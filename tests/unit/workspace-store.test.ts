@@ -243,6 +243,12 @@ describe("workspaceStore", () => {
         ],
         focusedWindowId: "workspace-1-primary",
         splitDirection: "row",
+        layout: {
+          type: "pane",
+          id: "workspace-1-primary",
+          windowId: "workspace-1-primary",
+          size: 1,
+        },
         hasHadContent: true,
         needsAttention: false,
       },
@@ -321,6 +327,7 @@ describe("workspaceStore", () => {
         windows: [],
         focusedWindowId: null,
         splitDirection: "row",
+        layout: null,
         hasHadContent: false,
         needsAttention: false,
       },
@@ -388,6 +395,21 @@ describe("workspaceStore", () => {
     expect(ws.windows[0].threadId).toBe("thread-1");
     expect(ws.windows[1].threadId).toBeNull();
     expect(ws.focusedWindowId).toBe(ws.windows[1].id);
+    expect(threadStore.activeThreadId).toBeNull();
+  });
+
+  it("keeps a split placeholder focused across workspace switches", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    const placeholderId = workspaceStore.activeWorkspace.windows[1].id;
+
+    workspaceStore.switchOrCreate(2);
+    workspaceStore.switchTo(1);
+
+    expect(workspaceStore.activeWorkspace.focusedWindowId).toBe(placeholderId);
+    expect(workspaceStore.activeWindow?.threadId).toBeNull();
   });
 
   it("fills a focused empty placeholder when a thread is selected", async () => {
@@ -418,6 +440,33 @@ describe("workspaceStore", () => {
     const ws = workspaceStore.activeWorkspace;
     expect(ws.windows).toHaveLength(beforeWindowCount);
     expect(ws.focusedWindowId).toBe(ws.windows[0].id);
+  });
+
+  it("focuses the active workspace pane when given a singleton pane id from another workspace", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("shared-thread");
+    const workspace1SharedPaneId = workspaceStore.activeWorkspace.windows[0].id;
+
+    workspaceStore.switchOrCreate(2);
+    threadStore.setActiveThread("other-thread");
+    workspaceStore.splitFocusedPane("row");
+    threadStore.setActiveThread("shared-thread");
+
+    const workspace2 = workspaceStore.activeWorkspace;
+    const workspace2OtherPaneId = workspace2.windows[0].id;
+    const workspace2SharedPaneId = workspace2.windows[1].id;
+    workspaceStore.focusWindow(workspace2OtherPaneId);
+    expect(workspaceStore.activeWorkspace.focusedWindowId).toBe(
+      workspace2OtherPaneId,
+    );
+
+    workspaceStore.focusWindow(workspace1SharedPaneId);
+
+    expect(workspaceStore.activeWorkspace.focusedWindowId).toBe(
+      workspace2SharedPaneId,
+    );
+    expect(threadStore.activeThreadId).toBe("shared-thread");
   });
 
   it("closes the focused pane and shifts focus to a sibling", async () => {
@@ -493,16 +542,41 @@ describe("workspaceStore", () => {
     expect(threadStore.activeThreadId).toBe("thread-1");
   });
 
-  it("locks split direction once the workspace has multiple panes", async () => {
+  it("nests opposite-direction splits instead of reflowing the root", async () => {
     const { threadStore, workspaceStore } = await setup();
 
     threadStore.setActiveThread("thread-1");
     workspaceStore.splitFocusedPane("row");
+    threadStore.setActiveThread("thread-2");
     expect(workspaceStore.activeWorkspace.splitDirection).toBe("row");
 
     workspaceStore.splitFocusedPane("column");
     expect(workspaceStore.activeWorkspace.windows).toHaveLength(3);
     expect(workspaceStore.activeWorkspace.splitDirection).toBe("row");
+    expect(workspaceStore.activeWorkspace.layout).toMatchObject({
+      type: "split",
+      direction: "row",
+      children: [
+        {
+          type: "pane",
+          windowId: workspaceStore.activeWorkspace.windows[0].id,
+        },
+        {
+          type: "split",
+          direction: "column",
+          children: [
+            {
+              type: "pane",
+              windowId: workspaceStore.activeWorkspace.windows[1].id,
+            },
+            {
+              type: "pane",
+              windowId: workspaceStore.activeWorkspace.windows[2].id,
+            },
+          ],
+        },
+      ],
+    });
   });
 
   it("preserves placeholder focus when an unrelated thread is added", async () => {

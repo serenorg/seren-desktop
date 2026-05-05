@@ -1013,13 +1013,17 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
    */
   const pushResize = () => {
     if (!surfaceRef) return;
+    if (surfaceRef.closest("[aria-hidden='true']")) return;
     const w = cellW();
     const h = cellH();
     if (w === 0 || h === 0) return;
     const id = activeBufferId();
     if (!id) return;
-    const cols = Math.max(2, Math.floor(surfaceRef.clientWidth / w));
-    const rows = Math.max(1, Math.floor(surfaceRef.clientHeight / h));
+    const width = surfaceRef.clientWidth;
+    const height = surfaceRef.clientHeight;
+    if (width <= 0 || height <= 0) return;
+    const cols = Math.max(2, Math.floor(width / w));
+    const rows = Math.max(1, Math.floor(height / h));
     const current = buffer();
     if (current && current.cols === cols && current.rows === rows) {
       return;

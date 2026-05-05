@@ -193,12 +193,14 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   const [showDepositFromError, setShowDepositFromError] = createSignal(false);
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const [isAttaching, setIsAttaching] = createSignal(false);
+  const isPaneActive = () => props.active ?? true;
   const privateChatLocked = () =>
     providerStore.activeProvider === "seren-private" &&
     !!authStore.privateChatPolicy?.hide_model_picker;
-  const { isDragging } = createDragDrop((files) =>
-    setAttachedImages((prev) => [...prev, ...files]),
-  );
+  const { isDragging } = createDragDrop((files) => {
+    if (!isPaneActive()) return;
+    setAttachedImages((prev) => [...prev, ...files]);
+  });
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -232,7 +234,6 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     const id = conversationId();
     return id ? conversationStore.getStreamingThinkingFor(id) : "";
   };
-  const isPaneActive = () => props.active ?? true;
   markdownWorker.onmessage = (
     e: MessageEvent<{ id: string; html: string; error?: boolean }>,
   ) => {
@@ -996,7 +997,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
 
   return (
     <section class="relative flex flex-col h-full bg-background text-foreground">
-      <Show when={isDragging()}>
+      <Show when={isDragging() && isPaneActive()}>
         <div class="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary/50 rounded-sm z-50 pointer-events-none flex items-center justify-center">
           <span class="text-primary text-sm font-medium bg-background/90 px-3 py-1.5 rounded-md shadow-sm">
             Drop files to attach

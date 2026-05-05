@@ -11,6 +11,23 @@ import {
 
 export type SplitDirection = "row" | "column";
 
+export interface WorkspacePaneLayout {
+  type: "pane";
+  id: string;
+  windowId: string;
+  size: number;
+}
+
+export interface WorkspaceSplitLayout {
+  type: "split";
+  id: string;
+  direction: SplitDirection;
+  children: WorkspaceLayout[];
+  size: number;
+}
+
+export type WorkspaceLayout = WorkspacePaneLayout | WorkspaceSplitLayout;
+
 export interface WorkspaceWindow {
   /** Stable identity for the pane inside a workspace. */
   id: string;
@@ -29,6 +46,8 @@ export interface Workspace {
   focusedWindowId: string | null;
   /** Tile layout direction: row = side by side, column = stacked. */
   splitDirection: SplitDirection;
+  /** Nested i3-style split tree. Null when no panes exist. */
+  layout: WorkspaceLayout | null;
   /** Sticky: auto-cleanup spares workspaces that ever had a window. */
   hasHadContent: boolean;
   /** Set when a thread here goes running -> not-running while inactive. */
@@ -53,6 +72,7 @@ const [state, setState] = createStore<WorkspaceState>({
       windows: [],
       focusedWindowId: null,
       splitDirection: "row",
+      layout: null,
       hasHadContent: false,
       needsAttention: false,
     },
@@ -66,6 +86,7 @@ function emptyWorkspace(number: number): Workspace {
     windows: [],
     focusedWindowId: null,
     splitDirection: "row",
+    layout: null,
     hasHadContent: false,
     needsAttention: false,
   };
@@ -81,11 +102,141 @@ function newPaneId(workspaceNumber: number): string {
   return `workspace-${workspaceNumber}-pane-${paneIdCounter}`;
 }
 
+let layoutIdCounter = 0;
+function newLayoutId(): string {
+  layoutIdCounter += 1;
+  return `layout-${layoutIdCounter}`;
+}
+
+function paneLayout(windowId: string, size = 1): WorkspacePaneLayout {
+  return { type: "pane", id: windowId, windowId, size };
+}
+
+function splitLayout(
+  direction: SplitDirection,
+  children: WorkspaceLayout[],
+  size = 1,
+): WorkspaceSplitLayout {
+  return {
+    type: "split",
+    id: newLayoutId(),
+    direction,
+    children,
+    size,
+  };
+}
+
+function layoutContainsWindow(
+  layout: WorkspaceLayout | null,
+  windowId: string,
+): boolean {
+  if (!layout) return false;
+  if (layout.type === "pane") return layout.windowId === windowId;
+  return layout.children.some((child) => layoutContainsWindow(child, windowId));
+}
+
+function insertPaneInLayout(
+  layout: WorkspaceLayout,
+  focusedWindowId: string,
+  newWindowId: string,
+  direction: SplitDirection,
+): WorkspaceLayout {
+  if (layout.type === "pane") {
+    if (layout.windowId !== focusedWindowId) return layout;
+    return splitLayout(
+      direction,
+      [paneLayout(layout.windowId), paneLayout(newWindowId)],
+      layout.size,
+    );
+  }
+
+  const childIdx = layout.children.findIndex((child) =>
+    layoutContainsWindow(child, focusedWindowId),
+  );
+  if (childIdx < 0) return layout;
+
+  const child = layout.children[childIdx];
+  if (
+    layout.direction === direction &&
+    child.type === "pane" &&
+    child.windowId === focusedWindowId
+  ) {
+    const nextChildren = [...layout.children];
+    nextChildren.splice(childIdx + 1, 0, paneLayout(newWindowId));
+    return { ...layout, children: nextChildren };
+  }
+
+  const nextChildren = [...layout.children];
+  nextChildren[childIdx] = insertPaneInLayout(
+    child,
+    focusedWindowId,
+    newWindowId,
+    direction,
+  );
+  return { ...layout, children: nextChildren };
+}
+
+function resizeLayoutNode(
+  layout: WorkspaceLayout,
+  id: string,
+  size: number,
+): WorkspaceLayout {
+  if (layout.id === id || (layout.type === "pane" && layout.windowId === id)) {
+    return { ...layout, size };
+  }
+  if (layout.type === "pane") return layout;
+  return {
+    ...layout,
+    children: layout.children.map((child) => resizeLayoutNode(child, id, size)),
+  };
+}
+
+function removeWindowFromLayout(
+  layout: WorkspaceLayout | null,
+  windowId: string,
+): WorkspaceLayout | null {
+  if (!layout) return null;
+  if (layout.type === "pane") {
+    return layout.windowId === windowId ? null : layout;
+  }
+
+  const children = layout.children
+    .map((child) => removeWindowFromLayout(child, windowId))
+    .filter((child): child is WorkspaceLayout => child !== null);
+  if (children.length === 0) return null;
+  if (children.length === 1) return { ...children[0], size: layout.size };
+  return { ...layout, children };
+}
+
+function pruneLayout(
+  layout: WorkspaceLayout | null,
+  liveWindowIds: Set<string>,
+): WorkspaceLayout | null {
+  if (!layout) return null;
+  if (layout.type === "pane") {
+    return liveWindowIds.has(layout.windowId) ? layout : null;
+  }
+  const children = layout.children
+    .map((child) => pruneLayout(child, liveWindowIds))
+    .filter((child): child is WorkspaceLayout => child !== null);
+  if (children.length === 0) return null;
+  if (children.length === 1) return { ...children[0], size: layout.size };
+  return { ...layout, children };
+}
+
 function focusedWindow(workspace: Workspace): WorkspaceWindow | null {
   if (!workspace.focusedWindowId) return null;
   return (
     workspace.windows.find((w) => w.id === workspace.focusedWindowId) ?? null
   );
+}
+
+function windowById(windowId: string): WorkspaceWindow | null {
+  for (const workspace of state.workspaces) {
+    const window = workspace.windows.find((w) => w.id === windowId);
+    if (window) return window;
+  }
+  return null;
 }
 
 function bindThreadToWorkspace(
@@ -132,6 +283,7 @@ function bindThreadToWorkspace(
     setState("workspaces", idx, "windows", [
       { id: windowId, threadId, kind: thread.kind, size: 1 },
     ]);
+    setState("workspaces", idx, "layout", paneLayout(windowId));
   } else {
     const windowIdx = workspace.windows.findIndex((w) => w.id === windowId);
     if (windowIdx >= 0) {
@@ -141,6 +293,10 @@ function bindThreadToWorkspace(
         kind: thread.kind,
       });
     }
+  }
+
+  if (!state.workspaces[idx].layout) {
+    setState("workspaces", idx, "layout", paneLayout(windowId));
   }
 
   if (state.workspaces[idx].focusedWindowId !== windowId) {
@@ -178,7 +334,13 @@ function pruneMissingThreadWindows(threadIds: Set<string>): void {
       )
         ? workspace.focusedWindowId
         : (windows[0]?.id ?? null);
-      return { ...workspace, windows, focusedWindowId };
+      const liveWindowIds = new Set(windows.map((window) => window.id));
+      return {
+        ...workspace,
+        windows,
+        focusedWindowId,
+        layout: pruneLayout(workspace.layout, liveWindowIds),
+      };
     }),
   );
 }
@@ -326,7 +488,8 @@ export const workspaceStore = {
    * Split the focused pane in `direction`, inserting a new empty
    * placeholder pane after it. The new pane becomes focused; the
    * next thread the user opens (sidebar click, "+ New") fills it.
-   * Sets the workspace's split direction to match.
+   * Uses a nested layout tree so splitting the other way affects only
+   * the focused pane's container, matching i3-style behavior.
    */
   splitFocusedPane(direction: SplitDirection): void {
     const wsIdx = state.workspaces.findIndex(
@@ -344,6 +507,7 @@ export const workspaceStore = {
     if (ws.windows.length === 0) {
       // No windows yet - the placeholder becomes the only pane.
       setState("workspaces", wsIdx, "windows", [placeholder]);
+      setState("workspaces", wsIdx, "layout", paneLayout(newId));
     } else {
       const focusedIdx = ws.windows.findIndex(
         (w) => w.id === ws.focusedWindowId,
@@ -354,17 +518,27 @@ export const workspaceStore = {
         placeholder,
         ...windows.slice(insertAt),
       ]);
+      const focusedWindowId =
+        focusedIdx >= 0
+          ? ws.windows[focusedIdx].id
+          : ws.windows[ws.windows.length - 1].id;
+      const baseLayout = ws.layout ?? paneLayout(focusedWindowId);
+      setState(
+        "workspaces",
+        wsIdx,
+        "layout",
+        insertPaneInLayout(baseLayout, focusedWindowId, newId, direction),
+      );
     }
-    // Direction is locked once the workspace has more than one pane.
-    // Splitting the other way past that point would silently re-flow
-    // every existing tile (e.g. 3 horizontal panes flipping to a stack
-    // of 3), which is more surprising than honoring the lock.
     if (ws.windows.length <= 1) {
       setState("workspaces", wsIdx, "splitDirection", direction);
     }
     setState("workspaces", wsIdx, "focusedWindowId", newId);
     if (!state.workspaces[wsIdx].hasHadContent) {
       setState("workspaces", wsIdx, "hasHadContent", true);
+    }
+    if (threadStore.activeThreadId !== null) {
+      threadStore.setActiveThread(null);
     }
   },
 
@@ -385,7 +559,14 @@ export const workspaceStore = {
       ...ws.windows.slice(0, focusedIdx),
       ...ws.windows.slice(focusedIdx + 1),
     ];
+    const closedWindowId = ws.windows[focusedIdx].id;
     setState("workspaces", wsIdx, "windows", nextWindows);
+    setState(
+      "workspaces",
+      wsIdx,
+      "layout",
+      removeWindowFromLayout(ws.layout, closedWindowId),
+    );
     const nextFocusIdx = Math.min(focusedIdx, nextWindows.length - 1);
     const nextFocusId = nextFocusIdx >= 0 ? nextWindows[nextFocusIdx].id : null;
     setState("workspaces", wsIdx, "focusedWindowId", nextFocusId);
@@ -406,10 +587,16 @@ export const workspaceStore = {
     );
     if (wsIdx < 0) return;
     const ws = state.workspaces[wsIdx];
-    const window = ws.windows.find((w) => w.id === windowId);
+    const window =
+      ws.windows.find((w) => w.id === windowId) ??
+      (() => {
+        const source = windowById(windowId);
+        if (!source?.threadId) return null;
+        return ws.windows.find((w) => w.threadId === source.threadId) ?? null;
+      })();
     if (!window) return;
-    if (ws.focusedWindowId !== windowId) {
-      setState("workspaces", wsIdx, "focusedWindowId", windowId);
+    if (ws.focusedWindowId !== window.id) {
+      setState("workspaces", wsIdx, "focusedWindowId", window.id);
     }
     if (window.threadId !== threadStore.activeThreadId) {
       threadStore.setActiveThread(window.threadId);
@@ -431,11 +618,20 @@ export const workspaceStore = {
     if (wsIdx < 0) return;
     const windows = state.workspaces[wsIdx].windows;
     for (const update of updates) {
-      const windowIdx = windows.findIndex((w) => w.id === update.id);
-      if (windowIdx < 0) continue;
       const nextSize = Math.max(0.05, update.size);
-      if (windows[windowIdx].size === nextSize) continue;
-      setState("workspaces", wsIdx, "windows", windowIdx, "size", nextSize);
+      const windowIdx = windows.findIndex((w) => w.id === update.id);
+      if (windowIdx >= 0 && windows[windowIdx].size !== nextSize) {
+        setState("workspaces", wsIdx, "windows", windowIdx, "size", nextSize);
+      }
+      const layout = state.workspaces[wsIdx].layout;
+      if (layout) {
+        setState(
+          "workspaces",
+          wsIdx,
+          "layout",
+          resizeLayoutNode(layout, update.id, nextSize),
+        );
+      }
     }
   },
 

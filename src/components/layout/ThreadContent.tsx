@@ -1,13 +1,25 @@
 // ABOUTME: Tiles per-thread panes inside the active workspace's split layout.
 // ABOUTME: Singleton-per-thread mounting; positions absolute, animated by layout.
 
-import { type Component, createMemo, For, Show } from "solid-js";
+import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import { AgentChat } from "@/components/chat/AgentChat";
 import { ChatContent } from "@/components/chat/ChatContent";
 import { TerminalBuffer } from "@/components/terminal/TerminalBuffer";
 import { openFolder } from "@/lib/files/service";
+import {
+  decodeThreadDragPayload,
+  getCurrentThreadDragPayload,
+  setCurrentThreadDragPayload,
+  THREAD_DRAG_MIME,
+} from "@/lib/thread-drag";
 import { fileTreeState } from "@/stores/fileTree";
-import { type WorkspaceWindow, workspaceStore } from "@/stores/workspace.store";
+import { threadStore } from "@/stores/thread.store";
+import {
+  type SplitDirection,
+  type WorkspaceLayout,
+  type WorkspaceWindow,
+  workspaceStore,
+} from "@/stores/workspace.store";
 
 interface ThreadContentProps {
   onSignInClick: () => void;
@@ -21,6 +33,31 @@ interface PanePlacement {
   bottom?: string;
   width?: string;
   height?: string;
+}
+
+interface LayoutRect {
+  topPct: number;
+  leftPct: number;
+  widthPct: number;
+  heightPct: number;
+  topPx: number;
+  leftPx: number;
+  widthPx: number;
+  heightPx: number;
+}
+
+interface GutterPlacement {
+  key: string;
+  style: Record<string, string>;
+  leftId: string;
+  rightId: string;
+  direction: SplitDirection;
+  leftSize: number;
+  rightSize: number;
+  totalSize: number;
+  totalGutter: number;
+  trackPct: number;
+  trackPx: number;
 }
 
 // Width of the gutter strip between adjacent tiles in pixels.
@@ -43,6 +80,9 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
     string,
     { key: string; window: WorkspaceWindow }
   >();
+  const [dragTargetWindowId, setDragTargetWindowId] = createSignal<
+    string | null
+  >(null);
   const mountedWindows = createMemo(() => {
     const out: Array<{ key: string; window: WorkspaceWindow }> = [];
     const seenThread = new Set<string>();
@@ -71,131 +111,187 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
     return out;
   });
 
-  // Compute the absolute placement (top/left/width/height) for a
-  // mounted pane based on which active-workspace tile holds its
-  // thread (or its placeholder id). Hidden placement = the pane is
-  // mounted but parked off-layout because its thread isn't in the
-  // active workspace right now.
-  const placementFor = (window: WorkspaceWindow): PanePlacement => {
+  const formatCalc = (pct: number, px: number) => `calc(${pct}% + ${px}px)`;
+  const rectToPlacement = (rect: LayoutRect): PanePlacement => ({
+    hidden: false,
+    top: formatCalc(rect.topPct, rect.topPx),
+    left: formatCalc(rect.leftPct, rect.leftPx),
+    width: formatCalc(rect.widthPct, rect.widthPx),
+    height: formatCalc(rect.heightPct, rect.heightPx),
+  });
+
+  const layoutGeometry = createMemo(() => {
     const ws = workspaceStore.activeWorkspace;
-    const idx = ws.windows.findIndex((w) =>
+    const placements = new Map<string, PanePlacement>();
+    const gutters: GutterPlacement[] = [];
+
+    const walk = (layout: WorkspaceLayout, rect: LayoutRect) => {
+      if (layout.type === "pane") {
+        placements.set(layout.windowId, rectToPlacement(rect));
+        return;
+      }
+
+      const sizes = layout.children.map((child) => Math.max(child.size, 0.05));
+      const totalSize = sizes.reduce((a, b) => a + b, 0);
+      const totalGutter = (layout.children.length - 1) * GUTTER_PX;
+      let before = 0;
+
+      for (let i = 0; i < layout.children.length; i++) {
+        const child = layout.children[i];
+        const size = sizes[i];
+        const startRatio = before / totalSize;
+        const sizeRatio = size / totalSize;
+        const childRect: LayoutRect =
+          layout.direction === "row"
+            ? {
+                topPct: rect.topPct,
+                leftPct: rect.leftPct + rect.widthPct * startRatio,
+                widthPct: rect.widthPct * sizeRatio,
+                heightPct: rect.heightPct,
+                topPx: rect.topPx,
+                leftPx:
+                  rect.leftPx +
+                  rect.widthPx * startRatio +
+                  i * GUTTER_PX -
+                  totalGutter * startRatio,
+                widthPx: rect.widthPx * sizeRatio - totalGutter * sizeRatio,
+                heightPx: rect.heightPx,
+              }
+            : {
+                topPct: rect.topPct + rect.heightPct * startRatio,
+                leftPct: rect.leftPct,
+                widthPct: rect.widthPct,
+                heightPct: rect.heightPct * sizeRatio,
+                topPx:
+                  rect.topPx +
+                  rect.heightPx * startRatio +
+                  i * GUTTER_PX -
+                  totalGutter * startRatio,
+                leftPx: rect.leftPx,
+                widthPx: rect.widthPx,
+                heightPx: rect.heightPx * sizeRatio - totalGutter * sizeRatio,
+              };
+        walk(child, childRect);
+
+        before += size;
+        if (i < layout.children.length - 1) {
+          const boundaryRatio = before / totalSize;
+          const gutterRect: LayoutRect =
+            layout.direction === "row"
+              ? {
+                  topPct: rect.topPct,
+                  leftPct: rect.leftPct + rect.widthPct * boundaryRatio,
+                  widthPct: 0,
+                  heightPct: rect.heightPct,
+                  topPx: rect.topPx,
+                  leftPx:
+                    rect.leftPx +
+                    rect.widthPx * boundaryRatio +
+                    (i + 1) * GUTTER_PX -
+                    totalGutter * boundaryRatio -
+                    GUTTER_PX,
+                  widthPx: GUTTER_PX,
+                  heightPx: rect.heightPx,
+                }
+              : {
+                  topPct: rect.topPct + rect.heightPct * boundaryRatio,
+                  leftPct: rect.leftPct,
+                  widthPct: rect.widthPct,
+                  heightPct: 0,
+                  topPx:
+                    rect.topPx +
+                    rect.heightPx * boundaryRatio +
+                    (i + 1) * GUTTER_PX -
+                    totalGutter * boundaryRatio -
+                    GUTTER_PX,
+                  leftPx: rect.leftPx,
+                  widthPx: rect.widthPx,
+                  heightPx: GUTTER_PX,
+                };
+          gutters.push({
+            key: `${ws.number}-${layout.id}-${i}`,
+            style: {
+              position: "absolute",
+              top: formatCalc(gutterRect.topPct, gutterRect.topPx),
+              left: formatCalc(gutterRect.leftPct, gutterRect.leftPx),
+              width: formatCalc(gutterRect.widthPct, gutterRect.widthPx),
+              height: formatCalc(gutterRect.heightPct, gutterRect.heightPx),
+              cursor: layout.direction === "row" ? "col-resize" : "row-resize",
+            },
+            leftId: layout.children[i].id,
+            rightId: layout.children[i + 1].id,
+            direction: layout.direction,
+            leftSize: sizes[i],
+            rightSize: sizes[i + 1],
+            totalSize,
+            totalGutter,
+            trackPct:
+              layout.direction === "row" ? rect.widthPct : rect.heightPct,
+            trackPx: layout.direction === "row" ? rect.widthPx : rect.heightPx,
+          });
+        }
+      }
+    };
+
+    if (ws.layout) {
+      walk(ws.layout, {
+        topPct: 0,
+        leftPct: 0,
+        widthPct: 100,
+        heightPct: 100,
+        topPx: 0,
+        leftPx: 0,
+        widthPx: 0,
+        heightPx: 0,
+      });
+    }
+
+    return { placements, gutters };
+  });
+
+  const activeTargetFor = (
+    window: WorkspaceWindow,
+  ): WorkspaceWindow | undefined => {
+    const ws = workspaceStore.activeWorkspace;
+    return ws.windows.find((w) =>
       window.threadId !== null
         ? w.threadId === window.threadId
         : w.id === window.id,
     );
-    if (idx < 0) return { hidden: true };
-    const sizes = ws.windows.map((w) => Math.max(w.size, 0.05));
-    const totalSize = sizes.reduce((a, b) => a + b, 0);
-    const before = sizes.slice(0, idx).reduce((a, b) => a + b, 0);
-    // Carve out gutters from the available track length so each tile
-    // accounts for its share of the dividers between siblings.
-    const totalGutter = (ws.windows.length - 1) * GUTTER_PX;
-    const startPct = (before / totalSize) * 100;
-    const sizePct = (sizes[idx] / totalSize) * 100;
-    const startCalc = `calc(${startPct}% + ${idx * GUTTER_PX - (totalGutter * before) / totalSize}px)`;
-    const sizeCalc = `calc(${sizePct}% - ${(totalGutter * sizes[idx]) / totalSize}px)`;
-    if (ws.splitDirection === "row") {
-      return {
-        hidden: false,
-        top: "0",
-        bottom: "0",
-        left: startCalc,
-        width: sizeCalc,
-      };
-    }
-    return {
-      hidden: false,
-      left: "0",
-      right: "0",
-      top: startCalc,
-      height: sizeCalc,
-    };
   };
 
-  // Gutters between adjacent tiles in the active workspace. One per
-  // boundary, positioned at the cumulative offset of all preceding
-  // tiles. Drag updates the size ratio of the two tiles it borders.
-  const gutters = createMemo(() => {
-    const ws = workspaceStore.activeWorkspace;
-    if (ws.windows.length < 2) return [];
-    const sizes = ws.windows.map((w) => Math.max(w.size, 0.05));
-    const totalSize = sizes.reduce((a, b) => a + b, 0);
-    const totalGutter = (ws.windows.length - 1) * GUTTER_PX;
-    const out: Array<{
-      key: string;
-      style: Record<string, string>;
-      leftId: string;
-      rightId: string;
-    }> = [];
-    let cumSize = 0;
-    for (let i = 0; i < ws.windows.length - 1; i++) {
-      cumSize += sizes[i];
-      const startPct = (cumSize / totalSize) * 100;
-      const startCalc = `calc(${startPct}% + ${
-        (i + 1) * GUTTER_PX - (totalGutter * cumSize) / totalSize - GUTTER_PX
-      }px)`;
-      const style: Record<string, string> =
-        ws.splitDirection === "row"
-          ? {
-              position: "absolute",
-              top: "0",
-              bottom: "0",
-              left: startCalc,
-              width: `${GUTTER_PX}px`,
-              cursor: "col-resize",
-            }
-          : {
-              position: "absolute",
-              left: "0",
-              right: "0",
-              top: startCalc,
-              height: `${GUTTER_PX}px`,
-              cursor: "row-resize",
-            };
-      out.push({
-        key: `${ws.number}-${ws.windows[i].id}-${ws.windows[i + 1].id}`,
-        style,
-        leftId: ws.windows[i].id,
-        rightId: ws.windows[i + 1].id,
-      });
-    }
-    return out;
-  });
+  const placementFor = (window: WorkspaceWindow): PanePlacement => {
+    const target = activeTargetFor(window);
+    if (!target) return { hidden: true };
+    return layoutGeometry().placements.get(target.id) ?? { hidden: true };
+  };
 
-  const onGutterPointerDown = (
-    e: PointerEvent,
-    leftId: string,
-    rightId: string,
-  ) => {
+  const onGutterPointerDown = (e: PointerEvent, gutter: GutterPlacement) => {
     e.preventDefault();
-    const ws = workspaceStore.activeWorkspace;
-    const left = ws.windows.find((w) => w.id === leftId);
-    const right = ws.windows.find((w) => w.id === rightId);
-    if (!left || !right) return;
-    const startSize = left.size + right.size;
-    const horizontal = ws.splitDirection === "row";
+    const startSize = gutter.leftSize + gutter.rightSize;
+    const horizontal = gutter.direction === "row";
     const container =
       (e.currentTarget as HTMLElement).parentElement ?? document.body;
     const rect = container.getBoundingClientRect();
-    const trackPx = horizontal ? rect.width : rect.height;
-    if (trackPx <= 0) return;
+    const rootTrackPx = horizontal ? rect.width : rect.height;
+    const trackPx = (rootTrackPx * gutter.trackPct) / 100 + gutter.trackPx;
+    const availableTrackPx = trackPx - gutter.totalGutter;
+    if (availableTrackPx <= 0) return;
     const startPos = horizontal ? e.clientX : e.clientY;
-    const startLeftFraction = left.size / startSize;
     const handle = e.currentTarget as HTMLElement;
     handle.setPointerCapture(e.pointerId);
 
     const move = (event: PointerEvent) => {
       const delta = (horizontal ? event.clientX : event.clientY) - startPos;
-      const deltaFraction = delta / trackPx;
-      const nextLeftFraction = Math.min(
-        0.95,
-        Math.max(0.05, startLeftFraction + deltaFraction),
+      const deltaSize = (delta / availableTrackPx) * gutter.totalSize;
+      const nextLeft = Math.min(
+        startSize - 0.05,
+        Math.max(0.05, gutter.leftSize + deltaSize),
       );
-      const nextLeft = nextLeftFraction * startSize;
       const nextRight = startSize - nextLeft;
       workspaceStore.resizePanes([
-        { id: leftId, size: nextLeft },
-        { id: rightId, size: nextRight },
+        { id: gutter.leftId, size: nextLeft },
+        { id: gutter.rightId, size: nextRight },
       ]);
     };
     const up = () => {
@@ -231,6 +327,51 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
     if (target) workspaceStore.focusWindow(target.id);
   };
 
+  const threadDragPayload = (event: DragEvent) => {
+    const value =
+      event.dataTransfer?.getData(THREAD_DRAG_MIME) ||
+      event.dataTransfer?.getData("text/plain");
+    return value
+      ? (decodeThreadDragPayload(value) ?? getCurrentThreadDragPayload())
+      : getCurrentThreadDragPayload();
+  };
+
+  const canAcceptThreadDrop = (event: DragEvent) => {
+    if (getCurrentThreadDragPayload() !== null) return true;
+
+    const types = Array.from(event.dataTransfer?.types ?? []);
+    if (types.includes(THREAD_DRAG_MIME)) return true;
+    if (!types.includes("text/plain")) return false;
+
+    const text = event.dataTransfer?.getData("text/plain");
+    return text ? decodeThreadDragPayload(text) !== null : false;
+  };
+
+  const handlePaneDragOver = (event: DragEvent, window: WorkspaceWindow) => {
+    if (!canAcceptThreadDrop(event)) return;
+    const target = activeTargetFor(window);
+    if (!target) return;
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+    if (dragTargetWindowId() !== target.id) {
+      setDragTargetWindowId(target.id);
+    }
+  };
+
+  const handlePaneDrop = (event: DragEvent, window: WorkspaceWindow) => {
+    const payload = threadDragPayload(event);
+    if (!payload) return;
+    const target = activeTargetFor(window);
+    if (!target) return;
+    event.preventDefault();
+    setDragTargetWindowId(null);
+    setCurrentThreadDragPayload(null);
+    workspaceStore.focusWindow(target.id);
+    threadStore.selectThread(payload.id, payload.kind);
+  };
+
   return (
     <div
       id="workspace-content-panel"
@@ -245,6 +386,10 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
             const placement = () => placementFor(entry.window);
             const focused = () => isFocused(entry.window);
             const hidden = () => placement().hidden;
+            const dragTarget = () => {
+              const target = activeTargetFor(entry.window);
+              return target !== undefined && dragTargetWindowId() === target.id;
+            };
             const baseStyle = () => {
               const p = placement();
               if (p.hidden) return { display: "none" };
@@ -262,41 +407,72 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
                 style={baseStyle()}
                 aria-hidden={hidden()}
                 onMouseDown={() => !hidden() && handlePaneFocus(entry.window)}
-                class="flex flex-col min-h-0 overflow-hidden rounded-[3px] transition-[outline-color] duration-100"
+                onDragOver={(e) =>
+                  !hidden() && handlePaneDragOver(e, entry.window)
+                }
+                onDragLeave={(e) => {
+                  if (e.currentTarget.contains(e.relatedTarget as Node)) {
+                    return;
+                  }
+                  if (dragTarget()) setDragTargetWindowId(null);
+                }}
+                onDrop={(e) => !hidden() && handlePaneDrop(e, entry.window)}
+                class="relative flex flex-col min-h-0 overflow-hidden rounded-[3px] transition-colors duration-100"
                 classList={{
-                  "outline outline-[1.5px] outline-offset-[-1.5px] outline-primary/70":
-                    !hidden() && focused(),
                   "outline outline-[1px] outline-offset-[-1px] outline-border/40":
                     !hidden() && !focused(),
+                  "bg-primary/[0.04]": !hidden() && dragTarget(),
                   "pointer-events-none": hidden(),
                 }}
               >
                 <Show
-                  when={entry.window.kind === "chat" && entry.window.threadId}
+                  when={
+                    entry.window.kind === "chat" ? entry.window.threadId : null
+                  }
                 >
-                  <ChatContent
-                    threadId={entry.window.threadId ?? ""}
-                    active={!hidden() && focused()}
-                    onSignInClick={props.onSignInClick}
-                  />
-                </Show>
-                <Show
-                  when={entry.window.kind === "agent" && entry.window.threadId}
-                >
-                  <AgentChat
-                    threadId={entry.window.threadId ?? ""}
-                    active={!hidden() && focused()}
-                  />
+                  {(threadId) => (
+                    <ChatContent
+                      threadId={threadId()}
+                      active={!hidden() && focused()}
+                      onSignInClick={props.onSignInClick}
+                    />
+                  )}
                 </Show>
                 <Show
                   when={
-                    entry.window.kind === "terminal" && entry.window.threadId
+                    entry.window.kind === "agent" ? entry.window.threadId : null
                   }
                 >
-                  <TerminalBuffer threadId={entry.window.threadId ?? ""} />
+                  {(threadId) => (
+                    <AgentChat
+                      threadId={threadId()}
+                      active={!hidden() && focused()}
+                    />
+                  )}
+                </Show>
+                <Show
+                  when={
+                    entry.window.kind === "terminal"
+                      ? entry.window.threadId
+                      : null
+                  }
+                >
+                  {(threadId) => <TerminalBuffer threadId={threadId()} />}
                 </Show>
                 <Show when={entry.window.threadId === null}>
                   <PlaceholderPane focused={focused()} />
+                </Show>
+                <Show when={!hidden() && (focused() || dragTarget())}>
+                  <div
+                    aria-hidden="true"
+                    class="absolute inset-0 rounded-[3px] pointer-events-none z-[5]"
+                    classList={{
+                      "border border-primary/65 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.18),0_0_0_1px_rgba(56,189,248,0.14)]":
+                        focused() && !dragTarget(),
+                      "border border-primary/80 bg-primary/[0.06] shadow-[inset_0_0_0_1px_rgba(125,211,252,0.3),0_0_0_1px_rgba(56,189,248,0.2)]":
+                        dragTarget(),
+                    }}
+                  />
                 </Show>
               </div>
             );
@@ -304,29 +480,23 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
         </For>
 
         {/* Gutters: rendered above panes so their cursor + drag wins. */}
-        <For each={gutters()}>
+        <For each={layoutGeometry().gutters}>
           {(gutter) => (
             <div
               style={gutter.style}
               class="z-10 group flex items-center justify-center"
               role="separator"
               aria-orientation={
-                workspaceStore.activeWorkspace.splitDirection === "row"
-                  ? "vertical"
-                  : "horizontal"
+                gutter.direction === "row" ? "vertical" : "horizontal"
               }
-              onPointerDown={(e) =>
-                onGutterPointerDown(e, gutter.leftId, gutter.rightId)
-              }
+              onPointerDown={(e) => onGutterPointerDown(e, gutter)}
             >
               <div
                 aria-hidden="true"
                 class="bg-border/20 group-hover:bg-primary/40 transition-colors duration-100"
                 classList={{
-                  "w-px h-full":
-                    workspaceStore.activeWorkspace.splitDirection === "row",
-                  "h-px w-full":
-                    workspaceStore.activeWorkspace.splitDirection === "column",
+                  "w-px h-full": gutter.direction === "row",
+                  "h-px w-full": gutter.direction === "column",
                 }}
               />
             </div>

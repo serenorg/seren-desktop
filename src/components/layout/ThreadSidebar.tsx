@@ -14,6 +14,12 @@ import {
 import { openFolder } from "@/lib/files/service";
 import type { InstalledSkill, Skill } from "@/lib/skills";
 import {
+  encodeThreadDragPayload,
+  encodeThreadDragText,
+  setCurrentThreadDragPayload,
+  THREAD_DRAG_MIME,
+} from "@/lib/thread-drag";
+import {
   allowsClaudeAgent,
   allowsCodexAgent,
   allowsGeminiAgent,
@@ -268,6 +274,23 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
   const handleSelectThread = (thread: Thread) => {
     threadStore.selectThread(thread.id, thread.kind);
+  };
+
+  const handleThreadDragStart = (event: DragEvent, thread: Thread) => {
+    const payload = { id: thread.id, kind: thread.kind };
+    setCurrentThreadDragPayload(payload);
+    event.dataTransfer?.setData(
+      THREAD_DRAG_MIME,
+      encodeThreadDragPayload(payload),
+    );
+    event.dataTransfer?.setData("text/plain", encodeThreadDragText(payload));
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "copy";
+    }
+  };
+
+  const handleThreadDragEnd = () => {
+    setCurrentThreadDragPayload(null);
   };
 
   const toggleGroup = (projectRoot: string | null) => {
@@ -1200,12 +1223,15 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           data-testid="thread-item"
                           data-thread-id={thread.id}
                           data-thread-kind={thread.kind}
-                          class="group flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none border-l-2 border-l-transparent rounded-lg cursor-pointer mb-0.5 text-left transition-all duration-150 hover:bg-surface-2/60"
+                          draggable={true}
+                          class="group flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none border-l-2 border-l-transparent rounded-lg cursor-pointer mb-0.5 text-left transition-all duration-150 hover:bg-surface-2/60 active:cursor-grabbing"
                           classList={{
                             "!bg-surface-2/80 border-l-2 !border-l-primary !pl-2":
                               thread.id === threadStore.activeThreadId,
                           }}
                           onClick={() => handleSelectThread(thread)}
+                          onDragStart={(e) => handleThreadDragStart(e, thread)}
+                          onDragEnd={handleThreadDragEnd}
                         >
                           <div class="shrink-0 w-5 flex items-center justify-center">
                             <Show
