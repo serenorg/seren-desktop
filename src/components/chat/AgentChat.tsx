@@ -1127,18 +1127,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   onClick={() => {
                     const id = activeAgentThread()?.id;
                     if (!id) return;
-                    const ts = agentStore.getThreadState(id);
-                    const text = ts.lastPromptText ?? message.content;
-                    agentStore.clearTurnError(id);
-                    void agentStore.sendPrompt(
-                      text,
-                      ts.lastPromptContext,
-                      {
-                        displayContent: ts.lastPromptDisplay,
-                        docNames: ts.lastPromptDocNames,
-                      },
-                      threadSessionId() ?? undefined,
-                    );
+                    void agentStore.retryLastPrompt(id);
                   }}
                 >
                   Retry

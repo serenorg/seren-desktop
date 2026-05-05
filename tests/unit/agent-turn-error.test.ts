@@ -71,10 +71,17 @@ describe("#1631 — inline error bubble + retry link", () => {
     expect(agentChatSource).toMatch(/>\s*Retry\s*<\/button>/);
   });
 
-  it("retry link re-calls sendPrompt with the stored last-prompt record", () => {
-    expect(agentChatSource).toContain("agentStore.clearTurnError(");
-    expect(agentChatSource).toContain("agentStore.sendPrompt(");
-    expect(agentChatSource).toContain("ts.lastPromptText");
+  it("retry link delegates to retryLastPrompt consolidator (#1805)", () => {
+    expect(agentChatSource).toContain("agentStore.retryLastPrompt(");
+  });
+
+  it("retryLastPrompt resends the stored last-prompt record", () => {
+    const idx = agentStoreSource.indexOf("async retryLastPrompt(threadId");
+    expect(idx).toBeGreaterThan(0);
+    const body = agentStoreSource.slice(idx, idx + 3000);
+    expect(body).toContain("ts.lastPromptText");
+    expect(body).toContain("this.clearTurnError(threadId)");
+    expect(body).toContain("this.sendPrompt(");
   });
 });
 
