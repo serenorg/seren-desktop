@@ -1143,6 +1143,37 @@ created if missing.",
             .and_then(|v| v.get("path").and_then(|p| p.as_str()).map(String::from))
     }
 
+    /// Track repeated identical parse-error tool calls within a single
+    /// `execute()` invocation. Returns true when the loop must abort because
+    /// the model has retried the same `(tool_name, arguments)` parse failure
+    /// 3 times in a row — which means the model is not correcting the JSON,
+    /// typically because the malformed args are produced upstream by the
+    /// gateway streaming accumulator (see issue #1812).
+    ///
+    /// Resets when `is_parse_error` is false or when the signature changes.
+    fn track_tool_arg_parse_loop(
+        tracker: &mut Option<(String, usize)>,
+        tool_name: &str,
+        arguments: &str,
+        is_parse_error: bool,
+    ) -> bool {
+        if !is_parse_error {
+            *tracker = None;
+            return false;
+        }
+        let signature = format!("{}|{}", tool_name, arguments);
+        match tracker {
+            Some((sig, count)) if sig == &signature => {
+                *count += 1;
+                *count >= 3
+            }
+            _ => {
+                *tracker = Some((signature, 1));
+                false
+            }
+        }
+    }
+
     /// Execute a local tool by name with the given arguments.
     /// Returns (result_content, is_error).
     async fn execute_tool(name: &str, arguments: &str) -> (String, bool) {
@@ -1418,6 +1449,15 @@ impl Worker for ChatModelWorker {
 
         let mut total_cost: f64 = 0.0;
 
+        // Track repeated identical parse-error tool calls so we can break out
+        // of an infinite retry storm where the model is not correcting the
+        // JSON (issue #1812). Also count tool activity so we can backfill a
+        // synthetic recap when the loop ends with empty content — empty
+        // assistant turns wipe cross-turn context for the next user prompt.
+        let mut parse_error_tracker: Option<(String, usize)> = None;
+        let mut tool_call_count: usize = 0;
+        let mut tool_failure_count: usize = 0;
+
         // Track where the current prompt's messages start (after system + history).
         // On tool-call rounds (1+), we trim old conversation history and keep only
         // the system prompt + the current prompt's message chain. This cuts prompt
@@ -1558,9 +1598,22 @@ impl Worker for ChatModelWorker {
                             "[ChatModelWorker] Max tool rounds ({}) reached, forcing completion",
                             MAX_TOOL_ROUNDS
                         );
+                        // Empty assistant turns destroy cross-turn context
+                        // (#1812). When the model never produced text but did
+                        // run tools, backfill a recap so the next user prompt
+                        // arrives with usable history.
+                        let final_content = if accumulated_content.is_empty() && tool_call_count > 0
+                        {
+                            format!(
+                                "(No final response — reached max tool rounds ({}); {} tool calls fired, {} failed.)",
+                                MAX_TOOL_ROUNDS, tool_call_count, tool_failure_count
+                            )
+                        } else {
+                            accumulated_content
+                        };
                         event_tx
                             .send(WorkerEvent::Complete {
-                                final_content: accumulated_content,
+                                final_content,
                                 thinking: None,
                                 cost: if total_cost > 0.0 {
                                     Some(total_cost)
@@ -1669,6 +1722,44 @@ impl Worker for ChatModelWorker {
                             "tool_call_id": tc.id,
                             "content": context_content
                         }));
+
+                        tool_call_count += 1;
+                        if is_error {
+                            tool_failure_count += 1;
+                        }
+                        let is_parse_error =
+                            is_error && result_content.starts_with("Failed to parse tool arguments");
+                        if Self::track_tool_arg_parse_loop(
+                            &mut parse_error_tracker,
+                            &tc.name,
+                            &tc.arguments,
+                            is_parse_error,
+                        ) {
+                            let recap = format!(
+                                "(Aborted: tool '{}' returned a parse error 3 times in a row for the same arguments. \
+                                 The model is not correcting the JSON — likely a gateway tool-call streaming issue. \
+                                 {} tool calls fired this turn, {} failed.)",
+                                tc.name, tool_call_count, tool_failure_count
+                            );
+                            log::warn!(
+                                "[ChatModelWorker] Parse-error loop detected for tool '{}'. Aborting with recap.",
+                                tc.name
+                            );
+                            let total = if total_cost > 0.0 {
+                                Some(total_cost)
+                            } else {
+                                None
+                            };
+                            let _ = event_tx
+                                .send(WorkerEvent::Complete {
+                                    final_content: recap,
+                                    thinking: None,
+                                    cost: total,
+                                    rlm_steps: None,
+                                })
+                                .await;
+                            return Ok(());
+                        }
                     }
 
                     log::info!(
@@ -1697,13 +1788,23 @@ impl Worker for ChatModelWorker {
                     );
                     // The error event was already forwarded by stream_response,
                     // so the destructive UI is already showing. Send a final
-                    // Complete event with empty content to clear the loading
-                    // spinner — but mark this conversation as failed in logs so
-                    // metrics and downstream consumers don't count it as a
-                    // successful completion.
+                    // Complete event to clear the loading spinner — but mark
+                    // this conversation as failed in logs so metrics and
+                    // downstream consumers don't count it as a successful
+                    // completion. If tools fired this turn, backfill a recap
+                    // so the next user prompt arrives with usable history
+                    // (#1812).
+                    let failed_final_content = if tool_call_count > 0 {
+                        format!(
+                            "(Stream failed mid-turn; {} tool calls fired, {} failed.)",
+                            tool_call_count, tool_failure_count
+                        )
+                    } else {
+                        String::new()
+                    };
                     if let Err(e) = event_tx
                         .send(WorkerEvent::Complete {
-                            final_content: String::new(),
+                            final_content: failed_final_content,
                             thinking: None,
                             cost: total,
                             rlm_steps: None,
@@ -2311,6 +2412,104 @@ mod tests {
         let (content, is_error) = ChatModelWorker::execute_tool("read_file", "{}").await;
         assert!(is_error);
         assert!(content.contains("Missing required parameter"));
+    }
+
+    // Regression guard for #1812: model retries the same malformed-JSON tool
+    // call indefinitely, causing context loss on the next user prompt. The
+    // helper must signal abort after exactly 3 consecutive identical parse
+    // errors and reset on either success or signature change.
+    #[test]
+    fn track_tool_arg_parse_loop_aborts_after_three_identical_errors() {
+        let mut tracker: Option<(String, usize)> = None;
+        let bad_args = r#"{"path":"./a"}{"path":"./b"}"#;
+
+        assert!(!ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            bad_args,
+            true
+        ));
+        assert!(!ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            bad_args,
+            true
+        ));
+        assert!(ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            bad_args,
+            true
+        ));
+    }
+
+    #[test]
+    fn track_tool_arg_parse_loop_resets_on_success() {
+        let mut tracker: Option<(String, usize)> = None;
+        let bad_args = r#"{"path":"./a"}{"path":"./b"}"#;
+
+        ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            bad_args,
+            true,
+        );
+        ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            bad_args,
+            true,
+        );
+        // A non-parse-error result resets the counter.
+        ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            bad_args,
+            false,
+        );
+        // Two more parse errors must not abort — counter restarted.
+        assert!(!ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            bad_args,
+            true
+        ));
+        assert!(!ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            bad_args,
+            true
+        ));
+    }
+
+    #[test]
+    fn track_tool_arg_parse_loop_resets_on_different_signature() {
+        let mut tracker: Option<(String, usize)> = None;
+        ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            r#"{"path":"a"}"#,
+            true,
+        );
+        ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            r#"{"path":"a"}"#,
+            true,
+        );
+        // Different arguments — same tool. Tracker must restart at 1.
+        assert!(!ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            r#"{"path":"b"}"#,
+            true
+        ));
+        assert!(!ChatModelWorker::track_tool_arg_parse_loop(
+            &mut tracker,
+            "list_directory",
+            r#"{"path":"b"}"#,
+            true
+        ));
     }
 
     #[tokio::test]
