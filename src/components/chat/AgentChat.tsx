@@ -93,9 +93,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const isPaneActive = () => props.active ?? true;
   const [input, setInput] = createSignal("");
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
-  const { isDragging } = createDragDrop((files) =>
-    setAttachedImages((prev) => [...prev, ...files]),
-  );
+  const { isDragging } = createDragDrop((files) => {
+    if (!isPaneActive()) return;
+    setAttachedImages((prev) => [...prev, ...files]);
+  });
   const [commandStatus, setCommandStatus] = createSignal<string | null>(null);
   const [commandPopupIndex, setCommandPopupIndex] = createSignal(0);
   const [historyIndex, setHistoryIndex] = createSignal(-1);
@@ -1309,7 +1310,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   return (
     <div class="relative flex-1 flex flex-col min-h-0">
-      <Show when={isDragging()}>
+      <Show when={isDragging() && isPaneActive()}>
         <div class="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary/50 rounded-sm z-50 pointer-events-none flex items-center justify-center">
           <span class="text-primary text-sm font-medium bg-background/90 px-3 py-1.5 rounded-md shadow-sm">
             Drop files to attach

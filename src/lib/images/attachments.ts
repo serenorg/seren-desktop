@@ -342,6 +342,51 @@ export async function readAttachment(path: string): Promise<Attachment> {
 }
 
 /**
+ * Read a File blob (e.g. from an HTML5 drop event's dataTransfer.files)
+ * and convert it to an Attachment. Mirrors readAttachment's size/resize
+ * rules but skips the Tauri filesystem invoke since the browser already
+ * has the bytes.
+ */
+export async function readAttachmentFromBlob(file: File): Promise<Attachment> {
+  const ext = getExtension(file.name);
+  const mimeType = MIME_TYPES[ext];
+  if (!mimeType) {
+    throw new Error(`Unsupported file format: .${ext}`);
+  }
+
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  // Chunked encode keeps us off the call-stack ceiling for large files.
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(
+      ...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)),
+    );
+  }
+  const base64 = btoa(binary);
+
+  const sizeLimit = mimeType.startsWith("video/")
+    ? MAX_VIDEO_BASE64_SIZE
+    : MAX_BASE64_SIZE;
+  const maxLabel = mimeType.startsWith("video/") ? "200MB" : "20MB";
+  if (base64.length > sizeLimit) {
+    throw new Error(`File too large (max ${maxLabel})`);
+  }
+
+  if (isImageMime(mimeType) && mimeType !== "image/svg+xml") {
+    const resized = await resizeImage(base64, mimeType, MAX_IMAGE_DIMENSION);
+    return {
+      name: file.name,
+      mimeType: resized.mimeType,
+      base64: resized.base64,
+    };
+  }
+
+  return { name: file.name, mimeType, base64 };
+}
+
+/**
  * Pick files via dialog and return them as attachments.
  */
 export async function pickAndReadAttachments(): Promise<Attachment[]> {

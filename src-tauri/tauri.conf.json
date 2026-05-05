@@ -21,7 +21,8 @@
         "minWidth": 800,
         "minHeight": 600,
         "devtools": true,
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "dragDropEnabled": false
       }
     ],
     "security": {
