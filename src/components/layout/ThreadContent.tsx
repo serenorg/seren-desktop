@@ -13,7 +13,6 @@ import {
   THREAD_DRAG_MIME,
 } from "@/lib/thread-drag";
 import { fileTreeState } from "@/stores/fileTree";
-import { threadStore } from "@/stores/thread.store";
 import {
   type SplitDirection,
   type WorkspaceLayout,
@@ -316,6 +315,8 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
         : ws.focusedWindowId === window.id)
     );
   };
+  const showFocusedOutline = () =>
+    workspaceStore.activeWorkspace.windows.length > 1;
 
   const handlePaneFocus = (window: WorkspaceWindow) => {
     const ws = workspaceStore.activeWorkspace;
@@ -368,8 +369,7 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
     event.preventDefault();
     setDragTargetWindowId(null);
     setCurrentThreadDragPayload(null);
-    workspaceStore.focusWindow(target.id);
-    threadStore.selectThread(payload.id, payload.kind);
+    workspaceStore.bindThreadToWindow(target.id, payload.id);
   };
 
   return (
@@ -462,14 +462,19 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
                 <Show when={entry.window.threadId === null}>
                   <PlaceholderPane focused={focused()} />
                 </Show>
-                <Show when={!hidden() && (focused() || dragTarget())}>
+                <Show
+                  when={
+                    !hidden() &&
+                    ((showFocusedOutline() && focused()) || dragTarget())
+                  }
+                >
                   <div
                     aria-hidden="true"
                     class="absolute inset-0 rounded-[3px] pointer-events-none z-[5]"
                     classList={{
-                      "border border-primary/65 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.18),0_0_0_1px_rgba(56,189,248,0.14)]":
-                        focused() && !dragTarget(),
-                      "border border-primary/80 bg-primary/[0.06] shadow-[inset_0_0_0_1px_rgba(125,211,252,0.3),0_0_0_1px_rgba(56,189,248,0.2)]":
+                      "border border-primary/45 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.1),0_0_0_1px_rgba(56,189,248,0.08)]":
+                        showFocusedOutline() && focused() && !dragTarget(),
+                      "border border-primary/70 bg-primary/[0.05] shadow-[inset_0_0_0_1px_rgba(125,211,252,0.22),0_0_0_1px_rgba(56,189,248,0.14)]":
                         dragTarget(),
                     }}
                   />

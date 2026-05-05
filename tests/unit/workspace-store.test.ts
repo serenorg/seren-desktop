@@ -37,6 +37,13 @@ vi.mock("@/stores/thread.store", () => {
     for (const effect of harness.effects) effect();
   });
 
+  const selectThread = vi.fn(
+    (id: string, _kind: "chat" | "agent" | "terminal") => {
+      harness.activeThreadId = id;
+      for (const effect of harness.effects) effect();
+    },
+  );
+
   return {
     threadStore: {
       get activeThreadId(): string | null {
@@ -46,6 +53,7 @@ vi.mock("@/stores/thread.store", () => {
         return harness.threads;
       },
       setActiveThread,
+      selectThread,
     },
     __setMockActiveThread(id: string | null): void {
       setActiveThread.mockClear();
@@ -467,6 +475,83 @@ describe("workspaceStore", () => {
       workspace2SharedPaneId,
     );
     expect(threadStore.activeThreadId).toBe("shared-thread");
+  });
+
+  it("binds a dropped thread directly to the target placeholder", async () => {
+    const { threadModule, threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    const placeholderId = workspaceStore.activeWorkspace.focusedWindowId;
+    expect(placeholderId).not.toBeNull();
+    const beforeWindowCount = workspaceStore.activeWorkspace.windows.length;
+
+    threadModule.__addMockThread("thread-2", "agent");
+    vi.mocked(threadStore.selectThread).mockClear();
+    workspaceStore.bindThreadToWindow(placeholderId ?? "", "thread-2");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows).toHaveLength(beforeWindowCount);
+    const target = ws.windows.find((w) => w.id === placeholderId);
+    expect(target?.threadId).toBe("thread-2");
+    expect(target?.kind).toBe("agent");
+    expect(ws.focusedWindowId).toBe(placeholderId);
+    expect(ws.hasHadContent).toBe(true);
+    expect(threadStore.selectThread).toHaveBeenCalledWith("thread-2", "agent");
+    expect(threadStore.activeThreadId).toBe("thread-2");
+  });
+
+  it("rejects a drop whose thread does not exist in the thread store", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    const placeholderId = workspaceStore.activeWorkspace.focusedWindowId;
+    expect(placeholderId).not.toBeNull();
+    vi.mocked(threadStore.selectThread).mockClear();
+
+    workspaceStore.bindThreadToWindow(placeholderId ?? "", "ghost-thread");
+
+    const ws = workspaceStore.activeWorkspace;
+    const target = ws.windows.find((w) => w.id === placeholderId);
+    expect(target?.threadId).toBeNull();
+    expect(target?.kind).toBeNull();
+    expect(threadStore.selectThread).not.toHaveBeenCalled();
+  });
+
+  it("does not rewrite the target row when dropping a thread onto its own pane", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    const targetWindow = workspaceStore.activeWorkspace.windows[0];
+    const beforeRowRef = workspaceStore.activeWorkspace.windows[0];
+    vi.mocked(threadStore.selectThread).mockClear();
+
+    workspaceStore.bindThreadToWindow(targetWindow.id, "thread-1");
+
+    // Same row identity preserved so ThreadContent's wrapperCache does
+    // not invalidate and remount the pane.
+    expect(workspaceStore.activeWorkspace.windows[0]).toBe(beforeRowRef);
+    expect(workspaceStore.activeWorkspace.windows[0].threadId).toBe("thread-1");
+    expect(threadStore.selectThread).toHaveBeenCalledWith("thread-1", "chat");
+  });
+
+  it("snaps focus to the existing pane when the dropped thread is already in this workspace", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    const placeholderId = workspaceStore.activeWorkspace.focusedWindowId;
+    const existingPaneId = workspaceStore.activeWorkspace.windows[0].id;
+    vi.mocked(threadStore.selectThread).mockClear();
+
+    workspaceStore.bindThreadToWindow(placeholderId ?? "", "thread-1");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.focusedWindowId).toBe(existingPaneId);
+    const placeholder = ws.windows.find((w) => w.id === placeholderId);
+    expect(placeholder?.threadId).toBeNull();
+    expect(threadStore.selectThread).toHaveBeenCalledWith("thread-1", "chat");
   });
 
   it("closes the focused pane and shifts focus to a sibling", async () => {

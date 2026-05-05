@@ -604,6 +604,70 @@ export const workspaceStore = {
   },
 
   /**
+   * Bind a thread directly to the named pane in the active workspace and
+   * activate it. This is the drop-target path: it operates on the target
+   * pane without going through focused-window resolution, so the bind
+   * always lands on the pane the user dropped onto. Calls
+   * `threadStore.selectThread` last so callers do not also need to.
+   */
+  bindThreadToWindow(windowId: string, threadId: string): void {
+    const wsIdx = state.workspaces.findIndex(
+      (w) => w.number === state.activeNumber,
+    );
+    if (wsIdx < 0) return;
+    const ws = state.workspaces[wsIdx];
+    const targetWindow =
+      ws.windows.find((w) => w.id === windowId) ??
+      (() => {
+        const source = windowById(windowId);
+        if (!source?.threadId) return null;
+        return ws.windows.find((w) => w.threadId === source.threadId) ?? null;
+      })();
+    if (!targetWindow) return;
+
+    const thread = threadStore.threads.find((t) => t.id === threadId);
+    if (!thread) return;
+
+    // Singleton-per-workspace: if this thread already lives in another
+    // pane here, focus that pane instead of duplicating it.
+    const existing = ws.windows.find(
+      (w) => w.threadId === threadId && w.id !== targetWindow.id,
+    );
+    if (existing) {
+      if (ws.focusedWindowId !== existing.id) {
+        setState("workspaces", wsIdx, "focusedWindowId", existing.id);
+      }
+      threadStore.selectThread(threadId, thread.kind);
+      return;
+    }
+
+    const targetIdx = ws.windows.findIndex((w) => w.id === targetWindow.id);
+    // Skip the rewrite when the target pane already shows this thread:
+    // any setState on `windows[targetIdx]` produces a new object identity
+    // for the row, which invalidates ThreadContent's wrapperCache and
+    // re-mounts the chat/agent/terminal pane (losing scroll, draft input,
+    // and IPC subscriptions).
+    const targetUnchanged =
+      targetIdx >= 0 &&
+      targetWindow.threadId === threadId &&
+      targetWindow.kind === thread.kind;
+    if (targetIdx >= 0 && !targetUnchanged) {
+      setState("workspaces", wsIdx, "windows", targetIdx, {
+        ...targetWindow,
+        threadId,
+        kind: thread.kind,
+      });
+    }
+    if (ws.focusedWindowId !== targetWindow.id) {
+      setState("workspaces", wsIdx, "focusedWindowId", targetWindow.id);
+    }
+    if (!ws.hasHadContent) {
+      setState("workspaces", wsIdx, "hasHadContent", true);
+    }
+    threadStore.selectThread(threadId, thread.kind);
+  },
+
+  /**
    * Update pane sizes from a drag-resize. Sizes are flex-grow values;
    * relative magnitudes determine each pane's share of the workspace.
    * Updates each pane's `size` field in place so the underlying window
