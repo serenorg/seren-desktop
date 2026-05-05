@@ -234,6 +234,7 @@ import {
   isTimeoutError,
   performAgentFallback,
 } from "@/lib/rate-limit-fallback";
+import { scrubAgentMarkup } from "@/lib/scrub-agent-markup";
 import { captureSupportError } from "@/lib/support/hook";
 import {
   clearConversationHistory,
@@ -5329,16 +5330,19 @@ Structured summary:`;
       setState("sessions", sessionId, "streamingThinkingTimestamp", undefined);
     }
     if (session.streamingContent) {
-      const contentMsg: AgentMessage = {
-        id: crypto.randomUUID(),
-        type: "assistant",
-        content: session.streamingContent,
-        timestamp: session.streamingContentTimestamp ?? Date.now(),
-      };
-      setState("sessions", sessionId, "messages", (msgs) => [
-        ...msgs,
-        contentMsg,
-      ]);
+      const scrubbed = scrubAgentMarkup(session.streamingContent);
+      if (scrubbed) {
+        const contentMsg: AgentMessage = {
+          id: crypto.randomUUID(),
+          type: "assistant",
+          content: scrubbed,
+          timestamp: session.streamingContentTimestamp ?? Date.now(),
+        };
+        setState("sessions", sessionId, "messages", (msgs) => [
+          ...msgs,
+          contentMsg,
+        ]);
+      }
       // Do NOT persist this intermediate flush — it captures partial streaming
       // text (often raw file contents from tool results) that would pollute
       // the restored conversation history on restart. Only
@@ -5678,6 +5682,20 @@ Structured summary:`;
         return;
       }
 
+      // Strip Claude Code scaffolding tags (<system-reminder>, <command-*>)
+      // before persisting or rendering. The model occasionally echoes those
+      // tags into its assistant text when a CLI skill (e.g. /loop) is active;
+      // letting them through pollutes the JSONL transcript and Seren memory,
+      // which makes the model continue extending the pattern on every
+      // subsequent turn. #1807.
+      const scrubbed = scrubAgentMarkup(session.streamingContent);
+      if (scrubbed.length === 0) {
+        setState("sessions", sessionId, "streamingContent", "");
+        setState("sessions", sessionId, "streamingContentTimestamp", undefined);
+        setState("sessions", sessionId, "promptStartTime", undefined);
+        return;
+      }
+
       // Calculate duration if we have a start time
       const duration = session.promptStartTime
         ? Date.now() - session.promptStartTime
@@ -5686,7 +5704,7 @@ Structured summary:`;
       const message: AgentMessage = {
         id: crypto.randomUUID(),
         type: "assistant",
-        content: session.streamingContent,
+        content: scrubbed,
         timestamp: session.streamingContentTimestamp ?? Date.now(),
         duration,
       };
@@ -5696,7 +5714,7 @@ Structured summary:`;
         "conversationId:",
         session.conversationId,
         "content:",
-        session.streamingContent.slice(0, 50),
+        scrubbed.slice(0, 50),
       );
       setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
       if (session.conversationId)
@@ -5709,10 +5727,9 @@ Structured summary:`;
       if (
         !isReplay &&
         settingsStore.settings.memoryEnabled &&
-        session.streamingContent.trim().length > 0 &&
-        !isLikelyAuthError(session.streamingContent)
+        !isLikelyAuthError(scrubbed)
       ) {
-        storeAssistantResponse(session.streamingContent, {
+        storeAssistantResponse(scrubbed, {
           model: `agent:${session.info.agentType}`,
           userQuery: session.lastUserPrompt,
         }).catch((err) => {
@@ -5723,8 +5740,8 @@ Structured summary:`;
       // If the agent streamed a short auth error as text, surface it as a session error
       // so the error banner with the Login button appears. Long messages are skipped
       // to avoid false positives when the agent discusses auth topics in normal output.
-      if (isLikelyAuthError(session.streamingContent)) {
-        setState("sessions", sessionId, "error", session.streamingContent);
+      if (isLikelyAuthError(scrubbed)) {
+        setState("sessions", sessionId, "error", scrubbed);
       }
 
       // Prompt-too-long is detected exclusively from the CLI's structured
