@@ -510,6 +510,7 @@ export const threadStore = {
       cwd: fileTreeState.rootPath,
     });
     this.selectThread(buffer.id, "terminal");
+    terminalStore.requestFocus(buffer.id);
     return buffer.id;
   },
 

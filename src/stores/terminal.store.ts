@@ -32,11 +32,13 @@ interface TerminalExitEvent {
 
 interface TerminalState {
   buffers: Record<string, TerminalBufferInfo>;
+  focusRequests: Record<string, number>;
   initialized: boolean;
 }
 
 const [state, setState] = createStore<TerminalState>({
   buffers: {},
+  focusRequests: {},
   initialized: false,
 });
 
@@ -52,6 +54,19 @@ export const terminalStore = {
   getBuffer(id: string | null): TerminalBufferInfo | null {
     if (!id) return null;
     return state.buffers[id] ?? null;
+  },
+
+  getFocusRequest(id: string | null): number {
+    if (!id) return 0;
+    return state.focusRequests[id] ?? 0;
+  },
+
+  requestFocus(bufferId: string): void {
+    setState(
+      "focusRequests",
+      bufferId,
+      (state.focusRequests[bufferId] ?? 0) + 1,
+    );
   },
 
   async init() {
@@ -156,6 +171,7 @@ export const terminalStore = {
     setState(
       produce((s: TerminalState) => {
         delete s.buffers[bufferId];
+        delete s.focusRequests[bufferId];
       }),
     );
   },

@@ -355,6 +355,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
   // resize, selection change, cell-metric change, and overflow recovery.
   let needsFullRepaint = true;
   let rafHandle: number | null = null;
+  let focusFrame: number | null = null;
   // Hard cap on queued diffs. If rAF is starved (background tab) we
   // drop the queue and resync via snapshot instead of growing forever.
   const MAX_PENDING_DIFFS = 240;
@@ -1582,18 +1583,30 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     await terminalStore.write(current.id, payload);
   };
 
-  const sendInterrupt = async () => {
-    const current = buffer();
-    if (!current || current.status !== "running") return;
-    snapToBottom();
-    await terminalStore.signal(current.id, "interrupt");
-  };
-
-  const kill = async () => {
-    const current = buffer();
-    if (!current || current.status !== "running") return;
-    await terminalStore.kill(current.id);
-  };
+  createEffect(
+    on(
+      () => terminalStore.getFocusRequest(activeBufferId()),
+      (request, previous) => {
+        if (request === 0 || request === previous) return;
+        if (focusFrame !== null) {
+          cancelAnimationFrame(focusFrame);
+        }
+        focusFrame = requestAnimationFrame(() => {
+          focusFrame = null;
+          const current = buffer();
+          if (
+            !current ||
+            current.status !== "running" ||
+            !surfaceRef ||
+            surfaceRef.closest("[aria-hidden='true']")
+          ) {
+            return;
+          }
+          surfaceRef.focus({ preventScroll: true });
+        });
+      },
+    ),
+  );
 
   onMount(async () => {
     await terminalStore.init();
@@ -1648,6 +1661,10 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       cancelAnimationFrame(rafHandle);
       rafHandle = null;
     }
+    if (focusFrame !== null) {
+      cancelAnimationFrame(focusFrame);
+      focusFrame = null;
+    }
     pendingDiffs = [];
     pendingRepaintRows.clear();
     pendingCanvasScrolls = [];
@@ -1679,22 +1696,6 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
                   {current().cwd || "Current environment"} - {current().status}
                 </div>
               </div>
-              <button
-                type="button"
-                class="px-2 py-1 text-[12px] rounded-md border border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-surface-2"
-                onClick={sendInterrupt}
-                disabled={current().status !== "running"}
-              >
-                Ctrl+C
-              </button>
-              <button
-                type="button"
-                class="px-2 py-1 text-[12px] rounded-md border border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-surface-2"
-                onClick={kill}
-                disabled={current().status !== "running"}
-              >
-                Stop
-              </button>
             </div>
 
             {/* Canvas surface. role="application" + tabIndex=0 lets the
