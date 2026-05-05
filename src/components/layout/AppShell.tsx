@@ -14,7 +14,6 @@ import { SignIn } from "@/components/auth/SignIn";
 import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
-import { WorkspaceBar } from "@/components/layout/WorkspaceBar";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
@@ -139,13 +138,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
     <div class="flex flex-col h-screen bg-background text-foreground">
       <Titlebar
         onSignInClick={handleSignInClick}
-        onSignOutClick={props.onLogout}
         onToggleSettings={handleToggleSettings}
-        onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
-        sidebarCollapsed={sidebarCollapsed()}
       />
-
-      <WorkspaceBar />
 
       <div class="flex flex-1 overflow-hidden relative">
         <ThreadSidebar

@@ -1,19 +1,15 @@
-// ABOUTME: Compact titlebar with app branding, project folder name, and user actions.
-// ABOUTME: Replaces the old Header component with a cleaner, Codex-inspired design.
+// ABOUTME: Compact titlebar with workspace switcher, balance, and window actions.
+// ABOUTME: Project folder lives in the sidebar header, not duplicated here.
 
 import { type Component, Show } from "solid-js";
 import { BalanceDisplay } from "@/components/common/BalanceDisplay";
-import { openFolder } from "@/lib/files/service";
+import { WorkspaceBar } from "@/components/layout/WorkspaceBar";
 import { authStore } from "@/stores/auth.store";
-import { fileTreeState } from "@/stores/fileTree";
 import { updaterStore } from "@/stores/updater.store";
 
 interface TitlebarProps {
   onSignInClick: () => void;
-  onSignOutClick: () => void;
   onToggleSettings: () => void;
-  onToggleSidebar: () => void;
-  sidebarCollapsed: boolean;
 }
 
 const DOWNLOAD_QUIPS = [
@@ -41,75 +37,23 @@ function formatBytes(bytes: number): string {
 }
 
 export const Titlebar: Component<TitlebarProps> = (props) => {
-  const folderName = () => {
-    const root = fileTreeState.rootPath;
-    if (!root) return null;
-    return root.split("/").pop() || root;
-  };
-
-  const handleOpenFolder = async () => {
-    await openFolder();
-  };
-
   return (
     <div
-      class="flex items-center justify-between h-[var(--titlebar-height,40px)] px-3 pl-[78px] bg-surface-1 border-b border-border shrink-0 select-none"
+      class="relative flex items-center justify-between h-[var(--titlebar-height,40px)] px-3 bg-surface-1 border-b border-border shrink-0 select-none"
       style={{ "-webkit-app-region": "drag" }}
     >
+      {/* Left: workspace switcher. */}
       <div
-        class="flex items-center gap-2"
+        class="flex items-center shrink-0"
         style={{ "-webkit-app-region": "no-drag" }}
       >
-        <span class="font-bold text-[14px] text-foreground tracking-[0.06em] uppercase">
-          Seren
-        </span>
-        <button
-          type="button"
-          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
-          onClick={props.onToggleSidebar}
-          title={props.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            role="img"
-            aria-label="Toggle sidebar"
-          >
-            <path
-              d="M3 4h10M3 8h10M3 12h10"
-              stroke="currentColor"
-              stroke-width="1.2"
-              stroke-linecap="round"
-            />
-          </svg>
-        </button>
+        <WorkspaceBar />
       </div>
 
-      <div class="flex items-center gap-1.5 flex-1 justify-center">
-        <Show
-          when={folderName()}
-          fallback={
-            <button
-              type="button"
-              class="text-xs text-muted-foreground opacity-60 bg-transparent border-none cursor-pointer transition-colors duration-100 hover:text-foreground"
-              style={{ "-webkit-app-region": "no-drag" }}
-              onClick={handleOpenFolder}
-              title="Open a project folder"
-            >
-              Open Folder
-            </button>
-          }
-        >
-          <span class="text-[13px] text-muted-foreground/70 overflow-hidden text-ellipsis whitespace-nowrap">
-            {folderName()}
-          </span>
-        </Show>
-      </div>
-
+      {/* Right: balance + window actions. Project folder lives in
+          the sidebar header; no need to duplicate it here. */}
       <div
-        class="flex items-center gap-2"
+        class="flex items-center gap-2 shrink-0"
         style={{ "-webkit-app-region": "no-drag" }}
       >
         {/* Update available button */}
@@ -197,32 +141,6 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
             <circle cx="12" cy="12" r="3" />
           </svg>
         </button>
-
-        <Show when={authStore.isAuthenticated}>
-          <button
-            type="button"
-            class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
-            onClick={props.onSignOutClick}
-            title="Sign out"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-label="Sign out icon"
-              role="img"
-            >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-          </button>
-        </Show>
 
         <Show when={!authStore.isAuthenticated}>
           <button
