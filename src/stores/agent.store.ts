@@ -1367,6 +1367,92 @@ export const agentStore = {
     setState("threadStates", threadId, "turnError", null);
   },
 
+  /**
+   * Re-dispatch the last submitted prompt for a thread. Used by the inline
+   * "Couldn't send. Retry" link after a turn fails (#1631) or after a
+   * mid-prompt session death (#1805). Consolidates retry logic so callers
+   * don't need to know whether the session is still alive.
+   *
+   * Path A — live ready session: dispatch directly via sendPrompt.
+   * Path B — no live session (terminated, removed, or never created):
+   *   resumeAgentConversation respawns from SQLite-persisted history, then
+   *   sendPrompt dispatches against the new session id.
+   */
+  async retryLastPrompt(threadId: string): Promise<void> {
+    const ts = state.threadStates[threadId];
+    if (!ts?.lastPromptText) {
+      console.warn(
+        "[AgentStore] retryLastPrompt: no lastPromptText for thread",
+        threadId,
+      );
+      return;
+    }
+
+    const promptText = ts.lastPromptText;
+    const promptContext = ts.lastPromptContext;
+    const promptDisplay = ts.lastPromptDisplay;
+    const promptDocNames = ts.lastPromptDocNames;
+
+    this.clearTurnError(threadId);
+
+    const live = this.getSessionForConversation(threadId);
+    const liveStatus = live?.info.status;
+    const isUsable =
+      live && liveStatus !== "error" && liveStatus !== "terminated";
+
+    let targetSessionId: string | null | undefined = isUsable
+      ? live.info.id
+      : undefined;
+
+    if (!targetSessionId) {
+      try {
+        targetSessionId = await this.resumeAgentConversation(threadId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[AgentStore] retryLastPrompt: respawn failed:", message);
+        this.setTurnError(threadId, "crash_ceiling", message);
+        return;
+      }
+      if (!targetSessionId) {
+        this.setTurnError(
+          threadId,
+          "crash_ceiling",
+          "Session could not be respawned for retry.",
+        );
+        return;
+      }
+      // resumeAgentConversation returns the conversationId when the session
+      // already exists; for a brand-new spawn the returned id is the new
+      // sessionId. Either way, look up the live session for dispatch.
+      const respawned = this.getSessionForConversation(threadId);
+      if (!respawned) {
+        this.setTurnError(
+          threadId,
+          "crash_ceiling",
+          "Session respawn returned without a live session.",
+        );
+        return;
+      }
+      targetSessionId = respawned.info.id;
+    }
+
+    try {
+      await this.sendPrompt(
+        promptText,
+        promptContext,
+        {
+          displayContent: promptDisplay,
+          docNames: promptDocNames,
+        },
+        targetSessionId,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[AgentStore] retryLastPrompt: dispatch failed:", message);
+      this.setTurnError(threadId, "crash_ceiling", message);
+    }
+  },
+
   _submitTurnErrorReport(
     threadId: string,
     kind: ErrorKind,
@@ -4945,6 +5031,36 @@ Structured summary:`;
           this.addErrorMessage(sessionId, event.data.error);
         } else {
           this.addErrorMessage(sessionId, event.data.error);
+
+          // Mid-prompt session death — runtime emits one of these strings
+          // when the child process is terminated or exits while a control
+          // request is pending. sendPrompt's catch block at line ~3819 only
+          // fires for synchronous IPC failures; post-dispatch deaths arrive
+          // here as async events and miss the existing recovery path.
+          // Without this branch, session.info.status stays "prompting" and
+          // turnInFlight stays true, so ThinkingStatus runs indefinitely.
+          // Catalog covers all three providers (#1805).
+          const errStr = String(event.data.error);
+          const isSessionDeath =
+            errStr.includes("Session terminated") ||
+            errStr.includes("stopped before request completed") ||
+            errStr.includes("stopped while prompt was active") ||
+            errStr.includes("Worker thread dropped");
+          const deathConvoId = state.sessions[sessionId]?.conversationId;
+          if (
+            isSessionDeath &&
+            deathConvoId &&
+            this.isTurnInFlight(deathConvoId)
+          ) {
+            setState(
+              "sessions",
+              sessionId,
+              "info",
+              "status",
+              "ready" as SessionStatus,
+            );
+            this.setTurnError(deathConvoId, "crash_ceiling", errStr);
+          }
         }
         break;
       }
@@ -5488,6 +5604,26 @@ Structured summary:`;
       if (entry) {
         entry.resolve();
         sessionReadyPromises.delete(sessionId);
+      }
+    }
+
+    // Belt-and-suspenders for the case where session-status: terminated/error
+    // arrives without a paired provider://error event (e.g. no pending control
+    // request at the moment of death). The error-event branch in
+    // handleSessionEvent is the primary detector; this catches the gap.
+    // #1805.
+    if (status === "terminated" || status === "error") {
+      const convoId = state.sessions[sessionId]?.conversationId;
+      if (
+        convoId &&
+        this.isTurnInFlight(convoId) &&
+        !this.getTurnError(convoId)
+      ) {
+        this.setTurnError(
+          convoId,
+          "crash_ceiling",
+          `Session ${status} mid-prompt`,
+        );
       }
     }
   },
