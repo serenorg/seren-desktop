@@ -21,6 +21,26 @@ import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
+// Right-aligned chip telling the user how a thread is billed.
+// Mirrors LauncherChip in ThreadSidebar.tsx — kept locally to avoid pulling
+// shared UI primitives across components for a single 7-row use case.
+const Chip: Component<{
+  variant: "paid" | "subscription";
+  children: string;
+}> = (chipProps) => {
+  const tone = () =>
+    chipProps.variant === "paid"
+      ? "bg-primary/10 text-primary/90 border-primary/25"
+      : "bg-purple-500/12 text-purple-300 border-purple-500/30";
+  return (
+    <span
+      class={`text-[10px] font-semibold tracking-[0.04em] px-1.5 py-0.5 rounded-full border whitespace-nowrap ${tone()}`}
+    >
+      {chipProps.children}
+    </span>
+  );
+};
+
 export const ThreadTabBar: Component = () => {
   const [showNewMenu, setShowNewMenu] = createSignal(false);
   let menuRef: HTMLDivElement | undefined;
@@ -182,31 +202,42 @@ export const ThreadTabBar: Component = () => {
         </button>
 
         <Show when={showNewMenu()}>
-          <div class="absolute top-full right-0 min-w-[160px] bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
+          <div class="absolute top-full right-0 min-w-[260px] bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
             <Show when={allowsSerenPublicModels(authStore.privateChatPolicy)}>
               <button
                 type="button"
-                class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                data-testid="new-seren-chat"
+                class="flex items-center gap-2.5 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
                 onClick={handleNewChat}
               >
-                <span class="text-[13px] w-[18px] text-center">💬</span>
-                <div class="font-medium">Seren Agent</div>
+                <span class="text-[13px] w-[18px] text-center shrink-0">
+                  💬
+                </span>
+                <div class="flex-1 min-w-0 font-medium">Seren Agent</div>
+                <Chip variant="paid">Pay-as-you-go</Chip>
               </button>
             </Show>
             <Show when={allowsSerenPrivateAgent(authStore.privateChatPolicy)}>
               <button
                 type="button"
-                class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                data-testid="new-seren-private-agent"
+                class="flex items-center gap-2.5 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
                 onClick={handleNewPrivateChat}
               >
-                <span class="text-[13px] w-[18px] text-center">🔒</span>
-                <div class="font-medium">Seren Agent (Private)</div>
+                <span class="text-[13px] w-[18px] text-center shrink-0">
+                  🔒
+                </span>
+                <div class="flex-1 min-w-0 font-medium">
+                  Seren Agent (Private)
+                </div>
+                <Chip variant="paid">Pay-as-you-go</Chip>
               </button>
             </Show>
             <Show when={allowsClaudeAgent(authStore.privateChatPolicy)}>
               <button
                 type="button"
-                class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                data-testid="new-claude-agent"
+                class="flex items-center gap-2.5 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
                 onClick={() => handleNewAgent("claude-code")}
                 disabled={!fileTreeState.rootPath}
                 title={
@@ -215,14 +246,18 @@ export const ThreadTabBar: Component = () => {
                     : undefined
                 }
               >
-                <span class="text-[13px] w-[18px] text-center">🤖</span>
-                Claude Code Agent
+                <span class="text-[13px] w-[18px] text-center shrink-0">
+                  🤖
+                </span>
+                <div class="flex-1 min-w-0 font-medium">Claude Code</div>
+                <Chip variant="subscription">Subscription</Chip>
               </button>
             </Show>
             <Show when={allowsCodexAgent(authStore.privateChatPolicy)}>
               <button
                 type="button"
-                class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                data-testid="new-codex-agent"
+                class="flex items-center gap-2.5 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
                 onClick={() => handleNewAgent("codex")}
                 disabled={!fileTreeState.rootPath}
                 title={
@@ -231,14 +266,18 @@ export const ThreadTabBar: Component = () => {
                     : undefined
                 }
               >
-                <span class="text-[13px] w-[18px] text-center">⚡</span>
-                Codex Agent
+                <span class="text-[13px] w-[18px] text-center shrink-0">
+                  ⚡
+                </span>
+                <div class="flex-1 min-w-0 font-medium">Codex</div>
+                <Chip variant="subscription">Subscription</Chip>
               </button>
             </Show>
             <Show when={allowsGeminiAgent(authStore.privateChatPolicy)}>
               <button
                 type="button"
-                class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                data-testid="new-gemini-agent"
+                class="flex items-center gap-2.5 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
                 onClick={() => handleNewAgent("gemini")}
                 disabled={!fileTreeState.rootPath}
                 title={
@@ -247,8 +286,11 @@ export const ThreadTabBar: Component = () => {
                     : undefined
                 }
               >
-                <span class="text-[13px] w-[18px] text-center">✨</span>
-                Gemini Agent
+                <span class="text-[13px] w-[18px] text-center shrink-0">
+                  ✨
+                </span>
+                <div class="flex-1 min-w-0 font-medium">Gemini</div>
+                <Chip variant="subscription">Subscription</Chip>
               </button>
             </Show>
           </div>

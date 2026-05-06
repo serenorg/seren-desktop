@@ -134,6 +134,21 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     }
   };
 
+  const handleNewAgent = async (
+    agentType: "claude-code" | "codex" | "gemini",
+  ) => {
+    setShowLauncher(false);
+    setLauncherQuery("");
+    const cwd = fileTreeState.rootPath;
+    if (!cwd) return;
+    setSpawning(true);
+    try {
+      await threadStore.createAgentThread(agentType, cwd);
+    } finally {
+      setSpawning(false);
+    }
+  };
+
   const handleSkillThread = async (skill: InstalledSkill | Skill) => {
     // Skills can only be toggled on an active thread
     const activeThread = threadStore.activeThread;
@@ -361,6 +376,84 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     </svg>
   );
 
+  // Right-aligned chip telling the user *what surface / how it's billed*.
+  const LauncherChip: Component<{
+    variant: "paid" | "subscription" | "cli";
+    children: string;
+  }> = (chipProps) => {
+    const tone = () =>
+      chipProps.variant === "paid"
+        ? "bg-primary/10 text-primary/90 border-primary/25"
+        : chipProps.variant === "subscription"
+          ? "bg-purple-500/12 text-purple-300 border-purple-500/30"
+          : "bg-surface-3 text-muted-foreground border-border";
+    return (
+      <span
+        class={`text-[10px] font-semibold tracking-[0.04em] px-1.5 py-0.5 rounded-full border whitespace-nowrap ${tone()}`}
+      >
+        {chipProps.children}
+      </span>
+    );
+  };
+
+  // Frames a brand emoji as a CLI command — small bordered square with a
+  // `>_` corner badge — so CLI rows visually depart from chat-style agent rows.
+  const CliBrandIcon: Component<{ glyph: string }> = (iconProps) => (
+    <span class="relative inline-flex items-center justify-center w-[22px] h-[22px] rounded-[5px] border border-border bg-black/25 text-[12px] shrink-0">
+      <span aria-hidden="true">{iconProps.glyph}</span>
+      <span
+        aria-hidden="true"
+        class="absolute -bottom-1 -right-1.5 px-[3px] py-[1px] rounded-[3px] border border-border bg-surface-2 text-[8px] font-semibold leading-none text-muted-foreground font-mono"
+      >
+        &gt;_
+      </span>
+    </span>
+  );
+
+  const SectionLabel: Component<{ children: string }> = (labelProps) => (
+    <div class="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 select-none">
+      {labelProps.children}
+    </div>
+  );
+
+  const SectionDivider: Component = () => (
+    <div class="h-px bg-border/60 mx-3 my-1" />
+  );
+
+  const claudeAvailable = createMemo(() =>
+    agentStore.availableAgents.some(
+      (a) => a.type === "claude-code" && a.available,
+    ),
+  );
+  const codexAvailable = createMemo(() =>
+    agentStore.availableAgents.some((a) => a.type === "codex" && a.available),
+  );
+  const geminiAvailable = createMemo(() =>
+    agentStore.availableAgents.some((a) => a.type === "gemini" && a.available),
+  );
+  const showSerenChat = createMemo(() =>
+    allowsSerenPublicModels(authStore.privateChatPolicy),
+  );
+  const showSerenPrivate = createMemo(() =>
+    allowsSerenPrivateAgent(authStore.privateChatPolicy),
+  );
+  const showClaudeAgent = createMemo(
+    () => allowsClaudeAgent(authStore.privateChatPolicy) && claudeAvailable(),
+  );
+  const showCodexAgent = createMemo(
+    () => allowsCodexAgent(authStore.privateChatPolicy) && codexAvailable(),
+  );
+  const showGeminiAgent = createMemo(
+    () => allowsGeminiAgent(authStore.privateChatPolicy) && geminiAvailable(),
+  );
+  const hasChatSection = createMemo(
+    () => showSerenChat() || showSerenPrivate(),
+  );
+  const hasAgentSection = createMemo(
+    () => showClaudeAgent() || showCodexAgent() || showGeminiAgent(),
+  );
+  const hasCliSection = createMemo(() => claudeAvailable() || codexAvailable());
+
   return (
     <aside
       data-testid="thread-sidebar"
@@ -491,134 +584,135 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
           <Show when={showLauncher()}>
             <div class="absolute top-[calc(100%+4px)] left-3 right-3 max-h-[60vh] overflow-y-auto bg-surface-2 border border-border rounded-lg z-20 shadow-lg animate-[slideDown_150ms_ease] py-1">
-              {/* Primary Seren chat path */}
-              <Show when={allowsSerenPublicModels(authStore.privateChatPolicy)}>
+              {/* ---------- Chat ---------- */}
+              <Show when={hasChatSection()}>
+                <SectionLabel>Chat</SectionLabel>
+              </Show>
+              <Show when={showSerenChat()}>
                 <button
                   type="button"
                   data-testid="new-seren-chat"
                   class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
                   onClick={handleNewChat}
                 >
-                  <span class="text-[14px]">{"\u{1F4AC}"}</span>
-                  <div class="min-w-0">
+                  <span class="text-[14px] w-[22px] text-center shrink-0">
+                    {"\u{1F4AC}"}
+                  </span>
+                  <div class="flex-1 min-w-0">
                     <div class="font-medium">Seren Agent</div>
-                    <Show when={primaryChatLauncherDescription()}>
-                      <div class="text-[11px] text-muted-foreground">
-                        {primaryChatLauncherDescription()}
-                      </div>
-                    </Show>
+                    <div class="text-[11px] text-muted-foreground">
+                      {primaryChatLauncherDescription()}
+                    </div>
                   </div>
+                  <LauncherChip variant="paid">Pay-as-you-go</LauncherChip>
                 </button>
               </Show>
-
-              <Show when={allowsSerenPrivateAgent(authStore.privateChatPolicy)}>
+              <Show when={showSerenPrivate()}>
                 <button
                   type="button"
+                  data-testid="new-seren-private-agent"
                   class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
                   onClick={handleNewPrivateChat}
                 >
-                  <span class="text-[14px]">{"\u{1F512}"}</span>
-                  <span class="font-medium">Seren Agent (Private)</span>
+                  <span class="text-[14px] w-[22px] text-center shrink-0">
+                    {"\u{1F512}"}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">Seren Agent (Private)</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      Private SerenModels · AWS Bedrock &amp; Azure
+                    </div>
+                  </div>
+                  <LauncherChip variant="paid">Pay-as-you-go</LauncherChip>
                 </button>
               </Show>
 
-              {/* Claude Code Agent */}
+              {/* ---------- Coding agents ---------- */}
+              <Show when={hasAgentSection() && hasChatSection()}>
+                <SectionDivider />
+              </Show>
+              <Show when={hasAgentSection()}>
+                <SectionLabel>Coding agents</SectionLabel>
+              </Show>
+              <Show when={showClaudeAgent()}>
+                <button
+                  type="button"
+                  data-testid="new-claude-agent"
+                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                  onClick={() => void handleNewAgent("claude-code")}
+                >
+                  <span class="text-[14px] w-[22px] text-center shrink-0">
+                    {"\u{1F916}"}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">Claude Code</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      Anthropic \u00B7 chat-style coding agent
+                    </div>
+                  </div>
+                  <LauncherChip variant="subscription">
+                    Subscription
+                  </LauncherChip>
+                </button>
+              </Show>
+              <Show when={showCodexAgent()}>
+                <button
+                  type="button"
+                  data-testid="new-codex-agent"
+                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                  onClick={() => void handleNewAgent("codex")}
+                >
+                  <span class="text-[14px] w-[22px] text-center shrink-0">
+                    {"\u26A1"}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">Codex</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      OpenAI \u00B7 chat-style coding agent
+                    </div>
+                  </div>
+                  <LauncherChip variant="subscription">
+                    Subscription
+                  </LauncherChip>
+                </button>
+              </Show>
+              <Show when={showGeminiAgent()}>
+                <button
+                  type="button"
+                  data-testid="new-gemini-agent"
+                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                  onClick={() => void handleNewAgent("gemini")}
+                >
+                  <span class="text-[14px] w-[22px] text-center shrink-0">
+                    {"\u2728"}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">Gemini</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      Google \u00B7 chat-style coding agent
+                    </div>
+                  </div>
+                  <LauncherChip variant="subscription">
+                    Subscription
+                  </LauncherChip>
+                </button>
+              </Show>
+
+              {/* ---------- Command line ---------- */}
               <Show
                 when={
-                  allowsClaudeAgent(authStore.privateChatPolicy) &&
-                  agentStore.availableAgents.some(
-                    (a) => a.type === "claude-code" && a.available,
-                  )
+                  hasCliSection() && (hasChatSection() || hasAgentSection())
                 }
               >
-                <button
-                  type="button"
-                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                  onClick={async () => {
-                    setShowLauncher(false);
-                    const cwd = fileTreeState.rootPath;
-                    if (!cwd) return;
-                    setSpawning(true);
-                    try {
-                      await threadStore.createAgentThread("claude-code", cwd);
-                    } finally {
-                      setSpawning(false);
-                    }
-                  }}
-                >
-                  <span class="text-[14px]">{"\u{1F916}"}</span>
-                  <span class="font-medium">Claude Code Agent</span>
-                </button>
+                <SectionDivider />
               </Show>
-
-              {/* Codex Agent */}
-              <Show
-                when={
-                  allowsCodexAgent(authStore.privateChatPolicy) &&
-                  agentStore.availableAgents.some(
-                    (a) => a.type === "codex" && a.available,
-                  )
-                }
-              >
-                <button
-                  type="button"
-                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                  onClick={async () => {
-                    setShowLauncher(false);
-                    const cwd = fileTreeState.rootPath;
-                    if (!cwd) return;
-                    setSpawning(true);
-                    try {
-                      await threadStore.createAgentThread("codex", cwd);
-                    } finally {
-                      setSpawning(false);
-                    }
-                  }}
-                >
-                  <span class="text-[14px]">{"\u26A1"}</span>
-                  <span class="font-medium">Codex Agent</span>
-                </button>
+              <Show when={hasCliSection()}>
+                <SectionLabel>Command line</SectionLabel>
               </Show>
-
-              {/* Gemini Agent */}
-              <Show
-                when={
-                  allowsGeminiAgent(authStore.privateChatPolicy) &&
-                  agentStore.availableAgents.some(
-                    (a) => a.type === "gemini" && a.available,
-                  )
-                }
-              >
+              <Show when={claudeAvailable()}>
                 <button
                   type="button"
-                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                  onClick={async () => {
-                    setShowLauncher(false);
-                    const cwd = fileTreeState.rootPath;
-                    if (!cwd) return;
-                    setSpawning(true);
-                    try {
-                      await threadStore.createAgentThread("gemini", cwd);
-                    } finally {
-                      setSpawning(false);
-                    }
-                  }}
-                >
-                  <span class="text-[14px]">{"\u2728"}</span>
-                  <span class="font-medium">Gemini Agent</span>
-                </button>
-              </Show>
-
-              {/* Terminal section - kept at the bottom of the launcher.
-                The CLI shortcuts are gated on the same availability
-                signal that gates the matching agent above. */}
-              <Show
-                when={agentStore.availableAgents.some(
-                  (a) => a.type === "claude-code" && a.available,
-                )}
-              >
-                <button
-                  type="button"
+                  data-testid="new-claude-cli"
                   class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
                   onClick={() =>
                     void handleNewTerminal({
@@ -627,19 +721,21 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                     })
                   }
                 >
-                  <span class="text-[14px]">{"\u{1F916}"}</span>
-                  <span class="font-medium">Claude Code CLI</span>
-                  <TerminalIcon size={11} />
+                  <CliBrandIcon glyph={"\u{1F916}"} />
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">Claude Code</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      Runs <code class="font-mono text-[10px]">claude</code> in
+                      a terminal pane
+                    </div>
+                  </div>
+                  <LauncherChip variant="cli">CLI</LauncherChip>
                 </button>
               </Show>
-
-              <Show
-                when={agentStore.availableAgents.some(
-                  (a) => a.type === "codex" && a.available,
-                )}
-              >
+              <Show when={codexAvailable()}>
                 <button
                   type="button"
+                  data-testid="new-codex-cli"
                   class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
                   onClick={() =>
                     void handleNewTerminal({
@@ -648,19 +744,36 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                     })
                   }
                 >
-                  <span class="text-[14px]">{"⚡"}</span>
-                  <span class="font-medium">Codex CLI</span>
-                  <TerminalIcon size={11} />
+                  <CliBrandIcon glyph={"⚡"} />
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">Codex</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      Runs <code class="font-mono text-[10px]">codex</code> in a
+                      terminal pane
+                    </div>
+                  </div>
+                  <LauncherChip variant="cli">CLI</LauncherChip>
                 </button>
               </Show>
 
+              {/* ---------- Shell ---------- */}
+              <SectionDivider />
+              <SectionLabel>Shell</SectionLabel>
               <button
                 type="button"
+                data-testid="new-terminal"
                 class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
                 onClick={() => void handleNewTerminal({ title: "Terminal" })}
               >
-                <TerminalIcon />
-                <span class="font-medium">Terminal</span>
+                <span class="w-[22px] flex items-center justify-center shrink-0">
+                  <TerminalIcon />
+                </span>
+                <div class="flex-1 min-w-0">
+                  <div class="font-medium">Terminal</div>
+                  <div class="text-[11px] text-muted-foreground">
+                    Plain shell at project root
+                  </div>
+                </div>
               </button>
             </div>
           </Show>
