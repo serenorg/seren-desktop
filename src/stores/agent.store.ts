@@ -160,24 +160,6 @@ type CompactAgentResult = {
   newSessionId?: string;
 };
 
-/** Wait for a session to return to 'ready' (not 'prompting') with a timeout.
- * Used after sending the compaction seed prompt to avoid racing with the retry. */
-async function waitForSessionIdle(
-  sessionId: string,
-  timeoutMs = 30_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (state.sessions[sessionId]?.info.status === "prompting") {
-    if (Date.now() >= deadline) {
-      console.warn(
-        `[AgentStore] waitForSessionIdle: timed out after ${timeoutMs}ms for session ${sessionId}`,
-      );
-      return;
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
-
 /** Maximum time sendPrompt waits for a predictive standby's seed prompt to
  * complete when the serving session is at critical context usage (#1675). */
 const STANDBY_SEED_WAIT_MS = 5_000;
@@ -198,6 +180,70 @@ async function waitForStandbySeed(
     await new Promise((r) => setTimeout(r, 50));
   }
   return state.sessions[standbyId]?.seedCompleted === true;
+}
+
+/**
+ * Read-and-clear the post-compaction prepend on a session. Returns the
+ * prompt with the structured summary banner in front when a prepend is
+ * pending, or the original prompt unchanged. Replaces the seed-prompt
+ * mechanism — the model's first turn after compaction is the user's
+ * actual prompt prefixed with restored context, not a meta-acknowledgement
+ * round-trip that would persist in the on-disk JSONL. #1829.
+ *
+ * Both `sendPrompt` (predictive promotion / cold submit) and
+ * `compactAndRetry` (reactive retry of the last failed prompt) call this.
+ */
+function consumeCompactionPrepend(sessionId: string, prompt: string): string {
+  const session = state.sessions[sessionId];
+  const prepend = session?.pendingCompactionPrepend;
+  if (!prepend) return prompt;
+  setState("sessions", sessionId, "pendingCompactionPrepend", undefined);
+  return `[Auto-compaction restored prior context]\n${prepend}\n\n---\n\n${prompt}`;
+}
+
+/**
+ * Drain the #1749 race-guard queue when a predictive standby finishes
+ * warming. Pre-#1829 the seed-prompt path triggered this inside the standby's
+ * first promptComplete handler. The synthetic and passive-prepend paths skip
+ * the seed turn entirely (no promptComplete fires), so the drain has to be
+ * triggered explicitly from compactAgentConversation. Without it, a prompt
+ * the user enqueued during warm-up sits on the serving's pendingPrompts
+ * until the next manual submit.
+ *
+ * Mirrors the body at the standby branch of the promptComplete handler.
+ * Caller passes the standby's id; we pivot through the standbySessionId
+ * backref to find the serving and drain its queue head onto its own
+ * sendPrompt path (which will then find seedCompleted=true and promote).
+ * #1829.
+ */
+function drainStandbyQueueIfPending(
+  standbyId: string,
+  doSendPrompt: (
+    prompt: string,
+    context?: Array<Record<string, string>>,
+    options?: { displayContent?: string; docNames?: string[] },
+    forSessionId?: string,
+  ) => Promise<void>,
+): void {
+  let drainTarget: string | null = null;
+  for (const [sid, s] of Object.entries(state.sessions)) {
+    if (s.standbySessionId === standbyId && s.role === "serving") {
+      if ((s.pendingPrompts ?? []).length > 0) {
+        drainTarget = sid;
+      }
+    }
+  }
+  if (!drainTarget) return;
+  const queue = state.sessions[drainTarget]?.pendingPrompts ?? [];
+  const [nextPrompt, ...remaining] = queue;
+  if (nextPrompt == null) return;
+  setState("sessions", drainTarget, "pendingPrompts", remaining);
+  console.info(
+    `[AgentStore] Standby ${standbyId} ready — draining queued prompt on ${drainTarget} (#1749)`,
+  );
+  setTimeout(() => {
+    void doSendPrompt(nextPrompt, undefined, undefined, drainTarget);
+  }, 0);
 }
 
 /** Claude Code model IDs that ship a 1M-token context tier behind the
@@ -290,6 +336,13 @@ let providerRuntimeRestartedListener: Promise<UnlistenFn> | null = null;
 /** Set once we've subscribed to `provider://cli-scan-rejected` so repeated
  *  initialize() calls don't stack listeners. #1646. */
 let cliScanRejectedUnsub: (() => void) | null = null;
+
+/** Set once we've subscribed to `provider://synthetic-transcript-schema-drift`
+ *  so a Claude CLI auto-update that breaks the splice invariants forces
+ *  `compactSyntheticTranscript=false` at runtime. The per-call try/catch
+ *  inside compactAgentConversation then falls back to passive prepend until
+ *  the schema is reconciled. #1829. */
+let syntheticSchemaDriftUnsub: (() => void) | null = null;
 
 /** Commit an agent list into the store + settle the selected-agent fallback.
  *  Shared by `initialize()` and the `provider-runtime://ready` listener so
@@ -468,6 +521,38 @@ function subscribeToCliScanRejections(): void {
   );
 }
 
+/**
+ * Subscribe once to `provider://synthetic-transcript-schema-drift`. Emitted
+ * by `agent-registry.mjs` after a Claude CLI auto-update when
+ * `runSyntheticTranscriptSelfCheck()` against a fixture detects that the
+ * splice invariants no longer hold (uuid chain, sessionId rewrite,
+ * record-shape). Force `compactSyntheticTranscript=false` so the next
+ * compaction uses the passive-prepend path instead of throwing on every
+ * call. The per-call try/catch already provides a runtime fallback; this
+ * subscriber persists the off-state across the session so the user is not
+ * paying the cost of a known-broken splice attempt every compaction. #1829.
+ *
+ * Idempotent — safe to call from initialize() across runtime restarts.
+ */
+function subscribeToSyntheticTranscriptSchemaDrift(): void {
+  if (syntheticSchemaDriftUnsub) return;
+  syntheticSchemaDriftUnsub = onRuntimeEvent(
+    "provider://synthetic-transcript-schema-drift",
+    (payload) => {
+      const event = payload as {
+        label?: string;
+        from?: string | null;
+        to?: string;
+        reason?: string;
+      };
+      console.warn(
+        `[compact.synthetic.schema_drift_disable] ${event.label ?? "Claude Code"} ${event.from ?? "?"} → ${event.to ?? "?"}: ${event.reason ?? "unknown"} — forcing compactSyntheticTranscript=false`,
+      );
+      settingsStore.set("compactSyntheticTranscript", false);
+    },
+  );
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -585,6 +670,15 @@ export interface ActiveSession {
   isCompacting?: boolean;
   /** Compacted summary from older messages. */
   compactedSummary?: AgentCompactedSummary;
+  /**
+   * One-shot context prepend queued after a compaction. The next prompt
+   * dispatched on this session is wrapped with this text in front of the
+   * user's actual input (`[Auto-compaction restored prior context]\n…`)
+   * and the field is cleared. Replaces the post-compaction seed turn —
+   * eliminating the meta-acknowledgement turn from the on-disk JSONL.
+   * #1829.
+   */
+  pendingCompactionPrepend?: string;
   /** Most recent user prompt text — used to retry after compaction. */
   lastUserPrompt?: string;
   /** Set after a compact-and-retry attempt so we only try once per prompt. */
@@ -1568,6 +1662,11 @@ export const agentStore = {
     // per launch per CLI). System notification + state record so the user
     // can review what was rejected and why.
     subscribeToCliScanRejections();
+    // #1829: consume the synthetic-transcript schema-drift event so a
+    // breaking Claude CLI auto-update forces compactSyntheticTranscript=false
+    // at runtime. Pre-#1829 the runtime emitted this event but no consumer
+    // existed in the TS layer, so the gate was one-way.
+    subscribeToSyntheticTranscriptSchemaDrift();
 
     const backoffMs = [0, 1_000, 2_000, 4_000, 8_000];
     for (let attempt = 0; attempt < backoffMs.length; attempt++) {
@@ -3057,12 +3156,10 @@ Structured summary:`;
       }
 
       // Post-generation verify-before-acting banner. Travels with `summary`
-      // itself so BOTH downstream consumers carry it: the seed-prompt path
-      // a few lines below AND the synthetic-transcript JSONL path that
+      // itself so BOTH downstream consumers carry it: the passive-prepend
+      // path AND the synthetic-transcript JSONL path that
       // `buildSyntheticTranscript()` writes to disk. A banner placed only
-      // on the seedPrompt would miss the synthetic path entirely (which is
-      // the default for claude-code agents, gated by
-      // `compactSyntheticTranscript`). #1800.
+      // on one consumer would miss the other. #1800.
       summary = `${summary.trim()}\n\nVERIFY-BEFORE-ACTING: Files, projects, and databases mentioned above may not exist on disk. Re-read the workspace, list .worktrees/, and resolve SerenDB projects/tables before acting on any claim.`;
 
       const compactedSummary: AgentCompactedSummary = {
@@ -3073,7 +3170,11 @@ Structured summary:`;
 
       const queuedPrompts = session.pendingPrompts ?? [];
 
-      // Build the structured seed prompt up-front — shared by both modes.
+      // Build the structured prepend up-front. This is what the next user
+      // submit on the new session will receive in front of their actual
+      // prompt — the post-compaction context-restore mechanism. No seed
+      // turn is sent to the model; the prepend is consumed exactly once on
+      // the first dispatch via `consumeCompactionPrepend`. #1829.
       const MAX_MSG_CHARS = 2000;
       const preservedContext = toPreserve
         .filter((m) => m.type === "user" || m.type === "assistant")
@@ -3085,9 +3186,14 @@ Structured summary:`;
           return `${m.type.toUpperCase()}: ${content}`;
         })
         .join("\n\n");
-      const seedPrompt = preservedContext
-        ? `Context restored after automatic compaction.\n\nPrior work summary:\n${summary}\n\nRecent messages:\n${preservedContext}\n\nConfirm you have this context in one sentence, then wait for the user's next message. Do not use any tools.`
-        : `Context restored after automatic compaction.\n\nPrior work summary:\n${summary}\n\nConfirm you have this context in one sentence, then wait for the user's next message. Do not use any tools.`;
+      const prependText = preservedContext
+        ? `Prior work summary:\n${summary}\n\nRecent messages:\n${preservedContext}`
+        : `Prior work summary:\n${summary}`;
+
+      const userTurnCount = Math.max(1, Math.ceil(toPreserve.length / 2));
+      const syntheticEnabled =
+        settingsStore.settings.compactSyntheticTranscript &&
+        agentType === "claude-code";
 
       if (mode === "predictive") {
         // Predictive path: spawn a STANDBY session alongside the live one.
@@ -3096,17 +3202,13 @@ Structured summary:`;
         // (#1673); concurrency is gated by `predictiveCompactInFlight` and
         // the module-level `predictiveCompactBusy` mutex.
 
-        // #1713: synthetic-transcript pre-warm. When enabled, build a
-        // synthetic JSONL on disk that splices the structured summary in
+        // #1713 / #1829: synthetic-transcript pre-warm. When enabled, build
+        // a synthetic JSONL on disk that splices the structured summary in
         // front of the parent's preserved tail and resume the standby
-        // against THAT, so the standby's prior assistant turn is the real
-        // prior assistant turn (no seed-ack misinterpretation).
-        if (
-          settingsStore.settings.compactSyntheticTranscript &&
-          agentType === "claude-code"
-        ) {
+        // against THAT — the standby's prior assistant turn is the real
+        // prior assistant turn, no model-visible acknowledgement round-trip.
+        if (syntheticEnabled) {
           try {
-            const userTurnCount = Math.max(1, Math.ceil(toPreserve.length / 2));
             const syntheticAgentSessionId =
               await providerService.buildSyntheticTranscript(
                 sessionId,
@@ -3136,25 +3238,37 @@ Structured summary:`;
             await waitForSessionReady(syntheticStandbyId);
             await this.restoreSessionSettings(session, syntheticStandbyId);
             // The synthetic JSONL already contains the real prior turn pair.
-            // Mark seed-complete immediately so promotion does not stall on
-            // a non-existent seed prompt.
+            // Mark seed-complete immediately so promotion does not stall.
             setState("sessions", syntheticStandbyId, "seedCompleted", true);
             predictiveCompactBusy = false;
             setState("sessions", sessionId, "predictiveCompactInFlight", false);
+            // No promptComplete event fires for this standby (no seed turn),
+            // so the drain that previously lived in the promptComplete
+            // handler must be triggered explicitly. #1749 / #1829.
+            drainStandbyQueueIfPending(
+              syntheticStandbyId,
+              this.sendPrompt.bind(this),
+            );
             console.info(
               `[compact.synthetic.success] standby ${syntheticStandbyId} resumed synthetic transcript ${syntheticAgentSessionId} for serving ${sessionId}`,
             );
             return { outcome: "succeeded", newSessionId: syntheticStandbyId };
           } catch (err) {
             // Defensive fallback: any failure (CLI rejects file, parent
-            // JSONL unreadable, write fails) drops through to today's
-            // seed-prompt path. The serving session is still alive.
+            // JSONL unreadable, write fails, schema drift) drops through to
+            // the passive-prepend path below. Serving session is untouched.
             console.warn(
-              `[compact.synthetic.fallback] ${err instanceof Error ? err.message : String(err)} — falling back to seed-prompt path`,
+              `[compact.synthetic.fallback.predictive] ${err instanceof Error ? err.message : String(err)} — falling back to passive prepend`,
             );
           }
         }
 
+        // Predictive non-synthetic path (passive prepend). Spawn a standby,
+        // queue the structured summary as `pendingCompactionPrepend`, mark
+        // seed-complete immediately. No seed turn is sent to the CLI — the
+        // standby's JSONL is empty until promotion, when sendPrompt's
+        // `consumeCompactionPrepend` injects the summary in front of the
+        // user's actual prompt. #1829.
         const standbyId = await this.spawnSession(cwd, agentType, {
           role: "standby",
           initialModelId: session.currentModelId,
@@ -3174,31 +3288,119 @@ Structured summary:`;
         setState("sessions", sessionId, "standbySessionId", standbyId);
         await waitForSessionReady(standbyId);
         await this.restoreSessionSettings(session, standbyId);
-        await providerService.sendPrompt(standbyId, seedPrompt);
-        // promptComplete handler detects role==="standby" and sets
-        // seedCompleted + releases predictiveCompactBusy.
+        setState(
+          "sessions",
+          standbyId,
+          "pendingCompactionPrepend",
+          prependText,
+        );
+        // No seed turn — mark seed-complete directly so promotion's gate
+        // (waitForStandbySeed) clears immediately on the next user submit.
+        setState("sessions", standbyId, "seedCompleted", true);
+        predictiveCompactBusy = false;
+        setState("sessions", sessionId, "predictiveCompactInFlight", false);
+        // Drain the #1749 race-guard queue explicitly — no promptComplete
+        // fires for this standby because we never sent a seed turn. #1829.
+        drainStandbyQueueIfPending(standbyId, this.sendPrompt.bind(this));
         console.info(
-          `[AgentStore] Predictive compaction: standby ${standbyId} seeding for serving ${sessionId}`,
+          `[AgentStore] Predictive compaction: standby ${standbyId} ready with passive prepend for serving ${sessionId}`,
         );
         return { outcome: "succeeded", newSessionId: standbyId };
       }
 
-      // Reactive path: terminate old, spawn fresh serving, seed, retry.
-      // Capture model id before terminate so the new session inherits the
-      // cached per-model context window via #1700.
+      // Reactive path. Two branches: synthetic-transcript (claude-code +
+      // setting on) and passive prepend (everything else / synthetic
+      // failure). Synthetic MUST run BEFORE terminate because
+      // `buildSyntheticTranscript` reads the live session's agentSessionId
+      // from the runtime's `sessions` map. After terminate the lookup
+      // throws "Session not found". #1829.
       const priorModelId = session.currentModelId;
-      await this.terminateSession(sessionId);
 
-      // Spawn the respawn as role="standby" so the seed prompt's
-      // acknowledgement turn is filtered by the handleSessionEvent guard
-      // (~line 4434) instead of streaming into the user-visible chat as
-      // "I'll acknowledge the system reminders…standing by". After the seed
-      // settles via waitForSessionIdle below, role flips back to "serving"
-      // and seedCompleted is cleared so the user's retry runs visibly. #1827.
+      if (syntheticEnabled) {
+        try {
+          const syntheticAgentSessionId =
+            await providerService.buildSyntheticTranscript(
+              sessionId,
+              summary,
+              userTurnCount,
+            );
+          // JSONL is now on disk; safe to terminate the old child.
+          await this.terminateSession(sessionId);
+          const syntheticSessionId = await this.spawnSession(cwd, agentType, {
+            localSessionId: conversationId,
+            initialModelId: priorModelId,
+            resumeAgentSessionId: syntheticAgentSessionId,
+          });
+          if (!syntheticSessionId) {
+            throw new Error(
+              "CompactionFailure: synthetic respawn returned null",
+            );
+          }
+          if (!state.sessions[syntheticSessionId]) {
+            throw new Error(
+              "CompactionFailure: synthetic respawn was removed before settings could be restored",
+            );
+          }
+          setState(
+            "sessions",
+            syntheticSessionId,
+            "compactedSummary",
+            compactedSummary,
+          );
+          setState("sessions", syntheticSessionId, "messages", fullTranscript);
+          setState(
+            "sessions",
+            syntheticSessionId,
+            "restoredMessageCount",
+            fullTranscript.length,
+          );
+          if (queuedPrompts.length > 0) {
+            setState(
+              "sessions",
+              syntheticSessionId,
+              "pendingPrompts",
+              queuedPrompts,
+            );
+          }
+          await waitForSessionReady(syntheticSessionId);
+          await this.restoreSessionSettings(session, syntheticSessionId);
+          console.info(
+            `[compact.synthetic.success.reactive] session ${syntheticSessionId} resumed synthetic transcript ${syntheticAgentSessionId}`,
+          );
+          return { outcome: "succeeded", newSessionId: syntheticSessionId };
+        } catch (err) {
+          // Synthetic failed. If the failure happened BEFORE terminate, the
+          // old session is still alive and we proceed with the passive-
+          // prepend path's normal terminate-then-spawn. If it happened AFTER
+          // terminate, the catch block at the end of the function runs the
+          // recovery spawn (preserves the user's transcript). The boundary
+          // is the `await this.terminateSession(sessionId)` above — anything
+          // after that throwing routes to the outer catch. The branch below
+          // covers the pre-terminate-failure case explicitly: we still need
+          // to terminate before spawning a clean replacement.
+          console.warn(
+            `[compact.synthetic.fallback.reactive] ${err instanceof Error ? err.message : String(err)} — falling back to passive prepend`,
+          );
+          if (state.sessions[sessionId]) {
+            // Pre-terminate failure path. Terminate now, then fall through
+            // to the passive-prepend block below.
+            await this.terminateSession(sessionId);
+          }
+        }
+      } else {
+        // Non-synthetic reactive: terminate before spawning the replacement
+        // (synthetic-enabled callers already terminated above on success or
+        // in the fallback branch).
+        await this.terminateSession(sessionId);
+      }
+
+      // Reactive passive-prepend path. No role-standby gymnastics — there
+      // is no seed-ack to suppress because no seed turn is sent. The user's
+      // retry (`compactAndRetry`) consumes the prepend and dispatches their
+      // failed prompt with the structured summary in front. #1829.
       const newSessionId = await this.spawnSession(cwd, agentType, {
         localSessionId: conversationId,
         initialModelId: priorModelId,
-        role: "standby",
       });
 
       if (!newSessionId) {
@@ -3226,11 +3428,6 @@ Structured summary:`;
       }
 
       setState("sessions", newSessionId, "compactedSummary", compactedSummary);
-
-      // UI history is decoupled from model context (#1631). The new session
-      // inherits the full transcript so users still see every earlier turn
-      // on scroll-up — the model's context is the structured summary + the
-      // preserved tail, seeded via the seed prompt below, not the transcript.
       setState("sessions", newSessionId, "messages", fullTranscript);
       setState(
         "sessions",
@@ -3243,25 +3440,20 @@ Structured summary:`;
       }
 
       console.info(
-        `[AgentStore] Compacted ${toCompact.length} messages, preserved ${toPreserve.length}. Seeding new session.`,
+        `[AgentStore] Compacted ${toCompact.length} messages, preserved ${toPreserve.length}. Queueing passive prepend on new session.`,
       );
 
-      // Wait for the new session to be ready, then restore settings and seed.
-      // We deliberately stop here: dispatching the user's failed prompt is the
-      // caller's job (`compactAndRetry`). Doing it inline produced two bugs in
-      // one function — see #1757. The contract is "produce a fresh, idle,
-      // seeded session and return its id"; nothing more.
       await waitForSessionReady(newSessionId);
       await this.restoreSessionSettings(session, newSessionId);
-      await providerService.sendPrompt(newSessionId, seedPrompt);
-      await waitForSessionIdle(newSessionId);
-
-      // Seed has fully settled — release the standby filter so the caller's
-      // retry (`compactAndRetry`) renders the user's actual response. Reset
-      // seedCompleted so the next promptComplete is treated as a real turn,
-      // not a second seed by the standby short-circuit at ~line 4485. #1827.
-      setState("sessions", newSessionId, "role", "serving");
-      setState("sessions", newSessionId, "seedCompleted", undefined);
+      // Queue the structured summary for the next dispatch on this session.
+      // compactAndRetry consumes it via consumeCompactionPrepend before its
+      // direct providerService.sendPrompt call. #1829.
+      setState(
+        "sessions",
+        newSessionId,
+        "pendingCompactionPrepend",
+        prependText,
+      );
 
       return { outcome: "succeeded", newSessionId };
     } catch (error) {
@@ -3396,7 +3588,12 @@ Structured summary:`;
           `[AgentStore] Compaction complete, retrying prompt on session ${newSessionId}`,
         );
         setState("sessions", newSessionId, "lastUserPrompt", lastPrompt);
-        await providerService.sendPrompt(newSessionId, lastPrompt);
+        // compactAndRetry bypasses store.sendPrompt (the user's UI message
+        // is already on screen from the first failed attempt). Apply the
+        // post-compaction prepend ourselves so the model receives the
+        // structured summary banner in front of the retry. #1829.
+        const retryPrompt = consumeCompactionPrepend(newSessionId, lastPrompt);
+        await providerService.sendPrompt(newSessionId, retryPrompt);
         return "retried";
       }
       console.info(
@@ -3914,7 +4111,16 @@ Structured summary:`;
     console.log("[AgentStore] Calling providerService.sendPrompt...");
     try {
       const mergedContext = await this.buildPromptContext(sessionId, context);
-      await providerService.sendPrompt(sessionId, prompt, mergedContext);
+      // Apply the post-compaction prepend (one-shot) AFTER the user message
+      // is rendered in the UI but BEFORE the IPC dispatch — the user's chat
+      // bubble shows their actual text; the model receives the structured
+      // summary banner in front of it. #1829.
+      const dispatchedPrompt = consumeCompactionPrepend(sessionId, prompt);
+      await providerService.sendPrompt(
+        sessionId,
+        dispatchedPrompt,
+        mergedContext,
+      );
       this.clearBootstrapPromptContext(sessionId);
       console.log("[AgentStore] sendPrompt completed successfully");
     } catch (error) {

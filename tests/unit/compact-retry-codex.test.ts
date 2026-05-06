@@ -86,24 +86,23 @@ describe("#1757 — compactAndRetry no longer searches state.sessions for the ne
 });
 
 describe("#1757 — retry prompt is dispatched exactly once, by compactAndRetry", () => {
-  it("compactAgentConversation does NOT call sendPrompt for any pendingUserPrompt", () => {
-    // Pre-fix, compactAgentConversation called sendPrompt for the user's
-    // failed prompt internally AND compactAndRetry called sendPrompt again
-    // after its lookup succeeded — a latent double-dispatch on the path
-    // where the swap-check passed (Claude Code). The fix moves dispatch out
-    // of compactAgentConversation entirely; the helper sends only the seed.
+  it("compactAgentConversation does NOT call providerService.sendPrompt at all", () => {
+    // Pre-#1757: compactAgentConversation called sendPrompt for the user's
+    //   failed prompt internally AND compactAndRetry called sendPrompt again
+    //   after its lookup succeeded — a latent double-dispatch.
+    // #1757 → #1827: helper kept a single sendPrompt for the seed turn; the
+    //   retry stayed with compactAndRetry.
+    // #1829: the seed turn is gone entirely — the structured summary is now
+    //   queued as `pendingCompactionPrepend` state, consumed on the next
+    //   user submit. compactAgentConversation makes ZERO IPC sendPrompt
+    //   calls. This is the structural invariant that prevents the seed-ack
+    //   from ever existing in the JSONL.
     const body = functionBody("async compactAgentConversation(");
-    // Assert: the only sendPrompt call references the seedPrompt local.
-    const sendPromptCalls = body.match(
-      /providerService\.sendPrompt\([^)]*\)/g,
-    );
-    expect(sendPromptCalls, "compactAgentConversation must call sendPrompt").toBeTruthy();
-    for (const call of sendPromptCalls ?? []) {
-      expect(
-        call,
-        "compactAgentConversation must only sendPrompt the seedPrompt — the retry belongs to compactAndRetry",
-      ).toContain("seedPrompt");
-    }
+    const sendPromptCalls = body.match(/providerService\.sendPrompt\(/g);
+    expect(
+      sendPromptCalls,
+      "compactAgentConversation must not call providerService.sendPrompt",
+    ).toBeNull();
     // Belt-and-braces: pendingUserPrompt and lastUserPrompt arguments must
     // never appear on a sendPrompt inside this function.
     expect(body).not.toMatch(
@@ -114,11 +113,13 @@ describe("#1757 — retry prompt is dispatched exactly once, by compactAndRetry"
     );
   });
 
-  it("compactAndRetry invokes sendPrompt for lastPrompt exactly once", () => {
+  it("compactAndRetry invokes providerService.sendPrompt exactly once for the retry", () => {
+    // Per #1829 the retry now passes the prepended `retryPrompt` (lastPrompt
+    // wrapped with the structured summary banner via consumeCompactionPrepend)
+    // rather than the raw lastPrompt. The contract — exactly one retry
+    // dispatch — is unchanged.
     const body = functionBody("async compactAndRetry(");
-    const calls = body.match(
-      /providerService\.sendPrompt\([^)]*lastPrompt[^)]*\)/g,
-    );
+    const calls = body.match(/providerService\.sendPrompt\(/g);
     expect(calls, "compactAndRetry must dispatch the retry prompt").toBeTruthy();
     expect(
       calls?.length,
