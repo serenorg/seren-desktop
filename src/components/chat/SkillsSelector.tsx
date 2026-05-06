@@ -16,9 +16,8 @@ import { fileTreeState } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
 
-const SKILL_CREATOR_SLUG = "seren-skill-creator";
-const SKILL_CREATOR_SOURCE_URL =
-  "https://raw.githubusercontent.com/serenorg/seren-skills/main/seren/skill-creator/SKILL.md";
+const SKILL_CREATOR_SLUG = "skill-creator";
+const SKILL_CREATOR_SOURCE_URL = `seren-skills:${SKILL_CREATOR_SLUG}`;
 
 export const SkillsSelector: Component = () => {
   const [isOpen, setIsOpen] = createSignal(false);
@@ -92,12 +91,12 @@ export const SkillsSelector: Component = () => {
     if (!alreadyInstalled) {
       try {
         const skill: Skill = {
-          id: `serenorg:${SKILL_CREATOR_SLUG}`,
+          id: `seren:${SKILL_CREATOR_SLUG}`,
           slug: SKILL_CREATOR_SLUG,
           name: "Skill Creator",
           description:
             "Guide for creating effective skills. Use when users want to create or update a skill that extends capabilities with specialized knowledge, workflows, or tool integrations.",
-          source: "serenorg",
+          source: "seren",
           sourceUrl: SKILL_CREATOR_SOURCE_URL,
           tags: ["meta", "creation"],
           author: "SerenAI",

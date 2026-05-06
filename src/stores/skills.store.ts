@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createStore } from "solid-js/store";
 import { log } from "@/lib/logger";
+import { queryClient } from "@/lib/query-client";
 import {
   filterHostCompatibleCatalog,
   type InstalledSkill,
@@ -13,11 +14,11 @@ import {
   type SkillsState,
 } from "@/lib/skills";
 import {
-  isPublisherManagedSkill,
   isUpstreamManagedSkill,
   type ProjectSkillsConfig,
   skills,
 } from "@/services/skills";
+import { skillsCatalogQueryKey } from "@/services/skills-query";
 import { getFileTreeState } from "@/stores/fileTree";
 
 const ENABLED_SKILLS_KEY = "seren:enabled_skills";
@@ -90,6 +91,18 @@ function makeProjectConfig(enabled: string[]): ProjectSkillsConfig {
 
 function skillRef(skill: Pick<InstalledSkill, "scope" | "slug">): string {
   return `${skill.scope}:${skill.slug}`;
+}
+
+function applyAvailableCatalog(all: Skill[]): void {
+  const available = filterHostCompatibleCatalog(all);
+  const excluded = all.length - available.length;
+  setState("available", available);
+  log.info(
+    "[SkillsStore] Loaded",
+    available.length,
+    "available skills",
+    excluded > 0 ? `(${excluded} host-excluded)` : "",
+  );
 }
 
 function normalizeRefs(refs: string[]): string[] {
@@ -218,6 +231,17 @@ export const skillsStore = {
    */
   get error(): string | null {
     return state.error;
+  },
+
+  setAvailableCatalog(all: Skill[]): void {
+    applyAvailableCatalog(all);
+    setState("error", null);
+  },
+
+  setAvailableError(error: unknown): void {
+    const message =
+      error instanceof Error ? error.message : "Failed to load skills";
+    setState("error", message);
   },
 
   /**
@@ -605,18 +629,7 @@ export const skillsStore = {
 
     try {
       const all = await skills.fetchAllSkills(skipCache);
-      // Filter out skills that exclude the Seren Desktop host. These are
-      // CLI-only skills and should never appear in Desktop discovery.
-      // Spec: serenorg/seren-desktop#1496
-      const available = filterHostCompatibleCatalog(all);
-      const excluded = all.length - available.length;
-      setState("available", available);
-      log.info(
-        "[SkillsStore] Loaded",
-        available.length,
-        "available skills",
-        excluded > 0 ? `(${excluded} host-excluded)` : "",
-      );
+      applyAvailableCatalog(all);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load skills";
@@ -705,15 +718,13 @@ export const skillsStore = {
     ]);
 
     // Backfill sync state for skills installed before the sync feature
-    // existed (pre-v2.3.16). Covers both upstream repo skills and publisher
-    // skills. Non-blocking — failures are logged and skipped.
+    // existed (pre-v2.3.16). Non-blocking: failures are logged and skipped.
     const needsBackfill = state.installed.some(
       (s) =>
         !s.syncState &&
         state.available.some(
           (a) =>
-            (a.slug === s.slug || a.slug === s.dirName) &&
-            (a.source === "serenorg" || a.source === "seren"),
+            (a.slug === s.slug || a.slug === s.dirName) && a.source === "seren",
         ),
     );
     if (needsBackfill) {
@@ -770,49 +781,6 @@ export const skillsStore = {
     }
     if (autoRefreshed > 0) {
       await this.refreshInstalled();
-    }
-
-    // Detect and remove installed publisher skills whose publisher no longer
-    // exists in the catalog (deleted publishers return 404 from the Gateway).
-    const catalogSlugs = new Set(
-      state.available.filter((s) => s.source === "seren").map((s) => s.slug),
-    );
-    let removedStale = 0;
-    for (const skill of [...state.installed]) {
-      if (!isPublisherManagedSkill(skill)) continue;
-      // Extract publisher slug from the sourceUrl
-      // Format: https://api.serendb.com/publishers/{slug}/skill.md
-      const urlMatch = skill.upstreamSourceUrl.match(
-        /\/publishers\/([^/]+)\/skill\.md$/,
-      );
-      if (!urlMatch) continue;
-      const publisherSlug = urlMatch[1];
-      if (catalogSlugs.has(publisherSlug)) continue;
-
-      // Publisher not in catalog — remove the stale skill
-      try {
-        await this.remove(skill);
-        removedStale++;
-        log.info(
-          "[SkillsStore] Removed stale publisher skill:",
-          skill.slug,
-          "(publisher deleted:",
-          `${publisherSlug})`,
-        );
-      } catch (err) {
-        log.warn(
-          "[SkillsStore] Failed to remove stale publisher skill:",
-          skill.slug,
-          err,
-        );
-      }
-    }
-    if (removedStale > 0) {
-      log.info(
-        "[SkillsStore] Cleaned up",
-        removedStale,
-        "stale publisher skill(s)",
-      );
     }
 
     // Rename skill directories where the resolved slug (from SKILL.md name)
@@ -945,6 +913,7 @@ export const skillsStore = {
    */
   async clearCacheAndRefresh(): Promise<void> {
     skills.clearCache();
+    queryClient.removeQueries({ queryKey: skillsCatalogQueryKey });
     await this.refresh(true);
   },
 

@@ -73,27 +73,19 @@ describe("Gemini Agent #1476 — load-bearing regression guards", () => {
     expect(handlerIdx).toBeLessThan(sessionRoutingIdx);
   });
 
-  // ─── Slice D: api.github.com never reappears in skills service ──────
-  it("src/services/skills.ts contains zero references to api.github.com (#1515)", () => {
-    // #1515 removed every GitHub API callsite from the skills service
-    // because the 60 req/hr anonymous limit 403s at our user count and
-    // masks the real problem. R2 is the sole source of truth for
-    // index/tree/revision metadata. Any regression that reintroduces
-    // `api.github.com` in this file will start a fresh round of 403
-    // storms in production — this guard catches it in CI.
+  // ─── Slice D: legacy skill fetch paths stay removed ──────────────────
+  it("src/services/skills.ts contains zero GitHub or R2 skill fetch paths", () => {
+    // Desktop skill discovery and bundle install should go through the generated
+    // Seren Skills API client. Reintroducing raw GitHub or R2 paths would split
+    // the source of truth for payload files and revision metadata.
     expect(skillsServiceTs).not.toContain("api.github.com");
+    expect(skillsServiceTs).not.toContain("raw.githubusercontent.com");
+    expect(skillsServiceTs).not.toContain("r2.dev/skills");
   });
 
-  it("synthetic revision uses lastModified as the SHA so syncedRevision comparison stays stable", () => {
-    // The synthetic SHA must equal the timestamp itself. Any other choice
-    // (e.g. hashing it, prefixing it) breaks the persisted-syncedRevision
-    // comparison after the first install — `remoteRevision.sha !== syncedRevision`
-    // would always be true and the UI would scream "update available" forever.
-    const idx = skillsServiceTs.indexOf(
-      "function syntheticRevisionFromLastModified",
-    );
-    expect(idx).toBeGreaterThan(-1);
-    const fn = skillsServiceTs.slice(idx, idx + 600);
-    expect(fn).toMatch(/sha:\s*lastModified/);
+  it("skills service uses the generated Seren Skills API client", () => {
+    expect(skillsServiceTs).toContain('from "@/api/seren-skills"');
+    expect(skillsServiceTs).toContain("downloadSkill");
+    expect(skillsServiceTs).toContain("listSkills");
   });
 });

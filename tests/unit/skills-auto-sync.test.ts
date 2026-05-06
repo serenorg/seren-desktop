@@ -10,7 +10,6 @@ const mockSkillsService = vi.hoisted(() => ({
   inspectSyncStatus: vi.fn().mockResolvedValue({ updateAvailable: false }),
   refreshInstalledSkill: vi.fn().mockResolvedValue({ installed: {}, syncStatus: null }),
   isUpstreamManagedSkill: vi.fn().mockReturnValue(false),
-  isPublisherManagedSkill: vi.fn().mockReturnValue(false),
   renameSkillDir: vi.fn().mockResolvedValue("/skills/renamed/SKILL.md"),
   clearCache: vi.fn(),
 }));
@@ -47,7 +46,6 @@ vi.mock("@/services/skills", () => ({
     clearCache: mockSkillsService.clearCache,
   },
   isUpstreamManagedSkill: mockSkillsService.isUpstreamManagedSkill,
-  isPublisherManagedSkill: mockSkillsService.isPublisherManagedSkill,
 }));
 
 describe("skills auto-sync on refresh (#1155)", () => {
@@ -58,9 +56,9 @@ describe("skills auto-sync on refresh (#1155)", () => {
   it("calls refreshInstalledSkill when an upstream-managed skill has updateAvailable", async () => {
     const staleSkill = {
       slug: "polymarket-maker-rebate-bot",
-      scope: "serenorg" as const,
+      scope: "seren" as const,
       path: "/skills/polymarket-maker-rebate-bot",
-      syncState: { upstreamSource: "serenorg/seren-skills", syncedRevision: "abc123", syncedAt: 1, managedFiles: {} },
+      syncState: { upstreamSource: "seren", syncedRevision: "abc123", syncedAt: 1, managedFiles: {} },
     };
 
     mockSkillsService.fetchAllSkills.mockResolvedValue([]);
@@ -79,9 +77,9 @@ describe("skills auto-sync on refresh (#1155)", () => {
   it("calls refreshInstalledSkill when an upstream-managed skill needs bootstrap refresh", async () => {
     const backfilledSkill = {
       slug: "polymarket-maker-rebate-bot",
-      scope: "serenorg" as const,
+      scope: "seren" as const,
       path: "/skills/polymarket-maker-rebate-bot",
-      syncState: { upstreamSource: "serenorg/seren-skills", syncedRevision: null, syncedAt: 1, managedFiles: { "SKILL.md": "hash" } },
+      syncState: { upstreamSource: "seren", syncedRevision: null, syncedAt: 1, managedFiles: { "SKILL.md": "hash" } },
     };
 
     mockSkillsService.fetchAllSkills.mockResolvedValue([]);
@@ -105,9 +103,9 @@ describe("skills auto-sync on refresh (#1155)", () => {
   it("does not auto-refresh when local managed files have changed", async () => {
     const editedSkill = {
       slug: "polymarket-maker-rebate-bot",
-      scope: "serenorg" as const,
+      scope: "seren" as const,
       path: "/skills/polymarket-maker-rebate-bot",
-      syncState: { upstreamSource: "serenorg/seren-skills", syncedRevision: "abc123", syncedAt: 1, managedFiles: { "SKILL.md": "hash" } },
+      syncState: { upstreamSource: "seren", syncedRevision: "abc123", syncedAt: 1, managedFiles: { "SKILL.md": "hash" } },
     };
 
     mockSkillsService.fetchAllSkills.mockResolvedValue([]);
@@ -158,21 +156,21 @@ describe("refresh() concurrency guard and summary (#1289)", () => {
   it("returns accurate summary counts", async () => {
     const updatedSkill = {
       slug: "skill-a",
-      scope: "serenorg" as const,
+      scope: "seren" as const,
       path: "/skills/skill-a",
-      syncState: { upstreamSource: "serenorg/seren-skills", syncedRevision: "aaa", syncedAt: 1, managedFiles: {} },
+      syncState: { upstreamSource: "seren", syncedRevision: "aaa", syncedAt: 1, managedFiles: {} },
     };
     const currentSkill = {
       slug: "skill-b",
-      scope: "serenorg" as const,
+      scope: "seren" as const,
       path: "/skills/skill-b",
-      syncState: { upstreamSource: "serenorg/seren-skills", syncedRevision: "bbb", syncedAt: 1, managedFiles: {} },
+      syncState: { upstreamSource: "seren", syncedRevision: "bbb", syncedAt: 1, managedFiles: {} },
     };
     const failingSkill = {
       slug: "skill-c",
-      scope: "serenorg" as const,
+      scope: "seren" as const,
       path: "/skills/skill-c",
-      syncState: { upstreamSource: "serenorg/seren-skills", syncedRevision: "ccc", syncedAt: 1, managedFiles: {} },
+      syncState: { upstreamSource: "seren", syncedRevision: "ccc", syncedAt: 1, managedFiles: {} },
     };
 
     mockSkillsService.fetchAllSkills.mockResolvedValue([]);
@@ -233,14 +231,14 @@ describe("backfill triggers for slug/dirName mismatch (#1558)", () => {
       slug: "saas-short-trader",
       dirName: "alpaca-saas-short-trader",
       scope: "seren" as const,
-      source: "serenorg",
+      source: "seren",
       path: "/skills/alpaca-saas-short-trader/SKILL.md",
       syncState: undefined,
     };
     const catalogEntry = {
       slug: "alpaca-saas-short-trader",
-      source: "serenorg",
-      sourceUrl: "https://raw.githubusercontent.com/serenorg/seren-skills/main/alpaca/saas-short-trader/SKILL.md",
+      source: "seren",
+      sourceUrl: "seren-skills:alpaca-saas-short-trader",
     };
 
     mockSkillsService.fetchAllSkills.mockResolvedValue([catalogEntry]);

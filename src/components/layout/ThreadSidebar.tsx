@@ -185,8 +185,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
         // Find the newly installed skill. Match by slug first, then fall back to
         // dirName because resolveSkillSlug() may derive a different slug from the
-        // SKILL.md name metadata than the marketplace slug (e.g. "skill-creator"
-        // vs "seren-skill-creator"). dirName always equals the marketplace slug.
+        // SKILL.md name metadata than the marketplace slug. dirName always equals
+        // the marketplace slug.
         const found = skillsStore.installed.find(
           (s) =>
             s.slug === marketplaceSkill.slug ||
@@ -958,10 +958,10 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                         setShowCreateMenu(false);
                         const skillCreator =
                           skillsStore.installed.find(
-                            (s) => s.slug === "seren-skill-creator",
+                            (s) => s.slug === "skill-creator",
                           ) ||
                           skillsStore.available.find(
-                            (s) => s.slug === "seren-skill-creator",
+                            (s) => s.slug === "skill-creator",
                           );
                         if (skillCreator) {
                           const cwd = fileTreeState.rootPath;

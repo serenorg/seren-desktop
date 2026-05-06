@@ -45,6 +45,12 @@ import {
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
+  canAcceptSkillDrop,
+  setCurrentSkillDragPayload,
+  skillDragPayload,
+  skillPromptTextFromDrag,
+} from "@/lib/skill-drag";
+import {
   appendInputHistory,
   getInputHistory,
   getThreadDraft,
@@ -260,6 +266,45 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const onPickImages = () => {
     if (!isPaneActive()) return;
     handleAttachImages();
+  };
+
+  const insertIntoInput = (text: string) => {
+    const target = inputRef;
+    const current = input();
+    const start = target?.selectionStart ?? current.length;
+    const end = target?.selectionEnd ?? current.length;
+    const prefix = current.slice(0, start);
+    const suffix = current.slice(end);
+    const before = prefix && !prefix.endsWith("\n") ? `${prefix}\n\n` : prefix;
+    const after = suffix && !suffix.startsWith("\n") ? `\n\n${suffix}` : suffix;
+    const next = `${before}${text}${after}`;
+    setInput(next);
+    requestAnimationFrame(() => {
+      inputRef?.focus();
+      const cursor = before.length + text.length;
+      inputRef?.setSelectionRange(cursor, cursor);
+    });
+  };
+
+  const handleSkillDragOver = (event: DragEvent) => {
+    if (!canAcceptSkillDrop(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = hasSession() ? "copy" : "none";
+    }
+  };
+
+  const handleSkillDrop = async (event: DragEvent) => {
+    const payload = skillDragPayload(event);
+    if (!payload) return;
+    // preventDefault unconditionally once we recognise a skill drop so the
+    // textarea never falls back to inserting the raw `seren-skill:{...}` text.
+    event.preventDefault();
+    setCurrentSkillDragPayload(null);
+    if (!hasSession()) return;
+    const text = await skillPromptTextFromDrag(payload);
+    if (!text) return;
+    insertIntoInput(text);
   };
   const onSetChatInput = (event: Event) => {
     if (!isPaneActive()) return;
@@ -1816,6 +1861,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   setInput(e.currentTarget.value);
                   setCommandPopupIndex(0);
                 }}
+                onDragOver={handleSkillDragOver}
+                onDrop={(event) => void handleSkillDrop(event)}
                 onKeyDown={handleKeyDown}
                 disabled={!hasSession()}
               />

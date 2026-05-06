@@ -14,8 +14,7 @@
   },
   "servers": [
     {
-      "url": "/publishers/seren-skills",
-      "description": "Hosted at the Seren gateway publisher path"
+      "url": "/publishers/seren-skills"
     }
   ],
   "paths": {

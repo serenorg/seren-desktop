@@ -126,7 +126,7 @@ function App() {
   });
 
   // Periodically refresh available skills so newly published skills appear without restart.
-  // Base interval: 5 min + up to 30s jitter. R2 serves the index with zero rate limits.
+  // Base interval: 5 min + up to 30s jitter.
   // Skip the refresh when any agent session is actively prompting — the 4+ network
   // requests and large setState batch compound the already-saturated event stream
   // from high-velocity tool-call chains, making the UI feel unresponsive. #1531.

@@ -1,9 +1,14 @@
 // ABOUTME: Skills service for managing skill discovery, installation, and content.
-// ABOUTME: Handles fetching from index, local skills, and Seren publishers.
+// ABOUTME: Handles fetching from Seren Skills, local skills, and sync state.
 
 import { invoke } from "@tauri-apps/api/core";
-import { apiBase } from "@/lib/config";
-import { appFetch } from "@/lib/fetch";
+import {
+  downloadSkill,
+  listSkills,
+  type SkillBundle,
+  type SkillBundleFile,
+  type SkillSummary,
+} from "@/api/seren-skills";
 import { log } from "@/lib/logger";
 import {
   computeContentHash,
@@ -15,47 +20,17 @@ import {
   resolveSkillDisplayName,
   resolveSkillSlug,
   type Skill,
-  type SkillIndexEntry,
   type SkillScope,
   type SkillSource,
   type SkillSyncState,
   type SkillSyncStatus,
 } from "@/lib/skills";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
-import { catalog, type Publisher } from "./catalog";
 
-const SKILLS_REPO_OWNER = "serenorg";
-const SKILLS_REPO_NAME = "seren-skills";
-const SKILLS_REPO_BRANCH = "main";
-const SKILLS_R2_INDEX_URL =
-  "https://pub-714fe894394345a0a8a102fbac2b208f.r2.dev/skills/index.json";
-const SKILLS_RAW_URL = `https://raw.githubusercontent.com/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/${SKILLS_REPO_BRANCH}`;
-const INDEX_CACHE_KEY = "seren:skills_index";
-const PUBLISHER_SKILLS_CACHE_KEY = "seren:publisher_skills";
+const LEGACY_INDEX_CACHE_KEY = "seren:skills_index";
+const INDEX_CACHE_KEY = "seren:skills_index:v2";
 const INDEX_CACHE_DURATION = 1000 * 60 * 5; // 5 minutes
-const MAX_STALE_CACHE_AGE = 1000 * 60 * 60; // 1 hour — don't serve cache older than this on error
-
-/**
- * Legacy tree-node shape retained so downstream helpers
- * (`collectTreeFiles`, `fetchRawFilesFromTree`, etc.) keep their current API.
- * R2-sourced entries are materialized with `type: "blob"` since R2 only ships
- * paths, not per-node metadata.
- */
-interface GitHubTreeNode {
-  path?: string;
-  type?: string;
-}
-
-/**
- * Shape of the R2-hosted skills index payload
- * (`skills/index.json`, built by seren-skills/scripts/build-index.mjs).
- */
-interface R2IndexPayload {
-  version: string;
-  updatedAt: string;
-  skills: SkillIndexEntry[];
-  tree?: string[];
-}
+const MAX_STALE_CACHE_AGE = 1000 * 60 * 60; // 1 hour
 
 interface ExtraFile {
   path: string;
@@ -89,27 +64,28 @@ export interface ProjectSkillsConfig {
  * here so the UI never renders raw slugs even when the catalog or a
  * specific SKILL.md is missing display metadata.
  */
-function indexEntryToSkill(entry: SkillIndexEntry): Skill {
+function skillSummaryToSkill(summary: SkillSummary): Skill {
   return {
-    id: `${entry.source}:${entry.slug}`,
-    slug: entry.slug,
-    name: humanizeSkillName(entry.name, entry.slug),
-    displayName: entry.displayName,
-    description: entry.description,
-    source: entry.source,
-    sourceUrl: entry.sourceUrl,
-    tags: entry.tags,
-    author: entry.author,
-    version: entry.version,
-    lastModified: entry.lastModified,
+    id: `seren:${summary.slug}`,
+    slug: summary.slug,
+    name: humanizeSkillName(summary.name, summary.slug),
+    description: summary.description,
+    source: "seren",
+    sourceUrl: `seren-skills:${summary.slug}`,
+    tags: [summary.visibility, summary.discoverability, summary.status].filter(
+      Boolean,
+    ),
+    version: summary.current_version ?? undefined,
+    lastModified: summary.updated_at,
   };
 }
 
 /**
  * Serialize a skill for index cache.
  */
-function skillToIndexEntry(skill: Skill): SkillIndexEntry {
+function skillToCacheEntry(skill: Skill): Skill {
   return {
+    id: skill.id,
     slug: skill.slug,
     name: skill.name,
     displayName: skill.displayName,
@@ -123,104 +99,178 @@ function skillToIndexEntry(skill: Skill): SkillIndexEntry {
   };
 }
 
-/**
- * Cached repo tree from the most recent R2 index fetch.
- * Used to discover sibling files when installing or syncing a skill.
- */
-let cachedRepoTree: GitHubTreeNode[] | null = null;
+function remoteRevisionFromBundle(bundle: SkillBundle): RemoteSkillRevision {
+  return {
+    sha: bundle.content_hash,
+    shortSha: bundle.content_hash.slice(0, 10),
+    committedAt: bundle.skill.updated_at,
+    message: bundle.version,
+    url: undefined,
+    changedFiles: (bundle.files ?? []).map((file) => file.path),
+  };
+}
 
-/**
- * Per-skill `lastModified` map from the most recent R2 v2+ index fetch,
- * keyed by canonical `sourceUrl`. Used by `fetchRemoteSkillRevision` to
- * derive a synthetic revision without any additional network calls once
- * the R2 index has been fetched. (#1476, #1515)
- *
- * Cleared and repopulated on every R2 fetch so deletions and renames in
- * the upstream repo don't leave stale entries.
- */
-const cachedLastModifiedBySourceUrl = new Map<string, string>();
+function decodeBase64Text(value: string): string {
+  const binary = atob(value);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
 
-/**
- * In-flight promise for the current R2 index fetch. Deduplicates concurrent
- * callers (e.g. `fetchFreshRepoTree` + `fetchRemoteSkillRevision` fired in
- * parallel from `fetchUpstreamSkillBundle`) so a single sync-refresh cycle
- * hits R2 exactly once regardless of how many skills are being refreshed.
- */
-let inflightR2IndexFetch: Promise<R2IndexPayload> | null = null;
-
-/**
- * Populate the module-level caches from a parsed R2 index payload.
- * Factored out so both cold catalog fetches (`fetchSkillsFromR2Index`) and
- * fresh sync-refresh fetches (`fetchFreshR2Index`) share one code path.
- */
-function populateCachesFromR2Payload(payload: R2IndexPayload): void {
-  cachedRepoTree = (payload.tree ?? []).map((path) => ({
-    path,
-    type: "blob",
+function bundleFilesToExtraFiles(files: SkillBundleFile[] = []): ExtraFile[] {
+  return files.map((file) => ({
+    path: file.path,
+    content: decodeBase64Text(file.content_b64),
   }));
-  cachedLastModifiedBySourceUrl.clear();
-  for (const entry of payload.skills) {
-    if (entry.lastModified && entry.sourceUrl) {
-      cachedLastModifiedBySourceUrl.set(entry.sourceUrl, entry.lastModified);
-    }
-  }
 }
 
-/**
- * Fetch the R2 skills index with optional cache-bust, populate module caches,
- * and deduplicate concurrent callers.
- *
- * R2 is the sole source of truth for skill discovery, tree listings, and
- * upstream revision metadata. There is no GitHub fallback — with 10k+ users
- * the 60 req/hr anonymous GitHub rate limit would 403 on any fallback and
- * mask the real problem. R2 availability is monitored upstream. (#1515)
- */
-async function fetchFreshR2Index(options?: {
-  cacheBust?: boolean;
-}): Promise<R2IndexPayload> {
-  if (inflightR2IndexFetch) {
-    return inflightR2IndexFetch;
-  }
-  inflightR2IndexFetch = (async () => {
-    try {
-      const url = options?.cacheBust
-        ? `${SKILLS_R2_INDEX_URL}?t=${Date.now()}`
-        : SKILLS_R2_INDEX_URL;
-      const response = await appFetch(url);
-      if (!response.ok) {
-        throw new Error(`R2 skills index: ${response.status}`);
+interface SkillsCatalogResponsePage {
+  skills: SkillSummary[];
+  total: number;
+}
+
+export interface SkillsCatalogPage {
+  skills: Skill[];
+  total: number;
+  offset: number;
+  nextOffset: number | null;
+}
+
+function objectKeys(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  const keys = Object.keys(value).slice(0, 5);
+  return keys.length > 0 ? `: ${keys.join(", ")}` : "";
+}
+
+function normalizeSkillsCatalogPage(
+  value: unknown,
+): SkillsCatalogResponsePage | null {
+  const queue: unknown[] = [value];
+  const seen = new Set<unknown>();
+
+  while (queue.length > 0 && seen.size < 25) {
+    const candidate = queue.shift();
+    if (!candidate || typeof candidate !== "object") {
+      continue;
+    }
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+
+    const page = candidate as {
+      body?: unknown;
+      data?: unknown;
+      result?: unknown;
+      skills?: unknown;
+      total?: unknown;
+    };
+
+    if (Array.isArray(page.skills)) {
+      return {
+        skills: page.skills as SkillSummary[],
+        total: typeof page.total === "number" ? page.total : page.skills.length,
+      };
+    }
+
+    for (const nested of [page.data, page.result, page.body]) {
+      if (nested && typeof nested === "object") {
+        queue.push(nested);
       }
-      const payload = (await response.json()) as R2IndexPayload;
-      populateCachesFromR2Payload(payload);
-      return payload;
-    } finally {
-      inflightR2IndexFetch = null;
     }
-  })();
-  return inflightR2IndexFetch;
+  }
+
+  return null;
 }
 
-async function fetchSkillsFromR2Index(): Promise<Skill[]> {
-  const payload = await fetchFreshR2Index();
-  return payload.skills.map(indexEntryToSkill);
+async function downloadSkillBundle(slug: string): Promise<SkillBundle> {
+  const { data, error, response } = await downloadSkill({
+    path: { slug },
+    throwOnError: false,
+  });
+  if (error || !data) {
+    const status = response ? `: ${response.status}` : "";
+    throw new Error(`Failed to download skill ${slug}${status}`);
+  }
+  return data;
 }
 
-async function fetchSkillsFromRepoIndex(): Promise<Skill[]> {
-  return fetchSkillsFromR2Index();
+async function fetchSerenSkillsPage(
+  limit: number,
+  offset: number,
+  query?: string,
+): Promise<SkillsCatalogPage> {
+  const { data, error, response } = await listSkills({
+    query: { limit, offset, q: query?.trim() || undefined },
+    throwOnError: false,
+  });
+  if (error || !data) {
+    const status = response ? `: ${response.status}` : "";
+    throw new Error(`Failed to list seren-skills catalog${status}`);
+  }
+
+  const page = normalizeSkillsCatalogPage(data);
+  if (!page) {
+    throw new Error(
+      `Unexpected seren-skills catalog response${objectKeys(data)}`,
+    );
+  }
+
+  if (page.skills.length === 0 && offset < page.total) {
+    log.warn(
+      "[Skills] Seren Skills catalog returned an empty page before total was reached",
+      { offset, total: page.total },
+    );
+  }
+
+  const nextOffset = offset + page.skills.length;
+  return {
+    skills: page.skills.map(skillSummaryToSkill),
+    total: page.total,
+    offset,
+    nextOffset:
+      page.skills.length > 0 && nextOffset < page.total ? nextOffset : null,
+  };
 }
 
-/**
- * Derive the GitHub skill directory prefix from a sourceUrl.
- * e.g. "https://raw.githubusercontent.com/.../curve/curve-gauge-yield-trader/SKILL.md"
- *   -> "curve/curve-gauge-yield-trader/"
- */
-function deriveRepoDirPrefix(sourceUrl: string): string | null {
-  const base = `${SKILLS_RAW_URL}/`;
-  if (!sourceUrl.startsWith(base)) return null;
-  const relative = sourceUrl.slice(base.length);
-  const lastSlash = relative.lastIndexOf("/");
-  if (lastSlash <= 0) return null;
-  return relative.slice(0, lastSlash + 1);
+async function fetchSerenSkills(skipCache = false): Promise<Skill[]> {
+  if (!skipCache) {
+    const cached = localStorage.getItem(INDEX_CACHE_KEY);
+    if (cached) {
+      const { timestamp, data } = JSON.parse(cached);
+      if (Date.now() - timestamp < INDEX_CACHE_DURATION) {
+        log.info("[Skills] Using cached seren-skills catalog");
+        return data as Skill[];
+      }
+    }
+  }
+
+  const pageSize = 100;
+  let offset = 0;
+  let total: number | null = null;
+  const all: Skill[] = [];
+
+  do {
+    const page = await fetchSerenSkillsPage(pageSize, offset);
+    if (page.skills.length === 0) {
+      break;
+    }
+    all.push(...page.skills);
+    total = page.total;
+    offset = page.nextOffset ?? page.total;
+  } while (total !== null && offset < total && offset > 0);
+
+  const skills = all;
+  if (skills.length > 0) {
+    localStorage.setItem(
+      INDEX_CACHE_KEY,
+      JSON.stringify({
+        timestamp: Date.now(),
+        data: skills.map(skillToCacheEntry),
+      }),
+    );
+  }
+  log.info("[Skills] Fetched", skills.length, "skills from seren-skills");
+  return skills;
 }
 
 function buildManagedFileMap(
@@ -249,80 +299,75 @@ function localManagedStateFingerprint(
     .join("\n");
 }
 
-/**
- * Build a synthetic RemoteSkillRevision from an R2 v2+ `lastModified`
- * timestamp. The ISO string IS the synthetic SHA: it changes when and only
- * when the upstream commit changes, which is exactly what the freshness
- * check needs (`remoteRevision.sha !== syncedRevision`). Persisted as
- * `syncedRevision` after install — same string is used for every comparison.
- *
- * R2 is the sole source of truth for revision metadata. No GitHub commits
- * API fallback — the 60 req/hr anonymous limit would 403 at our user count
- * and mask the real problem. (#1476, #1515)
- */
-function syntheticRevisionFromLastModified(
-  lastModified: string,
-): RemoteSkillRevision {
+function skillSlugFromSourceUrl(sourceUrl: string): string | null {
+  if (sourceUrl.startsWith("seren-skills:")) {
+    const slug = sourceUrl.slice("seren-skills:".length).trim();
+    return slug || null;
+  }
+
+  const legacyRawMatch = sourceUrl.match(
+    /^https:\/\/raw\.githubusercontent\.com\/serenorg\/seren-skills\/[^/]+\/(.+)\/SKILL\.md(?:\?.*)?$/,
+  );
+  if (legacyRawMatch?.[1]) {
+    const segments = legacyRawMatch[1].split("/").filter(Boolean);
+    return segments[segments.length - 1] ?? null;
+  }
+
+  const match = sourceUrl.match(
+    /\/publishers\/seren-skills\/skills\/([^/]+)(?:\/download)?$/,
+  );
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+function skillSourceUrlFromSlug(slug: string): string {
+  return `seren-skills:${slug}`;
+}
+
+function isSerenUpstreamSource(value: string | undefined): boolean {
+  return (
+    value === "seren" ||
+    value === "serenorg" ||
+    value === "serenorg/seren-skills"
+  );
+}
+
+function normalizeSyncSource(
+  upstreamSource: string,
+  upstreamSourceUrl: string,
+): { upstreamSource: "seren"; upstreamSourceUrl: string } | null {
+  if (!isSerenUpstreamSource(upstreamSource)) return null;
+
+  const slug = skillSlugFromSourceUrl(upstreamSourceUrl);
+  if (!slug) return null;
+
   return {
-    sha: lastModified,
-    shortSha: lastModified.slice(0, 10),
-    committedAt: lastModified,
-    message: undefined,
-    url: undefined,
-    changedFiles: [],
+    upstreamSource: "seren",
+    upstreamSourceUrl: skillSourceUrlFromSlug(slug),
   };
 }
 
 async function fetchRemoteSkillRevision(
   sourceUrl: string,
 ): Promise<RemoteSkillRevision | null> {
-  // Ensure the R2-backed lastModified cache is populated. This is a no-op
-  // on warm paths (catalog already loaded) because `fetchFreshR2Index`
-  // deduplicates concurrent and re-entrant calls.
-  if (cachedLastModifiedBySourceUrl.size === 0) {
-    try {
-      await fetchFreshR2Index();
-    } catch (err) {
-      log.warn(
-        "[Skills] Unable to fetch R2 index for revision lookup",
-        sourceUrl,
-        err,
-      );
-      return null;
-    }
-  }
-  const cachedLastModified = cachedLastModifiedBySourceUrl.get(sourceUrl);
-  if (!cachedLastModified) return null;
-  return syntheticRevisionFromLastModified(cachedLastModified);
+  const slug = skillSlugFromSourceUrl(sourceUrl);
+  if (!slug) return null;
+  return remoteRevisionFromBundle(await downloadSkillBundle(slug));
 }
 
 async function fetchUpstreamSkillBundle(skill: {
   sourceUrl?: string;
+  slug?: string;
 }): Promise<UpstreamSkillBundle | null> {
-  if (!skill.sourceUrl) return null;
-
-  // Phase 1: Fetch SKILL.md, repo tree, and revision in parallel
-  const cacheBustedUrl = `${skill.sourceUrl}${skill.sourceUrl.includes("?") ? "&" : "?"}t=${Date.now()}`;
-  const [skillMd, freshTree, remoteRevision] = await Promise.all([
-    appFetch(cacheBustedUrl).then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`Failed to fetch skill content: ${response.status}`);
-      }
-      return response.text();
-    }),
-    fetchFreshRepoTree(skill.sourceUrl),
-    fetchRemoteSkillRevision(skill.sourceUrl),
-  ]);
-
-  // Phase 2: Parse SKILL.md for includes, then fetch payload + includes files
-  const parsed = parseSkillMd(skillMd);
-  const payloadFiles = await fetchPayloadAndIncludes(
-    skill.sourceUrl,
-    freshTree,
-    parsed.metadata.includes,
-  );
-
-  return { skillMd, payloadFiles, remoteRevision };
+  const slug =
+    skill.slug ??
+    (skill.sourceUrl ? skillSlugFromSourceUrl(skill.sourceUrl) : null);
+  if (!slug) return null;
+  const bundle = await downloadSkillBundle(slug);
+  return {
+    skillMd: bundle.skill_md,
+    payloadFiles: bundleFilesToExtraFiles(bundle.files),
+    remoteRevision: remoteRevisionFromBundle(bundle),
+  };
 }
 
 async function computeUpstreamSyncState(
@@ -384,15 +429,15 @@ function parseInstalledSyncState(
       return null;
     }
 
-    if (
-      parsedSyncState.upstreamSource === "serenorg" &&
-      !deriveRepoDirPrefix(parsedSyncState.upstreamSourceUrl)
-    ) {
-      return null;
-    }
+    const normalizedSource = normalizeSyncSource(
+      parsedSyncState.upstreamSource,
+      parsedSyncState.upstreamSourceUrl,
+    );
+    if (!normalizedSource) return null;
 
     return {
       ...parsedSyncState,
+      ...normalizedSource,
       syncedRevision: normalizedSyncedRevision,
     } as SkillSyncState;
   } catch (error) {
@@ -405,267 +450,17 @@ export function isUpstreamManagedSkill(
   skill: InstalledSkill,
 ): skill is InstalledSkill & {
   syncState: SkillSyncState;
-  upstreamSource: "serenorg";
-  upstreamSourceUrl: string;
-} {
-  return (
-    !!skill.syncState &&
-    skill.upstreamSource === "serenorg" &&
-    typeof skill.upstreamSourceUrl === "string" &&
-    skill.upstreamSourceUrl.length > 0
-  );
-}
-
-/**
- * Check if an installed skill is managed by a Seren publisher (has sync state
- * with source "seren"). Used to detect stale publisher skills whose publisher
- * has been deleted.
- */
-export function isPublisherManagedSkill(
-  skill: InstalledSkill,
-): skill is InstalledSkill & {
-  syncState: SkillSyncState;
   upstreamSource: "seren";
   upstreamSourceUrl: string;
 } {
+  const upstreamSource = skill.upstreamSource as string | undefined;
   return (
     !!skill.syncState &&
-    skill.upstreamSource === "seren" &&
+    isSerenUpstreamSource(upstreamSource) &&
     typeof skill.upstreamSourceUrl === "string" &&
-    skill.upstreamSourceUrl.length > 0
+    skill.upstreamSourceUrl.length > 0 &&
+    skillSlugFromSourceUrl(skill.upstreamSourceUrl) !== null
   );
-}
-
-/**
- * Fetch a fresh repo tree from the R2 skills index with cache-bust to
- * bypass the Cloudflare edge cache. On failure this throws — callers must
- * not fall back to a stale tree because recording a new syncedRevision
- * with old file content would mask an incomplete sync and prevent future
- * retries.
- */
-async function fetchFreshRepoTree(
-  _sourceUrl: string,
-): Promise<GitHubTreeNode[]> {
-  try {
-    await fetchFreshR2Index({ cacheBust: true });
-  } catch (err) {
-    throw new Error(
-      `Failed to fetch repo tree for payload files: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
-  return cachedRepoTree ?? [];
-}
-
-/**
- * Validate an includes path for safety.
- * Must be relative, no traversal, no absolute paths.
- */
-function isValidIncludesPath(path: string): boolean {
-  if (!path || path.startsWith("/") || path.startsWith("\\")) return false;
-  if (path.includes("..")) return false;
-  if (path.startsWith(".") && !path.startsWith("./")) return false;
-  return true;
-}
-
-/**
- * Collect blob file nodes from a tree matching a directory prefix.
- * Returns objects mapping each file's repo path to its install-relative path.
- */
-function collectTreeFiles(
-  tree: GitHubTreeNode[],
-  dirPrefix: string,
-  relativePrefix: string,
-  excludeSkillMd: boolean,
-): Array<{ repoPath: string; relativePath: string }> {
-  return tree
-    .filter(
-      (node) =>
-        node.type === "blob" &&
-        typeof node.path === "string" &&
-        node.path.startsWith(dirPrefix) &&
-        (!excludeSkillMd || !node.path.endsWith("/SKILL.md")),
-    )
-    .map((node) => ({
-      repoPath: node.path as string,
-      relativePath:
-        relativePrefix + (node.path as string).slice(dirPrefix.length),
-    }));
-}
-
-/**
- * Fetch raw file contents from GitHub for a list of file nodes.
- */
-async function fetchRawFilesFromTree(
-  nodes: Array<{ repoPath: string; relativePath: string }>,
-): Promise<ExtraFile[]> {
-  if (nodes.length === 0) return [];
-
-  const results = await Promise.allSettled(
-    nodes.map(async ({ repoPath, relativePath }): Promise<ExtraFile> => {
-      const segments = repoPath.split("/").map((s) => encodeURIComponent(s));
-      const rawUrl = `${SKILLS_RAW_URL}/${segments.join("/")}?t=${Date.now()}`;
-
-      const resp = await appFetch(rawUrl);
-      if (!resp.ok) {
-        throw new Error(
-          `Failed to fetch payload file ${relativePath}: HTTP ${resp.status}`,
-        );
-      }
-      const content = await resp.text();
-      return { path: relativePath, content };
-    }),
-  );
-
-  const files: ExtraFile[] = [];
-  const failures: string[] = [];
-  for (const result of results) {
-    if (result.status === "fulfilled") {
-      files.push(result.value);
-    } else {
-      failures.push(result.reason?.message ?? String(result.reason));
-    }
-  }
-
-  if (failures.length > 0) {
-    throw new Error(
-      `Failed to fetch ${failures.length}/${nodes.length} payload files: ${failures.join("; ")}`,
-    );
-  }
-
-  return files;
-}
-
-/**
- * Fetch payload files from a skill's directory plus any declared includes paths.
- * Includes files are installed under `_deps/{repo-path}/` to keep them
- * safely within the skill directory while preserving the upstream structure.
- */
-async function fetchPayloadAndIncludes(
-  sourceUrl: string,
-  tree: GitHubTreeNode[],
-  includes?: string[],
-): Promise<ExtraFile[]> {
-  const dirPrefix = deriveRepoDirPrefix(sourceUrl);
-  if (!dirPrefix || tree.length === 0) return [];
-
-  // Collect files from the skill's own directory (excluding SKILL.md)
-  const fileNodes = collectTreeFiles(tree, dirPrefix, "", true);
-
-  // Collect files from declared includes paths (installed under _deps/)
-  if (includes && includes.length > 0) {
-    for (const includePath of includes) {
-      if (!isValidIncludesPath(includePath)) {
-        log.warn("[Skills] Skipping invalid includes path:", includePath);
-        continue;
-      }
-      const normalizedPath = includePath.endsWith("/")
-        ? includePath
-        : `${includePath}/`;
-      const includeNodes = collectTreeFiles(
-        tree,
-        normalizedPath,
-        `_deps/${normalizedPath}`,
-        false,
-      );
-      if (includeNodes.length === 0) {
-        log.warn("[Skills] No files found for includes path:", includePath);
-      }
-      fileNodes.push(...includeNodes);
-    }
-    if (fileNodes.some((n) => n.relativePath.startsWith("_deps/"))) {
-      log.info(
-        "[Skills] Including shared dependencies from",
-        includes.length,
-        "declared paths",
-      );
-    }
-  }
-
-  if (fileNodes.length === 0) return [];
-
-  log.info(
-    "[Skills] Fetching",
-    fileNodes.length,
-    "payload files for",
-    dirPrefix,
-  );
-
-  return fetchRawFilesFromTree(fileNodes);
-}
-
-/**
- * Convert a Seren publisher to a Skill.
- */
-function publisherToSkill(publisher: Publisher): Skill {
-  // Map publisher type to tags
-  const typeTags: string[] = [];
-  if (publisher.publisher_type === "database") typeTags.push("database");
-  if (publisher.publisher_type === "api") typeTags.push("api");
-  if (publisher.publisher_type === "mcp") typeTags.push("mcp");
-
-  // Combine with publisher categories
-  const tags = [...new Set([...typeTags, ...publisher.categories])];
-
-  return {
-    id: `seren:${publisher.slug}`,
-    slug: publisher.slug,
-    name: publisher.resource_name || publisher.name,
-    description: publisher.description,
-    source: "seren" as SkillSource,
-    sourceUrl: `${apiBase}/publishers/${publisher.slug}/skill.md`,
-    publisherSlug: publisher.slug,
-    publisherSourceUrl: `${apiBase}/publishers/${publisher.slug}/skill.md`,
-    publisherName: publisher.resource_name || publisher.name,
-    publisherDescription: publisher.description,
-    publisherType: publisher.publisher_type,
-    publisherCapabilities: publisher.capabilities ?? [],
-    publisherEndpoints: publisher.endpoints ?? [],
-    publisherApiUrl: publisher.api_url ?? null,
-    publisherMcpEndpoint: publisher.mcp_endpoint ?? null,
-    tags,
-    author: publisher.name,
-  };
-}
-
-function skillMergeKey(skill: Skill, publisherSlugs: Set<string>): string {
-  if (skill.source === "seren") {
-    return skill.slug;
-  }
-
-  if (skill.source === "serenorg" && skill.slug.startsWith("seren-")) {
-    const publisherSlug = skill.slug.slice("seren-".length);
-    if (publisherSlugs.has(publisherSlug)) {
-      // seren-skills indexes publisher wrappers as category-prefixed slugs
-      // (e.g. seren/seren-bounty -> seren-seren-bounty). Collapse them onto
-      // the live publisher slug, but merge precedence is handled separately.
-      return publisherSlug;
-    }
-  }
-
-  return skill.slug;
-}
-
-function mergePublisherMetadata(
-  repoSkill: Skill,
-  publisherSkill: Skill,
-): Skill {
-  return {
-    ...repoSkill,
-    id: `${repoSkill.source}:${publisherSkill.slug}`,
-    slug: publisherSkill.slug,
-    tags: [...new Set([...repoSkill.tags, ...publisherSkill.tags])],
-    publisherSlug: publisherSkill.slug,
-    publisherSourceUrl: publisherSkill.sourceUrl,
-    publisherName: publisherSkill.name,
-    publisherDescription: publisherSkill.description,
-    publisherType: publisherSkill.publisherType,
-    publisherCapabilities: publisherSkill.publisherCapabilities,
-    publisherEndpoints: publisherSkill.publisherEndpoints,
-    publisherApiUrl: publisherSkill.publisherApiUrl,
-    publisherMcpEndpoint: publisherSkill.publisherMcpEndpoint,
-  };
 }
 
 /**
@@ -673,37 +468,12 @@ function mergePublisherMetadata(
  */
 export const skills = {
   /**
-   * Fetch the skills index from the aggregated endpoint.
+   * Fetch the skills index from Seren Skills.
    * Uses caching to reduce network requests. Pass skipCache to force a fresh fetch.
    */
   async fetchIndex(skipCache = false): Promise<Skill[]> {
     try {
-      // Check cache first (unless explicitly bypassed)
-      if (!skipCache) {
-        const cached = localStorage.getItem(INDEX_CACHE_KEY);
-        if (cached) {
-          const { timestamp, data } = JSON.parse(cached);
-          if (Date.now() - timestamp < INDEX_CACHE_DURATION) {
-            log.info("[Skills] Using cached index");
-            return (data as SkillIndexEntry[]).map(indexEntryToSkill);
-          }
-        }
-      }
-
-      log.info("[Skills] Fetching skills index from", SKILLS_R2_INDEX_URL);
-      const skills = await fetchSkillsFromRepoIndex();
-
-      // Cache the result
-      localStorage.setItem(
-        INDEX_CACHE_KEY,
-        JSON.stringify({
-          timestamp: Date.now(),
-          data: skills.map(skillToIndexEntry),
-        }),
-      );
-
-      log.info("[Skills] Fetched", skills.length, "skills from repo");
-      return skills;
+      return await fetchSerenSkills(skipCache);
     } catch (error) {
       log.error("[Skills] Error fetching index:", error);
       const cached = localStorage.getItem(INDEX_CACHE_KEY);
@@ -716,7 +486,7 @@ export const skills = {
             Math.round(ageMs / 1000),
             "s",
           );
-          return (data as SkillIndexEntry[]).map(indexEntryToSkill);
+          return data as Skill[];
         }
         log.error(
           "[Skills] Stale cache too old to serve:",
@@ -724,105 +494,25 @@ export const skills = {
           "s",
         );
       }
-      return [];
+      throw error instanceof Error
+        ? error
+        : new Error("Failed to load seren-skills catalog");
     }
   },
 
   /**
-   * Fetch skills from Seren publishers.
-   * Each publisher has a skill.md available at /publishers/{slug}/skill.md
-   */
-  async fetchPublisherSkills(skipCache = false): Promise<Skill[]> {
-    try {
-      // Check cache first (unless explicitly bypassed)
-      if (!skipCache) {
-        const cached = localStorage.getItem(PUBLISHER_SKILLS_CACHE_KEY);
-        if (cached) {
-          const { timestamp, data } = JSON.parse(cached);
-          if (Date.now() - timestamp < INDEX_CACHE_DURATION) {
-            log.info("[Skills] Using cached publisher skills");
-            return data as Skill[];
-          }
-        }
-      }
-
-      log.info("[Skills] Fetching publisher skills from catalog");
-      const publishers = await catalog.list();
-
-      // Convert publishers to skills
-      const skills = publishers
-        .filter((p) => p.is_active)
-        .map(publisherToSkill);
-
-      // Cache the result
-      localStorage.setItem(
-        PUBLISHER_SKILLS_CACHE_KEY,
-        JSON.stringify({
-          timestamp: Date.now(),
-          data: skills,
-        }),
-      );
-
-      log.info("[Skills] Fetched", skills.length, "publisher skills");
-      return skills;
-    } catch (error) {
-      log.error("[Skills] Error fetching publisher skills:", error);
-      const cached = localStorage.getItem(PUBLISHER_SKILLS_CACHE_KEY);
-      if (cached) {
-        const { timestamp, data } = JSON.parse(cached);
-        const ageMs = Date.now() - timestamp;
-        if (ageMs < MAX_STALE_CACHE_AGE) {
-          log.warn(
-            "[Skills] Serving stale publisher skills cache, age:",
-            Math.round(ageMs / 1000),
-            "s",
-          );
-          return data as Skill[];
-        }
-        log.error(
-          "[Skills] Stale publisher skills cache too old to serve:",
-          Math.round(ageMs / 1000),
-          "s",
-        );
-      }
-      return [];
-    }
-  },
-
-  /**
-   * Fetch all available skills (from index + publishers).
+   * Fetch all available skills.
    */
   async fetchAllSkills(skipCache = false): Promise<Skill[]> {
-    const [indexSkills, publisherSkills] = await Promise.all([
-      this.fetchIndex(skipCache),
-      this.fetchPublisherSkills(skipCache),
-    ]);
+    return this.fetchIndex(skipCache);
+  },
 
-    // Merge skills by canonical publisher slug. When a seren-skills wrapper is
-    // present, keep its richer SKILL.md/sourceUrl and attach live publisher
-    // metadata for availability/execution.
-    const skillMap = new Map<string, Skill>();
-    const publisherSlugs = new Set(publisherSkills.map((skill) => skill.slug));
-
-    // Add index skills first
-    for (const skill of indexSkills) {
-      skillMap.set(skillMergeKey(skill, publisherSlugs), skill);
-    }
-
-    // Publisher-only skills remain available; repo-backed duplicates keep repo
-    // content while gaining publisher metadata.
-    for (const skill of publisherSkills) {
-      const mergeKey = skillMergeKey(skill, publisherSlugs);
-      const existingSkill = skillMap.get(mergeKey);
-      skillMap.set(
-        mergeKey,
-        existingSkill?.source === "serenorg"
-          ? mergePublisherMetadata(existingSkill, skill)
-          : skill,
-      );
-    }
-
-    return Array.from(skillMap.values());
+  async fetchCatalogPage(
+    limit: number,
+    offset: number,
+    query?: string,
+  ): Promise<SkillsCatalogPage> {
+    return fetchSerenSkillsPage(limit, offset, query);
   },
 
   /**
@@ -1049,23 +739,20 @@ export const skills = {
   },
 
   /**
-   * Fetch the full content of a skill from its source URL.
+   * Fetch the full SKILL.md content for a remote skill.
    */
   async fetchContent(skill: Skill): Promise<string | null> {
-    if (!skill.sourceUrl) {
+    const slug = skill.sourceUrl
+      ? skillSlugFromSourceUrl(skill.sourceUrl)
+      : null;
+    if (!slug) {
       log.warn("[Skills] No source URL for skill:", skill.id);
       return null;
     }
 
     try {
-      log.info("[Skills] Fetching content from", skill.sourceUrl);
-      const response = await appFetch(skill.sourceUrl);
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch skill content: ${response.status}`);
-      }
-
-      return await response.text();
+      log.info("[Skills] Fetching content for", slug);
+      return (await downloadSkillBundle(slug)).skill_md;
     } catch (error) {
       log.error("[Skills] Error fetching content:", error);
       return null;
@@ -1074,7 +761,7 @@ export const skills = {
 
   /**
    * Install a skill to the specified scope.
-   * For serenorg skills, fetches payload files (scripts, configs) alongside SKILL.md.
+   * Seren Skills installs use the API bundle as the source of truth.
    * Returns the installed skill along with any missing file warnings.
    */
   async install(
@@ -1104,7 +791,7 @@ export const skills = {
     let extraFiles: ExtraFile[] = [];
     let extraFilesJson: string | undefined;
     let syncState: SkillSyncState | null = null;
-    if (skill.source === "serenorg" && skill.sourceUrl) {
+    if (skill.source === "seren" && skill.sourceUrl) {
       const bundle = await fetchUpstreamSkillBundle(skill);
       if (!bundle) {
         throw new Error("Unable to fetch upstream skill content");
@@ -1126,16 +813,6 @@ export const skills = {
         bundle.remoteRevision,
         installContent,
         extraFiles,
-      );
-    } else if (skill.source === "seren" && skill.sourceUrl) {
-      // Publisher-installed skills also get sync state so they can be
-      // detected and cleaned up when the publisher is deleted.
-      syncState = await computeUpstreamSyncState(
-        skill.source,
-        skill.sourceUrl,
-        null,
-        installContent,
-        [],
       );
     }
 
@@ -1416,8 +1093,10 @@ export const skills = {
     }
 
     const syncState = await computeUpstreamSyncState(
-      skill.upstreamSource,
-      skill.upstreamSourceUrl,
+      "seren",
+      skillSourceUrlFromSlug(
+        skillSlugFromSourceUrl(skill.upstreamSourceUrl) ?? skill.slug,
+      ),
       bundle.remoteRevision,
       bundle.skillMd,
       bundle.payloadFiles,
@@ -1494,7 +1173,7 @@ export const skills = {
    */
   clearCache(): void {
     localStorage.removeItem(INDEX_CACHE_KEY);
-    localStorage.removeItem(PUBLISHER_SKILLS_CACHE_KEY);
+    localStorage.removeItem(LEGACY_INDEX_CACHE_KEY);
     log.info("[Skills] Cache cleared");
   },
 
@@ -1549,7 +1228,7 @@ export const skills = {
   /**
    * Backfill sync state for installed skills that were installed before the
    * sync feature existed (pre-v2.3.16). Matches installed skills missing
-   * sync state to available repo skills by slug, then writes a minimal
+   * sync state to available Seren Skills by slug, then writes a minimal
    * .seren-sync.json so the upstream refresh flow can detect updates.
    */
   async backfillSyncState(
@@ -1558,13 +1237,10 @@ export const skills = {
   ): Promise<number> {
     if (!isTauriRuntime()) return 0;
 
-    const repoSkillsBySlug = new Map<string, Skill>();
-    const publisherSkillsBySlug = new Map<string, Skill>();
+    const remoteSkillsBySlug = new Map<string, Skill>();
     for (const skill of available) {
-      if (skill.source === "serenorg" && skill.sourceUrl) {
-        repoSkillsBySlug.set(skill.slug, skill);
-      } else if (skill.source === "seren" && skill.sourceUrl) {
-        publisherSkillsBySlug.set(skill.slug, skill);
+      if (skill.source === "seren" && skill.sourceUrl) {
+        remoteSkillsBySlug.set(skill.slug, skill);
       }
     }
 
@@ -1577,53 +1253,12 @@ export const skills = {
       // Try matching by slug first, then fall back to dirName (which always
       // equals the marketplace slug even when resolveSkillSlug() derives a
       // different slug from SKILL.md frontmatter name).
-      const repoMatch =
-        repoSkillsBySlug.get(skill.slug) ?? repoSkillsBySlug.get(skill.dirName);
-      const publisherMatch =
-        publisherSkillsBySlug.get(skill.slug) ??
-        publisherSkillsBySlug.get(skill.dirName);
-      const match = repoMatch ?? publisherMatch;
+      const match =
+        remoteSkillsBySlug.get(skill.slug) ??
+        remoteSkillsBySlug.get(skill.dirName);
       if (!match?.sourceUrl) {
-        // Also detect publisher skills by SKILL.md metadata (publisher_slug)
-        const content = await this.readContent(skill);
-        if (!content) continue;
-        const slugMatch = content.match(/"publisher_slug"\s*:\s*"([^"]+)"/);
-        if (slugMatch) {
-          const publisherSlug = slugMatch[1];
-          const contentHash = await computeContentHash(content);
-          const syncState: SkillSyncState = {
-            version: 1,
-            upstreamSource: "seren" as SkillSource,
-            upstreamSourceUrl: `${apiBase}/publishers/${publisherSlug}/skill.md`,
-            syncedRevision: null,
-            syncedAt: Date.now(),
-            managedFiles: { "SKILL.md": contentHash },
-          };
-          try {
-            await invoke("write_skill_sync_state", {
-              skillsDir: skill.skillsDir,
-              slug: skill.dirName,
-              stateJson: JSON.stringify(syncState),
-            });
-            backfilled++;
-            log.info(
-              "[Skills] Backfilled publisher sync state for",
-              skill.slug,
-              "→ publisher:",
-              publisherSlug,
-            );
-          } catch (err) {
-            log.warn(
-              "[Skills] Failed to backfill publisher sync state for",
-              skill.slug,
-              err,
-            );
-          }
-        }
         continue;
       }
-
-      const source: SkillSource = repoMatch ? "serenorg" : "seren";
 
       // Read current content to compute managed file hash
       const content = await this.readContent(skill);
@@ -1632,7 +1267,7 @@ export const skills = {
       const contentHash = await computeContentHash(content);
       const syncState: SkillSyncState = {
         version: 1,
-        upstreamSource: source,
+        upstreamSource: "seren",
         upstreamSourceUrl: match.sourceUrl,
         syncedRevision: null,
         syncedAt: Date.now(),

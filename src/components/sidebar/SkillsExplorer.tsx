@@ -1,10 +1,12 @@
 // ABOUTME: Skills management panel with browse/install catalog and installed skills management.
 // ABOUTME: Renders inside SlidePanel with tabs for Installed and Browse, inline detail accordion.
 
+import { createInfiniteQuery } from "@tanstack/solid-query";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import {
   type Component,
+  createEffect,
   createSignal,
   For,
   onCleanup,
@@ -14,6 +16,12 @@ import {
 import { openExternalLink } from "@/lib/external-link";
 import { appFetch } from "@/lib/fetch";
 import { openFileInTab } from "@/lib/files/service";
+import {
+  encodeSkillDragPayload,
+  encodeSkillDragText,
+  SKILL_DRAG_MIME,
+  setCurrentSkillDragPayload,
+} from "@/lib/skill-drag";
 import type {
   InstalledSkill,
   Skill,
@@ -25,6 +33,7 @@ import {
   isUpstreamManagedSkill,
   skills as skillsService,
 } from "@/services/skills";
+import { skillsCatalogOptions } from "@/services/skills-query";
 import { agentStore } from "@/stores/agent.store";
 import { type RefreshSummary, skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
@@ -36,9 +45,8 @@ interface SkillsExplorerProps {
 
 type Tab = "installed" | "browse";
 
-const SKILL_CREATOR_SLUG = "seren-skill-creator";
-const SKILL_CREATOR_SOURCE_URL =
-  "https://raw.githubusercontent.com/serenorg/seren-skills/main/seren/skill-creator/SKILL.md";
+const SKILL_CREATOR_SLUG = "skill-creator";
+const SKILL_CREATOR_SOURCE_URL = `seren-skills:${SKILL_CREATOR_SLUG}`;
 
 function normalizeSkillSlug(raw: string): string {
   const normalized = raw
@@ -50,7 +58,7 @@ function normalizeSkillSlug(raw: string): string {
 }
 
 export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
-  const [activeTab, setActiveTab] = createSignal<Tab>("installed");
+  const [activeTab, setActiveTab] = createSignal<Tab>("browse");
   const [searchQuery, setSearchQuery] = createSignal("");
   const [expandedSkillId, setExpandedSkillId] = createSignal<string | null>(
     null,
@@ -77,6 +85,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const [syncLoading, setSyncLoading] = createSignal<Record<string, boolean>>(
     {},
   );
+  let contentRef: HTMLDivElement | undefined;
+  const availableSkillsQuery = createInfiniteQuery(() =>
+    skillsCatalogOptions(searchQuery()),
+  );
 
   // ── Derived values ──────────────────────────────
 
@@ -93,12 +105,28 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   };
 
   const filteredBrowse = () => {
-    const q = searchQuery().trim();
-    if (!q) return skillsStore.available;
-    return skillsService.search(skillsStore.available, q);
+    return skillsStore.available;
   };
 
   const syncStatusFor = (skill: InstalledSkill) => syncStatuses()[skill.path];
+  const isLoading = () =>
+    skillsStore.isLoading ||
+    (activeTab() === "browse" &&
+      availableSkillsQuery.isLoading &&
+      skillsStore.available.length === 0);
+  const catalogError = () => {
+    const error = availableSkillsQuery.error;
+    if (error instanceof Error) return error.message;
+    if (error) return "Failed to load skills";
+    return skillsStore.error;
+  };
+  const browseTotal = () =>
+    availableSkillsQuery.data?.pages.at(-1)?.total ?? null;
+  const browseLoaded = () =>
+    availableSkillsQuery.data?.pages.reduce(
+      (count, page) => count + page.skills.length,
+      0,
+    ) ?? 0;
 
   const setSyncLoadingFor = (path: string, isLoading: boolean) => {
     setSyncLoading((current) => ({ ...current, [path]: isLoading }));
@@ -207,10 +235,49 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     }
   };
 
+  createEffect(() => {
+    const pages = availableSkillsQuery.data?.pages;
+    if (pages) {
+      skillsStore.setAvailableCatalog(pages.flatMap((page) => page.skills));
+    }
+  });
+
+  createEffect(() => {
+    const error = availableSkillsQuery.error;
+    if (error) {
+      skillsStore.setAvailableError(error);
+    }
+  });
+
+  createEffect(() => {
+    if (activeTab() !== "browse") return;
+    const element = contentRef;
+    if (!element) return;
+    if (
+      availableSkillsQuery.hasNextPage &&
+      !availableSkillsQuery.isFetchingNextPage &&
+      element.scrollHeight <= element.clientHeight + 80
+    ) {
+      void availableSkillsQuery.fetchNextPage();
+    }
+  });
+
+  const maybeLoadNextBrowsePage = (element: HTMLElement) => {
+    if (activeTab() !== "browse") return;
+    if (!availableSkillsQuery.hasNextPage) return;
+    if (availableSkillsQuery.isFetchingNextPage) return;
+    if (
+      element.scrollTop + element.clientHeight >=
+      element.scrollHeight - 240
+    ) {
+      void availableSkillsQuery.fetchNextPage();
+    }
+  };
+
   // ── Lifecycle ───────────────────────────────────
 
   onMount(async () => {
-    await skillsStore.refresh();
+    await skillsStore.refreshInstalled();
     await ensureSkillCreatorInstalled();
     await refreshAllSyncStatuses();
   });
@@ -223,12 +290,12 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
     try {
       const skill: Skill = {
-        id: `serenorg:${SKILL_CREATOR_SLUG}`,
+        id: `seren:${SKILL_CREATOR_SLUG}`,
         slug: SKILL_CREATOR_SLUG,
         name: "Skill Creator",
         description:
           "Guide for creating effective skills. Use when users want to create or update a skill that extends capabilities with specialized knowledge, workflows, or tool integrations.",
-        source: "serenorg",
+        source: "seren",
         sourceUrl: SKILL_CREATOR_SOURCE_URL,
         tags: ["meta", "creation"],
         author: "SerenAI",
@@ -248,6 +315,29 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     if (overflowMenuId()) {
       setOverflowMenuId(null);
     }
+  };
+
+  const handleSkillDragStart = (event: DragEvent, skill: Skill) => {
+    const payload = {
+      id: skill.id,
+      displayName: skill.displayName,
+      name: skill.name,
+      slug: skill.slug,
+      sourceUrl: skill.sourceUrl,
+    };
+    setCurrentSkillDragPayload(payload);
+    event.dataTransfer?.setData(
+      SKILL_DRAG_MIME,
+      encodeSkillDragPayload(payload),
+    );
+    event.dataTransfer?.setData("text/plain", encodeSkillDragText(payload));
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "copy";
+    }
+  };
+
+  const handleSkillDragEnd = () => {
+    setCurrentSkillDragPayload(null);
   };
 
   onMount(() => {
@@ -335,7 +425,18 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   };
 
   const handleRefreshAll = async () => {
-    const summary = await skillsStore.refresh(true);
+    const [summary, catalogResult] = await Promise.all([
+      skillsStore.refresh(true),
+      availableSkillsQuery.refetch(),
+    ]);
+    if (catalogResult.data?.pages) {
+      skillsStore.setAvailableCatalog(
+        catalogResult.data.pages.flatMap((page) => page.skills),
+      );
+    }
+    if (catalogResult.error) {
+      skillsStore.setAvailableError(catalogResult.error);
+    }
     await refreshAllSyncStatuses();
     showRefreshStatus(summary);
   };
@@ -818,16 +919,28 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       </Show>
 
       {/* Content area */}
-      <div class="flex-1 overflow-y-auto">
+      <div
+        ref={contentRef}
+        class="flex-1 overflow-y-auto"
+        onScroll={(event) => maybeLoadNextBrowsePage(event.currentTarget)}
+      >
+        <Show when={activeTab() === "browse" && catalogError()}>
+          {(message) => (
+            <div class="mx-4 mt-2 px-3 py-2 bg-destructive/10 border border-destructive/30 rounded-md text-[12px] text-destructive">
+              {message()}
+            </div>
+          )}
+        </Show>
+
         {/* Loading */}
-        <Show when={skillsStore.isLoading}>
+        <Show when={isLoading()}>
           <div class="flex items-center justify-center py-8 text-muted-foreground text-[13px]">
             Loading skills...
           </div>
         </Show>
 
         {/* Installed tab */}
-        <Show when={!skillsStore.isLoading && activeTab() === "installed"}>
+        <Show when={!isLoading() && activeTab() === "installed"}>
           <Show
             when={filteredInstalled().length > 0}
             fallback={
@@ -1216,7 +1329,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         </Show>
 
         {/* Browse tab */}
-        <Show when={!skillsStore.isLoading && activeTab() === "browse"}>
+        <Show when={!isLoading() && activeTab() === "browse"}>
           <Show
             when={filteredBrowse().length > 0}
             fallback={
@@ -1235,11 +1348,16 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                     <div class="border-b border-border/50 last:border-b-0">
                       {/* Card */}
                       <div
-                        class="flex items-start gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-surface-2/50"
+                        draggable={true}
+                        class="flex items-start gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-surface-2/50 select-none active:cursor-grabbing"
                         classList={{
                           "bg-surface-2/30": expandedSkillId() === skill.id,
                         }}
                         onClick={() => toggleDetail(skill.id)}
+                        onDragStart={(event) =>
+                          handleSkillDragStart(event, skill)
+                        }
+                        onDragEnd={handleSkillDragEnd}
                       >
                         {/* Info */}
                         <div class="flex-1 min-w-0">
@@ -1354,6 +1472,38 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                   );
                 }}
               </For>
+              <Show when={availableSkillsQuery.isFetchingNextPage}>
+                <div class="px-4 py-3 text-center text-[12px] text-muted-foreground">
+                  Loading more skills...
+                </div>
+              </Show>
+              <Show
+                when={
+                  availableSkillsQuery.hasNextPage &&
+                  !availableSkillsQuery.isFetchingNextPage
+                }
+              >
+                <div class="px-4 py-3">
+                  <button
+                    type="button"
+                    class="w-full px-3 py-1.5 bg-transparent border border-border text-muted-foreground rounded-md text-[12px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
+                    onClick={() => void availableSkillsQuery.fetchNextPage()}
+                  >
+                    Load more
+                  </button>
+                </div>
+              </Show>
+              <Show
+                when={
+                  !availableSkillsQuery.hasNextPage &&
+                  browseTotal() !== null &&
+                  browseLoaded() > 0
+                }
+              >
+                <div class="px-4 py-3 text-center text-[11px] text-muted-foreground/60">
+                  {browseLoaded()} of {browseTotal()} skills loaded
+                </div>
+              </Show>
             </div>
           </Show>
         </Show>

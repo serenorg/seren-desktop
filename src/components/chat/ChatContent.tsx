@@ -35,6 +35,12 @@ import { isPaymentError } from "@/lib/payment-errors";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
+import {
+  canAcceptSkillDrop,
+  setCurrentSkillDragPayload,
+  skillDragPayload,
+  skillPromptTextFromDrag,
+} from "@/lib/skill-drag";
 import { appendInputHistory, getInputHistory } from "@/lib/tauri-bridge";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -491,6 +497,42 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     setInput(currentInput + (currentInput.endsWith(" ") ? "" : " ") + mention);
     setSuggestions([]);
     inputRef?.focus();
+  };
+
+  const insertIntoInput = (text: string) => {
+    const target = inputRef;
+    const current = input();
+    const start = target?.selectionStart ?? current.length;
+    const end = target?.selectionEnd ?? current.length;
+    const prefix = current.slice(0, start);
+    const suffix = current.slice(end);
+    const before = prefix && !prefix.endsWith("\n") ? `${prefix}\n\n` : prefix;
+    const after = suffix && !suffix.startsWith("\n") ? `\n\n${suffix}` : suffix;
+    const next = `${before}${text}${after}`;
+    setInput(next);
+    requestAnimationFrame(() => {
+      inputRef?.focus();
+      const cursor = before.length + text.length;
+      inputRef?.setSelectionRange(cursor, cursor);
+    });
+  };
+
+  const handleSkillDragOver = (event: DragEvent) => {
+    if (!canAcceptSkillDrop(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  const handleSkillDrop = async (event: DragEvent) => {
+    const payload = skillDragPayload(event);
+    if (!payload) return;
+    event.preventDefault();
+    setCurrentSkillDragPayload(null);
+    const text = await skillPromptTextFromDrag(payload);
+    if (!text) return;
+    insertIntoInput(text);
   };
 
   const dismissSuggestions = () => {
@@ -1499,6 +1541,8 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                     setHistoryIndex(-1);
                   }
                 }}
+                onDragOver={handleSkillDragOver}
+                onDrop={(event) => void handleSkillDrop(event)}
                 onKeyDown={(event) => {
                   // Slash command popup keyboard navigation
                   const isSlashInput =

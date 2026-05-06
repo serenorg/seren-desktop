@@ -9,8 +9,7 @@ export type SkillSource =
   | "anthropic"
   | "openai"
   | "community"
-  | "local"
-  | "serenorg";
+  | "local";
 
 /**
  * Skill metadata parsed from SKILL.md frontmatter.
@@ -57,35 +56,6 @@ export interface Skill {
   source: SkillSource;
   /** URL to fetch full SKILL.md content */
   sourceUrl?: string;
-  /**
-   * Live Seren publisher slug attached to a repo-backed skill. This preserves
-   * the richer seren-skills SKILL.md while keeping publisher availability and
-   * execution metadata discoverable.
-   */
-  publisherSlug?: string;
-  /** URL to fetch the live publisher-generated skill.md, when available. */
-  publisherSourceUrl?: string;
-  /** Human-readable publisher name, when attached to a repo-backed skill. */
-  publisherName?: string;
-  /** Live publisher catalog description, when attached to a repo-backed skill. */
-  publisherDescription?: string;
-  /** Publisher integration type, used to understand execution mode. */
-  publisherType?: string;
-  /** Publisher-declared capabilities for task matching and availability. */
-  publisherCapabilities?: string[];
-  /** Publisher endpoint definitions for live execution/discovery. */
-  publisherEndpoints?: Array<{
-    method: string;
-    path: string;
-    description?: string | null;
-    access?: string;
-    is_default?: boolean;
-    is_protected?: boolean;
-  }>;
-  /** External API URL for API publishers, when exposed by the catalog. */
-  publisherApiUrl?: string | null;
-  /** MCP endpoint URL for MCP publishers, when exposed by the catalog. */
-  publisherMcpEndpoint?: string | null;
   /** Tags for categorization and filtering */
   tags: string[];
   /** Author name or organization */
@@ -93,10 +63,7 @@ export interface Skill {
   /** Version string */
   version?: string;
   /**
-   * ISO timestamp of the last commit that touched this skill's SKILL.md.
-   * Provided by R2 index v2+ — populated by `seren-skills/scripts/build-index.mjs`
-   * via `git log -1 --format=%cI`. Used by upstream staleness checks to skip
-   * the GitHub API call entirely. (#1476)
+   * ISO timestamp from the Seren Skills API.
    */
   lastModified?: string;
   /**
@@ -179,43 +146,6 @@ export interface InstalledSkill extends Skill {
   upstreamSourceUrl?: string;
   /** Persisted sync metadata for upstream-managed files */
   syncState?: SkillSyncState | null;
-}
-
-/**
- * Index entry from the aggregated skills index.
- */
-export interface SkillIndexEntry {
-  slug: string;
-  name: string;
-  /** Human-readable display name from SKILL.md frontmatter. */
-  displayName?: string;
-  description: string;
-  source: SkillSource;
-  sourceUrl: string;
-  tags: string[];
-  author?: string;
-  version?: string;
-  /**
-   * ISO timestamp of the last commit that touched this skill's SKILL.md.
-   * Present in R2 index v2+ only. Optional for backward compatibility with
-   * older indexes — desktop falls back to GitHub API when missing. (#1476)
-   */
-  lastModified?: string;
-  /**
-   * Hosts this skill is NOT compatible with. Present in R2 index entries
-   * that declare host exclusion. Used to filter CLI-only skills from
-   * Desktop discovery. Spec: serenorg/seren-desktop#1496
-   */
-  excludeHosts?: string[];
-}
-
-/**
- * Aggregated skills index response from the skills catalog.
- */
-export interface SkillsIndex {
-  version: string;
-  updatedAt: string;
-  skills: SkillIndexEntry[];
 }
 
 /**

@@ -7,19 +7,31 @@ interface SlidePanelProps {
   open: boolean;
   onClose: () => void;
   wide?: boolean;
+  docked?: boolean;
   children: JSX.Element;
 }
 
 export const SlidePanel: Component<SlidePanelProps> = (props) => {
   return (
     <Show when={props.open}>
-      <div class="absolute inset-0 z-[15] flex justify-end">
+      <div
+        classList={{
+          "absolute inset-0 z-[15] flex justify-end": !props.docked,
+          "relative z-[1] shrink-0 h-full": props.docked,
+        }}
+      >
+        <Show when={!props.docked}>
+          <div
+            class="absolute inset-0 bg-black/40 animate-[fadeIn_200ms_ease]"
+            onClick={props.onClose}
+          />
+        </Show>
         <div
-          class="absolute inset-0 bg-black/40 animate-[fadeIn_200ms_ease]"
-          onClick={props.onClose}
-        />
-        <div
-          class="relative max-w-[90vw] h-full bg-surface-1/95 backdrop-blur-xl border-l border-border shadow-[var(--shadow-lg)] overflow-x-hidden overflow-y-auto animate-[slideInRight_200ms_ease]"
+          class="relative max-w-[90vw] h-full bg-surface-1 border-l border-border overflow-x-hidden overflow-y-auto"
+          classList={{
+            "bg-surface-1/95 backdrop-blur-xl shadow-[var(--shadow-lg)] animate-[slideInRight_200ms_ease]":
+              !props.docked,
+          }}
           style={{ width: props.wide ? "860px" : "var(--slide-panel-width)" }}
         >
           <button

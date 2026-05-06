@@ -13,6 +13,12 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import {
+  canAcceptSkillDrop,
+  setCurrentSkillDragPayload,
+  skillDragPayload,
+  skillPromptTextFromDrag,
+} from "@/lib/skill-drag";
 import { terminalStore } from "@/stores/terminal.store";
 import { threadStore } from "@/stores/thread.store";
 
@@ -1569,22 +1575,67 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
    * otherwise see a paste-end marker mid-content and treat the
    * trailing bytes as typed.
    */
-  const handlePaste = async (event: ClipboardEvent) => {
+  // Strip embedded paste-end markers so a malicious or malformed source
+  // cannot inject \x1b[201~ mid-content and have the receiving app treat
+  // the trailing bytes as typed input. split+join instead of a regex literal
+  // so biome's no-control-char-in-regex lint stays happy.
+  const writePromptText = async (text: string) => {
     const current = buffer();
     if (!current || current.status !== "running") return;
-    const text = event.clipboardData?.getData("text") ?? "";
-    if (!text) return;
-    event.preventDefault();
     snapToBottom();
-    // Strip embedded paste-end markers so a malicious or malformed
-    // clipboard cannot inject \x1b[201~ mid-content and have the
-    // receiving app treat the trailing bytes as typed input. split+join
-    // instead of a regex literal so biome's no-control-char-in-regex
-    // lint stays happy.
     const safe = text.split("\x1b[201~").join("");
     const bracketed = grid()?.bracketedPaste ?? false;
     const payload = bracketed ? `\x1b[200~${safe}\x1b[201~` : safe;
     await terminalStore.write(current.id, payload);
+  };
+
+  const handlePaste = async (event: ClipboardEvent) => {
+    const text = event.clipboardData?.getData("text") ?? "";
+    if (!text) return;
+    event.preventDefault();
+    await writePromptText(text);
+  };
+
+  const handleSkillDragOver = (event: DragEvent) => {
+    const current = buffer();
+    if (!current || current.status !== "running") return;
+    if (!canAcceptSkillDrop(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  const handleSkillDrop = async (event: DragEvent) => {
+    const payload = skillDragPayload(event);
+    if (!payload) return;
+    // Always preventDefault once we recognise a skill drop so the browser's
+    // native textarea-style drop never inserts the raw `seren-skill:{...}`
+    // text into anything below us.
+    event.preventDefault();
+    event.stopPropagation();
+    setCurrentSkillDragPayload(null);
+    const before = buffer();
+    if (!before || before.status !== "running") {
+      console.warn(
+        "[TerminalBuffer] skill drop rejected — buffer not running",
+        { id: before?.id, status: before?.status },
+      );
+      return;
+    }
+    const text = await skillPromptTextFromDrag(payload);
+    if (!text) {
+      console.warn(
+        "[TerminalBuffer] skill drop rejected — empty SKILL.md content",
+        { id: payload.id, slug: payload.slug },
+      );
+      return;
+    }
+    const after = buffer();
+    if (!after || after.status !== "running") return;
+    surfaceRef?.focus();
+    await writePromptText(text);
   };
 
   createEffect(
@@ -1680,7 +1731,11 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
   });
 
   return (
-    <div class="flex flex-col h-full min-h-0 bg-surface-0">
+    <div
+      class="flex flex-col h-full min-h-0 bg-surface-0"
+      onDragOver={handleSkillDragOver}
+      onDrop={(e) => void handleSkillDrop(e)}
+    >
       <Show
         when={buffer()}
         fallback={
@@ -1723,7 +1778,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
               onMouseMove={onSurfaceMouseMoveTracking}
               onWheel={onSurfaceWheel}
             >
-              <canvas ref={canvasRef} class="block" />
+              <canvas ref={canvasRef} class="block pointer-events-none" />
             </div>
           </>
         )}

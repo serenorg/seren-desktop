@@ -33,8 +33,13 @@ export default defineConfig({
     "@hey-api/typescript",
     "@hey-api/sdk",
     {
+      name: "@tanstack/solid-query",
+      queryOptions: true,
+      mutationOptions: true,
+    },
+    {
       name: "@hey-api/client-fetch",
-      runtimeConfigPath: "../../client-config",
+      runtimeConfigPath: "@/api/client-config",
     },
   ],
 });

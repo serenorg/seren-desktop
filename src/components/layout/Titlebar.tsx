@@ -9,6 +9,7 @@ import { updaterStore } from "@/stores/updater.store";
 
 interface TitlebarProps {
   onSignInClick: () => void;
+  onToggleSkills: () => void;
   onToggleSettings: () => void;
 }
 
@@ -118,6 +119,31 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         <Show when={authStore.isAuthenticated}>
           <BalanceDisplay />
         </Show>
+
+        <button
+          type="button"
+          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
+          onClick={props.onToggleSkills}
+          title="Skills"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            role="img"
+            aria-label="Skills"
+          >
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15z" />
+            <path d="M8 7h8" />
+            <path d="M8 11h6" />
+          </svg>
+        </button>
 
         <button
           type="button"

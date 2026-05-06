@@ -59,13 +59,13 @@ includes: []
   });
 });
 
-// --- Fetch integration tests ---
+// --- Bundle integration tests ---
 
-const mockAppFetch = vi.hoisted(() => vi.fn());
+const mockDownloadSkill = vi.hoisted(() => vi.fn());
 const mockInvoke = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/fetch", () => ({
-  appFetch: mockAppFetch,
+vi.mock("@/api/seren-skills", () => ({
+  downloadSkill: mockDownloadSkill,
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -76,73 +76,77 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: mockInvoke,
 }));
 
-vi.mock("@/services/catalog", () => ({
-  catalog: {},
-}));
-
 vi.mock("@/lib/tauri-bridge", () => ({
   isTauriRuntime: () => true,
 }));
 
-describe("fetchUpstreamSkillBundle with includes", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+function toBase64(value: string): string {
+  return btoa(value);
+}
 
-  it("fetches includes files under _deps/ prefix alongside skill payload", async () => {
-    const skillMdContent = `---
+function mockSkillBundle(files: Array<{ path: string; content: string }>) {
+  return {
+    content_hash: "bundle-hash",
+    files: files.map((file) => ({
+      path: file.path,
+      content_b64: toBase64(file.content),
+      content_hash: `${file.path}-hash`,
+      is_binary: false,
+      mode: 0o644,
+    })),
+    manifest: {},
+    skill: {
+      created_at: "2026-01-01T00:00:00Z",
+      created_by_user_id: "user-1",
+      current_version: "1.0.0",
+      current_version_id: "version-1",
+      deleted_at: null,
+      description: "A bot",
+      discoverability: "public",
+      id: "skill-1",
+      name: "Maker Bot",
+      owner_kind: "user",
+      owner_organization_id: "org-1",
+      owner_user_id: "user-1",
+      price_cents: 0,
+      seren_bounty_campaign_id: null,
+      skill_folder_name: "polymarket-maker-bot",
+      slug: "polymarket-maker-bot",
+      sponsor_mode: "skip",
+      sponsor_referral_code: null,
+      sponsor_static: null,
+      status: "published",
+      updated_at: "2026-01-01T00:00:00Z",
+      visibility: "public",
+    },
+    skill_md: `---
 name: Maker Bot
 description: A bot
 includes: [polymarket/_shared]
 ---
-# Maker Bot`;
+# Maker Bot`,
+    version: "1.0.0",
+  };
+}
 
-    const skillSourceUrl =
-      "https://raw.githubusercontent.com/serenorg/seren-skills/main/polymarket/polymarket-maker-bot/SKILL.md";
+describe("Seren Skills bundle install with includes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-    mockAppFetch.mockImplementation(async (url: string) => {
-      // SKILL.md fetch (cache-busted sourceUrl)
-      if (url.startsWith(skillSourceUrl)) {
-        return { ok: true, text: async () => skillMdContent };
-      }
-      // R2 skills index — single source of truth for tree + revision (#1515)
-      if (url.includes("/skills/index.json")) {
-        return {
-          ok: true,
-          json: async () => ({
-            version: "2",
-            updatedAt: "2026-01-01T00:00:00Z",
-            skills: [
-              {
-                slug: "polymarket-maker-bot",
-                name: "Maker Bot",
-                description: "A bot",
-                source: "serenorg",
-                sourceUrl: skillSourceUrl,
-                tags: [],
-                lastModified: "2026-01-01T00:00:00Z",
-              },
-            ],
-            tree: [
-              "polymarket/polymarket-maker-bot/SKILL.md",
-              "polymarket/polymarket-maker-bot/scripts/run.py",
-              "polymarket/_shared/utils.py",
-              "polymarket/_shared/config.json",
-            ],
-          }),
-        };
-      }
-      // Raw file fetches (payload + includes)
-      if (url.includes("scripts/run.py")) {
-        return { ok: true, text: async () => "print('run')" };
-      }
-      if (url.includes("_shared/utils.py")) {
-        return { ok: true, text: async () => "def helper(): pass" };
-      }
-      if (url.includes("_shared/config.json")) {
-        return { ok: true, text: async () => '{"key": "value"}' };
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
+  it("installs API bundle files alongside SKILL.md", async () => {
+    mockDownloadSkill.mockResolvedValue({
+      data: mockSkillBundle([
+        { path: "scripts/run.py", content: "print('run')" },
+        {
+          path: "_deps/polymarket/_shared/utils.py",
+          content: "def helper(): pass",
+        },
+        {
+          path: "_deps/polymarket/_shared/config.json",
+          content: '{"key": "value"}',
+        },
+      ]),
     });
 
     // Mock invoke for get_seren_skills_dir + install_skill + validate_skill_payload
@@ -154,17 +158,16 @@ includes: [polymarket/_shared]
     const { skills } = await import("@/services/skills");
 
     const skill = {
-      id: "serenorg:polymarket-maker-bot",
+      id: "seren:polymarket-maker-bot",
       slug: "polymarket-maker-bot",
       name: "Maker Bot",
       description: "A bot",
-      source: "serenorg" as const,
-      sourceUrl:
-        "https://raw.githubusercontent.com/serenorg/seren-skills/main/polymarket/polymarket-maker-bot/SKILL.md",
+      source: "seren" as const,
+      sourceUrl: "seren-skills:polymarket-maker-bot",
       tags: [],
     };
 
-    await skills.install(skill, skillMdContent, "seren", null);
+    await skills.install(skill, "", "seren", null);
 
     // Find the install_skill call
     const installCall = mockInvoke.mock.calls.find(
@@ -181,10 +184,7 @@ includes: [polymarket/_shared]
       content: string;
     }>;
 
-    // Should have the skill's own payload file
     expect(extraFiles.some((f) => f.path === "scripts/run.py")).toBe(true);
-
-    // Should have includes files under _deps/
     expect(
       extraFiles.some(
         (f) => f.path === "_deps/polymarket/_shared/utils.py",

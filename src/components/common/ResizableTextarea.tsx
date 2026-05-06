@@ -9,6 +9,8 @@ interface ResizableTextareaProps {
   value: string;
   placeholder?: string;
   class?: string;
+  onDragOver?: JSX.EventHandler<HTMLTextAreaElement, DragEvent>;
+  onDrop?: JSX.EventHandler<HTMLTextAreaElement, DragEvent>;
   onInput?: JSX.EventHandler<HTMLTextAreaElement, InputEvent>;
   onKeyDown?: JSX.EventHandler<HTMLTextAreaElement, KeyboardEvent>;
   disabled?: boolean;
@@ -125,6 +127,8 @@ export const ResizableTextarea: Component<ResizableTextareaProps> = (props) => {
         placeholder={props.placeholder}
         class={props.class}
         style={{ height: `${height()}px`, resize: "none" }}
+        onDragOver={props.onDragOver}
+        onDrop={props.onDrop}
         onInput={props.onInput}
         onKeyDown={props.onKeyDown}
         disabled={props.disabled}

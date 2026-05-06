@@ -19,6 +19,7 @@ import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
+import { SkillsExplorer } from "@/components/sidebar/SkillsExplorer";
 import { AgentTasksPanel } from "@/components/tasks/AgentTasksPanel";
 import { shortcuts } from "@/lib/shortcuts";
 import { initWorkspaceStore, workspaceStore } from "@/stores/workspace.store";
@@ -33,6 +34,7 @@ export type SlidePanelView =
   | "account"
   | "tasks"
   | "sessions"
+  | "skills"
   | null;
 
 interface AppShellProps {
@@ -50,6 +52,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
   const handleToggleSettings = () => {
     setSlidePanel((v) => (v === "settings" ? null : "settings"));
+  };
+
+  const handleToggleSkills = () => {
+    setSlidePanel((v) => (v === "skills" ? null : "skills"));
   };
 
   const handleCloseSlidePanel = () => {
@@ -76,6 +82,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
       setSlidePanel("tasks");
     } else if (p === "sessions") {
       setSlidePanel("sessions");
+    } else if (p === "skills") {
+      setSlidePanel("skills");
     }
   }) as EventListener;
 
@@ -275,6 +283,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     <div class="flex flex-col h-screen bg-background text-foreground">
       <Titlebar
         onSignInClick={handleSignInClick}
+        onToggleSkills={handleToggleSkills}
         onToggleSettings={handleToggleSettings}
       />
 
@@ -291,6 +300,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
         <SlidePanel
           open={slidePanel() !== null}
           onClose={handleCloseSlidePanel}
+          docked={slidePanel() === "skills"}
           wide={slidePanel() === "settings"}
         >
           <Switch>
@@ -311,6 +321,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
             </Match>
             <Match when={slidePanel() === "sessions"}>
               <SessionPanel onClose={handleCloseSlidePanel} />
+            </Match>
+            <Match when={slidePanel() === "skills"}>
+              <SkillsExplorer panelMode />
             </Match>
             <Match when={slidePanel() === "account"}>
               <SignIn onSuccess={handleLoginSuccess} />

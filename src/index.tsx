@@ -1,6 +1,8 @@
 /* @refresh reload */
+import { QueryClientProvider } from "@tanstack/solid-query";
 import { render } from "solid-js/web";
 import { installExternalLinkInterceptor } from "@/lib/external-link";
+import { queryClient } from "@/lib/query-client";
 import { installSupportReporting } from "@/lib/support/hook";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import App from "./App";
@@ -22,4 +24,11 @@ if (isTauriRuntime()) {
 installExternalLinkInterceptor();
 installSupportReporting();
 
-render(() => <App />, document.getElementById("root") as HTMLElement);
+render(
+  () => (
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>
+  ),
+  document.getElementById("root") as HTMLElement,
+);
