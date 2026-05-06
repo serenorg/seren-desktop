@@ -4,6 +4,12 @@
 const PATTERNS: RegExp[] = [
   /<system-reminder>[\s\S]*?<\/system-reminder>/g,
   /<command-(message|name|args)>[\s\S]*?<\/command-\1>/g,
+  // #1827: post-compaction seed-ack stock pattern. The compaction seed prompt
+  // ("Confirm you have this context… wait for the user's next message") plus
+  // the runtime's <system-reminder> injections produce a meta-acknowledgement
+  // turn. The role==="standby" event filter is the primary guard; this regex
+  // is the second layer for races, refactors, and seed-prompt rewordings.
+  /I(?:'ll| will) acknowledge the system reminders\.[^\n]*?standing by[.!]?/gi,
 ];
 
 /**
