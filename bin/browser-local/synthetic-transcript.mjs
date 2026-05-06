@@ -1,5 +1,5 @@
 // ABOUTME: Build synthetic Claude Code JSONL transcripts for predictive compaction (#1713).
-// ABOUTME: Slices the parent's tail, prepends a structured summary turn pair, rewrites session/parent ids.
+// ABOUTME: Also writes forked transcripts on disk for the fork primitive (#1825).
 
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
@@ -272,6 +272,62 @@ export const SYNTHETIC_TRANSCRIPT_INTERNALS = {
   SYNTHETIC_ACK_TEXT,
   SYNTHETIC_MODEL_FALLBACK,
 };
+
+/**
+ * Build the records for a forked transcript (#1825). Pure identity copy of
+ * the parent records with `sessionId` rewritten to the new id; uuid and
+ * parentUuid chains are preserved verbatim because Claude CLI's `--resume`
+ * indexes the chain by uuid and any in-tail rewrite would break resume.
+ *
+ * Caller writes the result to `<projectDir>/<forkedSessionId>.jsonl` so the
+ * file is durably on disk before returning to the spawn-side `--resume`.
+ */
+export function buildForkedTranscriptRecords({
+  parentRecords,
+  forkedSessionId,
+}) {
+  if (!Array.isArray(parentRecords)) {
+    throw new TypeError("parentRecords must be an array");
+  }
+  if (parentRecords.length === 0) {
+    throw new Error("Parent transcript is empty — nothing to fork.");
+  }
+  if (!forkedSessionId || typeof forkedSessionId !== "string") {
+    throw new TypeError("forkedSessionId must be a non-empty string");
+  }
+
+  return parentRecords.map((record) => {
+    const next = { ...record };
+    if (Object.hasOwn(next, "sessionId")) {
+      next.sessionId = forkedSessionId;
+    }
+    return next;
+  });
+}
+
+/**
+ * Read a parent JSONL, write a forked JSONL with the rewritten sessionId.
+ * Returns the new id and path so the caller (claude-runtime forkSession) can
+ * hand them straight to spawnSession's `--resume` without a process spawn.
+ */
+export async function writeForkedTranscript({
+  parentJsonlPath,
+  outputJsonlPath,
+  forkedSessionId,
+}) {
+  const parentRecords = await readJsonlFile(parentJsonlPath);
+  const records = buildForkedTranscriptRecords({
+    parentRecords,
+    forkedSessionId,
+  });
+  const payload = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
+  await fs.writeFile(outputJsonlPath, payload, "utf8");
+  return {
+    forkedSessionId,
+    forkedJsonlPath: outputJsonlPath,
+    recordCount: records.length,
+  };
+}
 
 /**
  * Static self-check used by the cli-updater hook (#1654 / #1713 §4.7).

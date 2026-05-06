@@ -30,19 +30,28 @@ describe("#1776 — post-init currentModelId resolution preserves [1m]", () => {
     expect(block).toContain("inferredFromInit");
   });
 
-  it("forkSession applies the same chooseUpdatedModelId protection symmetrically", () => {
-    // The fork path (#1635 resume + branch) repeats the post-init resolution
-    // for the temporary control session it spins up to derive a resumable
-    // agentSessionId. Without the same [1m]-preservation logic, forking a
-    // 1M-tier conversation drops the suffix on the new branch.
-    const forkAnchor =
-      'tempSession.availableModelRecords = augmentWithLegacyOpus(';
-    const idx = claudeRuntimeSource.indexOf(forkAnchor);
-    expect(idx, "forkSession post-init block must exist").toBeGreaterThan(0);
-
-    const block = claudeRuntimeSource.slice(idx, idx + 1200);
-    expect(block).toContain("chooseUpdatedModelId(");
-    expect(block).toContain("tempSession.currentModelId,");
+  it("forkSession delegates [1m] preservation to the next spawnSession boot — no temp init block", () => {
+    // #1825: forkSession no longer spins up a temporary control session to
+    // derive a resumable id; it writes the forked JSONL directly. The
+    // [1m]-preservation logic is therefore single-sourced in spawnSession's
+    // post-init block (asserted above) — the next user spawn against the
+    // forked JSONL applies it. Asserting the absence of a duplicate fork-side
+    // block locks in the single-source invariant and prevents the temp
+    // helper from being reintroduced as a "just to derive currentModelId"
+    // shortcut, which would re-open the JSONL-flush race the fix closed.
+    const fnIdx = claudeRuntimeSource.indexOf("async function forkSession(");
+    expect(fnIdx, "forkSession function missing").toBeGreaterThan(0);
+    const bodyEnd = claudeRuntimeSource.indexOf(
+      "\n  async function ",
+      fnIdx + 30,
+    );
+    const fnBody = claudeRuntimeSource.slice(
+      fnIdx,
+      bodyEnd > 0 ? bodyEnd : fnIdx + 4000,
+    );
+    expect(fnBody).not.toContain("augmentWithLegacyOpus(");
+    expect(fnBody).not.toContain("tempSession");
+    expect(fnBody).not.toContain("chooseUpdatedModelId(");
   });
 
   it("DEFAULT_PREFERRED_MODEL is the [1m]-tier Opus 4.7 id", () => {

@@ -13,6 +13,8 @@ const modulePath = new URL(
 const {
   buildSyntheticTranscript,
   buildSyntheticTranscriptRecords,
+  buildForkedTranscriptRecords,
+  writeForkedTranscript,
   findCutIndex,
   isRealUserTurn,
 } = await import(/* @vite-ignore */ modulePath);
@@ -313,6 +315,88 @@ describe("buildSyntheticTranscriptRecords (#1713 — splice safety, Codex P1)", 
     }) as JsonlRecord[];
     expect(out[0].isCompactSummary).toBe(true);
     expect(out[1].isSyntheticAck).toBe(true);
+  });
+});
+
+describe("buildForkedTranscriptRecords (#1825 — direct-write fork primitive)", () => {
+  it("rewrites sessionId on every record and preserves uuid + parentUuid chain verbatim", () => {
+    // Fork is a pure identity copy with the sessionId field rewritten — no
+    // summary/ack splice, no parentUuid mutation. The CLI's `--resume` only
+    // reads the chain by uuid, so any in-tail rewrite would break resume.
+    const parent = [
+      userTurn("u1", null, "first"),
+      assistantTextTurn("a1", "u1", "first reply"),
+      userTurn("u2", "a1", "second"),
+      assistantToolUseTurn("a2", "u2", "toolu_x"),
+      userToolResultTurn("t1", "a2", "toolu_x"),
+      assistantTextTurn("a3", "t1", "done"),
+      attachmentRecord("u2"),
+    ];
+    const out = buildForkedTranscriptRecords({
+      parentRecords: parent,
+      forkedSessionId: "FORK-NEW-ID",
+    }) as JsonlRecord[];
+
+    expect(out).toHaveLength(parent.length);
+    for (let i = 0; i < parent.length; i += 1) {
+      expect(out[i].uuid).toBe(parent[i].uuid);
+      expect(out[i].parentUuid).toBe(parent[i].parentUuid);
+      if (Object.hasOwn(parent[i], "sessionId")) {
+        expect(out[i].sessionId).toBe("FORK-NEW-ID");
+      }
+    }
+    // Original records must be untouched (pure function).
+    expect(parent[0].sessionId).toBe("PARENT");
+  });
+
+  it("rejects empty parent records — caller must fall back to bootstrap context", () => {
+    expect(() =>
+      buildForkedTranscriptRecords({
+        parentRecords: [],
+        forkedSessionId: "FORK-NEW-ID",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("writeForkedTranscript (#1825 — fork JSONL exists on disk before return)", () => {
+  it("reads parent JSONL, writes forked JSONL with rewritten sessionId, returns the new path", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "forked-transcript-"));
+    const parentPath = path.join(dir, "parent.jsonl");
+    const outputPath = path.join(dir, "fork.jsonl");
+    const parent = [
+      userTurn("u1", null, "first"),
+      assistantTextTurn("a1", "u1", "first reply"),
+      userTurn("u2", "a1", "second"),
+      assistantTextTurn("a2", "u2", "second reply"),
+    ];
+    writeFileSync(
+      parentPath,
+      parent.map((r) => JSON.stringify(r)).join("\n") + "\n",
+      "utf8",
+    );
+
+    const result = await writeForkedTranscript({
+      parentJsonlPath: parentPath,
+      outputJsonlPath: outputPath,
+      forkedSessionId: "FORK-NEW-ID",
+    });
+
+    expect(result.forkedSessionId).toBe("FORK-NEW-ID");
+    expect(result.forkedJsonlPath).toBe(outputPath);
+
+    const written = readFileSync(outputPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+    expect(written).toHaveLength(parent.length);
+    for (const rec of written) {
+      expect(rec.sessionId).toBe("FORK-NEW-ID");
+    }
+    expect(written[0].uuid).toBe("u1");
+    expect(written[0].parentUuid).toBeNull();
+    expect(written[3].uuid).toBe("a2");
+    expect(written[3].parentUuid).toBe("u2");
   });
 });
 
