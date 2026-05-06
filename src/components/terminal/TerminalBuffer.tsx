@@ -1596,6 +1596,23 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     await writePromptText(text);
   };
 
+  const handleExternalPasteRequest = (event: Event) => {
+    const detail = (event as CustomEvent).detail as
+      | { bufferId?: string; text?: string }
+      | undefined;
+    const id = activeBufferId();
+    console.info("[TerminalBuffer] paste-text event", {
+      detailBufferId: detail?.bufferId,
+      activeBufferId: id,
+      hasText: !!detail?.text,
+      bufferStatus: buffer()?.status,
+    });
+    if (!detail) return;
+    if (!id || detail.bufferId !== id || !detail.text) return;
+    surfaceRef?.focus();
+    void writePromptText(detail.text);
+  };
+
   const handleSkillDragOver = (event: DragEvent) => {
     const current = buffer();
     if (!current || current.status !== "running") return;
@@ -1710,9 +1727,18 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       });
       resizeObserver.observe(surfaceRef);
     }
+
+    window.addEventListener(
+      "seren:terminal-paste-text",
+      handleExternalPasteRequest,
+    );
   });
 
   onCleanup(() => {
+    window.removeEventListener(
+      "seren:terminal-paste-text",
+      handleExternalPasteRequest,
+    );
     unlistenDiff?.();
     resizeObserver?.disconnect();
     if (rafHandle !== null) {

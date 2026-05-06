@@ -9,7 +9,6 @@ import {
   createEffect,
   createSignal,
   For,
-  onCleanup,
   onMount,
   Show,
 } from "solid-js";
@@ -21,6 +20,7 @@ import {
   encodeSkillDragText,
   SKILL_DRAG_MIME,
   setCurrentSkillDragPayload,
+  skillPromptTextForSkill,
 } from "@/lib/skill-drag";
 import type {
   InstalledSkill,
@@ -35,6 +35,7 @@ import {
 } from "@/services/skills";
 import { skillsCatalogOptions } from "@/services/skills-query";
 import { agentStore } from "@/stores/agent.store";
+import { fileTreeState } from "@/stores/fileTree";
 import { type RefreshSummary, skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
 
@@ -74,7 +75,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     null,
   );
   const [refreshStatus, setRefreshStatus] = createSignal<string | null>(null);
-  const [overflowMenuId, setOverflowMenuId] = createSignal<string | null>(null);
   const [installWarning, setInstallWarning] = createSignal<{
     slug: string;
     missingFiles: string[];
@@ -137,9 +137,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   const availableRows = (): Skill[] => {
     if (activeFilter() !== "all") return [];
+    const q = searchQuery().toLowerCase().trim();
     const installedSlugs = new Set(skillsStore.installed.map((s) => s.slug));
     return skillsStore.available.filter(
-      (skill) => !installedSlugs.has(skill.slug),
+      (skill) => !installedSlugs.has(skill.slug) && matchesQuery(skill, q),
     );
   };
 
@@ -165,6 +166,49 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       (count, page) => count + page.skills.length,
       0,
     ) ?? 0;
+
+  const activeThreadContext = (): {
+    kind: "chat" | "agent" | "terminal";
+    projectRoot: string;
+    threadId: string;
+  } | null => {
+    const thread = threadStore.activeThread;
+    if (
+      !thread ||
+      (thread.kind !== "chat" &&
+        thread.kind !== "agent" &&
+        thread.kind !== "terminal")
+    ) {
+      return null;
+    }
+    const projectRoot = thread.projectRoot ?? fileTreeState.rootPath;
+    if (!projectRoot) return null;
+    return { kind: thread.kind, projectRoot, threadId: thread.id };
+  };
+
+  const activeThreadHasSkill = (skill: InstalledSkill): boolean => {
+    const context = activeThreadContext();
+    // Terminal pastes are one-shot, so we never mark a skill as already added.
+    if (!context || context.kind === "terminal") return false;
+    const activeSkills = skillsStore.getThreadSkills(
+      context.projectRoot,
+      context.threadId,
+    );
+    return activeSkills.some((activeSkill) => activeSkill.path === skill.path);
+  };
+
+  const addActionTitle = (installed: boolean): string => {
+    const context = activeThreadContext();
+    if (!context) return "Select a chat, agent, or terminal thread first";
+    if (context.kind === "terminal") {
+      return installed
+        ? "Paste into active terminal"
+        : "Install and paste into active terminal";
+    }
+    return installed
+      ? "Add to active thread"
+      : "Install and add to active thread";
+  };
 
   const setSyncLoadingFor = (path: string, isLoading: boolean) => {
     setSyncLoading((current) => ({ ...current, [path]: isLoading }));
@@ -239,7 +283,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     if (!status) return null;
     switch (status.state) {
       case "current":
-        return "Current";
+        // Current is the default state; surfacing it adds visual noise
+        // without telling the user anything actionable.
+        return null;
       case "bootstrap-required":
         return "Sync required";
       case "update-available":
@@ -347,15 +393,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     }
   };
 
-  // ── Click outside to close overflow menu ────────
-
-  const handleDocumentClick = () => {
-    if (overflowMenuId()) {
-      setOverflowMenuId(null);
-    }
-  };
-
-  const handleSkillDragStart = (event: DragEvent, skill: Skill) => {
+  const handleSkillDragStart = (
+    event: DragEvent,
+    skill: Skill | InstalledSkill,
+  ) => {
     const payload = {
       id: skill.id,
       displayName: skill.displayName,
@@ -377,14 +418,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const handleSkillDragEnd = () => {
     setCurrentSkillDragPayload(null);
   };
-
-  onMount(() => {
-    document.addEventListener("click", handleDocumentClick);
-  });
-
-  onCleanup(() => {
-    document.removeEventListener("click", handleDocumentClick);
-  });
 
   // ── Detail accordion ────────────────────────────
 
@@ -421,7 +454,74 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   // ── Install / Uninstall ─────────────────────────
 
-  const handleInstall = async (skill: Skill, scope: SkillScope = "seren") => {
+  const pasteSkillIntoTerminal = async (
+    bufferId: string,
+    skill: Skill | InstalledSkill,
+  ): Promise<void> => {
+    const text = await skillPromptTextForSkill(skill);
+    console.info("[SkillsExplorer] paste-into-terminal", {
+      bufferId,
+      slug: skill.slug,
+      textLength: text?.length ?? 0,
+    });
+    if (!text) {
+      throw new Error(`Could not load SKILL.md for ${skill.slug}`);
+    }
+    window.dispatchEvent(
+      new CustomEvent("seren:terminal-paste-text", {
+        detail: { bufferId, text },
+      }),
+    );
+  };
+
+  const attachInstalledToActiveThread = async (
+    skill: InstalledSkill,
+  ): Promise<void> => {
+    const context = activeThreadContext();
+    if (!context) return;
+    if (context.kind === "terminal") {
+      await pasteSkillIntoTerminal(context.threadId, skill);
+      return;
+    }
+    await skillsStore.attachSkillToThread(
+      context.projectRoot,
+      context.threadId,
+      skill.path,
+    );
+  };
+
+  const handleAddInstalledSkill = async (skill: InstalledSkill) => {
+    const context = activeThreadContext();
+    if (!context) return;
+    if (context.kind !== "terminal" && activeThreadHasSkill(skill)) return;
+
+    setActionInProgress(skill.id);
+    setInstallError(null);
+    try {
+      if (context.kind === "terminal") {
+        await pasteSkillIntoTerminal(context.threadId, skill);
+      } else {
+        await skillsStore.attachSkillToThread(
+          context.projectRoot,
+          context.threadId,
+          skill.path,
+        );
+      }
+    } catch (err) {
+      console.error("[SkillsExplorer] Failed to add skill:", err);
+      setInstallError({
+        slug: skill.slug,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setActionInProgress(null);
+    }
+  };
+
+  const handleAddCatalogSkill = async (
+    skill: Skill,
+    scope: SkillScope = "seren",
+  ) => {
     setActionInProgress(skill.id);
     setInstallWarning(null);
     setInstallError(null);
@@ -432,6 +532,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       }
       const installed = await skillsStore.install(skill, content, scope);
       await loadSyncStatus(installed);
+      await attachInstalledToActiveThread(installed);
 
       // Validate payload after install
       const missingFiles = await skillsService.validatePayload(
@@ -1031,16 +1132,16 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         <Show when={!isLoading() && totalRowsToShow() === 0}>
           <div class="px-4 py-8 text-center text-[13px] text-muted-foreground">
             <Show
-              when={activeFilter() === "needs-sync"}
+              when={searchQuery()}
               fallback={
-                searchQuery()
-                  ? "No matching skills"
+                activeFilter() === "needs-sync"
+                  ? "All installed skills are up to date"
                   : activeFilter() === "installed"
                     ? "No skills installed"
                     : "No skills available"
               }
             >
-              All installed skills are up to date
+              No matching skills
             </Show>
           </div>
         </Show>
@@ -1058,43 +1159,15 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                 <div class="border-b border-border/50 last:border-b-0">
                   {/* Card */}
                   <div
-                    class="flex items-start gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-surface-2/50"
+                    draggable={true}
+                    class="flex items-start gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-surface-2/50 select-none active:cursor-grabbing"
                     classList={{
                       "bg-surface-2/30": expandedSkillId() === skill.id,
                     }}
                     onClick={() => toggleDetail(skill.id)}
+                    onDragStart={(event) => handleSkillDragStart(event, skill)}
+                    onDragEnd={handleSkillDragEnd}
                   >
-                    {/* Toggle */}
-                    <button
-                      type="button"
-                      class="relative w-8 h-[18px] rounded-full transition-colors duration-200 shrink-0 mt-0.5"
-                      classList={{
-                        "bg-success": skillsStore.isEnabled(skill.id),
-                        "bg-muted-foreground/30": !skillsStore.isEnabled(
-                          skill.id,
-                        ),
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        skillsStore.toggleEnabled(skill.id);
-                      }}
-                      role="switch"
-                      aria-checked={skillsStore.isEnabled(skill.id)}
-                      aria-label={
-                        skillsStore.isEnabled(skill.id)
-                          ? "Disable skill"
-                          : "Enable skill"
-                      }
-                    >
-                      <span
-                        class="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform duration-200"
-                        classList={{
-                          "left-[16px]": skillsStore.isEnabled(skill.id),
-                          "left-[2px]": !skillsStore.isEnabled(skill.id),
-                        }}
-                      />
-                    </button>
-
                     {/* Info */}
                     <div class="flex-1 min-w-0">
                       <div class="flex items-center gap-2">
@@ -1138,81 +1211,40 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                       </Show>
                     </div>
 
-                    {/* Overflow menu */}
-                    <div class="relative shrink-0">
-                      <button
-                        type="button"
-                        class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-colors hover:bg-surface-3 hover:text-foreground"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOverflowMenuId(
-                            overflowMenuId() === skill.id ? null : skill.id,
-                          );
-                        }}
-                        aria-label="Skill actions"
+                    <div class="shrink-0 mt-0.5">
+                      <Show
+                        when={!activeThreadHasSkill(skill)}
+                        fallback={
+                          <span class="px-2 py-1 text-[11px] text-success bg-success/10 rounded">
+                            Added
+                          </span>
+                        }
                       >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          role="img"
-                          aria-label="More"
+                        <button
+                          type="button"
+                          class="px-2.5 py-1 bg-primary text-primary-foreground rounded-md text-[11px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40 disabled:cursor-default"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleAddInstalledSkill(skill);
+                          }}
+                          disabled={
+                            actionInProgress() === skill.id ||
+                            !activeThreadContext()
+                          }
+                          title={
+                            activeThreadContext()
+                              ? addActionTitle(true)
+                              : "Select a chat, agent, or terminal thread first"
+                          }
                         >
-                          <circle cx="8" cy="4" r="1" fill="currentColor" />
-                          <circle cx="8" cy="8" r="1" fill="currentColor" />
-                          <circle cx="8" cy="12" r="1" fill="currentColor" />
-                        </svg>
-                      </button>
-                      <Show when={overflowMenuId() === skill.id}>
-                        <div class="absolute right-0 top-7 min-w-[160px] bg-surface-2 border border-border rounded-lg shadow-[var(--shadow-lg)] z-50 py-1 animate-[fadeIn_100ms_ease]">
-                          <button
-                            type="button"
-                            class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOverflowMenuId(null);
-                              toggleDetail(skill.id);
-                            }}
-                          >
-                            View Details
-                          </button>
-                          <button
-                            type="button"
-                            class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOverflowMenuId(null);
-                              handleEditInEditor(skill.path);
-                            }}
-                          >
-                            Edit in Editor
-                          </button>
-                          <Show when={isUpstreamManagedSkill(skill)}>
-                            <button
-                              type="button"
-                              class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOverflowMenuId(null);
-                                void handleRefreshInstalledSkill(skill);
-                              }}
-                            >
-                              Refresh From Upstream
-                            </button>
-                          </Show>
-                          <button
-                            type="button"
-                            class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-destructive cursor-pointer transition-colors hover:bg-surface-3 text-left"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOverflowMenuId(null);
-                              handleUninstall(skill);
-                            }}
-                          >
-                            Uninstall
-                          </button>
-                        </div>
+                          {actionInProgress() === skill.id
+                            ? activeThreadContext()?.kind === "terminal"
+                              ? "Pasting..."
+                              : "Adding..."
+                            : activeThreadContext()?.kind === "terminal"
+                              ? "Paste"
+                              : "Add"}
+                        </button>
                       </Show>
                     </div>
                   </div>
@@ -1402,7 +1434,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                           >
                             {actionInProgress() === skill.id
                               ? "Removing..."
-                              : "Uninstall"}
+                              : "Delete"}
                           </button>
                           <button
                             type="button"
@@ -1432,7 +1464,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           <div class="py-1">
             <For each={availableRows()}>
               {(skill) => {
-                const installed = () => skillsStore.isInstalled(skill.id);
                 const installing = () => actionInProgress() === skill.id;
 
                 return (
@@ -1476,26 +1507,22 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
                       {/* Install button */}
                       <div class="shrink-0 mt-0.5">
-                        <Show
-                          when={!installed()}
-                          fallback={
-                            <span class="px-2 py-1 text-[11px] text-muted-foreground bg-surface-3 rounded">
-                              Installed
-                            </span>
+                        <button
+                          type="button"
+                          class="px-2.5 py-1 bg-primary text-primary-foreground rounded-md text-[11px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40 disabled:cursor-default"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddCatalogSkill(skill);
+                          }}
+                          disabled={installing()}
+                          title={
+                            activeThreadContext()
+                              ? addActionTitle(false)
+                              : "Install this skill locally"
                           }
                         >
-                          <button
-                            type="button"
-                            class="px-2.5 py-1 bg-primary text-primary-foreground rounded-md text-[11px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleInstall(skill);
-                            }}
-                            disabled={installing()}
-                          >
-                            {installing() ? "Installing..." : "Install"}
-                          </button>
-                        </Show>
+                          {installing() ? "Installing..." : "Install"}
+                        </button>
                       </div>
                     </div>
 
@@ -1541,21 +1568,27 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             </pre>
                           </Show>
 
-                          {/* Install action */}
-                          <Show when={!installed()}>
-                            <div class="mt-2.5">
-                              <button
-                                type="button"
-                                class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-[12px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40"
-                                onClick={() => handleInstall(skill)}
-                                disabled={installing()}
-                              >
-                                {installing()
-                                  ? "Installing..."
-                                  : "Install to Seren"}
-                              </button>
-                            </div>
-                          </Show>
+                          <div class="mt-2.5">
+                            <button
+                              type="button"
+                              class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-[12px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40 disabled:cursor-default"
+                              onClick={() => handleAddCatalogSkill(skill)}
+                              disabled={installing()}
+                              title={
+                                activeThreadContext()
+                                  ? addActionTitle(false)
+                                  : "Install this skill locally"
+                              }
+                            >
+                              {installing()
+                                ? "Installing..."
+                                : activeThreadContext()?.kind === "terminal"
+                                  ? "Install and Paste"
+                                  : activeThreadContext()
+                                    ? "Install and Add"
+                                    : "Install"}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </Show>

@@ -5,6 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockReadContent = vi.hoisted(() => vi.fn());
 const mockFetchContent = vi.hoisted(() => vi.fn());
+const mockInstall = vi.hoisted(() => vi.fn());
+const mockAttachSkillToThread = vi.hoisted(() => vi.fn());
+const mockGetThreadSkills = vi.hoisted(() => vi.fn());
+const mockSkillsState = vi.hoisted(() => ({
+  available: [] as Array<Record<string, unknown>>,
+  installed: [] as Array<Record<string, unknown>>,
+}));
 
 vi.mock("@/services/skills", () => ({
   skills: {
@@ -15,14 +22,30 @@ vi.mock("@/services/skills", () => ({
 
 vi.mock("@/stores/skills.store", () => ({
   skillsStore: {
-    available: [],
-    installed: [],
+    get available() {
+      return mockSkillsState.available;
+    },
+    get installed() {
+      return mockSkillsState.installed;
+    },
+    install: mockInstall,
+    attachSkillToThread: mockAttachSkillToThread,
+    getThreadSkills: mockGetThreadSkills,
   },
 }));
+
+function resetSkillStoreMocks(): void {
+  mockSkillsState.available = [];
+  mockSkillsState.installed = [];
+  mockInstall.mockReset();
+  mockAttachSkillToThread.mockReset();
+  mockGetThreadSkills.mockReset();
+}
 
 describe("decodeSkillDragPayload", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetSkillStoreMocks();
   });
 
   it("accepts a prefixed payload", async () => {
@@ -60,6 +83,7 @@ describe("decodeSkillDragPayload", () => {
 describe("skillPromptTextFromDrag fence escaping", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetSkillStoreMocks();
   });
 
   it("uses a longer fence when SKILL.md contains triple backticks", async () => {
@@ -112,5 +136,56 @@ describe("skillPromptTextFromDrag fence escaping", () => {
     });
 
     expect(text).toBeNull();
+  });
+});
+
+describe("attachSkillFromDrag", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetSkillStoreMocks();
+  });
+
+  it("installs a catalog skill before attaching it to a thread", async () => {
+    const skill = {
+      id: "seren:demo",
+      slug: "demo",
+      name: "Demo",
+      description: "",
+      source: "seren",
+      sourceUrl: "seren-skills:demo",
+      tags: [],
+    };
+    const installed = {
+      ...skill,
+      id: "local:demo",
+      source: "local",
+      scope: "seren",
+      skillsDir: "/skills",
+      dirName: "demo",
+      path: "/skills/demo/SKILL.md",
+      installedAt: 1,
+      enabled: true,
+      contentHash: "hash",
+    };
+    mockSkillsState.available = [skill];
+    mockFetchContent.mockResolvedValueOnce("# Demo");
+    mockInstall.mockResolvedValueOnce(installed);
+    mockGetThreadSkills.mockReturnValueOnce([]);
+
+    const { attachSkillFromDrag } = await import("@/lib/skill-drag");
+    const result = await attachSkillFromDrag(
+      { id: "seren:demo", slug: "demo", sourceUrl: "seren-skills:demo" },
+      "/project",
+      "thread-1",
+    );
+
+    expect(mockFetchContent).toHaveBeenCalledWith(skill);
+    expect(mockInstall).toHaveBeenCalledWith(skill, "# Demo", "seren");
+    expect(mockAttachSkillToThread).toHaveBeenCalledWith(
+      "/project",
+      "thread-1",
+      "/skills/demo/SKILL.md",
+    );
+    expect(result).toMatchObject({ installed: true, alreadyAttached: false });
   });
 });

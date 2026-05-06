@@ -177,12 +177,9 @@ function fenceLongerThanContent(content: string): string {
   return "`".repeat(Math.max(3, longest + 1));
 }
 
-export async function skillPromptTextFromDrag(
-  payload: SkillDragPayload,
+export async function skillPromptTextForSkill(
+  skill: Skill | InstalledSkill,
 ): Promise<string | null> {
-  const skill = resolveSkill(payload);
-  if (!skill) return null;
-
   const content = await readSkillMarkdown(skill);
   if (!content) return null;
 
@@ -190,4 +187,12 @@ export async function skillPromptTextFromDrag(
   const name = skill.displayName ?? skill.name;
   const fence = fenceLongerThanContent(trimmed);
   return `Use this SKILL.md as context for ${name}:\n\n${fence}markdown\n${trimmed}\n${fence}`;
+}
+
+export async function skillPromptTextFromDrag(
+  payload: SkillDragPayload,
+): Promise<string | null> {
+  const skill = resolveSkill(payload);
+  if (!skill) return null;
+  return skillPromptTextForSkill(skill);
 }

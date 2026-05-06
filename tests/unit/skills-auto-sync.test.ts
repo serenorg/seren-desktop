@@ -13,6 +13,12 @@ const mockSkillsService = vi.hoisted(() => ({
   renameSkillDir: vi.fn().mockResolvedValue("/skills/renamed/SKILL.md"),
   clearCache: vi.fn(),
   install: vi.fn(),
+  readProjectConfig: vi.fn().mockResolvedValue(null),
+  writeProjectConfig: vi.fn().mockResolvedValue(undefined),
+  clearProjectConfig: vi.fn().mockResolvedValue(undefined),
+  getThreadSkills: vi.fn().mockResolvedValue(null),
+  setThreadSkills: vi.fn().mockResolvedValue(undefined),
+  clearThreadSkills: vi.fn().mockResolvedValue(undefined),
   getEnabledSkillsContent: vi.fn().mockResolvedValue(""),
 }));
 
@@ -47,10 +53,35 @@ vi.mock("@/services/skills", () => ({
     renameSkillDir: mockSkillsService.renameSkillDir,
     clearCache: mockSkillsService.clearCache,
     install: mockSkillsService.install,
+    readProjectConfig: mockSkillsService.readProjectConfig,
+    writeProjectConfig: mockSkillsService.writeProjectConfig,
+    clearProjectConfig: mockSkillsService.clearProjectConfig,
+    getThreadSkills: mockSkillsService.getThreadSkills,
+    setThreadSkills: mockSkillsService.setThreadSkills,
+    clearThreadSkills: mockSkillsService.clearThreadSkills,
     getEnabledSkillsContent: mockSkillsService.getEnabledSkillsContent,
   },
   isUpstreamManagedSkill: mockSkillsService.isUpstreamManagedSkill,
 }));
+
+function installedSkill(slug: string) {
+  return {
+    id: `local:${slug}`,
+    slug,
+    name: slug,
+    displayName: slug,
+    description: "",
+    source: "local" as const,
+    tags: [],
+    scope: "seren" as const,
+    skillsDir: "/skills",
+    dirName: slug,
+    path: `/skills/${slug}/SKILL.md`,
+    installedAt: 1,
+    enabled: true,
+    contentHash: "hash",
+  };
+}
 
 describe("skills auto-sync on refresh (#1155)", () => {
   beforeEach(() => {
@@ -294,6 +325,64 @@ describe("install coalesces concurrent calls for the same scope+slug", () => {
     expect(a).toBe(b);
     expect(skillsStore.installed.filter((s) => s.path === installed.path)).toHaveLength(1);
   });
+});
+
+describe("thread skill attach/detach materializes effective defaults", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("adds a thread skill without dropping inherited project defaults", async () => {
+    const base = installedSkill("base");
+    const extra = installedSkill("extra");
+    mockSkillsService.listAllInstalled.mockResolvedValue([base, extra]);
+    mockSkillsService.readProjectConfig.mockResolvedValue({
+      version: 1,
+      skills: { enabled: ["seren:base"] },
+    });
+    mockSkillsService.getThreadSkills.mockResolvedValue(null);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.refreshInstalled();
+    await skillsStore.attachSkillToThread(
+      "/test/project",
+      "thread-1",
+      extra.path,
+    );
+
+    expect(mockSkillsService.setThreadSkills).toHaveBeenCalledWith(
+      "/test/project",
+      "thread-1",
+      ["seren:base", "seren:extra"],
+    );
+  });
+
+  it("detaches from inherited defaults by writing an explicit thread override", async () => {
+    const base = installedSkill("base");
+    const extra = installedSkill("extra");
+    mockSkillsService.listAllInstalled.mockResolvedValue([base, extra]);
+    mockSkillsService.readProjectConfig.mockResolvedValue({
+      version: 1,
+      skills: { enabled: ["seren:base", "seren:extra"] },
+    });
+    mockSkillsService.getThreadSkills.mockResolvedValue(null);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.refreshInstalled();
+    await skillsStore.detachSkillFromThread(
+      "/test/project",
+      "thread-1",
+      extra.path,
+    );
+
+    expect(mockSkillsService.setThreadSkills).toHaveBeenCalledWith(
+      "/test/project",
+      "thread-1",
+      ["seren:base"],
+    );
+  });
+
 });
 
 describe("backfill triggers for slug/dirName mismatch (#1558)", () => {

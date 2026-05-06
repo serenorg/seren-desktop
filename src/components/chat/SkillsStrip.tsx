@@ -1,7 +1,14 @@
 // ABOUTME: Compact skills strip rendered above chat/agent composers.
 // ABOUTME: Shows resolved effective skills for the current thread; opens the right panel for management.
 
-import { type Component, createMemo, createSignal, For, Show } from "solid-js";
+import {
+  type Component,
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  Show,
+} from "solid-js";
 import type { InstalledSkill } from "@/lib/skills";
 import { skillsStore } from "@/stores/skills.store";
 
@@ -10,7 +17,7 @@ interface SkillsStripProps {
   threadId: string | null;
 }
 
-const VISIBLE_LIMIT = 4;
+const VISIBLE_LIMIT = 9;
 
 const SCOPE_LABEL: Record<"thread" | "project" | "global", string> = {
   thread: "Attached to this thread",
@@ -40,12 +47,25 @@ export const SkillsStrip: Component<SkillsStripProps> = (props) => {
     const s = scope();
     return s ? SCOPE_LABEL[s] : "";
   };
-  const visibleSkills = () => skills().slice(0, VISIBLE_LIMIT);
+  const [expanded, setExpanded] = createSignal(false);
+  const visibleSkills = () =>
+    expanded() ? skills() : skills().slice(0, VISIBLE_LIMIT);
   const hiddenCount = () => Math.max(0, skills().length - VISIBLE_LIMIT);
   const [detachingPath, setDetachingPath] = createSignal<string | null>(null);
 
   const baseSkillName = (skill: InstalledSkill) =>
     skill.displayName ?? skill.name;
+
+  let lastContextKey = "";
+  createEffect(() => {
+    const contextKey = `${props.projectRoot ?? ""}:${props.threadId ?? ""}`;
+    if (contextKey !== lastContextKey) {
+      lastContextKey = contextKey;
+      setExpanded(false);
+      return;
+    }
+    if (hiddenCount() === 0) setExpanded(false);
+  });
 
   const detachSkill = async (skill: InstalledSkill) => {
     const root = props.projectRoot;
@@ -155,13 +175,15 @@ export const SkillsStrip: Component<SkillsStripProps> = (props) => {
             <button
               type="button"
               class="px-2 py-0.5 bg-transparent border border-border/60 rounded-full text-[11px] text-muted-foreground cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
-              onClick={openSkillsPanel}
+              onClick={() => setExpanded((value) => !value)}
               title={skills()
                 .slice(VISIBLE_LIMIT)
                 .map(baseSkillName)
                 .join(", ")}
             >
-              +{hiddenCount()} more
+              <Show when={expanded()} fallback={<>+{hiddenCount()} more</>}>
+                Show less
+              </Show>
             </button>
           </Show>
           <button
@@ -185,7 +207,7 @@ export const SkillsStrip: Component<SkillsStripProps> = (props) => {
                 stroke-linecap="round"
               />
             </svg>
-            Add
+            Add Skill
           </button>
         </Show>
       </div>

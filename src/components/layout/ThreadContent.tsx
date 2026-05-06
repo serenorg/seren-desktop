@@ -7,6 +7,12 @@ import { ChatContent } from "@/components/chat/ChatContent";
 import { TerminalBuffer } from "@/components/terminal/TerminalBuffer";
 import { openFolder } from "@/lib/files/service";
 import {
+  attachSkillFromDrag,
+  canAcceptSkillDrop,
+  setCurrentSkillDragPayload,
+  skillDragPayload,
+} from "@/lib/skill-drag";
+import {
   decodeThreadDragPayload,
   getCurrentThreadDragPayload,
   setCurrentThreadDragPayload,
@@ -348,7 +354,29 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
     return text ? decodeThreadDragPayload(text) !== null : false;
   };
 
+  const skillDropThreadIdFor = (window: WorkspaceWindow): string | null => {
+    const target = activeTargetFor(window);
+    if (!target?.threadId) return null;
+    return target.kind === "chat" || target.kind === "agent"
+      ? target.threadId
+      : null;
+  };
+
   const handlePaneDragOver = (event: DragEvent, window: WorkspaceWindow) => {
+    const skillThreadId = skillDropThreadIdFor(window);
+    if (skillThreadId && canAcceptSkillDrop(event)) {
+      const target = activeTargetFor(window);
+      if (!target) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "copy";
+      }
+      if (dragTargetWindowId() !== target.id) {
+        setDragTargetWindowId(target.id);
+      }
+      return;
+    }
+
     if (!canAcceptThreadDrop(event)) return;
     const target = activeTargetFor(window);
     if (!target) return;
@@ -361,7 +389,27 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
     }
   };
 
-  const handlePaneDrop = (event: DragEvent, window: WorkspaceWindow) => {
+  const handlePaneDrop = async (event: DragEvent, window: WorkspaceWindow) => {
+    if (event.defaultPrevented) return;
+
+    const skillThreadId = skillDropThreadIdFor(window);
+    const skillPayload = skillThreadId ? skillDragPayload(event) : null;
+    if (skillPayload && skillThreadId) {
+      event.preventDefault();
+      setDragTargetWindowId(null);
+      setCurrentSkillDragPayload(null);
+      try {
+        await attachSkillFromDrag(
+          skillPayload,
+          fileTreeState.rootPath,
+          skillThreadId,
+        );
+      } catch (err) {
+        console.error("[ThreadContent] Failed to attach skill:", err);
+      }
+      return;
+    }
+
     const payload = threadDragPayload(event);
     if (!payload) return;
     const target = activeTargetFor(window);
@@ -416,7 +464,9 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
                   }
                   if (dragTarget()) setDragTargetWindowId(null);
                 }}
-                onDrop={(e) => !hidden() && handlePaneDrop(e, entry.window)}
+                onDrop={(e) =>
+                  !hidden() && void handlePaneDrop(e, entry.window)
+                }
                 class="relative flex flex-col min-h-0 overflow-hidden rounded-[3px] transition-colors duration-100"
                 classList={{
                   "outline outline-[1px] outline-offset-[-1px] outline-border/40":
