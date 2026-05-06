@@ -38,6 +38,13 @@ export interface RefreshSummary {
 let activeRefreshPromise: Promise<RefreshSummary> | null = null;
 
 /**
+ * Concurrency guard: in-flight install promises keyed by scope+slug so a
+ * concurrent click + drag (or two drags) on the same skill cannot push two
+ * duplicate entries into state.installed.
+ */
+const activeInstallPromises = new Map<string, Promise<InstalledSkill>>();
+
+/**
  * Load enabled skills state from localStorage.
  */
 function loadEnabledState(): Record<string, boolean> {
@@ -923,20 +930,42 @@ export const skillsStore = {
     content: string,
     scope: SkillScope,
   ): Promise<InstalledSkill> {
-    const fileTree = getFileTreeState();
-    const projectRoot = fileTree.rootPath;
+    const key = `${scope}:${skill.slug}`;
+    const inflight = activeInstallPromises.get(key);
+    if (inflight) return inflight;
 
-    const installed = await skills.install(skill, content, scope, projectRoot);
+    const promise = (async () => {
+      const fileTree = getFileTreeState();
+      const projectRoot = fileTree.rootPath;
 
-    // Add to installed list
-    setState("installed", [...state.installed, installed]);
+      const installed = await skills.install(
+        skill,
+        content,
+        scope,
+        projectRoot,
+      );
 
-    // Set as enabled by default
-    enabledState[installed.path] = true;
-    saveEnabledState(enabledState);
+      // Drop any prior entry sharing the install path before appending so a
+      // racing caller cannot leave two records pointing at the same SKILL.md.
+      setState("installed", [
+        ...state.installed.filter((s) => s.path !== installed.path),
+        installed,
+      ]);
 
-    log.info("[SkillsStore] Installed skill:", skill.slug);
-    return installed;
+      // Set as enabled by default
+      enabledState[installed.path] = true;
+      saveEnabledState(enabledState);
+
+      log.info("[SkillsStore] Installed skill:", skill.slug);
+      return installed;
+    })();
+
+    activeInstallPromises.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      activeInstallPromises.delete(key);
+    }
   },
 
   /**

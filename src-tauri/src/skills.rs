@@ -203,19 +203,47 @@ fn validate_sync_state_file(state: &SkillSyncStateFile) -> Result<(), String> {
     if state.upstream_source_url.trim().is_empty() {
         return Err("Sync state upstreamSourceUrl cannot be empty".to_string());
     }
-    let parsed_url = Url::parse(&state.upstream_source_url)
-        .map_err(|e| format!("Invalid sync state upstreamSourceUrl: {}", e))?;
-    if parsed_url.scheme() != "https" {
-        return Err("Sync state upstreamSourceUrl must use https".to_string());
-    }
-    if state.upstream_source == "serenorg" {
-        let host = parsed_url.host_str().unwrap_or_default();
-        let path = parsed_url.path();
-        if host != "raw.githubusercontent.com" || !path.starts_with("/serenorg/seren-skills/") {
-            return Err(
-                "Seren upstream sync state must point at the canonical seren-skills raw URL"
-                    .to_string(),
-            );
+
+    // The Seren Skills publisher migration replaced `serenorg` + raw GitHub
+    // URLs with the `seren` source identifier and a `seren-skills:{slug}`
+    // bare-scheme URL. Both are accepted; legacy `serenorg` still requires
+    // the canonical raw-GitHub URL it was installed against, and any other
+    // upstream still must be https.
+    if state.upstream_source == "seren" {
+        let url = state.upstream_source_url.trim();
+        let slug = url
+            .strip_prefix("seren-skills:")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                "Seren upstream sync state must use a seren-skills:{slug} URL".to_string()
+            })?;
+        if slug == ".."
+            || slug.chars().any(|c| {
+                c.is_whitespace() || c.is_control() || c == '/' || c == '\\' || c == '\0'
+            })
+        {
+            return Err(format!(
+                "Seren upstream sync state slug is invalid: {}",
+                slug
+            ));
+        }
+    } else {
+        let parsed_url = Url::parse(&state.upstream_source_url)
+            .map_err(|e| format!("Invalid sync state upstreamSourceUrl: {}", e))?;
+        if parsed_url.scheme() != "https" {
+            return Err("Sync state upstreamSourceUrl must use https".to_string());
+        }
+        if state.upstream_source == "serenorg" {
+            let host = parsed_url.host_str().unwrap_or_default();
+            let path = parsed_url.path();
+            if host != "raw.githubusercontent.com" || !path.starts_with("/serenorg/seren-skills/")
+            {
+                return Err(
+                    "Seren upstream sync state must point at the canonical seren-skills raw URL"
+                        .to_string(),
+                );
+            }
         }
     }
     if !state.managed_files.contains_key("SKILL.md") {
@@ -1229,6 +1257,114 @@ Run [agent](scripts/agent.py) with `requirements.txt`.
             .expect("sync state should exist");
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(parsed, sync_state);
+    }
+
+    #[test]
+    fn install_skill_accepts_seren_publisher_sync_state() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+        let sync_state = serde_json::json!({
+            "version": 1,
+            "upstreamSource": "seren",
+            "upstreamSourceUrl": "seren-skills:test-skill",
+            "syncedRevision": "abc123",
+            "syncedAt": 1,
+            "managedFiles": {
+                "SKILL.md": "hash"
+            }
+        });
+
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            "# Test Skill\nHello".to_string(),
+            None,
+            Some(sync_state.to_string()),
+        )
+        .unwrap();
+
+        let raw = read_skill_sync_state(skills_dir, "test-skill".to_string())
+            .unwrap()
+            .expect("sync state should exist");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed, sync_state);
+    }
+
+    #[test]
+    fn install_skill_rejects_seren_sync_state_without_skills_scheme() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+        let sync_state = serde_json::json!({
+            "version": 1,
+            "upstreamSource": "seren",
+            "upstreamSourceUrl": "https://example.com/test-skill",
+            "syncedRevision": null,
+            "syncedAt": 1,
+            "managedFiles": { "SKILL.md": "hash" }
+        });
+
+        let err = install_skill(
+            skills_dir,
+            "test-skill".to_string(),
+            "# Test Skill\nHello".to_string(),
+            None,
+            Some(sync_state.to_string()),
+        )
+        .unwrap_err();
+        assert!(err.contains("seren-skills:{slug}"));
+    }
+
+    #[test]
+    fn validate_sync_state_rejects_seren_slugs_with_unsafe_characters() {
+        let make_state = |url: &str| SkillSyncStateFile {
+            version: 1,
+            upstream_source: "seren".to_string(),
+            upstream_source_url: url.to_string(),
+            synced_revision: None,
+            synced_at: 1,
+            managed_files: std::collections::BTreeMap::from([(
+                "SKILL.md".to_string(),
+                "hash".to_string(),
+            )]),
+        };
+
+        for url in [
+            "seren-skills:",
+            "seren-skills:   ",
+            "seren-skills:foo/bar",
+            "seren-skills:foo\\bar",
+            "seren-skills:foo bar",
+            "seren-skills:foo\nbar",
+            "seren-skills:..",
+        ] {
+            let result = validate_sync_state_file(&make_state(url));
+            let err = match result {
+                Ok(_) => panic!("expected validator to reject {}", url),
+                Err(e) => e,
+            };
+            assert!(
+                err.contains("Seren upstream sync state"),
+                "unexpected error for {}: {}",
+                url,
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn validate_sync_state_accepts_seren_slug_with_dots_and_dashes() {
+        let state = SkillSyncStateFile {
+            version: 1,
+            upstream_source: "seren".to_string(),
+            upstream_source_url: "seren-skills:my.skill-v2".to_string(),
+            synced_revision: None,
+            synced_at: 1,
+            managed_files: std::collections::BTreeMap::from([(
+                "SKILL.md".to_string(),
+                "hash".to_string(),
+            )]),
+        };
+        validate_sync_state_file(&state).unwrap();
     }
 
     #[test]

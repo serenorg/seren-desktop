@@ -12,6 +12,8 @@ const mockSkillsService = vi.hoisted(() => ({
   isUpstreamManagedSkill: vi.fn().mockReturnValue(false),
   renameSkillDir: vi.fn().mockResolvedValue("/skills/renamed/SKILL.md"),
   clearCache: vi.fn(),
+  install: vi.fn(),
+  getEnabledSkillsContent: vi.fn().mockResolvedValue(""),
 }));
 
 vi.mock("solid-js/store", () => ({
@@ -44,6 +46,8 @@ vi.mock("@/services/skills", () => ({
     refreshInstalledSkill: mockSkillsService.refreshInstalledSkill,
     renameSkillDir: mockSkillsService.renameSkillDir,
     clearCache: mockSkillsService.clearCache,
+    install: mockSkillsService.install,
+    getEnabledSkillsContent: mockSkillsService.getEnabledSkillsContent,
   },
   isUpstreamManagedSkill: mockSkillsService.isUpstreamManagedSkill,
 }));
@@ -245,6 +249,50 @@ describe("setAvailableCatalog merge keeps bulk-fetched entries", () => {
       "seren:b",
       "seren:c",
     ]);
+  });
+});
+
+describe("install coalesces concurrent calls for the same scope+slug", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("returns the same promise for two concurrent calls and only invokes the service once", async () => {
+    const installed = {
+      slug: "demo",
+      dirName: "demo",
+      scope: "seren" as const,
+      source: "local",
+      path: "/skills/demo/SKILL.md",
+    };
+    let resolveInstall: (value: typeof installed) => void = () => {};
+    mockSkillsService.install.mockImplementation(
+      () =>
+        new Promise<typeof installed>((resolve) => {
+          resolveInstall = resolve;
+        }),
+    );
+
+    const skillInput = {
+      id: "seren:demo",
+      slug: "demo",
+      name: "Demo",
+      description: "",
+      source: "seren" as const,
+      sourceUrl: "seren-skills:demo",
+      tags: [],
+    };
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    const first = skillsStore.install(skillInput, "# body", "seren");
+    const second = skillsStore.install(skillInput, "# body", "seren");
+    resolveInstall(installed);
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(mockSkillsService.install).toHaveBeenCalledTimes(1);
+    expect(a).toBe(b);
+    expect(skillsStore.installed.filter((s) => s.path === installed.path)).toHaveLength(1);
   });
 });
 

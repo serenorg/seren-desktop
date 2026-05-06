@@ -141,45 +141,69 @@ function objectKeys(value: unknown): string {
   return keys.length > 0 ? `: ${keys.join(", ")}` : "";
 }
 
-function normalizeSkillsCatalogPage(
+// Generated SDK responses come back wrapped in unpredictable layers of
+// {data,result,body} envelopes at runtime. Walk the envelope tree breadth-first
+// and return the first object that satisfies `match`. Shared so list and
+// download responses cannot silently drift apart again.
+function findInResponseEnvelopes<T>(
   value: unknown,
-): SkillsCatalogResponsePage | null {
+  match: (candidate: object) => T | null,
+): T | null {
   const queue: unknown[] = [value];
   const seen = new Set<unknown>();
 
   while (queue.length > 0 && seen.size < 25) {
     const candidate = queue.shift();
-    if (!candidate || typeof candidate !== "object") {
-      continue;
-    }
-    if (seen.has(candidate)) {
-      continue;
-    }
+    if (!candidate || typeof candidate !== "object") continue;
+    if (seen.has(candidate)) continue;
     seen.add(candidate);
 
-    const page = candidate as {
+    const result = match(candidate);
+    if (result !== null) return result;
+
+    const envelope = candidate as {
       body?: unknown;
       data?: unknown;
       result?: unknown;
-      skills?: unknown;
-      total?: unknown;
     };
-
-    if (Array.isArray(page.skills)) {
-      return {
-        skills: page.skills as SkillSummary[],
-        total: typeof page.total === "number" ? page.total : page.skills.length,
-      };
-    }
-
-    for (const nested of [page.data, page.result, page.body]) {
-      if (nested && typeof nested === "object") {
-        queue.push(nested);
-      }
+    for (const nested of [envelope.data, envelope.result, envelope.body]) {
+      if (nested && typeof nested === "object") queue.push(nested);
     }
   }
 
   return null;
+}
+
+function normalizeSkillsCatalogPage(
+  value: unknown,
+): SkillsCatalogResponsePage | null {
+  return findInResponseEnvelopes(value, (candidate) => {
+    const page = candidate as { skills?: unknown; total?: unknown };
+    if (!Array.isArray(page.skills)) return null;
+    return {
+      skills: page.skills as SkillSummary[],
+      total: typeof page.total === "number" ? page.total : page.skills.length,
+    };
+  });
+}
+
+function normalizeSkillBundle(value: unknown): SkillBundle | null {
+  return findInResponseEnvelopes(value, (candidate) => {
+    const bundle = candidate as {
+      skill_md?: unknown;
+      content_hash?: unknown;
+      skill?: unknown;
+    };
+    if (
+      typeof bundle.skill_md !== "string" ||
+      typeof bundle.content_hash !== "string" ||
+      !bundle.skill ||
+      typeof bundle.skill !== "object"
+    ) {
+      return null;
+    }
+    return candidate as SkillBundle;
+  });
 }
 
 async function downloadSkillBundle(slug: string): Promise<SkillBundle> {
@@ -191,7 +215,13 @@ async function downloadSkillBundle(slug: string): Promise<SkillBundle> {
     const status = response ? `: ${response.status}` : "";
     throw new Error(`Failed to download skill ${slug}${status}`);
   }
-  return data;
+  const bundle = normalizeSkillBundle(data);
+  if (!bundle) {
+    throw new Error(
+      `Unexpected seren-skills bundle response for ${slug}${objectKeys(data)}`,
+    );
+  }
+  return bundle;
 }
 
 async function fetchSerenSkillsPage(
@@ -740,6 +770,11 @@ export const skills = {
 
   /**
    * Fetch the full SKILL.md content for a remote skill.
+   *
+   * Throws on transport or shape failures so install paths can surface
+   * the failure to the user. Returns null only when the skill payload
+   * itself does not carry a sourceUrl (e.g. a Skill constructed without
+   * one), which is a programmer error in the caller.
    */
   async fetchContent(skill: Skill): Promise<string | null> {
     const slug = skill.sourceUrl
@@ -750,13 +785,8 @@ export const skills = {
       return null;
     }
 
-    try {
-      log.info("[Skills] Fetching content for", slug);
-      return (await downloadSkillBundle(slug)).skill_md;
-    } catch (error) {
-      log.error("[Skills] Error fetching content:", error);
-      return null;
-    }
+    log.info("[Skills] Fetching content for", slug);
+    return (await downloadSkillBundle(slug)).skill_md;
   },
 
   /**

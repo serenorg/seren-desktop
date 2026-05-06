@@ -79,6 +79,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     slug: string;
     missingFiles: string[];
   } | null>(null);
+  const [installError, setInstallError] = createSignal<{
+    slug: string;
+    message: string;
+  } | null>(null);
   const [syncStatuses, setSyncStatuses] = createSignal<
     Record<string, SkillSyncStatus | null | undefined>
   >({});
@@ -420,23 +424,29 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const handleInstall = async (skill: Skill, scope: SkillScope = "seren") => {
     setActionInProgress(skill.id);
     setInstallWarning(null);
+    setInstallError(null);
     try {
       const content = await skillsService.fetchContent(skill);
-      if (content) {
-        const installed = await skillsStore.install(skill, content, scope);
-        await loadSyncStatus(installed);
+      if (!content) {
+        throw new Error(`No SKILL.md content available for ${skill.slug}`);
+      }
+      const installed = await skillsStore.install(skill, content, scope);
+      await loadSyncStatus(installed);
 
-        // Validate payload after install
-        const missingFiles = await skillsService.validatePayload(
-          installed.skillsDir,
-          installed.slug,
-        );
-        if (missingFiles.length > 0) {
-          setInstallWarning({ slug: installed.slug, missingFiles });
-        }
+      // Validate payload after install
+      const missingFiles = await skillsService.validatePayload(
+        installed.skillsDir,
+        installed.slug,
+      );
+      if (missingFiles.length > 0) {
+        setInstallWarning({ slug: installed.slug, missingFiles });
       }
     } catch (err) {
       console.error("[SkillsExplorer] Failed to install:", err);
+      setInstallError({
+        slug: skill.slug,
+        message: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setActionInProgress(null);
     }
@@ -934,6 +944,32 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
             </Show>
           </div>
         </div>
+      </Show>
+
+      {/* Install failure banner */}
+      <Show when={installError()}>
+        {(failure) => (
+          <div class="mx-4 my-2 px-3 py-2 bg-destructive/10 border border-destructive/30 rounded-md text-[12px]">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <span class="font-medium text-destructive">
+                  Install failed: {failure().slug}
+                </span>
+                <p class="m-0 mt-1 text-muted-foreground break-words">
+                  {failure().message}
+                </p>
+              </div>
+              <button
+                type="button"
+                class="shrink-0 text-muted-foreground hover:text-foreground bg-transparent border-none cursor-pointer text-[14px] leading-none"
+                onClick={() => setInstallError(null)}
+                aria-label="Dismiss error"
+              >
+                x
+              </button>
+            </div>
+          </div>
+        )}
       </Show>
 
       {/* Install warning banner */}

@@ -156,3 +156,96 @@ describe("skills.fetchIndex via Seren Skills API", () => {
     );
   });
 });
+
+describe("skills.fetchContent via downloadSkillBundle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  function bundle(slug: string) {
+    return {
+      content_hash: "abc",
+      files: [],
+      manifest: {},
+      skill: skillSummary(slug),
+      skill_md: "# Body",
+      version: "1.0.0",
+    };
+  }
+
+  it("unwraps a bundle response wrapped in nested data envelopes", async () => {
+    mockDownloadSkill.mockResolvedValueOnce({
+      data: { data: { data: bundle("alpha") } },
+    });
+
+    const { skills } = await import("@/services/skills");
+    const content = await skills.fetchContent({
+      id: "seren:alpha",
+      slug: "alpha",
+      name: "Alpha",
+      description: "",
+      source: "seren",
+      sourceUrl: "seren-skills:alpha",
+      tags: [],
+    });
+
+    expect(content).toBe("# Body");
+  });
+
+  it("returns the bundle markdown when the response is unwrapped", async () => {
+    mockDownloadSkill.mockResolvedValueOnce({ data: bundle("beta") });
+
+    const { skills } = await import("@/services/skills");
+    const content = await skills.fetchContent({
+      id: "seren:beta",
+      slug: "beta",
+      name: "Beta",
+      description: "",
+      source: "seren",
+      sourceUrl: "seren-skills:beta",
+      tags: [],
+    });
+
+    expect(content).toBe("# Body");
+  });
+
+  it("throws when the bundle response cannot be normalized", async () => {
+    mockDownloadSkill.mockResolvedValueOnce({
+      data: { content_hash: "abc" },
+    });
+
+    const { skills } = await import("@/services/skills");
+    await expect(
+      skills.fetchContent({
+        id: "seren:gamma",
+        slug: "gamma",
+        name: "Gamma",
+        description: "",
+        source: "seren",
+        sourceUrl: "seren-skills:gamma",
+        tags: [],
+      }),
+    ).rejects.toThrow("Unexpected seren-skills bundle response for gamma");
+  });
+
+  it("throws when the API returns an error", async () => {
+    mockDownloadSkill.mockResolvedValueOnce({
+      error: { message: "not found" },
+      response: { status: 404 },
+    });
+
+    const { skills } = await import("@/services/skills");
+    await expect(
+      skills.fetchContent({
+        id: "seren:delta",
+        slug: "delta",
+        name: "Delta",
+        description: "",
+        source: "seren",
+        sourceUrl: "seren-skills:delta",
+        tags: [],
+      }),
+    ).rejects.toThrow("Failed to download skill delta: 404");
+  });
+});
