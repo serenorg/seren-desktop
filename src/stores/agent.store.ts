@@ -3189,9 +3189,16 @@ Structured summary:`;
       const priorModelId = session.currentModelId;
       await this.terminateSession(sessionId);
 
+      // Spawn the respawn as role="standby" so the seed prompt's
+      // acknowledgement turn is filtered by the handleSessionEvent guard
+      // (~line 4434) instead of streaming into the user-visible chat as
+      // "I'll acknowledge the system reminders…standing by". After the seed
+      // settles via waitForSessionIdle below, role flips back to "serving"
+      // and seedCompleted is cleared so the user's retry runs visibly. #1827.
       const newSessionId = await this.spawnSession(cwd, agentType, {
         localSessionId: conversationId,
         initialModelId: priorModelId,
+        role: "standby",
       });
 
       if (!newSessionId) {
@@ -3248,6 +3255,13 @@ Structured summary:`;
       await this.restoreSessionSettings(session, newSessionId);
       await providerService.sendPrompt(newSessionId, seedPrompt);
       await waitForSessionIdle(newSessionId);
+
+      // Seed has fully settled — release the standby filter so the caller's
+      // retry (`compactAndRetry`) renders the user's actual response. Reset
+      // seedCompleted so the next promptComplete is treated as a real turn,
+      // not a second seed by the standby short-circuit at ~line 4485. #1827.
+      setState("sessions", newSessionId, "role", "serving");
+      setState("sessions", newSessionId, "seedCompleted", undefined);
 
       return { outcome: "succeeded", newSessionId };
     } catch (error) {

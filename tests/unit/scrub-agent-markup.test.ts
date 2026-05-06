@@ -60,4 +60,45 @@ describe("scrubAgentMarkup", () => {
     expect(scrubAgentMarkup("")).toBe("");
     expect(scrubAgentMarkup("   \n\n  ")).toBe("");
   });
+
+  // #1827: post-compaction stock acknowledgement leak. The seed prompt
+  // ("Confirm you have this context… wait for the user's next message")
+  // combined with the runtime's <system-reminder> injections triggers a
+  // stock training-data response. If a race / refactor lets this turn
+  // escape the role==="standby" event filter, scrubAgentMarkup must drop
+  // it so it never persists into the transcript or Seren memory.
+  describe("#1827 — drops the post-compaction seed-ack stock pattern", () => {
+    it("drops the literal observed wording", () => {
+      const input =
+        "I'll acknowledge the system reminders. No user request to act on yet—standing by";
+      expect(scrubAgentMarkup(input)).toBe("");
+    });
+
+    it("drops the variant with an ASCII hyphen instead of em-dash", () => {
+      const input =
+        "I'll acknowledge the system reminders. No user request to act on yet - standing by.";
+      expect(scrubAgentMarkup(input)).toBe("");
+    });
+
+    it("drops the variant with leading whitespace and a trailing period", () => {
+      const input =
+        "  I'll acknowledge the system reminders. No user request to act on yet, standing by.  ";
+      expect(scrubAgentMarkup(input)).toBe("");
+    });
+
+    it("drops the 'I will acknowledge' (no contraction) variant", () => {
+      const input =
+        "I will acknowledge the system reminders. No user request to act on yet—standing by";
+      expect(scrubAgentMarkup(input)).toBe("");
+    });
+
+    it("preserves a real assistant turn that merely contains 'standing by' as a phrase", () => {
+      // Don't false-positive on legitimate prose. The stock pattern requires
+      // the "I('ll| will) acknowledge the system reminders" preamble to
+      // anchor the match.
+      const input =
+        "The validator service is healthy and standing by for traffic.";
+      expect(scrubAgentMarkup(input)).toBe(input);
+    });
+  });
 });
