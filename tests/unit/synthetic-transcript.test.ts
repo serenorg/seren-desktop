@@ -20,18 +20,21 @@ const {
 } = await import(/* @vite-ignore */ modulePath);
 
 interface JsonlRecord {
-  type: string;
+  type?: string;
   uuid?: string;
   parentUuid?: string | null;
   sessionId?: string;
-  message?: { content?: unknown };
   isCompactSummary?: boolean;
   isSyntheticAck?: boolean;
-  // biome-ignore lint/suspicious/noExplicitAny: test-only structural access
+  // biome-ignore lint/suspicious/noExplicitAny: test-only structural access — message and other shapes vary per record kind
   [key: string]: any;
 }
 
-function userTurn(uuid: string, parentUuid: string | null, text: string) {
+function userTurn(
+  uuid: string,
+  parentUuid: string | null,
+  text: string,
+): JsonlRecord {
   return {
     parentUuid,
     isSidechain: false,
@@ -50,7 +53,11 @@ function userTurn(uuid: string, parentUuid: string | null, text: string) {
   };
 }
 
-function assistantTextTurn(uuid: string, parentUuid: string, text: string) {
+function assistantTextTurn(
+  uuid: string,
+  parentUuid: string,
+  text: string,
+): JsonlRecord {
   return {
     parentUuid,
     isSidechain: false,
@@ -82,7 +89,7 @@ function assistantToolUseTurn(
   uuid: string,
   parentUuid: string,
   toolUseId: string,
-) {
+): JsonlRecord {
   return {
     parentUuid,
     isSidechain: false,
@@ -116,7 +123,7 @@ function userToolResultTurn(
   uuid: string,
   parentUuid: string,
   toolUseId: string,
-) {
+): JsonlRecord {
   return {
     parentUuid,
     isSidechain: false,
@@ -138,7 +145,7 @@ function userToolResultTurn(
   };
 }
 
-function attachmentRecord(parentUuid: string) {
+function attachmentRecord(parentUuid: string): JsonlRecord {
   return {
     parentUuid,
     isSidechain: false,
