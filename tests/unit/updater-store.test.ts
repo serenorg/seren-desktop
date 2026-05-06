@@ -64,7 +64,7 @@ describe("updaterStore install flow", () => {
     captureErrorMock.mockReset();
     // Vitest sets import.meta.env.DEV=true; the prod-only code paths under
     // test would otherwise short-circuit through isDevRuntime().
-    vi.stubEnv("DEV", "");
+    vi.stubEnv("DEV", false);
   });
 
   afterEach(() => {
