@@ -165,17 +165,21 @@ describe("Gemini Agent — thread.store.ts auto-detect (#1471)", () => {
 });
 
 describe("Gemini Agent — UI surface (#1471)", () => {
-  it("ThreadTabBar '+ New' menu includes a Gemini Agent button", () => {
+  it("ThreadTabBar '+ New' menu includes a Gemini button", () => {
+    // Label dropped the "Agent" suffix in #1832 once the chip vocabulary was added —
+    // the chip + section header now convey the kind. Wiring = testid + handler.
     expect(threadTabBarTsx).toContain("allowsGeminiAgent");
-    expect(threadTabBarTsx).toContain("Gemini Agent");
+    expect(threadTabBarTsx).toContain('data-testid="new-gemini-agent"');
     expect(threadTabBarTsx).toContain('handleNewAgent("gemini")');
   });
 
-  it("ThreadSidebar agent launcher includes a Gemini Agent button", () => {
+  it("ThreadSidebar agent launcher includes a Gemini button", () => {
     expect(threadSidebarTsx).toContain("allowsGeminiAgent");
-    expect(threadSidebarTsx).toContain("Gemini Agent");
-    expect(threadSidebarTsx).toContain(
-      'threadStore.createAgentThread("gemini"',
+    expect(threadSidebarTsx).toContain('data-testid="new-gemini-agent"');
+    expect(threadSidebarTsx).toContain('handleNewAgent("gemini")');
+    // Helper still routes to threadStore.createAgentThread under the hood.
+    expect(threadSidebarTsx).toMatch(
+      /threadStore\.createAgentThread\(\s*agentType\s*,\s*cwd\s*\)/,
     );
   });
 
