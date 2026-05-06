@@ -193,6 +193,20 @@ fn resolve_relative_skill_path(
     Ok(skill_dir.join(relative))
 }
 
+fn validate_skill_slug(slug: &str) -> Result<(), String> {
+    let trimmed = slug.trim();
+    if trimmed.is_empty() || trimmed != slug || trimmed == "." || trimmed == ".." {
+        return Err(format!("Invalid skill slug: {}", slug));
+    }
+    if slug.chars().any(|c| {
+        c.is_whitespace() || c.is_control() || c == '/' || c == '\\' || c == '\0'
+    })
+    {
+        return Err(format!("Invalid skill slug: {}", slug));
+    }
+    Ok(())
+}
+
 fn validate_sync_state_file(state: &SkillSyncStateFile) -> Result<(), String> {
     if state.version != 1 {
         return Err(format!("Unsupported sync state version: {}", state.version));
@@ -218,16 +232,8 @@ fn validate_sync_state_file(state: &SkillSyncStateFile) -> Result<(), String> {
             .ok_or_else(|| {
                 "Seren upstream sync state must use a seren-skills:{slug} URL".to_string()
             })?;
-        if slug == ".."
-            || slug.chars().any(|c| {
-                c.is_whitespace() || c.is_control() || c == '/' || c == '\\' || c == '\0'
-            })
-        {
-            return Err(format!(
-                "Seren upstream sync state slug is invalid: {}",
-                slug
-            ));
-        }
+        validate_skill_slug(slug)
+            .map_err(|_| format!("Seren upstream sync state slug is invalid: {}", slug))?;
     } else {
         let parsed_url = Url::parse(&state.upstream_source_url)
             .map_err(|e| format!("Invalid sync state upstreamSourceUrl: {}", e))?;
@@ -716,6 +722,7 @@ pub fn install_skill(
     extra_files: Option<String>,
     sync_state_json: Option<String>,
 ) -> Result<String, String> {
+    validate_skill_slug(&slug)?;
     let dir_path = PathBuf::from(&skills_dir);
     let skill_dir = dir_path.join(&slug);
     let parsed_extra_files: Vec<ExtraFile> = match extra_files {
@@ -913,6 +920,7 @@ pub fn create_skill_folder(
     slug: String,
     name: String,
 ) -> Result<String, String> {
+    validate_skill_slug(&slug)?;
     let dir_path = PathBuf::from(&skills_dir);
     let skill_dir = dir_path.join(&slug);
 
@@ -1172,6 +1180,36 @@ See [section](#overview) and [email](mailto:test@example.com).
     }
 
     #[test]
+    fn install_skill_rejects_unsafe_slug() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        for slug in [".", "..", "bad/slug", "bad\\slug", "bad slug"] {
+            let result = install_skill(
+                skills_dir.clone(),
+                slug.to_string(),
+                "# Test\n".to_string(),
+                None,
+                None,
+            );
+            assert!(result.is_err(), "expected install to reject {slug}");
+        }
+    }
+
+    #[test]
+    fn create_skill_folder_rejects_unsafe_slug() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let result = create_skill_folder(
+            skills_dir,
+            "../bad".to_string(),
+            "Bad Skill".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn validate_skill_payload_detects_missing_files() {
         let tmp = TempDir::new().unwrap();
         let skills_dir = tmp.path().to_string_lossy().to_string();
@@ -1331,6 +1369,7 @@ Run [agent](scripts/agent.py) with `requirements.txt`.
         for url in [
             "seren-skills:",
             "seren-skills:   ",
+            "seren-skills:.",
             "seren-skills:foo/bar",
             "seren-skills:foo\\bar",
             "seren-skills:foo bar",

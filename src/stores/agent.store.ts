@@ -96,6 +96,29 @@ export const PUBLISHER_LIVE_QUERY_INSTRUCTION =
   "tools, then call_publisher to invoke. This live-query rule " +
   "overrides any prior belief about what tools you have.";
 
+/**
+ * Defensive re-prime threshold. The CLI agents (Claude Code, Codex) expose a
+ * user-invoked `/compact` that summarizes their conversation history; that
+ * summary may not preserve the priming block we delivered with the first
+ * prompt. We do not observe the runtime's compact event from this side, so
+ * once a session has accrued this many messages past its last prime, the
+ * next prompt re-includes the publisher instruction + skills context as a
+ * defensive measure. With ~2 messages per turn, this re-primes roughly
+ * every 15 turns regardless of compact behavior.
+ *
+ * TODO(skills/system-prompt): a deeper fix is to deliver the priming block
+ * as the runtime's system prompt at spawn time. System prompts survive
+ * `/compact` in both CLIs, which would obviate this threshold. The change
+ * lives in this repo's bundled provider runtime — for Claude Code, thread
+ * a `systemPromptAppend` arg through `buildClaudeArgs` in
+ * `src-tauri/embedded-runtime/provider-runtime/browser-local/claude-runtime.mjs`
+ * and emit `--append-system-prompt`; for Codex, add the equivalent flag in
+ * the inline spawn in `.../browser-local/providers.mjs`. Then plumb
+ * `systemPromptAppend` through `provider_spawn` and skip the per-prompt
+ * priming block on sessions that received it.
+ */
+const REPRIME_AFTER_MESSAGES = 30;
+
 /** Await a session ready promise with a timeout to prevent infinite hangs */
 function waitForSessionReady(sessionId: string): Promise<void> {
   // Note: this only resolves the initial ready promise set up in spawnSession.
@@ -688,6 +711,25 @@ export interface ActiveSession {
   compactRetryPromise?: Promise<CompactionOutcome>;
   /** Transcript bootstrap injected into the first real prompt of a forked branch. */
   bootstrapPromptContext?: string;
+  /**
+   * Signature of the skills + publisher-instruction context block that has
+   * already been delivered to the agent runtime. Subsequent prompts skip
+   * resending this block while the signature is unchanged so we do not pay
+   * the same SKILL.md token cost on every turn. Reset implicitly when the
+   * runtime session is replaced (a fresh AgentSession is created without
+   * this field set), and when the resolved skills set changes (signature
+   * differs, the next prompt re-primes).
+   */
+  primedContextSignature?: string;
+  /**
+   * Message-count snapshot at the moment the priming context was last
+   * delivered. Used to defensively re-prime after the runtime has likely
+   * lost the priming text: e.g. user invokes `/compact` inside the CLI,
+   * which we cannot observe directly. Once messages.length advances by
+   * REPRIME_AFTER_MESSAGES beyond this snapshot, the next prompt re-primes
+   * even when the signature is otherwise unchanged.
+   */
+  primedAtMessageCount?: number;
   /** Set when the user explicitly requested a cancel — suppresses auto-retry
    *  in the unresponsive-agent recovery path. */
   cancelRequested?: boolean;
@@ -2804,14 +2846,53 @@ export const agentStore = {
     return sessionId;
   },
 
+  /**
+   * Build the per-prompt context array.
+   *
+   * The skills + publisher-instruction block is large and stable across
+   * turns within a single live runtime session, so we send it only when
+   * the signature changes. The caller is expected to call
+   * `markPromptContextPrimed(sessionId, newSignature)` after a successful
+   * sendPrompt so the next turn can short-circuit. When the signature is
+   * unchanged from the last primed value, this returns only the explicit
+   * per-turn `context` (file selections, transcript bootstrap, etc.).
+   */
   async buildPromptContext(
     sessionId: string,
     context?: Array<Record<string, string>>,
-  ): Promise<Array<Record<string, string>> | undefined> {
+  ): Promise<{
+    merged: Array<Record<string, string>> | undefined;
+    newSignature: string | null;
+  }> {
     const session = state.sessions[sessionId];
     if (!session) {
-      return context && context.length > 0 ? [...context] : undefined;
+      return {
+        merged: context && context.length > 0 ? [...context] : undefined,
+        newSignature: null,
+      };
     }
+
+    let skillsContent = "";
+    try {
+      skillsContent =
+        (await skillsStore.getThreadSkillsContent(
+          session.cwd,
+          session.conversationId,
+        )) ?? "";
+    } catch (error) {
+      console.warn(
+        "[AgentStore] Failed to load skills for agent prompt:",
+        error,
+      );
+    }
+
+    const currentSignature = `${PUBLISHER_LIVE_QUERY_INSTRUCTION}\n\n${skillsContent}`;
+    const messageCount = session.messages.length;
+    const messagesSincePrimed =
+      messageCount - (session.primedAtMessageCount ?? 0);
+    const expired = messagesSincePrimed > REPRIME_AFTER_MESSAGES;
+    const alreadyPrimed =
+      !expired && session.primedContextSignature === currentSignature;
 
     let mergedContext = context ? [...context] : [];
 
@@ -2822,30 +2903,32 @@ export const agentStore = {
       ];
     }
 
-    try {
-      const skillsContent = await skillsStore.getThreadSkillsContent(
-        session.cwd,
-        session.conversationId,
-      );
+    if (!alreadyPrimed) {
       if (skillsContent) {
         mergedContext = [
           { type: "text", text: skillsContent },
           ...mergedContext,
         ];
       }
-    } catch (error) {
-      console.warn(
-        "[AgentStore] Failed to load skills for agent prompt:",
-        error,
-      );
+      mergedContext = [
+        { type: "text", text: PUBLISHER_LIVE_QUERY_INSTRUCTION },
+        ...mergedContext,
+      ];
     }
 
-    mergedContext = [
-      { type: "text", text: PUBLISHER_LIVE_QUERY_INSTRUCTION },
-      ...mergedContext,
-    ];
+    return {
+      merged: mergedContext.length > 0 ? mergedContext : undefined,
+      newSignature: alreadyPrimed ? null : currentSignature,
+    };
+  },
 
-    return mergedContext.length > 0 ? mergedContext : undefined;
+  markPromptContextPrimed(sessionId: string, signature: string): void {
+    const session = state.sessions[sessionId];
+    if (!session) return;
+    setState("sessions", sessionId, {
+      primedContextSignature: signature,
+      primedAtMessageCount: session.messages.length,
+    });
   },
 
   setBootstrapPromptContext(
@@ -4110,18 +4193,20 @@ Structured summary:`;
 
     console.log("[AgentStore] Calling providerService.sendPrompt...");
     try {
-      const mergedContext = await this.buildPromptContext(sessionId, context);
+      const { merged, newSignature } = await this.buildPromptContext(
+        sessionId,
+        context,
+      );
       // Apply the post-compaction prepend (one-shot) AFTER the user message
       // is rendered in the UI but BEFORE the IPC dispatch — the user's chat
       // bubble shows their actual text; the model receives the structured
       // summary banner in front of it. #1829.
       const dispatchedPrompt = consumeCompactionPrepend(sessionId, prompt);
-      await providerService.sendPrompt(
-        sessionId,
-        dispatchedPrompt,
-        mergedContext,
-      );
+      await providerService.sendPrompt(sessionId, dispatchedPrompt, merged);
       this.clearBootstrapPromptContext(sessionId);
+      if (newSignature !== null) {
+        this.markPromptContextPrimed(sessionId, newSignature);
+      }
       console.log("[AgentStore] sendPrompt completed successfully");
     } catch (error) {
       const agentLabel = agentDisplayName(
@@ -4216,16 +4301,17 @@ Structured summary:`;
                 `[AgentStore] Retrying prompt on new session ${newSessionId}`,
               );
               try {
-                const retryContext = await this.buildPromptContext(
-                  newSessionId,
-                  context,
-                );
+                const { merged: retryContext, newSignature } =
+                  await this.buildPromptContext(newSessionId, context);
                 await providerService.sendPrompt(
                   newSessionId,
                   prompt,
                   retryContext,
                 );
                 this.clearBootstrapPromptContext(newSessionId);
+                if (newSignature !== null) {
+                  this.markPromptContextPrimed(newSessionId, newSignature);
+                }
                 console.log("[AgentStore] Retry succeeded on new session");
               } catch (retryError) {
                 console.error("[AgentStore] Retry failed:", retryError);

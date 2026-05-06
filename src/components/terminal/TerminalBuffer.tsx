@@ -1579,14 +1579,15 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
   // cannot inject \x1b[201~ mid-content and have the receiving app treat
   // the trailing bytes as typed input. split+join instead of a regex literal
   // so biome's no-control-char-in-regex lint stays happy.
-  const writePromptText = async (text: string) => {
+  const writePromptText = async (text: string): Promise<boolean> => {
     const current = buffer();
-    if (!current || current.status !== "running") return;
+    if (!current || current.status !== "running") return false;
     snapToBottom();
     const safe = text.split("\x1b[201~").join("");
     const bracketed = grid()?.bracketedPaste ?? false;
     const payload = bracketed ? `\x1b[200~${safe}\x1b[201~` : safe;
     await terminalStore.write(current.id, payload);
+    return true;
   };
 
   const handlePaste = async (event: ClipboardEvent) => {
@@ -1598,19 +1599,20 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
 
   const handleExternalPasteRequest = (event: Event) => {
     const detail = (event as CustomEvent).detail as
-      | { bufferId?: string; text?: string }
+      | {
+          bufferId?: string;
+          respond?: (result: Promise<boolean>) => void;
+          text?: string;
+        }
       | undefined;
     const id = activeBufferId();
-    console.info("[TerminalBuffer] paste-text event", {
-      detailBufferId: detail?.bufferId,
-      activeBufferId: id,
-      hasText: !!detail?.text,
-      bufferStatus: buffer()?.status,
-    });
     if (!detail) return;
     if (!id || detail.bufferId !== id || !detail.text) return;
     surfaceRef?.focus();
-    void writePromptText(detail.text);
+    detail.respond?.(writePromptText(detail.text));
+  };
+  const onExternalPasteRequest = (event: Event) => {
+    void handleExternalPasteRequest(event);
   };
 
   const handleSkillDragOver = (event: DragEvent) => {
@@ -1684,6 +1686,10 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
   );
 
   onMount(async () => {
+    window.addEventListener(
+      "seren:terminal-paste-text",
+      onExternalPasteRequest,
+    );
     await terminalStore.init();
     measureCell();
     pushResize();
@@ -1727,17 +1733,12 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       });
       resizeObserver.observe(surfaceRef);
     }
-
-    window.addEventListener(
-      "seren:terminal-paste-text",
-      handleExternalPasteRequest,
-    );
   });
 
   onCleanup(() => {
     window.removeEventListener(
       "seren:terminal-paste-text",
-      handleExternalPasteRequest,
+      onExternalPasteRequest,
     );
     unlistenDiff?.();
     resizeObserver?.disconnect();

@@ -459,19 +459,27 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     skill: Skill | InstalledSkill,
   ): Promise<void> => {
     const text = await skillPromptTextForSkill(skill);
-    console.info("[SkillsExplorer] paste-into-terminal", {
-      bufferId,
-      slug: skill.slug,
-      textLength: text?.length ?? 0,
-    });
     if (!text) {
       throw new Error(`Could not load SKILL.md for ${skill.slug}`);
     }
+    let writeResult: Promise<boolean> | null = null;
     window.dispatchEvent(
       new CustomEvent("seren:terminal-paste-text", {
-        detail: { bufferId, text },
+        detail: {
+          bufferId,
+          text,
+          respond: (result: Promise<boolean>) => {
+            writeResult = result;
+          },
+        },
       }),
     );
+    if (!writeResult) {
+      throw new Error("No active terminal pane accepted the paste request");
+    }
+    if (!(await writeResult)) {
+      throw new Error("Terminal is not running");
+    }
   };
 
   const attachInstalledToActiveThread = async (
