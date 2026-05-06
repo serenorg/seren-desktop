@@ -15,11 +15,9 @@ const {
   buildSyntheticTranscript,
 } = await import(new URL("bin/browser-local/synthetic-transcript.mjs", ROOT).href);
 
-function encodeProjectDirName(cwd) {
-  const resolved = path.resolve(cwd);
-  const sanitized = resolved.replace(/^\/+/, "").replaceAll(":", "");
-  return `-${sanitized.replaceAll("/", "-")}`;
-}
+const { encodeProjectDirName } = await import(
+  new URL("bin/browser-local/claude-runtime.mjs", ROOT).href
+);
 
 function claudeProjectsRoot() {
   return path.join(os.homedir(), ".claude", "projects");

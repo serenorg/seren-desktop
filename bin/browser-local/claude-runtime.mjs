@@ -241,11 +241,15 @@ function killChildTree(child) {
   }
 }
 
-function encodeProjectDirName(cwd) {
+export function encodeProjectDirName(cwd) {
+  // Claude Code collapses every non-`[a-zA-Z0-9-]` char to `-` (so `_` and `.`
+  // also become `-`). Restricting to just `/` produces a directory that
+  // doesn't exist for cwds like `/Users/x/Foo_Bar` — fork's outputJsonlPath
+  // then writes into a non-existent dir and ENOENTs. (#1836)
   const resolved = path.resolve(cwd);
   const unixPath = resolved.replaceAll("\\", "/");
   const sanitized = unixPath.replace(/^\/+/, "").replaceAll(":", "");
-  return `-${sanitized.replaceAll("/", "-")}`;
+  return `-${sanitized.replace(/[^a-zA-Z0-9-]/g, "-")}`;
 }
 
 function claudeProjectsRoot() {

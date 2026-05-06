@@ -140,7 +140,8 @@ pub fn session_jsonl_path(root: &Path, project_cwd: &Path, session_id: &str) -> 
 }
 
 /// Encode an absolute project directory the same way Claude Code does:
-/// `/Users/a/b` → `-Users-a-b`.
+/// `/Users/a/b` → `-Users-a-b`. Every non-`[a-zA-Z0-9-]` char (including `_`
+/// and `.`) collapses to `-`, matching the CLI's on-disk convention. (#1836)
 pub fn encode_project_dir(cwd: &Path) -> String {
     let resolved = cwd
         .canonicalize()
@@ -148,7 +149,11 @@ pub fn encode_project_dir(cwd: &Path) -> String {
         .to_string_lossy()
         .replace('\\', "/");
     let sanitized = resolved.trim_start_matches('/').replace(':', "");
-    format!("-{}", sanitized.replace('/', "-"))
+    let normalized: String = sanitized
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .collect();
+    format!("-{normalized}")
 }
 
 /// True when `path` is a `.md` file inside a Claude project's `memory/` subdir
@@ -1091,6 +1096,26 @@ mod tests {
             extract_claude_project_dir_name(path),
             Some("-Users-x-foo".to_string())
         );
+    }
+
+    #[test]
+    fn encode_project_dir_collapses_underscore_dot_and_other_specials() {
+        // #1836: every non-`[a-zA-Z0-9-]` char in the absolute cwd collapses
+        // to `-`, matching the Claude Code CLI's on-disk naming. Restricting
+        // to just `/` produced encoded names that didn't exist on disk for
+        // any cwd containing `_` (e.g. `Foo_Bar`) or `.` (e.g. `.app`),
+        // breaking fork, MEMORY.md render, and `claude_session_exists`.
+        let cwd = Path::new("/Users/x/Projects/Seren_Projects/seren-bounty");
+        assert_eq!(
+            encode_project_dir(cwd),
+            "-Users-x-Projects-Seren-Projects-seren-bounty"
+        );
+
+        let dotted = Path::new("/Users/x/.claude/plugins");
+        assert_eq!(encode_project_dir(dotted), "-Users-x--claude-plugins");
+
+        let plain = Path::new("/Users/x/Projects/seren-desktop");
+        assert_eq!(encode_project_dir(plain), "-Users-x-Projects-seren-desktop");
     }
 
     #[test]
