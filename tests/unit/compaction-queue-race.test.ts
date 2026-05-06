@@ -87,10 +87,14 @@ describe("#1623 — compactAgentConversation transfers pendingPrompts to new ses
     );
   });
 
-  it("compactAndRetry retries the failed prompt itself, after compactAgentConversation returns (#1757)", () => {
+  it("compactAndRetry retries the failed prompt itself, after compactAgentConversation returns (#1757 / #1829)", () => {
     // The failed-prompt retry path must still work — it IS a real retry —
     // but the dispatch lives in compactAndRetry, not compactAgentConversation.
     // Single responsibility per function, no double-dispatch.
+    // Per #1829: the dispatched prompt is `retryPrompt` (lastPrompt with the
+    // post-compaction prepend applied via consumeCompactionPrepend); the
+    // structural invariant is "exactly one sendPrompt under the lastPrompt
+    // gate", not the literal variable name.
     const fnStart = agentStoreSource.indexOf("async compactAndRetry(");
     expect(fnStart, "compactAndRetry must exist").toBeGreaterThan(0);
     const fnEnd = agentStoreSource.indexOf("\n  },", fnStart);
@@ -98,7 +102,7 @@ describe("#1623 — compactAgentConversation transfers pendingPrompts to new ses
 
     // The retry sendPrompt is in compactAndRetry's body, gated on lastPrompt.
     expect(fnBody).toMatch(
-      /if \(lastPrompt\) \{[\s\S]*?providerService\.sendPrompt\(newSessionId,\s*lastPrompt\)/,
+      /if \(lastPrompt\) \{[\s\S]*?providerService\.sendPrompt\(newSessionId,/,
     );
     // And compactAndRetry's compactAgentConversation call passes neither
     // a retry prompt nor a positional sentinel for one.

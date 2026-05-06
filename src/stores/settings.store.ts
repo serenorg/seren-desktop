@@ -56,12 +56,19 @@ export interface Settings {
   autoCompactThreshold: number;
   autoCompactPreserveMessages: number;
   /**
-   * Use synthetic-transcript pre-warm for predictive standby promotion (#1713).
-   * When true, the standby's prior assistant turn is the real prior assistant
-   * turn rather than a seed acknowledgement, so referential follow-ups
-   * ("This is done.", "yes") resolve correctly. Falls back to the seed-prompt
-   * path if the CLI rejects the synthetic file or schema-drift is detected.
-   * Off at first ship; flipped on after schema-drift gate proves stable.
+   * Use synthetic-transcript pre-warm for compaction (#1713 / #1829). When
+   * true, both predictive AND reactive compaction splice the structured
+   * summary into a synthetic JSONL on disk and resume the new session
+   * against that — the prior assistant turn is the real prior assistant
+   * turn, no model-visible acknowledgement round-trip in the JSONL.
+   * Falls back to the passive-prepend path on any per-call failure (CLI
+   * rejects file, schema drift, parent JSONL unreadable). Default-on for
+   * claude-code; non-claude-code agents always use passive prepend.
+   * The runtime self-check in `agent-registry.mjs` emits
+   * `provider://synthetic-transcript-schema-drift` after a CLI auto-update
+   * that breaks the splice; the agent.store consumer flips this flag to
+   * false at runtime so subsequent compactions use passive prepend until
+   * the schema is reconciled.
    */
   compactSyntheticTranscript: boolean;
 
@@ -197,7 +204,7 @@ const DEFAULT_SETTINGS: Settings = {
   autoCompactEnabled: true,
   autoCompactThreshold: 85,
   autoCompactPreserveMessages: 10,
-  compactSyntheticTranscript: false,
+  compactSyntheticTranscript: true,
   // Editor
   editorFontSize: 14,
   editorTabSize: 2,
