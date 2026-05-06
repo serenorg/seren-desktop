@@ -1619,7 +1619,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     const before = buffer();
     if (!before || before.status !== "running") {
       console.warn(
-        "[TerminalBuffer] skill drop rejected — buffer not running",
+        "[TerminalBuffer] skill drop rejected - buffer not running",
         { id: before?.id, status: before?.status },
       );
       return;
@@ -1627,13 +1627,16 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     const text = await skillPromptTextFromDrag(payload);
     if (!text) {
       console.warn(
-        "[TerminalBuffer] skill drop rejected — empty SKILL.md content",
+        "[TerminalBuffer] skill drop rejected - empty SKILL.md content",
         { id: payload.id, slug: payload.slug },
       );
       return;
     }
+    // Drop the write if the user navigated to another pane mid-fetch;
+    // otherwise the SKILL.md ends up in whatever PTY happens to be
+    // active now.
     const after = buffer();
-    if (!after || after.status !== "running") return;
+    if (!after || after.status !== "running" || after.id !== before.id) return;
     surfaceRef?.focus();
     await writePromptText(text);
   };

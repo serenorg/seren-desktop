@@ -119,6 +119,56 @@ async function readSkillMarkdown(
   return skills.fetchContent(skill);
 }
 
+async function ensureInstalled(
+  skill: Skill | InstalledSkill,
+): Promise<InstalledSkill | null> {
+  if ("path" in skill) return skill;
+
+  const existing = skillsStore.installed.find((s) => s.slug === skill.slug);
+  if (existing) return existing;
+
+  const content = await skills.fetchContent(skill);
+  if (!content) return null;
+  return skillsStore.install(skill, content, "seren");
+}
+
+export interface AttachSkillResult {
+  skill: InstalledSkill;
+  installed: boolean;
+  alreadyAttached: boolean;
+}
+
+export async function attachSkillFromDrag(
+  payload: SkillDragPayload,
+  projectRoot: string | null,
+  threadId: string | null,
+): Promise<AttachSkillResult | null> {
+  if (!projectRoot || !threadId) return null;
+
+  const resolved = resolveSkill(payload);
+  if (!resolved) return null;
+
+  const wasInstalled = "path" in resolved;
+  const installed = await ensureInstalled(resolved);
+  if (!installed) return null;
+
+  const before = skillsStore.getThreadSkills(projectRoot, threadId);
+  const alreadyAttached = before.some((s) => s.path === installed.path);
+  if (!alreadyAttached) {
+    await skillsStore.attachSkillToThread(
+      projectRoot,
+      threadId,
+      installed.path,
+    );
+  }
+
+  return {
+    skill: installed,
+    installed: !wasInstalled,
+    alreadyAttached,
+  };
+}
+
 function fenceLongerThanContent(content: string): string {
   let longest = 0;
   for (const match of content.matchAll(/`{3,}/g)) {

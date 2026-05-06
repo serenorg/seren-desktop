@@ -220,6 +220,34 @@ describe("clearCacheAndRefresh runs full sync (#1558)", () => {
   });
 });
 
+describe("setAvailableCatalog merge keeps bulk-fetched entries", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("does not drop entries that are absent from a paginated update", async () => {
+    const bulk = [
+      { id: "seren:a", slug: "a", name: "A", description: "", source: "seren" as const, sourceUrl: "seren-skills:a", tags: [] },
+      { id: "seren:b", slug: "b", name: "B", description: "", source: "seren" as const, sourceUrl: "seren-skills:b", tags: [] },
+      { id: "seren:c", slug: "c", name: "C", description: "", source: "seren" as const, sourceUrl: "seren-skills:c", tags: [] },
+    ];
+    mockSkillsService.fetchAllSkills.mockResolvedValue(bulk);
+    mockSkillsService.listAllInstalled.mockResolvedValue([]);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.refresh(true);
+    expect(skillsStore.available).toHaveLength(3);
+
+    skillsStore.setAvailableCatalog([bulk[0], bulk[1]]);
+    expect(skillsStore.available.map((s) => s.id).sort()).toEqual([
+      "seren:a",
+      "seren:b",
+      "seren:c",
+    ]);
+  });
+});
+
 describe("backfill triggers for slug/dirName mismatch (#1558)", () => {
   beforeEach(() => {
     vi.clearAllMocks();

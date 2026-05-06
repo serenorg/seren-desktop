@@ -17,6 +17,7 @@ import {
 import { createStore } from "solid-js/store";
 import { AgentPermissionDialog } from "@/components/agent/AgentPermissionDialog";
 import { DiffProposalDialog } from "@/components/agent/DiffProposalDialog";
+import { SkillsStrip } from "@/components/chat/SkillsStrip";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { isAuthError, isLikelyAuthError } from "@/lib/auth-errors";
@@ -45,10 +46,10 @@ import {
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
+  attachSkillFromDrag,
   canAcceptSkillDrop,
   setCurrentSkillDragPayload,
   skillDragPayload,
-  skillPromptTextFromDrag,
 } from "@/lib/skill-drag";
 import {
   appendInputHistory,
@@ -268,29 +269,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     handleAttachImages();
   };
 
-  const insertIntoInput = (text: string) => {
-    const target = inputRef;
-    const current = input();
-    const start = target?.selectionStart ?? current.length;
-    const end = target?.selectionEnd ?? current.length;
-    const prefix = current.slice(0, start);
-    const suffix = current.slice(end);
-    const before = prefix && !prefix.endsWith("\n") ? `${prefix}\n\n` : prefix;
-    const after = suffix && !suffix.startsWith("\n") ? `\n\n${suffix}` : suffix;
-    const next = `${before}${text}${after}`;
-    setInput(next);
-    requestAnimationFrame(() => {
-      inputRef?.focus();
-      const cursor = before.length + text.length;
-      inputRef?.setSelectionRange(cursor, cursor);
-    });
-  };
-
   const handleSkillDragOver = (event: DragEvent) => {
     if (!canAcceptSkillDrop(event)) return;
     event.preventDefault();
     if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = hasSession() ? "copy" : "none";
+      event.dataTransfer.dropEffect = "copy";
     }
   };
 
@@ -301,10 +284,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     // textarea never falls back to inserting the raw `seren-skill:{...}` text.
     event.preventDefault();
     setCurrentSkillDragPayload(null);
-    if (!hasSession()) return;
-    const text = await skillPromptTextFromDrag(payload);
-    if (!text) return;
-    insertIntoInput(text);
+    const projectRoot = fileTreeState.rootPath;
+    const threadId = activeAgentThread()?.id ?? null;
+    if (!projectRoot || !threadId) return;
+    try {
+      await attachSkillFromDrag(payload, projectRoot, threadId);
+    } catch (err) {
+      console.error("[AgentChat] Failed to attach skill:", err);
+    }
   };
   const onSetChatInput = (event: Event) => {
     if (!isPaneActive()) return;
@@ -1816,9 +1803,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       {/* Input Area */}
       <Show when={hasSession()}>
-        <div class="shrink-0 p-4 border-t border-surface-2 bg-surface-1">
+        <div class="shrink-0 border-t border-surface-2 bg-surface-1">
+          <SkillsStrip
+            projectRoot={fileTreeState.rootPath}
+            threadId={activeAgentThread()?.id ?? null}
+          />
           <form
-            class="flex flex-col gap-2"
+            class="flex flex-col gap-2 px-4 pb-4 pt-1.5"
             onSubmit={(e) => {
               e.preventDefault();
               sendMessage();

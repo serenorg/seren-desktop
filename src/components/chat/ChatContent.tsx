@@ -16,6 +16,7 @@ import {
 } from "solid-js";
 import { createStore } from "solid-js/store";
 import { SignIn } from "@/components/auth/SignIn";
+import { SkillsStrip } from "@/components/chat/SkillsStrip";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { DepositModal } from "@/components/wallet/DepositModal";
@@ -36,10 +37,10 @@ import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
+  attachSkillFromDrag,
   canAcceptSkillDrop,
   setCurrentSkillDragPayload,
   skillDragPayload,
-  skillPromptTextFromDrag,
 } from "@/lib/skill-drag";
 import { appendInputHistory, getInputHistory } from "@/lib/tauri-bridge";
 import { catalog, type Publisher } from "@/services/catalog";
@@ -499,24 +500,6 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     inputRef?.focus();
   };
 
-  const insertIntoInput = (text: string) => {
-    const target = inputRef;
-    const current = input();
-    const start = target?.selectionStart ?? current.length;
-    const end = target?.selectionEnd ?? current.length;
-    const prefix = current.slice(0, start);
-    const suffix = current.slice(end);
-    const before = prefix && !prefix.endsWith("\n") ? `${prefix}\n\n` : prefix;
-    const after = suffix && !suffix.startsWith("\n") ? `\n\n${suffix}` : suffix;
-    const next = `${before}${text}${after}`;
-    setInput(next);
-    requestAnimationFrame(() => {
-      inputRef?.focus();
-      const cursor = before.length + text.length;
-      inputRef?.setSelectionRange(cursor, cursor);
-    });
-  };
-
   const handleSkillDragOver = (event: DragEvent) => {
     if (!canAcceptSkillDrop(event)) return;
     event.preventDefault();
@@ -530,9 +513,14 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     if (!payload) return;
     event.preventDefault();
     setCurrentSkillDragPayload(null);
-    const text = await skillPromptTextFromDrag(payload);
-    if (!text) return;
-    insertIntoInput(text);
+    const projectRoot = fileTreeState.rootPath;
+    const threadId = conversationId() ?? null;
+    if (!projectRoot || !threadId) return;
+    try {
+      await attachSkillFromDrag(payload, projectRoot, threadId);
+    } catch (err) {
+      console.error("[ChatContent] Failed to attach skill:", err);
+    }
   };
 
   const dismissSuggestions = () => {
@@ -1479,9 +1467,13 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
           )}
         </Show>
 
-        <div class="shrink-0 px-4 py-3.5 border-t border-surface-2 bg-surface-1">
+        <div class="shrink-0 border-t border-surface-2 bg-surface-1">
+          <SkillsStrip
+            projectRoot={fileTreeState.rootPath}
+            threadId={conversationId() ?? null}
+          />
           <form
-            class="flex flex-col gap-2"
+            class="flex flex-col gap-2 px-4 pb-3.5 pt-1.5"
             onSubmit={(event) => {
               event.preventDefault();
               sendMessage();

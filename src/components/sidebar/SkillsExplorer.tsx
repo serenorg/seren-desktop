@@ -1,5 +1,5 @@
-// ABOUTME: Skills management panel with browse/install catalog and installed skills management.
-// ABOUTME: Renders inside SlidePanel with tabs for Installed and Browse, inline detail accordion.
+// ABOUTME: Skills management panel with unified installed-and-catalog list.
+// ABOUTME: Renders inside SlidePanel with chip filters (All / Installed / Needs sync) and an inline detail accordion.
 
 import { createInfiniteQuery } from "@tanstack/solid-query";
 import { invoke } from "@tauri-apps/api/core";
@@ -43,7 +43,7 @@ interface SkillsExplorerProps {
   panelMode?: boolean;
 }
 
-type Tab = "installed" | "browse";
+type Filter = "all" | "installed" | "needs-sync";
 
 const SKILL_CREATOR_SLUG = "skill-creator";
 const SKILL_CREATOR_SOURCE_URL = `seren-skills:${SKILL_CREATOR_SLUG}`;
@@ -58,7 +58,7 @@ function normalizeSkillSlug(raw: string): string {
 }
 
 export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
-  const [activeTab, setActiveTab] = createSignal<Tab>("browse");
+  const [activeFilter, setActiveFilter] = createSignal<Filter>("all");
   const [searchQuery, setSearchQuery] = createSignal("");
   const [expandedSkillId, setExpandedSkillId] = createSignal<string | null>(
     null,
@@ -92,26 +92,60 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   // ── Derived values ──────────────────────────────
 
-  const filteredInstalled = () => {
-    const q = searchQuery().toLowerCase().trim();
-    if (!q) return skillsStore.installed;
-    return skillsStore.installed.filter(
-      (s) =>
-        (s.displayName ?? s.name).toLowerCase().includes(q) ||
-        s.name.toLowerCase().includes(q) ||
-        (s.description ?? "").toLowerCase().includes(q) ||
-        s.tags.some((t) => t.toLowerCase().includes(q)),
+  const syncStatusFor = (skill: InstalledSkill) => syncStatuses()[skill.path];
+
+  const skillNeedsSync = (skill: InstalledSkill): boolean => {
+    const status = syncStatusFor(skill);
+    if (!status) return false;
+    return (
+      status.updateAvailable ||
+      status.hasLocalChanges ||
+      status.state === "bootstrap-required"
     );
   };
 
-  const filteredBrowse = () => {
-    return skillsStore.available;
+  const matchesQuery = (skill: Skill | InstalledSkill, q: string): boolean => {
+    if (!q) return true;
+    return (
+      (skill.displayName ?? skill.name).toLowerCase().includes(q) ||
+      skill.name.toLowerCase().includes(q) ||
+      skill.slug.toLowerCase().includes(q) ||
+      (skill.description ?? "").toLowerCase().includes(q) ||
+      skill.tags.some((t) => t.toLowerCase().includes(q)) ||
+      (skill.author?.toLowerCase().includes(q) ?? false)
+    );
   };
 
-  const syncStatusFor = (skill: InstalledSkill) => syncStatuses()[skill.path];
+  const installedRows = (): InstalledSkill[] => {
+    const q = searchQuery().toLowerCase().trim();
+    const filter = activeFilter();
+    return skillsStore.installed
+      .filter((skill) => {
+        if (!matchesQuery(skill, q)) return false;
+        if (filter === "needs-sync") return skillNeedsSync(skill);
+        return true;
+      })
+      .slice()
+      .sort((a, b) =>
+        (a.displayName ?? a.name).localeCompare(b.displayName ?? b.name),
+      );
+  };
+
+  const availableRows = (): Skill[] => {
+    if (activeFilter() !== "all") return [];
+    const installedSlugs = new Set(skillsStore.installed.map((s) => s.slug));
+    return skillsStore.available.filter(
+      (skill) => !installedSlugs.has(skill.slug),
+    );
+  };
+
+  const totalRowsToShow = () => installedRows().length + availableRows().length;
+  const needsSyncCount = () =>
+    skillsStore.installed.filter(skillNeedsSync).length;
+
   const isLoading = () =>
     skillsStore.isLoading ||
-    (activeTab() === "browse" &&
+    (activeFilter() === "all" &&
       availableSkillsQuery.isLoading &&
       skillsStore.available.length === 0);
   const catalogError = () => {
@@ -250,7 +284,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   });
 
   createEffect(() => {
-    if (activeTab() !== "browse") return;
+    if (activeFilter() !== "all") return;
     const element = contentRef;
     if (!element) return;
     if (
@@ -263,7 +297,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   });
 
   const maybeLoadNextBrowsePage = (element: HTMLElement) => {
-    if (activeTab() !== "browse") return;
+    if (activeFilter() !== "all") return;
     if (!availableSkillsQuery.hasNextPage) return;
     if (availableSkillsQuery.isFetchingNextPage) return;
     if (
@@ -559,7 +593,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       await skillsStore.refreshInstalled();
       setNewSkillName("");
       setShowCreateDialog(false);
-      setActiveTab("installed");
+      setActiveFilter("installed");
     } catch (err) {
       console.error("[SkillsExplorer] Failed to create skill:", err);
     }
@@ -610,7 +644,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       await loadSyncStatus(installed);
       setInstallUrl("");
       setShowUrlDialog(false);
-      setActiveTab("installed");
+      setActiveFilter("installed");
     } catch (err) {
       console.error("[SkillsExplorer] Failed to install from URL:", err);
     } finally {
@@ -669,7 +703,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       }}
     >
       {/* Header */}
-      <div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+      <div
+        class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0"
+        classList={{ "pr-12": !!props.panelMode }}
+      >
         <div class="flex items-center gap-2">
           <svg
             width="14"
@@ -828,34 +865,49 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         </div>
       </div>
 
-      {/* Tab switcher */}
-      <div class="flex px-4 py-2 gap-0 shrink-0">
+      {/* Filter chips */}
+      <div class="flex px-4 py-2 gap-1.5 shrink-0 flex-wrap">
         <button
           type="button"
-          class="flex-1 py-1.5 text-[12px] font-medium rounded-l-md border border-border transition-colors cursor-pointer"
+          class="px-2.5 py-1 text-[11px] font-medium rounded-full border transition-colors cursor-pointer"
           classList={{
             "bg-primary/[0.12] text-foreground border-primary/30":
-              activeTab() === "installed",
-            "bg-transparent text-muted-foreground hover:bg-surface-2":
-              activeTab() !== "installed",
+              activeFilter() === "all",
+            "bg-transparent text-muted-foreground border-border hover:bg-surface-2":
+              activeFilter() !== "all",
           }}
-          onClick={() => setActiveTab("installed")}
+          onClick={() => setActiveFilter("all")}
+        >
+          All
+        </button>
+        <button
+          type="button"
+          class="px-2.5 py-1 text-[11px] font-medium rounded-full border transition-colors cursor-pointer"
+          classList={{
+            "bg-primary/[0.12] text-foreground border-primary/30":
+              activeFilter() === "installed",
+            "bg-transparent text-muted-foreground border-border hover:bg-surface-2":
+              activeFilter() !== "installed",
+          }}
+          onClick={() => setActiveFilter("installed")}
         >
           Installed ({skillsStore.installed.length})
         </button>
-        <button
-          type="button"
-          class="flex-1 py-1.5 text-[12px] font-medium rounded-r-md border border-l-0 border-border transition-colors cursor-pointer"
-          classList={{
-            "bg-primary/[0.12] text-foreground border-primary/30":
-              activeTab() === "browse",
-            "bg-transparent text-muted-foreground hover:bg-surface-2":
-              activeTab() !== "browse",
-          }}
-          onClick={() => setActiveTab("browse")}
-        >
-          Browse ({skillsStore.available.length})
-        </button>
+        <Show when={needsSyncCount() > 0}>
+          <button
+            type="button"
+            class="px-2.5 py-1 text-[11px] font-medium rounded-full border transition-colors cursor-pointer"
+            classList={{
+              "bg-warning/15 text-warning border-warning/40":
+                activeFilter() === "needs-sync",
+              "bg-transparent text-warning/80 border-warning/30 hover:bg-warning/10":
+                activeFilter() !== "needs-sync",
+            }}
+            onClick={() => setActiveFilter("needs-sync")}
+          >
+            Needs sync ({needsSyncCount()})
+          </button>
+        </Show>
       </div>
 
       <Show when={updateCount() > 0 || localChangesCount() > 0}>
@@ -924,7 +976,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         class="flex-1 overflow-y-auto"
         onScroll={(event) => maybeLoadNextBrowsePage(event.currentTarget)}
       >
-        <Show when={activeTab() === "browse" && catalogError()}>
+        <Show when={activeFilter() === "all" && catalogError()}>
           {(message) => (
             <div class="mx-4 mt-2 px-3 py-2 bg-destructive/10 border border-destructive/30 rounded-md text-[12px] text-destructive">
               {message()}
@@ -939,177 +991,474 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </div>
         </Show>
 
-        {/* Installed tab */}
-        <Show when={!isLoading() && activeTab() === "installed"}>
-          <Show
-            when={filteredInstalled().length > 0}
-            fallback={
-              <div class="px-4 py-8 text-center text-[13px] text-muted-foreground">
-                {searchQuery() ? "No matching skills" : "No skills installed"}
-              </div>
-            }
-          >
-            <div class="py-1">
-              <For each={filteredInstalled()}>
-                {(skill) => (
+        {/* Empty state for the unified list */}
+        <Show when={!isLoading() && totalRowsToShow() === 0}>
+          <div class="px-4 py-8 text-center text-[13px] text-muted-foreground">
+            <Show
+              when={activeFilter() === "needs-sync"}
+              fallback={
+                searchQuery()
+                  ? "No matching skills"
+                  : activeFilter() === "installed"
+                    ? "No skills installed"
+                    : "No skills available"
+              }
+            >
+              All installed skills are up to date
+            </Show>
+          </div>
+        </Show>
+
+        {/* Installed rows (always render when present, regardless of filter) */}
+        <Show when={!isLoading() && installedRows().length > 0}>
+          <Show when={activeFilter() === "all"}>
+            <div class="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70">
+              Installed
+            </div>
+          </Show>
+          <div class="py-1">
+            <For each={installedRows()}>
+              {(skill) => (
+                <div class="border-b border-border/50 last:border-b-0">
+                  {/* Card */}
+                  <div
+                    class="flex items-start gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-surface-2/50"
+                    classList={{
+                      "bg-surface-2/30": expandedSkillId() === skill.id,
+                    }}
+                    onClick={() => toggleDetail(skill.id)}
+                  >
+                    {/* Toggle */}
+                    <button
+                      type="button"
+                      class="relative w-8 h-[18px] rounded-full transition-colors duration-200 shrink-0 mt-0.5"
+                      classList={{
+                        "bg-success": skillsStore.isEnabled(skill.id),
+                        "bg-muted-foreground/30": !skillsStore.isEnabled(
+                          skill.id,
+                        ),
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        skillsStore.toggleEnabled(skill.id);
+                      }}
+                      role="switch"
+                      aria-checked={skillsStore.isEnabled(skill.id)}
+                      aria-label={
+                        skillsStore.isEnabled(skill.id)
+                          ? "Disable skill"
+                          : "Enable skill"
+                      }
+                    >
+                      <span
+                        class="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform duration-200"
+                        classList={{
+                          "left-[16px]": skillsStore.isEnabled(skill.id),
+                          "left-[2px]": !skillsStore.isEnabled(skill.id),
+                        }}
+                      />
+                    </button>
+
+                    {/* Info */}
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="text-[13px] font-medium text-foreground truncate">
+                          {skill.displayName ?? skill.name}
+                        </span>
+                        <span
+                          class="shrink-0 px-1 py-0 text-[10px] font-semibold rounded bg-surface-3 text-muted-foreground"
+                          title={scopeTitle(skill.scope)}
+                        >
+                          {scopeLabel(skill.scope)}
+                        </span>
+                        <Show when={syncStatusLabel(syncStatusFor(skill))}>
+                          {(label) => (
+                            <span
+                              class={`shrink-0 px-1.5 py-0 text-[10px] font-semibold rounded ${syncStatusClasses(
+                                syncStatusFor(skill),
+                              )}`}
+                            >
+                              {label()}
+                            </span>
+                          )}
+                        </Show>
+                        <Show when={syncLoading()[skill.path]}>
+                          <span class="text-[10px] text-muted-foreground">
+                            Checking...
+                          </span>
+                        </Show>
+                      </div>
+                      <Show when={skill.description}>
+                        <p class="m-0 mt-0.5 text-[12px] text-muted-foreground truncate">
+                          {skill.description}
+                        </p>
+                      </Show>
+                      <Show when={skill.version || skill.author}>
+                        <p class="m-0 mt-0.5 text-[11px] text-muted-foreground/60">
+                          {skill.author}
+                          {skill.author && skill.version ? " · " : ""}
+                          {skill.version ? `v${skill.version}` : ""}
+                        </p>
+                      </Show>
+                    </div>
+
+                    {/* Overflow menu */}
+                    <div class="relative shrink-0">
+                      <button
+                        type="button"
+                        class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-colors hover:bg-surface-3 hover:text-foreground"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOverflowMenuId(
+                            overflowMenuId() === skill.id ? null : skill.id,
+                          );
+                        }}
+                        aria-label="Skill actions"
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          role="img"
+                          aria-label="More"
+                        >
+                          <circle cx="8" cy="4" r="1" fill="currentColor" />
+                          <circle cx="8" cy="8" r="1" fill="currentColor" />
+                          <circle cx="8" cy="12" r="1" fill="currentColor" />
+                        </svg>
+                      </button>
+                      <Show when={overflowMenuId() === skill.id}>
+                        <div class="absolute right-0 top-7 min-w-[160px] bg-surface-2 border border-border rounded-lg shadow-[var(--shadow-lg)] z-50 py-1 animate-[fadeIn_100ms_ease]">
+                          <button
+                            type="button"
+                            class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOverflowMenuId(null);
+                              toggleDetail(skill.id);
+                            }}
+                          >
+                            View Details
+                          </button>
+                          <button
+                            type="button"
+                            class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOverflowMenuId(null);
+                              handleEditInEditor(skill.path);
+                            }}
+                          >
+                            Edit in Editor
+                          </button>
+                          <Show when={isUpstreamManagedSkill(skill)}>
+                            <button
+                              type="button"
+                              class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOverflowMenuId(null);
+                                void handleRefreshInstalledSkill(skill);
+                              }}
+                            >
+                              Refresh From Upstream
+                            </button>
+                          </Show>
+                          <button
+                            type="button"
+                            class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-destructive cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOverflowMenuId(null);
+                              handleUninstall(skill);
+                            }}
+                          >
+                            Uninstall
+                          </button>
+                        </div>
+                      </Show>
+                    </div>
+                  </div>
+
+                  {/* Detail accordion */}
+                  <Show when={expandedSkillId() === skill.id}>
+                    <div class="px-4 pb-3 bg-surface-2/20 border-t border-border/30">
+                      <div class="pt-2.5">
+                        {/* Tags */}
+                        <Show when={skill.tags.length > 0}>
+                          <div class="flex flex-wrap gap-1 mb-2">
+                            <For each={skill.tags}>
+                              {(tag) => (
+                                <span class="px-1.5 py-0.5 bg-surface-3 rounded text-[10px] text-muted-foreground">
+                                  {tag}
+                                </span>
+                              )}
+                            </For>
+                          </div>
+                        </Show>
+
+                        <Show when={isUpstreamManagedSkill(skill)}>
+                          <div class="mb-2 p-2.5 bg-surface-1 border border-border rounded-md text-[11px] text-muted-foreground">
+                            <div class="flex items-center justify-between gap-2">
+                              <span class="font-medium text-foreground">
+                                Upstream sync
+                              </span>
+                              <button
+                                type="button"
+                                class="px-2 py-1 bg-transparent border border-border text-muted-foreground rounded-md text-[11px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground disabled:opacity-40"
+                                onClick={() =>
+                                  void handleRefreshInstalledSkill(skill)
+                                }
+                                disabled={
+                                  actionInProgress() === skill.id ||
+                                  syncLoading()[skill.path]
+                                }
+                              >
+                                {actionInProgress() === skill.id
+                                  ? "Refreshing..."
+                                  : "Refresh from upstream"}
+                              </button>
+                            </div>
+                            <div class="mt-2">
+                              Local revision:{" "}
+                              <span class="text-foreground">
+                                {syncStatusFor(skill)?.syncedRevision?.slice(
+                                  0,
+                                  7,
+                                ) || "unknown"}
+                              </span>
+                            </div>
+                            <div class="mt-1">
+                              Remote revision:{" "}
+                              <span class="text-foreground">
+                                {syncStatusFor(skill)?.remoteRevision
+                                  ?.shortSha || "unavailable"}
+                              </span>
+                            </div>
+                            <Show
+                              when={
+                                syncStatusFor(skill)?.remoteRevision?.message
+                              }
+                            >
+                              <div class="mt-1">
+                                {syncStatusFor(skill)?.remoteRevision?.message}
+                              </div>
+                            </Show>
+                            <Show
+                              when={syncStatusFor(skill)?.remoteRevision?.url}
+                            >
+                              <div class="mt-2">
+                                <button
+                                  type="button"
+                                  class="p-0 bg-transparent border-none text-[11px] text-primary cursor-pointer hover:underline"
+                                  onClick={() =>
+                                    void openExternalLink(
+                                      syncStatusFor(skill)?.remoteRevision
+                                        ?.url || "",
+                                    )
+                                  }
+                                >
+                                  Open upstream commit
+                                </button>
+                              </div>
+                            </Show>
+                            <Show
+                              when={
+                                syncStatusFor(skill)?.remoteRevision
+                                  ?.changedFiles.length
+                              }
+                            >
+                              <div class="mt-2">
+                                <div class="font-medium text-foreground">
+                                  Upstream changed files
+                                </div>
+                                <ul class="m-0 mt-1 pl-4">
+                                  <For
+                                    each={syncStatusFor(
+                                      skill,
+                                    )?.remoteRevision?.changedFiles.slice(0, 6)}
+                                  >
+                                    {(file) => <li>{file}</li>}
+                                  </For>
+                                </ul>
+                              </div>
+                            </Show>
+                            <Show
+                              when={
+                                syncStatusFor(skill)?.changedLocalFiles.length
+                              }
+                            >
+                              <div class="mt-2">
+                                <div class="font-medium text-destructive">
+                                  Local file changes
+                                </div>
+                                <ul class="m-0 mt-1 pl-4 text-destructive">
+                                  <For
+                                    each={syncStatusFor(
+                                      skill,
+                                    )?.changedLocalFiles.slice(0, 6)}
+                                  >
+                                    {(file) => <li>{file}</li>}
+                                  </For>
+                                </ul>
+                              </div>
+                            </Show>
+                            <Show
+                              when={
+                                syncStatusFor(skill)?.missingManagedFiles.length
+                              }
+                            >
+                              <div class="mt-2">
+                                <div class="font-medium text-destructive">
+                                  Missing managed files
+                                </div>
+                                <ul class="m-0 mt-1 pl-4 text-destructive">
+                                  <For
+                                    each={syncStatusFor(
+                                      skill,
+                                    )?.missingManagedFiles.slice(0, 6)}
+                                  >
+                                    {(file) => <li>{file}</li>}
+                                  </For>
+                                </ul>
+                              </div>
+                            </Show>
+                            <Show
+                              when={getAffectedLiveThreadIds(skill).length > 0}
+                            >
+                              <div class="mt-2 text-warning">
+                                {getAffectedLiveThreadIds(skill).length} live
+                                agent thread
+                                {getAffectedLiveThreadIds(skill).length === 1
+                                  ? ""
+                                  : "s"}{" "}
+                                currently reference this skill.
+                              </div>
+                            </Show>
+                            <Show when={syncStatusFor(skill)?.error}>
+                              <div class="mt-2 text-destructive">
+                                {syncStatusFor(skill)?.error}
+                              </div>
+                            </Show>
+                          </div>
+                        </Show>
+
+                        {/* Content preview */}
+                        <Show when={detailLoading()}>
+                          <div class="py-3 text-[12px] text-muted-foreground">
+                            Loading content...
+                          </div>
+                        </Show>
+                        <Show when={!detailLoading() && detailContent()}>
+                          <pre class="m-0 max-h-[200px] overflow-y-auto p-2.5 bg-surface-1 border border-border rounded-md text-[11px] text-muted-foreground whitespace-pre-wrap font-mono leading-relaxed">
+                            {detailContent()}
+                          </pre>
+                        </Show>
+
+                        {/* Actions */}
+                        <div class="flex items-center gap-2 mt-2.5">
+                          <button
+                            type="button"
+                            class="px-3 py-1 bg-transparent border border-destructive/40 text-destructive rounded-md text-[12px] cursor-pointer transition-colors hover:bg-destructive/10 disabled:opacity-40"
+                            onClick={() => handleUninstall(skill)}
+                            disabled={actionInProgress() === skill.id}
+                          >
+                            {actionInProgress() === skill.id
+                              ? "Removing..."
+                              : "Uninstall"}
+                          </button>
+                          <button
+                            type="button"
+                            class="px-3 py-1 bg-transparent border border-border text-muted-foreground rounded-md text-[12px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
+                            onClick={() => handleEditInEditor(skill.path)}
+                          >
+                            Edit in Editor
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </Show>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
+
+        {/* Available rows (catalog skills not yet installed) */}
+        <Show when={!isLoading() && availableRows().length > 0}>
+          <Show when={installedRows().length > 0}>
+            <div class="mx-4 my-1 border-t border-border/40" />
+            <div class="px-4 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70">
+              Catalog
+            </div>
+          </Show>
+          <div class="py-1">
+            <For each={availableRows()}>
+              {(skill) => {
+                const installed = () => skillsStore.isInstalled(skill.id);
+                const installing = () => actionInProgress() === skill.id;
+
+                return (
                   <div class="border-b border-border/50 last:border-b-0">
                     {/* Card */}
                     <div
-                      class="flex items-start gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-surface-2/50"
+                      draggable={true}
+                      class="flex items-start gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-surface-2/50 select-none active:cursor-grabbing"
                       classList={{
                         "bg-surface-2/30": expandedSkillId() === skill.id,
                       }}
                       onClick={() => toggleDetail(skill.id)}
+                      onDragStart={(event) =>
+                        handleSkillDragStart(event, skill)
+                      }
+                      onDragEnd={handleSkillDragEnd}
                     >
-                      {/* Toggle */}
-                      <button
-                        type="button"
-                        class="relative w-8 h-[18px] rounded-full transition-colors duration-200 shrink-0 mt-0.5"
-                        classList={{
-                          "bg-success": skillsStore.isEnabled(skill.id),
-                          "bg-muted-foreground/30": !skillsStore.isEnabled(
-                            skill.id,
-                          ),
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          skillsStore.toggleEnabled(skill.id);
-                        }}
-                        role="switch"
-                        aria-checked={skillsStore.isEnabled(skill.id)}
-                        aria-label={
-                          skillsStore.isEnabled(skill.id)
-                            ? "Disable skill"
-                            : "Enable skill"
-                        }
-                      >
-                        <span
-                          class="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform duration-200"
-                          classList={{
-                            "left-[16px]": skillsStore.isEnabled(skill.id),
-                            "left-[2px]": !skillsStore.isEnabled(skill.id),
-                          }}
-                        />
-                      </button>
-
                       {/* Info */}
                       <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2">
-                          <span class="text-[13px] font-medium text-foreground truncate">
-                            {skill.displayName ?? skill.name}
-                          </span>
-                          <span
-                            class="shrink-0 px-1 py-0 text-[10px] font-semibold rounded bg-surface-3 text-muted-foreground"
-                            title={scopeTitle(skill.scope)}
-                          >
-                            {scopeLabel(skill.scope)}
-                          </span>
-                          <Show when={syncStatusLabel(syncStatusFor(skill))}>
-                            {(label) => (
-                              <span
-                                class={`shrink-0 px-1.5 py-0 text-[10px] font-semibold rounded ${syncStatusClasses(
-                                  syncStatusFor(skill),
-                                )}`}
-                              >
-                                {label()}
-                              </span>
-                            )}
-                          </Show>
-                          <Show when={syncLoading()[skill.path]}>
-                            <span class="text-[10px] text-muted-foreground">
-                              Checking...
-                            </span>
-                          </Show>
-                        </div>
+                        <span class="text-[13px] font-medium text-foreground truncate block">
+                          {skill.displayName ?? skill.name}
+                        </span>
                         <Show when={skill.description}>
                           <p class="m-0 mt-0.5 text-[12px] text-muted-foreground truncate">
                             {skill.description}
                           </p>
                         </Show>
-                        <Show when={skill.version || skill.author}>
-                          <p class="m-0 mt-0.5 text-[11px] text-muted-foreground/60">
-                            {skill.author}
-                            {skill.author && skill.version ? " · " : ""}
-                            {skill.version ? `v${skill.version}` : ""}
-                          </p>
-                        </Show>
+                        <div class="flex items-center gap-1.5 mt-0.5">
+                          <Show when={skill.author || skill.source}>
+                            <span class="text-[11px] text-muted-foreground/60">
+                              {skill.author || skill.source}
+                            </span>
+                          </Show>
+                          <Show when={skill.tags.length > 0}>
+                            <span class="text-[11px] text-muted-foreground/40">
+                              {skill.tags.slice(0, 3).join(", ")}
+                            </span>
+                          </Show>
+                        </div>
                       </div>
 
-                      {/* Overflow menu */}
-                      <div class="relative shrink-0">
-                        <button
-                          type="button"
-                          class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-colors hover:bg-surface-3 hover:text-foreground"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOverflowMenuId(
-                              overflowMenuId() === skill.id ? null : skill.id,
-                            );
-                          }}
-                          aria-label="Skill actions"
+                      {/* Install button */}
+                      <div class="shrink-0 mt-0.5">
+                        <Show
+                          when={!installed()}
+                          fallback={
+                            <span class="px-2 py-1 text-[11px] text-muted-foreground bg-surface-3 rounded">
+                              Installed
+                            </span>
+                          }
                         >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 16 16"
-                            fill="none"
-                            role="img"
-                            aria-label="More"
+                          <button
+                            type="button"
+                            class="px-2.5 py-1 bg-primary text-primary-foreground rounded-md text-[11px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleInstall(skill);
+                            }}
+                            disabled={installing()}
                           >
-                            <circle cx="8" cy="4" r="1" fill="currentColor" />
-                            <circle cx="8" cy="8" r="1" fill="currentColor" />
-                            <circle cx="8" cy="12" r="1" fill="currentColor" />
-                          </svg>
-                        </button>
-                        <Show when={overflowMenuId() === skill.id}>
-                          <div class="absolute right-0 top-7 min-w-[160px] bg-surface-2 border border-border rounded-lg shadow-[var(--shadow-lg)] z-50 py-1 animate-[fadeIn_100ms_ease]">
-                            <button
-                              type="button"
-                              class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOverflowMenuId(null);
-                                toggleDetail(skill.id);
-                              }}
-                            >
-                              View Details
-                            </button>
-                            <button
-                              type="button"
-                              class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOverflowMenuId(null);
-                                handleEditInEditor(skill.path);
-                              }}
-                            >
-                              Edit in Editor
-                            </button>
-                            <Show when={isUpstreamManagedSkill(skill)}>
-                              <button
-                                type="button"
-                                class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOverflowMenuId(null);
-                                  void handleRefreshInstalledSkill(skill);
-                                }}
-                              >
-                                Refresh From Upstream
-                              </button>
-                            </Show>
-                            <button
-                              type="button"
-                              class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-destructive cursor-pointer transition-colors hover:bg-surface-3 text-left"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOverflowMenuId(null);
-                                handleUninstall(skill);
-                              }}
-                            >
-                              Uninstall
-                            </button>
-                          </div>
+                            {installing() ? "Installing..." : "Install"}
+                          </button>
                         </Show>
                       </div>
                     </div>
@@ -1131,160 +1480,18 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             </div>
                           </Show>
 
-                          <Show when={isUpstreamManagedSkill(skill)}>
-                            <div class="mb-2 p-2.5 bg-surface-1 border border-border rounded-md text-[11px] text-muted-foreground">
-                              <div class="flex items-center justify-between gap-2">
-                                <span class="font-medium text-foreground">
-                                  Upstream sync
-                                </span>
-                                <button
-                                  type="button"
-                                  class="px-2 py-1 bg-transparent border border-border text-muted-foreground rounded-md text-[11px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground disabled:opacity-40"
-                                  onClick={() =>
-                                    void handleRefreshInstalledSkill(skill)
-                                  }
-                                  disabled={
-                                    actionInProgress() === skill.id ||
-                                    syncLoading()[skill.path]
-                                  }
-                                >
-                                  {actionInProgress() === skill.id
-                                    ? "Refreshing..."
-                                    : "Refresh from upstream"}
-                                </button>
-                              </div>
-                              <div class="mt-2">
-                                Local revision:{" "}
-                                <span class="text-foreground">
-                                  {syncStatusFor(skill)?.syncedRevision?.slice(
-                                    0,
-                                    7,
-                                  ) || "unknown"}
-                                </span>
-                              </div>
-                              <div class="mt-1">
-                                Remote revision:{" "}
-                                <span class="text-foreground">
-                                  {syncStatusFor(skill)?.remoteRevision
-                                    ?.shortSha || "unavailable"}
-                                </span>
-                              </div>
-                              <Show
-                                when={
-                                  syncStatusFor(skill)?.remoteRevision?.message
-                                }
-                              >
-                                <div class="mt-1">
-                                  {
-                                    syncStatusFor(skill)?.remoteRevision
-                                      ?.message
-                                  }
-                                </div>
-                              </Show>
-                              <Show
-                                when={syncStatusFor(skill)?.remoteRevision?.url}
-                              >
-                                <div class="mt-2">
-                                  <button
-                                    type="button"
-                                    class="p-0 bg-transparent border-none text-[11px] text-primary cursor-pointer hover:underline"
-                                    onClick={() =>
-                                      void openExternalLink(
-                                        syncStatusFor(skill)?.remoteRevision
-                                          ?.url || "",
-                                      )
-                                    }
-                                  >
-                                    Open upstream commit
-                                  </button>
-                                </div>
-                              </Show>
-                              <Show
-                                when={
-                                  syncStatusFor(skill)?.remoteRevision
-                                    ?.changedFiles.length
-                                }
-                              >
-                                <div class="mt-2">
-                                  <div class="font-medium text-foreground">
-                                    Upstream changed files
-                                  </div>
-                                  <ul class="m-0 mt-1 pl-4">
-                                    <For
-                                      each={syncStatusFor(
-                                        skill,
-                                      )?.remoteRevision?.changedFiles.slice(
-                                        0,
-                                        6,
-                                      )}
-                                    >
-                                      {(file) => <li>{file}</li>}
-                                    </For>
-                                  </ul>
-                                </div>
-                              </Show>
-                              <Show
-                                when={
-                                  syncStatusFor(skill)?.changedLocalFiles.length
-                                }
-                              >
-                                <div class="mt-2">
-                                  <div class="font-medium text-destructive">
-                                    Local file changes
-                                  </div>
-                                  <ul class="m-0 mt-1 pl-4 text-destructive">
-                                    <For
-                                      each={syncStatusFor(
-                                        skill,
-                                      )?.changedLocalFiles.slice(0, 6)}
-                                    >
-                                      {(file) => <li>{file}</li>}
-                                    </For>
-                                  </ul>
-                                </div>
-                              </Show>
-                              <Show
-                                when={
-                                  syncStatusFor(skill)?.missingManagedFiles
-                                    .length
-                                }
-                              >
-                                <div class="mt-2">
-                                  <div class="font-medium text-destructive">
-                                    Missing managed files
-                                  </div>
-                                  <ul class="m-0 mt-1 pl-4 text-destructive">
-                                    <For
-                                      each={syncStatusFor(
-                                        skill,
-                                      )?.missingManagedFiles.slice(0, 6)}
-                                    >
-                                      {(file) => <li>{file}</li>}
-                                    </For>
-                                  </ul>
-                                </div>
-                              </Show>
-                              <Show
-                                when={
-                                  getAffectedLiveThreadIds(skill).length > 0
-                                }
-                              >
-                                <div class="mt-2 text-warning">
-                                  {getAffectedLiveThreadIds(skill).length} live
-                                  agent thread
-                                  {getAffectedLiveThreadIds(skill).length === 1
-                                    ? ""
-                                    : "s"}{" "}
-                                  currently reference this skill.
-                                </div>
-                              </Show>
-                              <Show when={syncStatusFor(skill)?.error}>
-                                <div class="mt-2 text-destructive">
-                                  {syncStatusFor(skill)?.error}
-                                </div>
-                              </Show>
-                            </div>
-                          </Show>
+                          {/* Metadata */}
+                          <div class="flex items-center gap-3 mb-2 text-[11px] text-muted-foreground/60">
+                            <Show when={skill.author}>
+                              <span>Author: {skill.author}</span>
+                            </Show>
+                            <Show when={skill.version}>
+                              <span>v{skill.version}</span>
+                            </Show>
+                            <Show when={skill.source}>
+                              <span>Source: {skill.source}</span>
+                            </Show>
+                          </div>
 
                           {/* Content preview */}
                           <Show when={detailLoading()}>
@@ -1298,214 +1505,61 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             </pre>
                           </Show>
 
-                          {/* Actions */}
-                          <div class="flex items-center gap-2 mt-2.5">
-                            <button
-                              type="button"
-                              class="px-3 py-1 bg-transparent border border-destructive/40 text-destructive rounded-md text-[12px] cursor-pointer transition-colors hover:bg-destructive/10 disabled:opacity-40"
-                              onClick={() => handleUninstall(skill)}
-                              disabled={actionInProgress() === skill.id}
-                            >
-                              {actionInProgress() === skill.id
-                                ? "Removing..."
-                                : "Uninstall"}
-                            </button>
-                            <button
-                              type="button"
-                              class="px-3 py-1 bg-transparent border border-border text-muted-foreground rounded-md text-[12px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
-                              onClick={() => handleEditInEditor(skill.path)}
-                            >
-                              Edit in Editor
-                            </button>
-                          </div>
+                          {/* Install action */}
+                          <Show when={!installed()}>
+                            <div class="mt-2.5">
+                              <button
+                                type="button"
+                                class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-[12px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40"
+                                onClick={() => handleInstall(skill)}
+                                disabled={installing()}
+                              >
+                                {installing()
+                                  ? "Installing..."
+                                  : "Install to Seren"}
+                              </button>
+                            </div>
+                          </Show>
                         </div>
                       </div>
                     </Show>
                   </div>
-                )}
-              </For>
-            </div>
-          </Show>
-        </Show>
-
-        {/* Browse tab */}
-        <Show when={!isLoading() && activeTab() === "browse"}>
-          <Show
-            when={filteredBrowse().length > 0}
-            fallback={
-              <div class="px-4 py-8 text-center text-[13px] text-muted-foreground">
-                {searchQuery() ? "No matching skills" : "No skills available"}
+                );
+              }}
+            </For>
+            <Show when={availableSkillsQuery.isFetchingNextPage}>
+              <div class="px-4 py-3 text-center text-[12px] text-muted-foreground">
+                Loading more skills...
               </div>
-            }
-          >
-            <div class="py-1">
-              <For each={filteredBrowse()}>
-                {(skill) => {
-                  const installed = () => skillsStore.isInstalled(skill.id);
-                  const installing = () => actionInProgress() === skill.id;
-
-                  return (
-                    <div class="border-b border-border/50 last:border-b-0">
-                      {/* Card */}
-                      <div
-                        draggable={true}
-                        class="flex items-start gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-surface-2/50 select-none active:cursor-grabbing"
-                        classList={{
-                          "bg-surface-2/30": expandedSkillId() === skill.id,
-                        }}
-                        onClick={() => toggleDetail(skill.id)}
-                        onDragStart={(event) =>
-                          handleSkillDragStart(event, skill)
-                        }
-                        onDragEnd={handleSkillDragEnd}
-                      >
-                        {/* Info */}
-                        <div class="flex-1 min-w-0">
-                          <span class="text-[13px] font-medium text-foreground truncate block">
-                            {skill.displayName ?? skill.name}
-                          </span>
-                          <Show when={skill.description}>
-                            <p class="m-0 mt-0.5 text-[12px] text-muted-foreground truncate">
-                              {skill.description}
-                            </p>
-                          </Show>
-                          <div class="flex items-center gap-1.5 mt-0.5">
-                            <Show when={skill.author || skill.source}>
-                              <span class="text-[11px] text-muted-foreground/60">
-                                {skill.author || skill.source}
-                              </span>
-                            </Show>
-                            <Show when={skill.tags.length > 0}>
-                              <span class="text-[11px] text-muted-foreground/40">
-                                {skill.tags.slice(0, 3).join(", ")}
-                              </span>
-                            </Show>
-                          </div>
-                        </div>
-
-                        {/* Install button */}
-                        <div class="shrink-0 mt-0.5">
-                          <Show
-                            when={!installed()}
-                            fallback={
-                              <span class="px-2 py-1 text-[11px] text-muted-foreground bg-surface-3 rounded">
-                                Installed
-                              </span>
-                            }
-                          >
-                            <button
-                              type="button"
-                              class="px-2.5 py-1 bg-primary text-primary-foreground rounded-md text-[11px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleInstall(skill);
-                              }}
-                              disabled={installing()}
-                            >
-                              {installing() ? "Installing..." : "Install"}
-                            </button>
-                          </Show>
-                        </div>
-                      </div>
-
-                      {/* Detail accordion */}
-                      <Show when={expandedSkillId() === skill.id}>
-                        <div class="px-4 pb-3 bg-surface-2/20 border-t border-border/30">
-                          <div class="pt-2.5">
-                            {/* Tags */}
-                            <Show when={skill.tags.length > 0}>
-                              <div class="flex flex-wrap gap-1 mb-2">
-                                <For each={skill.tags}>
-                                  {(tag) => (
-                                    <span class="px-1.5 py-0.5 bg-surface-3 rounded text-[10px] text-muted-foreground">
-                                      {tag}
-                                    </span>
-                                  )}
-                                </For>
-                              </div>
-                            </Show>
-
-                            {/* Metadata */}
-                            <div class="flex items-center gap-3 mb-2 text-[11px] text-muted-foreground/60">
-                              <Show when={skill.author}>
-                                <span>Author: {skill.author}</span>
-                              </Show>
-                              <Show when={skill.version}>
-                                <span>v{skill.version}</span>
-                              </Show>
-                              <Show when={skill.source}>
-                                <span>Source: {skill.source}</span>
-                              </Show>
-                            </div>
-
-                            {/* Content preview */}
-                            <Show when={detailLoading()}>
-                              <div class="py-3 text-[12px] text-muted-foreground">
-                                Loading content...
-                              </div>
-                            </Show>
-                            <Show when={!detailLoading() && detailContent()}>
-                              <pre class="m-0 max-h-[200px] overflow-y-auto p-2.5 bg-surface-1 border border-border rounded-md text-[11px] text-muted-foreground whitespace-pre-wrap font-mono leading-relaxed">
-                                {detailContent()}
-                              </pre>
-                            </Show>
-
-                            {/* Install action */}
-                            <Show when={!installed()}>
-                              <div class="mt-2.5">
-                                <button
-                                  type="button"
-                                  class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-[12px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40"
-                                  onClick={() => handleInstall(skill)}
-                                  disabled={installing()}
-                                >
-                                  {installing()
-                                    ? "Installing..."
-                                    : "Install to Seren"}
-                                </button>
-                              </div>
-                            </Show>
-                          </div>
-                        </div>
-                      </Show>
-                    </div>
-                  );
-                }}
-              </For>
-              <Show when={availableSkillsQuery.isFetchingNextPage}>
-                <div class="px-4 py-3 text-center text-[12px] text-muted-foreground">
-                  Loading more skills...
-                </div>
-              </Show>
-              <Show
-                when={
-                  availableSkillsQuery.hasNextPage &&
-                  !availableSkillsQuery.isFetchingNextPage
-                }
-              >
-                <div class="px-4 py-3">
-                  <button
-                    type="button"
-                    class="w-full px-3 py-1.5 bg-transparent border border-border text-muted-foreground rounded-md text-[12px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
-                    onClick={() => void availableSkillsQuery.fetchNextPage()}
-                  >
-                    Load more
-                  </button>
-                </div>
-              </Show>
-              <Show
-                when={
-                  !availableSkillsQuery.hasNextPage &&
-                  browseTotal() !== null &&
-                  browseLoaded() > 0
-                }
-              >
-                <div class="px-4 py-3 text-center text-[11px] text-muted-foreground/60">
-                  {browseLoaded()} of {browseTotal()} skills loaded
-                </div>
-              </Show>
-            </div>
-          </Show>
+            </Show>
+            <Show
+              when={
+                availableSkillsQuery.hasNextPage &&
+                !availableSkillsQuery.isFetchingNextPage
+              }
+            >
+              <div class="px-4 py-3">
+                <button
+                  type="button"
+                  class="w-full px-3 py-1.5 bg-transparent border border-border text-muted-foreground rounded-md text-[12px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
+                  onClick={() => void availableSkillsQuery.fetchNextPage()}
+                >
+                  Load more
+                </button>
+              </div>
+            </Show>
+            <Show
+              when={
+                !availableSkillsQuery.hasNextPage &&
+                browseTotal() !== null &&
+                browseLoaded() > 0
+              }
+            >
+              <div class="px-4 py-3 text-center text-[11px] text-muted-foreground/60">
+                {browseLoaded()} of {browseTotal()} skills loaded
+              </div>
+            </Show>
+          </div>
         </Show>
       </div>
 

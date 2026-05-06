@@ -2,6 +2,7 @@
 // ABOUTME: Handles available skills, installed skills, and thread/project/global resolution.
 
 import { invoke } from "@tauri-apps/api/core";
+import { untrack } from "solid-js";
 import { createStore } from "solid-js/store";
 import { log } from "@/lib/logger";
 import { queryClient } from "@/lib/query-client";
@@ -103,6 +104,29 @@ function applyAvailableCatalog(all: Skill[]): void {
     "available skills",
     excluded > 0 ? `(${excluded} host-excluded)` : "",
   );
+}
+
+// Merge a partial catalog view (e.g. paginated browse results) into
+// state.available without dropping entries supplied by the bulk catalog
+// fetch. The paginated source only ever covers a slice of the catalog,
+// so a plain replace would shrink consumers like the thread launcher and
+// the skill-drag fallback resolver.
+//
+// The existing read is untracked: callers run inside SkillsExplorer's
+// createEffect, so a tracked read of state.available would resubscribe
+// the same effect that's about to write it and spin into an infinite
+// merge loop that freezes the UI when the panel mounts.
+function mergeAvailableCatalog(partial: Skill[]): void {
+  const filtered = filterHostCompatibleCatalog(partial);
+  const existing = untrack(() => state.available);
+  const byId = new Map<string, Skill>();
+  for (const skill of existing) {
+    byId.set(skill.id, skill);
+  }
+  for (const next of filtered) {
+    byId.set(next.id, next);
+  }
+  setState("available", Array.from(byId.values()));
 }
 
 function normalizeRefs(refs: string[]): string[] {
@@ -234,7 +258,7 @@ export const skillsStore = {
   },
 
   setAvailableCatalog(all: Skill[]): void {
-    applyAvailableCatalog(all);
+    mergeAvailableCatalog(all);
     setState("error", null);
   },
 
@@ -506,6 +530,25 @@ export const skillsStore = {
   },
 
   /**
+   * Resolve the scope a thread's effective skills come from.
+   * Refs at a higher scope replace lower scopes (no mixing), so the
+   * entire resolved list shares one source label.
+   */
+  getThreadSkillsScope(
+    projectRoot: string | null,
+    threadId: string | null,
+  ): "thread" | "project" | "global" | null {
+    if (!projectRoot || !threadId) return null;
+    if (Array.isArray(threadSkillsState[threadKey(projectRoot, threadId)])) {
+      return "thread";
+    }
+    if (Array.isArray(projectConfigState[projectRoot])) {
+      return "project";
+    }
+    return "global";
+  },
+
+  /**
    * Toggle a single skill for a specific thread.
    */
   async toggleThreadSkill(
@@ -566,6 +609,60 @@ export const skillsStore = {
   ): Promise<void> {
     await skills.clearThreadSkills(projectRoot, threadId);
     setThreadSkillsState(threadKey(projectRoot, threadId), null);
+  },
+
+  /**
+   * Detach a single skill from a thread's effective context.
+   *
+   * Materializes the currently-resolved effective skills (which may be
+   * inherited from project or global defaults), removes the targeted
+   * skill, and saves the remainder as the thread override. Without
+   * this, calling toggleThreadSkill on a thread with no override would
+   * start from `[]` and detach every other inherited skill too.
+   */
+  async detachSkillFromThread(
+    projectRoot: string,
+    threadId: string,
+    skillPath: string,
+  ): Promise<void> {
+    await this.loadProjectConfig(projectRoot);
+    await this.loadThreadSkills(projectRoot, threadId);
+
+    const effective = this.getThreadSkills(projectRoot, threadId);
+    const remaining = effective.filter((skill) => skill.path !== skillPath);
+    const refs = normalizeRefs(remaining.map((skill) => skillRef(skill)));
+
+    await skills.setThreadSkills(projectRoot, threadId, refs);
+    setThreadSkillsState(threadKey(projectRoot, threadId), refs);
+  },
+
+  /**
+   * Attach a single skill to a thread's effective context.
+   *
+   * Materializes the currently-resolved effective skills, adds the
+   * targeted skill if not already present, and saves the union as the
+   * thread override. Idempotent. Same materialization rationale as
+   * detachSkillFromThread.
+   */
+  async attachSkillToThread(
+    projectRoot: string,
+    threadId: string,
+    skillPath: string,
+  ): Promise<void> {
+    await this.loadProjectConfig(projectRoot);
+    await this.loadThreadSkills(projectRoot, threadId);
+
+    const target = state.installed.find((s) => s.path === skillPath);
+    if (!target) return;
+
+    const effective = this.getThreadSkills(projectRoot, threadId);
+    if (effective.some((skill) => skill.path === skillPath)) return;
+
+    const next = [...effective, target];
+    const refs = normalizeRefs(next.map((skill) => skillRef(skill)));
+
+    await skills.setThreadSkills(projectRoot, threadId, refs);
+    setThreadSkillsState(threadKey(projectRoot, threadId), refs);
   },
 
   /**
