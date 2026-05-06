@@ -111,9 +111,10 @@ describe("#1639 — refreshAccessToken pairs clearAuthState + requestSignInModal
       "async function refreshAccessToken",
     );
     const fnBody = authServiceSource.slice(refreshFnIdx, refreshFnIdx + 1400);
-    const clear401Block = fnBody.indexOf("response.status === 401");
-    expect(clear401Block).toBeGreaterThan(0);
-    const afterClear = fnBody.slice(clear401Block, clear401Block + 300);
+    const clear401Match = /response\??\.status === 401/.exec(fnBody);
+    const clear401Idx = clear401Match?.index ?? -1;
+    expect(clear401Idx).toBeGreaterThan(0);
+    const afterClear = fnBody.slice(clear401Idx, clear401Idx + 300);
     expect(afterClear).toContain("clearAuthState()");
     expect(afterClear).toContain("requestSignInModal()");
   });
