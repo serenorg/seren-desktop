@@ -17,7 +17,10 @@ import {
 } from "./effort.mjs";
 import { updatePeakInputTokens } from "./usage.mjs";
 import { chooseUpdatedModelId, inferCurrentModelId } from "./model-resolution.mjs";
-import { buildSyntheticTranscript as writeSyntheticJsonl } from "./synthetic-transcript.mjs";
+import {
+  buildSyntheticTranscript as writeSyntheticJsonl,
+  writeForkedTranscript,
+} from "./synthetic-transcript.mjs";
 
 /**
  * Resolve the full path to the `claude` binary.
@@ -756,7 +759,6 @@ function sendControlRequest(session, request, timeoutMs = 30_000) {
 function buildClaudeArgs({
   sessionId,
   resumeSessionId,
-  forkSession,
   preferredModel,
   mcpConfigJson,
   effort,
@@ -794,14 +796,8 @@ function buildClaudeArgs({
 
   if (resumeSessionId) {
     args.push("--resume", resumeSessionId);
-  }
-
-  if (!resumeSessionId || forkSession) {
+  } else {
     args.push("--session-id", sessionId);
-  }
-
-  if (forkSession) {
-    args.push("--fork-session");
   }
 
   if (preferredModel) {
@@ -1588,7 +1584,6 @@ export function createClaudeRuntime({ emit }) {
   // the promise resolves. Before spawning with a reused ID, we await
   // this to prevent the old exit handler from deleting the new session.
   const exitPromises = new Map();
-  const silentEmit = () => {};
 
   function createSessionRecord({
     sessionId,
@@ -1692,7 +1687,6 @@ export function createClaudeRuntime({ emit }) {
     const claudeArgs = buildClaudeArgs({
       sessionId: remoteSessionId,
       resumeSessionId: resumeAgentSessionId ?? null,
-      forkSession: false,
       preferredModel,
       mcpConfigJson: mcpConfig.claudeMcpConfigJson,
       effort: effectiveEffort,
@@ -2079,6 +2073,14 @@ export function createClaudeRuntime({ emit }) {
   }
 
   async function forkSession({ sessionId }) {
+    // #1825: write the forked transcript to disk directly instead of relying
+    // on the CLI's fork flag to flush. The CLI persists the new session
+    // file lazily on first turn, but the previous helper killed the temp
+    // process immediately after `initialize`, leaving the returned id
+    // pointing at no on-disk JSONL. The next spawn would then fail with
+    // "No conversation found with session ID: <id>". Mirroring the
+    // synthetic-transcript pre-warm path (#1713) — pure read + identity copy
+    // with sessionId rewritten — eliminates the race entirely.
     const session = sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
@@ -2089,112 +2091,28 @@ export function createClaudeRuntime({ emit }) {
       throw new Error("Claude session does not have a resumable session id yet.");
     }
 
-    const historyPath = await findSessionJsonlPath(session.cwd, sourceAgentSessionId);
-    if (!historyPath) {
+    const parentJsonlPath = await findSessionJsonlPath(
+      session.cwd,
+      sourceAgentSessionId,
+    );
+    if (!parentJsonlPath) {
       throw new Error(`Claude session not found: ${sourceAgentSessionId}`);
     }
 
     const forkedAgentSessionId = randomUUID();
-    const tempLocalSessionId = randomUUID();
-    const claudeBin = resolveClaudeBinary();
-    const forkArgs = buildClaudeArgs({
-      sessionId: forkedAgentSessionId,
-      resumeSessionId: sourceAgentSessionId,
-      forkSession: true,
-      preferredModel: session.currentModelId,
-      mcpConfigJson: session.mcpConfigJson,
-      effort: session.reasoningEffort,
-    });
-    const processHandle = spawn(
-      claudeBin,
-      forkArgs,
-      {
-        cwd: session.cwd,
-        env: {
-          ...process.env,
-          ...(session.spawnEnv ?? {}),
-          PATH: buildExtendedPath(),
-        },
-        stdio: ["pipe", "pipe", "pipe"],
-        shell: resolveSpawnShell(claudeBin),
-      },
+    const outputJsonlPath = path.join(
+      claudeProjectsRoot(),
+      encodeProjectDirName(session.cwd),
+      `${forkedAgentSessionId}.jsonl`,
     );
 
-    // Clean up MCP config temp file when the process exits
-    if (forkArgs._mcpTempFile) {
-      const tempFile = forkArgs._mcpTempFile;
-      processHandle.on("exit", () => {
-        try { unlinkSync(tempFile); } catch {}
-      });
-    }
-
-    // Catch spawn errors to prevent crashing the provider runtime.
-    processHandle.on("error", (spawnError) => {
-      console.error(`[browser-local][claude] Fork spawn error: ${spawnError.message}`);
+    await writeForkedTranscript({
+      parentJsonlPath,
+      outputJsonlPath,
+      forkedSessionId: forkedAgentSessionId,
     });
 
-    const tempSession = createSessionRecord({
-      sessionId: tempLocalSessionId,
-      cwd: session.cwd,
-      processHandle,
-      timeoutSecs: session.timeoutSecs,
-      agentSessionId: forkedAgentSessionId,
-      currentModelId: session.currentModelId,
-      currentModeId: session.currentModeId,
-      mcpConfigJson: session.mcpConfigJson,
-      spawnEnv: session.spawnEnv,
-      reasoningEffort: session.reasoningEffort,
-    });
-    const tempSessions = new Map([[tempSession.id, tempSession]]);
-    attachProcessListeners(silentEmit, tempSessions, tempSession, new Map());
-
-    try {
-      const initResult = await sendControlRequest(
-        tempSession,
-        {
-          subtype: "initialize",
-          hooks: null,
-        },
-        20_000,
-      );
-
-      tempSession.availableModelRecords = augmentWithLegacyOpus(
-        normalizeModelRecords(initResult),
-      );
-      // Symmetric with spawnSession's post-init handling — preserve the
-      // `[1m]` suffix from the seed `currentModelId` when the CLI echoes the
-      // bare equivalent in initResult.model. See #1776.
-      const inferredFromInit = inferCurrentModelId(
-        initResult?.model ?? null,
-        tempSession.availableModelRecords,
-      );
-      tempSession.currentModelId =
-        chooseUpdatedModelId(
-          tempSession.currentModelId,
-          inferredFromInit,
-          tempSession.availableModelRecords,
-        ) ??
-        inferredFromInit ??
-        tempSession.currentModelId;
-
-      if (!tempSession.agentSessionId) {
-        throw new Error("Claude fork did not return a resumable session id.");
-      }
-
-      return tempSession.agentSessionId;
-    } finally {
-      tempSessions.delete(tempSession.id);
-      rejectPendingControlRequests(
-        tempSession,
-        new Error("Fork helper session terminated."),
-      );
-      rejectCurrentPrompt(
-        tempSession,
-        new Error("Fork helper session terminated."),
-      );
-      tempSession.output.close();
-      killChildTree(processHandle);
-    }
+    return forkedAgentSessionId;
   }
 
   async function buildSyntheticTranscript({

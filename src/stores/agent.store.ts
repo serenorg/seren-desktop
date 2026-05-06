@@ -5822,6 +5822,38 @@ Structured summary:`;
         );
         return null;
       }
+
+      // #1825 sanity gate: the native-fork helper claims success only when a
+      // forked JSONL is durable on disk, but a CLI version skew or a write
+      // failure could still leave us with a non-resumable id. If the file
+      // cannot be confirmed, drop the resume id and fall back to the
+      // bootstrap-context branch — the same shape useNativeFork=false uses.
+      // Mirrors the protective gate resumeAgentConversation got in #1657.
+      let resumableJsonlExists = true;
+      if (agentType === "claude-code" && newAgentSessionId) {
+        try {
+          resumableJsonlExists = await claudeSessionExists(
+            cwd,
+            newAgentSessionId,
+          );
+        } catch (err) {
+          console.warn(
+            "[AgentStore] forkConversation: claudeSessionExists check failed; falling back to bootstrap context:",
+            err,
+          );
+          resumableJsonlExists = false;
+        }
+      }
+      if (!resumableJsonlExists) {
+        console.warn(
+          "[AgentStore] forkConversation: forked Claude JSONL missing for",
+          newAgentSessionId,
+          "— falling back to bootstrap context",
+        );
+        newAgentSessionId = undefined;
+        bootstrapPromptContext =
+          buildForkBootstrapContext(session, forkedMessages) ?? undefined;
+      }
     } else {
       bootstrapPromptContext =
         buildForkBootstrapContext(session, forkedMessages) ?? undefined;
@@ -5851,9 +5883,10 @@ Structured summary:`;
     }
 
     // 3. Spawn a new local session for the fork.
+    const resumeAgentSessionId = newAgentSessionId;
     const newSessionId = await this.spawnSession(cwd, agentType, {
       localSessionId: newConversationId,
-      resumeAgentSessionId: newAgentSessionId,
+      resumeAgentSessionId,
       conversationTitle: forkTitle,
       restoredMessages: forkedMessages,
       bootstrapPromptContext,

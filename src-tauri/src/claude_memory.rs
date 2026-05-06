@@ -129,13 +129,14 @@ pub fn claude_projects_root() -> Result<PathBuf, String> {
 }
 
 /// Build the path Claude CLI uses for a session transcript:
-/// `<root>/<encoded(cwd)>/sessions/<session_id>.jsonl`.
-/// Pure path construction — caller decides whether to stat or read.
+/// `<root>/<encoded(cwd)>/<session_id>.jsonl`. The pre-#1825 implementation
+/// added a `sessions/` subdir that Claude Code never creates, so
+/// `claude_session_exists` always returned false and the resume-side gate
+/// from #1657 silently skipped --resume on every reload. Pure path
+/// construction — caller decides whether to stat or read.
 pub fn session_jsonl_path(root: &Path, project_cwd: &Path, session_id: &str) -> PathBuf {
     let encoded = encode_project_dir(project_cwd);
-    root.join(&encoded)
-        .join("sessions")
-        .join(format!("{session_id}.jsonl"))
+    root.join(&encoded).join(format!("{session_id}.jsonl"))
 }
 
 /// Encode an absolute project directory the same way Claude Code does:
@@ -1001,12 +1002,15 @@ mod tests {
 
     #[test]
     fn session_jsonl_path_constructs_expected_layout_and_detects_presence() {
-        // Mirrors Claude CLI's on-disk layout:
-        //   <root>/<encoded(cwd)>/sessions/<session_id>.jsonl
-        // Test that (a) the path is constructed correctly and (b) is_file()
-        // returns true only when a real file exists at that path. Both legs
-        // are required for #1657 — frontend depends on the file-presence
-        // signal to decide whether to skip --resume.
+        // Mirrors Claude CLI's real on-disk layout:
+        //   <root>/<encoded(cwd)>/<session_id>.jsonl
+        // The pre-#1825 implementation pointed at a `sessions/` subdir that
+        // Claude Code does not create — `claude_session_exists` therefore
+        // always returned false and the resume-side gate from #1657 silently
+        // skipped --resume on every reload. The test now codifies the real
+        // layout (a flat `<id>.jsonl` directly under the encoded project
+        // dir) so any future drift back to the bogus `sessions/` segment
+        // fails fast.
         let tmp = TempDir::new().expect("tempdir");
         let root = tmp.path();
         let cwd = tmp.path().join("Projects").join("seren-desktop");
@@ -1019,13 +1023,23 @@ mod tests {
             "missing session must NOT be reported as present (this is the stale-session case the fix addresses)",
         );
 
-        // Materialize the file the way Claude CLI would. Path layout assertion:
-        // /<root>/<encoded>/sessions/<id>.jsonl
+        // Layout assertion: <id>.jsonl lives directly inside the encoded
+        // project dir — there is NO `sessions/` segment in the real CLI
+        // layout. The parent dir must equal the encoded project dir.
         let session_dir = path_before
             .parent()
             .expect("session jsonl must have a parent dir");
-        assert!(session_dir.ends_with("sessions"), "second-to-last segment must be 'sessions'");
-        fs::create_dir_all(session_dir).expect("create sessions dir");
+        assert!(
+            !session_dir.ends_with("sessions"),
+            "real Claude Code layout has no `sessions/` subdir — the pre-#1825 path was wrong",
+        );
+        assert_eq!(
+            session_dir.file_name().and_then(|n| n.to_str()),
+            Some(encode_project_dir(&cwd).as_str()),
+            "session jsonl must live directly under <root>/<encoded(cwd)>",
+        );
+
+        fs::create_dir_all(session_dir).expect("create encoded project dir");
         fs::write(&path_before, b"{\"stub\":true}\n").expect("write stub session");
         assert!(
             path_before.is_file(),
