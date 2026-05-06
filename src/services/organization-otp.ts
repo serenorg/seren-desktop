@@ -1,47 +1,28 @@
 import { createRoot, createSignal } from "solid-js";
+import {
+  beginOrganizationOtpEnrollment,
+  confirmOrganizationOtpEnrollment,
+  type OrganizationOtpEnrollmentChallenge,
+  type OrganizationOtpEnrollmentStatus,
+  type OrganizationOtpScope,
+  type OrganizationOtpStatus,
+  verifyOrganizationOtpScope,
+} from "@/api";
 import { apiBase } from "@/lib/config";
-import { appFetch } from "@/lib/fetch";
 import { toDataURL } from "@/lib/qrcode-shim";
-import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
-import { getToken } from "@/services/auth";
 
-export type OrganizationOtpScope =
-  | "org_sign_in"
-  | "organization_security_manage"
-  | "private_models.access";
-
-export type OrganizationOtpEnrollmentStatus =
-  | "unenrolled"
-  | "pending_confirmation"
-  | "enrolled";
+export type {
+  OrganizationOtpEnrollmentChallenge,
+  OrganizationOtpEnrollmentStatus,
+  OrganizationOtpScope,
+  OrganizationOtpStatus,
+};
 
 export type OrganizationOtpDenialReason =
   | "policy_required"
   | "unenrolled"
   | "expired"
   | "locked";
-
-export interface OrganizationOtpStatus {
-  organization_id: string;
-  user_id: string;
-  scope: OrganizationOtpScope;
-  is_scope_protected: boolean;
-  enrollment_status: OrganizationOtpEnrollmentStatus;
-  verification_required: boolean;
-  verification_ttl: "30m" | "8h" | "12h";
-  verified_until?: string | null;
-  locked_until?: string | null;
-}
-
-export interface OrganizationOtpEnrollmentChallenge {
-  organization_id: string;
-  user_id: string;
-  enrollment_status: OrganizationOtpEnrollmentStatus;
-  issuer: string;
-  account_name: string;
-  manual_entry_key: string;
-  otpauth_uri: string;
-}
 
 export interface OrganizationOtpDenialResponse {
   error: "otp_required";
@@ -59,22 +40,6 @@ interface PendingOtpRequest {
   phase: PendingPhase;
   helperText: string | null;
   resolve: (approved: boolean) => void;
-}
-
-async function authHeaders(url: string): Promise<HeadersInit> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-
-  if (!shouldUseRustGatewayAuth(url)) {
-    const token = await getToken();
-    if (!token) {
-      throw new Error("Not authenticated");
-    }
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  return headers;
 }
 
 function scopeLabel(scope: OrganizationOtpScope): string {
@@ -133,66 +98,56 @@ async function getOtpJson(
 }
 
 async function beginEnrollment(): Promise<OrganizationOtpEnrollmentChallenge> {
-  const url = `${apiBase}/organizations/default/otp/enrollment`;
-  const response = await appFetch(url, {
-    method: "POST",
-    headers: await authHeaders(url),
+  const { data, error, response } = await beginOrganizationOtpEnrollment({
+    path: { organization_id: "default" },
+    throwOnError: false,
   });
-
-  if (!response.ok) {
-    const message = await response.text().catch(() => "");
+  if (error || !data?.data) {
+    const message = await response?.text().catch(() => "");
     throw new Error(
-      `Failed to begin organization OTP enrollment (${response.status}): ${message}`,
+      `Failed to begin organization OTP enrollment (${response?.status ?? "?"}): ${message}`,
     );
   }
-
-  const json = await response.json();
-  return json.data as OrganizationOtpEnrollmentChallenge;
+  return data.data;
 }
 
 async function confirmEnrollment(code: string): Promise<OrganizationOtpStatus> {
-  const url = `${apiBase}/organizations/default/otp/enrollment/confirm`;
-  const response = await appFetch(url, {
-    method: "POST",
-    headers: await authHeaders(url),
-    body: JSON.stringify({ code }),
+  const { data, error, response } = await confirmOrganizationOtpEnrollment({
+    path: { organization_id: "default" },
+    body: { code },
+    throwOnError: false,
   });
-
-  if (!response.ok) {
-    const message = await response.text().catch(() => "");
+  if (error || !data?.data) {
+    const message = await response?.text().catch(() => "");
     throw new Error(
-      `Failed to confirm organization OTP enrollment (${response.status}): ${message}`,
+      `Failed to confirm organization OTP enrollment (${response?.status ?? "?"}): ${message}`,
     );
   }
-
-  const json = await response.json();
-  return json.data as OrganizationOtpStatus;
+  return data.data;
 }
 
 async function verifyScope(
   scope: OrganizationOtpScope,
   code: string,
 ): Promise<OrganizationOtpStatus> {
-  const url = `${apiBase}/organizations/default/otp/verify`;
-  const response = await appFetch(url, {
-    method: "POST",
-    headers: await authHeaders(url),
-    body: JSON.stringify({ scope, code }),
+  const { data, error, response } = await verifyOrganizationOtpScope({
+    path: { organization_id: "default" },
+    body: { code, scope },
+    throwOnError: false,
   });
-
-  if (!response.ok) {
-    const otpError = await getOtpJson(response);
-    if (otpError) {
-      throw new Error(otpError.message);
+  if (error || !data?.data) {
+    if (response) {
+      const otpError = await getOtpJson(response);
+      if (otpError) {
+        throw new Error(otpError.message);
+      }
     }
-    const message = await response.text().catch(() => "");
+    const message = await response?.text().catch(() => "");
     throw new Error(
-      `Failed to verify organization OTP (${response.status}): ${message}`,
+      `Failed to verify organization OTP (${response?.status ?? "?"}): ${message}`,
     );
   }
-
-  const json = await response.json();
-  return json.data as OrganizationOtpStatus;
+  return data.data;
 }
 
 function createOrganizationOtpService() {

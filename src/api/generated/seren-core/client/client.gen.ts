@@ -31,13 +31,20 @@ export const createClient = (config: Config = {}): Client => {
 
   const interceptors = createInterceptors<Request, Response, unknown, ResolvedRequestOptions>();
 
-  const beforeRequest = async (options: RequestOptions) => {
+  const beforeRequest = async <
+    TData = unknown,
+    TResponseStyle extends 'data' | 'fields' = 'fields',
+    ThrowOnError extends boolean = boolean,
+    Url extends string = string,
+  >(
+    options: RequestOptions<TData, TResponseStyle, ThrowOnError, Url>,
+  ) => {
     const opts = {
       ..._config,
       ...options,
       fetch: options.fetch ?? _config.fetch ?? globalThis.fetch,
       headers: mergeHeaders(_config.headers, options.headers),
-      serializedBody: undefined,
+      serializedBody: undefined as string | undefined,
     };
 
     if (opts.security) {
@@ -52,7 +59,7 @@ export const createClient = (config: Config = {}): Client => {
     }
 
     if (opts.body !== undefined && opts.bodySerializer) {
-      opts.serializedBody = opts.bodySerializer(opts.body);
+      opts.serializedBody = opts.bodySerializer(opts.body) as string | undefined;
     }
 
     // remove Content-Type header if body is empty to avoid sending invalid requests
@@ -60,13 +67,14 @@ export const createClient = (config: Config = {}): Client => {
       opts.headers.delete('Content-Type');
     }
 
-    const url = buildUrl(opts);
+    const resolvedOpts = opts as typeof opts &
+      ResolvedRequestOptions<TResponseStyle, ThrowOnError, Url>;
+    const url = buildUrl(resolvedOpts);
 
-    return { opts, url };
+    return { opts: resolvedOpts, url };
   };
 
   const request: Client['request'] = async (options) => {
-    // @ts-expect-error
     const { opts, url } = await beforeRequest(options);
     const requestInit: ReqInit = {
       redirect: 'follow',
@@ -258,8 +266,10 @@ export const createClient = (config: Config = {}): Client => {
     });
   };
 
+  const _buildUrl: Client['buildUrl'] = (options) => buildUrl({ ..._config, ...options });
+
   return {
-    buildUrl,
+    buildUrl: _buildUrl,
     connect: makeMethodFn('CONNECT'),
     delete: makeMethodFn('DELETE'),
     get: makeMethodFn('GET'),

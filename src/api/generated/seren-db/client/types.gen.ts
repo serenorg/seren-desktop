@@ -93,6 +93,7 @@ export interface ResolvedRequestOptions<
   ThrowOnError extends boolean = boolean,
   Url extends string = string,
 > extends RequestOptions<unknown, TResponseStyle, ThrowOnError, Url> {
+  headers: Headers;
   serializedBody?: string;
 }
 
@@ -152,7 +153,7 @@ type SseFn = <
   ThrowOnError extends boolean = false,
   TResponseStyle extends ResponseStyle = 'fields',
 >(
-  options: Omit<RequestOptions<TData, TResponseStyle, ThrowOnError>, 'method'>,
+  options: Omit<RequestOptions<never, TResponseStyle, ThrowOnError>, 'method'>,
 ) => Promise<ServerSentEventsResult<TData, TError>>;
 
 type RequestFn = <
@@ -190,7 +191,7 @@ export type Client = CoreClient<RequestFn, Config, MethodFn, BuildUrlFn, SseFn> 
  */
 export type CreateClientConfig<T extends ClientOptions = ClientOptions> = (
   override?: Config<ClientOptions & T>,
-) => Config<Required<ClientOptions> & T> | Promise<Config<Required<ClientOptions> & T>>;
+) => Config<Required<ClientOptions> & T>;
 
 export interface TDataShape {
   body?: unknown;

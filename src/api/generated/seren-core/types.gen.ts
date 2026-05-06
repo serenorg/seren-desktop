@@ -3108,6 +3108,83 @@ export type DataResponseLogoUploadResponse = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseLogoutResult = {
+    data: {
+        message: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseOAuthProviderResponse = {
     /**
      * Response type for OAuth provider (excludes sensitive fields like client_secret)
@@ -6160,6 +6237,84 @@ export type DataResponseSessionsRevoked = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseSignupResult = {
+    data: {
+        message: string;
+        user: UserInfo;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseSuggestResponse = {
     /**
      * Response for suggest endpoint
@@ -6174,6 +6329,85 @@ export type DataResponseSuggestResponse = {
          * Matched publishers sorted by relevance
          */
         publishers: Array<PublisherSuggestion>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseTokenRefresh = {
+    data: {
+        access_token: string;
+        expires_in: number;
+        refresh_token: string;
     };
     pagination?: null | PaginationMeta;
 };
@@ -9892,6 +10126,12 @@ export type EndpointDefinition = {
      */
     request_body?: unknown;
     /**
+     * Endpoint-specific upstream request Content-Type override.
+     *
+     * When set, this takes precedence over the publisher-level request_content_type.
+     */
+    request_content_type?: string | null;
+    /**
      * Headers required for this endpoint (beyond publisher defaults)
      */
     required_headers?: Array<string> | null;
@@ -10223,6 +10463,11 @@ export type LlmConfig = {
     provider: string;
 };
 
+export type LoginRequest = {
+    email: Email;
+    password: string;
+};
+
 export type LoginResult = {
     access_token: string;
     /**
@@ -10260,6 +10505,10 @@ export type LogoUploadResponse = {
     /**
      * Message indicating success
      */
+    message: string;
+};
+
+export type LogoutResult = {
     message: string;
 };
 
@@ -11604,6 +11853,10 @@ export type ReferralInfoResponse = {
     total_referrals: number;
 };
 
+export type RefreshTokenRequest = {
+    refresh_token: string;
+};
+
 export type RefundChargeRequest = {
     reason: string;
 };
@@ -11763,6 +12016,21 @@ export type SetupInstructions = {
      * Step 4: Use publishers by type
      */
     step_4: PublisherTypeInstructions;
+};
+
+export type SignupRequest = {
+    email: Email;
+    name: string;
+    password: string;
+    /**
+     * Optional referral code for affiliate tracking
+     */
+    referral_code?: string | null;
+};
+
+export type SignupResult = {
+    message: string;
+    user: UserInfo;
 };
 
 /**
@@ -11949,6 +12217,12 @@ export type TokenCount = {
 };
 
 export type TokenEndpointAuthMethod = 'client_secret_post' | 'client_secret_basic';
+
+export type TokenRefresh = {
+    access_token: string;
+    expires_in: number;
+    refresh_token: string;
+};
 
 /**
  * Top agent by spending.
@@ -12983,6 +13257,60 @@ export type ForgotPasswordResponses = {
 
 export type ForgotPasswordResponse = ForgotPasswordResponses[keyof ForgotPasswordResponses];
 
+export type LoginData = {
+    body: LoginRequest;
+    path?: never;
+    query?: never;
+    url: '/auth/login';
+};
+
+export type LoginErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Invalid credentials
+     */
+    401: unknown;
+    /**
+     * Email verification required
+     */
+    403: unknown;
+};
+
+export type LoginResponses = {
+    /**
+     * Login successful
+     */
+    200: DataResponseLoginResult;
+};
+
+export type LoginResponse = LoginResponses[keyof LoginResponses];
+
+export type LogoutData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/logout';
+};
+
+export type LogoutErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type LogoutResponses = {
+    /**
+     * Sessions revoked and refresh cookie cleared
+     */
+    200: DataResponseLogoutResult;
+};
+
+export type LogoutResponse = LogoutResponses[keyof LogoutResponses];
+
 export type GetCurrentUserData = {
     body?: never;
     path?: never;
@@ -13005,6 +13333,32 @@ export type GetCurrentUserResponses = {
 };
 
 export type GetCurrentUserResponse = GetCurrentUserResponses[keyof GetCurrentUserResponses];
+
+export type RefreshTokenData = {
+    /**
+     * Optional - the refresh cookie is preferred
+     */
+    body: RefreshTokenRequest;
+    path?: never;
+    query?: never;
+    url: '/auth/refresh';
+};
+
+export type RefreshTokenErrors = {
+    /**
+     * Missing, invalid, expired, or reused refresh token
+     */
+    401: unknown;
+};
+
+export type RefreshTokenResponses = {
+    /**
+     * Tokens rotated
+     */
+    200: DataResponseTokenRefresh;
+};
+
+export type RefreshTokenResponse = RefreshTokenResponses[keyof RefreshTokenResponses];
 
 export type ResendVerificationEmailData = {
     body: ResendVerificationRequest;
@@ -13055,6 +13409,33 @@ export type ResetPasswordResponses = {
 };
 
 export type ResetPasswordResponse = ResetPasswordResponses[keyof ResetPasswordResponses];
+
+export type SignupData = {
+    body: SignupRequest;
+    path?: never;
+    query?: never;
+    url: '/auth/signup';
+};
+
+export type SignupErrors = {
+    /**
+     * Invalid request or weak password
+     */
+    400: unknown;
+    /**
+     * Email already registered
+     */
+    409: unknown;
+};
+
+export type SignupResponses = {
+    /**
+     * Account created
+     */
+    201: DataResponseSignupResult;
+};
+
+export type SignupResponse = SignupResponses[keyof SignupResponses];
 
 export type VerifyEmailData = {
     body: VerifyEmailRequest;

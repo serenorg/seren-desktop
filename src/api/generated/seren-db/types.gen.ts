@@ -313,6 +313,11 @@ export type CreateReplicationSlotRequest = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -411,6 +416,11 @@ export type DataResponseBranch = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -493,6 +503,11 @@ export type DataResponseBranchCreationResult = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -577,6 +592,11 @@ export type DataResponseBranchDetail = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -660,6 +680,11 @@ export type DataResponseBranchProtection = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -742,6 +767,11 @@ export type DataResponseBranchRestored = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -824,6 +854,11 @@ export type DataResponseConnectionString = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -903,6 +938,11 @@ export type DataResponseDatabaseCreated = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -983,6 +1023,11 @@ export type DataResponseDatabaseWithOwner = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1088,6 +1133,11 @@ export type DataResponseEndpoint = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1182,6 +1232,11 @@ export type DataResponseEndpointCreated = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1260,6 +1315,11 @@ export type DataResponseEndpointStatusInfo = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1344,6 +1404,11 @@ export type DataResponseIpAllowList = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1422,6 +1487,11 @@ export type DataResponseLogicalReplicationSettings = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1497,6 +1567,11 @@ export type DataResponseLsnByTimestamp = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1601,6 +1676,11 @@ export type DataResponseProject = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1673,6 +1753,11 @@ export type DataResponseProjectConnectionUri = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1752,6 +1837,11 @@ export type DataResponseProjectConsumption = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1853,6 +1943,11 @@ export type DataResponseProjectCreated = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1929,6 +2024,11 @@ export type DataResponseProjectSize = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2017,6 +2117,11 @@ export type DataResponsePublicationInfo = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2094,6 +2199,11 @@ export type DataResponseQueryResult = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2180,6 +2290,11 @@ export type DataResponseReplicationSlotInfo = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2259,6 +2374,11 @@ export type DataResponseRoleCreated = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2335,6 +2455,11 @@ export type DataResponseRolePasswordReset = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2410,6 +2535,11 @@ export type DataResponseTimestampByLsn = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2480,6 +2610,11 @@ export type DataResponseValue = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2575,6 +2710,11 @@ export type DataResponseVecBranch = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2655,6 +2795,11 @@ export type DataResponseVecBranchProtection = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2732,6 +2877,11 @@ export type DataResponseVecDatabaseWithOwner = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2834,6 +2984,11 @@ export type DataResponseVecEndpoint = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2915,6 +3070,11 @@ export type DataResponseVecIpAllowList = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -3016,6 +3176,11 @@ export type DataResponseVecProject = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -3101,6 +3266,11 @@ export type DataResponseVecPublicationInfo = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -3184,6 +3354,11 @@ export type DataResponseVecReplicationSlotInfo = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *

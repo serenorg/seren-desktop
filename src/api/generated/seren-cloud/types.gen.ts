@@ -48,6 +48,72 @@ export type CloudDeploymentAlertPolicy = {
 };
 
 /**
+ * Deployment bundle metadata without raw bundle content.
+ */
+export type CloudDeploymentBundle = {
+    created_at: string;
+    id: string;
+    organization_id: string;
+    sha256: string;
+    size_bytes: number;
+    source_kind: CloudDeploymentBundleSourceKind;
+    updated_at: string;
+    uploaded_at?: string | null;
+    user_id: string;
+};
+
+/**
+ * Deployment bundle metadata plus current deployment references.
+ */
+export type CloudDeploymentBundleDetail = {
+    bundle: CloudDeploymentBundle;
+    deployment_ids: Array<string>;
+};
+
+/**
+ * Short-lived download instructions for a deployment's runtime bundle.
+ */
+export type CloudDeploymentBundleDownloadResponse = {
+    deployment_bundle_id: string;
+    deployment_id: string;
+    download_expires_at: string;
+    download_headers?: {
+        [key: string]: string;
+    };
+    download_url: string;
+    sha256: string;
+    size_bytes: number;
+    source_kind: CloudDeploymentBundleSourceKind;
+};
+
+/**
+ * Deployment bundle artifact format.
+ *
+ * This is intentionally a closed server-supported set. Add formats by
+ * migration when Seren Cloud can validate and execute them.
+ */
+export type CloudDeploymentBundleSourceKind = 'tar_gz';
+
+export type CloudDeploymentChannelRunEventRequest = {
+    conversation_id?: string | null;
+    execution_id: string;
+    execution_time_ms?: number | null;
+    inference_cost_atomic?: number | null;
+    inference_input_tokens?: number | null;
+    inference_output_tokens?: number | null;
+    invocation_payload?: unknown;
+    metadata?: unknown;
+    output?: string | null;
+    output_events?: unknown;
+    run_name?: string | null;
+    session_id?: string | null;
+    session_url?: string | null;
+    status: string;
+    status_message?: string | null;
+    stop_reason?: string | null;
+};
+
+/**
  * Cloud deployment compute backend target.
  */
 export type CloudDeploymentComputeBackend = 'aws_container' | 'cloudflare_worker' | 'daytona';
@@ -262,6 +328,10 @@ export type CloudDeploymentStatus = 'pending' | 'building' | 'running' | 'stoppe
  * Summary view for listing deployments (excludes large fields like code_bundle).
  */
 export type CloudDeploymentSummary = {
+    /**
+     * Current managed-agent revision, when this is a managed seren-agent deployment.
+     */
+    active_revision_id?: string | null;
     alert_policy?: null | CloudDeploymentAlertPolicy;
     code_bundle_hash: string;
     compute_backend: CloudDeploymentComputeBackend;
@@ -269,6 +339,7 @@ export type CloudDeploymentSummary = {
     cron_schedule?: string | null;
     cron_timezone?: string | null;
     dashboard_config?: unknown;
+    deployment_bundle_id?: string | null;
     endpoint_url?: string | null;
     environment_id?: string | null;
     error_message?: string | null;
@@ -651,6 +722,40 @@ export type CloudRunStreamCloseResponse = {
 };
 
 /**
+ * Request body for registering a content-addressed deployment bundle.
+ */
+export type CreateCloudDeploymentBundleRequest = {
+    /**
+     * Lowercase hex SHA-256 digest of the raw bundle bytes.
+     */
+    sha256: string;
+    /**
+     * Exact raw bundle size in bytes.
+     */
+    size_bytes: number;
+    /**
+     * Bundle artifact format.
+     */
+    source_kind: CloudDeploymentBundleSourceKind;
+};
+
+/**
+ * Response returned when a deployment bundle is registered.
+ */
+export type CreateCloudDeploymentBundleResponse = {
+    deployment_bundle_id: string;
+    sha256: string;
+    size_bytes: number;
+    source_kind: CloudDeploymentBundleSourceKind;
+    upload_expires_at?: string | null;
+    upload_headers?: {
+        [key: string]: string;
+    };
+    upload_required: boolean;
+    upload_url?: string | null;
+};
+
+/**
  * Request body for creating a reusable execution environment.
  */
 export type CreateCloudDeploymentEnvironmentRequest = {
@@ -659,6 +764,55 @@ export type CreateCloudDeploymentEnvironmentRequest = {
     is_default?: boolean | null;
     name: string;
     setup_commands?: Array<string> | null;
+};
+
+/**
+ * Request body for creating a cloud deployment.
+ *
+ * The deployment envelope (name, skill, mode, schedule, eval gate, dashboard,
+ * alert policy, visibility, environment) is on the request itself; all
+ * runtime concerns (execution strategy, compute backend, limits, secrets,
+ * config, requirements, etc.) live inside the embedded `WorkloadSpec`.
+ */
+export type CreateCloudDeploymentRequest = {
+    alert_policy?: null | CloudDeploymentAlertPolicy;
+    /**
+     * Cron expression, required when `mode` is `cron`.
+     */
+    cron_schedule?: string | null;
+    /**
+     * Timezone for cron schedules. Defaults to `UTC` when omitted.
+     */
+    cron_timezone?: string | null;
+    /**
+     * UI rendering hints for custom dashboards.
+     */
+    dashboard_config?: unknown;
+    /**
+     * Optional reusable execution environment.
+     */
+    environment_id?: string | null;
+    eval_gate?: null | EvalGate;
+    /**
+     * Deployment mode (always_on, cron, job).
+     */
+    mode: CloudDeploymentMode;
+    /**
+     * Human-readable deployment name. Auto-generated when omitted.
+     */
+    name?: string | null;
+    /**
+     * Stable slug identifying the skill being deployed.
+     */
+    skill_slug: string;
+    /**
+     * Visibility mode (`open` or `opaque`).
+     */
+    visibility?: string | null;
+    /**
+     * Runtime workload specification (execution strategy, compute, limits, ...).
+     */
+    workload: WorkloadSpec;
 };
 
 /**
@@ -687,6 +841,11 @@ export type CreateCloudEvalSetRequest = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -772,6 +931,11 @@ export type DataResponseAuditEntry = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -847,6 +1011,269 @@ export type DataResponseCloudDeploymentActionStatusResponse = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudDeploymentBundle = {
+    /**
+     * Deployment bundle metadata without raw bundle content.
+     */
+    data: {
+        created_at: string;
+        id: string;
+        organization_id: string;
+        sha256: string;
+        size_bytes: number;
+        source_kind: CloudDeploymentBundleSourceKind;
+        updated_at: string;
+        uploaded_at?: string | null;
+        user_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudDeploymentBundleDetail = {
+    /**
+     * Deployment bundle metadata plus current deployment references.
+     */
+    data: {
+        bundle: CloudDeploymentBundle;
+        deployment_ids: Array<string>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudDeploymentBundleDownloadResponse = {
+    /**
+     * Short-lived download instructions for a deployment's runtime bundle.
+     */
+    data: {
+        deployment_bundle_id: string;
+        deployment_id: string;
+        download_expires_at: string;
+        download_headers?: {
+            [key: string]: string;
+        };
+        download_url: string;
+        sha256: string;
+        size_bytes: number;
+        source_kind: CloudDeploymentBundleSourceKind;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -932,6 +1359,11 @@ export type DataResponseCloudDeploymentEnvironment = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1048,6 +1480,11 @@ export type DataResponseCloudDeploymentRunEvent = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1165,6 +1602,11 @@ export type DataResponseCloudDeploymentRunInvocationResponse = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1229,6 +1671,10 @@ export type DataResponseCloudDeploymentSummary = {
      * Summary view for listing deployments (excludes large fields like code_bundle).
      */
     data: {
+        /**
+         * Current managed-agent revision, when this is a managed seren-agent deployment.
+         */
+        active_revision_id?: string | null;
         alert_policy?: null | CloudDeploymentAlertPolicy;
         code_bundle_hash: string;
         compute_backend: CloudDeploymentComputeBackend;
@@ -1236,6 +1682,7 @@ export type DataResponseCloudDeploymentSummary = {
         cron_schedule?: string | null;
         cron_timezone?: string | null;
         dashboard_config?: unknown;
+        deployment_bundle_id?: string | null;
         endpoint_url?: string | null;
         environment_id?: string | null;
         error_message?: string | null;
@@ -1271,6 +1718,11 @@ export type DataResponseCloudDeploymentSummary = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1361,6 +1813,11 @@ export type DataResponseCloudEvalCase = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1458,6 +1915,11 @@ export type DataResponseCloudEvalCaseResult = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1551,6 +2013,11 @@ export type DataResponseCloudEvalRun = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1636,6 +2103,11 @@ export type DataResponseCloudEvalSet = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1713,6 +2185,11 @@ export type DataResponseCloudRunEvalsResponse = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1791,6 +2268,11 @@ export type DataResponseCloudRunPendingApprovalsResponse = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1879,6 +2361,11 @@ export type DataResponseCloudRunReplayComparison = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -1956,6 +2443,100 @@ export type DataResponseCloudRunStreamCloseResponse = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCreateCloudDeploymentBundleResponse = {
+    /**
+     * Response returned when a deployment bundle is registered.
+     */
+    data: {
+        deployment_bundle_id: string;
+        sha256: string;
+        size_bytes: number;
+        source_kind: CloudDeploymentBundleSourceKind;
+        upload_expires_at?: string | null;
+        upload_headers?: {
+            [key: string]: string;
+        };
+        upload_required: boolean;
+        upload_url?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2036,6 +2617,11 @@ export type DataResponseDeploymentSpendSummary = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2118,6 +2704,11 @@ export type DataResponseVecAuditEntry = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2200,6 +2791,11 @@ export type DataResponseVecCloudDeploymentEnvironment = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2282,6 +2878,11 @@ export type DataResponseVecCloudDeploymentRunArtifact = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2395,6 +2996,11 @@ export type DataResponseVecCloudDeploymentRunEvent = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2456,6 +3062,10 @@ export type DataResponseVecCloudDeploymentRunEvent = {
  */
 export type DataResponseVecCloudDeploymentSummary = {
     data: Array<{
+        /**
+         * Current managed-agent revision, when this is a managed seren-agent deployment.
+         */
+        active_revision_id?: string | null;
         alert_policy?: null | CloudDeploymentAlertPolicy;
         code_bundle_hash: string;
         compute_backend: CloudDeploymentComputeBackend;
@@ -2463,6 +3073,7 @@ export type DataResponseVecCloudDeploymentSummary = {
         cron_schedule?: string | null;
         cron_timezone?: string | null;
         dashboard_config?: unknown;
+        deployment_bundle_id?: string | null;
         endpoint_url?: string | null;
         environment_id?: string | null;
         error_message?: string | null;
@@ -2498,6 +3109,11 @@ export type DataResponseVecCloudDeploymentSummary = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2585,6 +3201,11 @@ export type DataResponseVecCloudEvalCase = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2679,6 +3300,11 @@ export type DataResponseVecCloudEvalCaseResult = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2769,6 +3395,11 @@ export type DataResponseVecCloudEvalRun = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2851,6 +3482,11 @@ export type DataResponseVecCloudEvalSet = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -2933,6 +3569,11 @@ export type DataResponseVecCloudPendingApprovalRun = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -3013,6 +3654,11 @@ export type DataResponseVecCloudRunOutputEventEnvelope = {
  * This wrapper provides a consistent structure for all API responses,
  * making it easier for clients to handle responses uniformly. It supports
  * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
  *
  * # Response Structure
  *
@@ -3086,104 +3732,6 @@ export type DataResponseVerificationResult = {
 };
 
 /**
- * JSON body for the deploy endpoint (base64-encoded code bundle).
- */
-export type DeployRequest = {
-    alert_policy?: null | CloudDeploymentAlertPolicy;
-    /**
-     * Base64-encoded tar.gz of the scripts/ directory.
-     */
-    code_bundle_base64: string;
-    /**
-     * Optional backend override. Omit or set "auto" for AWS-first bundle-based routing.
-     */
-    compute_backend?: string | null;
-    /**
-     * JSON config object (will be encrypted at rest).
-     */
-    config?: unknown;
-    /**
-     * Cumulative context token budget; oldest tool results truncated when exceeded.
-     */
-    context_budget_tokens?: number | null;
-    cron_schedule?: string | null;
-    cron_timezone?: string | null;
-    /**
-     * UI rendering hints for custom dashboards.
-     */
-    dashboard_config?: unknown;
-    environment_id?: string | null;
-    eval_gate_max_age_seconds?: number | null;
-    eval_gate_set_id?: string | null;
-    /**
-     * Fallback model IDs to try on transient errors (429, 503, timeout).
-     */
-    fallback_models?: Array<string> | null;
-    /**
-     * Max LLM loop iterations (overrides SEREN_MAX_ITERATIONS env var in orchestrator).
-     */
-    max_iterations?: number | null;
-    /**
-     * Max wall-clock seconds per run (overrides SEREN_MAX_TIMEOUT env var in orchestrator).
-     */
-    max_timeout_seconds?: number | null;
-    /**
-     * Max total tool calls allowed in a single run before the runtime stops.
-     */
-    max_tool_calls_per_run?: number | null;
-    /**
-     * Max characters per tool output (overrides SEREN_MAX_TOOL_OUTPUT env var).
-     */
-    max_tool_output_chars?: number | null;
-    mode: string;
-    /**
-     * Additional model parameters (temperature, max_tokens, etc.).
-     */
-    model_config?: unknown;
-    /**
-     * Model identifier (e.g. "anthropic/claude-sonnet-4-20250514").
-     */
-    model_id?: string | null;
-    name?: string | null;
-    network_policy?: null | CloudDeploymentNetworkPolicy;
-    /**
-     * Orchestration mode: "script" (default) or "llm".
-     */
-    orchestration_mode?: string | null;
-    /**
-     * Restrict the runtime to built-in Seren publisher tools only.
-     */
-    publisher_only?: boolean;
-    /**
-     * Declared requirements (env vars, secrets, config keys) validated at deploy time.
-     */
-    requirements?: Array<RequirementSpec> | null;
-    requirements_txt?: string | null;
-    /**
-     * Optional runtime override. Omit or set "auto" to infer from the uploaded bundle.
-     */
-    runtime_kind?: string | null;
-    /**
-     * JSON secrets object (key-value pairs, will be encrypted at rest).
-     */
-    secrets?: unknown;
-    side_effect_policy?: null | SideEffectPolicy;
-    skill_slug: string;
-    /**
-     * System prompt for LLM orchestration (required when orchestration_mode = "llm").
-     */
-    system_prompt?: string | null;
-    /**
-     * Tool definitions for the LLM to call.
-     */
-    tool_definitions?: unknown;
-    /**
-     * Visibility mode: "open" (default, internals visible) or "opaque" (internals hidden).
-     */
-    visibility?: string | null;
-};
-
-/**
  * Aggregated spend summary for a single cloud deployment.
  */
 export type DeploymentSpendSummary = {
@@ -3195,9 +3743,23 @@ export type DeploymentSpendSummary = {
     total_cost_usd: string;
 };
 
+/**
+ * Eval gate configuration that must pass with a fresh verdict before runs proceed.
+ */
+export type EvalGate = {
+    max_age_seconds: number;
+    set_id: string;
+};
+
 export type ManagedAgentApprovalPolicy = 'read_only' | 'allow_mutations';
 
+export type ManagedAgentLlmConnection = {
+    provider: 'seren_private_models';
+};
+
 export type ManagedAgentModelPolicy = 'fast' | 'balanced' | 'deep';
+
+export type ManagedAgentRuntimeAdapter = 'adk';
 
 export type ManagedAgentSummary = {
     allowed_publisher_operations: Array<string>;
@@ -3284,6 +3846,70 @@ export type SideEffectPolicy = {
 };
 
 /**
+ * Condition for a conditional approval rule.
+ */
+export type ToolApprovalCondition = {
+    gte?: number | null;
+    lte?: number | null;
+    path: string;
+    type: 'numeric_threshold';
+} | {
+    path: string;
+    type: 'string_equals';
+    value: string;
+} | {
+    path: string;
+    type: 'string_in';
+    values: Array<string>;
+} | {
+    path: string;
+    type: 'string_not_in';
+    values: Array<string>;
+} | {
+    path: string;
+    type: 'boolean_equals';
+    value: boolean;
+} | {
+    end_hour: number;
+    start_hour: number;
+    type: 'outside_hours_utc';
+};
+
+/**
+ * Conditional approval rule for an orchestration tool.
+ */
+export type ToolApprovalRule = {
+    approval_reason?: string | null;
+    approval_type?: ToolApprovalType;
+    conditions?: Array<ToolApprovalCondition>;
+};
+
+/**
+ * Approval policy for an LLM orchestration tool.
+ */
+export type ToolApprovalType = 'none' | 'required' | 'audit';
+
+/**
+ * A single tool definition for LLM orchestration.
+ */
+export type ToolDefinition = {
+    approval_reason?: string | null;
+    approval_rules?: Array<ToolApprovalRule>;
+    approval_type?: ToolApprovalType;
+    description: string;
+    input_schema?: unknown;
+    /**
+     * Maximum output size in bytes for this tool. Output exceeding this limit is truncated.
+     */
+    max_output_bytes?: number | null;
+    name: string;
+    /**
+     * Per-tool timeout override in seconds. Overrides the deployment-level tool timeout.
+     */
+    timeout_override_seconds?: number | null;
+};
+
+/**
  * Request body for updating a reusable execution environment.
  */
 export type UpdateCloudDeploymentEnvironmentRequest = {
@@ -3295,18 +3921,34 @@ export type UpdateCloudDeploymentEnvironmentRequest = {
 };
 
 /**
- * Request body for updating config/secrets without redeploying.
+ * Partial update request for an existing cloud deployment.
+ *
+ * Mirrors the deployment envelope as `Option<...>` for partial update. Runtime
+ * workload changes use deployment-specific replacement/update endpoints.
  */
 export type UpdateCloudDeploymentRequest = {
     alert_policy?: null | CloudDeploymentAlertPolicy;
+    /**
+     * Clear any existing alert policy.
+     */
     clear_alert_policy?: boolean;
+    /**
+     * Clear any existing dashboard config.
+     */
+    clear_dashboard_config?: boolean;
+    /**
+     * Clear any existing eval gate configuration.
+     */
     clear_eval_gate?: boolean;
-    clear_network_policy?: boolean;
-    config?: unknown;
-    eval_gate_max_age_seconds?: number | null;
-    eval_gate_set_id?: string | null;
-    network_policy?: null | CloudDeploymentNetworkPolicy;
-    secrets?: unknown;
+    /**
+     * Updated dashboard rendering config.
+     */
+    dashboard_config?: unknown;
+    eval_gate?: null | EvalGate;
+    /**
+     * Updated visibility mode.
+     */
+    visibility?: string | null;
 };
 
 /**
@@ -3329,6 +3971,114 @@ export type VerificationResult = {
     error?: string | null;
     first_invalid_sequence?: number | null;
     verified: boolean;
+};
+
+/**
+ * Execution strategy for a workload.
+ *
+ * Tagged on the `type` field so the wire shape is `{"type":"llm",...}` or
+ * `{"type":"code",...}`.
+ */
+export type WorkloadExecution = {
+    adapter?: null | ManagedAgentRuntimeAdapter;
+    /**
+     * Ordered list of fallback model identifiers tried on primary failure.
+     */
+    fallback_models?: Array<string> | null;
+    llm_connection?: null | ManagedAgentLlmConnection;
+    /**
+     * Arbitrary model parameters forwarded to the provider.
+     */
+    model_config?: unknown;
+    /**
+     * Model identifier override (e.g. `"anthropic/claude-sonnet-4.6"`).
+     */
+    model_id?: string | null;
+    /**
+     * System prompt delivered to the language model at runtime.
+     */
+    system_prompt: string;
+    /**
+     * Tool definitions available to the LLM during execution.
+     */
+    tool_definitions?: Array<ToolDefinition> | null;
+    type: 'llm';
+} | {
+    /**
+     * Uploaded deployment bundle identifier returned by `seren_cloud_create_deployment_bundle`.
+     */
+    deployment_bundle_id: string;
+    /**
+     * Python requirements.txt contents injected at build time.
+     */
+    requirements_txt?: string | null;
+    runtime_kind?: null | CloudDeploymentRuntimeKind;
+    type: 'code';
+};
+
+/**
+ * Resource and iteration limits applied to a workload run.
+ *
+ * All fields default to `None` (no limit).
+ */
+export type WorkloadLimits = {
+    /**
+     * Maximum context window budget in tokens.
+     */
+    context_budget_tokens?: number | null;
+    /**
+     * Maximum number of agent loop iterations before the run is terminated.
+     */
+    max_iterations?: number | null;
+    /**
+     * Wall-clock timeout in seconds for the entire run.
+     */
+    max_timeout_seconds?: number | null;
+    /**
+     * Maximum number of tool calls across the entire run.
+     */
+    max_tool_calls_per_run?: number | null;
+    /**
+     * Maximum number of characters kept from any single tool output.
+     */
+    max_tool_output_chars?: number | null;
+};
+
+/**
+ * Full runtime specification for a cloud workload.
+ *
+ * Captures compute backend, network policy, side-effect controls, and the
+ * execution discriminator. The `execution` field is required; all other
+ * fields default to `None` or their zero value.
+ */
+export type WorkloadSpec = {
+    compute_backend?: null | CloudDeploymentComputeBackend;
+    /**
+     * Arbitrary operator-supplied configuration passed to the runtime.
+     */
+    config?: unknown;
+    /**
+     * Execution strategy -- either LLM-orchestrated or artifact-bundle backed.
+     */
+    execution: WorkloadExecution;
+    /**
+     * Resource and iteration limits for the workload.
+     */
+    limits?: WorkloadLimits;
+    network_policy?: null | CloudDeploymentNetworkPolicy;
+    /**
+     * When true, the workload is exposed only to publisher-internal callers.
+     */
+    publisher_only?: boolean;
+    /**
+     * Declared requirements validated at deploy time.
+     */
+    requirements?: Array<RequirementSpec> | null;
+    /**
+     * Secret references available to the runtime (typed in a later milestone).
+     */
+    secrets?: unknown;
+    side_effect_policy?: null | SideEffectPolicy;
 };
 
 export type SerenCloudListAuditEntriesData = {
@@ -3414,7 +4164,7 @@ export type SerenCloudGetAuditEntryResponses = {
 export type SerenCloudGetAuditEntryResponse = SerenCloudGetAuditEntryResponses[keyof SerenCloudGetAuditEntryResponses];
 
 export type SerenCloudDeployData = {
-    body: DeployRequest;
+    body: CreateCloudDeploymentRequest;
     path?: never;
     query?: never;
     url: '/deploy';
@@ -3439,6 +4189,101 @@ export type SerenCloudDeployResponses = {
 };
 
 export type SerenCloudDeployResponse = SerenCloudDeployResponses[keyof SerenCloudDeployResponses];
+
+export type SerenCloudCreateDeploymentBundleData = {
+    body: CreateCloudDeploymentBundleRequest;
+    path?: never;
+    query?: never;
+    url: '/deployment-bundles';
+};
+
+export type SerenCloudCreateDeploymentBundleErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type SerenCloudCreateDeploymentBundleResponses = {
+    /**
+     * Deployment bundle registered
+     */
+    200: DataResponseCreateCloudDeploymentBundleResponse;
+};
+
+export type SerenCloudCreateDeploymentBundleResponse = SerenCloudCreateDeploymentBundleResponses[keyof SerenCloudCreateDeploymentBundleResponses];
+
+export type SerenCloudGetDeploymentBundleData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment bundle ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployment-bundles/{id}';
+};
+
+export type SerenCloudGetDeploymentBundleErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Deployment bundle not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudGetDeploymentBundleResponses = {
+    /**
+     * Deployment bundle metadata
+     */
+    200: DataResponseCloudDeploymentBundleDetail;
+};
+
+export type SerenCloudGetDeploymentBundleResponse = SerenCloudGetDeploymentBundleResponses[keyof SerenCloudGetDeploymentBundleResponses];
+
+export type SerenCloudCompleteDeploymentBundleUploadData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment bundle ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployment-bundles/{id}/complete';
+};
+
+export type SerenCloudCompleteDeploymentBundleUploadErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Deployment bundle not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudCompleteDeploymentBundleUploadResponses = {
+    /**
+     * Deployment bundle upload completed
+     */
+    200: DataResponseCloudDeploymentBundle;
+};
+
+export type SerenCloudCompleteDeploymentBundleUploadResponse = SerenCloudCompleteDeploymentBundleUploadResponses[keyof SerenCloudCompleteDeploymentBundleUploadResponses];
 
 export type SerenCloudListDeploymentsData = {
     body?: never;
@@ -3591,6 +4436,86 @@ export type SerenCloudDeploymentAuditResponses = {
 };
 
 export type SerenCloudDeploymentAuditResponse = SerenCloudDeploymentAuditResponses[keyof SerenCloudDeploymentAuditResponses];
+
+export type SerenCloudRecordChannelRunEventData = {
+    body: CloudDeploymentChannelRunEventRequest;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/channel-run-events';
+};
+
+export type SerenCloudRecordChannelRunEventErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudRecordChannelRunEventResponses = {
+    /**
+     * Channel run event recorded
+     */
+    201: DataResponseCloudDeploymentRunEvent;
+};
+
+export type SerenCloudRecordChannelRunEventResponse = SerenCloudRecordChannelRunEventResponses[keyof SerenCloudRecordChannelRunEventResponses];
+
+export type SerenCloudGetDeploymentBundleDownloadData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/deployment-bundle-download';
+};
+
+export type SerenCloudGetDeploymentBundleDownloadErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment or bundle not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudGetDeploymentBundleDownloadResponses = {
+    /**
+     * Deployment bundle download instructions
+     */
+    200: DataResponseCloudDeploymentBundleDownloadResponse;
+};
+
+export type SerenCloudGetDeploymentBundleDownloadResponse = SerenCloudGetDeploymentBundleDownloadResponses[keyof SerenCloudGetDeploymentBundleDownloadResponses];
 
 export type SerenCloudDeploymentFsData = {
     body?: never;

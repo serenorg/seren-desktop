@@ -6,23 +6,27 @@ export default defineConfig({
     "./openapi/openapi-seren-db.json",
     "./openapi/openapi-seren-cloud.json",
     "./openapi/openapi-seren-private-models.json",
+    "./openapi/openapi-seren-agent.json",
+    "./openapi/openapi-seren-skills.json",
   ],
   output: [
     {
       path: "src/api/generated/seren-core",
-      format: "prettier",
     },
     {
       path: "src/api/generated/seren-db",
-      format: "prettier",
     },
     {
       path: "src/api/generated/seren-cloud",
-      format: "prettier",
     },
     {
       path: "src/api/generated/seren-private-models",
-      format: "prettier",
+    },
+    {
+      path: "src/api/generated/seren-agent",
+    },
+    {
+      path: "src/api/generated/seren-skills",
     },
   ],
   plugins: [

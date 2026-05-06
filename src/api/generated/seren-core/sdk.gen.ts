@@ -2,9 +2,9 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AcceptOrganizationInviteData, AcceptOrganizationInviteErrors, AcceptOrganizationInviteResponses, AddPaymentMethodData, AddPaymentMethodErrors, AddPaymentMethodResponses, AgentRegisterData, AgentRegisterErrors, AgentRegisterResponses, AgentUpdateData, AgentUpdateErrors, AgentUpdateResponses, ApplyReferralCodeData, ApplyReferralCodeErrors, ApplyReferralCodeResponses, AssignRoleData, AssignRoleErrors, AssignRoleResponses, BeginOrganizationOtpEnrollmentData, BeginOrganizationOtpEnrollmentErrors, BeginOrganizationOtpEnrollmentResponses, CancelTaskData, CancelTaskErrors, CancelTaskResponses, ChangeOrganizationPlanData, ChangeOrganizationPlanErrors, ChangeOrganizationPlanResponses, ChangePasswordData, ChangePasswordErrors, ChangePasswordResponses, CheckDailyEligibilityData, CheckDailyEligibilityErrors, CheckDailyEligibilityResponses, CheckPermissionData, CheckPermissionErrors, CheckPermissionResponses, ClaimDailyData, ClaimDailyErrors, ClaimDailyResponses, ClaimPaymentMethodBonusData, ClaimPaymentMethodBonusErrors, ClaimPaymentMethodBonusResponses, ClaimSignupBonusData, ClaimSignupBonusErrors, ClaimSignupBonusResponses, ConfirmOrganizationOtpEnrollmentData, ConfirmOrganizationOtpEnrollmentErrors, ConfirmOrganizationOtpEnrollmentResponses, CreateChargeData, CreateChargeErrors, CreateChargeResponses, CreateCustomSkillData, CreateCustomSkillResponses, CreateCustomSkillRevisionData, CreateCustomSkillRevisionResponses, CreateDefaultOrgApiKeyData, CreateDefaultOrgApiKeyErrors, CreateDefaultOrgApiKeyResponses, CreateDepositData, CreateDepositErrors, CreateDepositResponses, CreateInviteData, CreateInviteErrors, CreateInviteResponses, CreateOrganizationRoleData, CreateOrganizationRoleErrors, CreateOrganizationRoleResponses, CreateOrgApiKeyData, CreateOrgApiKeyErrors, CreateOrgApiKeyResponses, CreateOrgOauthProviderData, CreateOrgOauthProviderErrors, CreateOrgOauthProviderResponses, CreateOrgPublisherPayoutData, CreateOrgPublisherPayoutErrors, CreateOrgPublisherPayoutResponses, CreateOrgVpcEndpointData, CreateOrgVpcEndpointErrors, CreateOrgVpcEndpointResponses, CreatePaymentIntentData, CreatePaymentIntentErrors, CreatePaymentIntentResponses, CreatePayoutData, CreatePayoutErrors, CreatePayoutResponses, CreatePublisherData, CreatePublisherErrors, CreatePublisherResponses, CreateWebhookData, CreateWebhookErrors, CreateWebhookResponses, DeleteOrganizationRoleData, DeleteOrganizationRoleErrors, DeleteOrganizationRoleResponses, DeleteOrgOauthProviderData, DeleteOrgOauthProviderErrors, DeleteOrgOauthProviderResponses, DeleteOrgVpcEndpointByRegionData, DeleteOrgVpcEndpointByRegionErrors, DeleteOrgVpcEndpointByRegionResponses, DeleteOrgVpcEndpointData, DeleteOrgVpcEndpointErrors, DeleteOrgVpcEndpointResponses, DeletePaymentMethodData, DeletePaymentMethodErrors, DeletePaymentMethodResponses, DeletePublisherData, DeletePublisherErrors, DeletePublisherResponses, DeleteResourceData, DeleteResourceErrors, DeleteResourceResponses, DeleteWebhookData, DeleteWebhookErrors, DeleteWebhookResponses, DownloadCustomSkillRevisionBundleData, DownloadCustomSkillRevisionBundleResponses, EstimateQueryData, EstimateQueryErrors, EstimateQueryResponses, ExportTransactionsData, ExportTransactionsErrors, ExportTransactionsResponses, ForgotPasswordData, ForgotPasswordErrors, ForgotPasswordResponses, GenerateInvoicesData, GenerateInvoicesErrors, GenerateInvoicesResponses, GetAccountSecurityData, GetAccountSecurityErrors, GetAccountSecurityResponses, GetAgentBalanceData, GetAgentBalanceErrors, GetAgentBalanceResponses, GetAuditLogData, GetAuditLogErrors, GetAuditLogResponses, GetBillingHealthData, GetBillingHealthErrors, GetBillingHealthResponses, GetChargeStatusData, GetChargeStatusErrors, GetChargeStatusResponses, GetCurrentUserData, GetCurrentUserErrors, GetCurrentUserResponses, GetCustomSkillData, GetCustomSkillErrors, GetCustomSkillResponses, GetCustomSkillRevisionData, GetCustomSkillRevisionFileData, GetCustomSkillRevisionFileResponses, GetCustomSkillRevisionResponses, GetEndpointBillingEventsData, GetEndpointBillingEventsErrors, GetEndpointBillingEventsResponses, GetHistoryStatsData, GetHistoryStatsErrors, GetHistoryStatsResponses, GetInvoiceData, GetInvoiceErrors, GetInvoiceResponses, GetMatrixData, GetMatrixErrors, GetMatrixResponses, GetMyPermissionsData, GetMyPermissionsErrors, GetMyPermissionsResponses, GetOrganizationConsumptionData, GetOrganizationConsumptionErrors, GetOrganizationConsumptionResponses, GetOrganizationOtpPolicyData, GetOrganizationOtpPolicyErrors, GetOrganizationOtpPolicyResponses, GetOrganizationOtpStatusData, GetOrganizationOtpStatusErrors, GetOrganizationOtpStatusResponses, GetOrganizationPlanData, GetOrganizationPlanErrors, GetOrganizationPlanResponses, GetOrgOauthProviderData, GetOrgOauthProviderErrors, GetOrgOauthProviderResponses, GetOrgPublisherData, GetOrgPublisherEarningsData, GetOrgPublisherEarningsErrors, GetOrgPublisherEarningsResponses, GetOrgPublisherErrors, GetOrgPublisherResponses, GetOrgVpcEndpointByRegionData, GetOrgVpcEndpointByRegionErrors, GetOrgVpcEndpointByRegionResponses, GetOrgVpcEndpointData, GetOrgVpcEndpointErrors, GetOrgVpcEndpointResponses, GetPaymentHistoryData, GetPaymentHistoryErrors, GetPaymentHistoryResponses, GetPayoutStatusData, GetPayoutStatusErrors, GetPayoutStatusResponses, GetPlanData, GetPlanErrors, GetPlanResponses, GetPrivateModelsPolicyData, GetPrivateModelsPolicyErrors, GetPrivateModelsPolicyResponses, GetPublisherTemplateAnalyticsData, GetPublisherTemplateAnalyticsErrors, GetPublisherTemplateAnalyticsResponses, GetQuotaUsageData, GetQuotaUsageErrors, GetQuotaUsageResponses, GetReferralInfoData, GetReferralInfoErrors, GetReferralInfoResponses, GetResourceData, GetResourceErrors, GetResourceResponses, GetRevenueByDayData, GetRevenueByDayErrors, GetRevenueByDayResponses, GetRevenueMetricsData, GetRevenueMetricsErrors, GetRevenueMetricsResponses, GetRoleData, GetRoleErrors, GetRoleResponses, GetStatsData, GetStatsErrors, GetStatsResponses, GetStorePublisherData, GetStorePublisherErrors, GetStorePublisherLogoData, GetStorePublisherLogoErrors, GetStorePublisherLogoResponses, GetStorePublisherResponses, GetSupportedData, GetSupportedErrors, GetSupportedResponses, GetTaskData, GetTaskErrors, GetTaskResponses, GetTemplateData, GetTemplateErrors, GetTemplateResponses, GetTopAgentsData, GetTopAgentsErrors, GetTopAgentsResponses, GetTransactionsData, GetTransactionsErrors, GetTransactionsResponses, GetTransactionSummaryData, GetTransactionSummaryErrors, GetTransactionSummaryResponses, GetUsageSummaryData, GetUsageSummaryErrors, GetUsageSummaryResponses, GetWalletBalanceData, GetWalletBalanceErrors, GetWalletBalanceResponses, GetWebhookData, GetWebhookErrors, GetWebhookResponses, HandleStripeWebhookData, HandleStripeWebhookErrors, HandleStripeWebhookResponses, InitiateOauthByIdData, InitiateOauthByIdErrors, InitiateOauthData, InitiateOauthErrors, InvokeTemplateData, InvokeTemplateErrors, InvokeTemplateResponses, IssueInvoiceData, IssueInvoiceErrors, IssueInvoiceResponses, ListAllDatabasesData, ListAllDatabasesErrors, ListAllDatabasesResponses, ListAuditLogsData, ListAuditLogsErrors, ListAuditLogsResponses, ListConnectionsData, ListConnectionsResponses, ListCustomSkillRevisionsData, ListCustomSkillRevisionsResponses, ListCustomSkillsData, ListCustomSkillsResponses, ListDefaultOrgApiKeysData, ListDefaultOrgApiKeysErrors, ListDefaultOrgApiKeysResponses, ListEventTypesData, ListEventTypesErrors, ListEventTypesResponses, ListHistoryData, ListHistoryErrors, ListHistoryResponses, ListInvitesData, ListInvitesErrors, ListInvitesResponses, ListMembersData, ListMembersErrors, ListMembersResponses, ListOrganizationRolesData, ListOrganizationRolesErrors, ListOrganizationRolesResponses, ListOrganizationsData, ListOrganizationsErrors, ListOrganizationsResponses, ListOrgApiKeysData, ListOrgApiKeysErrors, ListOrgApiKeysResponses, ListOrgOauthProvidersData, ListOrgOauthProvidersErrors, ListOrgOauthProvidersResponses, ListOrgPublisherPayoutsData, ListOrgPublisherPayoutsErrors, ListOrgPublisherPayoutsResponses, ListOrgPublishersData, ListOrgPublishersErrors, ListOrgPublishersResponses, ListOrgVpcEndpointsAliasData, ListOrgVpcEndpointsAliasErrors, ListOrgVpcEndpointsAliasResponses, ListOrgVpcEndpointsByRegionData, ListOrgVpcEndpointsByRegionErrors, ListOrgVpcEndpointsByRegionResponses, ListOrgVpcEndpointsData, ListOrgVpcEndpointsErrors, ListOrgVpcEndpointsResponses, ListPaymentMethodsData, ListPaymentMethodsErrors, ListPaymentMethodsResponses, ListPermissionsData, ListPermissionsErrors, ListPermissionsResponses, ListPlansData, ListPlansErrors, ListPlansResponses, ListProvidersData, ListProvidersResponses, ListResourcesData, ListResourcesErrors, ListResourcesResponses, ListSessionsData, ListSessionsErrors, ListSessionsResponses, ListStorePublishersData, ListStorePublishersErrors, ListStorePublishersResponses, ListTaskEventsData, ListTaskEventsErrors, ListTaskEventsResponses, ListTasksData, ListTasksErrors, ListTasksResponses, ListTemplatesData, ListTemplatesErrors, ListTemplatesResponses, ListWebhookDeliveriesData, ListWebhookDeliveriesErrors, ListWebhookDeliveriesResponses, ListWebhooksData, ListWebhooksErrors, ListWebhooksResponses, OauthCallbackByIdData, OauthCallbackByIdErrors, OauthCallbackData, OauthCallbackErrors, OnchainDepositData, OnchainDepositErrors, OnchainDepositResponses, PostSignalsData, PostSignalsErrors, PostSignalsResponses, ProxyToPublisherGetData, ProxyToPublisherGetErrors, ProxyToPublisherGetResponses, ProxyToPublisherPostData, ProxyToPublisherPostErrors, ProxyToPublisherPostResponses, PublishCustomSkillRevisionData, PublishCustomSkillRevisionResponses, PublisherRootHandlerData, PublisherRootHandlerErrors, PublisherRootHandlerResponses, PublishTemplateData, PublishTemplateErrors, PublishTemplateResponses, RefundChargeData, RefundChargeErrors, RefundChargeResponses, ResendVerificationEmailData, ResendVerificationEmailErrors, ResendVerificationEmailResponses, ResetOrganizationMemberOtpData, ResetOrganizationMemberOtpErrors, ResetOrganizationMemberOtpResponses, ResetPasswordData, ResetPasswordErrors, ResetPasswordResponses, RevokeAllSessionsData, RevokeAllSessionsErrors, RevokeAllSessionsResponses, RevokeConnectionByIdData, RevokeConnectionByIdErrors, RevokeConnectionByIdResponses, RevokeConnectionData, RevokeConnectionErrors, RevokeConnectionResponses, RevokeDefaultOrgApiKeyData, RevokeDefaultOrgApiKeyErrors, RevokeDefaultOrgApiKeyResponses, RevokeOrgApiKeyData, RevokeOrgApiKeyErrors, RevokeOrgApiKeyResponses, RevokeOtherSessionsData, RevokeOtherSessionsErrors, RevokeOtherSessionsResponses, RevokeSessionData, RevokeSessionErrors, RevokeSessionResponses, RotateWebhookSecretData, RotateWebhookSecretErrors, RotateWebhookSecretResponses, SetRecoveryData, SetRecoveryErrors, SetRecoveryResponses, SlashChargeData, SlashChargeErrors, SlashChargeResponses, StreamTaskData, StreamTaskResponses, SubmitTaskInputData, SubmitTaskInputErrors, SubmitTaskInputResponses, SuggestPublishersData, SuggestPublishersErrors, SuggestPublishersResponses, UpdateCustomSkillData, UpdateCustomSkillErrors, UpdateCustomSkillResponses, UpdateOrganizationOtpPolicyData, UpdateOrganizationOtpPolicyErrors, UpdateOrganizationOtpPolicyResponses, UpdateOrgOauthProviderData, UpdateOrgOauthProviderErrors, UpdateOrgOauthProviderResponses, UpdatePrivateModelsPolicyData, UpdatePrivateModelsPolicyErrors, UpdatePrivateModelsPolicyResponses, UpdatePublisherData, UpdatePublisherErrors, UpdatePublisherPricingData, UpdatePublisherPricingErrors, UpdatePublisherPricingResponses, UpdatePublisherResponses, UpdateRoleData, UpdateRoleErrors, UpdateRoleResponses, UpdateWebhookData, UpdateWebhookErrors, UpdateWebhookResponses, UploadPublisherLogoData, UploadPublisherLogoErrors, UploadPublisherLogoResponses, UpsertResourceData, UpsertResourceErrors, UpsertResourceResponses, VerifyEmailData, VerifyEmailErrors, VerifyEmailResponses, VerifyOrganizationOtpScopeData, VerifyOrganizationOtpScopeErrors, VerifyOrganizationOtpScopeResponses, WalletRecoverData, WalletRecoverErrors, WalletRecoverResponses } from './types.gen';
+import type { AcceptOrganizationInviteData, AcceptOrganizationInviteErrors, AcceptOrganizationInviteResponses, AddPaymentMethodData, AddPaymentMethodErrors, AddPaymentMethodResponses, AgentRegisterData, AgentRegisterErrors, AgentRegisterResponses, AgentUpdateData, AgentUpdateErrors, AgentUpdateResponses, ApplyReferralCodeData, ApplyReferralCodeErrors, ApplyReferralCodeResponses, AssignRoleData, AssignRoleErrors, AssignRoleResponses, BeginOrganizationOtpEnrollmentData, BeginOrganizationOtpEnrollmentErrors, BeginOrganizationOtpEnrollmentResponses, CancelTaskData, CancelTaskErrors, CancelTaskResponses, ChangeOrganizationPlanData, ChangeOrganizationPlanErrors, ChangeOrganizationPlanResponses, ChangePasswordData, ChangePasswordErrors, ChangePasswordResponses, CheckDailyEligibilityData, CheckDailyEligibilityErrors, CheckDailyEligibilityResponses, CheckPermissionData, CheckPermissionErrors, CheckPermissionResponses, ClaimDailyData, ClaimDailyErrors, ClaimDailyResponses, ClaimPaymentMethodBonusData, ClaimPaymentMethodBonusErrors, ClaimPaymentMethodBonusResponses, ClaimSignupBonusData, ClaimSignupBonusErrors, ClaimSignupBonusResponses, ConfirmOrganizationOtpEnrollmentData, ConfirmOrganizationOtpEnrollmentErrors, ConfirmOrganizationOtpEnrollmentResponses, CreateChargeData, CreateChargeErrors, CreateChargeResponses, CreateCustomSkillData, CreateCustomSkillResponses, CreateCustomSkillRevisionData, CreateCustomSkillRevisionResponses, CreateDefaultOrgApiKeyData, CreateDefaultOrgApiKeyErrors, CreateDefaultOrgApiKeyResponses, CreateDepositData, CreateDepositErrors, CreateDepositResponses, CreateInviteData, CreateInviteErrors, CreateInviteResponses, CreateOrganizationRoleData, CreateOrganizationRoleErrors, CreateOrganizationRoleResponses, CreateOrgApiKeyData, CreateOrgApiKeyErrors, CreateOrgApiKeyResponses, CreateOrgOauthProviderData, CreateOrgOauthProviderErrors, CreateOrgOauthProviderResponses, CreateOrgPublisherPayoutData, CreateOrgPublisherPayoutErrors, CreateOrgPublisherPayoutResponses, CreateOrgVpcEndpointData, CreateOrgVpcEndpointErrors, CreateOrgVpcEndpointResponses, CreatePaymentIntentData, CreatePaymentIntentErrors, CreatePaymentIntentResponses, CreatePayoutData, CreatePayoutErrors, CreatePayoutResponses, CreatePublisherData, CreatePublisherErrors, CreatePublisherResponses, CreateWebhookData, CreateWebhookErrors, CreateWebhookResponses, DeleteOrganizationRoleData, DeleteOrganizationRoleErrors, DeleteOrganizationRoleResponses, DeleteOrgOauthProviderData, DeleteOrgOauthProviderErrors, DeleteOrgOauthProviderResponses, DeleteOrgVpcEndpointByRegionData, DeleteOrgVpcEndpointByRegionErrors, DeleteOrgVpcEndpointByRegionResponses, DeleteOrgVpcEndpointData, DeleteOrgVpcEndpointErrors, DeleteOrgVpcEndpointResponses, DeletePaymentMethodData, DeletePaymentMethodErrors, DeletePaymentMethodResponses, DeletePublisherData, DeletePublisherErrors, DeletePublisherResponses, DeleteResourceData, DeleteResourceErrors, DeleteResourceResponses, DeleteWebhookData, DeleteWebhookErrors, DeleteWebhookResponses, DownloadCustomSkillRevisionBundleData, DownloadCustomSkillRevisionBundleResponses, EstimateQueryData, EstimateQueryErrors, EstimateQueryResponses, ExportTransactionsData, ExportTransactionsErrors, ExportTransactionsResponses, ForgotPasswordData, ForgotPasswordErrors, ForgotPasswordResponses, GenerateInvoicesData, GenerateInvoicesErrors, GenerateInvoicesResponses, GetAccountSecurityData, GetAccountSecurityErrors, GetAccountSecurityResponses, GetAgentBalanceData, GetAgentBalanceErrors, GetAgentBalanceResponses, GetAuditLogData, GetAuditLogErrors, GetAuditLogResponses, GetBillingHealthData, GetBillingHealthErrors, GetBillingHealthResponses, GetChargeStatusData, GetChargeStatusErrors, GetChargeStatusResponses, GetCurrentUserData, GetCurrentUserErrors, GetCurrentUserResponses, GetCustomSkillData, GetCustomSkillErrors, GetCustomSkillResponses, GetCustomSkillRevisionData, GetCustomSkillRevisionFileData, GetCustomSkillRevisionFileResponses, GetCustomSkillRevisionResponses, GetEndpointBillingEventsData, GetEndpointBillingEventsErrors, GetEndpointBillingEventsResponses, GetHistoryStatsData, GetHistoryStatsErrors, GetHistoryStatsResponses, GetInvoiceData, GetInvoiceErrors, GetInvoiceResponses, GetMatrixData, GetMatrixErrors, GetMatrixResponses, GetMyPermissionsData, GetMyPermissionsErrors, GetMyPermissionsResponses, GetOrganizationConsumptionData, GetOrganizationConsumptionErrors, GetOrganizationConsumptionResponses, GetOrganizationOtpPolicyData, GetOrganizationOtpPolicyErrors, GetOrganizationOtpPolicyResponses, GetOrganizationOtpStatusData, GetOrganizationOtpStatusErrors, GetOrganizationOtpStatusResponses, GetOrganizationPlanData, GetOrganizationPlanErrors, GetOrganizationPlanResponses, GetOrgOauthProviderData, GetOrgOauthProviderErrors, GetOrgOauthProviderResponses, GetOrgPublisherData, GetOrgPublisherEarningsData, GetOrgPublisherEarningsErrors, GetOrgPublisherEarningsResponses, GetOrgPublisherErrors, GetOrgPublisherResponses, GetOrgVpcEndpointByRegionData, GetOrgVpcEndpointByRegionErrors, GetOrgVpcEndpointByRegionResponses, GetOrgVpcEndpointData, GetOrgVpcEndpointErrors, GetOrgVpcEndpointResponses, GetPaymentHistoryData, GetPaymentHistoryErrors, GetPaymentHistoryResponses, GetPayoutStatusData, GetPayoutStatusErrors, GetPayoutStatusResponses, GetPlanData, GetPlanErrors, GetPlanResponses, GetPrivateModelsPolicyData, GetPrivateModelsPolicyErrors, GetPrivateModelsPolicyResponses, GetPublisherTemplateAnalyticsData, GetPublisherTemplateAnalyticsErrors, GetPublisherTemplateAnalyticsResponses, GetQuotaUsageData, GetQuotaUsageErrors, GetQuotaUsageResponses, GetReferralInfoData, GetReferralInfoErrors, GetReferralInfoResponses, GetResourceData, GetResourceErrors, GetResourceResponses, GetRevenueByDayData, GetRevenueByDayErrors, GetRevenueByDayResponses, GetRevenueMetricsData, GetRevenueMetricsErrors, GetRevenueMetricsResponses, GetRoleData, GetRoleErrors, GetRoleResponses, GetStatsData, GetStatsErrors, GetStatsResponses, GetStorePublisherData, GetStorePublisherErrors, GetStorePublisherLogoData, GetStorePublisherLogoErrors, GetStorePublisherLogoResponses, GetStorePublisherResponses, GetSupportedData, GetSupportedErrors, GetSupportedResponses, GetTaskData, GetTaskErrors, GetTaskResponses, GetTemplateData, GetTemplateErrors, GetTemplateResponses, GetTopAgentsData, GetTopAgentsErrors, GetTopAgentsResponses, GetTransactionsData, GetTransactionsErrors, GetTransactionsResponses, GetTransactionSummaryData, GetTransactionSummaryErrors, GetTransactionSummaryResponses, GetUsageSummaryData, GetUsageSummaryErrors, GetUsageSummaryResponses, GetWalletBalanceData, GetWalletBalanceErrors, GetWalletBalanceResponses, GetWebhookData, GetWebhookErrors, GetWebhookResponses, HandleStripeWebhookData, HandleStripeWebhookErrors, HandleStripeWebhookResponses, InitiateOauthByIdData, InitiateOauthByIdErrors, InitiateOauthData, InitiateOauthErrors, InvokeTemplateData, InvokeTemplateErrors, InvokeTemplateResponses, IssueInvoiceData, IssueInvoiceErrors, IssueInvoiceResponses, ListAllDatabasesData, ListAllDatabasesErrors, ListAllDatabasesResponses, ListAuditLogsData, ListAuditLogsErrors, ListAuditLogsResponses, ListConnectionsData, ListConnectionsResponses, ListCustomSkillRevisionsData, ListCustomSkillRevisionsResponses, ListCustomSkillsData, ListCustomSkillsResponses, ListDefaultOrgApiKeysData, ListDefaultOrgApiKeysErrors, ListDefaultOrgApiKeysResponses, ListEventTypesData, ListEventTypesErrors, ListEventTypesResponses, ListHistoryData, ListHistoryErrors, ListHistoryResponses, ListInvitesData, ListInvitesErrors, ListInvitesResponses, ListMembersData, ListMembersErrors, ListMembersResponses, ListOrganizationRolesData, ListOrganizationRolesErrors, ListOrganizationRolesResponses, ListOrganizationsData, ListOrganizationsErrors, ListOrganizationsResponses, ListOrgApiKeysData, ListOrgApiKeysErrors, ListOrgApiKeysResponses, ListOrgOauthProvidersData, ListOrgOauthProvidersErrors, ListOrgOauthProvidersResponses, ListOrgPublisherPayoutsData, ListOrgPublisherPayoutsErrors, ListOrgPublisherPayoutsResponses, ListOrgPublishersData, ListOrgPublishersErrors, ListOrgPublishersResponses, ListOrgVpcEndpointsAliasData, ListOrgVpcEndpointsAliasErrors, ListOrgVpcEndpointsAliasResponses, ListOrgVpcEndpointsByRegionData, ListOrgVpcEndpointsByRegionErrors, ListOrgVpcEndpointsByRegionResponses, ListOrgVpcEndpointsData, ListOrgVpcEndpointsErrors, ListOrgVpcEndpointsResponses, ListPaymentMethodsData, ListPaymentMethodsErrors, ListPaymentMethodsResponses, ListPermissionsData, ListPermissionsErrors, ListPermissionsResponses, ListPlansData, ListPlansErrors, ListPlansResponses, ListProvidersData, ListProvidersResponses, ListResourcesData, ListResourcesErrors, ListResourcesResponses, ListSessionsData, ListSessionsErrors, ListSessionsResponses, ListStorePublishersData, ListStorePublishersErrors, ListStorePublishersResponses, ListTaskEventsData, ListTaskEventsErrors, ListTaskEventsResponses, ListTasksData, ListTasksErrors, ListTasksResponses, ListTemplatesData, ListTemplatesErrors, ListTemplatesResponses, ListWebhookDeliveriesData, ListWebhookDeliveriesErrors, ListWebhookDeliveriesResponses, ListWebhooksData, ListWebhooksErrors, ListWebhooksResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, OauthCallbackByIdData, OauthCallbackByIdErrors, OauthCallbackData, OauthCallbackErrors, OnchainDepositData, OnchainDepositErrors, OnchainDepositResponses, PostSignalsData, PostSignalsErrors, PostSignalsResponses, ProxyToPublisherGetData, ProxyToPublisherGetErrors, ProxyToPublisherGetResponses, ProxyToPublisherPostData, ProxyToPublisherPostErrors, ProxyToPublisherPostResponses, PublishCustomSkillRevisionData, PublishCustomSkillRevisionResponses, PublisherRootHandlerData, PublisherRootHandlerErrors, PublisherRootHandlerResponses, PublishTemplateData, PublishTemplateErrors, PublishTemplateResponses, RefreshTokenData, RefreshTokenErrors, RefreshTokenResponses, RefundChargeData, RefundChargeErrors, RefundChargeResponses, ResendVerificationEmailData, ResendVerificationEmailErrors, ResendVerificationEmailResponses, ResetOrganizationMemberOtpData, ResetOrganizationMemberOtpErrors, ResetOrganizationMemberOtpResponses, ResetPasswordData, ResetPasswordErrors, ResetPasswordResponses, RevokeAllSessionsData, RevokeAllSessionsErrors, RevokeAllSessionsResponses, RevokeConnectionByIdData, RevokeConnectionByIdErrors, RevokeConnectionByIdResponses, RevokeConnectionData, RevokeConnectionErrors, RevokeConnectionResponses, RevokeDefaultOrgApiKeyData, RevokeDefaultOrgApiKeyErrors, RevokeDefaultOrgApiKeyResponses, RevokeOrgApiKeyData, RevokeOrgApiKeyErrors, RevokeOrgApiKeyResponses, RevokeOtherSessionsData, RevokeOtherSessionsErrors, RevokeOtherSessionsResponses, RevokeSessionData, RevokeSessionErrors, RevokeSessionResponses, RotateWebhookSecretData, RotateWebhookSecretErrors, RotateWebhookSecretResponses, SetRecoveryData, SetRecoveryErrors, SetRecoveryResponses, SignupData, SignupErrors, SignupResponses, SlashChargeData, SlashChargeErrors, SlashChargeResponses, StreamTaskData, StreamTaskResponses, SubmitTaskInputData, SubmitTaskInputErrors, SubmitTaskInputResponses, SuggestPublishersData, SuggestPublishersErrors, SuggestPublishersResponses, UpdateCustomSkillData, UpdateCustomSkillErrors, UpdateCustomSkillResponses, UpdateOrganizationOtpPolicyData, UpdateOrganizationOtpPolicyErrors, UpdateOrganizationOtpPolicyResponses, UpdateOrgOauthProviderData, UpdateOrgOauthProviderErrors, UpdateOrgOauthProviderResponses, UpdatePrivateModelsPolicyData, UpdatePrivateModelsPolicyErrors, UpdatePrivateModelsPolicyResponses, UpdatePublisherData, UpdatePublisherErrors, UpdatePublisherPricingData, UpdatePublisherPricingErrors, UpdatePublisherPricingResponses, UpdatePublisherResponses, UpdateRoleData, UpdateRoleErrors, UpdateRoleResponses, UpdateWebhookData, UpdateWebhookErrors, UpdateWebhookResponses, UploadPublisherLogoData, UploadPublisherLogoErrors, UploadPublisherLogoResponses, UpsertResourceData, UpsertResourceErrors, UpsertResourceResponses, VerifyEmailData, VerifyEmailErrors, VerifyEmailResponses, VerifyOrganizationOtpScopeData, VerifyOrganizationOtpScopeErrors, VerifyOrganizationOtpScopeResponses, WalletRecoverData, WalletRecoverErrors, WalletRecoverResponses } from './types.gen';
 
-export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
+export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
      * You can provide a client instance returned by `createClient()` instead of
      * individual options. This might be also useful if you want to implement a
@@ -23,6 +23,7 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
  * Accept an organization invite for the authenticated user.
  */
 export const acceptOrganizationInvite = <ThrowOnError extends boolean = false>(options: Options<AcceptOrganizationInviteData, ThrowOnError>) => (options.client ?? client).post<AcceptOrganizationInviteResponses, AcceptOrganizationInviteErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/auth/accept-invite',
     ...options,
     headers: {
@@ -35,7 +36,11 @@ export const acceptOrganizationInvite = <ThrowOnError extends boolean = false>(o
  * GET /auth/account-security
  * Return account-level auth state (password presence and linked social providers).
  */
-export const getAccountSecurity = <ThrowOnError extends boolean = false>(options?: Options<GetAccountSecurityData, ThrowOnError>) => (options?.client ?? client).get<GetAccountSecurityResponses, GetAccountSecurityErrors, ThrowOnError>({ url: '/auth/account-security', ...options });
+export const getAccountSecurity = <ThrowOnError extends boolean = false>(options?: Options<GetAccountSecurityData, ThrowOnError>) => (options?.client ?? client).get<GetAccountSecurityResponses, GetAccountSecurityErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/auth/account-security',
+    ...options
+});
 
 /**
  * Update an agent's profile (e.g. set a real email address).
@@ -46,6 +51,7 @@ export const getAccountSecurity = <ThrowOnError extends boolean = false>(options
  * A verified email is required before making Stripe deposits.
  */
 export const agentUpdate = <ThrowOnError extends boolean = false>(options: Options<AgentUpdateData, ThrowOnError>) => (options.client ?? client).patch<AgentUpdateResponses, AgentUpdateErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/auth/agent',
     ...options,
     headers: {
@@ -81,6 +87,7 @@ export const agentRegister = <ThrowOnError extends boolean = false>(options: Opt
  * Change the authenticated user's password and revoke active refresh sessions
  */
 export const changePassword = <ThrowOnError extends boolean = false>(options: Options<ChangePasswordData, ThrowOnError>) => (options.client ?? client).post<ChangePasswordResponses, ChangePasswordErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/auth/change-password',
     ...options,
     headers: {
@@ -103,10 +110,53 @@ export const forgotPassword = <ThrowOnError extends boolean = false>(options: Op
 });
 
 /**
+ * POST /auth/login
+ * Login with email and password. Sets a refresh-token cookie alongside the
+ * JSON body so cookie-aware clients can rotate without echoing the token back.
+ */
+export const login = <ThrowOnError extends boolean = false>(options: Options<LoginData, ThrowOnError>) => (options.client ?? client).post<LoginResponses, LoginErrors, ThrowOnError>({
+    url: '/auth/login',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * POST /auth/logout
+ * Clear refresh cookie and revoke all sessions for current user
+ */
+export const logout = <ThrowOnError extends boolean = false>(options?: Options<LogoutData, ThrowOnError>) => (options?.client ?? client).post<LogoutResponses, LogoutErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/auth/logout',
+    ...options
+});
+
+/**
  * GET /auth/me
  * Get current authenticated user information with default organization
  */
-export const getCurrentUser = <ThrowOnError extends boolean = false>(options?: Options<GetCurrentUserData, ThrowOnError>) => (options?.client ?? client).get<GetCurrentUserResponses, GetCurrentUserErrors, ThrowOnError>({ url: '/auth/me', ...options });
+export const getCurrentUser = <ThrowOnError extends boolean = false>(options?: Options<GetCurrentUserData, ThrowOnError>) => (options?.client ?? client).get<GetCurrentUserResponses, GetCurrentUserErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/auth/me',
+    ...options
+});
+
+/**
+ * POST /auth/refresh
+ * Exchange refresh token for new access token and refresh token (rotation).
+ * The refresh token is read from either the request body or the refresh
+ * cookie; the rotated token is set in both the response body and a Set-Cookie.
+ */
+export const refreshToken = <ThrowOnError extends boolean = false>(options: Options<RefreshTokenData, ThrowOnError>) => (options.client ?? client).post<RefreshTokenResponses, RefreshTokenErrors, ThrowOnError>({
+    url: '/auth/refresh',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * POST /auth/resend-verification
@@ -127,6 +177,19 @@ export const resendVerificationEmail = <ThrowOnError extends boolean = false>(op
  */
 export const resetPassword = <ThrowOnError extends boolean = false>(options: Options<ResetPasswordData, ThrowOnError>) => (options.client ?? client).post<ResetPasswordResponses, ResetPasswordErrors, ThrowOnError>({
     url: '/auth/reset-password',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * POST /auth/signup
+ * Register a new user with email and password
+ */
+export const signup = <ThrowOnError extends boolean = false>(options: Options<SignupData, ThrowOnError>) => (options.client ?? client).post<SignupResponses, SignupErrors, ThrowOnError>({
+    url: '/auth/signup',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -185,25 +248,38 @@ export const issueInvoice = <ThrowOnError extends boolean = false>(options: Opti
  * POST /billing/invoices/:id/pay
  * Create a payment intent for an invoice
  */
-export const createPaymentIntent = <ThrowOnError extends boolean = false>(options: Options<CreatePaymentIntentData, ThrowOnError>) => (options.client ?? client).post<CreatePaymentIntentResponses, CreatePaymentIntentErrors, ThrowOnError>({ url: '/billing/invoices/{id}/pay', ...options });
+export const createPaymentIntent = <ThrowOnError extends boolean = false>(options: Options<CreatePaymentIntentData, ThrowOnError>) => (options.client ?? client).post<CreatePaymentIntentResponses, CreatePaymentIntentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/billing/invoices/{id}/pay',
+    ...options
+});
 
 /**
  * GET /billing/invoices/:id/payments
  * Get payment history for an invoice
  */
-export const getPaymentHistory = <ThrowOnError extends boolean = false>(options: Options<GetPaymentHistoryData, ThrowOnError>) => (options.client ?? client).get<GetPaymentHistoryResponses, GetPaymentHistoryErrors, ThrowOnError>({ url: '/billing/invoices/{id}/payments', ...options });
+export const getPaymentHistory = <ThrowOnError extends boolean = false>(options: Options<GetPaymentHistoryData, ThrowOnError>) => (options.client ?? client).get<GetPaymentHistoryResponses, GetPaymentHistoryErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/billing/invoices/{id}/payments',
+    ...options
+});
 
 /**
  * GET /billing/payment-methods
  * List payment methods for the organization
  */
-export const listPaymentMethods = <ThrowOnError extends boolean = false>(options?: Options<ListPaymentMethodsData, ThrowOnError>) => (options?.client ?? client).get<ListPaymentMethodsResponses, ListPaymentMethodsErrors, ThrowOnError>({ url: '/billing/payment-methods', ...options });
+export const listPaymentMethods = <ThrowOnError extends boolean = false>(options?: Options<ListPaymentMethodsData, ThrowOnError>) => (options?.client ?? client).get<ListPaymentMethodsResponses, ListPaymentMethodsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/billing/payment-methods',
+    ...options
+});
 
 /**
  * POST /billing/payment-methods
  * Add a payment method for the organization
  */
 export const addPaymentMethod = <ThrowOnError extends boolean = false>(options: Options<AddPaymentMethodData, ThrowOnError>) => (options.client ?? client).post<AddPaymentMethodResponses, AddPaymentMethodErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/billing/payment-methods',
     ...options,
     headers: {
@@ -216,12 +292,17 @@ export const addPaymentMethod = <ThrowOnError extends boolean = false>(options: 
  * DELETE /billing/payment-methods/{id}
  * Remove a payment method from the organization
  */
-export const deletePaymentMethod = <ThrowOnError extends boolean = false>(options: Options<DeletePaymentMethodData, ThrowOnError>) => (options.client ?? client).delete<DeletePaymentMethodResponses, DeletePaymentMethodErrors, ThrowOnError>({ url: '/billing/payment-methods/{id}', ...options });
+export const deletePaymentMethod = <ThrowOnError extends boolean = false>(options: Options<DeletePaymentMethodData, ThrowOnError>) => (options.client ?? client).delete<DeletePaymentMethodResponses, DeletePaymentMethodErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/billing/payment-methods/{id}',
+    ...options
+});
 
 /**
  * POST /billing/publishers/{slug}/charges
  */
 export const createCharge = <ThrowOnError extends boolean = false>(options: Options<CreateChargeData, ThrowOnError>) => (options.client ?? client).post<CreateChargeResponses, CreateChargeErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/billing/publishers/{slug}/charges',
     ...options,
     headers: {
@@ -233,12 +314,17 @@ export const createCharge = <ThrowOnError extends boolean = false>(options: Opti
 /**
  * GET /billing/publishers/{slug}/charges/{charge_id}
  */
-export const getChargeStatus = <ThrowOnError extends boolean = false>(options: Options<GetChargeStatusData, ThrowOnError>) => (options.client ?? client).get<GetChargeStatusResponses, GetChargeStatusErrors, ThrowOnError>({ url: '/billing/publishers/{slug}/charges/{charge_id}', ...options });
+export const getChargeStatus = <ThrowOnError extends boolean = false>(options: Options<GetChargeStatusData, ThrowOnError>) => (options.client ?? client).get<GetChargeStatusResponses, GetChargeStatusErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/billing/publishers/{slug}/charges/{charge_id}',
+    ...options
+});
 
 /**
  * POST /billing/publishers/{slug}/charges/{charge_id}/refund
  */
 export const refundCharge = <ThrowOnError extends boolean = false>(options: Options<RefundChargeData, ThrowOnError>) => (options.client ?? client).post<RefundChargeResponses, RefundChargeErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/billing/publishers/{slug}/charges/{charge_id}/refund',
     ...options,
     headers: {
@@ -251,6 +337,7 @@ export const refundCharge = <ThrowOnError extends boolean = false>(options: Opti
  * POST /billing/publishers/{slug}/charges/{charge_id}/slash
  */
 export const slashCharge = <ThrowOnError extends boolean = false>(options: Options<SlashChargeData, ThrowOnError>) => (options.client ?? client).post<SlashChargeResponses, SlashChargeErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/billing/publishers/{slug}/charges/{charge_id}/slash',
     ...options,
     headers: {
@@ -263,6 +350,7 @@ export const slashCharge = <ThrowOnError extends boolean = false>(options: Optio
  * POST /billing/publishers/{slug}/payouts
  */
 export const createPayout = <ThrowOnError extends boolean = false>(options: Options<CreatePayoutData, ThrowOnError>) => (options.client ?? client).post<CreatePayoutResponses, CreatePayoutErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/billing/publishers/{slug}/payouts',
     ...options,
     headers: {
@@ -274,7 +362,11 @@ export const createPayout = <ThrowOnError extends boolean = false>(options: Opti
 /**
  * GET /billing/publishers/{slug}/payouts/{payout_id}
  */
-export const getPayoutStatus = <ThrowOnError extends boolean = false>(options: Options<GetPayoutStatusData, ThrowOnError>) => (options.client ?? client).get<GetPayoutStatusResponses, GetPayoutStatusErrors, ThrowOnError>({ url: '/billing/publishers/{slug}/payouts/{payout_id}', ...options });
+export const getPayoutStatus = <ThrowOnError extends boolean = false>(options: Options<GetPayoutStatusData, ThrowOnError>) => (options.client ?? client).get<GetPayoutStatusResponses, GetPayoutStatusErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/billing/publishers/{slug}/payouts/{payout_id}',
+    ...options
+});
 
 /**
  * GET /billing/usage/:organization_id
@@ -288,17 +380,26 @@ export const getUsageSummary = <ThrowOnError extends boolean = false>(options: O
  * Returns all databases the user has access to, with project and branch context included.
  * This provides a single view of all databases without needing to query each project/branch separately.
  */
-export const listAllDatabases = <ThrowOnError extends boolean = false>(options?: Options<ListAllDatabasesData, ThrowOnError>) => (options?.client ?? client).get<ListAllDatabasesResponses, ListAllDatabasesErrors, ThrowOnError>({ url: '/databases', ...options });
+export const listAllDatabases = <ThrowOnError extends boolean = false>(options?: Options<ListAllDatabasesData, ThrowOnError>) => (options?.client ?? client).get<ListAllDatabasesResponses, ListAllDatabasesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/databases',
+    ...options
+});
 
 /**
  * Get the global eval routing matrix.
  */
-export const getMatrix = <ThrowOnError extends boolean = false>(options?: Options<GetMatrixData, ThrowOnError>) => (options?.client ?? client).get<GetMatrixResponses, GetMatrixErrors, ThrowOnError>({ url: '/eval/matrix', ...options });
+export const getMatrix = <ThrowOnError extends boolean = false>(options?: Options<GetMatrixData, ThrowOnError>) => (options?.client ?? client).get<GetMatrixResponses, GetMatrixErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/eval/matrix',
+    ...options
+});
 
 /**
  * Ingest eval signals from Seren Desktop clients.
  */
 export const postSignals = <ThrowOnError extends boolean = false>(options: Options<PostSignalsData, ThrowOnError>) => (options.client ?? client).post<PostSignalsResponses, PostSignalsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/eval/signals',
     ...options,
     headers: {
@@ -364,19 +465,31 @@ export const deleteResource = <ThrowOnError extends boolean = false>(options: Op
  *
  * Returns all OAuth providers the user has connected to.
  */
-export const listConnections = <ThrowOnError extends boolean = false>(options?: Options<ListConnectionsData, ThrowOnError>) => (options?.client ?? client).get<ListConnectionsResponses, unknown, ThrowOnError>({ url: '/oauth/connections', ...options });
+export const listConnections = <ThrowOnError extends boolean = false>(options?: Options<ListConnectionsData, ThrowOnError>) => (options?.client ?? client).get<ListConnectionsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/oauth/connections',
+    ...options
+});
 
 /**
  * Revoke an OAuth connection by provider ID (supports org-scoped providers)
  */
-export const revokeConnectionById = <ThrowOnError extends boolean = false>(options: Options<RevokeConnectionByIdData, ThrowOnError>) => (options.client ?? client).delete<RevokeConnectionByIdResponses, RevokeConnectionByIdErrors, ThrowOnError>({ url: '/oauth/connections/providers/{provider_id}', ...options });
+export const revokeConnectionById = <ThrowOnError extends boolean = false>(options: Options<RevokeConnectionByIdData, ThrowOnError>) => (options.client ?? client).delete<RevokeConnectionByIdResponses, RevokeConnectionByIdErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/oauth/connections/providers/{provider_id}',
+    ...options
+});
 
 /**
  * Revoke an OAuth connection
  *
  * Disconnects the user's account from the OAuth provider and deletes stored tokens.
  */
-export const revokeConnection = <ThrowOnError extends boolean = false>(options: Options<RevokeConnectionData, ThrowOnError>) => (options.client ?? client).delete<RevokeConnectionResponses, RevokeConnectionErrors, ThrowOnError>({ url: '/oauth/connections/{provider}', ...options });
+export const revokeConnection = <ThrowOnError extends boolean = false>(options: Options<RevokeConnectionData, ThrowOnError>) => (options.client ?? client).delete<RevokeConnectionResponses, RevokeConnectionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/oauth/connections/{provider}',
+    ...options
+});
 
 /**
  * List available OAuth providers
@@ -384,12 +497,20 @@ export const revokeConnection = <ThrowOnError extends boolean = false>(options: 
  * Returns all active OAuth providers that users can connect to,
  * including global providers and providers from organizations the user belongs to.
  */
-export const listProviders = <ThrowOnError extends boolean = false>(options?: Options<ListProvidersData, ThrowOnError>) => (options?.client ?? client).get<ListProvidersResponses, unknown, ThrowOnError>({ url: '/oauth/providers', ...options });
+export const listProviders = <ThrowOnError extends boolean = false>(options?: Options<ListProvidersData, ThrowOnError>) => (options?.client ?? client).get<ListProvidersResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/oauth/providers',
+    ...options
+});
 
 /**
  * Initiate OAuth authorization flow by provider ID (supports org-scoped providers)
  */
-export const initiateOauthById = <ThrowOnError extends boolean = false>(options: Options<InitiateOauthByIdData, ThrowOnError>) => (options.client ?? client).get<unknown, InitiateOauthByIdErrors, ThrowOnError>({ url: '/oauth/providers/{provider_id}/authorize', ...options });
+export const initiateOauthById = <ThrowOnError extends boolean = false>(options: Options<InitiateOauthByIdData, ThrowOnError>) => (options.client ?? client).get<unknown, InitiateOauthByIdErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/oauth/providers/{provider_id}/authorize',
+    ...options
+});
 
 /**
  * Handle OAuth callback by provider ID (supports org-scoped providers)
@@ -402,7 +523,11 @@ export const oauthCallbackById = <ThrowOnError extends boolean = false>(options:
  * Redirects the user to the OAuth provider's consent screen.
  * After authorization, the provider will redirect back to the callback URL.
  */
-export const initiateOauth = <ThrowOnError extends boolean = false>(options: Options<InitiateOauthData, ThrowOnError>) => (options.client ?? client).get<unknown, InitiateOauthErrors, ThrowOnError>({ url: '/oauth/{provider}/authorize', ...options });
+export const initiateOauth = <ThrowOnError extends boolean = false>(options: Options<InitiateOauthData, ThrowOnError>) => (options.client ?? client).get<unknown, InitiateOauthErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/oauth/{provider}/authorize',
+    ...options
+});
 
 /**
  * Handle OAuth callback
@@ -416,12 +541,20 @@ export const oauthCallback = <ThrowOnError extends boolean = false>(options: Opt
  * GET /organizations
  * List all organizations for the authenticated user
  */
-export const listOrganizations = <ThrowOnError extends boolean = false>(options?: Options<ListOrganizationsData, ThrowOnError>) => (options?.client ?? client).get<ListOrganizationsResponses, ListOrganizationsErrors, ThrowOnError>({ url: '/organizations', ...options });
+export const listOrganizations = <ThrowOnError extends boolean = false>(options?: Options<ListOrganizationsData, ThrowOnError>) => (options?.client ?? client).get<ListOrganizationsResponses, ListOrganizationsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations',
+    ...options
+});
 
 /**
  * List API keys for the user's default organization
  */
-export const listDefaultOrgApiKeys = <ThrowOnError extends boolean = false>(options?: Options<ListDefaultOrgApiKeysData, ThrowOnError>) => (options?.client ?? client).get<ListDefaultOrgApiKeysResponses, ListDefaultOrgApiKeysErrors, ThrowOnError>({ url: '/organizations/default/api-keys', ...options });
+export const listDefaultOrgApiKeys = <ThrowOnError extends boolean = false>(options?: Options<ListDefaultOrgApiKeysData, ThrowOnError>) => (options?.client ?? client).get<ListDefaultOrgApiKeysResponses, ListDefaultOrgApiKeysErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/default/api-keys',
+    ...options
+});
 
 /**
  * Create a new API key for the user's default organization
@@ -430,6 +563,7 @@ export const listDefaultOrgApiKeys = <ThrowOnError extends boolean = false>(opti
  * first organization, avoiding an extra round-trip to /auth/me.
  */
 export const createDefaultOrgApiKey = <ThrowOnError extends boolean = false>(options: Options<CreateDefaultOrgApiKeyData, ThrowOnError>) => (options.client ?? client).post<CreateDefaultOrgApiKeyResponses, CreateDefaultOrgApiKeyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/default/api-keys',
     ...options,
     headers: {
@@ -441,7 +575,11 @@ export const createDefaultOrgApiKey = <ThrowOnError extends boolean = false>(opt
 /**
  * Revoke an API key from the user's default organization
  */
-export const revokeDefaultOrgApiKey = <ThrowOnError extends boolean = false>(options: Options<RevokeDefaultOrgApiKeyData, ThrowOnError>) => (options.client ?? client).delete<RevokeDefaultOrgApiKeyResponses, RevokeDefaultOrgApiKeyErrors, ThrowOnError>({ url: '/organizations/default/api-keys/{key_id}', ...options });
+export const revokeDefaultOrgApiKey = <ThrowOnError extends boolean = false>(options: Options<RevokeDefaultOrgApiKeyData, ThrowOnError>) => (options.client ?? client).delete<RevokeDefaultOrgApiKeyResponses, RevokeDefaultOrgApiKeyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/default/api-keys/{key_id}',
+    ...options
+});
 
 /**
  * GET /organizations/{organization_id}/agents/tasks
@@ -483,12 +621,17 @@ export const streamTask = <ThrowOnError extends boolean = false>(options: Option
 /**
  * List API keys for a specific organization
  */
-export const listOrgApiKeys = <ThrowOnError extends boolean = false>(options: Options<ListOrgApiKeysData, ThrowOnError>) => (options.client ?? client).get<ListOrgApiKeysResponses, ListOrgApiKeysErrors, ThrowOnError>({ url: '/organizations/{organization_id}/api-keys', ...options });
+export const listOrgApiKeys = <ThrowOnError extends boolean = false>(options: Options<ListOrgApiKeysData, ThrowOnError>) => (options.client ?? client).get<ListOrgApiKeysResponses, ListOrgApiKeysErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/api-keys',
+    ...options
+});
 
 /**
  * Create a new API key for a specific organization
  */
 export const createOrgApiKey = <ThrowOnError extends boolean = false>(options: Options<CreateOrgApiKeyData, ThrowOnError>) => (options.client ?? client).post<CreateOrgApiKeyResponses, CreateOrgApiKeyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/api-keys',
     ...options,
     headers: {
@@ -500,17 +643,29 @@ export const createOrgApiKey = <ThrowOnError extends boolean = false>(options: O
 /**
  * Revoke an organization API key
  */
-export const revokeOrgApiKey = <ThrowOnError extends boolean = false>(options: Options<RevokeOrgApiKeyData, ThrowOnError>) => (options.client ?? client).delete<RevokeOrgApiKeyResponses, RevokeOrgApiKeyErrors, ThrowOnError>({ url: '/organizations/{organization_id}/api-keys/{key_id}', ...options });
+export const revokeOrgApiKey = <ThrowOnError extends boolean = false>(options: Options<RevokeOrgApiKeyData, ThrowOnError>) => (options.client ?? client).delete<RevokeOrgApiKeyResponses, RevokeOrgApiKeyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/api-keys/{key_id}',
+    ...options
+});
 
 /**
  * List audit logs for an organization
  */
-export const listAuditLogs = <ThrowOnError extends boolean = false>(options: Options<ListAuditLogsData, ThrowOnError>) => (options.client ?? client).get<ListAuditLogsResponses, ListAuditLogsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/audit-logs', ...options });
+export const listAuditLogs = <ThrowOnError extends boolean = false>(options: Options<ListAuditLogsData, ThrowOnError>) => (options.client ?? client).get<ListAuditLogsResponses, ListAuditLogsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/audit-logs',
+    ...options
+});
 
 /**
  * Get a specific audit log entry
  */
-export const getAuditLog = <ThrowOnError extends boolean = false>(options: Options<GetAuditLogData, ThrowOnError>) => (options.client ?? client).get<GetAuditLogResponses, GetAuditLogErrors, ThrowOnError>({ url: '/organizations/{organization_id}/audit-logs/{log_id}', ...options });
+export const getAuditLog = <ThrowOnError extends boolean = false>(options: Options<GetAuditLogData, ThrowOnError>) => (options.client ?? client).get<GetAuditLogResponses, GetAuditLogErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/audit-logs/{log_id}',
+    ...options
+});
 
 /**
  * GET /organizations/{organization_id}/billing/endpoints/{endpoint_id}/events
@@ -522,17 +677,26 @@ export const getEndpointBillingEvents = <ThrowOnError extends boolean = false>(o
  * GET /organizations/{organization_id}/consumption
  * Aggregated organization-level consumption over a billing window.
  */
-export const getOrganizationConsumption = <ThrowOnError extends boolean = false>(options: Options<GetOrganizationConsumptionData, ThrowOnError>) => (options.client ?? client).get<GetOrganizationConsumptionResponses, GetOrganizationConsumptionErrors, ThrowOnError>({ url: '/organizations/{organization_id}/consumption', ...options });
+export const getOrganizationConsumption = <ThrowOnError extends boolean = false>(options: Options<GetOrganizationConsumptionData, ThrowOnError>) => (options.client ?? client).get<GetOrganizationConsumptionResponses, GetOrganizationConsumptionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/consumption',
+    ...options
+});
 
 /**
  * GET /organizations/{organization_id}/custom-skills
  */
-export const listCustomSkills = <ThrowOnError extends boolean = false>(options: Options<ListCustomSkillsData, ThrowOnError>) => (options.client ?? client).get<ListCustomSkillsResponses, unknown, ThrowOnError>({ url: '/organizations/{organization_id}/custom-skills', ...options });
+export const listCustomSkills = <ThrowOnError extends boolean = false>(options: Options<ListCustomSkillsData, ThrowOnError>) => (options.client ?? client).get<ListCustomSkillsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/custom-skills',
+    ...options
+});
 
 /**
  * POST /organizations/{organization_id}/custom-skills
  */
 export const createCustomSkill = <ThrowOnError extends boolean = false>(options: Options<CreateCustomSkillData, ThrowOnError>) => (options.client ?? client).post<CreateCustomSkillResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/custom-skills',
     ...options,
     headers: {
@@ -544,12 +708,17 @@ export const createCustomSkill = <ThrowOnError extends boolean = false>(options:
 /**
  * GET /organizations/{organization_id}/custom-skills/{skill_id}
  */
-export const getCustomSkill = <ThrowOnError extends boolean = false>(options: Options<GetCustomSkillData, ThrowOnError>) => (options.client ?? client).get<GetCustomSkillResponses, GetCustomSkillErrors, ThrowOnError>({ url: '/organizations/{organization_id}/custom-skills/{skill_id}', ...options });
+export const getCustomSkill = <ThrowOnError extends boolean = false>(options: Options<GetCustomSkillData, ThrowOnError>) => (options.client ?? client).get<GetCustomSkillResponses, GetCustomSkillErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}',
+    ...options
+});
 
 /**
  * PATCH /organizations/{organization_id}/custom-skills/{skill_id}
  */
 export const updateCustomSkill = <ThrowOnError extends boolean = false>(options: Options<UpdateCustomSkillData, ThrowOnError>) => (options.client ?? client).patch<UpdateCustomSkillResponses, UpdateCustomSkillErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/custom-skills/{skill_id}',
     ...options,
     headers: {
@@ -561,12 +730,17 @@ export const updateCustomSkill = <ThrowOnError extends boolean = false>(options:
 /**
  * GET /organizations/{organization_id}/custom-skills/{skill_id}/revisions
  */
-export const listCustomSkillRevisions = <ThrowOnError extends boolean = false>(options: Options<ListCustomSkillRevisionsData, ThrowOnError>) => (options.client ?? client).get<ListCustomSkillRevisionsResponses, unknown, ThrowOnError>({ url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions', ...options });
+export const listCustomSkillRevisions = <ThrowOnError extends boolean = false>(options: Options<ListCustomSkillRevisionsData, ThrowOnError>) => (options.client ?? client).get<ListCustomSkillRevisionsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions',
+    ...options
+});
 
 /**
  * POST /organizations/{organization_id}/custom-skills/{skill_id}/revisions
  */
 export const createCustomSkillRevision = <ThrowOnError extends boolean = false>(options: Options<CreateCustomSkillRevisionData, ThrowOnError>) => (options.client ?? client).post<CreateCustomSkillRevisionResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions',
     ...options,
     headers: {
@@ -578,34 +752,55 @@ export const createCustomSkillRevision = <ThrowOnError extends boolean = false>(
 /**
  * GET /organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}
  */
-export const getCustomSkillRevision = <ThrowOnError extends boolean = false>(options: Options<GetCustomSkillRevisionData, ThrowOnError>) => (options.client ?? client).get<GetCustomSkillRevisionResponses, unknown, ThrowOnError>({ url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}', ...options });
+export const getCustomSkillRevision = <ThrowOnError extends boolean = false>(options: Options<GetCustomSkillRevisionData, ThrowOnError>) => (options.client ?? client).get<GetCustomSkillRevisionResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}',
+    ...options
+});
 
 /**
  * GET /organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/bundle
  */
-export const downloadCustomSkillRevisionBundle = <ThrowOnError extends boolean = false>(options: Options<DownloadCustomSkillRevisionBundleData, ThrowOnError>) => (options.client ?? client).get<DownloadCustomSkillRevisionBundleResponses, unknown, ThrowOnError>({ url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/bundle', ...options });
+export const downloadCustomSkillRevisionBundle = <ThrowOnError extends boolean = false>(options: Options<DownloadCustomSkillRevisionBundleData, ThrowOnError>) => (options.client ?? client).get<DownloadCustomSkillRevisionBundleResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/bundle',
+    ...options
+});
 
 /**
  * GET /organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/file?path=...
  */
-export const getCustomSkillRevisionFile = <ThrowOnError extends boolean = false>(options: Options<GetCustomSkillRevisionFileData, ThrowOnError>) => (options.client ?? client).get<GetCustomSkillRevisionFileResponses, unknown, ThrowOnError>({ url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/file', ...options });
+export const getCustomSkillRevisionFile = <ThrowOnError extends boolean = false>(options: Options<GetCustomSkillRevisionFileData, ThrowOnError>) => (options.client ?? client).get<GetCustomSkillRevisionFileResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/file',
+    ...options
+});
 
 /**
  * POST /organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/publish
  */
-export const publishCustomSkillRevision = <ThrowOnError extends boolean = false>(options: Options<PublishCustomSkillRevisionData, ThrowOnError>) => (options.client ?? client).post<PublishCustomSkillRevisionResponses, unknown, ThrowOnError>({ url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/publish', ...options });
+export const publishCustomSkillRevision = <ThrowOnError extends boolean = false>(options: Options<PublishCustomSkillRevisionData, ThrowOnError>) => (options.client ?? client).post<PublishCustomSkillRevisionResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/publish',
+    ...options
+});
 
 /**
  * GET /organizations/{organization_id}/invites
  * List pending and historical organization invites.
  */
-export const listInvites = <ThrowOnError extends boolean = false>(options: Options<ListInvitesData, ThrowOnError>) => (options.client ?? client).get<ListInvitesResponses, ListInvitesErrors, ThrowOnError>({ url: '/organizations/{organization_id}/invites', ...options });
+export const listInvites = <ThrowOnError extends boolean = false>(options: Options<ListInvitesData, ThrowOnError>) => (options.client ?? client).get<ListInvitesResponses, ListInvitesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/invites',
+    ...options
+});
 
 /**
  * POST /organizations/{organization_id}/invites
  * Create a new organization invite and send an email via the configured mailer.
  */
 export const createInvite = <ThrowOnError extends boolean = false>(options: Options<CreateInviteData, ThrowOnError>) => (options.client ?? client).post<CreateInviteResponses, CreateInviteErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/invites',
     ...options,
     headers: {
@@ -618,12 +813,17 @@ export const createInvite = <ThrowOnError extends boolean = false>(options: Opti
  * GET /organizations/{organization_id}/members
  * List organization members with basic user details.
  */
-export const listMembers = <ThrowOnError extends boolean = false>(options: Options<ListMembersData, ThrowOnError>) => (options.client ?? client).get<ListMembersResponses, ListMembersErrors, ThrowOnError>({ url: '/organizations/{organization_id}/members', ...options });
+export const listMembers = <ThrowOnError extends boolean = false>(options: Options<ListMembersData, ThrowOnError>) => (options.client ?? client).get<ListMembersResponses, ListMembersErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/members',
+    ...options
+});
 
 /**
  * Assign a role to an organization member
  */
 export const assignRole = <ThrowOnError extends boolean = false>(options: Options<AssignRoleData, ThrowOnError>) => (options.client ?? client).put<AssignRoleResponses, AssignRoleErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/members/{member_id}/role',
     ...options,
     headers: {
@@ -637,7 +837,11 @@ export const assignRole = <ThrowOnError extends boolean = false>(options: Option
  *
  * List all OAuth providers for an organization.
  */
-export const listOrgOauthProviders = <ThrowOnError extends boolean = false>(options: Options<ListOrgOauthProvidersData, ThrowOnError>) => (options.client ?? client).get<ListOrgOauthProvidersResponses, ListOrgOauthProvidersErrors, ThrowOnError>({ url: '/organizations/{organization_id}/oauth/providers', ...options });
+export const listOrgOauthProviders = <ThrowOnError extends boolean = false>(options: Options<ListOrgOauthProvidersData, ThrowOnError>) => (options.client ?? client).get<ListOrgOauthProvidersResponses, ListOrgOauthProvidersErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/oauth/providers',
+    ...options
+});
 
 /**
  * POST /organizations/{organization_id}/oauth/providers
@@ -645,6 +849,7 @@ export const listOrgOauthProviders = <ThrowOnError extends boolean = false>(opti
  * Create a new OAuth provider for an organization.
  */
 export const createOrgOauthProvider = <ThrowOnError extends boolean = false>(options: Options<CreateOrgOauthProviderData, ThrowOnError>) => (options.client ?? client).post<CreateOrgOauthProviderResponses, CreateOrgOauthProviderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/oauth/providers',
     ...options,
     headers: {
@@ -658,14 +863,22 @@ export const createOrgOauthProvider = <ThrowOnError extends boolean = false>(opt
  *
  * Delete an OAuth provider for an organization.
  */
-export const deleteOrgOauthProvider = <ThrowOnError extends boolean = false>(options: Options<DeleteOrgOauthProviderData, ThrowOnError>) => (options.client ?? client).delete<DeleteOrgOauthProviderResponses, DeleteOrgOauthProviderErrors, ThrowOnError>({ url: '/organizations/{organization_id}/oauth/providers/{provider_id}', ...options });
+export const deleteOrgOauthProvider = <ThrowOnError extends boolean = false>(options: Options<DeleteOrgOauthProviderData, ThrowOnError>) => (options.client ?? client).delete<DeleteOrgOauthProviderResponses, DeleteOrgOauthProviderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/oauth/providers/{provider_id}',
+    ...options
+});
 
 /**
  * GET /organizations/{organization_id}/oauth/providers/{provider_id}
  *
  * Get a specific OAuth provider for an organization.
  */
-export const getOrgOauthProvider = <ThrowOnError extends boolean = false>(options: Options<GetOrgOauthProviderData, ThrowOnError>) => (options.client ?? client).get<GetOrgOauthProviderResponses, GetOrgOauthProviderErrors, ThrowOnError>({ url: '/organizations/{organization_id}/oauth/providers/{provider_id}', ...options });
+export const getOrgOauthProvider = <ThrowOnError extends boolean = false>(options: Options<GetOrgOauthProviderData, ThrowOnError>) => (options.client ?? client).get<GetOrgOauthProviderResponses, GetOrgOauthProviderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/oauth/providers/{provider_id}',
+    ...options
+});
 
 /**
  * PATCH /organizations/{organization_id}/oauth/providers/{provider_id}
@@ -673,6 +886,7 @@ export const getOrgOauthProvider = <ThrowOnError extends boolean = false>(option
  * Update an OAuth provider for an organization.
  */
 export const updateOrgOauthProvider = <ThrowOnError extends boolean = false>(options: Options<UpdateOrgOauthProviderData, ThrowOnError>) => (options.client ?? client).patch<UpdateOrgOauthProviderResponses, UpdateOrgOauthProviderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/oauth/providers/{provider_id}',
     ...options,
     headers: {
@@ -684,12 +898,17 @@ export const updateOrgOauthProvider = <ThrowOnError extends boolean = false>(opt
 /**
  * GET /organizations/{organization_id}/otp-policy
  */
-export const getOrganizationOtpPolicy = <ThrowOnError extends boolean = false>(options: Options<GetOrganizationOtpPolicyData, ThrowOnError>) => (options.client ?? client).get<GetOrganizationOtpPolicyResponses, GetOrganizationOtpPolicyErrors, ThrowOnError>({ url: '/organizations/{organization_id}/otp-policy', ...options });
+export const getOrganizationOtpPolicy = <ThrowOnError extends boolean = false>(options: Options<GetOrganizationOtpPolicyData, ThrowOnError>) => (options.client ?? client).get<GetOrganizationOtpPolicyResponses, GetOrganizationOtpPolicyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/otp-policy',
+    ...options
+});
 
 /**
  * PUT /organizations/{organization_id}/otp-policy
  */
 export const updateOrganizationOtpPolicy = <ThrowOnError extends boolean = false>(options: Options<UpdateOrganizationOtpPolicyData, ThrowOnError>) => (options.client ?? client).put<UpdateOrganizationOtpPolicyResponses, UpdateOrganizationOtpPolicyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/otp-policy',
     ...options,
     headers: {
@@ -701,12 +920,17 @@ export const updateOrganizationOtpPolicy = <ThrowOnError extends boolean = false
 /**
  * POST /organizations/{organization_id}/otp/enrollment
  */
-export const beginOrganizationOtpEnrollment = <ThrowOnError extends boolean = false>(options: Options<BeginOrganizationOtpEnrollmentData, ThrowOnError>) => (options.client ?? client).post<BeginOrganizationOtpEnrollmentResponses, BeginOrganizationOtpEnrollmentErrors, ThrowOnError>({ url: '/organizations/{organization_id}/otp/enrollment', ...options });
+export const beginOrganizationOtpEnrollment = <ThrowOnError extends boolean = false>(options: Options<BeginOrganizationOtpEnrollmentData, ThrowOnError>) => (options.client ?? client).post<BeginOrganizationOtpEnrollmentResponses, BeginOrganizationOtpEnrollmentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/otp/enrollment',
+    ...options
+});
 
 /**
  * POST /organizations/{organization_id}/otp/enrollment/confirm
  */
 export const confirmOrganizationOtpEnrollment = <ThrowOnError extends boolean = false>(options: Options<ConfirmOrganizationOtpEnrollmentData, ThrowOnError>) => (options.client ?? client).post<ConfirmOrganizationOtpEnrollmentResponses, ConfirmOrganizationOtpEnrollmentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/otp/enrollment/confirm',
     ...options,
     headers: {
@@ -718,17 +942,26 @@ export const confirmOrganizationOtpEnrollment = <ThrowOnError extends boolean = 
 /**
  * POST /organizations/{organization_id}/otp/members/{user_id}/reset
  */
-export const resetOrganizationMemberOtp = <ThrowOnError extends boolean = false>(options: Options<ResetOrganizationMemberOtpData, ThrowOnError>) => (options.client ?? client).post<ResetOrganizationMemberOtpResponses, ResetOrganizationMemberOtpErrors, ThrowOnError>({ url: '/organizations/{organization_id}/otp/members/{user_id}/reset', ...options });
+export const resetOrganizationMemberOtp = <ThrowOnError extends boolean = false>(options: Options<ResetOrganizationMemberOtpData, ThrowOnError>) => (options.client ?? client).post<ResetOrganizationMemberOtpResponses, ResetOrganizationMemberOtpErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/otp/members/{user_id}/reset',
+    ...options
+});
 
 /**
  * GET /organizations/{organization_id}/otp/status
  */
-export const getOrganizationOtpStatus = <ThrowOnError extends boolean = false>(options: Options<GetOrganizationOtpStatusData, ThrowOnError>) => (options.client ?? client).get<GetOrganizationOtpStatusResponses, GetOrganizationOtpStatusErrors, ThrowOnError>({ url: '/organizations/{organization_id}/otp/status', ...options });
+export const getOrganizationOtpStatus = <ThrowOnError extends boolean = false>(options: Options<GetOrganizationOtpStatusData, ThrowOnError>) => (options.client ?? client).get<GetOrganizationOtpStatusResponses, GetOrganizationOtpStatusErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/otp/status',
+    ...options
+});
 
 /**
  * POST /organizations/{organization_id}/otp/verify
  */
 export const verifyOrganizationOtpScope = <ThrowOnError extends boolean = false>(options: Options<VerifyOrganizationOtpScopeData, ThrowOnError>) => (options.client ?? client).post<VerifyOrganizationOtpScopeResponses, VerifyOrganizationOtpScopeErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/otp/verify',
     ...options,
     headers: {
@@ -740,12 +973,20 @@ export const verifyOrganizationOtpScope = <ThrowOnError extends boolean = false>
 /**
  * Check if the current user has a specific permission
  */
-export const checkPermission = <ThrowOnError extends boolean = false>(options: Options<CheckPermissionData, ThrowOnError>) => (options.client ?? client).get<CheckPermissionResponses, CheckPermissionErrors, ThrowOnError>({ url: '/organizations/{organization_id}/permissions/check/{permission}', ...options });
+export const checkPermission = <ThrowOnError extends boolean = false>(options: Options<CheckPermissionData, ThrowOnError>) => (options.client ?? client).get<CheckPermissionResponses, CheckPermissionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/permissions/check/{permission}',
+    ...options
+});
 
 /**
  * Get current user's permissions in an organization
  */
-export const getMyPermissions = <ThrowOnError extends boolean = false>(options: Options<GetMyPermissionsData, ThrowOnError>) => (options.client ?? client).get<GetMyPermissionsResponses, GetMyPermissionsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/permissions/mine', ...options });
+export const getMyPermissions = <ThrowOnError extends boolean = false>(options: Options<GetMyPermissionsData, ThrowOnError>) => (options.client ?? client).get<GetMyPermissionsResponses, GetMyPermissionsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/permissions/mine',
+    ...options
+});
 
 /**
  * GET /organizations/:org_id/plan
@@ -769,12 +1010,17 @@ export const changeOrganizationPlan = <ThrowOnError extends boolean = false>(opt
 /**
  * GET /organizations/{organization_id}/private-models-policy
  */
-export const getPrivateModelsPolicy = <ThrowOnError extends boolean = false>(options: Options<GetPrivateModelsPolicyData, ThrowOnError>) => (options.client ?? client).get<GetPrivateModelsPolicyResponses, GetPrivateModelsPolicyErrors, ThrowOnError>({ url: '/organizations/{organization_id}/private-models-policy', ...options });
+export const getPrivateModelsPolicy = <ThrowOnError extends boolean = false>(options: Options<GetPrivateModelsPolicyData, ThrowOnError>) => (options.client ?? client).get<GetPrivateModelsPolicyResponses, GetPrivateModelsPolicyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/private-models-policy',
+    ...options
+});
 
 /**
  * PUT /organizations/{organization_id}/private-models-policy
  */
 export const updatePrivateModelsPolicy = <ThrowOnError extends boolean = false>(options: Options<UpdatePrivateModelsPolicyData, ThrowOnError>) => (options.client ?? client).put<UpdatePrivateModelsPolicyResponses, UpdatePrivateModelsPolicyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/private-models-policy',
     ...options,
     headers: {
@@ -831,19 +1077,31 @@ export const updatePublisher = <ThrowOnError extends boolean = false>(options: O
  * GET /organizations/:org_id/publishers/:publisher_id/analytics/revenue
  * Get revenue metrics with period-over-period comparison.
  */
-export const getRevenueMetrics = <ThrowOnError extends boolean = false>(options: Options<GetRevenueMetricsData, ThrowOnError>) => (options.client ?? client).get<GetRevenueMetricsResponses, GetRevenueMetricsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/publishers/{publisher_id}/analytics/revenue', ...options });
+export const getRevenueMetrics = <ThrowOnError extends boolean = false>(options: Options<GetRevenueMetricsData, ThrowOnError>) => (options.client ?? client).get<GetRevenueMetricsResponses, GetRevenueMetricsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/publishers/{publisher_id}/analytics/revenue',
+    ...options
+});
 
 /**
  * GET /organizations/:org_id/publishers/:publisher_id/analytics/revenue-by-day
  * Get daily revenue breakdown.
  */
-export const getRevenueByDay = <ThrowOnError extends boolean = false>(options: Options<GetRevenueByDayData, ThrowOnError>) => (options.client ?? client).get<GetRevenueByDayResponses, GetRevenueByDayErrors, ThrowOnError>({ url: '/organizations/{organization_id}/publishers/{publisher_id}/analytics/revenue-by-day', ...options });
+export const getRevenueByDay = <ThrowOnError extends boolean = false>(options: Options<GetRevenueByDayData, ThrowOnError>) => (options.client ?? client).get<GetRevenueByDayResponses, GetRevenueByDayErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/publishers/{publisher_id}/analytics/revenue-by-day',
+    ...options
+});
 
 /**
  * GET /organizations/:org_id/publishers/:publisher_id/analytics/top-agents
  * Get top agents by spending.
  */
-export const getTopAgents = <ThrowOnError extends boolean = false>(options: Options<GetTopAgentsData, ThrowOnError>) => (options.client ?? client).get<GetTopAgentsResponses, GetTopAgentsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/publishers/{publisher_id}/analytics/top-agents', ...options });
+export const getTopAgents = <ThrowOnError extends boolean = false>(options: Options<GetTopAgentsData, ThrowOnError>) => (options.client ?? client).get<GetTopAgentsResponses, GetTopAgentsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/publishers/{publisher_id}/analytics/top-agents',
+    ...options
+});
 
 /**
  * GET /organizations/:org_id/publishers/:publisher_id/earnings
@@ -905,12 +1163,17 @@ export const getQuotaUsage = <ThrowOnError extends boolean = false>(options: Opt
 /**
  * List roles for an organization (includes built-in roles)
  */
-export const listOrganizationRoles = <ThrowOnError extends boolean = false>(options: Options<ListOrganizationRolesData, ThrowOnError>) => (options.client ?? client).get<ListOrganizationRolesResponses, ListOrganizationRolesErrors, ThrowOnError>({ url: '/organizations/{organization_id}/roles', ...options });
+export const listOrganizationRoles = <ThrowOnError extends boolean = false>(options: Options<ListOrganizationRolesData, ThrowOnError>) => (options.client ?? client).get<ListOrganizationRolesResponses, ListOrganizationRolesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/roles',
+    ...options
+});
 
 /**
  * Create a custom role
  */
 export const createOrganizationRole = <ThrowOnError extends boolean = false>(options: Options<CreateOrganizationRoleData, ThrowOnError>) => (options.client ?? client).post<CreateOrganizationRoleResponses, CreateOrganizationRoleErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/roles',
     ...options,
     headers: {
@@ -922,17 +1185,26 @@ export const createOrganizationRole = <ThrowOnError extends boolean = false>(opt
 /**
  * Delete a custom role
  */
-export const deleteOrganizationRole = <ThrowOnError extends boolean = false>(options: Options<DeleteOrganizationRoleData, ThrowOnError>) => (options.client ?? client).delete<DeleteOrganizationRoleResponses, DeleteOrganizationRoleErrors, ThrowOnError>({ url: '/organizations/{organization_id}/roles/{role_id}', ...options });
+export const deleteOrganizationRole = <ThrowOnError extends boolean = false>(options: Options<DeleteOrganizationRoleData, ThrowOnError>) => (options.client ?? client).delete<DeleteOrganizationRoleResponses, DeleteOrganizationRoleErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/roles/{role_id}',
+    ...options
+});
 
 /**
  * Get a specific role
  */
-export const getRole = <ThrowOnError extends boolean = false>(options: Options<GetRoleData, ThrowOnError>) => (options.client ?? client).get<GetRoleResponses, GetRoleErrors, ThrowOnError>({ url: '/organizations/{organization_id}/roles/{role_id}', ...options });
+export const getRole = <ThrowOnError extends boolean = false>(options: Options<GetRoleData, ThrowOnError>) => (options.client ?? client).get<GetRoleResponses, GetRoleErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/roles/{role_id}',
+    ...options
+});
 
 /**
  * Update a custom role
  */
 export const updateRole = <ThrowOnError extends boolean = false>(options: Options<UpdateRoleData, ThrowOnError>) => (options.client ?? client).patch<UpdateRoleResponses, UpdateRoleErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/roles/{role_id}',
     ...options,
     headers: {
@@ -945,11 +1217,20 @@ export const updateRole = <ThrowOnError extends boolean = false>(options: Option
  * GET /organizations/{organization_id}/templates/analytics/{publisher_id}
  * Get template analytics for a specific publisher
  */
-export const getPublisherTemplateAnalytics = <ThrowOnError extends boolean = false>(options: Options<GetPublisherTemplateAnalyticsData, ThrowOnError>) => (options.client ?? client).get<GetPublisherTemplateAnalyticsResponses, GetPublisherTemplateAnalyticsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/templates/analytics/{publisher_id}', ...options });
+export const getPublisherTemplateAnalytics = <ThrowOnError extends boolean = false>(options: Options<GetPublisherTemplateAnalyticsData, ThrowOnError>) => (options.client ?? client).get<GetPublisherTemplateAnalyticsResponses, GetPublisherTemplateAnalyticsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/templates/analytics/{publisher_id}',
+    ...options
+});
 
-export const listOrgVpcEndpoints = <ThrowOnError extends boolean = false>(options: Options<ListOrgVpcEndpointsData, ThrowOnError>) => (options.client ?? client).get<ListOrgVpcEndpointsResponses, ListOrgVpcEndpointsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/vpc-endpoints', ...options });
+export const listOrgVpcEndpoints = <ThrowOnError extends boolean = false>(options: Options<ListOrgVpcEndpointsData, ThrowOnError>) => (options.client ?? client).get<ListOrgVpcEndpointsResponses, ListOrgVpcEndpointsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/vpc-endpoints',
+    ...options
+});
 
 export const createOrgVpcEndpoint = <ThrowOnError extends boolean = false>(options: Options<CreateOrgVpcEndpointData, ThrowOnError>) => (options.client ?? client).post<CreateOrgVpcEndpointResponses, CreateOrgVpcEndpointErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/vpc-endpoints',
     ...options,
     headers: {
@@ -958,39 +1239,68 @@ export const createOrgVpcEndpoint = <ThrowOnError extends boolean = false>(optio
     }
 });
 
-export const deleteOrgVpcEndpoint = <ThrowOnError extends boolean = false>(options: Options<DeleteOrgVpcEndpointData, ThrowOnError>) => (options.client ?? client).delete<DeleteOrgVpcEndpointResponses, DeleteOrgVpcEndpointErrors, ThrowOnError>({ url: '/organizations/{organization_id}/vpc-endpoints/{endpoint_id}', ...options });
+export const deleteOrgVpcEndpoint = <ThrowOnError extends boolean = false>(options: Options<DeleteOrgVpcEndpointData, ThrowOnError>) => (options.client ?? client).delete<DeleteOrgVpcEndpointResponses, DeleteOrgVpcEndpointErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/vpc-endpoints/{endpoint_id}',
+    ...options
+});
 
-export const getOrgVpcEndpoint = <ThrowOnError extends boolean = false>(options: Options<GetOrgVpcEndpointData, ThrowOnError>) => (options.client ?? client).get<GetOrgVpcEndpointResponses, GetOrgVpcEndpointErrors, ThrowOnError>({ url: '/organizations/{organization_id}/vpc-endpoints/{endpoint_id}', ...options });
+export const getOrgVpcEndpoint = <ThrowOnError extends boolean = false>(options: Options<GetOrgVpcEndpointData, ThrowOnError>) => (options.client ?? client).get<GetOrgVpcEndpointResponses, GetOrgVpcEndpointErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/vpc-endpoints/{endpoint_id}',
+    ...options
+});
 
 /**
  * List VPC endpoints for an organization filtered by region (alias path)
  */
-export const listOrgVpcEndpointsByRegion = <ThrowOnError extends boolean = false>(options: Options<ListOrgVpcEndpointsByRegionData, ThrowOnError>) => (options.client ?? client).get<ListOrgVpcEndpointsByRegionResponses, ListOrgVpcEndpointsByRegionErrors, ThrowOnError>({ url: '/organizations/{organization_id}/vpc/region/{region_id}/vpc_endpoints', ...options });
+export const listOrgVpcEndpointsByRegion = <ThrowOnError extends boolean = false>(options: Options<ListOrgVpcEndpointsByRegionData, ThrowOnError>) => (options.client ?? client).get<ListOrgVpcEndpointsByRegionResponses, ListOrgVpcEndpointsByRegionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/vpc/region/{region_id}/vpc_endpoints',
+    ...options
+});
 
 /**
  * Delete VPC endpoint with region in path (alias)
  */
-export const deleteOrgVpcEndpointByRegion = <ThrowOnError extends boolean = false>(options: Options<DeleteOrgVpcEndpointByRegionData, ThrowOnError>) => (options.client ?? client).delete<DeleteOrgVpcEndpointByRegionResponses, DeleteOrgVpcEndpointByRegionErrors, ThrowOnError>({ url: '/organizations/{organization_id}/vpc/region/{region_id}/vpc_endpoints/{endpoint_id}', ...options });
+export const deleteOrgVpcEndpointByRegion = <ThrowOnError extends boolean = false>(options: Options<DeleteOrgVpcEndpointByRegionData, ThrowOnError>) => (options.client ?? client).delete<DeleteOrgVpcEndpointByRegionResponses, DeleteOrgVpcEndpointByRegionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/vpc/region/{region_id}/vpc_endpoints/{endpoint_id}',
+    ...options
+});
 
 /**
  * Get VPC endpoint details with region in path (alias)
  */
-export const getOrgVpcEndpointByRegion = <ThrowOnError extends boolean = false>(options: Options<GetOrgVpcEndpointByRegionData, ThrowOnError>) => (options.client ?? client).get<GetOrgVpcEndpointByRegionResponses, GetOrgVpcEndpointByRegionErrors, ThrowOnError>({ url: '/organizations/{organization_id}/vpc/region/{region_id}/vpc_endpoints/{endpoint_id}', ...options });
+export const getOrgVpcEndpointByRegion = <ThrowOnError extends boolean = false>(options: Options<GetOrgVpcEndpointByRegionData, ThrowOnError>) => (options.client ?? client).get<GetOrgVpcEndpointByRegionResponses, GetOrgVpcEndpointByRegionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/vpc/region/{region_id}/vpc_endpoints/{endpoint_id}',
+    ...options
+});
 
 /**
  * List VPC endpoints for an organization (alias path with underscores)
  */
-export const listOrgVpcEndpointsAlias = <ThrowOnError extends boolean = false>(options: Options<ListOrgVpcEndpointsAliasData, ThrowOnError>) => (options.client ?? client).get<ListOrgVpcEndpointsAliasResponses, ListOrgVpcEndpointsAliasErrors, ThrowOnError>({ url: '/organizations/{organization_id}/vpc/vpc_endpoints', ...options });
+export const listOrgVpcEndpointsAlias = <ThrowOnError extends boolean = false>(options: Options<ListOrgVpcEndpointsAliasData, ThrowOnError>) => (options.client ?? client).get<ListOrgVpcEndpointsAliasResponses, ListOrgVpcEndpointsAliasErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/vpc/vpc_endpoints',
+    ...options
+});
 
 /**
  * List webhooks for an organization
  */
-export const listWebhooks = <ThrowOnError extends boolean = false>(options: Options<ListWebhooksData, ThrowOnError>) => (options.client ?? client).get<ListWebhooksResponses, ListWebhooksErrors, ThrowOnError>({ url: '/organizations/{organization_id}/webhooks', ...options });
+export const listWebhooks = <ThrowOnError extends boolean = false>(options: Options<ListWebhooksData, ThrowOnError>) => (options.client ?? client).get<ListWebhooksResponses, ListWebhooksErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/webhooks',
+    ...options
+});
 
 /**
  * Create a webhook
  */
 export const createWebhook = <ThrowOnError extends boolean = false>(options: Options<CreateWebhookData, ThrowOnError>) => (options.client ?? client).post<CreateWebhookResponses, CreateWebhookErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/webhooks',
     ...options,
     headers: {
@@ -1002,17 +1312,26 @@ export const createWebhook = <ThrowOnError extends boolean = false>(options: Opt
 /**
  * Delete a webhook
  */
-export const deleteWebhook = <ThrowOnError extends boolean = false>(options: Options<DeleteWebhookData, ThrowOnError>) => (options.client ?? client).delete<DeleteWebhookResponses, DeleteWebhookErrors, ThrowOnError>({ url: '/organizations/{organization_id}/webhooks/{webhook_id}', ...options });
+export const deleteWebhook = <ThrowOnError extends boolean = false>(options: Options<DeleteWebhookData, ThrowOnError>) => (options.client ?? client).delete<DeleteWebhookResponses, DeleteWebhookErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/webhooks/{webhook_id}',
+    ...options
+});
 
 /**
  * Get a specific webhook
  */
-export const getWebhook = <ThrowOnError extends boolean = false>(options: Options<GetWebhookData, ThrowOnError>) => (options.client ?? client).get<GetWebhookResponses, GetWebhookErrors, ThrowOnError>({ url: '/organizations/{organization_id}/webhooks/{webhook_id}', ...options });
+export const getWebhook = <ThrowOnError extends boolean = false>(options: Options<GetWebhookData, ThrowOnError>) => (options.client ?? client).get<GetWebhookResponses, GetWebhookErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/webhooks/{webhook_id}',
+    ...options
+});
 
 /**
  * Update a webhook
  */
 export const updateWebhook = <ThrowOnError extends boolean = false>(options: Options<UpdateWebhookData, ThrowOnError>) => (options.client ?? client).patch<UpdateWebhookResponses, UpdateWebhookErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/organizations/{organization_id}/webhooks/{webhook_id}',
     ...options,
     headers: {
@@ -1024,12 +1343,20 @@ export const updateWebhook = <ThrowOnError extends boolean = false>(options: Opt
 /**
  * List recent deliveries for a webhook
  */
-export const listWebhookDeliveries = <ThrowOnError extends boolean = false>(options: Options<ListWebhookDeliveriesData, ThrowOnError>) => (options.client ?? client).get<ListWebhookDeliveriesResponses, ListWebhookDeliveriesErrors, ThrowOnError>({ url: '/organizations/{organization_id}/webhooks/{webhook_id}/deliveries', ...options });
+export const listWebhookDeliveries = <ThrowOnError extends boolean = false>(options: Options<ListWebhookDeliveriesData, ThrowOnError>) => (options.client ?? client).get<ListWebhookDeliveriesResponses, ListWebhookDeliveriesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/webhooks/{webhook_id}/deliveries',
+    ...options
+});
 
 /**
  * Regenerate webhook secret
  */
-export const rotateWebhookSecret = <ThrowOnError extends boolean = false>(options: Options<RotateWebhookSecretData, ThrowOnError>) => (options.client ?? client).post<RotateWebhookSecretResponses, RotateWebhookSecretErrors, ThrowOnError>({ url: '/organizations/{organization_id}/webhooks/{webhook_id}/rotate-secret', ...options });
+export const rotateWebhookSecret = <ThrowOnError extends boolean = false>(options: Options<RotateWebhookSecretData, ThrowOnError>) => (options.client ?? client).post<RotateWebhookSecretResponses, RotateWebhookSecretErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/organizations/{organization_id}/webhooks/{webhook_id}/rotate-secret',
+    ...options
+});
 
 /**
  * GET /payments/supported
@@ -1040,7 +1367,11 @@ export const getSupported = <ThrowOnError extends boolean = false>(options?: Opt
 /**
  * List all permissions
  */
-export const listPermissions = <ThrowOnError extends boolean = false>(options?: Options<ListPermissionsData, ThrowOnError>) => (options?.client ?? client).get<ListPermissionsResponses, ListPermissionsErrors, ThrowOnError>({ url: '/permissions', ...options });
+export const listPermissions = <ThrowOnError extends boolean = false>(options?: Options<ListPermissionsData, ThrowOnError>) => (options?.client ?? client).get<ListPermissionsResponses, ListPermissionsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/permissions',
+    ...options
+});
 
 /**
  * GET /plans
@@ -1131,22 +1462,38 @@ export const proxyToPublisherPost = <ThrowOnError extends boolean = false>(optio
 /**
  * List all active sessions for the current user
  */
-export const listSessions = <ThrowOnError extends boolean = false>(options?: Options<ListSessionsData, ThrowOnError>) => (options?.client ?? client).get<ListSessionsResponses, ListSessionsErrors, ThrowOnError>({ url: '/sessions', ...options });
+export const listSessions = <ThrowOnError extends boolean = false>(options?: Options<ListSessionsData, ThrowOnError>) => (options?.client ?? client).get<ListSessionsResponses, ListSessionsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/sessions',
+    ...options
+});
 
 /**
  * Revoke all sessions (logout everywhere)
  */
-export const revokeAllSessions = <ThrowOnError extends boolean = false>(options?: Options<RevokeAllSessionsData, ThrowOnError>) => (options?.client ?? client).post<RevokeAllSessionsResponses, RevokeAllSessionsErrors, ThrowOnError>({ url: '/sessions/revoke-all', ...options });
+export const revokeAllSessions = <ThrowOnError extends boolean = false>(options?: Options<RevokeAllSessionsData, ThrowOnError>) => (options?.client ?? client).post<RevokeAllSessionsResponses, RevokeAllSessionsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/sessions/revoke-all',
+    ...options
+});
 
 /**
  * Revoke a specific session
  */
-export const revokeSession = <ThrowOnError extends boolean = false>(options: Options<RevokeSessionData, ThrowOnError>) => (options.client ?? client).delete<RevokeSessionResponses, RevokeSessionErrors, ThrowOnError>({ url: '/sessions/{session_id}', ...options });
+export const revokeSession = <ThrowOnError extends boolean = false>(options: Options<RevokeSessionData, ThrowOnError>) => (options.client ?? client).delete<RevokeSessionResponses, RevokeSessionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/sessions/{session_id}',
+    ...options
+});
 
 /**
  * Revoke all sessions except a specified one
  */
-export const revokeOtherSessions = <ThrowOnError extends boolean = false>(options: Options<RevokeOtherSessionsData, ThrowOnError>) => (options.client ?? client).post<RevokeOtherSessionsResponses, RevokeOtherSessionsErrors, ThrowOnError>({ url: '/sessions/{session_id}/revoke-others', ...options });
+export const revokeOtherSessions = <ThrowOnError extends boolean = false>(options: Options<RevokeOtherSessionsData, ThrowOnError>) => (options.client ?? client).post<RevokeOtherSessionsResponses, RevokeOtherSessionsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/sessions/{session_id}/revoke-others',
+    ...options
+});
 
 /**
  * GET /templates
@@ -1159,6 +1506,7 @@ export const listTemplates = <ThrowOnError extends boolean = false>(options?: Op
  * Publish a new agent template
  */
 export const publishTemplate = <ThrowOnError extends boolean = false>(options: Options<PublishTemplateData, ThrowOnError>) => (options.client ?? client).post<PublishTemplateResponses, PublishTemplateErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/templates/publish',
     ...options,
     headers: {
@@ -1193,32 +1541,53 @@ export const invokeTemplate = <ThrowOnError extends boolean = false>(options: Op
 /**
  * Get wallet balance (funded + promotional)
  */
-export const getWalletBalance = <ThrowOnError extends boolean = false>(options?: Options<GetWalletBalanceData, ThrowOnError>) => (options?.client ?? client).get<GetWalletBalanceResponses, GetWalletBalanceErrors, ThrowOnError>({ url: '/wallet/balance', ...options });
+export const getWalletBalance = <ThrowOnError extends boolean = false>(options?: Options<GetWalletBalanceData, ThrowOnError>) => (options?.client ?? client).get<GetWalletBalanceResponses, GetWalletBalanceErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/wallet/balance',
+    ...options
+});
 
 /**
  * Claim payment method bonus (if not already claimed)
  */
-export const claimPaymentMethodBonus = <ThrowOnError extends boolean = false>(options?: Options<ClaimPaymentMethodBonusData, ThrowOnError>) => (options?.client ?? client).post<ClaimPaymentMethodBonusResponses, ClaimPaymentMethodBonusErrors, ThrowOnError>({ url: '/wallet/bonus/payment-method', ...options });
+export const claimPaymentMethodBonus = <ThrowOnError extends boolean = false>(options?: Options<ClaimPaymentMethodBonusData, ThrowOnError>) => (options?.client ?? client).post<ClaimPaymentMethodBonusResponses, ClaimPaymentMethodBonusErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/wallet/bonus/payment-method',
+    ...options
+});
 
 /**
  * Claim signup bonus (if not already claimed)
  */
-export const claimSignupBonus = <ThrowOnError extends boolean = false>(options?: Options<ClaimSignupBonusData, ThrowOnError>) => (options?.client ?? client).post<ClaimSignupBonusResponses, ClaimSignupBonusErrors, ThrowOnError>({ url: '/wallet/bonus/signup', ...options });
+export const claimSignupBonus = <ThrowOnError extends boolean = false>(options?: Options<ClaimSignupBonusData, ThrowOnError>) => (options?.client ?? client).post<ClaimSignupBonusResponses, ClaimSignupBonusErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/wallet/bonus/signup',
+    ...options
+});
 
 /**
  * Claim daily free credits
  */
-export const claimDaily = <ThrowOnError extends boolean = false>(options?: Options<ClaimDailyData, ThrowOnError>) => (options?.client ?? client).post<ClaimDailyResponses, ClaimDailyErrors, ThrowOnError>({ url: '/wallet/daily/claim', ...options });
+export const claimDaily = <ThrowOnError extends boolean = false>(options?: Options<ClaimDailyData, ThrowOnError>) => (options?.client ?? client).post<ClaimDailyResponses, ClaimDailyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/wallet/daily/claim',
+    ...options
+});
 
 /**
  * Check if user can claim daily credits
  */
-export const checkDailyEligibility = <ThrowOnError extends boolean = false>(options?: Options<CheckDailyEligibilityData, ThrowOnError>) => (options?.client ?? client).get<CheckDailyEligibilityResponses, CheckDailyEligibilityErrors, ThrowOnError>({ url: '/wallet/daily/eligibility', ...options });
+export const checkDailyEligibility = <ThrowOnError extends boolean = false>(options?: Options<CheckDailyEligibilityData, ThrowOnError>) => (options?.client ?? client).get<CheckDailyEligibilityResponses, CheckDailyEligibilityErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/wallet/daily/eligibility',
+    ...options
+});
 
 /**
  * Deposit funds via Stripe
  */
 export const createDeposit = <ThrowOnError extends boolean = false>(options: Options<CreateDepositData, ThrowOnError>) => (options.client ?? client).post<CreateDepositResponses, CreateDepositErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/wallet/deposit',
     ...options,
     headers: {
@@ -1248,7 +1617,11 @@ export const onchainDeposit = <ThrowOnError extends boolean = false>(options: Op
  * GET /wallet/lookup/{agent_wallet}
  * Look up an agent's available balance (for publisher pre-checks)
  */
-export const getAgentBalance = <ThrowOnError extends boolean = false>(options: Options<GetAgentBalanceData, ThrowOnError>) => (options.client ?? client).get<GetAgentBalanceResponses, GetAgentBalanceErrors, ThrowOnError>({ url: '/wallet/lookup/{agent_wallet}', ...options });
+export const getAgentBalance = <ThrowOnError extends boolean = false>(options: Options<GetAgentBalanceData, ThrowOnError>) => (options.client ?? client).get<GetAgentBalanceResponses, GetAgentBalanceErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/wallet/lookup/{agent_wallet}',
+    ...options
+});
 
 /**
  * POST /wallet/recover
@@ -1284,6 +1657,7 @@ export const walletRecover = <ThrowOnError extends boolean = false>(options: Opt
  * Use the recovery code with `POST /wallet/recover` to rotate access after losing your API key.
  */
 export const setRecovery = <ThrowOnError extends boolean = false>(options: Options<SetRecoveryData, ThrowOnError>) => (options.client ?? client).post<SetRecoveryResponses, SetRecoveryErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/wallet/recovery',
     ...options,
     headers: {
@@ -1295,12 +1669,17 @@ export const setRecovery = <ThrowOnError extends boolean = false>(options: Optio
 /**
  * Get user's referral info and code
  */
-export const getReferralInfo = <ThrowOnError extends boolean = false>(options?: Options<GetReferralInfoData, ThrowOnError>) => (options?.client ?? client).get<GetReferralInfoResponses, GetReferralInfoErrors, ThrowOnError>({ url: '/wallet/referral', ...options });
+export const getReferralInfo = <ThrowOnError extends boolean = false>(options?: Options<GetReferralInfoData, ThrowOnError>) => (options?.client ?? client).get<GetReferralInfoResponses, GetReferralInfoErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/wallet/referral',
+    ...options
+});
 
 /**
  * Apply a referral code to the current user
  */
 export const applyReferralCode = <ThrowOnError extends boolean = false>(options: Options<ApplyReferralCodeData, ThrowOnError>) => (options.client ?? client).post<ApplyReferralCodeResponses, ApplyReferralCodeErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/wallet/referral/apply',
     ...options,
     headers: {
@@ -1312,22 +1691,38 @@ export const applyReferralCode = <ThrowOnError extends boolean = false>(options:
 /**
  * Get transaction history including credits and debits
  */
-export const getTransactions = <ThrowOnError extends boolean = false>(options?: Options<GetTransactionsData, ThrowOnError>) => (options?.client ?? client).get<GetTransactionsResponses, GetTransactionsErrors, ThrowOnError>({ url: '/wallet/transactions', ...options });
+export const getTransactions = <ThrowOnError extends boolean = false>(options?: Options<GetTransactionsData, ThrowOnError>) => (options?.client ?? client).get<GetTransactionsResponses, GetTransactionsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/wallet/transactions',
+    ...options
+});
 
 /**
  * Export transactions as a CSV file for a date range
  */
-export const exportTransactions = <ThrowOnError extends boolean = false>(options?: Options<ExportTransactionsData, ThrowOnError>) => (options?.client ?? client).get<ExportTransactionsResponses, ExportTransactionsErrors, ThrowOnError>({ url: '/wallet/transactions/export', ...options });
+export const exportTransactions = <ThrowOnError extends boolean = false>(options?: Options<ExportTransactionsData, ThrowOnError>) => (options?.client ?? client).get<ExportTransactionsResponses, ExportTransactionsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/wallet/transactions/export',
+    ...options
+});
 
 /**
  * Get summary statistics for transactions in a date range
  */
-export const getTransactionSummary = <ThrowOnError extends boolean = false>(options?: Options<GetTransactionSummaryData, ThrowOnError>) => (options?.client ?? client).get<GetTransactionSummaryResponses, GetTransactionSummaryErrors, ThrowOnError>({ url: '/wallet/transactions/summary', ...options });
+export const getTransactionSummary = <ThrowOnError extends boolean = false>(options?: Options<GetTransactionSummaryData, ThrowOnError>) => (options?.client ?? client).get<GetTransactionSummaryResponses, GetTransactionSummaryErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/wallet/transactions/summary',
+    ...options
+});
 
 /**
  * List available event types
  */
-export const listEventTypes = <ThrowOnError extends boolean = false>(options?: Options<ListEventTypesData, ThrowOnError>) => (options?.client ?? client).get<ListEventTypesResponses, ListEventTypesErrors, ThrowOnError>({ url: '/webhooks/event-types', ...options });
+export const listEventTypes = <ThrowOnError extends boolean = false>(options?: Options<ListEventTypesData, ThrowOnError>) => (options?.client ?? client).get<ListEventTypesResponses, ListEventTypesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/webhooks/event-types',
+    ...options
+});
 
 /**
  * POST /webhooks/stripe

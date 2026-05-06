@@ -4,7 +4,7 @@ import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
 import type { GetPrivateModelsData, GetPrivateModelsErrors, GetPrivateModelsResponses, PostChatCompletionsData, PostChatCompletionsErrors, PostChatCompletionsResponses } from './types.gen';
 
-export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
+export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
      * You can provide a client instance returned by `createClient()` instead of
      * individual options. This might be also useful if you want to implement a
@@ -19,6 +19,7 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 };
 
 export const postChatCompletions = <ThrowOnError extends boolean = false>(options: Options<PostChatCompletionsData, ThrowOnError>) => (options.client ?? client).post<PostChatCompletionsResponses, PostChatCompletionsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/chat/completions',
     ...options,
     headers: {
@@ -27,4 +28,8 @@ export const postChatCompletions = <ThrowOnError extends boolean = false>(option
     }
 });
 
-export const getPrivateModels = <ThrowOnError extends boolean = false>(options?: Options<GetPrivateModelsData, ThrowOnError>) => (options?.client ?? client).get<GetPrivateModelsResponses, GetPrivateModelsErrors, ThrowOnError>({ url: '/models', ...options });
+export const getPrivateModels = <ThrowOnError extends boolean = false>(options?: Options<GetPrivateModelsData, ThrowOnError>) => (options?.client ?? client).get<GetPrivateModelsResponses, GetPrivateModelsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/models',
+    ...options
+});

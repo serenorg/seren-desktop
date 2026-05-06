@@ -1,9 +1,13 @@
 // ABOUTME: Authentication service for login, logout, and token management.
-// ABOUTME: Uses manual fetch for login/refresh (not in OpenAPI spec) and SDK for user info.
+// ABOUTME: Wraps the generated seren-core SDK with token storage and rate-limit policy.
 
-import { getCurrentUser } from "@/api";
-import { apiBase } from "@/lib/config";
-import { appFetch } from "@/lib/fetch";
+import {
+  createDefaultOrgApiKey,
+  getCurrentUser,
+  type LoginResult,
+  login as loginSdk,
+  refreshToken as refreshTokenSdk,
+} from "@/api";
 import {
   clearDefaultOrganizationId,
   clearRefreshToken,
@@ -14,22 +18,9 @@ import {
   storeRefreshToken,
   storeToken,
 } from "@/lib/tauri-bridge";
-import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { clearAuthState, requestSignInModal } from "@/stores/auth.store";
 
-export interface LoginResponse {
-  data: {
-    access_token: string;
-    refresh_token: string;
-    expires_in: number;
-    user: {
-      id: string;
-      email: string;
-      name?: string;
-    };
-    default_organization_id: string;
-  };
-}
+export type { LoginResult };
 
 export interface AuthError {
   message: string;
@@ -85,40 +76,41 @@ function recordLoginAttempt(success: boolean): void {
 /**
  * Login with email and password.
  * Stores token securely on success.
- * Note: Login endpoint is not in OpenAPI spec, using manual fetch.
  * @throws Error on authentication failure or rate limiting
  */
 export async function login(
   email: string,
   password: string,
-): Promise<LoginResponse> {
+): Promise<LoginResult> {
   checkLoginRateLimit();
 
-  const response = await appFetch(`${apiBase}/auth/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ email, password }),
+  const { data, error, response } = await loginSdk({
+    body: { email, password },
+    throwOnError: false,
   });
 
-  if (!response.ok) {
+  if (error || !data?.data) {
     recordLoginAttempt(false);
-    if (response.status === 401) {
+    if (response?.status === 401) {
       throw new Error("Invalid email or password");
     }
-    const error: AuthError = await response.json().catch(() => ({
-      message: "Authentication failed",
-    }));
-    throw new Error(error.message);
+    let message = "Authentication failed";
+    try {
+      const parsed = (await response?.clone().json()) as Partial<AuthError>;
+      if (typeof parsed?.message === "string") {
+        message = parsed.message;
+      }
+    } catch {
+      // Non-JSON body — fall back to default message.
+    }
+    throw new Error(message);
   }
 
   recordLoginAttempt(true);
-  const data: LoginResponse = await response.json();
   await storeToken(data.data.access_token);
   await storeRefreshToken(data.data.refresh_token);
   await storeDefaultOrganizationId(data.data.default_organization_id);
-  return data;
+  return data.data;
 }
 
 /**
@@ -132,7 +124,6 @@ export async function logout(): Promise<void> {
 
 /**
  * Refresh the access token using the stored refresh token.
- * Note: Refresh endpoint is not in OpenAPI spec, using manual fetch.
  * @returns true if refresh succeeded, false if refresh token is missing or invalid
  */
 export async function refreshAccessToken(): Promise<boolean> {
@@ -144,18 +135,14 @@ export async function refreshAccessToken(): Promise<boolean> {
   }
 
   try {
-    // Use appFetch for CORS bypass in Tauri (it skips auto-refresh for /auth/refresh)
-    const response = await appFetch(`${apiBase}/auth/refresh`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ refresh_token: refreshToken }),
+    const { data, error, response } = await refreshTokenSdk({
+      body: { refresh_token: refreshToken },
+      throwOnError: false,
     });
 
-    if (!response.ok) {
-      // Refresh token is invalid or expired - clear all tokens
-      if (response.status === 401) {
+    if (error || !data?.data) {
+      // 401: refresh token is invalid, expired, or reused.
+      if (response?.status === 401) {
         await clearToken();
         await clearRefreshToken();
         clearAuthState();
@@ -164,9 +151,7 @@ export async function refreshAccessToken(): Promise<boolean> {
       return false;
     }
 
-    const data: LoginResponse = await response.json();
     await storeToken(data.data.access_token);
-    // Store new refresh token if provided (token rotation)
     if (data.data.refresh_token) {
       await storeRefreshToken(data.data.refresh_token);
     }
@@ -188,7 +173,6 @@ export async function hasStoredToken(): Promise<boolean> {
 
 /**
  * Validate token with the server by calling /auth/me.
- * Uses generated SDK for type-safe API calls.
  * Clears token if invalid/expired.
  * @returns true if token is valid, false otherwise
  */
@@ -205,14 +189,12 @@ export async function isLoggedIn(): Promise<boolean> {
       return true;
     }
 
-    // Token is invalid or expired - clear it
     if (error) {
       await clearToken();
     }
     return false;
   } catch {
-    // Network error - assume token might still be valid
-    // This allows offline usage if token was valid
+    // Network error - assume token might still be valid (offline usage).
     return true;
   }
 }
@@ -225,45 +207,31 @@ export { getToken };
 
 const DESKTOP_API_KEY_NAME = "Seren Desktop";
 
-interface ApiKeyCreateResponse {
-  data: {
-    api_key: string;
-  };
-}
-
 /**
  * Create a new API key for MCP authentication.
- * Uses the convenience route: POST /organizations/default/api-keys
- * which resolves "default" to the user's first organization.
+ * Uses POST /organizations/default/api-keys, which resolves "default" to
+ * the user's first organization.
  * @returns API key (seren_xxx_yyy format)
  * @throws Error if not authenticated or request fails
  */
 export async function createApiKey(): Promise<string> {
-  const url = `${apiBase}/organizations/default/api-keys`;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (!shouldUseRustGatewayAuth(url)) {
-    const token = await getToken();
-    if (!token) {
-      throw new Error("Not authenticated");
-    }
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  const response = await appFetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ name: DESKTOP_API_KEY_NAME }),
+  const { data, error, response } = await createDefaultOrgApiKey({
+    body: { name: DESKTOP_API_KEY_NAME },
+    throwOnError: false,
   });
 
-  if (!response.ok) {
-    const error: AuthError = await response.json().catch(() => ({
-      message: "Failed to create API key",
-    }));
-    throw new Error(error.message);
+  if (error || !data?.data) {
+    let message = "Failed to create API key";
+    try {
+      const parsed = (await response?.clone().json()) as Partial<AuthError>;
+      if (typeof parsed?.message === "string") {
+        message = parsed.message;
+      }
+    } catch {
+      // Non-JSON body — fall back to default message.
+    }
+    throw new Error(message);
   }
 
-  const data: ApiKeyCreateResponse = await response.json();
   return data.data.api_key;
 }

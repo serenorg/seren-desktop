@@ -2,9 +2,9 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentErrors, SerenCloudCreateEnvironmentResponses, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetErrors, SerenCloudCreateEvalSetResponses, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentErrors, SerenCloudDeleteEnvironmentResponses, SerenCloudDeleteErrors, SerenCloudDeleteResponses, SerenCloudDeployData, SerenCloudDeployErrors, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditErrors, SerenCloudDeploymentAuditResponses, SerenCloudDeploymentFsData, SerenCloudDeploymentFsErrors, SerenCloudDeploymentFsReadBytesData, SerenCloudDeploymentFsReadBytesErrors, SerenCloudDeploymentFsReadBytesResponses, SerenCloudDeploymentFsReadTextData, SerenCloudDeploymentFsReadTextErrors, SerenCloudDeploymentFsReadTextResponses, SerenCloudDeploymentFsResponses, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsErrors, SerenCloudDeploymentPendingApprovalsResponses, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsErrors, SerenCloudDeploymentRunArtifactsResponses, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelErrors, SerenCloudDeploymentRunCancelResponses, SerenCloudDeploymentRunData, SerenCloudDeploymentRunErrors, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsErrors, SerenCloudDeploymentRunEvalsResponses, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsErrors, SerenCloudDeploymentRunEventsResponses, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsErrors, SerenCloudDeploymentRunPendingApprovalsResponses, SerenCloudDeploymentRunResponses, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsErrors, SerenCloudDeploymentRunsResponses, SerenCloudDeploymentRunStreamCloseData, SerenCloudDeploymentRunStreamCloseErrors, SerenCloudDeploymentRunStreamCloseResponses, SerenCloudDeploymentRunStreamData, SerenCloudDeploymentRunStreamErrors, SerenCloudDeploymentRunStreamResponses, SerenCloudDeployResponses, SerenCloudEvalCasesData, SerenCloudEvalCasesErrors, SerenCloudEvalCasesResponses, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsErrors, SerenCloudEvalRunResultsResponses, SerenCloudEvalRunsData, SerenCloudEvalRunsErrors, SerenCloudEvalRunsResponses, SerenCloudEvalSetsData, SerenCloudEvalSetsResponses, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryErrors, SerenCloudGetAuditEntryResponses, SerenCloudGetDeploymentData, SerenCloudGetDeploymentErrors, SerenCloudGetDeploymentResponses, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendErrors, SerenCloudGetDeploymentSpendResponses, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentErrors, SerenCloudGetEnvironmentResponses, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseErrors, SerenCloudGetEvalCaseResponses, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultErrors, SerenCloudGetEvalCaseResultResponses, SerenCloudGetEvalRunData, SerenCloudGetEvalRunErrors, SerenCloudGetEvalRunResponses, SerenCloudGetEvalSetData, SerenCloudGetEvalSetErrors, SerenCloudGetEvalSetResponses, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponses, SerenCloudListDeploymentsData, SerenCloudListDeploymentsErrors, SerenCloudListDeploymentsResponses, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponses, SerenCloudLogsData, SerenCloudLogsErrors, SerenCloudLogsResponses, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsErrors, SerenCloudPendingApprovalsResponses, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseErrors, SerenCloudPromoteRunToEvalCaseResponses, SerenCloudRunArtifactsData, SerenCloudRunArtifactsErrors, SerenCloudRunArtifactsResponses, SerenCloudRunAuditData, SerenCloudRunAuditErrors, SerenCloudRunAuditResponses, SerenCloudRunCancelData, SerenCloudRunCancelErrors, SerenCloudRunCancelResponses, SerenCloudRunCompareData, SerenCloudRunCompareErrors, SerenCloudRunCompareResponses, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailErrors, SerenCloudRunDetailResponses, SerenCloudRunErrors, SerenCloudRunEvalsData, SerenCloudRunEvalsErrors, SerenCloudRunEvalSetData, SerenCloudRunEvalSetErrors, SerenCloudRunEvalSetResponses, SerenCloudRunEvalsResponses, SerenCloudRunEventsData, SerenCloudRunEventsErrors, SerenCloudRunEventsResponses, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsErrors, SerenCloudRunPendingApprovalsResponses, SerenCloudRunResponses, SerenCloudRunsData, SerenCloudRunsErrors, SerenCloudRunsResponses, SerenCloudRunStreamCloseData, SerenCloudRunStreamCloseErrors, SerenCloudRunStreamCloseResponses, SerenCloudRunStreamData, SerenCloudRunStreamErrors, SerenCloudRunStreamResponses, SerenCloudStartData, SerenCloudStartErrors, SerenCloudStartResponses, SerenCloudStopData, SerenCloudStopErrors, SerenCloudStopResponses, SerenCloudUpdateConfigData, SerenCloudUpdateConfigErrors, SerenCloudUpdateConfigResponses, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentErrors, SerenCloudUpdateEnvironmentResponses, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetErrors, SerenCloudUpdateEvalSetResponses, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponses } from './types.gen';
+import type { SerenCloudCompleteDeploymentBundleUploadData, SerenCloudCompleteDeploymentBundleUploadErrors, SerenCloudCompleteDeploymentBundleUploadResponses, SerenCloudCreateDeploymentBundleData, SerenCloudCreateDeploymentBundleErrors, SerenCloudCreateDeploymentBundleResponses, SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentErrors, SerenCloudCreateEnvironmentResponses, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetErrors, SerenCloudCreateEvalSetResponses, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentErrors, SerenCloudDeleteEnvironmentResponses, SerenCloudDeleteErrors, SerenCloudDeleteResponses, SerenCloudDeployData, SerenCloudDeployErrors, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditErrors, SerenCloudDeploymentAuditResponses, SerenCloudDeploymentFsData, SerenCloudDeploymentFsErrors, SerenCloudDeploymentFsReadBytesData, SerenCloudDeploymentFsReadBytesErrors, SerenCloudDeploymentFsReadBytesResponses, SerenCloudDeploymentFsReadTextData, SerenCloudDeploymentFsReadTextErrors, SerenCloudDeploymentFsReadTextResponses, SerenCloudDeploymentFsResponses, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsErrors, SerenCloudDeploymentPendingApprovalsResponses, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsErrors, SerenCloudDeploymentRunArtifactsResponses, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelErrors, SerenCloudDeploymentRunCancelResponses, SerenCloudDeploymentRunData, SerenCloudDeploymentRunErrors, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsErrors, SerenCloudDeploymentRunEvalsResponses, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsErrors, SerenCloudDeploymentRunEventsResponses, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsErrors, SerenCloudDeploymentRunPendingApprovalsResponses, SerenCloudDeploymentRunResponses, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsErrors, SerenCloudDeploymentRunsResponses, SerenCloudDeploymentRunStreamCloseData, SerenCloudDeploymentRunStreamCloseErrors, SerenCloudDeploymentRunStreamCloseResponses, SerenCloudDeploymentRunStreamData, SerenCloudDeploymentRunStreamErrors, SerenCloudDeploymentRunStreamResponses, SerenCloudDeployResponses, SerenCloudEvalCasesData, SerenCloudEvalCasesErrors, SerenCloudEvalCasesResponses, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsErrors, SerenCloudEvalRunResultsResponses, SerenCloudEvalRunsData, SerenCloudEvalRunsErrors, SerenCloudEvalRunsResponses, SerenCloudEvalSetsData, SerenCloudEvalSetsResponses, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryErrors, SerenCloudGetAuditEntryResponses, SerenCloudGetDeploymentBundleData, SerenCloudGetDeploymentBundleDownloadData, SerenCloudGetDeploymentBundleDownloadErrors, SerenCloudGetDeploymentBundleDownloadResponses, SerenCloudGetDeploymentBundleErrors, SerenCloudGetDeploymentBundleResponses, SerenCloudGetDeploymentData, SerenCloudGetDeploymentErrors, SerenCloudGetDeploymentResponses, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendErrors, SerenCloudGetDeploymentSpendResponses, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentErrors, SerenCloudGetEnvironmentResponses, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseErrors, SerenCloudGetEvalCaseResponses, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultErrors, SerenCloudGetEvalCaseResultResponses, SerenCloudGetEvalRunData, SerenCloudGetEvalRunErrors, SerenCloudGetEvalRunResponses, SerenCloudGetEvalSetData, SerenCloudGetEvalSetErrors, SerenCloudGetEvalSetResponses, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponses, SerenCloudListDeploymentsData, SerenCloudListDeploymentsErrors, SerenCloudListDeploymentsResponses, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponses, SerenCloudLogsData, SerenCloudLogsErrors, SerenCloudLogsResponses, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsErrors, SerenCloudPendingApprovalsResponses, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseErrors, SerenCloudPromoteRunToEvalCaseResponses, SerenCloudRecordChannelRunEventData, SerenCloudRecordChannelRunEventErrors, SerenCloudRecordChannelRunEventResponses, SerenCloudRunArtifactsData, SerenCloudRunArtifactsErrors, SerenCloudRunArtifactsResponses, SerenCloudRunAuditData, SerenCloudRunAuditErrors, SerenCloudRunAuditResponses, SerenCloudRunCancelData, SerenCloudRunCancelErrors, SerenCloudRunCancelResponses, SerenCloudRunCompareData, SerenCloudRunCompareErrors, SerenCloudRunCompareResponses, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailErrors, SerenCloudRunDetailResponses, SerenCloudRunErrors, SerenCloudRunEvalsData, SerenCloudRunEvalsErrors, SerenCloudRunEvalSetData, SerenCloudRunEvalSetErrors, SerenCloudRunEvalSetResponses, SerenCloudRunEvalsResponses, SerenCloudRunEventsData, SerenCloudRunEventsErrors, SerenCloudRunEventsResponses, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsErrors, SerenCloudRunPendingApprovalsResponses, SerenCloudRunResponses, SerenCloudRunsData, SerenCloudRunsErrors, SerenCloudRunsResponses, SerenCloudRunStreamCloseData, SerenCloudRunStreamCloseErrors, SerenCloudRunStreamCloseResponses, SerenCloudRunStreamData, SerenCloudRunStreamErrors, SerenCloudRunStreamResponses, SerenCloudStartData, SerenCloudStartErrors, SerenCloudStartResponses, SerenCloudStopData, SerenCloudStopErrors, SerenCloudStopResponses, SerenCloudUpdateConfigData, SerenCloudUpdateConfigErrors, SerenCloudUpdateConfigResponses, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentErrors, SerenCloudUpdateEnvironmentResponses, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetErrors, SerenCloudUpdateEvalSetResponses, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponses } from './types.gen';
 
-export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
+export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
      * You can provide a client instance returned by `createClient()` instead of
      * individual options. This might be also useful if you want to implement a
@@ -21,22 +21,35 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 /**
  * List tamper-evident audit entries for seren-cloud.
  */
-export const serenCloudListAuditEntries = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudListAuditEntriesData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudListAuditEntriesResponses, unknown, ThrowOnError>({ url: '/audit', ...options });
+export const serenCloudListAuditEntries = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudListAuditEntriesData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudListAuditEntriesResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/audit',
+    ...options
+});
 
 /**
  * Verify the tamper-evident audit chain.
  */
-export const serenCloudVerifyAudit = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudVerifyAuditData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudVerifyAuditResponses, unknown, ThrowOnError>({ url: '/audit/verify', ...options });
+export const serenCloudVerifyAudit = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudVerifyAuditData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudVerifyAuditResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/audit/verify',
+    ...options
+});
 
 /**
  * Get a single tamper-evident audit entry.
  */
-export const serenCloudGetAuditEntry = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetAuditEntryData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetAuditEntryResponses, SerenCloudGetAuditEntryErrors, ThrowOnError>({ url: '/audit/{entry_id}', ...options });
+export const serenCloudGetAuditEntry = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetAuditEntryData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetAuditEntryResponses, SerenCloudGetAuditEntryErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/audit/{entry_id}',
+    ...options
+});
 
 /**
  * Deploy a skill to seren-cloud.
  */
 export const serenCloudDeploy = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeployData, ThrowOnError>) => (options.client ?? client).post<SerenCloudDeployResponses, SerenCloudDeployErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/deploy',
     ...options,
     headers: {
@@ -46,24 +59,68 @@ export const serenCloudDeploy = <ThrowOnError extends boolean = false>(options: 
 });
 
 /**
+ * Register a content-addressed deployment bundle before uploading raw bytes.
+ */
+export const serenCloudCreateDeploymentBundle = <ThrowOnError extends boolean = false>(options: Options<SerenCloudCreateDeploymentBundleData, ThrowOnError>) => (options.client ?? client).post<SerenCloudCreateDeploymentBundleResponses, SerenCloudCreateDeploymentBundleErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployment-bundles',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Get deployment bundle metadata without raw content.
+ */
+export const serenCloudGetDeploymentBundle = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetDeploymentBundleData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetDeploymentBundleResponses, SerenCloudGetDeploymentBundleErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployment-bundles/{id}',
+    ...options
+});
+
+/**
+ * Complete a direct-to-S3 upload for a registered deployment bundle.
+ */
+export const serenCloudCompleteDeploymentBundleUpload = <ThrowOnError extends boolean = false>(options: Options<SerenCloudCompleteDeploymentBundleUploadData, ThrowOnError>) => (options.client ?? client).post<SerenCloudCompleteDeploymentBundleUploadResponses, SerenCloudCompleteDeploymentBundleUploadErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployment-bundles/{id}/complete',
+    ...options
+});
+
+/**
  * List all deployments for the authenticated organization.
  */
-export const serenCloudListDeployments = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudListDeploymentsData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudListDeploymentsResponses, SerenCloudListDeploymentsErrors, ThrowOnError>({ url: '/deployments', ...options });
+export const serenCloudListDeployments = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudListDeploymentsData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudListDeploymentsResponses, SerenCloudListDeploymentsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments',
+    ...options
+});
 
 /**
  * Delete a deployment and clean up compute resources.
  */
-export const serenCloudDelete = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeleteData, ThrowOnError>) => (options.client ?? client).delete<SerenCloudDeleteResponses, SerenCloudDeleteErrors, ThrowOnError>({ url: '/deployments/{id}', ...options });
+export const serenCloudDelete = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeleteData, ThrowOnError>) => (options.client ?? client).delete<SerenCloudDeleteResponses, SerenCloudDeleteErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}',
+    ...options
+});
 
 /**
  * Get details of a specific deployment.
  */
-export const serenCloudGetDeployment = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetDeploymentData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetDeploymentResponses, SerenCloudGetDeploymentErrors, ThrowOnError>({ url: '/deployments/{id}', ...options });
+export const serenCloudGetDeployment = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetDeploymentData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetDeploymentResponses, SerenCloudGetDeploymentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}',
+    ...options
+});
 
 /**
  * Update config and/or secrets without redeploying code.
  */
 export const serenCloudUpdateConfig = <ThrowOnError extends boolean = false>(options: Options<SerenCloudUpdateConfigData, ThrowOnError>) => (options.client ?? client).patch<SerenCloudUpdateConfigResponses, SerenCloudUpdateConfigErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/deployments/{id}',
     ...options,
     headers: {
@@ -75,39 +132,90 @@ export const serenCloudUpdateConfig = <ThrowOnError extends boolean = false>(opt
 /**
  * List tamper-evident audit entries scoped to a deployment.
  */
-export const serenCloudDeploymentAudit = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentAuditData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentAuditResponses, SerenCloudDeploymentAuditErrors, ThrowOnError>({ url: '/deployments/{id}/audit', ...options });
+export const serenCloudDeploymentAudit = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentAuditData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentAuditResponses, SerenCloudDeploymentAuditErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/audit',
+    ...options
+});
+
+/**
+ * Record a minimized Dispatch channel turn for a deployment.
+ */
+export const serenCloudRecordChannelRunEvent = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRecordChannelRunEventData, ThrowOnError>) => (options.client ?? client).post<SerenCloudRecordChannelRunEventResponses, SerenCloudRecordChannelRunEventErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/channel-run-events',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Get a short-lived direct download URL for a deployment runtime bundle.
+ */
+export const serenCloudGetDeploymentBundleDownload = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetDeploymentBundleDownloadData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetDeploymentBundleDownloadResponses, SerenCloudGetDeploymentBundleDownloadErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/deployment-bundle-download',
+    ...options
+});
 
 /**
  * Inspect the managed deployment filesystem within the state or artifacts namespace.
  */
-export const serenCloudDeploymentFs = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentFsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentFsResponses, SerenCloudDeploymentFsErrors, ThrowOnError>({ url: '/deployments/{id}/fs', ...options });
+export const serenCloudDeploymentFs = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentFsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentFsResponses, SerenCloudDeploymentFsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/fs',
+    ...options
+});
 
 /**
  * Read a byte range from the managed deployment filesystem.
  */
-export const serenCloudDeploymentFsReadBytes = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentFsReadBytesData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentFsReadBytesResponses, SerenCloudDeploymentFsReadBytesErrors, ThrowOnError>({ url: '/deployments/{id}/fs/read_bytes', ...options });
+export const serenCloudDeploymentFsReadBytes = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentFsReadBytesData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentFsReadBytesResponses, SerenCloudDeploymentFsReadBytesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/fs/read_bytes',
+    ...options
+});
 
 /**
  * Read a UTF-8 text file from the managed deployment filesystem.
  */
-export const serenCloudDeploymentFsReadText = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentFsReadTextData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentFsReadTextResponses, SerenCloudDeploymentFsReadTextErrors, ThrowOnError>({ url: '/deployments/{id}/fs/read_text', ...options });
+export const serenCloudDeploymentFsReadText = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentFsReadTextData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentFsReadTextResponses, SerenCloudDeploymentFsReadTextErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/fs/read_text',
+    ...options
+});
 
 /**
  * Get logs for a deployment.
  */
-export const serenCloudLogs = <ThrowOnError extends boolean = false>(options: Options<SerenCloudLogsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudLogsResponses, SerenCloudLogsErrors, ThrowOnError>({ url: '/deployments/{id}/logs', ...options });
+export const serenCloudLogs = <ThrowOnError extends boolean = false>(options: Options<SerenCloudLogsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudLogsResponses, SerenCloudLogsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/logs',
+    ...options
+});
 
 /**
  * List awaiting-approval runs for a deployment.
  */
-export const serenCloudDeploymentPendingApprovals = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentPendingApprovalsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentPendingApprovalsResponses, SerenCloudDeploymentPendingApprovalsErrors, ThrowOnError>({ url: '/deployments/{id}/pending_approvals', ...options });
+export const serenCloudDeploymentPendingApprovals = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentPendingApprovalsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentPendingApprovalsResponses, SerenCloudDeploymentPendingApprovalsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/pending_approvals',
+    ...options
+});
 
 /**
  * List run events (history) for a deployment.
  */
-export const serenCloudDeploymentRuns = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunsResponses, SerenCloudDeploymentRunsErrors, ThrowOnError>({ url: '/deployments/{id}/runs', ...options });
+export const serenCloudDeploymentRuns = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunsResponses, SerenCloudDeploymentRunsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/runs',
+    ...options
+});
 
 export const serenCloudRun = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunData, ThrowOnError>) => (options.client ?? client).post<SerenCloudRunResponses, SerenCloudRunErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/deployments/{id}/runs',
     ...options,
     headers: {
@@ -119,67 +227,116 @@ export const serenCloudRun = <ThrowOnError extends boolean = false>(options: Opt
 /**
  * Get a single run event for a deployment.
  */
-export const serenCloudDeploymentRun = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunResponses, SerenCloudDeploymentRunErrors, ThrowOnError>({ url: '/deployments/{id}/runs/{run_id}', ...options });
+export const serenCloudDeploymentRun = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunResponses, SerenCloudDeploymentRunErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/runs/{run_id}',
+    ...options
+});
 
 /**
  * List artifacts emitted by a specific deployment run.
  */
-export const serenCloudDeploymentRunArtifacts = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunArtifactsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunArtifactsResponses, SerenCloudDeploymentRunArtifactsErrors, ThrowOnError>({ url: '/deployments/{id}/runs/{run_id}/artifacts', ...options });
+export const serenCloudDeploymentRunArtifacts = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunArtifactsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunArtifactsResponses, SerenCloudDeploymentRunArtifactsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/runs/{run_id}/artifacts',
+    ...options
+});
 
 /**
  * Cancel a queued/running deployment run.
  */
-export const serenCloudDeploymentRunCancel = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunCancelData, ThrowOnError>) => (options.client ?? client).post<SerenCloudDeploymentRunCancelResponses, SerenCloudDeploymentRunCancelErrors, ThrowOnError>({ url: '/deployments/{id}/runs/{run_id}/cancel', ...options });
+export const serenCloudDeploymentRunCancel = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunCancelData, ThrowOnError>) => (options.client ?? client).post<SerenCloudDeploymentRunCancelResponses, SerenCloudDeploymentRunCancelErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/runs/{run_id}/cancel',
+    ...options
+});
 
 /**
  * List eval records linked to a specific deployment run.
  */
-export const serenCloudDeploymentRunEvals = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunEvalsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunEvalsResponses, SerenCloudDeploymentRunEvalsErrors, ThrowOnError>({ url: '/deployments/{id}/runs/{run_id}/evals', ...options });
+export const serenCloudDeploymentRunEvals = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunEvalsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunEvalsResponses, SerenCloudDeploymentRunEvalsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/runs/{run_id}/evals',
+    ...options
+});
 
 /**
  * List structured output events emitted by a specific deployment run.
  */
-export const serenCloudDeploymentRunEvents = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunEventsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunEventsResponses, SerenCloudDeploymentRunEventsErrors, ThrowOnError>({ url: '/deployments/{id}/runs/{run_id}/events', ...options });
+export const serenCloudDeploymentRunEvents = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunEventsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunEventsResponses, SerenCloudDeploymentRunEventsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/runs/{run_id}/events',
+    ...options
+});
 
 /**
  * List current pending approvals for a specific deployment run.
  */
-export const serenCloudDeploymentRunPendingApprovals = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunPendingApprovalsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunPendingApprovalsResponses, SerenCloudDeploymentRunPendingApprovalsErrors, ThrowOnError>({ url: '/deployments/{id}/runs/{run_id}/pending_approvals', ...options });
+export const serenCloudDeploymentRunPendingApprovals = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunPendingApprovalsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentRunPendingApprovalsResponses, SerenCloudDeploymentRunPendingApprovalsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/runs/{run_id}/pending_approvals',
+    ...options
+});
 
 /**
  * Close an active deployment-run stream session.
  */
-export const serenCloudDeploymentRunStreamClose = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunStreamCloseData, ThrowOnError>) => (options.client ?? client).delete<SerenCloudDeploymentRunStreamCloseResponses, SerenCloudDeploymentRunStreamCloseErrors, ThrowOnError>({ url: '/deployments/{id}/runs/{run_id}/stream', ...options });
+export const serenCloudDeploymentRunStreamClose = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunStreamCloseData, ThrowOnError>) => (options.client ?? client).delete<SerenCloudDeploymentRunStreamCloseResponses, SerenCloudDeploymentRunStreamCloseErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/runs/{run_id}/stream',
+    ...options
+});
 
 /**
  * Stream updates for a deployment run as Server-Sent Events.
  */
-export const serenCloudDeploymentRunStream = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunStreamData, ThrowOnError>) => (options.client ?? client).sse.get<SerenCloudDeploymentRunStreamResponses, SerenCloudDeploymentRunStreamErrors, ThrowOnError>({ url: '/deployments/{id}/runs/{run_id}/stream', ...options });
+export const serenCloudDeploymentRunStream = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentRunStreamData, ThrowOnError, unknown>) => (options.client ?? client).sse.get<SerenCloudDeploymentRunStreamResponses, SerenCloudDeploymentRunStreamErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/runs/{run_id}/stream',
+    ...options
+});
 
 /**
  * Run a one-shot invocation of a deployment.
  */
-export const serenCloudGetDeploymentSpend = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetDeploymentSpendData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetDeploymentSpendResponses, SerenCloudGetDeploymentSpendErrors, ThrowOnError>({ url: '/deployments/{id}/spend', ...options });
+export const serenCloudGetDeploymentSpend = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetDeploymentSpendData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetDeploymentSpendResponses, SerenCloudGetDeploymentSpendErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/spend',
+    ...options
+});
 
 /**
  * Start an always-on deployment (scale to 1 replica).
  */
-export const serenCloudStart = <ThrowOnError extends boolean = false>(options: Options<SerenCloudStartData, ThrowOnError>) => (options.client ?? client).post<SerenCloudStartResponses, SerenCloudStartErrors, ThrowOnError>({ url: '/deployments/{id}/start', ...options });
+export const serenCloudStart = <ThrowOnError extends boolean = false>(options: Options<SerenCloudStartData, ThrowOnError>) => (options.client ?? client).post<SerenCloudStartResponses, SerenCloudStartErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/start',
+    ...options
+});
 
 /**
  * Stop an always-on deployment (scale to 0 replicas).
  */
-export const serenCloudStop = <ThrowOnError extends boolean = false>(options: Options<SerenCloudStopData, ThrowOnError>) => (options.client ?? client).post<SerenCloudStopResponses, SerenCloudStopErrors, ThrowOnError>({ url: '/deployments/{id}/stop', ...options });
+export const serenCloudStop = <ThrowOnError extends boolean = false>(options: Options<SerenCloudStopData, ThrowOnError>) => (options.client ?? client).post<SerenCloudStopResponses, SerenCloudStopErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/stop',
+    ...options
+});
 
 /**
  * List reusable execution environment profiles.
  */
-export const serenCloudListEnvironments = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudListEnvironmentsData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudListEnvironmentsResponses, unknown, ThrowOnError>({ url: '/environments', ...options });
+export const serenCloudListEnvironments = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudListEnvironmentsData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudListEnvironmentsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/environments',
+    ...options
+});
 
 /**
  * Create a reusable execution environment profile.
  */
 export const serenCloudCreateEnvironment = <ThrowOnError extends boolean = false>(options: Options<SerenCloudCreateEnvironmentData, ThrowOnError>) => (options.client ?? client).post<SerenCloudCreateEnvironmentResponses, SerenCloudCreateEnvironmentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/environments',
     ...options,
     headers: {
@@ -191,17 +348,26 @@ export const serenCloudCreateEnvironment = <ThrowOnError extends boolean = false
 /**
  * Delete a reusable execution environment profile.
  */
-export const serenCloudDeleteEnvironment = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeleteEnvironmentData, ThrowOnError>) => (options.client ?? client).delete<SerenCloudDeleteEnvironmentResponses, SerenCloudDeleteEnvironmentErrors, ThrowOnError>({ url: '/environments/{id}', ...options });
+export const serenCloudDeleteEnvironment = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeleteEnvironmentData, ThrowOnError>) => (options.client ?? client).delete<SerenCloudDeleteEnvironmentResponses, SerenCloudDeleteEnvironmentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/environments/{id}',
+    ...options
+});
 
 /**
  * Get a reusable execution environment profile.
  */
-export const serenCloudGetEnvironment = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetEnvironmentData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetEnvironmentResponses, SerenCloudGetEnvironmentErrors, ThrowOnError>({ url: '/environments/{id}', ...options });
+export const serenCloudGetEnvironment = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetEnvironmentData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetEnvironmentResponses, SerenCloudGetEnvironmentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/environments/{id}',
+    ...options
+});
 
 /**
  * Update a reusable execution environment profile.
  */
 export const serenCloudUpdateEnvironment = <ThrowOnError extends boolean = false>(options: Options<SerenCloudUpdateEnvironmentData, ThrowOnError>) => (options.client ?? client).patch<SerenCloudUpdateEnvironmentResponses, SerenCloudUpdateEnvironmentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/environments/{id}',
     ...options,
     headers: {
@@ -213,12 +379,17 @@ export const serenCloudUpdateEnvironment = <ThrowOnError extends boolean = false
 /**
  * List eval sets for the authenticated organization.
  */
-export const serenCloudEvalSets = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudEvalSetsData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudEvalSetsResponses, unknown, ThrowOnError>({ url: '/eval-sets', ...options });
+export const serenCloudEvalSets = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudEvalSetsData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudEvalSetsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/eval-sets',
+    ...options
+});
 
 /**
  * Create a durable eval set for seren-cloud runs.
  */
 export const serenCloudCreateEvalSet = <ThrowOnError extends boolean = false>(options: Options<SerenCloudCreateEvalSetData, ThrowOnError>) => (options.client ?? client).post<SerenCloudCreateEvalSetResponses, SerenCloudCreateEvalSetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/eval-sets',
     ...options,
     headers: {
@@ -230,12 +401,17 @@ export const serenCloudCreateEvalSet = <ThrowOnError extends boolean = false>(op
 /**
  * Get a single eval set.
  */
-export const serenCloudGetEvalSet = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetEvalSetData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetEvalSetResponses, SerenCloudGetEvalSetErrors, ThrowOnError>({ url: '/eval-sets/{id}', ...options });
+export const serenCloudGetEvalSet = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetEvalSetData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetEvalSetResponses, SerenCloudGetEvalSetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/eval-sets/{id}',
+    ...options
+});
 
 /**
  * Replace an eval set definition, including schedule and criteria.
  */
 export const serenCloudUpdateEvalSet = <ThrowOnError extends boolean = false>(options: Options<SerenCloudUpdateEvalSetData, ThrowOnError>) => (options.client ?? client).put<SerenCloudUpdateEvalSetResponses, SerenCloudUpdateEvalSetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/eval-sets/{id}',
     ...options,
     headers: {
@@ -247,12 +423,17 @@ export const serenCloudUpdateEvalSet = <ThrowOnError extends boolean = false>(op
 /**
  * List eval cases within a set.
  */
-export const serenCloudEvalCases = <ThrowOnError extends boolean = false>(options: Options<SerenCloudEvalCasesData, ThrowOnError>) => (options.client ?? client).get<SerenCloudEvalCasesResponses, SerenCloudEvalCasesErrors, ThrowOnError>({ url: '/eval-sets/{id}/cases', ...options });
+export const serenCloudEvalCases = <ThrowOnError extends boolean = false>(options: Options<SerenCloudEvalCasesData, ThrowOnError>) => (options.client ?? client).get<SerenCloudEvalCasesResponses, SerenCloudEvalCasesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/eval-sets/{id}/cases',
+    ...options
+});
 
 /**
  * Promote a terminal run into a durable eval case.
  */
 export const serenCloudPromoteRunToEvalCase = <ThrowOnError extends boolean = false>(options: Options<SerenCloudPromoteRunToEvalCaseData, ThrowOnError>) => (options.client ?? client).post<SerenCloudPromoteRunToEvalCaseResponses, SerenCloudPromoteRunToEvalCaseErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/eval-sets/{id}/cases/from-run/{run_id}',
     ...options,
     headers: {
@@ -264,17 +445,26 @@ export const serenCloudPromoteRunToEvalCase = <ThrowOnError extends boolean = fa
 /**
  * Get a single eval case.
  */
-export const serenCloudGetEvalCase = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetEvalCaseData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetEvalCaseResponses, SerenCloudGetEvalCaseErrors, ThrowOnError>({ url: '/eval-sets/{id}/cases/{case_id}', ...options });
+export const serenCloudGetEvalCase = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetEvalCaseData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetEvalCaseResponses, SerenCloudGetEvalCaseErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/eval-sets/{id}/cases/{case_id}',
+    ...options
+});
 
 /**
  * List eval runs within a set.
  */
-export const serenCloudEvalRuns = <ThrowOnError extends boolean = false>(options: Options<SerenCloudEvalRunsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudEvalRunsResponses, SerenCloudEvalRunsErrors, ThrowOnError>({ url: '/eval-sets/{id}/runs', ...options });
+export const serenCloudEvalRuns = <ThrowOnError extends boolean = false>(options: Options<SerenCloudEvalRunsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudEvalRunsResponses, SerenCloudEvalRunsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/eval-sets/{id}/runs',
+    ...options
+});
 
 /**
  * Execute an eval set against a deployment.
  */
 export const serenCloudRunEvalSet = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunEvalSetData, ThrowOnError>) => (options.client ?? client).post<SerenCloudRunEvalSetResponses, SerenCloudRunEvalSetErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/eval-sets/{id}/runs',
     ...options,
     headers: {
@@ -286,74 +476,134 @@ export const serenCloudRunEvalSet = <ThrowOnError extends boolean = false>(optio
 /**
  * Get a single eval run.
  */
-export const serenCloudGetEvalRun = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetEvalRunData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetEvalRunResponses, SerenCloudGetEvalRunErrors, ThrowOnError>({ url: '/eval-sets/{id}/runs/{run_id}', ...options });
+export const serenCloudGetEvalRun = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetEvalRunData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetEvalRunResponses, SerenCloudGetEvalRunErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/eval-sets/{id}/runs/{run_id}',
+    ...options
+});
 
 /**
  * List case results for an eval run.
  */
-export const serenCloudEvalRunResults = <ThrowOnError extends boolean = false>(options: Options<SerenCloudEvalRunResultsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudEvalRunResultsResponses, SerenCloudEvalRunResultsErrors, ThrowOnError>({ url: '/eval-sets/{id}/runs/{run_id}/results', ...options });
+export const serenCloudEvalRunResults = <ThrowOnError extends boolean = false>(options: Options<SerenCloudEvalRunResultsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudEvalRunResultsResponses, SerenCloudEvalRunResultsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/eval-sets/{id}/runs/{run_id}/results',
+    ...options
+});
 
 /**
  * Get a single case result from an eval run.
  */
-export const serenCloudGetEvalCaseResult = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetEvalCaseResultData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetEvalCaseResultResponses, SerenCloudGetEvalCaseResultErrors, ThrowOnError>({ url: '/eval-sets/{id}/runs/{run_id}/results/{case_id}', ...options });
+export const serenCloudGetEvalCaseResult = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetEvalCaseResultData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetEvalCaseResultResponses, SerenCloudGetEvalCaseResultErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/eval-sets/{id}/runs/{run_id}/results/{case_id}',
+    ...options
+});
 
 /**
  * List awaiting-approval runs across all deployments for the organization.
  */
-export const serenCloudPendingApprovals = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudPendingApprovalsData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudPendingApprovalsResponses, SerenCloudPendingApprovalsErrors, ThrowOnError>({ url: '/pending_approvals', ...options });
+export const serenCloudPendingApprovals = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudPendingApprovalsData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudPendingApprovalsResponses, SerenCloudPendingApprovalsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/pending_approvals',
+    ...options
+});
 
 /**
  * List all runs across all deployments for the organization.
  */
-export const serenCloudRuns = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudRunsData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudRunsResponses, SerenCloudRunsErrors, ThrowOnError>({ url: '/runs', ...options });
+export const serenCloudRuns = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudRunsData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudRunsResponses, SerenCloudRunsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/runs',
+    ...options
+});
 
 /**
  * Get a single run event by ID (cross-agent).
  */
-export const serenCloudRunDetail = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunDetailData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunDetailResponses, SerenCloudRunDetailErrors, ThrowOnError>({ url: '/runs/{run_id}', ...options });
+export const serenCloudRunDetail = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunDetailData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunDetailResponses, SerenCloudRunDetailErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/runs/{run_id}',
+    ...options
+});
 
 /**
  * List artifacts emitted by a run event.
  */
-export const serenCloudRunArtifacts = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunArtifactsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunArtifactsResponses, SerenCloudRunArtifactsErrors, ThrowOnError>({ url: '/runs/{run_id}/artifacts', ...options });
+export const serenCloudRunArtifacts = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunArtifactsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunArtifactsResponses, SerenCloudRunArtifactsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/runs/{run_id}/artifacts',
+    ...options
+});
 
 /**
  * List tamper-evident audit entries scoped to a run.
  */
-export const serenCloudRunAudit = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunAuditData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunAuditResponses, SerenCloudRunAuditErrors, ThrowOnError>({ url: '/runs/{run_id}/audit', ...options });
+export const serenCloudRunAudit = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunAuditData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunAuditResponses, SerenCloudRunAuditErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/runs/{run_id}/audit',
+    ...options
+});
 
 /**
  * Cancel a queued/running run by ID.
  */
-export const serenCloudRunCancel = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunCancelData, ThrowOnError>) => (options.client ?? client).post<SerenCloudRunCancelResponses, SerenCloudRunCancelErrors, ThrowOnError>({ url: '/runs/{run_id}/cancel', ...options });
+export const serenCloudRunCancel = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunCancelData, ThrowOnError>) => (options.client ?? client).post<SerenCloudRunCancelResponses, SerenCloudRunCancelErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/runs/{run_id}/cancel',
+    ...options
+});
 
 /**
  * Compare two run replay/eval captures by ID (cross-agent).
  */
-export const serenCloudRunCompare = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunCompareData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunCompareResponses, SerenCloudRunCompareErrors, ThrowOnError>({ url: '/runs/{run_id}/compare/{compare_run_id}', ...options });
+export const serenCloudRunCompare = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunCompareData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunCompareResponses, SerenCloudRunCompareErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/runs/{run_id}/compare/{compare_run_id}',
+    ...options
+});
 
 /**
  * List eval records linked to a run event.
  */
-export const serenCloudRunEvals = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunEvalsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunEvalsResponses, SerenCloudRunEvalsErrors, ThrowOnError>({ url: '/runs/{run_id}/evals', ...options });
+export const serenCloudRunEvals = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunEvalsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunEvalsResponses, SerenCloudRunEvalsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/runs/{run_id}/evals',
+    ...options
+});
 
 /**
  * List structured output events emitted by a run event.
  */
-export const serenCloudRunEvents = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunEventsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunEventsResponses, SerenCloudRunEventsErrors, ThrowOnError>({ url: '/runs/{run_id}/events', ...options });
+export const serenCloudRunEvents = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunEventsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunEventsResponses, SerenCloudRunEventsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/runs/{run_id}/events',
+    ...options
+});
 
 /**
  * List current pending approvals for a run event.
  */
-export const serenCloudRunPendingApprovals = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunPendingApprovalsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunPendingApprovalsResponses, SerenCloudRunPendingApprovalsErrors, ThrowOnError>({ url: '/runs/{run_id}/pending_approvals', ...options });
+export const serenCloudRunPendingApprovals = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunPendingApprovalsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudRunPendingApprovalsResponses, SerenCloudRunPendingApprovalsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/runs/{run_id}/pending_approvals',
+    ...options
+});
 
 /**
  * Close an active run stream session (global run path).
  */
-export const serenCloudRunStreamClose = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunStreamCloseData, ThrowOnError>) => (options.client ?? client).delete<SerenCloudRunStreamCloseResponses, SerenCloudRunStreamCloseErrors, ThrowOnError>({ url: '/runs/{run_id}/stream', ...options });
+export const serenCloudRunStreamClose = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunStreamCloseData, ThrowOnError>) => (options.client ?? client).delete<SerenCloudRunStreamCloseResponses, SerenCloudRunStreamCloseErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/runs/{run_id}/stream',
+    ...options
+});
 
 /**
  * Stream updates for a run as Server-Sent Events.
  */
-export const serenCloudRunStream = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunStreamData, ThrowOnError>) => (options.client ?? client).sse.get<SerenCloudRunStreamResponses, SerenCloudRunStreamErrors, ThrowOnError>({ url: '/runs/{run_id}/stream', ...options });
+export const serenCloudRunStream = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRunStreamData, ThrowOnError, unknown>) => (options.client ?? client).sse.get<SerenCloudRunStreamResponses, SerenCloudRunStreamErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/runs/{run_id}/stream',
+    ...options
+});

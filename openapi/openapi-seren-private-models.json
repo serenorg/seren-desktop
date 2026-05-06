@@ -1,16 +1,17 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "seren-core",
-    "description": "",
+    "title": "Seren Private Models",
+    "description": "List and run organization private models through seren-private-models.",
     "contact": {
-      "name": "SerenDB Team"
+      "name": "SerenAI",
+      "email": "hello@serendb.com"
     },
     "license": {
       "name": "UNLICENSED",
       "identifier": "UNLICENSED"
     },
-    "version": "0.1.0"
+    "version": "1.0.0"
   },
   "servers": [
     {
@@ -452,6 +453,12 @@
             ]
           }
         }
+      }
+    },
+    "securitySchemes": {
+      "bearer_auth": {
+        "type": "http",
+        "scheme": "bearer"
       }
     }
   },
