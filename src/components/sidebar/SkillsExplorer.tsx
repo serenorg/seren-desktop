@@ -198,17 +198,12 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   // decides whether the current SKILL.md is worth shipping as a new version.
   const canPublishUpdate = (skill: InstalledSkill): boolean => ownsSkill(skill);
 
-  /**
-   * Single-button entry point for the publish flow. Routes to first-time
-   * publish or new-version modal based on whether the skill already has a
-   * catalog record. Keeps Publish discoverable as one consistent action even
-   * though the underlying API call differs (createSkill vs createVersion).
-   */
   const handlePublishClick = (skill: InstalledSkill) => {
+    const path = editablePathFor(skill);
     if (isPublishable(skill)) {
-      skillPublishStore.requestFirstPublish(skill.path);
+      skillPublishStore.requestFirstPublish(path);
     } else if (canPublishUpdate(skill)) {
-      skillPublishStore.requestVersionPublish(skill.path);
+      skillPublishStore.requestVersionPublish(path);
     }
   };
 
@@ -1626,18 +1621,24 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                               Manage on Seren Skills
                             </button>
                           </Show>
-                          <Show when={isPublishable(skill)}>
+                          <Show
+                            when={
+                              isPublishable(skill) || canPublishUpdate(skill)
+                            }
+                          >
                             <button
                               type="button"
                               class="px-3 py-1 bg-transparent border border-primary/40 text-primary rounded-md text-[12px] cursor-pointer transition-colors hover:bg-primary/10"
-                              onClick={() =>
-                                skillPublishStore.requestFirstPublish(
-                                  skill.path,
-                                )
+                              onClick={() => handlePublishClick(skill)}
+                              title={
+                                isPublishable(skill)
+                                  ? "Push this local SKILL.md to Seren Skills as a new publisher record"
+                                  : "Publish a new version to Seren Skills"
                               }
-                              title="Push this local SKILL.md to Seren Skills as a new publisher record"
                             >
-                              Publish to Seren Skills
+                              {isPublishable(skill)
+                                ? "Publish to Seren Skills"
+                                : "Publish update"}
                             </button>
                           </Show>
                         </div>

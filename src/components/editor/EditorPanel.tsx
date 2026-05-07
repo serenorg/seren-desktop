@@ -404,6 +404,7 @@ export const EditorPanel: Component = () => {
                           <MonacoEditor
                             filePath={filePath()}
                             value={editorContent()}
+                            savedContent={activeTab()?.savedContent}
                             onChange={handleEditorChange}
                             onDirtyChange={handleEditorDirtyChange}
                             savedSnapshot={savedSnapshot()}

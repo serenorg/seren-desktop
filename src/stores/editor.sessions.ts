@@ -347,6 +347,7 @@ export function initEditorSessionPersistence(): void {
     tabsState.tabs.length;
     tabsState.activeTabId;
     void tabsState.lastActiveByCwd;
+    void tabsState.lastActiveAtByCwd;
     for (const tab of tabsState.tabs) {
       // Tabs change cwd is fixed at open time but include the read so
       // additions/removals fire the effect.

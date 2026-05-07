@@ -64,10 +64,7 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
     tabsState.tabs.find((tab) => tab.id === tabsState.activeTabId),
   );
 
-  // The publish button only surfaces when the active tab is a skill the
-  // user can publish - either an unpublished authored skill (first-time
-  // publish) or one they already own (new-version publish). Skills they
-  // don't own and skills with no matching SKILL.md path stay hidden.
+  // Only show publish controls for local skills the signed-in user can own.
   const publishableSkill = createMemo(() => {
     const tab = activeTab();
     if (!tab) return null;
@@ -79,10 +76,10 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
     if (!userId) return null;
     const catalog = skillsStore.available.find((s) => s.slug === skill.slug);
     if (!catalog) {
-      return { skill, mode: "first" as const };
+      return { skill, path: tab.filePath, mode: "first" as const };
     }
     if (catalog.publisher?.createdByUserId === userId) {
-      return { skill, mode: "version" as const, catalog };
+      return { skill, path: tab.filePath, mode: "version" as const, catalog };
     }
     return null;
   });
@@ -91,9 +88,9 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
     const target = publishableSkill();
     if (!target) return;
     if (target.mode === "first") {
-      skillPublishStore.requestFirstPublish(target.skill.path);
+      skillPublishStore.requestFirstPublish(target.path);
     } else {
-      skillPublishStore.requestVersionPublish(target.skill.path);
+      skillPublishStore.requestVersionPublish(target.path);
     }
   };
 
@@ -379,6 +376,7 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
                         <MonacoEditor
                           filePath={filePath()}
                           value={editorContent()}
+                          savedContent={activeTab()?.savedContent}
                           active={props.active}
                           onChange={handleEditorChange}
                           onDirtyChange={handleEditorDirtyChange}

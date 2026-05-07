@@ -24,6 +24,7 @@ import { PublishVersionModal } from "@/components/sidebar/PublishVersionModal";
 import { SkillsExplorer } from "@/components/sidebar/SkillsExplorer";
 import { AgentTasksPanel } from "@/components/tasks/AgentTasksPanel";
 import { shortcuts } from "@/lib/shortcuts";
+import type { InstalledSkill } from "@/lib/skills";
 import {
   initEditorSessionPersistence,
   pickEditorSessionForContext,
@@ -74,11 +75,40 @@ function loadInitialSlidePanel(): SlidePanelView {
 }
 
 function persistSlidePanel(view: SlidePanelView): void {
+  // Transient views (e.g. sign-in) must not overwrite the user's stored
+  // preference. Otherwise opening sign-in once would force the next launch
+  // to ignore a previously-closed or settings/database/etc. preference and
+  // fall back to the "skills" default.
+  if (view !== null && !PERSISTABLE_VIEWS.has(view)) return;
   try {
     localStorage.setItem(SLIDE_PANEL_KEY, view ?? "null");
   } catch {
     // Non-fatal
   }
+}
+
+function pathParent(path: string): string {
+  const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return idx > 0 ? path.slice(0, idx) : "";
+}
+
+function pathBasename(path: string): string {
+  const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return idx >= 0 ? path.slice(idx + 1) : path;
+}
+
+function skillForPublishPath(
+  skill: InstalledSkill,
+  path: string,
+): InstalledSkill {
+  if (skill.path === path) return skill;
+  const skillDir = pathParent(path);
+  const skillsDir = pathParent(skillDir);
+  const dirName = pathBasename(skillDir);
+  if (!skillDir || !skillsDir || !dirName) {
+    return { ...skill, path };
+  }
+  return { ...skill, path, skillsDir, dirName };
 }
 
 interface AppShellProps {
@@ -125,6 +155,13 @@ export const AppShell: Component<AppShellProps> = (props) => {
     await skillsStore.refreshAvailable(true);
     await skillsStore.refreshOwnedSkills();
     await skillsStore.refreshInstalled();
+  };
+
+  const publishTargetForPath = (path: string): InstalledSkill | null => {
+    const skill = skillsStore.installed.find(
+      (s) => s.path === path || s.authoringPath === path,
+    );
+    return skill ? skillForPublishPath(skill, path) : null;
   };
 
   /**
@@ -422,14 +459,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
       <StatusBar />
 
-      {/* Skill publish modals live at app level so they work whether the
-          skills slide panel is open or not (e.g. triggered from the editor
-          header). Both look up the InstalledSkill by path against the store
-          at render time. */}
       <Show when={skillPublishStore.firstPublishPath}>
         {(path) => {
-          const target = () =>
-            skillsStore.installed.find((s) => s.path === path());
+          const target = () => publishTargetForPath(path());
           return (
             <Show when={target()}>
               {(skill) => (
@@ -445,8 +477,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
       </Show>
       <Show when={skillPublishStore.versionPublishPath}>
         {(path) => {
-          const target = () =>
-            skillsStore.installed.find((s) => s.path === path());
+          const target = () => publishTargetForPath(path());
           const catalogVersion = (slug: string) =>
             skillsStore.available.find((s) => s.slug === slug)?.version;
           return (

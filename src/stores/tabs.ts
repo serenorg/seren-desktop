@@ -11,6 +11,8 @@ export interface Tab {
   cwd: string;
   isDirty: boolean;
   content: string;
+  /** Last content known to be written to disk. */
+  savedContent: string;
 }
 
 interface TabsState {
@@ -63,7 +65,15 @@ export function openTab(
 
   setTabsState("tabs", (tabs) => [
     ...tabs,
-    { id, filePath, fileName, cwd, isDirty: false, content },
+    {
+      id,
+      filePath,
+      fileName,
+      cwd,
+      isDirty: false,
+      content,
+      savedContent: content,
+    },
   ]);
   setTabsState("activeTabId", id);
   setTabsState("lastActiveByCwd", cwd, id);
@@ -87,7 +97,7 @@ export function closeTab(tabId: string): void {
       (t) => t.cwd === closed.cwd && t.id !== tabId,
     );
     const fallback =
-      sameSession[Math.min(sameSession.length - 1, 0)] ??
+      sameSession[sameSession.length - 1] ??
       tabsState.tabs.find((t) => t.id !== tabId);
     setTabsState("activeTabId", fallback?.id ?? null);
     if (fallback) rememberActive(fallback.id);
@@ -100,6 +110,17 @@ export function closeTab(tabId: string): void {
     delete next[closed.cwd];
     return next;
   });
+  // Drop the cwd's recency entry when its last tab closes; otherwise the
+  // persisted state accumulates orphan entries for sessions the user no
+  // longer has open.
+  if (!tabsState.tabs.some((t) => t.cwd === closed.cwd)) {
+    setTabsState("lastActiveAtByCwd", (recency) => {
+      if (!(closed.cwd in recency)) return recency;
+      const next = { ...recency };
+      delete next[closed.cwd];
+      return next;
+    });
+  }
 }
 
 /**
@@ -109,6 +130,7 @@ export function closeAllTabs(): void {
   setTabsState("tabs", []);
   setTabsState("activeTabId", null);
   setTabsState("lastActiveByCwd", {});
+  setTabsState("lastActiveAtByCwd", {});
 }
 
 /**
@@ -168,6 +190,13 @@ export function setActiveSessionByCwd(cwd: string): void {
  */
 export function updateTabContent(tabId: string, content: string): void {
   setTabsState("tabs", (t) => t.id === tabId, "content", content);
+}
+
+/**
+ * Mark a tab's current content as the saved baseline.
+ */
+export function setTabSavedContent(tabId: string, content: string): void {
+  setTabsState("tabs", (t) => t.id === tabId, "savedContent", content);
 }
 
 /**

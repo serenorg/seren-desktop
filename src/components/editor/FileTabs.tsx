@@ -1,3 +1,6 @@
+// ABOUTME: File tabs strip rendering open editor tabs for the active session.
+// ABOUTME: Includes a markdown split-preview toggle on the right.
+
 import { type Component, createMemo, For, Show } from "solid-js";
 import { editorSessionStore } from "@/stores/editor.sessions";
 import { closeTab, setActiveTab, type Tab, tabsState } from "@/stores/tabs";
