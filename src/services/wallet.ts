@@ -57,13 +57,34 @@ export async function fetchBalance() {
  * @throws Error if not authenticated or network error
  */
 export async function initiateTopUp(amount: number) {
-  const { data, error } = await createDeposit({
+  const { data, error, response } = await createDeposit({
     body: { amount_cents: Math.round(amount * 100) },
     throwOnError: false,
   });
 
   if (error) {
-    throw new Error("Failed to initiate top-up");
+    const status = response?.status;
+    let serverMessage: string | undefined;
+    if (typeof error === "string") {
+      serverMessage = error;
+    } else if (error && typeof error === "object") {
+      const body = error as Record<string, unknown>;
+      if (typeof body.message === "string") {
+        serverMessage = body.message;
+      } else if (typeof body.error === "string") {
+        serverMessage = body.error;
+      } else if (typeof body.detail === "string") {
+        serverMessage = body.detail;
+      }
+    }
+
+    console.error("[Wallet] Error initiating top-up:", { status, error });
+    const detail = serverMessage
+      ? `${status ?? "request failed"} — ${serverMessage}`
+      : status
+        ? `HTTP ${status}`
+        : "request failed";
+    throw new Error(`Failed to initiate top-up: ${detail}`);
   }
 
   if (!data?.data) {

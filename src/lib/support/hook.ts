@@ -180,6 +180,7 @@ export const __supportReportingTestHooks = import.meta.env.DEV
   ? {
       rememberSignature,
       seenSignatures: () => [...seenSignatures.keys()],
+      logSlice: () => [...logSlice],
       reset: () => {
         seenSignatures.clear();
         logSlice.splice(0);
@@ -309,9 +310,21 @@ export async function captureSupportError(
     capturing = false;
   }
 
-  const signature = await supportSignature(error);
+  const signature = await supportSignature(error, input.http);
   if (!isValidSignature(signature)) return;
-  if (!rememberSignature(signature)) return;
+  if (!rememberSignature(signature)) {
+    // Pre-fix this returned silently — combined with the kind-only signature
+    // for HTTP errors (#1838), an entire session's worth of distinct 4xx
+    // failures vanished after the first one. Leave a breadcrumb in the log
+    // slice so the next non-deduped report carries evidence of suppressed
+    // captures.
+    appendSupportLog(
+      "WARN",
+      "support-report",
+      `dropped duplicate signature: ${signature.slice(0, 8)}`,
+    );
+    return;
+  }
 
   const [ids, build] = await Promise.all([getSupportIds(), getBuildInfo()]);
   const installId = ids.install_id.toLowerCase();
