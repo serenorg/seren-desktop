@@ -42,6 +42,40 @@ export type SlidePanelView =
   | "skills"
   | null;
 
+const SLIDE_PANEL_KEY = "seren:slide_panel";
+
+const PERSISTABLE_VIEWS: ReadonlySet<NonNullable<SlidePanelView>> = new Set([
+  "settings",
+  "database",
+  "tasks",
+  "sessions",
+  "skills",
+]);
+
+function loadInitialSlidePanel(): SlidePanelView {
+  // First launch (no stored preference) opens the skills panel by default
+  // so users discover the catalog without having to hunt for it.
+  try {
+    const raw = localStorage.getItem(SLIDE_PANEL_KEY);
+    if (raw === null) return "skills";
+    if (raw === "null") return null;
+    if (PERSISTABLE_VIEWS.has(raw as NonNullable<SlidePanelView>)) {
+      return raw as SlidePanelView;
+    }
+  } catch {
+    // localStorage unavailable - fall back to default
+  }
+  return "skills";
+}
+
+function persistSlidePanel(view: SlidePanelView): void {
+  try {
+    localStorage.setItem(SLIDE_PANEL_KEY, view ?? "null");
+  } catch {
+    // Non-fatal
+  }
+}
+
 interface AppShellProps {
   onLoginSuccess: () => void;
   onLogout: () => void;
@@ -49,7 +83,12 @@ interface AppShellProps {
 
 export const AppShell: Component<AppShellProps> = (props) => {
   const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false);
-  const [slidePanel, setSlidePanel] = createSignal<SlidePanelView>(null);
+  const [slidePanel, setSlidePanel] = createSignal<SlidePanelView>(
+    loadInitialSlidePanel(),
+  );
+  createEffect(() => {
+    persistSlidePanel(slidePanel());
+  });
 
   const handleSignInClick = () => {
     setSlidePanel("account");
