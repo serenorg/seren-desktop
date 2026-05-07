@@ -279,14 +279,19 @@ export const threadStore = {
   },
 
   /**
-   * Threads grouped by project directory.
-   * The current project's group comes first, then others, then ungrouped.
+   * Threads grouped by project directory, ordered by most recent activity.
+   *
+   * Sort key is `max(thread.timestamp)` across each group. We deliberately
+   * do NOT float the current project (`fileTreeState.rootPath`) to the top:
+   * doing so meant every thread click reordered the sidebar, which felt
+   * like the layout was jumping around. The "you are here" signal is
+   * carried by the highlight on the active group's header instead, which
+   * lets the layout stay spatially predictable while the user navigates.
    */
   get groupedThreads(): ThreadGroup[] {
     const threads = this.threads;
-    const currentRoot = fileTreeState.rootPath;
 
-    // Group by projectRoot
+    // Group by projectRoot.
     const groups = new Map<string | null, Thread[]>();
     for (const t of threads) {
       const key = t.projectRoot;
@@ -296,18 +301,7 @@ export const threadStore = {
 
     const result: ThreadGroup[] = [];
 
-    // Current project first
-    if (currentRoot && groups.has(currentRoot)) {
-      result.push({
-        projectRoot: currentRoot,
-        folderName: currentRoot.split("/").pop() || currentRoot,
-        threads: groups.get(currentRoot) || [],
-      });
-      groups.delete(currentRoot);
-    }
-
-    // Other projects (sorted by most recent thread)
-    const otherRoots = [...groups.entries()]
+    const sorted = [...groups.entries()]
       .filter(([key]) => key !== null)
       .sort(
         ([, a], [, b]) =>
@@ -315,7 +309,7 @@ export const threadStore = {
           Math.max(...a.map((t) => t.timestamp)),
       );
 
-    for (const [root, rootThreads] of otherRoots) {
+    for (const [root, rootThreads] of sorted) {
       result.push({
         projectRoot: root,
         folderName: (root as string).split("/").pop() || (root as string),
@@ -323,7 +317,8 @@ export const threadStore = {
       });
     }
 
-    // Ungrouped threads (no project)
+    // Ungrouped threads (no project) always pinned to the bottom so the
+    // groupless bucket doesn't compete with real projects for prime space.
     const ungrouped = groups.get(null);
     if (ungrouped && ungrouped.length > 0) {
       result.push({

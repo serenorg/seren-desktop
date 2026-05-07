@@ -609,11 +609,12 @@ export const workspaceStore = {
     const ws = state.workspaces[wsIdx];
     const focusedIdx = ws.windows.findIndex((w) => w.id === ws.focusedWindowId);
     if (focusedIdx < 0) return;
+    const closedWindow = ws.windows[focusedIdx];
     const nextWindows = [
       ...ws.windows.slice(0, focusedIdx),
       ...ws.windows.slice(focusedIdx + 1),
     ];
-    const closedWindowId = ws.windows[focusedIdx].id;
+    const closedWindowId = closedWindow.id;
     setState("workspaces", wsIdx, "windows", nextWindows);
     setState(
       "workspaces",
@@ -624,6 +625,16 @@ export const workspaceStore = {
     const nextFocusIdx = Math.min(focusedIdx, nextWindows.length - 1);
     const nextFocusId = nextFocusIdx >= 0 ? nextWindows[nextFocusIdx].id : null;
     setState("workspaces", wsIdx, "focusedWindowId", nextFocusId);
+
+    // Closing an editor pane is a hide operation: the session and its tabs
+    // stay open in the background. Don't shift the active thread - that
+    // would yank the user back to whatever sibling pane happened to be
+    // next, change fileTreeRoot via selectThread, and demote the project
+    // group from the top of the sidebar even though the user only just
+    // finished editing there. The user can click another pane explicitly
+    // to switch threads.
+    if (closedWindow.kind === "editor") return;
+
     if (nextFocusId !== null) {
       const nextThreadId = nextWindows[nextFocusIdx].threadId;
       if (nextThreadId !== threadStore.activeThreadId) {

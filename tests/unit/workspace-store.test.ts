@@ -744,6 +744,25 @@ describe("workspaceStore", () => {
     expect(ws.windows[0].size).toBeCloseTo(0.4);
   });
 
+  it("closing an editor pane does not auto-shift the active thread", async () => {
+    const { threadModule, threadStore, workspaceStore } = await setup();
+
+    // User is editing a skill: editor session is the active thread.
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.bindEditorToWorkspace("/skill/SKILL.md");
+    threadModule.__addMockThread("editor:/skill", "editor");
+    threadStore.setActiveThread("editor:/skill");
+    expect(threadStore.activeThreadId).toBe("editor:/skill");
+
+    // Workspace looks like [chat thread-1, editor (focused)].
+    // Closing the editor pane must NOT yank focus back to thread-1; the
+    // user just finished editing the skill and shouldn't lose its
+    // currentRoot bubble-to-top in the sidebar.
+    workspaceStore.closeFocusedWindow();
+
+    expect(threadStore.activeThreadId).toBe("editor:/skill");
+  });
+
   it("does not replace a focused editor pane when a thread is selected", async () => {
     const { threadStore, workspaceStore } = await setup();
 

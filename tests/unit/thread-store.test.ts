@@ -298,11 +298,11 @@ describe("threadStore", () => {
 
       const groups = threadStore.groupedThreads;
       expect(groups).toHaveLength(3);
-      // Current project first
-      expect(groups[0].projectRoot).toBe("/Users/dev/project-a");
-      // Other projects next
-      expect(groups[1].projectRoot).toBe("/Users/dev/project-b");
-      // Ungrouped last
+      // Sorted by max thread timestamp (project-b=2000, project-a=1000),
+      // not by currentRoot. Clicking a thread no longer reorders the list.
+      expect(groups[0].projectRoot).toBe("/Users/dev/project-b");
+      expect(groups[1].projectRoot).toBe("/Users/dev/project-a");
+      // Ungrouped pinned to bottom regardless of timestamp.
       expect(groups[2].projectRoot).toBeNull();
       expect(groups[2].folderName).toBe("No project");
     });
