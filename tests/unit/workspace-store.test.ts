@@ -679,4 +679,100 @@ describe("workspaceStore", () => {
 
     expect(workspaceStore.activeWorkspace.focusedWindowId).toBe(placeholder.id);
   });
+
+  it("opens the editor as a workspace pane without replacing the thread pane", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.bindEditorToWorkspace("/tmp/skill/SKILL.md");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows).toHaveLength(2);
+    expect(ws.windows[0]).toMatchObject({
+      threadId: "thread-1",
+      kind: "chat",
+    });
+    expect(ws.windows[1]).toMatchObject({
+      threadId: null,
+      kind: "editor",
+      editorFilePath: "/tmp/skill/SKILL.md",
+    });
+    expect(ws.focusedWindowId).toBe(ws.windows[1].id);
+    expect(threadStore.activeThreadId).toBeNull();
+  });
+
+  it("reuses the existing editor pane in a workspace", async () => {
+    const { workspaceStore } = await setup();
+
+    workspaceStore.bindEditorToWorkspace("/tmp/skill-a/SKILL.md");
+    const editorId = workspaceStore.activeWorkspace.windows[0].id;
+
+    workspaceStore.bindEditorToWorkspace("/tmp/skill-b/SKILL.md");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows).toHaveLength(1);
+    expect(ws.windows[0]).toMatchObject({
+      id: editorId,
+      kind: "editor",
+      editorFilePath: "/tmp/skill-b/SKILL.md",
+    });
+    expect(ws.focusedWindowId).toBe(editorId);
+  });
+
+  it("fills the focused placeholder with an editor and preserves pane size", async () => {
+    const { workspaceStore } = await setup();
+
+    workspaceStore.splitFocusedPane("row");
+    const placeholder = workspaceStore.activeWorkspace.windows[0];
+    workspaceStore.resizePanes([{ id: placeholder.id, size: 0.4 }]);
+
+    workspaceStore.bindEditorToWorkspace("/tmp/skill/SKILL.md");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows).toHaveLength(1);
+    expect(ws.windows[0]).toMatchObject({
+      id: placeholder.id,
+      threadId: null,
+      kind: "editor",
+      editorFilePath: "/tmp/skill/SKILL.md",
+    });
+    expect(ws.windows[0].size).toBeCloseTo(0.4);
+  });
+
+  it("does not replace a focused editor pane when a thread is selected", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    workspaceStore.bindEditorToWorkspace("/tmp/skill/SKILL.md");
+    expect(workspaceStore.activeWorkspace.windows).toHaveLength(1);
+    expect(workspaceStore.activeWorkspace.windows[0].kind).toBe("editor");
+
+    threadStore.setActiveThread("thread-1");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows).toHaveLength(2);
+    const editor = ws.windows.find((w) => w.kind === "editor");
+    const thread = ws.windows.find((w) => w.threadId === "thread-1");
+    expect(editor).toBeDefined();
+    expect(editor?.editorFilePath).toBe("/tmp/skill/SKILL.md");
+    expect(thread).toBeDefined();
+    expect(thread?.kind).toBe("chat");
+    expect(ws.focusedWindowId).toBe(thread?.id);
+  });
+
+  it("clears the active thread when switching back to an editor-focused workspace", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.bindEditorToWorkspace("/tmp/skill/SKILL.md");
+    workspaceStore.switchOrCreate(2);
+    threadStore.setActiveThread("thread-2");
+
+    workspaceStore.switchTo(1);
+
+    expect(workspaceStore.activeWindow).toMatchObject({
+      kind: "editor",
+      threadId: null,
+    });
+    expect(threadStore.activeThreadId).toBeNull();
+  });
 });

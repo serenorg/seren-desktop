@@ -70,6 +70,7 @@ import { type AgentMessage, agentStore } from "@/stores/agent.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
 import { threadStore } from "@/stores/thread.store";
+import { workspaceStore } from "@/stores/workspace.store";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { AgentEffortSelector } from "./AgentEffortSelector";
 import { AgentModelSelector } from "./AgentModelSelector";
@@ -1462,11 +1463,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                       : url;
                 openFileInTab(resolved)
                   .then(() => {
-                    window.dispatchEvent(
-                      new CustomEvent("seren:open-panel", {
-                        detail: "editor",
-                      }),
-                    );
+                    workspaceStore.bindEditorToWorkspace(resolved);
                   })
                   .catch((err) =>
                     console.warn(

@@ -671,6 +671,16 @@ export const skills = {
   },
 
   /**
+   * Get the local authoring directory for user-created skills.
+   */
+  async getSerenSkillAuthoringDir(): Promise<string> {
+    if (!isTauriRuntime()) {
+      return "~/Documents/Seren/skills";
+    }
+    return invoke<string>("get_seren_skill_authoring_dir");
+  },
+
+  /**
    * Get the Claude Code skills directory (~/.claude/skills/).
    */
   async getClaudeSkillsDir(): Promise<string> {
@@ -693,7 +703,7 @@ export const skills = {
   },
 
   /**
-   * Create a new Seren-scope skill folder and return the SKILL.md path.
+   * Create a new local authoring skill folder and return the SKILL.md path.
    */
   async createSkillFolder(options: {
     name: string;
@@ -704,7 +714,7 @@ export const skills = {
     }
     const trimmedName = options.name.trim();
     const slug = normalizeSkillSlug(trimmedName);
-    const skillsDir = await this.getSerenSkillsDir();
+    const skillsDir = await this.getSerenSkillAuthoringDir();
     return invoke<string>("create_skill_folder", {
       skillsDir,
       slug,
@@ -890,17 +900,50 @@ export const skills = {
   async listAllInstalled(
     projectRoot: string | null,
   ): Promise<InstalledSkill[]> {
+    const authoringDir = await this.getSerenSkillAuthoringDir();
     const serenDir = await this.getSerenSkillsDir();
     const claudeDir = await this.getClaudeSkillsDir();
     const projectDir = await this.getProjectSkillsDir(projectRoot);
 
+    const authoredSkills = await this.listInstalled(authoringDir, "seren");
     const serenSkills = await this.listInstalled(serenDir, "seren");
     const claudeSkills = await this.listInstalled(claudeDir, "claude");
     const projectSkills = projectDir
       ? await this.listInstalled(projectDir, "project")
       : [];
 
-    return [...serenSkills, ...claudeSkills, ...projectSkills];
+    const authoredBySlug = new Map(
+      authoredSkills.map((skill) => [skill.slug, skill]),
+    );
+    const runtimeSerenSlugs = new Set(serenSkills.map((skill) => skill.slug));
+    const runtimeSerenSkills = serenSkills.map((skill) => {
+      const authored = authoredBySlug.get(skill.slug);
+      return authored ? { ...skill, authoringPath: authored.path } : skill;
+    });
+    const visibleAuthoredSkills = authoredSkills.filter(
+      (skill) => !runtimeSerenSlugs.has(skill.slug),
+    );
+
+    // Final pass: dedupe by absolute SKILL.md path so overlapping scan
+    // directories never surface the same file twice. The most common case is
+    // the user opening ~/Documents/Seren as their project root, which makes
+    // projectDir === authoringDir and would otherwise show every authored
+    // skill once with scope "seren" and again with scope "project".
+    // First-write-wins keeps the authoring/runtime/claude/project ordering
+    // semantically correct.
+    const ordered = [
+      ...visibleAuthoredSkills,
+      ...runtimeSerenSkills,
+      ...claudeSkills,
+      ...projectSkills,
+    ];
+    const byPath = new Map<string, InstalledSkill>();
+    for (const skill of ordered) {
+      if (!byPath.has(skill.path)) {
+        byPath.set(skill.path, skill);
+      }
+    }
+    return Array.from(byPath.values());
   },
 
   /**
@@ -1413,6 +1456,14 @@ export const skills = {
       throw new Error(`Failed to publish skill ${skill.slug}${status}`);
     }
     return data;
+  },
+
+  /**
+   * Install a just-published skill into the Seren runtime skills directory.
+   */
+  async installPublishedSkill(summary: SkillSummary): Promise<InstalledSkill> {
+    const publishedSkill = skillSummaryToSkill(summary);
+    return this.install(publishedSkill, "", "seren", null);
   },
 
   /**

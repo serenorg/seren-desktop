@@ -1,3 +1,6 @@
+// ABOUTME: Monaco editor wrapper used by Seren's file editing surfaces.
+// ABOUTME: Tracks local dirty state against an explicit saved-content baseline.
+
 import type * as monaco from "monaco-editor";
 import {
   type Component,
@@ -32,8 +35,18 @@ export interface MonacoEditorProps {
   theme?: "seren-dark" | "seren-light";
   /** Read-only mode */
   readOnly?: boolean;
+  /** Whether this editor is the active workspace pane. */
+  active?: boolean;
   /** Additional editor options */
   options?: monaco.editor.IStandaloneEditorConstructionOptions;
+  /** Last content snapshot that was successfully saved for this file. */
+  savedSnapshot?: SavedFileSnapshot | null;
+}
+
+export interface SavedFileSnapshot {
+  revision: number;
+  filePath: string;
+  content: string;
 }
 
 export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
@@ -149,6 +162,15 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
     m.editor.setModelLanguage(model, language);
   });
 
+  createEffect(() => {
+    const snapshot = props.savedSnapshot;
+    if (!snapshot || !model || !isMonacoReady()) return;
+    if (props.filePath !== snapshot.filePath) return;
+    if (model.getValue() !== snapshot.content) return;
+    setOriginalValue(snapshot.content);
+    setIsDirty(false);
+  });
+
   // Update theme when changed
   createEffect(() => {
     if (editor && props.theme) {
@@ -161,6 +183,15 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
     if (editor) {
       editor.updateOptions({ readOnly: props.readOnly || false });
     }
+  });
+
+  createEffect(() => {
+    if (!props.active || props.readOnly || !editor || !isMonacoReady()) return;
+    requestAnimationFrame(() => {
+      if (props.active && editor) {
+        editor.focus();
+      }
+    });
   });
 
   /**
@@ -204,7 +235,15 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
   void _getModel;
   void _focus;
 
-  return <div ref={containerRef} class="w-full h-full min-h-[200px]" />;
+  return (
+    <div
+      ref={containerRef}
+      tabIndex={-1}
+      data-workspace-default-focus="true"
+      onFocus={() => editor?.focus()}
+      class="w-full h-full min-h-[200px]"
+    />
+  );
 };
 
 export default MonacoEditor;

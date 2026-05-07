@@ -29,7 +29,7 @@ import { FileTabs } from "./FileTabs";
 import { ImageViewer } from "./ImageViewer";
 import { InlineEditWidget } from "./InlineEditWidget";
 import { MarkdownPreview } from "./MarkdownPreview";
-import { MonacoEditor } from "./MonacoEditor";
+import { MonacoEditor, type SavedFileSnapshot } from "./MonacoEditor";
 import { PdfViewer } from "./PdfViewer";
 
 // State for inline edit widget
@@ -42,6 +42,7 @@ interface InlineEditState {
 }
 
 interface EditorContentProps {
+  active?: boolean;
   onClose?: () => void;
 }
 
@@ -51,6 +52,29 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
   const [showPreview, setShowPreview] = createSignal(false);
   const [inlineEditState, setInlineEditState] =
     createSignal<InlineEditState | null>(null);
+  const [savingTabId, setSavingTabId] = createSignal<string | null>(null);
+  const [saveError, setSaveError] = createSignal<string | null>(null);
+  const [savedSnapshot, setSavedSnapshot] =
+    createSignal<SavedFileSnapshot | null>(null);
+
+  const activeTab = createMemo(() =>
+    tabsState.tabs.find((tab) => tab.id === tabsState.activeTabId),
+  );
+
+  const saveStatus = createMemo(() => {
+    if (saveError()) return "Save failed";
+    const tab = activeTab();
+    if (!tab) return null;
+    if (savingTabId() === tab.id) return "Saving...";
+    return tab.isDirty ? "Unsaved changes" : "Saved";
+  });
+
+  const saveStatusClass = createMemo(() => {
+    if (saveError()) return "text-destructive";
+    const tab = activeTab();
+    if (tab?.isDirty) return "text-warning";
+    return "text-muted-foreground";
+  });
 
   // Register all context menu handlers
   onMount(() => {
@@ -143,9 +167,15 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
     }
   });
 
+  createEffect(() => {
+    tabsState.activeTabId;
+    setSaveError(null);
+  });
+
   function handleEditorChange(value: string) {
     const activeTab = getActiveTab();
     if (!activeTab) return;
+    setSaveError(null);
     updateTabContent(activeTab.id, value);
     setEditorContent(value);
   }
@@ -158,12 +188,27 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
   }
 
   async function handleSave() {
-    const activeTab = getActiveTab();
-    if (!activeTab) return;
+    const tab = getActiveTab();
+    if (!tab || savingTabId() !== null) return;
+    const tabId = tab.id;
+    const filePath = tab.filePath;
+    const content = tab.content;
+    setSavingTabId(tabId);
+    setSaveError(null);
     try {
-      await saveTab(activeTab.id, activeTab.filePath, activeTab.content);
+      const savedCurrentContent = await saveTab(tabId, filePath, content);
+      if (savedCurrentContent) {
+        setSavedSnapshot((snapshot) => ({
+          revision: (snapshot?.revision ?? 0) + 1,
+          filePath,
+          content,
+        }));
+      }
     } catch (error) {
       console.error("Failed to save file:", error);
+      setSaveError(error instanceof Error ? error.message : "Unable to save");
+    } finally {
+      setSavingTabId((current) => (current === tabId ? null : current));
     }
   }
 
@@ -212,14 +257,32 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
       <Show when={props.onClose}>
         <div class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-border-medium bg-surface-0">
           <span class="text-xs font-medium text-muted-foreground">Editor</span>
-          <button
-            type="button"
-            class="bg-transparent border-none text-muted-foreground cursor-pointer px-1.5 py-0.5 text-sm leading-none hover:text-foreground"
-            onClick={props.onClose}
-            title="Close Editor"
-          >
-            ×
-          </button>
+          <div class="flex items-center gap-2">
+            <Show when={saveStatus()}>
+              {(status) => (
+                <span class={`text-[11px] ${saveStatusClass()}`}>
+                  {status()}
+                </span>
+              )}
+            </Show>
+            <button
+              type="button"
+              class="rounded-sm border border-border bg-surface-1 px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={handleSave}
+              disabled={!activeTab()?.isDirty || savingTabId() !== null}
+              title="Save file (Cmd/Ctrl+S)"
+            >
+              {savingTabId() === activeTab()?.id ? "Saving..." : "Save"}
+            </button>
+            <button
+              type="button"
+              class="bg-transparent border-none text-muted-foreground cursor-pointer px-1.5 py-0.5 text-sm leading-none hover:text-foreground"
+              onClick={props.onClose}
+              title="Close Editor"
+            >
+              ×
+            </button>
+          </div>
         </div>
       </Show>
       <div class="shrink-0 border-b border-border-medium">
@@ -264,8 +327,10 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
                         <MonacoEditor
                           filePath={filePath()}
                           value={editorContent()}
+                          active={props.active}
                           onChange={handleEditorChange}
                           onDirtyChange={handleEditorDirtyChange}
+                          savedSnapshot={savedSnapshot()}
                         />
                       </div>
                       <Show when={showPreview() && isMarkdownFile()}>

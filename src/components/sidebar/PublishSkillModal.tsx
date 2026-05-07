@@ -38,10 +38,11 @@ export const PublishSkillModal: Component<PublishSkillModalProps> = (props) => {
     setPublishing(true);
     setError(null);
     try {
-      await skillsService.publishLocalSkill(props.skill, {
+      const published = await skillsService.publishLocalSkill(props.skill, {
         visibility: visibility(),
         version: trimmedVersion,
       });
+      await skillsService.installPublishedSkill(published);
       props.onPublished();
       props.onClose();
     } catch (err) {
@@ -114,8 +115,8 @@ export const PublishSkillModal: Component<PublishSkillModalProps> = (props) => {
 
           <p class="m-0 text-[12px] text-muted-foreground">
             This pushes your local SKILL.md and payload files to Seren Skills as
-            a new publisher record. Once published, you can manage visibility or
-            delete it from the panel.
+            a new publisher record, then installs the published copy so it is
+            available in chats.
           </p>
 
           <section class="flex flex-col gap-2">
@@ -188,7 +189,7 @@ export const PublishSkillModal: Component<PublishSkillModalProps> = (props) => {
             onClick={handlePublish}
             disabled={publishing() || versionInvalid()}
           >
-            {publishing() ? "Publishing..." : "Publish"}
+            {publishing() ? "Publishing..." : "Publish and install"}
           </button>
         </div>
       </div>

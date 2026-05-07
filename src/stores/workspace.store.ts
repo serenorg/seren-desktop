@@ -10,6 +10,7 @@ import {
 } from "@/stores/thread.store";
 
 export type SplitDirection = "row" | "column";
+export type WorkspaceWindowKind = ThreadKind | "editor";
 
 export interface WorkspacePaneLayout {
   type: "pane";
@@ -33,8 +34,10 @@ export interface WorkspaceWindow {
   id: string;
   /** Thread displayed by this window. Null = empty placeholder pane. */
   threadId: string | null;
-  /** Mirrors thread kind once bound. Null when placeholder. */
-  kind: ThreadKind | null;
+  /** Window content type. Null when placeholder. */
+  kind: WorkspaceWindowKind | null;
+  /** File displayed by editor windows. */
+  editorFilePath?: string | null;
   /** Flex-grow weight when laid out in the workspace. Defaults to 1. */
   size: number;
 }
@@ -277,20 +280,60 @@ function bindThreadToWorkspace(
   }
 
   const focused = focusedWindow(workspace) ?? workspace.windows[0];
+
+  // Editor panes are persistent. Don't replace one with the picked thread -
+  // open the thread in a new pane next to the editor instead, mirroring
+  // bindEditorToWorkspace's behavior when a thread pane is focused.
+  if (focused?.kind === "editor") {
+    const focusedIdx = workspace.windows.findIndex(
+      (w) => w.id === workspace.focusedWindowId,
+    );
+    const insertAt =
+      focusedIdx >= 0 ? focusedIdx + 1 : workspace.windows.length;
+    const newId = newPaneId(number);
+    setState("workspaces", idx, "windows", (windows) => [
+      ...windows.slice(0, insertAt),
+      { id: newId, threadId, kind: thread.kind, size: 1 },
+      ...windows.slice(insertAt),
+    ]);
+    const anchorId =
+      focusedIdx >= 0
+        ? workspace.windows[focusedIdx].id
+        : workspace.windows[workspace.windows.length - 1].id;
+    const baseLayout = workspace.layout ?? paneLayout(anchorId);
+    setState(
+      "workspaces",
+      idx,
+      "layout",
+      insertPaneInLayout(baseLayout, anchorId, newId, "row"),
+    );
+    setState("workspaces", idx, "focusedWindowId", newId);
+    if (!state.workspaces[idx].hasHadContent) {
+      setState("workspaces", idx, "hasHadContent", true);
+    }
+    return;
+  }
+
   const windowId = focused?.id ?? primaryWindowId(number);
 
   if (!focused) {
     setState("workspaces", idx, "windows", [
-      { id: windowId, threadId, kind: thread.kind, size: 1 },
+      {
+        id: windowId,
+        threadId,
+        kind: thread.kind,
+        size: 1,
+      },
     ]);
     setState("workspaces", idx, "layout", paneLayout(windowId));
   } else {
     const windowIdx = workspace.windows.findIndex((w) => w.id === windowId);
     if (windowIdx >= 0) {
       setState("workspaces", idx, "windows", windowIdx, {
-        ...focused,
+        id: focused.id,
         threadId,
         kind: thread.kind,
+        size: focused.size,
       });
     }
   }
@@ -502,6 +545,7 @@ export const workspaceStore = {
       id: newId,
       threadId: null,
       kind: null,
+      editorFilePath: null,
       size: 1,
     };
     if (ws.windows.length === 0) {
@@ -653,9 +697,10 @@ export const workspaceStore = {
       targetWindow.kind === thread.kind;
     if (targetIdx >= 0 && !targetUnchanged) {
       setState("workspaces", wsIdx, "windows", targetIdx, {
-        ...targetWindow,
+        id: targetWindow.id,
         threadId,
         kind: thread.kind,
+        size: targetWindow.size,
       });
     }
     if (ws.focusedWindowId !== targetWindow.id) {
@@ -665,6 +710,91 @@ export const workspaceStore = {
       setState("workspaces", wsIdx, "hasHadContent", true);
     }
     threadStore.selectThread(threadId, thread.kind);
+  },
+
+  /**
+   * Open the editor as a workspace pane. The editor owns tabs globally, so
+   * each workspace gets at most one editor window.
+   */
+  bindEditorToWorkspace(filePath: string | null = null): void {
+    const wsIdx = state.workspaces.findIndex(
+      (w) => w.number === state.activeNumber,
+    );
+    if (wsIdx < 0) return;
+    const ws = state.workspaces[wsIdx];
+    const existing = ws.windows.find((w) => w.kind === "editor");
+    if (existing) {
+      const existingIdx = ws.windows.findIndex((w) => w.id === existing.id);
+      if (filePath !== null && existing.editorFilePath !== filePath) {
+        setState(
+          "workspaces",
+          wsIdx,
+          "windows",
+          existingIdx,
+          "editorFilePath",
+          filePath,
+        );
+      }
+      if (ws.focusedWindowId !== existing.id) {
+        setState("workspaces", wsIdx, "focusedWindowId", existing.id);
+      }
+      if (threadStore.activeThreadId !== null) {
+        threadStore.setActiveThread(null);
+      }
+      return;
+    }
+
+    const focused = focusedWindow(ws);
+    const fillFocusedPlaceholder = focused?.kind === null;
+    const windowId = fillFocusedPlaceholder
+      ? focused.id
+      : ws.windows.length === 0
+        ? primaryWindowId(ws.number)
+        : newPaneId(ws.number);
+    const editorWindow: WorkspaceWindow = {
+      id: windowId,
+      threadId: null,
+      kind: "editor",
+      editorFilePath: filePath,
+      size: focused?.size ?? 1,
+    };
+
+    if (ws.windows.length === 0) {
+      setState("workspaces", wsIdx, "windows", [editorWindow]);
+      setState("workspaces", wsIdx, "layout", paneLayout(windowId));
+    } else if (fillFocusedPlaceholder) {
+      const windowIdx = ws.windows.findIndex((w) => w.id === focused.id);
+      setState("workspaces", wsIdx, "windows", windowIdx, editorWindow);
+    } else {
+      const focusedIdx = ws.windows.findIndex(
+        (w) => w.id === ws.focusedWindowId,
+      );
+      const insertAt = focusedIdx >= 0 ? focusedIdx + 1 : ws.windows.length;
+      setState("workspaces", wsIdx, "windows", (windows) => [
+        ...windows.slice(0, insertAt),
+        editorWindow,
+        ...windows.slice(insertAt),
+      ]);
+      const focusedWindowId =
+        focusedIdx >= 0
+          ? ws.windows[focusedIdx].id
+          : ws.windows[ws.windows.length - 1].id;
+      const baseLayout = ws.layout ?? paneLayout(focusedWindowId);
+      setState(
+        "workspaces",
+        wsIdx,
+        "layout",
+        insertPaneInLayout(baseLayout, focusedWindowId, windowId, "row"),
+      );
+    }
+
+    setState("workspaces", wsIdx, "focusedWindowId", windowId);
+    if (!state.workspaces[wsIdx].hasHadContent) {
+      setState("workspaces", wsIdx, "hasHadContent", true);
+    }
+    if (threadStore.activeThreadId !== null) {
+      threadStore.setActiveThread(null);
+    }
   },
 
   /**

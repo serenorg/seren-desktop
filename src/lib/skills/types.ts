@@ -178,6 +178,8 @@ export interface InstalledSkill extends Skill {
   dirName: string;
   /** Full path to the SKILL.md file */
   path: string;
+  /** Local authoring SKILL.md path when this row represents a published install */
+  authoringPath?: string;
   /** Timestamp when the skill was installed */
   installedAt: number;
   /** Whether the skill is currently enabled */

@@ -67,6 +67,7 @@ import { editorStore } from "@/stores/editor.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
+import { workspaceStore } from "@/stores/workspace.store";
 import type { ToolCallData, UnifiedMessage } from "@/types/conversation";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { CompactedMessage } from "./CompactedMessage";
@@ -324,9 +325,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 : url;
           openFileInTab(resolved)
             .then(() => {
-              window.dispatchEvent(
-                new CustomEvent("seren:open-panel", { detail: "editor" }),
-              );
+              workspaceStore.bindEditorToWorkspace(resolved);
             })
             .catch((err) =>
               console.warn("[ChatContent] Failed to open file:", resolved, err),

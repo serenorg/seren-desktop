@@ -66,6 +66,16 @@ fn seren_config_dir() -> Result<PathBuf, String> {
     Ok(home.join(".config").join("seren"))
 }
 
+fn default_project_dir() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+    let docs = home.join("Documents");
+    if docs.is_dir() {
+        Ok(docs.join("Seren"))
+    } else {
+        Ok(home.join("Seren"))
+    }
+}
+
 /// Get the Seren-scope skills directory using XDG config home:
 /// - `$XDG_CONFIG_HOME/seren/skills` when `XDG_CONFIG_HOME` is set to an absolute path
 /// - `~/.config/seren/skills` otherwise
@@ -87,13 +97,7 @@ pub fn get_seren_skills_dir() -> Result<String, String> {
 /// Creates the directory if it doesn't exist.
 #[tauri::command]
 pub fn get_default_project_dir() -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("Could not determine home directory")?;
-    let docs = home.join("Documents");
-    let project_dir = if docs.is_dir() {
-        docs.join("Seren")
-    } else {
-        home.join("Seren")
-    };
+    let project_dir = default_project_dir()?;
 
     if !project_dir.exists() {
         fs::create_dir_all(&project_dir)
@@ -101,6 +105,20 @@ pub fn get_default_project_dir() -> Result<String, String> {
     }
 
     Ok(project_dir.to_string_lossy().to_string())
+}
+
+/// Get the local authoring directory for user-created skills.
+/// Creates the directory if it doesn't exist.
+#[tauri::command]
+pub fn get_seren_skill_authoring_dir() -> Result<String, String> {
+    let skills_dir = default_project_dir()?.join("skills");
+
+    if !skills_dir.exists() {
+        fs::create_dir_all(&skills_dir)
+            .map_err(|e| format!("Failed to create Seren skills authoring directory: {}", e))?;
+    }
+
+    Ok(skills_dir.to_string_lossy().to_string())
 }
 
 /// Get the Claude Code skills directory (~/.claude/skills/).

@@ -1,3 +1,6 @@
+// ABOUTME: File-system service layer for editor tabs and project file trees.
+// ABOUTME: Routes file operations through the Tauri/browser-local bridge.
+
 import {
   isBrowserLocalRuntime,
   runtimeInvoke,
@@ -17,7 +20,7 @@ import {
   writeFile as writeFileBridge,
 } from "@/lib/tauri-bridge";
 import { type FileNode, setNodes, setRootPath } from "@/stores/fileTree";
-import { openTab, setTabDirty } from "@/stores/tabs";
+import { openTab, setTabDirty, tabsState } from "@/stores/tabs";
 
 export interface FileEntry {
   name: string;
@@ -256,9 +259,14 @@ export async function saveTab(
   tabId: string,
   path: string,
   content: string,
-): Promise<void> {
+): Promise<boolean> {
   await writeFile(path, content);
-  setTabDirty(tabId, false);
+  const currentTab = tabsState.tabs.find((tab) => tab.id === tabId);
+  const savedCurrentContent = currentTab?.content === content;
+  if (savedCurrentContent) {
+    setTabDirty(tabId, false);
+  }
+  return savedCurrentContent;
 }
 
 /**

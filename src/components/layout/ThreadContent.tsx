@@ -4,6 +4,7 @@
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import { AgentChat } from "@/components/chat/AgentChat";
 import { ChatContent } from "@/components/chat/ChatContent";
+import { EditorContent } from "@/components/editor/EditorContent";
 import { TerminalBuffer } from "@/components/terminal/TerminalBuffer";
 import { openFolder } from "@/lib/files/service";
 import {
@@ -94,7 +95,12 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
     const liveKeys = new Set<string>();
     for (const workspace of workspaceStore.workspaces) {
       for (const window of workspace.windows) {
-        const key = window.threadId ?? window.id;
+        const key =
+          window.kind === "editor"
+            ? "editor:singleton"
+            : window.threadId !== null
+              ? `thread:${window.threadId}`
+              : `pane:${workspace.number}:${window.id}`;
         if (window.threadId !== null) {
           if (seenThread.has(window.threadId)) continue;
           seenThread.add(window.threadId);
@@ -254,15 +260,24 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
     return { placements, gutters };
   });
 
+  const windowMatches = (
+    candidate: WorkspaceWindow,
+    source: WorkspaceWindow,
+  ): boolean => {
+    if (source.kind === "editor") {
+      return candidate.kind === "editor";
+    }
+    if (source.threadId !== null) {
+      return candidate.threadId === source.threadId;
+    }
+    return candidate.id === source.id;
+  };
+
   const activeTargetFor = (
     window: WorkspaceWindow,
   ): WorkspaceWindow | undefined => {
     const ws = workspaceStore.activeWorkspace;
-    return ws.windows.find((w) =>
-      window.threadId !== null
-        ? w.threadId === window.threadId
-        : w.id === window.id,
-    );
+    return ws.windows.find((w) => windowMatches(w, window));
   };
 
   const placementFor = (window: WorkspaceWindow): PanePlacement => {
@@ -313,12 +328,9 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
     const ws = workspaceStore.activeWorkspace;
     return (
       ws.focusedWindowId !== null &&
-      (window.threadId !== null
-        ? ws.windows.some(
-            (w) =>
-              w.threadId === window.threadId && w.id === ws.focusedWindowId,
-          )
-        : ws.focusedWindowId === window.id)
+      ws.windows.some(
+        (w) => w.id === ws.focusedWindowId && windowMatches(w, window),
+      )
     );
   };
   const showFocusedOutline = () =>
@@ -326,11 +338,7 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
 
   const handlePaneFocus = (window: WorkspaceWindow) => {
     const ws = workspaceStore.activeWorkspace;
-    const target = ws.windows.find((w) =>
-      window.threadId !== null
-        ? w.threadId === window.threadId
-        : w.id === window.id,
-    );
+    const target = ws.windows.find((w) => windowMatches(w, window));
     if (target) workspaceStore.focusWindow(target.id);
   };
 
@@ -455,6 +463,7 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
                 style={baseStyle()}
                 aria-hidden={hidden()}
                 onMouseDown={() => !hidden() && handlePaneFocus(entry.window)}
+                onFocusIn={() => !hidden() && handlePaneFocus(entry.window)}
                 onDragOver={(e) =>
                   !hidden() && handlePaneDragOver(e, entry.window)
                 }
@@ -509,7 +518,16 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
                 >
                   {(threadId) => <TerminalBuffer threadId={threadId()} />}
                 </Show>
-                <Show when={entry.window.threadId === null}>
+                <Show when={entry.window.kind === "editor" ? true : null}>
+                  <EditorContent
+                    active={!hidden() && focused()}
+                    onClose={() => {
+                      handlePaneFocus(entry.window);
+                      workspaceStore.closeFocusedWindow();
+                    }}
+                  />
+                </Show>
+                <Show when={entry.window.kind === null}>
                   <PlaceholderPane focused={focused()} />
                 </Show>
                 <Show

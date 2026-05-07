@@ -14,7 +14,6 @@ import {
 import { SessionExpiredModal } from "@/components/auth/SessionExpiredModal";
 import { SignIn } from "@/components/auth/SignIn";
 import { StatusBar } from "@/components/common/StatusBar";
-import { EditorContent } from "@/components/editor/EditorContent";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
@@ -30,7 +29,6 @@ import { Titlebar } from "./Titlebar";
 export type SlidePanelView =
   | "settings"
   | "database"
-  | "editor"
   | "account"
   | "tasks"
   | "sessions"
@@ -73,7 +71,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
     if (p === "chat") {
       setSlidePanel(null);
     } else if (p === "editor") {
-      setSlidePanel("editor");
+      setSlidePanel(null);
+      workspaceStore.bindEditorToWorkspace();
     } else if (p === "settings") {
       setSlidePanel("settings");
     } else if (p === "database") {
@@ -258,7 +257,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
     );
     shortcuts.register("toggleSidebar", () => setSidebarCollapsed((v) => !v));
     shortcuts.register("closePanel", handleCloseSlidePanel);
-    shortcuts.register("focusEditor", () => setSlidePanel("editor"));
+    shortcuts.register("focusEditor", () => {
+      setSlidePanel(null);
+      workspaceStore.bindEditorToWorkspace();
+    });
   });
 
   onCleanup(() => {
@@ -312,9 +314,6 @@ export const AppShell: Component<AppShellProps> = (props) => {
             </Match>
             <Match when={slidePanel() === "database"}>
               <DatabasePanel />
-            </Match>
-            <Match when={slidePanel() === "editor"}>
-              <EditorContent onClose={handleCloseSlidePanel} />
             </Match>
             <Match when={slidePanel() === "tasks"}>
               <AgentTasksPanel onClose={handleCloseSlidePanel} />

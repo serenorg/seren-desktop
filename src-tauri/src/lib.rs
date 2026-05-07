@@ -841,6 +841,7 @@ pub fn run() {
             commands::indexing::compute_file_hash,
             // Skills commands
             skills::get_default_project_dir,
+            skills::get_seren_skill_authoring_dir,
             skills::get_seren_skills_dir,
             skills::get_claude_skills_dir,
             skills::get_project_skills_dir,

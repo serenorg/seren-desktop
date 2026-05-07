@@ -134,7 +134,8 @@ export const CreateSkillModal: Component<CreateSkillModalProps> = (props) => {
               }}
             />
             <p class="m-0 text-[11px] text-muted-foreground">
-              Used as both the display title and the directory slug.
+              Used as both the display title and the directory slug under
+              ~/Documents/Seren/skills.
             </p>
           </div>
 

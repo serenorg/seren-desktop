@@ -46,6 +46,7 @@ import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { type RefreshSummary, skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
+import { workspaceStore } from "@/stores/workspace.store";
 
 interface SkillsExplorerProps {
   collapsed?: boolean;
@@ -145,6 +146,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const handlePublishComplete = async () => {
     await skillsStore.refreshAvailable(true);
     await skillsStore.refreshOwnedSkills();
+    await skillsStore.refreshInstalled();
   };
 
   const matchesQuery = (skill: Skill | InstalledSkill, q: string): boolean => {
@@ -767,9 +769,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const handleSkillCreated = async (skillPath: string) => {
     await skillsStore.refreshInstalled();
     setActiveFilter("installed");
-    // Drop the user straight into the editor. Create is the entry point to
-    // authoring, not just a filesystem scaffold.
-    handleEditInEditor(skillPath);
+    await handleEditInEditor(skillPath);
   };
 
   // ── Install from URL ────────────────────────────
@@ -827,12 +827,13 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   // ── Edit in editor ──────────────────────────────
 
-  const handleEditInEditor = (path: string) => {
-    openFileInTab(path);
-    window.dispatchEvent(
-      new CustomEvent("seren:open-panel", { detail: "editor" }),
-    );
+  const handleEditInEditor = async (path: string) => {
+    await openFileInTab(path);
+    workspaceStore.bindEditorToWorkspace(path);
   };
+
+  const editablePathFor = (skill: InstalledSkill): string =>
+    skill.authoringPath ?? skill.path;
 
   // ── Scope badge label ───────────────────────────
 
@@ -1509,7 +1510,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                           <button
                             type="button"
                             class="px-3 py-1 bg-transparent border border-border text-muted-foreground rounded-md text-[12px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
-                            onClick={() => handleEditInEditor(skill.path)}
+                            onClick={() =>
+                              handleEditInEditor(editablePathFor(skill))
+                            }
                           >
                             Edit in Editor
                           </button>

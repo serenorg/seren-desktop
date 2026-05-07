@@ -8,6 +8,7 @@ import {
   openFolder,
 } from "@/lib/files/service";
 import { fileTreeState, setNodes } from "@/stores/fileTree";
+import { workspaceStore } from "@/stores/workspace.store";
 import { FileTree } from "./FileTree";
 
 /**
@@ -49,10 +50,7 @@ export const FileExplorer: Component = () => {
   const handleFileSelect = async (path: string) => {
     try {
       await openFileInTab(path);
-      // Switch to editor panel to show the opened file
-      window.dispatchEvent(
-        new CustomEvent("seren:open-panel", { detail: "editor" }),
-      );
+      workspaceStore.bindEditorToWorkspace(path);
     } catch (error) {
       console.error("Failed to open file:", error);
     }
