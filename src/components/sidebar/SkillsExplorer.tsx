@@ -945,22 +945,15 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
               height="14"
               viewBox="0 0 16 16"
               fill="none"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
               role="img"
               aria-label="Refresh"
             >
-              <path
-                d="M2 8a6 6 0 1011.5 2.5"
-                stroke="currentColor"
-                stroke-width="1.3"
-                stroke-linecap="round"
-              />
-              <path
-                d="M2 3v5h5"
-                stroke="currentColor"
-                stroke-width="1.3"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
+              <path d="M14 8a6 6 0 1 1-2-4.47L14 5.33" />
+              <polyline points="14 2 14 6 10 6" />
             </svg>
           </button>
         </div>

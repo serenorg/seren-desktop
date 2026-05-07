@@ -101,12 +101,31 @@ export const FileTabs: Component<FileTabsProps> = (props) => {
       <Show when={props.isMarkdown}>
         <button
           type="button"
-          class={`flex items-center justify-center w-9 h-9 bg-transparent border-none border-l border-border text-muted-foreground text-base cursor-pointer transition-all hover:bg-muted hover:text-foreground ${props.showPreview ? "bg-primary text-white" : ""}`}
+          class="flex items-center justify-center w-9 h-9 bg-transparent border-none border-l border-border cursor-pointer transition-colors hover:bg-muted"
+          classList={{
+            "text-primary": !!props.showPreview,
+            "text-muted-foreground hover:text-foreground": !props.showPreview,
+          }}
           onClick={props.onTogglePreview}
-          title={props.showPreview ? "Hide Preview" : "Show Preview"}
+          title={props.showPreview ? "Hide preview" : "Show preview"}
           aria-pressed={props.showPreview ? "true" : "false"}
+          aria-label="Toggle markdown preview"
         >
-          👁
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.3"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            role="img"
+            aria-label="Split preview"
+          >
+            <rect x="2" y="3" width="12" height="10" rx="1.5" />
+            <path d="M8 3v10" />
+          </svg>
         </button>
       </Show>
     </div>

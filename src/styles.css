@@ -229,6 +229,21 @@ footer.status-bar {
   background: var(--scrollbar-thumb-hover);
 }
 
+/* Monaco draws its scrollbars as plain DOM elements. Some Monaco builds
+ * leak through a default red slider color when scrollbarSlider.* tokens
+ * don't take. Pin the slider to our slate value so a horizontal overflow
+ * never paints a thick red bar at the bottom of the editor pane. */
+.monaco-scrollable-element > .scrollbar > .slider {
+  background: var(--scrollbar-thumb) !important;
+  border-radius: 3px;
+}
+.monaco-scrollable-element > .scrollbar > .slider:hover {
+  background: var(--scrollbar-thumb-hover) !important;
+}
+.monaco-scrollable-element > .scrollbar > .slider.active {
+  background: rgba(148, 163, 184, 0.35) !important;
+}
+
 /* Loading spinner animation */
 @keyframes spin {
   to {
