@@ -20,6 +20,7 @@ import {
   getSkillPath,
   humanizeSkillName,
   type InstalledSkill,
+  normalizeSkillSlug,
   parseSkillMd,
   type RemoteSkillRevision,
   resolveSkillDisplayName,
@@ -689,6 +690,27 @@ export const skills = {
       return null;
     }
     return invoke<string | null>("get_project_skills_dir", { projectRoot });
+  },
+
+  /**
+   * Create a new Seren-scope skill folder and return the SKILL.md path.
+   */
+  async createSkillFolder(options: {
+    name: string;
+    description?: string | null;
+  }): Promise<string> {
+    if (!isTauriRuntime()) {
+      throw new Error("Skills can only be created in the desktop app");
+    }
+    const trimmedName = options.name.trim();
+    const slug = normalizeSkillSlug(trimmedName);
+    const skillsDir = await this.getSerenSkillsDir();
+    return invoke<string>("create_skill_folder", {
+      skillsDir,
+      slug,
+      name: trimmedName,
+      description: options.description?.trim() || null,
+    });
   },
 
   /**

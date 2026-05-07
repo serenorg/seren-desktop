@@ -277,6 +277,12 @@ export const skillsStore = {
     setState("error", message);
   },
 
+  resetRemoteCatalog(): void {
+    setState("available", []);
+    setState("selectedId", null);
+    setState("error", null);
+  },
+
   /**
    * Check if a skill is installed.
    * A slug match alone is not sufficient when the installed skill's dirName
@@ -757,6 +763,12 @@ export const skillsStore = {
    * logged at error level so genuine server problems are not masked.
    */
   async refreshOwnedSkills(): Promise<void> {
+    const { authStore } = await import("@/stores/auth.store");
+    if (!authStore.isAuthenticated) {
+      log.debug("[SkillsStore] Owned-skills refresh skipped (signed out)");
+      return;
+    }
+
     try {
       const owned = await skills.fetchOwnedSkills();
       if (owned.length > 0) {

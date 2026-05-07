@@ -1,7 +1,6 @@
 // ABOUTME: Modal dialog for creating a new skill.
-// ABOUTME: Scaffolds a SKILL.md folder via the Tauri create_skill_folder command and returns the new path.
+// ABOUTME: Scaffolds a SKILL.md folder through the skills service and returns the new path.
 
-import { invoke } from "@tauri-apps/api/core";
 import {
   type Component,
   createSignal,
@@ -9,7 +8,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { normalizeSkillSlug } from "@/lib/skills";
+import { skills } from "@/services/skills";
 
 interface CreateSkillModalProps {
   onClose: () => void;
@@ -36,16 +35,12 @@ export const CreateSkillModal: Component<CreateSkillModalProps> = (props) => {
       return;
     }
 
-    const slug = normalizeSkillSlug(trimmedName);
     const trimmedDescription = description().trim();
 
     setIsCreating(true);
     setError(null);
     try {
-      const skillsDir = await invoke<string>("get_seren_skills_dir");
-      const skillPath = await invoke<string>("create_skill_folder", {
-        skillsDir,
-        slug,
+      const skillPath = await skills.createSkillFolder({
         name: trimmedName,
         description: trimmedDescription.length > 0 ? trimmedDescription : null,
       });

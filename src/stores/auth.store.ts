@@ -124,6 +124,15 @@ async function loadPrivateChatPolicy(): Promise<void> {
   }
 }
 
+async function resetSkillsCatalog(): Promise<void> {
+  try {
+    const { skillsStore } = await import("@/stores/skills.store");
+    skillsStore.resetRemoteCatalog();
+  } catch (error) {
+    console.warn("[Auth Store] Failed to reset skills catalog:", error);
+  }
+}
+
 /**
  * Check authentication status on app startup.
  * Provisions the SerenDB API key before flipping `isAuthenticated` so every
@@ -207,6 +216,7 @@ export async function logout(): Promise<void> {
   }
 
   await authLogout();
+  await resetSkillsCatalog();
   setState({
     user: null,
     isAuthenticated: false,
@@ -227,6 +237,7 @@ export async function logout(): Promise<void> {
  * see #1661).
  */
 export function clearAuthState(): void {
+  void resetSkillsCatalog();
   setState({
     isAuthenticated: false,
     user: null,

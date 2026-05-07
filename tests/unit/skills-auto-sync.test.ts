@@ -23,6 +23,9 @@ const mockSkillsService = vi.hoisted(() => ({
   getEnabledSkillsContent: vi.fn().mockResolvedValue(""),
 }));
 
+const mockAuthState = vi.hoisted(() => ({
+  isAuthenticated: true,
+}));
 
 vi.mock("solid-js/store", () => ({
   createStore: <T extends Record<string, unknown>>(initial: T) => {
@@ -39,6 +42,10 @@ vi.mock("@/stores/fileTree", () => ({
   get fileTreeState() {
     return { rootPath: "/test/project" };
   },
+}));
+
+vi.mock("@/stores/auth.store", () => ({
+  authStore: mockAuthState,
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -78,6 +85,10 @@ vi.mock("@/services/skills", () => {
     isAuthStatus: (status: number | undefined) =>
       status === 401 || status === 403,
   };
+});
+
+beforeEach(() => {
+  mockAuthState.isAuthenticated = true;
 });
 
 function installedSkill(slug: string) {
@@ -251,6 +262,17 @@ describe("refresh() concurrency guard and summary (#1289)", () => {
     // Two sequential calls should each execute
     expect(mockSkillsService.fetchAllSkills).toHaveBeenCalledTimes(2);
   });
+
+  it("skips owned private skill refresh while signed out", async () => {
+    mockAuthState.isAuthenticated = false;
+    mockSkillsService.fetchAllSkills.mockResolvedValue([]);
+    mockSkillsService.listAllInstalled.mockResolvedValue([]);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.refresh(true);
+
+    expect(mockSkillsService.fetchOwnedSkills).not.toHaveBeenCalled();
+  });
 });
 
 describe("clearCacheAndRefresh runs full sync (#1558)", () => {
@@ -296,6 +318,34 @@ describe("setAvailableCatalog merge keeps bulk-fetched entries", () => {
       "seren:b",
       "seren:c",
     ]);
+  });
+
+  it("clears remote catalog entries on reset", async () => {
+    const privateSkill = {
+      id: "seren:private",
+      slug: "private",
+      name: "Private",
+      description: "",
+      source: "seren" as const,
+      sourceUrl: "seren-skills:private",
+      tags: [],
+      publisher: {
+        createdByUserId: "user-1",
+        ownerUserId: "user-1",
+        visibility: "private" as const,
+        discoverability: "unlisted" as const,
+        publishStatus: "published" as const,
+      },
+    };
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    skillsStore.setAvailableCatalog([privateSkill]);
+    expect(skillsStore.available).toHaveLength(1);
+
+    skillsStore.resetRemoteCatalog();
+
+    expect(skillsStore.available).toHaveLength(0);
+    expect(skillsStore.selectedId).toBeNull();
   });
 });
 

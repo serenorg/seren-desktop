@@ -1047,8 +1047,7 @@ pub fn list_skill_payload_files(
         for entry in read {
             let entry = entry.map_err(|e| format!("Directory entry error: {}", e))?;
             let path = entry.path();
-            let metadata = entry
-                .metadata()
+            let metadata = fs::symlink_metadata(&path)
                 .map_err(|e| format!("Failed to stat {}: {}", path.display(), e))?;
             if metadata.file_type().is_symlink() {
                 continue;
@@ -1616,5 +1615,37 @@ Run [agent](scripts/agent.py) with `requirements.txt`.
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("escapes the skill directory"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_skill_payload_files_skips_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+        let outside = TempDir::new().unwrap();
+        fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            "# Test Skill\nHello".to_string(),
+            Some(
+                serde_json::json!([
+                    {"path": "scripts/agent.py", "content": "print('ok')"}
+                ])
+                .to_string(),
+            ),
+            None,
+        )
+        .unwrap();
+
+        let skill_dir = tmp.path().join("test-skill");
+        symlink(outside.path(), skill_dir.join("linked")).unwrap();
+
+        let payload = list_skill_payload_files(skills_dir, "test-skill".to_string()).unwrap();
+        assert_eq!(payload.len(), 1);
+        assert_eq!(payload[0].path, "scripts/agent.py");
     }
 }

@@ -458,6 +458,17 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     setCurrentSkillDragPayload(null);
   };
 
+  onMount(() => {
+    window.addEventListener("dragend", handleSkillDragEnd);
+    window.addEventListener("drop", handleSkillDragEnd);
+  });
+
+  onCleanup(() => {
+    window.removeEventListener("dragend", handleSkillDragEnd);
+    window.removeEventListener("drop", handleSkillDragEnd);
+    handleSkillDragEnd();
+  });
+
   // ── Detail accordion ────────────────────────────
 
   const toggleDetail = async (skillId: string) => {
