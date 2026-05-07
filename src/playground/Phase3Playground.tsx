@@ -189,7 +189,7 @@ export const Phase3Playground = () => {
   function handleFileSelect(path: string): void {
     const content = SAMPLE_FILES[path] ?? "// Sample file";
     setSelectedPath(path);
-    openTab(path, content);
+    openTab(path, content, "/workspace");
   }
 
   function handleEditorChange(value: string): void {

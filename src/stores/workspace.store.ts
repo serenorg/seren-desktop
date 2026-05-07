@@ -257,6 +257,16 @@ function bindThreadToWorkspace(
 
   const workspace = state.workspaces[idx];
 
+  // Editor "threads" are sessions, not chat panes. Route them through the
+  // editor-pane plumbing so the existing single-editor-per-workspace
+  // invariant and the wrapperCache "editor:singleton" key still hold.
+  // Switching sessions doesn't remount Monaco; it just swaps which tabs
+  // are visible in the existing editor pane.
+  if (thread.kind === "editor") {
+    workspaceStore.bindEditorToWorkspace();
+    return;
+  }
+
   // Same thread already in another pane in this workspace? Just refocus
   // it - we enforce one pane per thread per workspace so the singleton
   // mounting in ThreadContent stays valid. Skip the refocus when this
@@ -672,6 +682,49 @@ export const workspaceStore = {
     const thread = threadStore.threads.find((t) => t.id === threadId);
     if (!thread) return;
 
+    // Editor sessions are coordinated by editorSessionStore, not by
+    // window.threadId. Drag-drop into a pane should:
+    //   - on a chat/agent/terminal target: replace the target with an editor
+    //     pane, preserving the single-editor-per-workspace invariant by
+    //     refocusing any pre-existing editor pane instead of creating two.
+    //   - on a placeholder: same as above.
+    //   - on the existing editor pane: just activate the dragged session.
+    if (thread.kind === "editor") {
+      const existingEditorIdx = ws.windows.findIndex(
+        (w) => w.kind === "editor",
+      );
+      if (existingEditorIdx >= 0) {
+        const editorPane = ws.windows[existingEditorIdx];
+        if (ws.focusedWindowId !== editorPane.id) {
+          setState("workspaces", wsIdx, "focusedWindowId", editorPane.id);
+        }
+        if (!ws.hasHadContent) {
+          setState("workspaces", wsIdx, "hasHadContent", true);
+        }
+        threadStore.selectThread(threadId, "editor");
+        return;
+      }
+      // No existing editor pane: replace the drop target with one.
+      const targetIdx = ws.windows.findIndex((w) => w.id === targetWindow.id);
+      if (targetIdx >= 0) {
+        setState("workspaces", wsIdx, "windows", targetIdx, {
+          id: targetWindow.id,
+          threadId: null,
+          kind: "editor",
+          editorFilePath: null,
+          size: targetWindow.size,
+        });
+      }
+      if (ws.focusedWindowId !== targetWindow.id) {
+        setState("workspaces", wsIdx, "focusedWindowId", targetWindow.id);
+      }
+      if (!ws.hasHadContent) {
+        setState("workspaces", wsIdx, "hasHadContent", true);
+      }
+      threadStore.selectThread(threadId, "editor");
+      return;
+    }
+
     // Singleton-per-workspace: if this thread already lives in another
     // pane here, focus that pane instead of duplicating it.
     const existing = ws.windows.find(
@@ -738,7 +791,10 @@ export const workspaceStore = {
       if (ws.focusedWindowId !== existing.id) {
         setState("workspaces", wsIdx, "focusedWindowId", existing.id);
       }
-      if (threadStore.activeThreadId !== null) {
+      if (
+        threadStore.activeThreadId !== null &&
+        threadStore.activeThreadKind !== "editor"
+      ) {
         threadStore.setActiveThread(null);
       }
       return;
@@ -792,7 +848,10 @@ export const workspaceStore = {
     if (!state.workspaces[wsIdx].hasHadContent) {
       setState("workspaces", wsIdx, "hasHadContent", true);
     }
-    if (threadStore.activeThreadId !== null) {
+    if (
+      threadStore.activeThreadId !== null &&
+      threadStore.activeThreadKind !== "editor"
+    ) {
       threadStore.setActiveThread(null);
     }
   },

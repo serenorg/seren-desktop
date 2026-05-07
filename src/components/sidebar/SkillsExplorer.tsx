@@ -46,7 +46,6 @@ import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { type RefreshSummary, skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
-import { workspaceStore } from "@/stores/workspace.store";
 
 interface SkillsExplorerProps {
   collapsed?: boolean;
@@ -827,13 +826,26 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   // ── Edit in editor ──────────────────────────────
 
-  const handleEditInEditor = async (path: string) => {
-    await openFileInTab(path);
-    workspaceStore.bindEditorToWorkspace(path);
-  };
-
   const editablePathFor = (skill: InstalledSkill): string =>
     skill.authoringPath ?? skill.path;
+
+  const skillCwdFor = (path: string): string => {
+    // The session root is the skill folder containing SKILL.md so each
+    // authored skill becomes its own sidebar entry, grouped under the
+    // skill's name in the project list.
+    const idx = path.lastIndexOf("/");
+    return idx > 0 ? path.slice(0, idx) : path;
+  };
+
+  const handleEditInEditor = async (path: string) => {
+    const cwd = skillCwdFor(path);
+    await openFileInTab(path, { cwd });
+    // Route through selectThread so the skill becomes the active thread and
+    // its project group floats to the top of the sidebar (current-project
+    // priority + lastActiveAt timestamp). selectThread also triggers the
+    // workspace effect that surfaces the editor pane via bindEditorToWorkspace.
+    threadStore.selectThread(`editor:${cwd}`, "editor");
+  };
 
   // ── Scope badge label ───────────────────────────
 

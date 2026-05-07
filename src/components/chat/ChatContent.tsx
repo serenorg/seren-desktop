@@ -323,7 +323,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
               : root
                 ? `${root.replace(/\/$/, "")}/${url}`
                 : url;
-          openFileInTab(resolved)
+          openFileInTab(resolved, { cwd: root ?? undefined })
             .then(() => {
               workspaceStore.bindEditorToWorkspace(resolved);
             })

@@ -21,6 +21,13 @@ import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import { SkillsExplorer } from "@/components/sidebar/SkillsExplorer";
 import { AgentTasksPanel } from "@/components/tasks/AgentTasksPanel";
 import { shortcuts } from "@/lib/shortcuts";
+import {
+  initEditorSessionPersistence,
+  pickEditorSessionForContext,
+  restoreEditorSessions,
+} from "@/stores/editor.sessions";
+import { fileTreeState } from "@/stores/fileTree";
+import { threadStore } from "@/stores/thread.store";
 import { initWorkspaceStore, workspaceStore } from "@/stores/workspace.store";
 import { SlidePanel } from "./SlidePanel";
 import { ThreadContent } from "./ThreadContent";
@@ -65,6 +72,31 @@ export const AppShell: Component<AppShellProps> = (props) => {
     setSlidePanel(null);
   };
 
+  /**
+   * Cmd+E semantics: focus the editor pane and pick the editor session that
+   * matches the user's current context. Preference order:
+   *   1. The active thread's projectRoot (so an open chat or skill brings
+   *      the editor for THAT project to the front).
+   *   2. The file-tree root.
+   *   3. The most recently activated session.
+   *   4. No sessions exist - just create an empty editor pane.
+   */
+  const focusEditorForContext = () => {
+    const active = threadStore.activeThread;
+    if (active?.kind === "editor") {
+      // Already on this session; just refocus the pane.
+      workspaceStore.bindEditorToWorkspace();
+      return;
+    }
+    const contextRoot = active?.projectRoot ?? fileTreeState.rootPath ?? null;
+    const target = pickEditorSessionForContext({ contextRoot });
+    if (target) {
+      threadStore.selectThread(target.id, "editor");
+    } else {
+      workspaceStore.bindEditorToWorkspace();
+    }
+  };
+
   // Expose panel controls to global events (for slash commands, etc.)
   const handleOpenPanel = ((e: CustomEvent) => {
     const p = e.detail as string;
@@ -72,7 +104,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
       setSlidePanel(null);
     } else if (p === "editor") {
       setSlidePanel(null);
-      workspaceStore.bindEditorToWorkspace();
+      focusEditorForContext();
     } else if (p === "settings") {
       setSlidePanel("settings");
     } else if (p === "database") {
@@ -243,6 +275,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
   // Register global listeners and keyboard shortcuts
   onMount(() => {
     initWorkspaceStore();
+    initEditorSessionPersistence();
+    void restoreEditorSessions();
 
     window.addEventListener("seren:open-panel", handleOpenPanel);
     window.addEventListener("seren:open-settings", handleOpenSettings);
@@ -259,7 +293,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     shortcuts.register("closePanel", handleCloseSlidePanel);
     shortcuts.register("focusEditor", () => {
       setSlidePanel(null);
-      workspaceStore.bindEditorToWorkspace();
+      focusEditorForContext();
     });
   });
 

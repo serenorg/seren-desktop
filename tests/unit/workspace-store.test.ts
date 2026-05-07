@@ -3,13 +3,15 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+type MockThreadKind = "chat" | "agent" | "terminal" | "editor";
 type MockThreadStatus = "idle" | "running" | "waiting-input" | "error";
 const harness = vi.hoisted(() => ({
   activeThreadId: null as string | null,
+  activeThreadKind: null as MockThreadKind | null,
   effects: [] as Array<() => void>,
   threads: [] as Array<{
     id: string;
-    kind: "chat" | "agent" | "terminal";
+    kind: MockThreadKind;
     status: "idle" | "running" | "waiting-input" | "error";
   }>,
 }));
@@ -34,20 +36,26 @@ vi.mock("@/stores/thread.store", () => {
       harness.threads.push({ id, kind: "chat", status: "idle" });
     }
     harness.activeThreadId = id;
+    harness.activeThreadKind =
+      id === null
+        ? null
+        : (harness.threads.find((t) => t.id === id)?.kind ?? null);
     for (const effect of harness.effects) effect();
   });
 
-  const selectThread = vi.fn(
-    (id: string, _kind: "chat" | "agent" | "terminal") => {
-      harness.activeThreadId = id;
-      for (const effect of harness.effects) effect();
-    },
-  );
+  const selectThread = vi.fn((id: string, kind: MockThreadKind) => {
+    harness.activeThreadId = id;
+    harness.activeThreadKind = kind;
+    for (const effect of harness.effects) effect();
+  });
 
   return {
     threadStore: {
       get activeThreadId(): string | null {
         return harness.activeThreadId;
+      },
+      get activeThreadKind(): MockThreadKind | null {
+        return harness.activeThreadKind;
       },
       get threads() {
         return harness.threads;
@@ -67,10 +75,7 @@ vi.mock("@/stores/thread.store", () => {
       harness.activeThreadId = id;
       for (const effect of harness.effects) effect();
     },
-    __addMockThread(
-      id: string,
-      kind: "chat" | "agent" | "terminal" = "chat",
-    ): void {
+    __addMockThread(id: string, kind: MockThreadKind = "chat"): void {
       if (!harness.threads.some((thread) => thread.id === id)) {
         harness.threads.push({ id, kind, status: "idle" });
       }
@@ -100,7 +105,7 @@ async function setup(initialActiveThreadId: string | null = null) {
     __setMockActiveThreadWithoutThread(id: string | null): void;
     __addMockThread(
       id: string,
-      kind?: "chat" | "agent" | "terminal",
+      kind?: MockThreadKind,
     ): void;
     __removeMockThread(id: string): void;
     __setMockThreadStatus(id: string, status: MockThreadStatus): void;
@@ -757,6 +762,68 @@ describe("workspaceStore", () => {
     expect(thread).toBeDefined();
     expect(thread?.kind).toBe("chat");
     expect(ws.focusedWindowId).toBe(thread?.id);
+  });
+
+  it("dragging an editor session onto a chat pane converts that pane into the editor", async () => {
+    const { threadModule, threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    expect(workspaceStore.activeWorkspace.windows[0].kind).toBe("chat");
+    const chatPaneId = workspaceStore.activeWorkspace.windows[0].id;
+
+    threadModule.__addMockThread("editor:/skill", "editor");
+    workspaceStore.bindThreadToWindow(chatPaneId, "editor:/skill");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows).toHaveLength(1);
+    expect(ws.windows[0]).toMatchObject({
+      id: chatPaneId,
+      kind: "editor",
+      threadId: null,
+    });
+    expect(ws.focusedWindowId).toBe(chatPaneId);
+  });
+
+  it("dragging an editor session refocuses the existing editor pane instead of duplicating", async () => {
+    const { threadModule, threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.bindEditorToWorkspace("/skill/SKILL.md");
+    const ws0 = workspaceStore.activeWorkspace;
+    expect(ws0.windows.filter((w) => w.kind === "editor")).toHaveLength(1);
+    const editorPaneId =
+      ws0.windows.find((w) => w.kind === "editor")?.id ?? "";
+    const chatPaneId =
+      ws0.windows.find((w) => w.kind === "chat")?.id ?? "";
+
+    // Now drag a second editor session onto the chat pane. The single-editor
+    // invariant must hold: no second editor pane is created; the existing one
+    // is refocused.
+    threadModule.__addMockThread("editor:/other", "editor");
+    workspaceStore.bindThreadToWindow(chatPaneId, "editor:/other");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows.filter((w) => w.kind === "editor")).toHaveLength(1);
+    expect(ws.windows.some((w) => w.kind === "chat")).toBe(true);
+    expect(ws.focusedWindowId).toBe(editorPaneId);
+  });
+
+  it("routes editor-kind thread selection through bindEditorToWorkspace", async () => {
+    const { threadModule, threadStore, workspaceStore } = await setup();
+
+    // Existing chat thread; user is focused on it.
+    threadStore.setActiveThread("thread-1");
+    expect(workspaceStore.activeWorkspace.windows[0].kind).toBe("chat");
+
+    // Now an editor session appears in the thread store and the user clicks it.
+    threadModule.__addMockThread("editor:/skill", "editor");
+    threadStore.setActiveThread("editor:/skill");
+
+    // The editor opens in a new pane next to the chat - it does NOT replace
+    // the chat pane and it does NOT use the kind="chat" replace path.
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows.some((w) => w.kind === "chat")).toBe(true);
+    expect(ws.windows.some((w) => w.kind === "editor")).toBe(true);
   });
 
   it("clears the active thread when switching back to an editor-focused workspace", async () => {

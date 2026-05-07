@@ -7,8 +7,9 @@ import {
   openFileInTab,
   openFolder,
 } from "@/lib/files/service";
+import { sessionIdForCwd } from "@/stores/editor.sessions";
 import { fileTreeState, setNodes } from "@/stores/fileTree";
-import { workspaceStore } from "@/stores/workspace.store";
+import { threadStore } from "@/stores/thread.store";
 import { FileTree } from "./FileTree";
 
 /**
@@ -49,8 +50,16 @@ export const FileExplorer: Component = () => {
 
   const handleFileSelect = async (path: string) => {
     try {
-      await openFileInTab(path);
-      workspaceStore.bindEditorToWorkspace(path);
+      // Group all files opened from this explorer into the project's session
+      // so the user gets one editor entry per project rather than one per
+      // directory.
+      const cwd = fileTreeState.rootPath ?? undefined;
+      await openFileInTab(path, { cwd });
+      // Route through selectThread so the editor becomes the active thread
+      // and the project group floats to the top.
+      if (cwd) {
+        threadStore.selectThread(sessionIdForCwd(cwd), "editor");
+      }
     } catch (error) {
       console.error("Failed to open file:", error);
     }

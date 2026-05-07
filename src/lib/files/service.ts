@@ -227,29 +227,36 @@ export function extractLineAnchor(rawPath: string): number | undefined {
 }
 
 /**
+ * Resolve a default cwd for a file when the caller has not supplied one.
+ * Falls back to the file's parent directory so every tab still belongs to
+ * some session.
+ */
+function fileDirname(path: string): string {
+  const idx = path.lastIndexOf("/");
+  if (idx <= 0) return "/";
+  return path.slice(0, idx);
+}
+
+export interface OpenFileOptions {
+  /** Session root the tab joins. Defaults to the file's parent directory. */
+  cwd?: string;
+}
+
+/**
  * Open a file in a tab.
  */
-export async function openFileInTab(rawPath: string): Promise<void> {
+export async function openFileInTab(
+  rawPath: string,
+  options: OpenFileOptions = {},
+): Promise<void> {
   // Strip line/column anchors before reading. Agents emit two styles:
   // markdown anchors (#L79, #L10-L20) and grep/editor refs
   // (path:line, path:line:col). Both must be removed before readFile.
   // Non-greedy + end-anchor preserves Windows drive letters like C:\foo.md.
   const path = stripLineAnchor(rawPath);
-  const line = extractLineAnchor(rawPath);
-
-  console.log(
-    "[openFileInTab] Opening file:",
-    path,
-    line ? `line ${line}` : "",
-  );
+  const cwd = (options.cwd ?? fileDirname(path)).replace(/\/+$/, "") || "/";
   const content = await readFile(path);
-  console.log("[openFileInTab] Read content length:", content.length);
-  const tabId = openTab(path, content);
-  console.log(
-    "[openFileInTab] Opened tab:",
-    tabId,
-    line ? `→ line ${line}` : "",
-  );
+  openTab(path, content, cwd);
 }
 
 /**

@@ -26,6 +26,7 @@ import {
 } from "@/services/organization-policy";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
+import { editorSessionStore } from "@/stores/editor.sessions";
 import { fileTreeState } from "@/stores/fileTree";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
@@ -216,6 +217,26 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     </svg>
   );
 
+  const EditorIcon: Component<{ size?: number; strokeWidth?: number }> = (
+    iconProps,
+  ) => (
+    <svg
+      width={iconProps.size ?? 14}
+      height={iconProps.size ?? 14}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      stroke-width={iconProps.strokeWidth ?? 1.3}
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      role="img"
+      aria-label="Editor"
+    >
+      <path d="M9.5 2.5H4a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 4 13.5h8A1.5 1.5 0 0 0 13.5 12V6" />
+      <path d="M11 2.5l2.5 2.5-5.5 5.5H5.5V8L11 2.5z" />
+    </svg>
+  );
+
   // Right-aligned chip telling the user *what surface / how it's billed*.
   const LauncherChip: Component<{
     variant: "paid" | "subscription" | "cli";
@@ -293,6 +314,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     () => showClaudeAgent() || showCodexAgent() || showGeminiAgent(),
   );
   const hasCliSection = createMemo(() => claudeAvailable() || codexAvailable());
+
 
   return (
     <aside
@@ -708,7 +730,16 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                                 <Show
                                   when={thread.kind === "terminal"}
                                   fallback={
-                                    <span class="text-xs">{"\u{1F4AC}"}</span>
+                                    <Show
+                                      when={thread.kind === "editor"}
+                                      fallback={
+                                        <span class="text-xs">
+                                          {"\u{1F4AC}"}
+                                        </span>
+                                      }
+                                    >
+                                      <EditorIcon size={13} strokeWidth={1.4} />
+                                    </Show>
                                   }
                                 >
                                   <TerminalIcon size={13} strokeWidth={1.4} />
@@ -728,9 +759,27 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           <span class="flex-1 min-w-0 text-[13px] text-foreground whitespace-nowrap overflow-hidden text-ellipsis">
                             {thread.title}
                           </span>
-                          <span class="text-[11px] text-muted-foreground shrink-0">
-                            {formatTime(thread.timestamp)}
-                          </span>
+                          <Show
+                            when={thread.kind === "editor"}
+                            fallback={
+                              <span class="text-[11px] text-muted-foreground shrink-0">
+                                {formatTime(thread.timestamp)}
+                              </span>
+                            }
+                          >
+                            <Show
+                              when={
+                                editorSessionStore.findById(thread.id)?.isDirty
+                              }
+                            >
+                              <span
+                                class="text-warning text-[11px] -mr-0.5"
+                                title="Unsaved changes"
+                              >
+                                ●
+                              </span>
+                            </Show>
+                          </Show>
 
                           <Show
                             when={

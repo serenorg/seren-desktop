@@ -14,14 +14,16 @@ import { skills as skillsService } from "@/services/skills";
 import { agentStore } from "@/stores/agent.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
+import { editorSessionStore } from "@/stores/editor.sessions";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 import { skillsStore } from "@/stores/skills.store";
+import { closeTab } from "@/stores/tabs";
 import { terminalStore } from "@/stores/terminal.store";
 
 const LAST_ACTIVE_THREAD_KEY = "seren:lastActiveThread";
 
-export type ThreadKind = "chat" | "agent" | "terminal";
+export type ThreadKind = "chat" | "agent" | "terminal" | "editor";
 
 function persistLastActiveThread(id: string, kind: ThreadKind): void {
   try {
@@ -43,7 +45,8 @@ function loadLastActiveThread(): {
       typeof parsed?.id === "string" &&
       (parsed?.kind === "chat" ||
         parsed?.kind === "agent" ||
-        parsed?.kind === "terminal")
+        parsed?.kind === "terminal" ||
+        parsed?.kind === "editor")
     ) {
       return parsed as { id: string; kind: ThreadKind };
     }
@@ -249,8 +252,28 @@ export const threadStore = {
       isLive: buffer.status === "running",
     }));
 
+    const editorThreads: Thread[] = editorSessionStore.sessions.map(
+      (session) => ({
+        id: session.id,
+        title: session.label,
+        kind: "editor" as const,
+        status: "idle" as ThreadStatus,
+        projectRoot: session.cwd,
+        // Sessions never bump above any real thread by accident: the recency
+        // signal here is `lastActiveAt`, which only changes when the user
+        // activates the session.
+        timestamp: session.lastActiveAt,
+        isLive: false,
+      }),
+    );
+
     // Merge and sort by recency
-    const all = [...chatThreads, ...agentThreads, ...terminalThreads];
+    const all = [
+      ...chatThreads,
+      ...agentThreads,
+      ...terminalThreads,
+      ...editorThreads,
+    ];
 
     return all.sort((a, b) => b.timestamp - a.timestamp);
   },
@@ -421,6 +444,12 @@ export const threadStore = {
           void agentStore.resumeAgentConversation(id, cwd);
         }
       }
+    } else if (kind === "editor") {
+      // Editor sessions live in the tab store; activating one swaps the
+      // visible tabs to that session's cwd. The conversation/agent stores
+      // intentionally stay where they are - editing a file shouldn't drop
+      // the user out of the chat or agent they had open.
+      editorSessionStore.activate(id);
     } else {
       conversationStore.setActiveConversation(null);
       agentStore.setActiveSession(null);
@@ -604,9 +633,26 @@ export const threadStore = {
     } else if (kind === "agent") {
       await archiveAgentConversation(id);
       await agentStore.refreshRecentAgentConversations(200);
-    } else {
+    } else if (kind === "terminal") {
       await terminalStore.kill(id);
       terminalStore.removeLocal(id);
+    } else {
+      // Editor sessions: close every tab in the session. The session
+      // disappears from the sidebar automatically because it's derived from
+      // the open tab list. Prompt before discarding unsaved tabs so a stray
+      // close click can't silently drop work in progress.
+      const session = editorSessionStore.findById(id);
+      if (!session) return;
+      if (session.isDirty) {
+        const dirtyCount = session.tabs.filter((t) => t.isDirty).length;
+        const { confirm } = await import("@tauri-apps/plugin-dialog");
+        const ok = await confirm(
+          `${session.label} has ${dirtyCount} unsaved file${dirtyCount === 1 ? "" : "s"}. Close anyway? Changes will be lost.`,
+          { title: "Close editor session", kind: "warning" },
+        );
+        if (!ok) return;
+      }
+      for (const tab of session.tabs) closeTab(tab.id);
     }
 
     // Clear selection if this was active

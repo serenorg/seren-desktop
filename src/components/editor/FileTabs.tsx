@@ -1,4 +1,5 @@
-import { type Component, For, Show } from "solid-js";
+import { type Component, createMemo, For, Show } from "solid-js";
+import { editorSessionStore } from "@/stores/editor.sessions";
 import { closeTab, setActiveTab, type Tab, tabsState } from "@/stores/tabs";
 
 interface FileTabsProps {
@@ -9,6 +10,12 @@ interface FileTabsProps {
 }
 
 export const FileTabs: Component<FileTabsProps> = (props) => {
+  const visibleTabs = createMemo(() => {
+    const session = editorSessionStore.activeSession;
+    if (!session) return [] as Tab[];
+    return session.tabs;
+  });
+
   function handleTabClick(tab: Tab) {
     setActiveTab(tab.id);
   }
@@ -45,7 +52,7 @@ export const FileTabs: Component<FileTabsProps> = (props) => {
         aria-label="Open files"
       >
         <div class="flex items-center overflow-x-auto overflow-y-hidden flex-1 scrollbar-thin [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-sm">
-          <For each={tabsState.tabs}>
+          <For each={visibleTabs()}>
             {(tab) => (
               <div
                 class={`group flex items-center gap-1.5 h-full px-3 bg-secondary border-r border-border cursor-pointer text-[13px] whitespace-nowrap transition-colors hover:bg-muted ${tab.id === tabsState.activeTabId ? "bg-card border-b-2 border-b-primary" : ""} ${tab.isDirty ? "[&_.tab-name]:italic" : ""} focus:outline-none focus:shadow-[inset_0_0_0_1px_var(--primary)]`}
@@ -85,7 +92,7 @@ export const FileTabs: Component<FileTabsProps> = (props) => {
             )}
           </For>
         </div>
-        <Show when={tabsState.tabs.length === 0}>
+        <Show when={visibleTabs().length === 0}>
           <div class="px-4 text-muted-foreground text-xs italic">
             No files open
           </div>

@@ -1461,7 +1461,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     : cwd
                       ? `${cwd.replace(/\/$/, "")}/${url}`
                       : url;
-                openFileInTab(resolved)
+                openFileInTab(resolved, { cwd: cwd ?? undefined })
                   .then(() => {
                     workspaceStore.bindEditorToWorkspace(resolved);
                   })
