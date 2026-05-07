@@ -9,6 +9,7 @@ import {
   on,
   onCleanup,
   onMount,
+  Show,
   Switch,
 } from "solid-js";
 import { SessionExpiredModal } from "@/components/auth/SessionExpiredModal";
@@ -18,6 +19,8 @@ import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
+import { PublishSkillModal } from "@/components/sidebar/PublishSkillModal";
+import { PublishVersionModal } from "@/components/sidebar/PublishVersionModal";
 import { SkillsExplorer } from "@/components/sidebar/SkillsExplorer";
 import { AgentTasksPanel } from "@/components/tasks/AgentTasksPanel";
 import { shortcuts } from "@/lib/shortcuts";
@@ -27,6 +30,8 @@ import {
   restoreEditorSessions,
 } from "@/stores/editor.sessions";
 import { fileTreeState } from "@/stores/fileTree";
+import { skillPublishStore } from "@/stores/skill-publish.store";
+import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
 import { initWorkspaceStore, workspaceStore } from "@/stores/workspace.store";
 import { SlidePanel } from "./SlidePanel";
@@ -109,6 +114,17 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const handleLoginSuccess = () => {
     props.onLoginSuccess();
     setSlidePanel(null);
+  };
+
+  /**
+   * Refresh catalog/installed state after a publish completes so the row
+   * flips from "Publishable" to "Yours" (and the rail's letter avatars
+   * pick up the new published version) without a manual refresh.
+   */
+  const handleSkillPublishComplete = async () => {
+    await skillsStore.refreshAvailable(true);
+    await skillsStore.refreshOwnedSkills();
+    await skillsStore.refreshInstalled();
   };
 
   /**
@@ -405,6 +421,50 @@ export const AppShell: Component<AppShellProps> = (props) => {
       </div>
 
       <StatusBar />
+
+      {/* Skill publish modals live at app level so they work whether the
+          skills slide panel is open or not (e.g. triggered from the editor
+          header). Both look up the InstalledSkill by path against the store
+          at render time. */}
+      <Show when={skillPublishStore.firstPublishPath}>
+        {(path) => {
+          const target = () =>
+            skillsStore.installed.find((s) => s.path === path());
+          return (
+            <Show when={target()}>
+              {(skill) => (
+                <PublishSkillModal
+                  skill={skill()}
+                  onClose={() => skillPublishStore.clearFirstPublish()}
+                  onPublished={() => void handleSkillPublishComplete()}
+                />
+              )}
+            </Show>
+          );
+        }}
+      </Show>
+      <Show when={skillPublishStore.versionPublishPath}>
+        {(path) => {
+          const target = () =>
+            skillsStore.installed.find((s) => s.path === path());
+          const catalogVersion = (slug: string) =>
+            skillsStore.available.find((s) => s.slug === slug)?.version;
+          return (
+            <Show when={target()}>
+              {(skill) => (
+                <PublishVersionModal
+                  skill={skill()}
+                  currentVersion={
+                    catalogVersion(skill().slug) ?? skill().version
+                  }
+                  onClose={() => skillPublishStore.clearVersionPublish()}
+                  onPublished={() => void handleSkillPublishComplete()}
+                />
+              )}
+            </Show>
+          );
+        }}
+      </Show>
 
       {/* Layout-level blocking sign-in modal — fires on mid-session expiry,
           refresh-token failure, and the /login slash command. Distinct from

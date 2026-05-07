@@ -17,8 +17,11 @@ import {
   setInlineEditHandler,
 } from "@/lib/editor";
 import { saveTab } from "@/lib/files/service";
+import { authStore } from "@/stores/auth.store";
 import { editorStore } from "@/stores/editor.store";
 import { setSelectedPath } from "@/stores/fileTree";
+import { skillPublishStore } from "@/stores/skill-publish.store";
+import { skillsStore } from "@/stores/skills.store";
 import {
   getActiveTab,
   setTabDirty,
@@ -60,6 +63,39 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
   const activeTab = createMemo(() =>
     tabsState.tabs.find((tab) => tab.id === tabsState.activeTabId),
   );
+
+  // The publish button only surfaces when the active tab is a skill the
+  // user can publish - either an unpublished authored skill (first-time
+  // publish) or one they already own (new-version publish). Skills they
+  // don't own and skills with no matching SKILL.md path stay hidden.
+  const publishableSkill = createMemo(() => {
+    const tab = activeTab();
+    if (!tab) return null;
+    const skill = skillsStore.installed.find(
+      (s) => s.path === tab.filePath || s.authoringPath === tab.filePath,
+    );
+    if (!skill) return null;
+    const userId = authStore.user?.id;
+    if (!userId) return null;
+    const catalog = skillsStore.available.find((s) => s.slug === skill.slug);
+    if (!catalog) {
+      return { skill, mode: "first" as const };
+    }
+    if (catalog.publisher?.createdByUserId === userId) {
+      return { skill, mode: "version" as const, catalog };
+    }
+    return null;
+  });
+
+  const handlePublish = () => {
+    const target = publishableSkill();
+    if (!target) return;
+    if (target.mode === "first") {
+      skillPublishStore.requestFirstPublish(target.skill.path);
+    } else {
+      skillPublishStore.requestVersionPublish(target.skill.path);
+    }
+  };
 
   const saveStatus = createMemo(() => {
     if (saveError()) return "Save failed";
@@ -274,6 +310,22 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
             >
               {savingTabId() === activeTab()?.id ? "Saving..." : "Save"}
             </button>
+            <Show when={publishableSkill()}>
+              {(target) => (
+                <button
+                  type="button"
+                  class="rounded-sm border border-primary/40 bg-primary/[0.08] px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/[0.18]"
+                  onClick={handlePublish}
+                  title={
+                    target().mode === "first"
+                      ? "Publish this skill to Seren Skills"
+                      : "Publish a new version to Seren Skills"
+                  }
+                >
+                  {target().mode === "first" ? "Publish" : "Publish update"}
+                </button>
+              )}
+            </Show>
             <button
               type="button"
               class="bg-transparent border-none text-muted-foreground cursor-pointer px-1.5 py-0.5 text-sm leading-none hover:text-foreground"

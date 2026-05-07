@@ -14,7 +14,6 @@ import {
 } from "solid-js";
 import { CreateSkillModal } from "@/components/sidebar/CreateSkillModal";
 import { ManageSkillModal } from "@/components/sidebar/ManageSkillModal";
-import { PublishSkillModal } from "@/components/sidebar/PublishSkillModal";
 import { openExternalLink } from "@/lib/external-link";
 import { appFetch } from "@/lib/fetch";
 import { openFileInTab } from "@/lib/files/service";
@@ -44,6 +43,7 @@ import { skillsCatalogOptions } from "@/services/skills-query";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { skillPublishStore } from "@/stores/skill-publish.store";
 import { type RefreshSummary, skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
 
@@ -57,6 +57,60 @@ type Filter = "all" | "installed" | "needs-sync";
 const SKILL_CREATOR_SLUG = "skill-creator";
 const SKILL_CREATOR_SOURCE_URL = `seren-skills:${SKILL_CREATOR_SLUG}`;
 
+const PencilIcon: Component = () => (
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    role="img"
+    aria-label="Edit"
+  >
+    <path d="M11.5 2L14 4.5l-8.5 8.5H3v-2.5L11.5 2z" />
+  </svg>
+);
+
+const CloudUpIcon: Component = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    role="img"
+    aria-label="Publish"
+  >
+    <path d="M4 12.5a3 3 0 0 1-.6-5.94 4 4 0 0 1 7.85-1.06A3 3 0 0 1 12 12.5h-1.5" />
+    <path d="M8 8v6" />
+    <path d="M5.5 10L8 7.5 10.5 10" />
+  </svg>
+);
+
+const SettingsIcon: Component = () => (
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    role="img"
+    aria-label="Manage"
+  >
+    <circle cx="8" cy="8" r="2" />
+    <path d="M8 1.5v2M8 12.5v2M14.5 8h-2M3.5 8h-2M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4M12.6 12.6l-1.4-1.4M4.8 4.8L3.4 3.4" />
+  </svg>
+);
+
 export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const [activeFilter, setActiveFilter] = createSignal<Filter>("all");
   const [searchQuery, setSearchQuery] = createSignal("");
@@ -67,9 +121,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const [detailLoading, setDetailLoading] = createSignal(false);
   const [showCreateDialog, setShowCreateDialog] = createSignal(false);
   const [manageSkillSlug, setManageSkillSlug] = createSignal<string | null>(
-    null,
-  );
-  const [publishSkillPath, setPublishSkillPath] = createSignal<string | null>(
     null,
   );
   const [showUrlDialog, setShowUrlDialog] = createSignal(false);
@@ -142,10 +193,23 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     return true;
   };
 
-  const handlePublishComplete = async () => {
-    await skillsStore.refreshAvailable(true);
-    await skillsStore.refreshOwnedSkills();
-    await skillsStore.refreshInstalled();
+  // The user is allowed to push a new version when they own the catalog
+  // record. We don't auto-detect "are there local changes" - the user
+  // decides whether the current SKILL.md is worth shipping as a new version.
+  const canPublishUpdate = (skill: InstalledSkill): boolean => ownsSkill(skill);
+
+  /**
+   * Single-button entry point for the publish flow. Routes to first-time
+   * publish or new-version modal based on whether the skill already has a
+   * catalog record. Keeps Publish discoverable as one consistent action even
+   * though the underlying API call differs (createSkill vs createVersion).
+   */
+  const handlePublishClick = (skill: InstalledSkill) => {
+    if (isPublishable(skill)) {
+      skillPublishStore.requestFirstPublish(skill.path);
+    } else if (canPublishUpdate(skill)) {
+      skillPublishStore.requestVersionPublish(skill.path);
+    }
   };
 
   const matchesQuery = (skill: Skill | InstalledSkill, q: string): boolean => {
@@ -985,24 +1049,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </Show>
         )}
       </Show>
-      <Show when={publishSkillPath()}>
-        {(path) => {
-          const target = () =>
-            skillsStore.installed.find((s) => s.path === path());
-          return (
-            <Show when={target()}>
-              {(skill) => (
-                <PublishSkillModal
-                  skill={skill()}
-                  onClose={() => setPublishSkillPath(null)}
-                  onPublished={() => void handlePublishComplete()}
-                />
-              )}
-            </Show>
-          );
-        }}
-      </Show>
-
       {/* Search */}
       <div class="px-4 py-2 border-b border-border shrink-0">
         <div class="relative">
@@ -1286,18 +1332,68 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                       </Show>
                     </div>
 
-                    <div class="shrink-0 mt-0.5">
+                    <div class="shrink-0 mt-0.5 flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        class="flex items-center justify-center w-7 h-7 bg-transparent border-none rounded-md text-muted-foreground cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleEditInEditor(editablePathFor(skill));
+                        }}
+                        title="Edit SKILL.md in the editor"
+                        aria-label="Edit skill"
+                      >
+                        <PencilIcon />
+                      </button>
+                      <Show
+                        when={isPublishable(skill) || canPublishUpdate(skill)}
+                      >
+                        <button
+                          type="button"
+                          class="flex items-center justify-center w-7 h-7 bg-transparent border-none rounded-md text-muted-foreground cursor-pointer transition-colors hover:bg-surface-2 hover:text-primary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePublishClick(skill);
+                          }}
+                          title={
+                            isPublishable(skill)
+                              ? "Publish to Seren Skills"
+                              : "Publish a new version"
+                          }
+                          aria-label={
+                            isPublishable(skill)
+                              ? "Publish to Seren Skills"
+                              : "Publish a new version"
+                          }
+                        >
+                          <CloudUpIcon />
+                        </button>
+                      </Show>
+                      <Show when={ownsSkill(skill)}>
+                        <button
+                          type="button"
+                          class="flex items-center justify-center w-7 h-7 bg-transparent border-none rounded-md text-muted-foreground cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setManageSkillSlug(skill.slug);
+                          }}
+                          title="Manage on Seren Skills"
+                          aria-label="Manage on Seren Skills"
+                        >
+                          <SettingsIcon />
+                        </button>
+                      </Show>
                       <Show
                         when={!activeThreadHasSkill(skill)}
                         fallback={
-                          <span class="px-2 py-1 text-[11px] text-success bg-success/10 rounded">
+                          <span class="ml-1 px-2 py-1 text-[11px] text-success bg-success/10 rounded">
                             Added
                           </span>
                         }
                       >
                         <button
                           type="button"
-                          class="px-2.5 py-1 bg-primary text-primary-foreground rounded-md text-[11px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40 disabled:cursor-default"
+                          class="ml-1 px-2.5 py-1 bg-primary text-primary-foreground rounded-md text-[11px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40 disabled:cursor-default"
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleAddInstalledSkill(skill);
@@ -1534,7 +1630,11 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             <button
                               type="button"
                               class="px-3 py-1 bg-transparent border border-primary/40 text-primary rounded-md text-[12px] cursor-pointer transition-colors hover:bg-primary/10"
-                              onClick={() => setPublishSkillPath(skill.path)}
+                              onClick={() =>
+                                skillPublishStore.requestFirstPublish(
+                                  skill.path,
+                                )
+                              }
                               title="Push this local SKILL.md to Seren Skills as a new publisher record"
                             >
                               Publish to Seren Skills
