@@ -6,9 +6,11 @@ import {
   createMemo,
   createSignal,
   For,
+  Match,
   onCleanup,
   onMount,
   Show,
+  Switch,
 } from "solid-js";
 import { openFolder } from "@/lib/files/service";
 import {
@@ -29,11 +31,70 @@ import { authStore } from "@/stores/auth.store";
 import { editorSessionStore } from "@/stores/editor.sessions";
 import { fileTreeState } from "@/stores/fileTree";
 import { type Thread, threadStore } from "@/stores/thread.store";
+import { type WorkspaceWindow, workspaceStore } from "@/stores/workspace.store";
 
 interface ThreadSidebarProps {
   collapsed: boolean;
   onToggle?: () => void;
 }
+
+const FolderIcon: Component<{ size?: number }> = (iconProps) => (
+  <svg
+    width={iconProps.size ?? 14}
+    height={iconProps.size ?? 14}
+    viewBox="0 0 16 16"
+    fill="none"
+    role="img"
+    aria-label="Folder"
+  >
+    <path
+      d="M2 4.5A1.5 1.5 0 013.5 3H6l1.5 2h5A1.5 1.5 0 0114 6.5v5a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 11.5v-7z"
+      stroke="currentColor"
+      stroke-width="1.2"
+    />
+  </svg>
+);
+
+const TerminalIcon: Component<{ size?: number; strokeWidth?: number }> = (
+  iconProps,
+) => (
+  <svg
+    width={iconProps.size ?? 14}
+    height={iconProps.size ?? 14}
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width={iconProps.strokeWidth ?? 1.3}
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    role="img"
+    aria-label="Terminal"
+  >
+    <path d="M2.5 3.5h11v9h-11z" />
+    <path d="M5 6l2 2-2 2" />
+    <path d="M8.5 10h3" />
+  </svg>
+);
+
+const EditorIcon: Component<{ size?: number; strokeWidth?: number }> = (
+  iconProps,
+) => (
+  <svg
+    width={iconProps.size ?? 14}
+    height={iconProps.size ?? 14}
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width={iconProps.strokeWidth ?? 1.3}
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    role="img"
+    aria-label="Editor"
+  >
+    <path d="M9.5 2.5H4a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 4 13.5h8A1.5 1.5 0 0 0 13.5 12V6" />
+    <path d="M11 2.5l2.5 2.5-5.5 5.5H5.5V8L11 2.5z" />
+  </svg>
+);
 
 export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   const [showLauncher, setShowLauncher] = createSignal(false);
@@ -179,64 +240,6 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     });
   };
 
-  const FolderIcon: Component<{ size?: number }> = (iconProps) => (
-    <svg
-      width={iconProps.size ?? 14}
-      height={iconProps.size ?? 14}
-      viewBox="0 0 16 16"
-      fill="none"
-      role="img"
-      aria-label="Folder"
-    >
-      <path
-        d="M2 4.5A1.5 1.5 0 013.5 3H6l1.5 2h5A1.5 1.5 0 0114 6.5v5a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 11.5v-7z"
-        stroke="currentColor"
-        stroke-width="1.2"
-      />
-    </svg>
-  );
-
-  const TerminalIcon: Component<{ size?: number; strokeWidth?: number }> = (
-    iconProps,
-  ) => (
-    <svg
-      width={iconProps.size ?? 14}
-      height={iconProps.size ?? 14}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      stroke-width={iconProps.strokeWidth ?? 1.3}
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      role="img"
-      aria-label="Terminal"
-    >
-      <path d="M2.5 3.5h11v9h-11z" />
-      <path d="M5 6l2 2-2 2" />
-      <path d="M8.5 10h3" />
-    </svg>
-  );
-
-  const EditorIcon: Component<{ size?: number; strokeWidth?: number }> = (
-    iconProps,
-  ) => (
-    <svg
-      width={iconProps.size ?? 14}
-      height={iconProps.size ?? 14}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      stroke-width={iconProps.strokeWidth ?? 1.3}
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      role="img"
-      aria-label="Editor"
-    >
-      <path d="M9.5 2.5H4a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 4 13.5h8A1.5 1.5 0 0 0 13.5 12V6" />
-      <path d="M11 2.5l2.5 2.5-5.5 5.5H5.5V8L11 2.5z" />
-    </svg>
-  );
-
   // Right-aligned chip telling the user *what surface / how it's billed*.
   const LauncherChip: Component<{
     variant: "paid" | "subscription" | "cli";
@@ -315,7 +318,6 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   );
   const hasCliSection = createMemo(() => claudeAvailable() || codexAvailable());
 
-
   return (
     <aside
       data-testid="thread-sidebar"
@@ -328,7 +330,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       }}
     >
       <Show when={props.collapsed && props.onToggle}>
-        <div class="flex flex-col items-center pt-2 shrink-0">
+        <div class="flex flex-col items-center pt-2 shrink-0 gap-1">
           <button
             type="button"
             class="flex items-center justify-center w-7 h-7 bg-transparent border-none rounded-md text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground"
@@ -352,6 +354,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               />
             </svg>
           </button>
+
+          <CollapsedPaneList />
         </div>
       </Show>
 
@@ -903,5 +907,100 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         </div>
       </Show>
     </aside>
+  );
+};
+
+/**
+ * Vertical strip of clickable pane icons rendered inside the collapsed
+ * sidebar rail. One icon per workspace window in the active workspace,
+ * letting the user jump between panes without expanding the sidebar.
+ * Status dots match the existing thread-row indicators.
+ */
+const CollapsedPaneList: Component = () => {
+  const panes = () =>
+    workspaceStore.activeWorkspace.windows.filter((w) => w.kind !== null);
+
+  const threadFor = (window: WorkspaceWindow): Thread | undefined => {
+    if (window.threadId === null) {
+      if (window.kind === "editor")
+        return threadStore.threads.find((t) => t.kind === "editor");
+      return undefined;
+    }
+    return threadStore.threads.find((t) => t.id === window.threadId);
+  };
+
+  const titleFor = (window: WorkspaceWindow): string => {
+    const thread = threadFor(window);
+    if (thread) return thread.title;
+    if (window.kind === "editor") return "Editor";
+    return "Pane";
+  };
+
+  const handleClick = (window: WorkspaceWindow) => {
+    workspaceStore.focusWindow(window.id);
+  };
+
+  return (
+    <Show when={panes().length > 0}>
+      <div
+        class="w-full mt-1 pt-1 border-t border-border/40 flex flex-col items-center gap-1"
+        role="tablist"
+        aria-label="Workspace panes"
+      >
+        <For each={panes()}>
+          {(window) => {
+            const isActive = () =>
+              workspaceStore.activeWorkspace.focusedWindowId === window.id;
+            const status = () => threadFor(window)?.status ?? "idle";
+            return (
+              <button
+                type="button"
+                class="relative flex items-center justify-center w-7 h-7 bg-transparent border-none rounded-md cursor-pointer transition-all duration-100 hover:bg-surface-2"
+                classList={{
+                  "text-foreground bg-surface-2/70": isActive(),
+                  "text-muted-foreground hover:text-foreground": !isActive(),
+                }}
+                onClick={() => handleClick(window)}
+                title={titleFor(window)}
+                aria-label={titleFor(window)}
+              >
+                <Switch>
+                  <Match when={window.kind === "agent"}>
+                    <span class="text-[13px] leading-none">{"\u{1F916}"}</span>
+                  </Match>
+                  <Match when={window.kind === "terminal"}>
+                    <TerminalIcon size={13} strokeWidth={1.4} />
+                  </Match>
+                  <Match when={window.kind === "editor"}>
+                    <EditorIcon size={13} strokeWidth={1.4} />
+                  </Match>
+                  <Match when={window.kind === "chat"}>
+                    <span class="text-[13px] leading-none">{"\u{1F4AC}"}</span>
+                  </Match>
+                </Switch>
+                <Show when={status() === "running"}>
+                  <span
+                    class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-status-running shadow-[0_0_4px_var(--status-running)] animate-pulse"
+                    aria-hidden="true"
+                  />
+                </Show>
+                <Show when={status() === "waiting-input"}>
+                  <span
+                    class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-status-waiting shadow-[0_0_4px_var(--status-waiting)] animate-pulse"
+                    aria-hidden="true"
+                  />
+                </Show>
+                <Show when={status() === "error"}>
+                  <span
+                    class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-status-error"
+                    aria-hidden="true"
+                  />
+                </Show>
+              </button>
+            );
+          }}
+        </For>
+      </div>
+    </Show>
   );
 };
