@@ -270,6 +270,21 @@ export function slugFromName(name: string): string | null {
 }
 
 /**
+ * Best-effort normalization for user-entered skill names. Always returns a
+ * non-empty slug; falls back to `"skill"` if normalization would otherwise
+ * produce an empty string. Intended for UI flows like the Create dialog
+ * where we always want to scaffold something rather than fail validation.
+ */
+export function normalizeSkillSlug(raw: string): string {
+  const normalized = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return normalized || "skill";
+}
+
+/**
  * Resolve the canonical slug for an installed skill.
  * Priority: explicit slug field > name-derived slug > directory name.
  */

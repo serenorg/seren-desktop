@@ -39,6 +39,45 @@ export interface SkillMetadata {
 }
 
 /**
+ * Visibility of a published skill on Seren Skills.
+ * Mirrors `SkillVisibility` from the generated SDK.
+ */
+export type SkillVisibility = "private" | "public" | "paid";
+
+/**
+ * Discoverability of a published skill on Seren Skills.
+ * Mirrors `SkillDiscoverability` from the generated SDK.
+ */
+export type SkillDiscoverability = "listed" | "unlisted";
+
+/**
+ * Lifecycle status of a published skill on Seren Skills.
+ * Mirrors `SkillStatus` from the generated SDK.
+ */
+export type SkillPublishStatus =
+  | "draft"
+  | "published"
+  | "suspended"
+  | "deleted";
+
+/**
+ * Owner-side metadata propagated from the Seren Skills publisher API.
+ * Present on catalog Skills and absent on locally-only skills.
+ */
+export interface SkillPublisherMetadata {
+  /** User id of the original creator. Stable. */
+  createdByUserId: string;
+  /** Current user owner if the record is user-owned. */
+  ownerUserId?: string | null;
+  /** Visibility of the published record. */
+  visibility: SkillVisibility;
+  /** Discoverability of the published record. */
+  discoverability: SkillDiscoverability;
+  /** Publisher lifecycle status. */
+  publishStatus: SkillPublishStatus;
+}
+
+/**
  * A skill available for installation.
  */
 export interface Skill {
@@ -72,6 +111,11 @@ export interface Skill {
    * discovery. Spec: serenorg/seren-desktop#1496
    */
   excludeHosts?: string[];
+  /**
+   * Owner-side metadata when the record exists on the Seren Skills
+   * publisher. Absent for installed-only / local-only skills.
+   */
+  publisher?: SkillPublisherMetadata;
 }
 
 export interface SkillSyncState {

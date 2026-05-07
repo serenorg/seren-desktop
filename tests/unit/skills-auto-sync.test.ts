@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSkillsService = vi.hoisted(() => ({
   fetchAllSkills: vi.fn().mockResolvedValue([]),
+  fetchOwnedSkills: vi.fn().mockResolvedValue([]),
   listAllInstalled: vi.fn().mockResolvedValue([]),
   backfillSyncState: vi.fn().mockResolvedValue(0),
   inspectSyncStatus: vi.fn().mockResolvedValue({ updateAvailable: false }),
@@ -21,6 +22,7 @@ const mockSkillsService = vi.hoisted(() => ({
   clearThreadSkills: vi.fn().mockResolvedValue(undefined),
   getEnabledSkillsContent: vi.fn().mockResolvedValue(""),
 }));
+
 
 vi.mock("solid-js/store", () => ({
   createStore: <T extends Record<string, unknown>>(initial: T) => {
@@ -43,26 +45,40 @@ vi.mock("@/lib/logger", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock("@/services/skills", () => ({
-  skills: {
-    fetchAllSkills: mockSkillsService.fetchAllSkills,
-    listAllInstalled: mockSkillsService.listAllInstalled,
-    backfillSyncState: mockSkillsService.backfillSyncState,
-    inspectSyncStatus: mockSkillsService.inspectSyncStatus,
-    refreshInstalledSkill: mockSkillsService.refreshInstalledSkill,
-    renameSkillDir: mockSkillsService.renameSkillDir,
-    clearCache: mockSkillsService.clearCache,
-    install: mockSkillsService.install,
-    readProjectConfig: mockSkillsService.readProjectConfig,
-    writeProjectConfig: mockSkillsService.writeProjectConfig,
-    clearProjectConfig: mockSkillsService.clearProjectConfig,
-    getThreadSkills: mockSkillsService.getThreadSkills,
-    setThreadSkills: mockSkillsService.setThreadSkills,
-    clearThreadSkills: mockSkillsService.clearThreadSkills,
-    getEnabledSkillsContent: mockSkillsService.getEnabledSkillsContent,
-  },
-  isUpstreamManagedSkill: mockSkillsService.isUpstreamManagedSkill,
-}));
+vi.mock("@/services/skills", () => {
+  class SkillsApiError extends Error {
+    status?: number;
+    constructor(message: string, status?: number) {
+      super(message);
+      this.name = "SkillsApiError";
+      this.status = status;
+    }
+  }
+  return {
+    skills: {
+      fetchAllSkills: mockSkillsService.fetchAllSkills,
+      fetchOwnedSkills: mockSkillsService.fetchOwnedSkills,
+      listAllInstalled: mockSkillsService.listAllInstalled,
+      backfillSyncState: mockSkillsService.backfillSyncState,
+      inspectSyncStatus: mockSkillsService.inspectSyncStatus,
+      refreshInstalledSkill: mockSkillsService.refreshInstalledSkill,
+      renameSkillDir: mockSkillsService.renameSkillDir,
+      clearCache: mockSkillsService.clearCache,
+      install: mockSkillsService.install,
+      readProjectConfig: mockSkillsService.readProjectConfig,
+      writeProjectConfig: mockSkillsService.writeProjectConfig,
+      clearProjectConfig: mockSkillsService.clearProjectConfig,
+      getThreadSkills: mockSkillsService.getThreadSkills,
+      setThreadSkills: mockSkillsService.setThreadSkills,
+      clearThreadSkills: mockSkillsService.clearThreadSkills,
+      getEnabledSkillsContent: mockSkillsService.getEnabledSkillsContent,
+    },
+    isUpstreamManagedSkill: mockSkillsService.isUpstreamManagedSkill,
+    SkillsApiError,
+    isAuthStatus: (status: number | undefined) =>
+      status === 401 || status === 403,
+  };
+});
 
 function installedSkill(slug: string) {
   return {

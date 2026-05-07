@@ -62,31 +62,41 @@ export function decodeSkillDragPayload(
   }
 }
 
+// Try the dataTransfer-bound payload first so a stale module-level signal
+// (e.g. a prior drag whose dragend never fired) cannot poison the next drop.
+// The signal is a last-resort fallback for browsers that strip dataTransfer
+// between dragstart and drop.
 export function skillDragPayload(event: DragEvent): SkillDragPayload | null {
-  const current = getCurrentSkillDragPayload();
-  if (current) return current;
-
   const transfer = event.dataTransfer;
-  if (!transfer) return null;
+  if (transfer) {
+    const direct = transfer.getData(SKILL_DRAG_MIME);
+    if (direct) {
+      const decoded = decodeSkillDragPayload(direct);
+      if (decoded) return decoded;
+    }
 
-  const direct = transfer.getData(SKILL_DRAG_MIME);
-  if (direct) return decodeSkillDragPayload(direct);
+    const text = transfer.getData("text/plain");
+    if (text) {
+      const decoded = decodeSkillDragPayload(text, { requirePrefix: true });
+      if (decoded) return decoded;
+    }
+  }
 
-  const text = transfer.getData("text/plain");
-  return text ? decodeSkillDragPayload(text, { requirePrefix: true }) : null;
+  return getCurrentSkillDragPayload();
 }
 
 export function canAcceptSkillDrop(event: DragEvent): boolean {
-  if (getCurrentSkillDragPayload() !== null) return true;
-
   const types = Array.from(event.dataTransfer?.types ?? []);
   if (types.includes(SKILL_DRAG_MIME)) return true;
-  if (!types.includes("text/plain")) return false;
 
-  const text = event.dataTransfer?.getData("text/plain");
-  return text
-    ? decodeSkillDragPayload(text, { requirePrefix: true }) !== null
-    : false;
+  if (types.includes("text/plain")) {
+    const text = event.dataTransfer?.getData("text/plain");
+    if (text && decodeSkillDragPayload(text, { requirePrefix: true })) {
+      return true;
+    }
+  }
+
+  return getCurrentSkillDragPayload() !== null;
 }
 
 function resolveSkill(

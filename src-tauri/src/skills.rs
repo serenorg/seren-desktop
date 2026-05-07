@@ -868,7 +868,7 @@ fn extract_referenced_files(content: &str) -> Vec<String> {
     let mut files = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    // Match markdown links: [text](path) — only relative paths
+    // Match markdown links: [text](path), only relative paths
     let link_re = regex::Regex::new(r"\[(?:[^\]]*)\]\(([^)]+)\)").unwrap();
     for cap in link_re.captures_iter(content) {
         let path = cap[1].trim();
@@ -914,11 +914,15 @@ pub fn remove_skill(skills_dir: String, slug: String) -> Result<(), String> {
 
 /// Create a new skill folder with scaffold structure.
 /// Generates SKILL.md, template.md, examples/sample.md, and scripts/validate.sh.
+/// `description` populates the frontmatter and overview when supplied; the
+/// frontmatter description is what the agent reads to decide whether to invoke
+/// a skill, so a meaningful value here matters more than the name does.
 #[tauri::command]
 pub fn create_skill_folder(
     skills_dir: String,
     slug: String,
     name: String,
+    description: Option<String>,
 ) -> Result<String, String> {
     validate_skill_slug(&slug)?;
     let dir_path = PathBuf::from(&skills_dir);
@@ -934,19 +938,33 @@ pub fn create_skill_folder(
     fs::create_dir_all(skill_dir.join("scripts"))
         .map_err(|e| format!("Failed to create scripts directory: {}", e))?;
 
+    let trimmed_description = description.as_deref().map(str::trim).unwrap_or("");
+    let frontmatter_description = if trimmed_description.is_empty() {
+        "TODO: describe what this skill does and when to use it".to_string()
+    } else {
+        trimmed_description.replace('\n', " ").trim().to_string()
+    };
+    let overview_body = if trimmed_description.is_empty() {
+        "Describe the skill's purpose and capabilities here.".to_string()
+    } else {
+        trimmed_description.to_string()
+    };
+
     let skill_md = format!(
-        "---\nname: {slug}\ndescription: TODO — describe what this skill does and when to use it\n---\n\n# {name}\n\n## Overview\n\nDescribe the skill's purpose and capabilities here.\n\n## Workflow\n\n1. Step one\n2. Step two\n3. Step three\n\n## Examples\n\nSee [examples/sample.md](examples/sample.md) for example output.\n\n## Scripts\n\n- [scripts/validate.sh](scripts/validate.sh) — validation script\n",
+        "---\nname: {slug}\ndescription: {description}\n---\n\n# {name}\n\n## Overview\n\n{overview}\n\n## Workflow\n\n1. Step one\n2. Step two\n3. Step three\n\n## Examples\n\nSee [examples/sample.md](examples/sample.md) for example output.\n\n## Scripts\n\n- [scripts/validate.sh](scripts/validate.sh) - validation script\n",
         slug = slug,
-        name = name
+        name = name,
+        description = frontmatter_description,
+        overview = overview_body,
     );
 
     let template_md = format!(
-        "# {name} — Template\n\nUse this template as a starting point. Fill in each section.\n\n## Input\n\nDescribe the input this skill expects.\n\n## Output\n\nDescribe the expected output format.\n",
+        "# {name} - Template\n\nUse this template as a starting point. Fill in each section.\n\n## Input\n\nDescribe the input this skill expects.\n\n## Output\n\nDescribe the expected output format.\n",
         name = name
     );
 
     let sample_md = format!(
-        "# {name} — Example Output\n\nThis file shows an example of the expected output format.\n\n## Sample\n\nReplace this with a real example.\n",
+        "# {name} - Example Output\n\nThis file shows an example of the expected output format.\n\n## Sample\n\nReplace this with a real example.\n",
         name = name
     );
 
@@ -987,6 +1005,86 @@ pub fn read_skill_content(skills_dir: String, slug: String) -> Result<Option<Str
     let content =
         fs::read_to_string(&skill_file).map_err(|e| format!("Failed to read SKILL.md: {}", e))?;
     Ok(Some(content))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillPayloadFile {
+    /// POSIX-style path relative to the skill root.
+    pub path: String,
+    /// Base64-encoded raw bytes of the file. Binary-safe.
+    pub content_b64: String,
+}
+
+/// Walk a skill directory and return every non-canonical file as a
+/// base64-encoded payload entry suitable for `BundleFileInput`. Excludes
+/// `SKILL.md` (canonical Markdown column on the publisher) and the local
+/// `.seren-sync.json` metadata file. Symlinks are not followed; recursion
+/// depth is bounded.
+#[tauri::command]
+pub fn list_skill_payload_files(
+    skills_dir: String,
+    slug: String,
+) -> Result<Vec<SkillPayloadFile>, String> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+
+    let dir_path = PathBuf::from(&skills_dir);
+    let skill_dir = match resolve_skill_dir_path(&dir_path, &slug) {
+        Some(path) => path,
+        None => return Err(format!("Skill directory not found for slug: {}", slug)),
+    };
+
+    let mut out: Vec<SkillPayloadFile> = Vec::new();
+    let mut stack: Vec<PathBuf> = vec![skill_dir.clone()];
+    let mut depth = 0usize;
+    while let Some(dir) = stack.pop() {
+        depth += 1;
+        if depth > 4096 {
+            return Err("Skill directory walk exceeded depth bound".to_string());
+        }
+        let read = fs::read_dir(&dir)
+            .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?;
+        for entry in read {
+            let entry = entry.map_err(|e| format!("Directory entry error: {}", e))?;
+            let path = entry.path();
+            let metadata = entry
+                .metadata()
+                .map_err(|e| format!("Failed to stat {}: {}", path.display(), e))?;
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !metadata.is_file() {
+                continue;
+            }
+            let relative = match path.strip_prefix(&skill_dir) {
+                Ok(rel) => rel,
+                Err(_) => continue,
+            };
+            let posix = relative
+                .components()
+                .filter_map(|c| match c {
+                    std::path::Component::Normal(s) => s.to_str().map(str::to_string),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("/");
+            if posix == "SKILL.md" || posix == SKILL_SYNC_STATE_FILE {
+                continue;
+            }
+            let bytes = fs::read(&path)
+                .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+            out.push(SkillPayloadFile {
+                path: posix,
+                content_b64: STANDARD.encode(&bytes),
+            });
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
 }
 
 /// Read a relative file from a skill directory.
@@ -1205,8 +1303,51 @@ See [section](#overview) and [email](mailto:test@example.com).
             skills_dir,
             "../bad".to_string(),
             "Bad Skill".to_string(),
+            None,
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn create_skill_folder_writes_description_into_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let path = create_skill_folder(
+            skills_dir,
+            "lead-finder".to_string(),
+            "Lead Finder".to_string(),
+            Some("Find new leads from a list of websites and report back".to_string()),
+        )
+        .unwrap();
+
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains(
+            "description: Find new leads from a list of websites and report back",
+        ));
+        assert!(
+            content
+                .contains("Find new leads from a list of websites and report back\n\n## Workflow"),
+            "overview body should reuse the supplied description, got:\n{}",
+            content,
+        );
+    }
+
+    #[test]
+    fn create_skill_folder_falls_back_to_todo_when_description_blank() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let path = create_skill_folder(
+            skills_dir,
+            "blank".to_string(),
+            "Blank".to_string(),
+            Some("   ".to_string()),
+        )
+        .unwrap();
+
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("description: TODO: describe"));
     }
 
     #[test]

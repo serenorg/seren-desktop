@@ -15,8 +15,10 @@ import {
   type SkillsState,
 } from "@/lib/skills";
 import {
+  isAuthStatus,
   isUpstreamManagedSkill,
   type ProjectSkillsConfig,
+  SkillsApiError,
   skills,
 } from "@/services/skills";
 import { skillsCatalogQueryKey } from "@/services/skills-query";
@@ -745,6 +747,31 @@ export const skillsStore = {
   },
 
   /**
+   * Merge the authenticated user's owned skills (any visibility tier) into
+   * state.available. The default catalog endpoint only returns public
+   * records, so without this the UI cannot detect ownership of private
+   * skills the user just published and the manage actions never surface.
+   *
+   * Auth errors (401/403) are swallowed so an unauthenticated session does
+   * not poison the public catalog state. Other failures (5xx, network) are
+   * logged at error level so genuine server problems are not masked.
+   */
+  async refreshOwnedSkills(): Promise<void> {
+    try {
+      const owned = await skills.fetchOwnedSkills();
+      if (owned.length > 0) {
+        mergeAvailableCatalog(owned);
+      }
+    } catch (err) {
+      if (err instanceof SkillsApiError && isAuthStatus(err.status)) {
+        log.debug("[SkillsStore] Owned-skills refresh skipped (unauth)");
+        return;
+      }
+      log.error("[SkillsStore] Owned-skills refresh failed:", err);
+    }
+  },
+
+  /**
    * Refresh installed skills from the file system.
    */
   async refreshInstalled(): Promise<void> {
@@ -820,6 +847,11 @@ export const skillsStore = {
       this.refreshAvailable(skipCache),
       this.refreshInstalled(),
     ]);
+
+    // Merge in skills owned by the authenticated user across every
+    // visibility tier so private records the user just published become
+    // detectable for ownership checks.
+    await this.refreshOwnedSkills();
 
     // Backfill sync state for skills installed before the sync feature
     // existed (pre-v2.3.16). Non-blocking: failures are logged and skipped.

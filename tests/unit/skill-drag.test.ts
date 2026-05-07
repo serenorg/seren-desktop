@@ -139,6 +139,120 @@ describe("skillPromptTextFromDrag fence escaping", () => {
   });
 });
 
+interface FakeDataTransferInit {
+  data?: Record<string, string>;
+  types?: string[];
+}
+
+function fakeDragEvent(init: FakeDataTransferInit = {}): DragEvent {
+  const data = init.data ?? {};
+  const declaredTypes = init.types ?? Object.keys(data);
+  const dataTransfer = {
+    types: declaredTypes,
+    getData: (type: string) => data[type] ?? "",
+  } as unknown as DataTransfer;
+  return { dataTransfer } as unknown as DragEvent;
+}
+
+describe("skillDragPayload priority", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    resetSkillStoreMocks();
+    const { setCurrentSkillDragPayload } = await import("@/lib/skill-drag");
+    setCurrentSkillDragPayload(null);
+  });
+
+  it("prefers the MIME payload over a stale module-level signal", async () => {
+    const { setCurrentSkillDragPayload, skillDragPayload, SKILL_DRAG_MIME } =
+      await import("@/lib/skill-drag");
+    setCurrentSkillDragPayload({ id: "stale:from-prior-drag" });
+    const event = fakeDragEvent({
+      data: { [SKILL_DRAG_MIME]: JSON.stringify({ id: "fresh:demo" }) },
+    });
+    expect(skillDragPayload(event)).toMatchObject({ id: "fresh:demo" });
+  });
+
+  it("falls back to text/plain prefix when MIME slot is empty", async () => {
+    const { encodeSkillDragText, skillDragPayload } = await import(
+      "@/lib/skill-drag"
+    );
+    const event = fakeDragEvent({
+      data: {
+        "text/plain": encodeSkillDragText({ id: "seren:demo", slug: "demo" }),
+      },
+    });
+    expect(skillDragPayload(event)).toMatchObject({ id: "seren:demo" });
+  });
+
+  it("ignores a non-prefixed text/plain payload", async () => {
+    const { skillDragPayload } = await import("@/lib/skill-drag");
+    const event = fakeDragEvent({
+      data: { "text/plain": JSON.stringify({ id: "seren:demo" }) },
+    });
+    expect(skillDragPayload(event)).toBeNull();
+  });
+
+  it("uses the signal only when dataTransfer carries no payload", async () => {
+    const { setCurrentSkillDragPayload, skillDragPayload } = await import(
+      "@/lib/skill-drag"
+    );
+    setCurrentSkillDragPayload({ id: "fallback:demo" });
+    const event = fakeDragEvent();
+    expect(skillDragPayload(event)).toMatchObject({ id: "fallback:demo" });
+  });
+
+  it("returns null after the drop handler clears the signal", async () => {
+    const { setCurrentSkillDragPayload, skillDragPayload } = await import(
+      "@/lib/skill-drag"
+    );
+    setCurrentSkillDragPayload({ id: "seren:demo" });
+    setCurrentSkillDragPayload(null);
+    expect(skillDragPayload(fakeDragEvent())).toBeNull();
+  });
+});
+
+describe("canAcceptSkillDrop", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    resetSkillStoreMocks();
+    const { setCurrentSkillDragPayload } = await import("@/lib/skill-drag");
+    setCurrentSkillDragPayload(null);
+  });
+
+  it("accepts when the MIME type is declared on dataTransfer", async () => {
+    const { canAcceptSkillDrop, SKILL_DRAG_MIME } = await import(
+      "@/lib/skill-drag"
+    );
+    const event = fakeDragEvent({ types: [SKILL_DRAG_MIME] });
+    expect(canAcceptSkillDrop(event)).toBe(true);
+  });
+
+  it("rejects an unrelated text/plain drag", async () => {
+    const { canAcceptSkillDrop } = await import("@/lib/skill-drag");
+    const event = fakeDragEvent({
+      data: { "text/plain": "just some prose the user dragged in" },
+    });
+    expect(canAcceptSkillDrop(event)).toBe(false);
+  });
+
+  it("falls back to the signal only when no skill type is declared", async () => {
+    const { canAcceptSkillDrop, setCurrentSkillDragPayload } = await import(
+      "@/lib/skill-drag"
+    );
+    setCurrentSkillDragPayload({ id: "seren:demo" });
+    expect(canAcceptSkillDrop(fakeDragEvent())).toBe(true);
+  });
+
+  it("does not accept once the signal is cleared and no MIME match exists", async () => {
+    const { canAcceptSkillDrop, setCurrentSkillDragPayload } = await import(
+      "@/lib/skill-drag"
+    );
+    setCurrentSkillDragPayload({ id: "seren:demo" });
+    setCurrentSkillDragPayload(null);
+    expect(canAcceptSkillDrop(fakeDragEvent())).toBe(false);
+  });
+});
+
 describe("attachSkillFromDrag", () => {
   beforeEach(() => {
     vi.clearAllMocks();

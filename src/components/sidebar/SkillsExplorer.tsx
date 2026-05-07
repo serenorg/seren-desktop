@@ -2,16 +2,19 @@
 // ABOUTME: Renders inside SlidePanel with chip filters (All / Installed / Needs sync) and an inline detail accordion.
 
 import { createInfiniteQuery } from "@tanstack/solid-query";
-import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import {
   type Component,
   createEffect,
   createSignal,
   For,
+  onCleanup,
   onMount,
   Show,
 } from "solid-js";
+import { CreateSkillModal } from "@/components/sidebar/CreateSkillModal";
+import { ManageSkillModal } from "@/components/sidebar/ManageSkillModal";
+import { PublishSkillModal } from "@/components/sidebar/PublishSkillModal";
 import { openExternalLink } from "@/lib/external-link";
 import { appFetch } from "@/lib/fetch";
 import { openFileInTab } from "@/lib/files/service";
@@ -28,13 +31,18 @@ import type {
   SkillScope,
   SkillSyncStatus,
 } from "@/lib/skills";
-import { parseSkillMd, resolveSkillDisplayName } from "@/lib/skills";
+import {
+  normalizeSkillSlug,
+  parseSkillMd,
+  resolveSkillDisplayName,
+} from "@/lib/skills";
 import {
   isUpstreamManagedSkill,
   skills as skillsService,
 } from "@/services/skills";
 import { skillsCatalogOptions } from "@/services/skills-query";
 import { agentStore } from "@/stores/agent.store";
+import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { type RefreshSummary, skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
@@ -49,15 +57,6 @@ type Filter = "all" | "installed" | "needs-sync";
 const SKILL_CREATOR_SLUG = "skill-creator";
 const SKILL_CREATOR_SOURCE_URL = `seren-skills:${SKILL_CREATOR_SLUG}`;
 
-function normalizeSkillSlug(raw: string): string {
-  const normalized = raw
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-  return normalized || "skill";
-}
-
 export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const [activeFilter, setActiveFilter] = createSignal<Filter>("all");
   const [searchQuery, setSearchQuery] = createSignal("");
@@ -67,7 +66,12 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const [detailContent, setDetailContent] = createSignal<string | null>(null);
   const [detailLoading, setDetailLoading] = createSignal(false);
   const [showCreateDialog, setShowCreateDialog] = createSignal(false);
-  const [newSkillName, setNewSkillName] = createSignal("");
+  const [manageSkillSlug, setManageSkillSlug] = createSignal<string | null>(
+    null,
+  );
+  const [publishSkillPath, setPublishSkillPath] = createSignal<string | null>(
+    null,
+  );
   const [showUrlDialog, setShowUrlDialog] = createSignal(false);
   const [installUrl, setInstallUrl] = createSignal("");
   const [urlInstalling, setUrlInstalling] = createSignal(false);
@@ -90,6 +94,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     {},
   );
   let contentRef: HTMLDivElement | undefined;
+  let refreshStatusTimer: ReturnType<typeof setTimeout> | null = null;
   const availableSkillsQuery = createInfiniteQuery(() =>
     skillsCatalogOptions(searchQuery()),
   );
@@ -106,6 +111,40 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       status.hasLocalChanges ||
       status.state === "bootstrap-required"
     );
+  };
+
+  // Ownership is decided by the publisher record, which only exists on
+  // catalog-side Skills. For installed rows we cross-reference by slug. The
+  // identity check uses authStore.user.id; a user signed out cannot own
+  // anything.
+  const findCatalogBySlug = (slug: string): Skill | undefined =>
+    skillsStore.available.find((s) => s.slug === slug);
+
+  const ownsSkill = (skill: Skill | InstalledSkill): boolean => {
+    const userId = authStore.user?.id;
+    if (!userId) return false;
+    const publisher =
+      skill.publisher ?? findCatalogBySlug(skill.slug)?.publisher;
+    return publisher?.createdByUserId === userId;
+  };
+
+  const handleManageChanged = async () => {
+    await skillsStore.refreshAvailable(true);
+    await skillsStore.refreshOwnedSkills();
+  };
+
+  // A skill is "publishable from desktop" when it's installed locally and has
+  // no matching record on Seren Skills yet. Skills imported from the catalog
+  // already have a record (and are owned by someone else, usually).
+  const isPublishable = (skill: InstalledSkill): boolean => {
+    if (!authStore.user?.id) return false;
+    if (findCatalogBySlug(skill.slug)) return false;
+    return true;
+  };
+
+  const handlePublishComplete = async () => {
+    await skillsStore.refreshAvailable(true);
+    await skillsStore.refreshOwnedSkills();
   };
 
   const matchesQuery = (skill: Skill | InstalledSkill, q: string): boolean => {
@@ -604,8 +643,21 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       message = "All skills up to date";
     }
     setRefreshStatus(message);
-    setTimeout(() => setRefreshStatus(null), 4000);
+    if (refreshStatusTimer !== null) {
+      clearTimeout(refreshStatusTimer);
+    }
+    refreshStatusTimer = setTimeout(() => {
+      refreshStatusTimer = null;
+      setRefreshStatus(null);
+    }, 4000);
   }
+
+  onCleanup(() => {
+    if (refreshStatusTimer !== null) {
+      clearTimeout(refreshStatusTimer);
+      refreshStatusTimer = null;
+    }
+  });
 
   const handleRefreshInstalledSkill = async (skill: InstalledSkill) => {
     const cachedStatus = syncStatusFor(skill);
@@ -701,21 +753,12 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   // ── Create skill ────────────────────────────────
 
-  const handleCreateSkill = async () => {
-    const name = newSkillName().trim();
-    if (!name) return;
-
-    const slug = name.toLowerCase().replace(/\s+/g, "-");
-    try {
-      const skillsDir = await invoke<string>("get_seren_skills_dir");
-      await invoke<string>("create_skill_folder", { skillsDir, slug, name });
-      await skillsStore.refreshInstalled();
-      setNewSkillName("");
-      setShowCreateDialog(false);
-      setActiveFilter("installed");
-    } catch (err) {
-      console.error("[SkillsExplorer] Failed to create skill:", err);
-    }
+  const handleSkillCreated = async (skillPath: string) => {
+    await skillsStore.refreshInstalled();
+    setActiveFilter("installed");
+    // Drop the user straight into the editor. Create is the entry point to
+    // authoring, not just a filesystem scaffold.
+    handleEditInEditor(skillPath);
   };
 
   // ── Install from URL ────────────────────────────
@@ -906,42 +949,41 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         </div>
       </Show>
 
-      {/* Create dialog */}
       <Show when={showCreateDialog()}>
-        <div class="px-4 py-3 border-b border-border bg-surface-2/50">
-          <input
-            type="text"
-            class="w-full px-3 py-1.5 bg-surface-1 border border-border rounded-md text-[13px] text-foreground placeholder-muted-foreground outline-none focus:border-primary"
-            placeholder="Skill name (e.g. lead-finder)"
-            value={newSkillName()}
-            onInput={(e) => setNewSkillName(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleCreateSkill();
-              if (e.key === "Escape") setShowCreateDialog(false);
-            }}
-            autofocus
-          />
-          <div class="flex items-center gap-2 mt-2">
-            <button
-              type="button"
-              class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-[12px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40"
-              onClick={handleCreateSkill}
-              disabled={!newSkillName().trim()}
-            >
-              Create
-            </button>
-            <button
-              type="button"
-              class="px-3 py-1 bg-transparent border border-border text-muted-foreground rounded-md text-[12px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
-              onClick={() => {
-                setShowCreateDialog(false);
-                setNewSkillName("");
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
+        <CreateSkillModal
+          onClose={() => setShowCreateDialog(false)}
+          onCreated={(skillPath) => void handleSkillCreated(skillPath)}
+        />
+      </Show>
+      <Show when={manageSkillSlug()}>
+        {(slug) => (
+          <Show when={findCatalogBySlug(slug())}>
+            {(skill) => (
+              <ManageSkillModal
+                skill={skill()}
+                onClose={() => setManageSkillSlug(null)}
+                onChanged={() => void handleManageChanged()}
+              />
+            )}
+          </Show>
+        )}
+      </Show>
+      <Show when={publishSkillPath()}>
+        {(path) => {
+          const target = () =>
+            skillsStore.installed.find((s) => s.path === path());
+          return (
+            <Show when={target()}>
+              {(skill) => (
+                <PublishSkillModal
+                  skill={skill()}
+                  onClose={() => setPublishSkillPath(null)}
+                  onPublished={() => void handlePublishComplete()}
+                />
+              )}
+            </Show>
+          );
+        }}
       </Show>
 
       {/* Search */}
@@ -1199,6 +1241,14 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             </span>
                           )}
                         </Show>
+                        <Show when={ownsSkill(skill)}>
+                          <span
+                            class="shrink-0 px-1.5 py-0 text-[10px] font-semibold rounded bg-primary/15 text-primary"
+                            title="You own this skill on Seren Skills"
+                          >
+                            Yours
+                          </span>
+                        </Show>
                         <Show when={syncLoading()[skill.path]}>
                           <span class="text-[10px] text-muted-foreground">
                             Checking...
@@ -1433,16 +1483,17 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                         </Show>
 
                         {/* Actions */}
-                        <div class="flex items-center gap-2 mt-2.5">
+                        <div class="flex items-center gap-2 mt-2.5 flex-wrap">
                           <button
                             type="button"
                             class="px-3 py-1 bg-transparent border border-destructive/40 text-destructive rounded-md text-[12px] cursor-pointer transition-colors hover:bg-destructive/10 disabled:opacity-40"
                             onClick={() => handleUninstall(skill)}
                             disabled={actionInProgress() === skill.id}
+                            title="Remove the local SKILL.md folder. Does not affect the published record on Seren Skills."
                           >
                             {actionInProgress() === skill.id
-                              ? "Removing..."
-                              : "Delete"}
+                              ? "Uninstalling..."
+                              : "Uninstall"}
                           </button>
                           <button
                             type="button"
@@ -1451,6 +1502,25 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                           >
                             Edit in Editor
                           </button>
+                          <Show when={ownsSkill(skill)}>
+                            <button
+                              type="button"
+                              class="px-3 py-1 bg-transparent border border-primary/40 text-primary rounded-md text-[12px] cursor-pointer transition-colors hover:bg-primary/10"
+                              onClick={() => setManageSkillSlug(skill.slug)}
+                            >
+                              Manage on Seren Skills
+                            </button>
+                          </Show>
+                          <Show when={isPublishable(skill)}>
+                            <button
+                              type="button"
+                              class="px-3 py-1 bg-transparent border border-primary/40 text-primary rounded-md text-[12px] cursor-pointer transition-colors hover:bg-primary/10"
+                              onClick={() => setPublishSkillPath(skill.path)}
+                              title="Push this local SKILL.md to Seren Skills as a new publisher record"
+                            >
+                              Publish to Seren Skills
+                            </button>
+                          </Show>
                         </div>
                       </div>
                     </div>
@@ -1491,9 +1561,19 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                     >
                       {/* Info */}
                       <div class="flex-1 min-w-0">
-                        <span class="text-[13px] font-medium text-foreground truncate block">
-                          {skill.displayName ?? skill.name}
-                        </span>
+                        <div class="flex items-center gap-2">
+                          <span class="text-[13px] font-medium text-foreground truncate">
+                            {skill.displayName ?? skill.name}
+                          </span>
+                          <Show when={ownsSkill(skill)}>
+                            <span
+                              class="shrink-0 px-1.5 py-0 text-[10px] font-semibold rounded bg-primary/15 text-primary"
+                              title="You own this skill on Seren Skills"
+                            >
+                              Yours
+                            </span>
+                          </Show>
+                        </div>
                         <Show when={skill.description}>
                           <p class="m-0 mt-0.5 text-[12px] text-muted-foreground truncate">
                             {skill.description}
@@ -1576,7 +1656,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             </pre>
                           </Show>
 
-                          <div class="mt-2.5">
+                          <div class="mt-2.5 flex items-center gap-2 flex-wrap">
                             <button
                               type="button"
                               class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-[12px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40 disabled:cursor-default"
@@ -1596,6 +1676,15 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                                     ? "Install and Add"
                                     : "Install"}
                             </button>
+                            <Show when={ownsSkill(skill)}>
+                              <button
+                                type="button"
+                                class="px-3 py-1 bg-transparent border border-primary/40 text-primary rounded-md text-[12px] cursor-pointer transition-colors hover:bg-primary/10"
+                                onClick={() => setManageSkillSlug(skill.slug)}
+                              >
+                                Manage on Seren Skills
+                              </button>
+                            </Show>
                           </div>
                         </div>
                       </div>

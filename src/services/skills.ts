@@ -3,11 +3,16 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import {
+  type BundleFileInput,
+  createSkill,
+  createVersion,
+  deleteSkill,
   downloadSkill,
   listSkills,
   type SkillBundle,
   type SkillBundleFile,
   type SkillSummary,
+  updateSkill,
 } from "@/api/seren-skills";
 import { log } from "@/lib/logger";
 import {
@@ -31,6 +36,29 @@ const LEGACY_INDEX_CACHE_KEY = "seren:skills_index";
 const INDEX_CACHE_KEY = "seren:skills_index:v2";
 const INDEX_CACHE_DURATION = 1000 * 60 * 5; // 5 minutes
 const MAX_STALE_CACHE_AGE = 1000 * 60 * 60; // 1 hour
+
+/**
+ * Error thrown by Seren Skills API helpers. Carries the HTTP status when one
+ * is available so callers can distinguish auth failures from server errors
+ * without scraping the message string.
+ */
+export class SkillsApiError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "SkillsApiError";
+    this.status = status;
+  }
+}
+
+/**
+ * True for HTTP statuses that map to "the user is not signed in or not
+ * permitted to see this resource". Used to gate silent vs surfaced errors
+ * on the owned-skills merge path.
+ */
+export function isAuthStatus(status: number | undefined): boolean {
+  return status === 401 || status === 403;
+}
 
 interface ExtraFile {
   path: string;
@@ -77,6 +105,13 @@ function skillSummaryToSkill(summary: SkillSummary): Skill {
     ),
     version: summary.current_version ?? undefined,
     lastModified: summary.updated_at,
+    publisher: {
+      createdByUserId: summary.created_by_user_id,
+      ownerUserId: summary.owner_user_id ?? null,
+      visibility: summary.visibility,
+      discoverability: summary.discoverability,
+      publishStatus: summary.status,
+    },
   };
 }
 
@@ -96,6 +131,7 @@ function skillToCacheEntry(skill: Skill): Skill {
     author: skill.author,
     version: skill.version,
     lastModified: skill.lastModified,
+    publisher: skill.publisher,
   };
 }
 
@@ -114,6 +150,26 @@ function decodeBase64Text(value: string): string {
   const binary = atob(value);
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Walk the installed skill's directory and collect payload files for a
+ * publish/version push. SKILL.md and the local sync metadata are filtered
+ * out by the Rust side; this just shapes the response into the
+ * `BundleFileInput` format the publisher expects.
+ */
+async function collectPayloadFiles(
+  skill: InstalledSkill,
+): Promise<BundleFileInput[]> {
+  if (!isTauriRuntime()) return [];
+  const raw = await invoke<Array<{ path: string; contentB64: string }>>(
+    "list_skill_payload_files",
+    { skillsDir: skill.skillsDir, slug: skill.dirName },
+  );
+  return raw.map((file) => ({
+    path: file.path,
+    content_b64: file.contentB64,
+  }));
 }
 
 function bundleFilesToExtraFiles(files: SkillBundleFile[] = []): ExtraFile[] {
@@ -252,6 +308,44 @@ async function fetchSerenSkillsPage(
     );
   }
 
+  const nextOffset = offset + page.skills.length;
+  return {
+    skills: page.skills.map(skillSummaryToSkill),
+    total: page.total,
+    offset,
+    nextOffset:
+      page.skills.length > 0 && nextOffset < page.total ? nextOffset : null,
+  };
+}
+
+/**
+ * List skills owned by the authenticated user across every visibility tier.
+ * The default `listSkills` path returns the public catalog only, which omits
+ * private skills the user owns. Without this call the desktop UI cannot
+ * detect ownership of those records and the manage actions never surface.
+ */
+async function fetchOwnedSkillsPage(
+  limit: number,
+  offset: number,
+): Promise<SkillsCatalogPage> {
+  const { data, error, response } = await listSkills({
+    query: { limit, offset, mine: true },
+    throwOnError: false,
+  });
+  if (error || !data) {
+    const status = response?.status;
+    const suffix = status !== undefined ? `: ${status}` : "";
+    throw new SkillsApiError(
+      `Failed to list owned seren-skills${suffix}`,
+      status,
+    );
+  }
+  const page = normalizeSkillsCatalogPage(data);
+  if (!page) {
+    throw new Error(
+      `Unexpected seren-skills catalog response${objectKeys(data)}`,
+    );
+  }
   const nextOffset = offset + page.skills.length;
   return {
     skills: page.skills.map(skillSummaryToSkill),
@@ -543,6 +637,25 @@ export const skills = {
     query?: string,
   ): Promise<SkillsCatalogPage> {
     return fetchSerenSkillsPage(limit, offset, query);
+  },
+
+  /**
+   * Fetch every skill owned by the authenticated user across every
+   * visibility tier. Returns the empty list for unauthenticated calls.
+   */
+  async fetchOwnedSkills(): Promise<Skill[]> {
+    const pageSize = 100;
+    const all: Skill[] = [];
+    let offset = 0;
+    let total: number | null = null;
+    do {
+      const page = await fetchOwnedSkillsPage(pageSize, offset);
+      if (page.skills.length === 0) break;
+      all.push(...page.skills);
+      total = page.total;
+      offset = page.nextOffset ?? page.total;
+    } while (total !== null && offset < total);
+    return all;
   },
 
   /**
@@ -1196,6 +1309,120 @@ export const skills = {
     }
 
     return `\n\n# Active Skills\n\n${contents.join("\n\n---\n\n")}`;
+  },
+
+  // ─── Publisher actions for owned skills ─────────────
+
+  /**
+   * Delete an owned skill from the Seren Skills publisher (soft-delete).
+   * The skill record + its versions are tombstoned. Local installs of the
+   * same slug are unaffected by this call.
+   */
+  async deletePublishedSkill(slug: string): Promise<void> {
+    const { error, response } = await deleteSkill({
+      path: { slug },
+      throwOnError: false,
+    });
+    if (error) {
+      const status = response ? `: ${response.status}` : "";
+      throw new Error(`Failed to delete skill ${slug}${status}`);
+    }
+  },
+
+  /**
+   * Update visibility/discoverability metadata on an owned published skill.
+   */
+  async updatePublishedMetadata(
+    slug: string,
+    patch: {
+      visibility?: "private" | "public" | "paid";
+      discoverability?: "listed" | "unlisted";
+    },
+  ): Promise<void> {
+    const { error, response } = await updateSkill({
+      path: { slug },
+      body: patch,
+      throwOnError: false,
+    });
+    if (error) {
+      const status = response ? `: ${response.status}` : "";
+      throw new Error(`Failed to update skill ${slug}${status}`);
+    }
+  },
+
+  /**
+   * Publish a locally-installed skill to Seren Skills as a brand-new record.
+   * Creates the publisher entry and the seed version with the local
+   * SKILL.md + payload contents. Throws on conflict so the caller can
+   * surface "slug already exists" cleanly.
+   */
+  async publishLocalSkill(
+    skill: InstalledSkill,
+    options: {
+      visibility: "private" | "public" | "paid";
+      discoverability?: "listed" | "unlisted";
+      version?: string;
+    },
+  ): Promise<SkillSummary> {
+    if (!isTauriRuntime()) {
+      throw new Error("Skills can only be published from the desktop app");
+    }
+    const skillMd = await this.readContent(skill);
+    if (!skillMd) {
+      throw new Error(`Could not read SKILL.md for ${skill.slug}`);
+    }
+    const files = await collectPayloadFiles(skill);
+    const { data, error, response } = await createSkill({
+      body: {
+        slug: skill.slug,
+        name: skill.displayName ?? skill.name,
+        description: skill.description ?? "",
+        visibility: options.visibility,
+        discoverability: options.discoverability ?? "listed",
+        skill_md: skillMd,
+        files: files.length > 0 ? files : null,
+        version: options.version ?? "0.1.0",
+        publish_now: true,
+      },
+      throwOnError: false,
+    });
+    if (error || !data) {
+      const status = response ? `: ${response.status}` : "";
+      throw new Error(`Failed to publish skill ${skill.slug}${status}`);
+    }
+    return data;
+  },
+
+  /**
+   * Push a new version of a previously-published skill from the local
+   * SKILL.md + payload. Used when the slug already exists upstream.
+   */
+  async publishNewVersion(
+    skill: InstalledSkill,
+    options: { version: string; changelog?: string },
+  ): Promise<void> {
+    if (!isTauriRuntime()) {
+      throw new Error("Skills can only be published from the desktop app");
+    }
+    const skillMd = await this.readContent(skill);
+    if (!skillMd) {
+      throw new Error(`Could not read SKILL.md for ${skill.slug}`);
+    }
+    const files = await collectPayloadFiles(skill);
+    const { error, response } = await createVersion({
+      path: { slug: skill.slug },
+      body: {
+        version: options.version,
+        skill_md: skillMd,
+        files: files.length > 0 ? files : null,
+        changelog: options.changelog ?? null,
+      },
+      throwOnError: false,
+    });
+    if (error) {
+      const status = response ? `: ${response.status}` : "";
+      throw new Error(`Failed to publish version of ${skill.slug}${status}`);
+    }
   },
 
   /**

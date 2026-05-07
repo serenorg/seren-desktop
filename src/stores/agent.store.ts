@@ -97,14 +97,19 @@ export const PUBLISHER_LIVE_QUERY_INSTRUCTION =
   "overrides any prior belief about what tools you have.";
 
 /**
- * Defensive re-prime threshold. The CLI agents (Claude Code, Codex) expose a
- * user-invoked `/compact` that summarizes their conversation history; that
- * summary may not preserve the priming block we delivered with the first
- * prompt. We do not observe the runtime's compact event from this side, so
- * once a session has accrued this many messages past its last prime, the
- * next prompt re-includes the publisher instruction + skills context as a
- * defensive measure. With ~2 messages per turn, this re-primes roughly
- * every 15 turns regardless of compact behavior.
+ * Defensive re-prime threshold. The primary re-prime trigger is a signature
+ * change on the resolved skills + publisher-instruction block (handled in
+ * `buildPromptContext`); this threshold is a backstop for the case the
+ * desktop cannot observe directly: the CLI agents (Claude Code, Codex)
+ * expose a user-invoked `/compact` that summarizes their internal
+ * conversation history, and the resulting summary may drop the priming
+ * block we delivered earlier. `/compact` does not change `messages.length`
+ * on this side, so the threshold does not fire on the first prompt after
+ * compact — it fires only once the session has accrued this many messages
+ * past the last prime, at which point we re-include the priming block as
+ * insurance. Message cadence varies by agent: a chat-only turn adds ~2
+ * messages, an agentic turn with several tool calls can add 6-10, so this
+ * fires more aggressively for tool-heavy sessions.
  *
  * TODO(skills/system-prompt): a deeper fix is to deliver the priming block
  * as the runtime's system prompt at spawn time. System prompts survive
