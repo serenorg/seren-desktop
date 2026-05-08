@@ -16,7 +16,6 @@ import {
 } from "solid-js";
 import { createStore } from "solid-js/store";
 import { SignIn } from "@/components/auth/SignIn";
-import { SkillsStrip } from "@/components/chat/SkillsStrip";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { DepositModal } from "@/components/wallet/DepositModal";
@@ -1467,10 +1466,6 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
         </Show>
 
         <div class="shrink-0 border-t border-surface-2 bg-surface-1">
-          <SkillsStrip
-            projectRoot={fileTreeState.rootPath}
-            threadId={conversationId() ?? null}
-          />
           <form
             class="flex flex-col gap-2 px-4 pb-3.5 pt-1.5"
             onSubmit={(event) => {

@@ -545,25 +545,6 @@ export const skillsStore = {
   },
 
   /**
-   * Resolve the scope a thread's effective skills come from.
-   * Refs at a higher scope replace lower scopes (no mixing), so the
-   * entire resolved list shares one source label.
-   */
-  getThreadSkillsScope(
-    projectRoot: string | null,
-    threadId: string | null,
-  ): "thread" | "project" | "global" | null {
-    if (!projectRoot || !threadId) return null;
-    if (Array.isArray(threadSkillsState[threadKey(projectRoot, threadId)])) {
-      return "thread";
-    }
-    if (Array.isArray(projectConfigState[projectRoot])) {
-      return "project";
-    }
-    return "global";
-  },
-
-  /**
    * Toggle a single skill for a specific thread.
    */
   async toggleThreadSkill(

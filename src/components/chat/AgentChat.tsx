@@ -17,7 +17,6 @@ import {
 import { createStore } from "solid-js/store";
 import { AgentPermissionDialog } from "@/components/agent/AgentPermissionDialog";
 import { DiffProposalDialog } from "@/components/agent/DiffProposalDialog";
-import { SkillsStrip } from "@/components/chat/SkillsStrip";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { isAuthError, isLikelyAuthError } from "@/lib/auth-errors";
@@ -1801,10 +1800,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       {/* Input Area */}
       <Show when={hasSession()}>
         <div class="shrink-0 border-t border-surface-2 bg-surface-1">
-          <SkillsStrip
-            projectRoot={fileTreeState.rootPath}
-            threadId={activeAgentThread()?.id ?? null}
-          />
           <form
             class="flex flex-col gap-2 px-4 pb-4 pt-1.5"
             onSubmit={(e) => {
