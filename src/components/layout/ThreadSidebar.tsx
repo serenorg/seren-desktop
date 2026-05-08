@@ -38,6 +38,13 @@ interface ThreadSidebarProps {
   onToggle?: () => void;
 }
 
+const PROJECT_GROUP_DRAG_MIME = "application/x-seren-project-group";
+
+interface ProjectDropTarget {
+  projectRoot: string;
+  position: "before" | "after";
+}
+
 const FolderIcon: Component<{ size?: number }> = (iconProps) => (
   <svg
     width={iconProps.size ?? 14}
@@ -210,6 +217,65 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     setCurrentThreadDragPayload(null);
   };
 
+  const [draggingProjectRoot, setDraggingProjectRoot] = createSignal<
+    string | null
+  >(null);
+  const [projectDropTarget, setProjectDropTarget] =
+    createSignal<ProjectDropTarget | null>(null);
+
+  const handleProjectDragStart = (event: DragEvent, projectRoot: string) => {
+    setDraggingProjectRoot(projectRoot);
+    event.dataTransfer?.setData(PROJECT_GROUP_DRAG_MIME, projectRoot);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
+  };
+
+  const handleProjectDragEnd = () => {
+    setDraggingProjectRoot(null);
+    setProjectDropTarget(null);
+  };
+
+  const handleProjectDragOver = (event: DragEvent, projectRoot: string) => {
+    const source = draggingProjectRoot();
+    if (!source) return;
+    // preventDefault + dropEffect=move on every dragover keeps the cursor
+    // showing "move" (no "+") even when hovering the source itself.
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+    if (source === projectRoot) {
+      if (projectDropTarget() !== null) setProjectDropTarget(null);
+      return;
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const position: "before" | "after" =
+      event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    const current = projectDropTarget();
+    if (
+      !current ||
+      current.projectRoot !== projectRoot ||
+      current.position !== position
+    ) {
+      setProjectDropTarget({ projectRoot, position });
+    }
+  };
+
+  const handleProjectDrop = (event: DragEvent, targetRoot: string) => {
+    const source =
+      event.dataTransfer?.getData(PROJECT_GROUP_DRAG_MIME) ||
+      draggingProjectRoot();
+    const target = projectDropTarget();
+    setDraggingProjectRoot(null);
+    setProjectDropTarget(null);
+    if (!source || source === targetRoot) return;
+    event.preventDefault();
+    const position =
+      target?.projectRoot === targetRoot ? target.position : "after";
+    threadStore.reorderProjectGroup(source, targetRoot, position);
+  };
+
   const toggleGroup = (projectRoot: string | null) => {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -327,6 +393,23 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
           !props.collapsed,
         // Collapsed: a 36px rail keeps the toggle button reachable.
         "w-9 min-w-9": props.collapsed,
+      }}
+      onDragEnter={(event) => {
+        if (!draggingProjectRoot()) return;
+        event.preventDefault();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "move";
+        }
+      }}
+      onDragOver={(event) => {
+        // Anchor the move cursor anywhere within the sidebar while a project
+        // group is being dragged so brief excursions outside the thread list
+        // don't flip the platform cursor back to copy ("+").
+        if (!draggingProjectRoot()) return;
+        event.preventDefault();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "move";
+        }
       }}
     >
       <Show when={props.collapsed && props.onToggle}>
@@ -646,7 +729,19 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         </div>
 
         {/* Thread list grouped by project */}
-        <div class="flex-1 overflow-y-auto px-2 py-1">
+        <div
+          class="flex-1 overflow-y-auto px-2 py-1"
+          onDragOver={(event) => {
+            // Keep cursor showing "move" anywhere within the thread list while
+            // a project group is being dragged, including between/around the
+            // group headers where per-button handlers don't fire.
+            if (!draggingProjectRoot()) return;
+            event.preventDefault();
+            if (event.dataTransfer) {
+              event.dataTransfer.dropEffect = "move";
+            }
+          }}
+        >
           <Show
             when={threadStore.groupedThreads.length > 0}
             fallback={
@@ -659,6 +754,15 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               {(group) => (
                 <div class="mb-1">
                   <Show when={threadStore.groupedThreads.length > 1}>
+                    <Show
+                      when={
+                        projectDropTarget()?.projectRoot ===
+                          group.projectRoot &&
+                        projectDropTarget()?.position === "before"
+                      }
+                    >
+                      <div class="h-0.5 mx-2 mb-0.5 bg-primary rounded-full" />
+                    </Show>
                     <button
                       type="button"
                       class="flex items-center gap-1.5 w-full px-2.5 py-1.5 mb-0.5 bg-transparent border-none text-[11px] font-semibold uppercase tracking-[0.04em] select-none cursor-pointer rounded-md transition-colors duration-100 hover:bg-surface-2"
@@ -667,9 +771,28 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           group.projectRoot === fileTreeState.rootPath,
                         "text-muted-foreground":
                           group.projectRoot !== fileTreeState.rootPath,
+                        "opacity-50":
+                          draggingProjectRoot() === group.projectRoot,
                       }}
                       title={group.projectRoot || undefined}
                       onClick={() => toggleGroup(group.projectRoot)}
+                      draggable={group.projectRoot !== null}
+                      onDragStart={(e) => {
+                        if (group.projectRoot !== null) {
+                          handleProjectDragStart(e, group.projectRoot);
+                        }
+                      }}
+                      onDragEnd={handleProjectDragEnd}
+                      onDragOver={(e) => {
+                        if (group.projectRoot !== null) {
+                          handleProjectDragOver(e, group.projectRoot);
+                        }
+                      }}
+                      onDrop={(e) => {
+                        if (group.projectRoot !== null) {
+                          handleProjectDrop(e, group.projectRoot);
+                        }
+                      }}
                     >
                       <svg
                         width="10"
@@ -849,6 +972,14 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                         </div>
                       )}
                     </For>
+                  </Show>
+                  <Show
+                    when={
+                      projectDropTarget()?.projectRoot === group.projectRoot &&
+                      projectDropTarget()?.position === "after"
+                    }
+                  >
+                    <div class="h-0.5 mx-2 mt-0.5 bg-primary rounded-full" />
                   </Show>
                 </div>
               )}

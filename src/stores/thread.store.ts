@@ -22,12 +22,35 @@ import { closeTab } from "@/stores/tabs";
 import { terminalStore } from "@/stores/terminal.store";
 
 const LAST_ACTIVE_THREAD_KEY = "seren:lastActiveThread";
+const PROJECT_ORDER_KEY = "seren:projectOrder";
 
 export type ThreadKind = "chat" | "agent" | "terminal" | "editor";
 
 function persistLastActiveThread(id: string, kind: ThreadKind): void {
   try {
     localStorage.setItem(LAST_ACTIVE_THREAD_KEY, JSON.stringify({ id, kind }));
+  } catch {
+    // Non-fatal
+  }
+}
+
+function loadProjectOrder(): string[] {
+  try {
+    const raw = localStorage.getItem(PROJECT_ORDER_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((v) => typeof v === "string")) {
+      return parsed;
+    }
+  } catch {
+    // Ignore
+  }
+  return [];
+}
+
+function persistProjectOrder(order: string[]): void {
+  try {
+    localStorage.setItem(PROJECT_ORDER_KEY, JSON.stringify(order));
   } catch {
     // Non-fatal
   }
@@ -85,6 +108,12 @@ interface ThreadState {
   activeThreadKind: ThreadKind | null;
   /** When true, new threads prefer Seren Chat over any available agent. */
   preferChat: boolean;
+  /**
+   * User-set order of project groups in the sidebar. Project roots in this
+   * list appear first in the rendered order; any project not in the list
+   * falls through to recency sort. Persisted across sessions.
+   */
+  projectOrder: string[];
 }
 
 export type SkillLaunchMode = "replace" | "add";
@@ -102,6 +131,7 @@ const [state, setState] = createStore<ThreadState>({
   activeThreadId: null,
   activeThreadKind: null,
   preferChat: false,
+  projectOrder: loadProjectOrder(),
 });
 
 // ============================================================================
@@ -200,6 +230,34 @@ export const threadStore = {
   },
 
   /**
+   * Move a project group so it lands before/after a target group in the
+   * sidebar. Both operands must be real project roots (not null). Persists
+   * the new order. No-op if source equals target.
+   */
+  reorderProjectGroup(
+    sourceRoot: string,
+    targetRoot: string,
+    position: "before" | "after",
+  ): void {
+    if (sourceRoot === targetRoot) return;
+
+    // Build the current displayed order so dragging an unranked project
+    // anchors at its currently-visible position rather than jumping.
+    const displayed = this.groupedThreads
+      .map((g) => g.projectRoot)
+      .filter((root): root is string => root !== null);
+
+    const next = displayed.filter((root) => root !== sourceRoot);
+    const targetIndex = next.indexOf(targetRoot);
+    if (targetIndex === -1) return;
+    const insertAt = position === "before" ? targetIndex : targetIndex + 1;
+    next.splice(insertAt, 0, sourceRoot);
+
+    setState("projectOrder", next);
+    persistProjectOrder(next);
+  },
+
+  /**
    * All threads, sorted by most recent first.
    * Combines chat conversations from conversationStore and agent conversations
    * from agentStore into a single unified list.
@@ -279,14 +337,16 @@ export const threadStore = {
   },
 
   /**
-   * Threads grouped by project directory, ordered by most recent activity.
+   * Threads grouped by project directory.
    *
-   * Sort key is `max(thread.timestamp)` across each group. We deliberately
-   * do NOT float the current project (`fileTreeState.rootPath`) to the top:
-   * doing so meant every thread click reordered the sidebar, which felt
-   * like the layout was jumping around. The "you are here" signal is
-   * carried by the highlight on the active group's header instead, which
-   * lets the layout stay spatially predictable while the user navigates.
+   * Order: any project roots in `projectOrder` appear first in that exact
+   * order; remaining projects fall through to most-recent-activity sort.
+   * The "No project" bucket is always pinned to the bottom.
+   *
+   * We deliberately do NOT float the current project (`fileTreeState.rootPath`)
+   * to the top: doing so meant every thread click reordered the sidebar,
+   * which felt like the layout was jumping around. The "you are here"
+   * signal is carried by the highlight on the active group's header.
    */
   get groupedThreads(): ThreadGroup[] {
     const threads = this.threads;
@@ -300,19 +360,32 @@ export const threadStore = {
     }
 
     const result: ThreadGroup[] = [];
+    const realRoots = [...groups.keys()].filter(
+      (key): key is string => key !== null,
+    );
 
-    const sorted = [...groups.entries()]
-      .filter(([key]) => key !== null)
-      .sort(
-        ([, a], [, b]) =>
-          Math.max(...b.map((t) => t.timestamp)) -
-          Math.max(...a.map((t) => t.timestamp)),
-      );
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    for (const root of state.projectOrder) {
+      if (groups.has(root) && !seen.has(root)) {
+        ordered.push(root);
+        seen.add(root);
+      }
+    }
 
-    for (const [root, rootThreads] of sorted) {
+    const unranked = realRoots
+      .filter((root) => !seen.has(root))
+      .sort((a, b) => {
+        const aMax = Math.max(...(groups.get(a) ?? []).map((t) => t.timestamp));
+        const bMax = Math.max(...(groups.get(b) ?? []).map((t) => t.timestamp));
+        return bMax - aMax;
+      });
+
+    for (const root of [...ordered, ...unranked]) {
+      const rootThreads = groups.get(root) ?? [];
       result.push({
         projectRoot: root,
-        folderName: (root as string).split("/").pop() || (root as string),
+        folderName: root.split("/").pop() || root,
         threads: rootThreads,
       });
     }
