@@ -70,11 +70,24 @@ const DATABASE_READY_DELAY_MS = 2000;
  * but its Postgres backend is not yet routable by the `/query` endpoint.
  * Any of these on a `SELECT 1` means "wait and retry"; any OTHER error is
  * a real problem and should bubble up immediately.
+ *
+ * The `returned http <status>` markers anchor on the Rust formatter at
+ * `src-tauri/src/claude_memory.rs::SerenDbSqlClient::run_sql` (which emits
+ * `"SerenDB query returned HTTP {status}: {body}"`). 408 is the canonical
+ * empty-body edge-timeout signature when the SerenDB SQL backend is cold;
+ * 502/503/504 cover gateway-level transients during deploys, restarts, and
+ * saturation. 5xx responses that carry a concrete body (e.g. 500 carrying
+ * "Failed to connect to target database") still match via the connection
+ * markers above. #1845.
  */
 const DATABASE_NOT_READY_MARKERS = [
   "failed to connect to target database",
   "database not ready",
   "connection refused",
+  "returned http 408",
+  "returned http 502",
+  "returned http 503",
+  "returned http 504",
 ];
 
 function isDatabaseNotReadyError(err: unknown): boolean {
@@ -83,45 +96,45 @@ function isDatabaseNotReadyError(err: unknown): boolean {
 }
 
 /**
- * Poll a database with `SELECT 1` until it responds successfully, the
- * error stops looking like a cold-start, or we hit the max attempt count.
- * Returns once the database is queryable; throws on terminal errors or
- * timeout.
+ * Run a single SQL statement against SerenDB, retrying through the readiness
+ * marker set above when the failure looks like a cold backend or a gateway
+ * transient. The DDL leg of `ensureClaudeMemoryProvisioned` and the
+ * `SELECT 1` probe in `waitForDatabaseReady` both go through this helper so
+ * each leg gets the full 180-second cold-start budget — a single 408 on
+ * either path used to crash the entire interceptor start (#1845).
  *
- * This is the "Engineering 101" check the initial #1510 PR was missing:
- * a freshly-created SerenDB database is NOT immediately queryable via the
- * `/query` endpoint. The metadata write returns fast, but the Postgres
- * backend takes seconds (sometimes tens of seconds) to provision. The
- * only safe pattern is: create → poll until ready → DDL.
+ * The query must be safe to re-run on retry. The Claude memory DDL is
+ * idempotent (`CREATE TABLE IF NOT EXISTS`), and the readiness probe is
+ * `SELECT 1`. Do not pass non-idempotent statements through here.
  */
-export async function waitForDatabaseReady(
+async function runSqlWithReadinessRetry(
   projectId: string,
   branchId: string,
   databaseName: string,
+  query: string,
+  readOnly: boolean,
   maxAttempts: number = DATABASE_READY_MAX_ATTEMPTS,
   delayMs: number = DATABASE_READY_DELAY_MS,
   sleepFn: (ms: number) => Promise<void> = (ms) =>
     new Promise((r) => setTimeout(r, ms)),
-): Promise<void> {
+): Promise<unknown> {
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      await databases.runSql(
+      const result = await databases.runSql(
         projectId,
         branchId,
         databaseName,
-        "SELECT 1",
-        /* readOnly */ true,
+        query,
+        readOnly,
       );
       if (attempt > 1) {
         console.info(
-          `[ClaudeMemory] database "${databaseName}" became ready after ${attempt} attempts`,
+          `[ClaudeMemory] database "${databaseName}" served query after ${attempt} attempts`,
         );
       }
-      return;
+      return result;
     } catch (err) {
       if (!isDatabaseNotReadyError(err)) {
-        // Not a cold-start error — surface it immediately instead of
-        // burning the whole budget on a permanent failure.
         throw err;
       }
       if (attempt === maxAttempts) {
@@ -138,6 +151,42 @@ export async function waitForDatabaseReady(
       await sleepFn(delayMs);
     }
   }
+  // Exhausted the loop without returning or throwing — unreachable with the
+  // bounds above, but TypeScript can't prove it.
+  throw new Error("runSqlWithReadinessRetry exhausted without resolving");
+}
+
+/**
+ * Poll a database with `SELECT 1` until it responds successfully, the
+ * error stops looking like a cold-start, or we hit the max attempt count.
+ * Returns once the database is queryable; throws on terminal errors or
+ * timeout.
+ *
+ * Thin wrapper around `runSqlWithReadinessRetry`. A freshly-created SerenDB
+ * database is NOT immediately queryable via the `/query` endpoint — the
+ * metadata write returns fast, but the Postgres backend takes seconds
+ * (sometimes tens of seconds) to provision. The only safe pattern is:
+ * create → poll until ready → DDL.
+ */
+export async function waitForDatabaseReady(
+  projectId: string,
+  branchId: string,
+  databaseName: string,
+  maxAttempts: number = DATABASE_READY_MAX_ATTEMPTS,
+  delayMs: number = DATABASE_READY_DELAY_MS,
+  sleepFn: (ms: number) => Promise<void> = (ms) =>
+    new Promise((r) => setTimeout(r, ms)),
+): Promise<void> {
+  await runSqlWithReadinessRetry(
+    projectId,
+    branchId,
+    databaseName,
+    "SELECT 1",
+    /* readOnly */ true,
+    maxAttempts,
+    delayMs,
+    sleepFn,
+  );
 }
 
 export interface ClaudeMemoryStatus {
@@ -251,12 +300,14 @@ export async function ensureClaudeMemoryProvisioned(): Promise<ClaudeMemoryProvi
     CLAUDE_MEMORY_DATABASE_NAME,
   );
 
-  // Apply the table DDL. Idempotent — uses CREATE TABLE IF NOT EXISTS so
-  // running on every start is harmless.
+  // Apply the table DDL through the same readiness-retry helper as the
+  // SELECT 1 probe. The DDL is idempotent (CREATE TABLE IF NOT EXISTS), and
+  // a cold backend or transient gateway 408/502/503/504 between the probe
+  // and the DDL must not collapse the whole start (#1845).
   console.info(
     `[ClaudeMemory] applying claude_agent_preferences DDL to ${CLAUDE_MEMORY_DATABASE_NAME}`,
   );
-  await databases.runSql(
+  await runSqlWithReadinessRetry(
     project.id,
     branch.id,
     CLAUDE_MEMORY_DATABASE_NAME,

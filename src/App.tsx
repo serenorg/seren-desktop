@@ -287,6 +287,36 @@ function App() {
         } catch (err) {
           // Reset so a later project/auth change can retry.
           claudeMemoryStartedForAuth = null;
+          // Emit telemetry so persistent failures (e.g. cold-start exhaustion,
+          // gateway outages) open a serenorg/seren-core ticket instead of dying
+          // silently in the dialog. #1845 — pre-fix, this entire failure class
+          // produced zero PostHog logs and zero error-tracking issues.
+          const errMessage = err instanceof Error ? err.message : String(err);
+          const errStack =
+            err instanceof Error && err.stack ? err.stack.split("\n") : [];
+          const httpStatusMatch = /returned HTTP (\d{3})/i.exec(errMessage);
+          const httpStatusCode = httpStatusMatch?.[1]
+            ? Number.parseInt(httpStatusMatch[1], 10)
+            : undefined;
+          try {
+            const { captureSupportError } = await import("@/lib/support/hook");
+            void captureSupportError({
+              kind: "claude_memory.start_failure",
+              message: errMessage,
+              stack: errStack,
+              http: {
+                method: "POST",
+                url: "https://api.serendb.com/publishers/seren-db/query",
+                status: httpStatusCode,
+                body: errMessage,
+              },
+            });
+          } catch (captureErr) {
+            // Telemetry must never block the user-facing dialog.
+            console.warn(
+              `[ClaudeMemory] captureSupportError unavailable: ${captureErr}`,
+            );
+          }
           await notifyUser(
             `The Claude memory interceptor could not start: ${err}. You can try again by toggling it off and on in Settings → Code Indexing → Claude Code Auto-Memory.`,
           );

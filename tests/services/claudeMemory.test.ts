@@ -172,6 +172,53 @@ describe("ensureClaudeMemoryProvisioned", () => {
     expect(databasesMock.runSql).not.toHaveBeenCalled();
   });
 
+  // #1845: A transient 408 on the DDL leg used to crash the entire
+  // interceptor start because the DDL was not wrapped in the same retry the
+  // readiness probe uses. Both legs must absorb cold-start blips.
+  it("survives a transient HTTP 408 on the DDL and persists IDs once it succeeds", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      databasesMock.listProjects.mockResolvedValueOnce([
+        { id: "warm-proj", name: "claude-agent-prefs" },
+      ]);
+      databasesMock.listBranches.mockResolvedValueOnce([
+        { id: "warm-branch", name: "main" },
+      ]);
+      databasesMock.listDatabases.mockResolvedValueOnce([
+        { id: "warm-db", name: "claude_agent_prefs" },
+      ]);
+      // SELECT 1 succeeds, DDL fails once with 408 then succeeds.
+      databasesMock.runSql
+        .mockResolvedValueOnce({ columns: ["?column?"], row_count: 1, rows: [[1]] })
+        .mockRejectedValueOnce(new Error("SerenDB query returned HTTP 408: "))
+        .mockResolvedValueOnce({ columns: [], row_count: 0, rows: [] });
+
+      const promise = ensureClaudeMemoryProvisioned();
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result).toEqual({
+        projectId: "warm-proj",
+        branchId: "warm-branch",
+        databaseName: "claude_agent_prefs",
+      });
+      // Three calls: probe + DDL-fail + DDL-success. The DDL retry is what
+      // saves a session that would otherwise have crashed at start.
+      expect(databasesMock.runSql).toHaveBeenCalledTimes(3);
+      const ddlAttempt = databasesMock.runSql.mock.calls[2]!;
+      expect(ddlAttempt[3]).toContain(
+        "CREATE TABLE IF NOT EXISTS claude_agent_preferences",
+      );
+      // Persistence runs only after the DDL succeeds — proves recovery is end-to-end.
+      expect(settingsStoreMock.set).toHaveBeenCalledWith(
+        "claudeMemoryProjectId",
+        "warm-proj",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reuses an existing claude-agent-prefs project if one is found", async () => {
     // No persisted IDs, but the project already exists in the user's
     // SerenDB account from a previous machine or manual creation.
@@ -290,6 +337,58 @@ describe("waitForDatabaseReady", () => {
       ),
     ).rejects.toThrow(/did not become ready after 3 attempts/);
     expect(databasesMock.runSql).toHaveBeenCalledTimes(3);
+  });
+
+  // #1845: empty-body 408s from /publishers/seren-db/query are the canonical
+  // edge-timeout shape when the SerenDB SQL backend is cold. The retry loop
+  // must absorb them; otherwise a single transient 408 collapses the entire
+  // 180s cold-start budget.
+  it.each([408, 502, 503, 504])(
+    "retries on transient HTTP %i and resolves on success",
+    async (status) => {
+      databasesMock.runSql
+        .mockRejectedValueOnce(
+          new Error(`SerenDB query returned HTTP ${status}: `),
+        )
+        .mockResolvedValueOnce({ columns: ["?column?"], row_count: 1, rows: [[1]] });
+
+      const sleepMock = vi.fn(async () => {
+        /* no-op */
+      });
+      await waitForDatabaseReady(
+        "proj",
+        "branch",
+        "claude_agent_prefs",
+        5,
+        10,
+        sleepMock,
+      );
+      expect(databasesMock.runSql).toHaveBeenCalledTimes(2);
+      expect(sleepMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("still fails fast on terminal HTTP 401", async () => {
+    // Auth failures must not be swallowed by the retry loop — there is no
+    // amount of waiting that fixes a missing API key.
+    databasesMock.runSql.mockRejectedValueOnce(
+      new Error("SerenDB query returned HTTP 401: Unauthorized"),
+    );
+    const sleepMock = vi.fn(async () => {
+      /* no-op */
+    });
+    await expect(
+      waitForDatabaseReady(
+        "proj",
+        "branch",
+        "claude_agent_prefs",
+        10,
+        10,
+        sleepMock,
+      ),
+    ).rejects.toThrow(/401/);
+    expect(databasesMock.runSql).toHaveBeenCalledTimes(1);
+    expect(sleepMock).not.toHaveBeenCalled();
   });
 });
 
