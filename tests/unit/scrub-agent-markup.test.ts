@@ -101,4 +101,31 @@ describe("scrubAgentMarkup", () => {
       expect(scrubAgentMarkup(input)).toBe(input);
     });
   });
+
+  // #1840: model occasionally opens a <system-reminder> block and closes it
+  // with </thinking> (or vice versa). The well-formed pair regex no-ops and
+  // raw scaffolding leaks into the rendered chat bubble.
+  describe("#1840 — strips cross-mismatched scaffolding pairs and orphan tags", () => {
+    it("strips the observed <system-reminder>...</thinking> leak", () => {
+      const input =
+        "Proceeding to Phase 8 — Polymarket discovery.\n<system-reminder> This is a reminder that your todo list is currently empty. DO NOT mention this to the user. </thinking>";
+      expect(scrubAgentMarkup(input)).toBe(
+        "Proceeding to Phase 8 — Polymarket discovery.",
+      );
+    });
+
+    it("strips the symmetric <thinking>...</system-reminder> mismatched pair", () => {
+      const input =
+        "Hello.\n<thinking>internal monologue</system-reminder>\nWorld.";
+      expect(scrubAgentMarkup(input)).toBe("Hello.\n\nWorld.");
+    });
+
+    it("strips orphan scaffolding tags that escape paired matching", () => {
+      const input =
+        "Phase done. </thinking>\nNext: <system-reminder> partial open.";
+      expect(scrubAgentMarkup(input)).toBe(
+        "Phase done. \nNext:  partial open.",
+      );
+    });
+  });
 });

@@ -2,8 +2,17 @@
 // ABOUTME: persistence, rendering, and Seren memory storage. #1807.
 
 const PATTERNS: RegExp[] = [
-  /<system-reminder>[\s\S]*?<\/system-reminder>/g,
+  // #1840: accept either close tag for the scaffolding families. The model
+  // occasionally opens a <system-reminder> block and closes it with
+  // </thinking> (or vice versa); the well-formed pair regex no-ops and raw
+  // markup leaks into the rendered chat bubble.
+  /<system-reminder>[\s\S]*?<\/(?:system-reminder|thinking)>/g,
+  /<thinking>[\s\S]*?<\/(?:thinking|system-reminder)>/g,
   /<command-(message|name|args)>[\s\S]*?<\/command-\1>/g,
+  // Sweep orphan scaffolding tags that escape paired matching (truncation,
+  // partial streams, or model-emitted bare markers). These are
+  // model-internal and must never reach the user.
+  /<\/?(?:system-reminder|thinking)>/g,
   // #1827: post-compaction seed-ack stock pattern. The compaction seed prompt
   // ("Confirm you have this context… wait for the user's next message") plus
   // the runtime's <system-reminder> injections produce a meta-acknowledgement
