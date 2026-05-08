@@ -225,6 +225,11 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     const id = conversationId();
     return id ? conversationStore.getMessagesFor(id) : [];
   });
+  const skillsProjectRoot = () =>
+    conversationStore.conversations.find((c) => c.id === conversationId())
+      ?.projectRoot ??
+    fileTreeState.rootPath ??
+    null;
   const conversationIsLoading = () => {
     const id = conversationId();
     return id ? conversationStore.getLoadingFor(id) : false;
@@ -1484,6 +1489,8 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
               onAttach={handleAttachImages}
               onRemove={handleRemoveImage}
               isLoading={isAttaching()}
+              projectRoot={skillsProjectRoot()}
+              threadId={conversationId() ?? null}
             />
             <div class="relative">
               <SlashCommandPopup
