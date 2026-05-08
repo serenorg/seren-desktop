@@ -857,14 +857,25 @@ jobs:
             }
 
             if (publishTarget.draft) {
-              console.log(`Setting release ${publishTarget.id} to published (non-draft)`);
+              console.log(`Setting release ${publishTarget.id} to published (non-draft) and binding tag ${tagName} @ ${context.sha}`);
               await github.rest.repos.updateRelease({
                 owner,
                 repo,
                 release_id: publishTarget.id,
-                draft: false
+                draft: false,
+                tag_name: tagName,
+                target_commitish: context.sha
               });
               console.log('Release published successfully!');
+            } else if (publishTarget.tag_name !== tagName) {
+              console.log(`Release ${publishTarget.id} is published but tagged ${publishTarget.tag_name}; rebinding to ${tagName} @ ${context.sha}`);
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: publishTarget.id,
+                tag_name: tagName,
+                target_commitish: context.sha
+              });
             } else {
               console.log(`Release ${publishTarget.id} for tag ${tagName} is already published; skipping undraft`);
             }
@@ -1037,12 +1048,31 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const tagName = '${{ github.ref_name }}';
+            const initialReleaseId = '${{ needs.create-release.outputs.release_id }}';
 
-            const { data: release } = await github.rest.repos.getReleaseByTag({
-              owner,
-              repo,
-              tag: tagName
-            });
+            let release;
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag: tagName
+              });
+              release = data;
+              console.log(`Resolved release by tag ${tagName}: ${release.id}`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              const fallbackReleaseId = Number(initialReleaseId);
+              if (!Number.isFinite(fallbackReleaseId)) {
+                throw new Error(`No release for tag ${tagName} and invalid fallback ID: ${initialReleaseId}`);
+              }
+              console.log(`No release resolves by tag ${tagName}; falling back to release ID ${fallbackReleaseId}`);
+              const { data } = await github.rest.repos.getRelease({
+                owner,
+                repo,
+                release_id: fallbackReleaseId
+              });
+              release = data;
+            }
 
             const existingAssets = await github.rest.repos.listReleaseAssets({
               owner,
