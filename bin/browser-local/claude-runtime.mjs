@@ -1695,6 +1695,16 @@ export function createClaudeRuntime({ emit }) {
       mcpConfigJson: mcpConfig.claudeMcpConfigJson,
       effort: effectiveEffort,
     });
+    // Surface the resolved --model value at every spawn so UI/runtime model
+    // mismatches (e.g. picker shows [1m] but the spawned session reports a
+    // 200K window) are diagnosable without ad-hoc instrumentation. Goes to
+    // stderr so it shares the [ProviderRuntime stderr] channel with other
+    // browser-local diagnostics; mcpConfigJson is intentionally omitted to
+    // avoid surfacing publisher credentials embedded in the inline config.
+    // See #1854.
+    console.error(
+      `[browser-local][claude] spawn sessionId=${remoteSessionId} preferredModel="${preferredModel}"`,
+    );
     const processHandle = spawn(
       claudeBin,
       claudeArgs,
@@ -2191,4 +2201,5 @@ export {
   DEFAULT_PREFERRED_MODEL as _DEFAULT_PREFERRED_MODEL,
   comparePickerEntries as _comparePickerEntries,
   resolveSpawnShell as _resolveSpawnShell,
+  buildClaudeArgs as _buildClaudeArgs,
 };
