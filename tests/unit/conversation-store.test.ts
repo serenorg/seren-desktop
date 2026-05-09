@@ -265,6 +265,7 @@ describe("conversationStore", () => {
           selected_provider: null,
           project_root: null,
           is_archived: false,
+          employee_id: null,
         },
       ]);
       vi.mocked(bridge.getMessages).mockResolvedValueOnce([
@@ -298,6 +299,7 @@ describe("conversationStore", () => {
           selected_provider: null,
           project_root: null,
           is_archived: false,
+          employee_id: null,
         },
       ]);
       vi.mocked(bridge.getMessages).mockResolvedValueOnce([

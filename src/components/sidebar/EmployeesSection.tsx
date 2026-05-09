@@ -18,6 +18,7 @@ import type {
   EmployeeSummary,
 } from "@/lib/employees/types";
 import { employeeStore } from "@/stores/employees.store";
+import { type Thread, threadStore } from "@/stores/thread.store";
 
 const STATUS_REFRESH_INTERVAL_MS = 30_000;
 
@@ -177,13 +178,40 @@ export const EmployeesSection: Component = () => {
           </div>
         </Show>
         <For each={employees()}>
-          {(employee) => (
-            <EmployeeRow
-              employee={employee}
-              active={activeId() === employee.id}
-              onSelect={handleSelect}
-            />
-          )}
+          {(employee) => {
+            const threads = createMemo<Thread[]>(
+              () => threadStore.threadsByEmployee[employee.id] ?? [],
+            );
+            return (
+              <div>
+                <EmployeeRow
+                  employee={employee}
+                  active={activeId() === employee.id}
+                  onSelect={handleSelect}
+                />
+                <For each={threads()}>
+                  {(thread) => (
+                    <button
+                      type="button"
+                      class="flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2"
+                      classList={{
+                        "bg-surface-2/70":
+                          threadStore.activeThreadId === thread.id,
+                      }}
+                      onClick={() =>
+                        threadStore.selectThread(thread.id, thread.kind)
+                      }
+                      title={thread.title}
+                    >
+                      <span class="text-[11.5px] text-muted-foreground truncate">
+                        {thread.title}
+                      </span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            );
+          }}
         </For>
         <Show when={!employeeStore.loading && employees().length === 0}>
           <div class="px-2 py-1.5 text-[11px] text-muted-foreground/70">

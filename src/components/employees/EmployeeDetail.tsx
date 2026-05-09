@@ -18,6 +18,7 @@ import type {
 } from "@/lib/employees/types";
 import { employees as svc } from "@/services/employees";
 import { employeeStore } from "@/stores/employees.store";
+import { threadStore } from "@/stores/thread.store";
 
 interface EmployeeDetailProps {
   employeeId: string;
@@ -325,8 +326,35 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
               <button
                 type="button"
                 class="w-full mb-6 py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium text-[14px] hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled
-                title="Coming in a later phase"
+                disabled={emp().mode !== "always_on"}
+                title={
+                  emp().mode === "always_on"
+                    ? `Open a new chat with ${emp().name}`
+                    : "Manual run support is coming in a later phase"
+                }
+                onClick={async () => {
+                  if (emp().mode !== "always_on") return;
+                  try {
+                    // Pass the default title so conversationStore.addMessage's
+                    // auto-titler renames the thread based on the first user
+                    // message. Linkage to the employee is conveyed by the
+                    // sidebar grouping; we don't need the row title to repeat
+                    // the employee name.
+                    await threadStore.createChatThreadWithOptions("New Chat", {
+                      provider:
+                        emp().modelChoice === "private"
+                          ? "seren-private"
+                          : null,
+                      model: emp().modelId ?? undefined,
+                      employeeId: emp().id,
+                    });
+                    props.onClose();
+                  } catch (err) {
+                    setActionError(
+                      err instanceof Error ? err.message : String(err),
+                    );
+                  }
+                }}
               >
                 {primaryCtaLabel(emp().mode)}
               </button>

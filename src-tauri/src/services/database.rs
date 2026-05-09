@@ -73,7 +73,8 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             agent_permission_mode TEXT,
             agent_metadata TEXT,
             project_id TEXT,
-            project_root TEXT
+            project_root TEXT,
+            employee_id TEXT
         )",
         [],
     )?;
@@ -236,6 +237,17 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             .ok();
     }
 
+    // employee_id links a conversation to a deployed seren-agent (virtual
+    // employee). When set, the thread groups under that employee in the
+    // sidebar instead of under its projectRoot.
+    let has_employee_id: bool = conn
+        .prepare("SELECT employee_id FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_employee_id {
+        conn.execute("ALTER TABLE conversations ADD COLUMN employee_id TEXT", [])
+            .ok();
+    }
+
     // Backfill project context for existing agent conversations.
     conn.execute(
         "UPDATE conversations
@@ -277,6 +289,11 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     .ok();
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_conversations_kind_project_created_at ON conversations(kind, project_id, created_at DESC)",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_employee_id ON conversations(employee_id, created_at DESC) WHERE employee_id IS NOT NULL",
         [],
     )
     .ok();

@@ -28,6 +28,7 @@ export interface Conversation {
   selectedProvider: ProviderId | null;
   projectRoot: string | null;
   isArchived: boolean;
+  employeeId: string | null;
 }
 
 interface ConversationState {
@@ -61,6 +62,7 @@ function dbToConversation(db: DbConversation): Conversation {
     selectedProvider: (db.selected_provider as ProviderId) ?? null,
     projectRoot: db.project_root ?? null,
     isArchived: db.is_archived,
+    employeeId: db.employee_id ?? null,
   };
 }
 
@@ -163,6 +165,7 @@ export const conversationStore = {
     model: string,
     projectRoot?: string,
     selectedProvider?: ProviderId | null,
+    employeeId?: string | null,
   ): Promise<Conversation> {
     const id = crypto.randomUUID();
 
@@ -173,6 +176,7 @@ export const conversationStore = {
         model,
         selectedProvider ?? undefined,
         projectRoot,
+        employeeId ?? undefined,
       );
     } catch (error) {
       console.warn("Failed to persist conversation", error);
@@ -186,6 +190,7 @@ export const conversationStore = {
       selectedProvider: selectedProvider ?? null,
       projectRoot: projectRoot ?? null,
       isArchived: false,
+      employeeId: employeeId ?? null,
     };
 
     setState("conversations", (convos) => [conversation, ...convos]);

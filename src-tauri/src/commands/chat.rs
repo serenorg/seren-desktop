@@ -35,6 +35,7 @@ pub struct Conversation {
     pub selected_provider: Option<String>,
     pub project_root: Option<String>,
     pub is_archived: bool,
+    pub employee_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -76,6 +77,7 @@ pub async fn create_conversation(
     selected_model: Option<String>,
     selected_provider: Option<String>,
     project_root: Option<String>,
+    employee_id: Option<String>,
 ) -> Result<Conversation, String> {
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -92,13 +94,14 @@ pub async fn create_conversation(
         selected_provider: selected_provider.clone(),
         project_root: normalized_project_root.clone(),
         is_archived: false,
+        employee_id: employee_id.clone(),
     };
 
     run_db(app, move |conn| {
         conn.execute(
-            "INSERT INTO conversations (id, title, created_at, selected_model, selected_provider, project_root, is_archived, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 'chat')",
-            params![id, title, created_at, selected_model, selected_provider, normalized_project_root],
+            "INSERT INTO conversations (id, title, created_at, selected_model, selected_provider, project_root, is_archived, kind, employee_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 'chat', ?7)",
+            params![id, title, created_at, selected_model, selected_provider, normalized_project_root, employee_id],
         )?;
         Ok(())
     })
@@ -117,7 +120,7 @@ pub async fn get_conversations(
     run_db(app, move |conn| {
         let rows = if let Some(ref root) = normalized {
             let mut stmt = conn.prepare(
-                "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived
+                "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived, employee_id
                  FROM conversations
                  WHERE kind = 'chat' AND is_archived = 0
                    AND (project_root = ?1 OR project_root IS NULL)
@@ -132,12 +135,13 @@ pub async fn get_conversations(
                     selected_provider: row.get(4)?,
                     project_root: row.get(5)?,
                     is_archived: row.get::<_, i32>(6)? != 0,
+                    employee_id: row.get(7)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?
         } else {
             let mut stmt = conn.prepare(
-                "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived
+                "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived, employee_id
                  FROM conversations
                  WHERE kind = 'chat' AND is_archived = 0
                  ORDER BY created_at DESC",
@@ -151,6 +155,7 @@ pub async fn get_conversations(
                     selected_provider: row.get(4)?,
                     project_root: row.get(5)?,
                     is_archived: row.get::<_, i32>(6)? != 0,
+                    employee_id: row.get(7)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?
@@ -165,7 +170,7 @@ pub async fn get_conversations(
 pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conversation>, String> {
     run_db(app, move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived
+            "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived, employee_id
              FROM conversations
              WHERE id = ?1 AND kind = 'chat'",
         )?;
@@ -180,6 +185,7 @@ pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conve
                     selected_provider: row.get(4)?,
                     project_root: row.get(5)?,
                     is_archived: row.get::<_, i32>(6)? != 0,
+                    employee_id: row.get(7)?,
                 })
             })
             .optional()?;

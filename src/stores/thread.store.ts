@@ -92,6 +92,12 @@ export interface Thread {
   agentType?: AgentType;
   status: ThreadStatus;
   projectRoot: string | null;
+  /**
+   * When set, the thread is linked to a deployed virtual employee. Threads
+   * with employeeId are grouped under that employee in the sidebar instead
+   * of under their projectRoot.
+   */
+  employeeId: string | null;
   timestamp: number;
   /** Whether this thread has an active in-memory agent runtime session. */
   isLive: boolean;
@@ -272,6 +278,7 @@ export const threadStore = {
         kind: "chat" as const,
         status: "idle" as ThreadStatus,
         projectRoot: c.projectRoot,
+        employeeId: c.employeeId,
         timestamp: c.createdAt,
         isLive: false,
       }));
@@ -292,6 +299,7 @@ export const threadStore = {
             ? mapSessionStatusToThread(liveSession.info.status)
             : ("idle" as ThreadStatus),
           projectRoot: a.project_root ?? a.agent_cwd ?? null,
+          employeeId: null,
           timestamp: a.created_at,
           isLive: !!liveSession,
         };
@@ -306,6 +314,7 @@ export const threadStore = {
           ? ("running" as ThreadStatus)
           : ("idle" as ThreadStatus),
       projectRoot: buffer.cwd ?? null,
+      employeeId: null,
       timestamp: buffer.createdAt,
       isLive: buffer.status === "running",
     }));
@@ -317,6 +326,7 @@ export const threadStore = {
         kind: "editor" as const,
         status: "idle" as ThreadStatus,
         projectRoot: session.cwd,
+        employeeId: null,
         // Sessions never bump above any real thread by accident: the recency
         // signal here is `lastActiveAt`, which only changes when the user
         // activates the session.
@@ -348,8 +358,25 @@ export const threadStore = {
    * which felt like the layout was jumping around. The "you are here"
    * signal is carried by the highlight on the active group's header.
    */
+  /**
+   * Threads keyed by their owning employee. Employee-linked threads are
+   * rendered under the employee row in the sidebar instead of in the
+   * project group list, so they are filtered out of `groupedThreads`.
+   */
+  get threadsByEmployee(): Record<string, Thread[]> {
+    const out: Record<string, Thread[]> = {};
+    for (const t of this.threads) {
+      if (!t.employeeId) continue;
+      const list = out[t.employeeId] ?? [];
+      list.push(t);
+      out[t.employeeId] = list;
+    }
+    return out;
+  },
+
   get groupedThreads(): ThreadGroup[] {
-    const threads = this.threads;
+    // Employee-linked threads are surfaced under the employee in the sidebar.
+    const threads = this.threads.filter((t) => !t.employeeId);
 
     // Group by projectRoot.
     const groups = new Map<string | null, Thread[]>();
@@ -555,9 +582,13 @@ export const threadStore = {
     options: {
       provider?: ProviderId | null;
       model?: string;
+      employeeId?: string;
     },
   ): Promise<string> {
-    const projectRoot = fileTreeState.rootPath || undefined;
+    // Employee-linked threads are not bound to a project folder.
+    const projectRoot = options.employeeId
+      ? undefined
+      : fileTreeState.rootPath || undefined;
     const provider =
       options.provider ??
       (providerStore.activeProvider === "seren-private"
@@ -573,6 +604,7 @@ export const threadStore = {
       model,
       projectRoot,
       provider,
+      options.employeeId ?? null,
     );
     this.selectThread(conversation.id, "chat");
     return conversation.id;

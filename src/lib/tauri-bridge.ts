@@ -602,6 +602,7 @@ export interface Conversation {
   selected_provider: string | null;
   project_root: string | null;
   is_archived: boolean;
+  employee_id: string | null;
 }
 
 /**
@@ -647,6 +648,7 @@ export async function createConversation(
   selectedModel?: string,
   selectedProvider?: string,
   projectRoot?: string,
+  employeeId?: string,
 ): Promise<Conversation> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -658,6 +660,7 @@ export async function createConversation(
     selectedModel,
     selectedProvider,
     projectRoot,
+    employeeId,
   });
 }
 
