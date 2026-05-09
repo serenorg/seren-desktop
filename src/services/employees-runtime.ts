@@ -1,0 +1,295 @@
+// ABOUTME: Runtime invocation for deployed employee agents via the seren-cloud SDK.
+// ABOUTME: POSTs a run, streams events via SSE (with poll fallback), returns the reply.
+
+import {
+  type CloudRunOutputEventEnvelope,
+  serenCloudDeploymentRun,
+  serenCloudDeploymentRunStream,
+  serenCloudRun,
+} from "@/api/seren-cloud";
+
+const POLL_INTERVAL_MS = 600;
+const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const STREAM_MAX_RETRY_ATTEMPTS = 1;
+
+const TERMINAL_STATUSES = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "canceled",
+  "awaiting_approval",
+]);
+
+const FAILURE_STATUSES = new Set(["failed", "cancelled", "canceled"]);
+
+export interface RunResult {
+  text: string;
+  status: string;
+  runId: string | null;
+  thinking: string | null;
+  errorMessage: string | null;
+}
+
+function asMessage(error: unknown, fallback: string): string {
+  if (!error) return fallback;
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (typeof error === "object") {
+    const obj = error as Record<string, unknown>;
+    if (typeof obj.message === "string") return obj.message;
+    if (typeof obj.detail === "string") return obj.detail;
+    if (typeof obj.error === "string") return obj.error;
+  }
+  return fallback;
+}
+
+function fallbackTextFromResult(result: unknown): string {
+  if (typeof result === "string") return result;
+  if (result && typeof result === "object") {
+    const obj = result as Record<string, unknown>;
+    if (typeof obj.text === "string") return obj.text;
+    if (typeof obj.content === "string") return obj.content;
+    if (typeof obj.message === "string") return obj.message;
+    if (typeof obj.output === "string") return obj.output;
+  }
+  return "";
+}
+
+export interface RunCallbacks {
+  /** Called for each text token streamed from the runtime. */
+  onText?: (chunk: string) => void;
+  /** Called for each thinking-trace token streamed from the runtime. */
+  onThinking?: (chunk: string) => void;
+}
+
+export interface RunOptions extends RunCallbacks {
+  signal?: AbortSignal;
+  /**
+   * Stable desktop-side conversation identifier. Forwarded to the runtime
+   * as `conversation_id` so a deployed agent can correlate turns into a
+   * single session and answer with multi-turn context. The seren-cloud
+   * run-request schema explicitly accepts additional JSON fields.
+   */
+  conversationId?: string;
+}
+
+function applyEnvelope(
+  raw: unknown,
+  state: { text: string; thinking: string; errorMessage: string | null },
+  callbacks: RunCallbacks,
+): void {
+  if (!raw || typeof raw !== "object") return;
+  const ev = raw as CloudRunOutputEventEnvelope;
+  switch (ev.type) {
+    case "text":
+      if (typeof ev.text === "string" && ev.text.length > 0) {
+        state.text += ev.text;
+        callbacks.onText?.(ev.text);
+      }
+      break;
+    case "thinking":
+      if (typeof ev.text === "string" && ev.text.length > 0) {
+        state.thinking += ev.text;
+        callbacks.onThinking?.(ev.text);
+      }
+      break;
+    case "error":
+      if (typeof ev.message === "string" && !state.errorMessage) {
+        state.errorMessage = ev.message;
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+async function pollUntilTerminal(
+  deploymentId: string,
+  runId: string,
+  signal: AbortSignal | undefined,
+  state: { text: string; thinking: string; errorMessage: string | null },
+  callbacks: RunCallbacks,
+  startedAt: number,
+): Promise<{
+  status: string;
+  statusMessage: string | null;
+  output: string | null;
+}> {
+  while (true) {
+    signal?.throwIfAborted();
+    const r = await serenCloudDeploymentRun({
+      path: { id: deploymentId, run_id: runId },
+      throwOnError: false,
+    });
+    if (r.error || !r.data?.data) {
+      throw new Error(`Failed to read run ${runId}: ${asMessage(r.error, "")}`);
+    }
+    const event = r.data.data;
+    if (TERMINAL_STATUSES.has(event.status)) {
+      // Replay any events the caller has not seen yet (because we fell
+      // back to polling without ever opening the stream, or because the
+      // stream dropped before terminal). Track length-only on text/thinking
+      // so we don't double-emit chunks already streamed.
+      const recovered = { text: "", thinking: "", errorMessage: null } as {
+        text: string;
+        thinking: string;
+        errorMessage: string | null;
+      };
+      if (Array.isArray(event.output_events)) {
+        for (const raw of event.output_events) {
+          applyEnvelope(raw, recovered, {});
+        }
+      }
+      if (recovered.text.length > state.text.length) {
+        const diff = recovered.text.slice(state.text.length);
+        state.text = recovered.text;
+        callbacks.onText?.(diff);
+      }
+      if (recovered.thinking.length > state.thinking.length) {
+        const diff = recovered.thinking.slice(state.thinking.length);
+        state.thinking = recovered.thinking;
+        callbacks.onThinking?.(diff);
+      }
+      if (recovered.errorMessage && !state.errorMessage) {
+        state.errorMessage = recovered.errorMessage;
+      }
+      return {
+        status: event.status,
+        statusMessage: event.status_message ?? null,
+        output: event.output ?? null,
+      };
+    }
+    if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+      throw new Error(
+        `Employee run ${runId} did not complete within ${Math.round(
+          POLL_TIMEOUT_MS / 1000,
+        )}s`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+}
+
+/**
+ * Trigger a run on a deployed employee and wait for it to finish.
+ *
+ * POSTs to `serenCloudRun` with the user's message, then opens an SSE
+ * stream at `/deployments/{id}/runs/{run_id}/stream`. Each text/thinking
+ * chunk is dispatched through the provided callbacks while a running tally
+ * is kept so the final RunResult carries the assembled reply. If the
+ * stream drops or the runtime emits no events, falls back to polling
+ * `serenCloudDeploymentRun` until terminal state.
+ */
+export async function runEmployeeMessage(
+  deploymentId: string,
+  message: string,
+  options: RunOptions = {},
+): Promise<RunResult> {
+  const { signal, onText, onThinking, conversationId } = options;
+  const callbacks: RunCallbacks = { onText, onThinking };
+  signal?.throwIfAborted();
+
+  // CloudDeploymentRunRequest's typed surface only knows {message, async,
+  // run_id, ...}; the schema description allows additional fields. Cast
+  // through `unknown` so the runtime sees `conversation_id` without
+  // upsetting the SDK's generated body type.
+  const body = {
+    message,
+    ...(conversationId ? { conversation_id: conversationId } : {}),
+  } as unknown as Parameters<typeof serenCloudRun>[0]["body"];
+
+  const created = await serenCloudRun({
+    path: { id: deploymentId },
+    body,
+    throwOnError: false,
+  });
+  if (created.error || !created.data?.data) {
+    throw new Error(
+      `Failed to start employee run: ${asMessage(created.error, "")}`,
+    );
+  }
+
+  const invocation = created.data.data;
+  const runId = invocation.run_id ?? null;
+
+  // Some compute backends complete synchronously and return the result
+  // inline without a run_id. Emit it as a single chunk and return.
+  if (!runId) {
+    const text = fallbackTextFromResult(invocation.result);
+    const status = invocation.status ?? "completed";
+    if (FAILURE_STATUSES.has(status) && !text) {
+      throw new Error(`Run ${status} with no output`);
+    }
+    if (text) callbacks.onText?.(text);
+    return {
+      text,
+      status,
+      runId: null,
+      thinking: null,
+      errorMessage: null,
+    };
+  }
+
+  const state = { text: "", thinking: "", errorMessage: null } as {
+    text: string;
+    thinking: string;
+    errorMessage: string | null;
+  };
+  const startedAt = Date.now();
+
+  try {
+    const { stream } = await serenCloudDeploymentRunStream({
+      path: { id: deploymentId, run_id: runId },
+      signal,
+      sseMaxRetryAttempts: STREAM_MAX_RETRY_ATTEMPTS,
+      throwOnError: false,
+    });
+    for await (const raw of stream) {
+      signal?.throwIfAborted();
+      applyEnvelope(raw, state, callbacks);
+    }
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    // Stream dropped (or never opened); fall through to the canonical
+    // terminal-state fetch below, which will replay any events we missed.
+    console.warn(
+      "[employees-runtime] Stream failed, falling back to poll:",
+      err,
+    );
+  }
+
+  // Either the stream completed or it failed; in both cases the run is
+  // either already terminal or we need to poll until it is. If the stream
+  // closed cleanly we still poll once to read the canonical terminal
+  // status and recover any text we may have missed.
+  const final = await pollUntilTerminal(
+    deploymentId,
+    runId,
+    signal,
+    state,
+    callbacks,
+    startedAt,
+  );
+
+  // Prefer streamed text; fall back to the runtime's raw stdout/stderr for
+  // backends that don't emit structured events (e.g. plain script runtimes).
+  const text = state.text || final.output || "";
+  const errorMessage = state.errorMessage ?? final.statusMessage ?? null;
+
+  if (FAILURE_STATUSES.has(final.status) && !text) {
+    throw new Error(errorMessage ?? `Employee run ${final.status}`);
+  }
+  if (final.status === "awaiting_approval" && !text) {
+    throw new Error(
+      "Employee run is awaiting approval. Approval flow is not yet supported in chat.",
+    );
+  }
+
+  return {
+    text,
+    status: final.status,
+    runId,
+    thinking: state.thinking || null,
+    errorMessage,
+  };
+}

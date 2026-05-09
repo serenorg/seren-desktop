@@ -6,6 +6,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Attachment, ToolDefinition } from "@/lib/providers/types";
 import { getAllTools } from "@/lib/tools";
 import { executeTool } from "@/lib/tools/executor";
+import { runEmployeeMessage } from "@/services/employees-runtime";
 import { storeAssistantResponse } from "@/services/memory";
 import {
   allowsClaudeAgent,
@@ -156,6 +157,19 @@ export async function orchestrate(
 
   // Save params for retry support
   lastOrchestrationParams = { conversationId, prompt, images };
+
+  // Employee-linked threads bypass the seren-models orchestrator and run
+  // against the deployed agent's runtime via seren-cloud. The deployed
+  // agent owns its own system_prompt, model_policy, tool_presets, and
+  // approval policy — we just hand it the user message and surface the
+  // reply.
+  const conv = conversationStore.conversations.find(
+    (c) => c.id === conversationId,
+  );
+  if (conv?.employeeId) {
+    await runEmployeeTurn(conversationId, conv.employeeId, prompt);
+    return;
+  }
 
   // 1. Build history from conversation store
   const messages = conversationStore.getMessagesFor(conversationId);
@@ -549,6 +563,54 @@ function handleComplete(
   storeAssistantResponse(content, { model }).catch((err) => {
     console.warn("[orchestrator] Failed to store memory:", err);
   });
+}
+
+/**
+ * Run a single chat turn against a deployed virtual employee via seren-cloud.
+ *
+ * Bypasses the seren-models orchestrator entirely: the deployed agent owns
+ * its own system_prompt, model resolution, tools, and approval policy. We
+ * just hand it the user's message and surface the reply as an assistant
+ * message.
+ */
+async function runEmployeeTurn(
+  conversationId: string,
+  deploymentId: string,
+  prompt: string,
+): Promise<void> {
+  try {
+    const result = await runEmployeeMessage(deploymentId, prompt, {
+      conversationId,
+      onText: (chunk) => {
+        conversationStore.appendStreamingContent(chunk, conversationId);
+      },
+      onThinking: (chunk) => {
+        conversationStore.appendStreamingThinking(chunk, conversationId);
+      },
+    });
+    conversationStore.finalizeStreaming(conversationId);
+    const assistantMessage: UnifiedMessage = {
+      id: crypto.randomUUID(),
+      type: "assistant",
+      role: "assistant",
+      content: result.text,
+      timestamp: Date.now(),
+      status: "complete",
+      workerType: "orchestrator",
+      thinking: result.thinking ?? undefined,
+      modelId: undefined,
+      request: { prompt },
+    };
+    conversationStore.addMessage(assistantMessage, conversationId);
+    await conversationStore.persistMessage(assistantMessage, conversationId);
+  } catch (error) {
+    conversationStore.finalizeStreaming(conversationId);
+    const message = error instanceof Error ? error.message : String(error);
+    handleError(message, conversationId);
+  } finally {
+    conversationStore.setLoading(false, conversationId);
+    conversationStore.setRLMProcessing(false, conversationId);
+  }
 }
 
 function handleError(message: string, conversationId?: string): void {
