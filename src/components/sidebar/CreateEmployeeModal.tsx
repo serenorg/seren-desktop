@@ -15,8 +15,10 @@ import {
 import { deriveSlug, gradientFor, initialFor } from "@/lib/employees/avatar";
 import type {
   EmployeeApprovalPolicy,
+  EmployeeDetail,
   EmployeeMode,
   EmployeeModelPolicy,
+  EmployeePatch,
   EmployeeToolPreset,
   ModelChoice,
   NewEmployeeInput,
@@ -59,42 +61,73 @@ const DEFAULT_LIMITS = {
 interface CreateEmployeeModalProps {
   onClose: () => void;
   onCreated: (employeeId: string) => void;
+  /**
+   * When provided, the modal opens in edit mode: fields are prefilled and
+   * submission calls update() instead of deploy(). Slug and mode are
+   * immutable in edit mode (the backend update spec does not expose them).
+   */
+  employee?: EmployeeDetail;
+}
+
+function extractRoleBody(prompt: string | null | undefined): string {
+  if (!prompt) return "";
+  const withoutFrontmatter = prompt.replace(/^---[\s\S]*?---\n/, "");
+  const withoutHeading = withoutFrontmatter.replace(/^# .*\n+/, "");
+  return withoutHeading.trim();
 }
 
 export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
   props,
 ) => {
-  const [name, setName] = createSignal("");
-  const [slug, setSlug] = createSignal("");
-  const [slugTouched, setSlugTouched] = createSignal(false);
-  const [mode, setMode] = createSignal<EmployeeMode>("always_on");
-  const [cronSchedule, setCronSchedule] = createSignal("0 * * * *");
-  const [cronTimezone, setCronTimezone] = createSignal("UTC");
-  const [role, setRole] = createSignal("");
-  const [modelChoice, setModelChoice] = createSignal<ModelChoice>("standard");
-  const [modelPolicy, setModelPolicy] =
-    createSignal<EmployeeModelPolicy>("balanced");
-  const [modelId, setModelId] = createSignal("");
+  const editing = () => props.employee !== undefined;
+  const initial = props.employee;
+
+  const [name, setName] = createSignal(initial?.name ?? "");
+  const [slug, setSlug] = createSignal(initial?.slug ?? "");
+  // In edit mode the slug is immutable; treat it as already-touched so we
+  // never auto-derive over it.
+  const [slugTouched, setSlugTouched] = createSignal(initial !== undefined);
+  const [mode, setMode] = createSignal<EmployeeMode>(
+    initial?.mode ?? "always_on",
+  );
+  const [cronSchedule, setCronSchedule] = createSignal(
+    initial?.cronSchedule ?? "0 * * * *",
+  );
+  const [cronTimezone, setCronTimezone] = createSignal(
+    initial?.cronTimezone ?? "UTC",
+  );
+  const [role, setRole] = createSignal(extractRoleBody(initial?.prompt));
+  const [modelChoice, setModelChoice] = createSignal<ModelChoice>(
+    initial?.modelChoice ?? "standard",
+  );
+  const [modelPolicy, setModelPolicy] = createSignal<EmployeeModelPolicy>(
+    initial?.modelPolicy ?? "balanced",
+  );
+  const [modelId, setModelId] = createSignal(initial?.modelId ?? "");
   const [showAdvanced, setShowAdvanced] = createSignal(false);
   const [approvalPolicy, setApprovalPolicy] =
-    createSignal<EmployeeApprovalPolicy>("read_only");
-  const [toolPresets, setToolPresets] = createSignal<EmployeeToolPreset[]>([
-    "live_data",
-  ]);
+    createSignal<EmployeeApprovalPolicy>(
+      initial?.approvalPolicy ?? "read_only",
+    );
+  const [toolPresets, setToolPresets] = createSignal<EmployeeToolPreset[]>(
+    initial?.toolPresets && initial.toolPresets.length > 0
+      ? initial.toolPresets
+      : ["live_data"],
+  );
   const [maxIterations, setMaxIterations] = createSignal(
-    DEFAULT_LIMITS.maxIterations,
+    initial?.maxIterations ?? DEFAULT_LIMITS.maxIterations,
   );
   const [maxToolCalls, setMaxToolCalls] = createSignal(
-    DEFAULT_LIMITS.maxToolCallsPerRun,
+    initial?.maxToolCallsPerRun ?? DEFAULT_LIMITS.maxToolCallsPerRun,
   );
   const [maxTimeout, setMaxTimeout] = createSignal(
-    DEFAULT_LIMITS.maxTimeoutSeconds,
+    initial?.maxTimeoutSeconds ?? DEFAULT_LIMITS.maxTimeoutSeconds,
   );
   const [maxToolOutput, setMaxToolOutput] = createSignal(
-    DEFAULT_LIMITS.maxToolOutputChars,
+    initial?.maxToolOutputChars ?? DEFAULT_LIMITS.maxToolOutputChars,
   );
   const [contextBudget, setContextBudget] = createSignal(
-    DEFAULT_LIMITS.contextBudgetTokens,
+    initial?.contextBudgetTokens ?? DEFAULT_LIMITS.contextBudgetTokens,
   );
 
   const [submitting, setSubmitting] = createSignal(false);
@@ -189,29 +222,55 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     setSubmitting(true);
     setError(null);
     try {
-      const input: NewEmployeeInput = {
-        name: name().trim(),
-        slug: effectiveSlug(),
-        mode: mode(),
-        cronSchedule: mode() === "cron" ? cronSchedule().trim() : undefined,
-        cronTimezone: mode() === "cron" ? cronTimezone().trim() : undefined,
-        systemPrompt: buildSystemPrompt(),
-        modelChoice: modelChoice(),
-        modelPolicy: modelChoice() === "standard" ? modelPolicy() : undefined,
-        modelId: modelChoice() === "private" ? modelId().trim() : undefined,
-        toolPresets: toolPresets(),
-        approvalPolicy: approvalPolicy(),
-        limits: {
-          maxIterations: maxIterations(),
-          maxToolCallsPerRun: maxToolCalls(),
-          maxTimeoutSeconds: maxTimeout(),
-          maxToolOutputChars: maxToolOutput(),
-          contextBudgetTokens: contextBudget(),
-        },
+      const limits = {
+        maxIterations: maxIterations(),
+        maxToolCallsPerRun: maxToolCalls(),
+        maxTimeoutSeconds: maxTimeout(),
+        maxToolOutputChars: maxToolOutput(),
+        contextBudgetTokens: contextBudget(),
       };
-      const summary = await svc.deploy(input);
+      let summary: Awaited<ReturnType<typeof svc.deploy>>;
+      if (props.employee) {
+        const patch: EmployeePatch = {
+          name: name().trim(),
+          // Mode is immutable on update; cron fields only flow when the
+          // existing mode is cron.
+          mode: props.employee.mode,
+          cronSchedule:
+            props.employee.mode === "cron" ? cronSchedule().trim() : undefined,
+          cronTimezone:
+            props.employee.mode === "cron" ? cronTimezone().trim() : undefined,
+          systemPrompt: buildSystemPrompt(),
+          modelChoice: modelChoice(),
+          modelPolicy: modelChoice() === "standard" ? modelPolicy() : undefined,
+          modelId: modelChoice() === "private" ? modelId().trim() : undefined,
+          toolPresets: toolPresets(),
+          approvalPolicy: approvalPolicy(),
+          limits,
+        };
+        summary = await svc.update(props.employee.id, patch);
+      } else {
+        const input: NewEmployeeInput = {
+          name: name().trim(),
+          slug: effectiveSlug(),
+          mode: mode(),
+          cronSchedule: mode() === "cron" ? cronSchedule().trim() : undefined,
+          cronTimezone: mode() === "cron" ? cronTimezone().trim() : undefined,
+          systemPrompt: buildSystemPrompt(),
+          modelChoice: modelChoice(),
+          modelPolicy: modelChoice() === "standard" ? modelPolicy() : undefined,
+          modelId: modelChoice() === "private" ? modelId().trim() : undefined,
+          toolPresets: toolPresets(),
+          approvalPolicy: approvalPolicy(),
+          limits,
+        };
+        summary = await svc.deploy(input);
+      }
       employeeStore.upsert(summary);
       void employeeStore.refresh();
+      if (props.employee) {
+        void employeeStore.loadDetail(summary.id);
+      }
       props.onCreated(summary.id);
       props.onClose();
     } catch (err) {
@@ -239,7 +298,9 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             id="create-employee-title"
             class="m-0 text-base font-semibold text-foreground"
           >
-            New employee
+            {editing()
+              ? `Edit ${props.employee?.name ?? "employee"}`
+              : "New employee"}
           </h2>
           <button
             type="button"
@@ -306,7 +367,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             <input
               id="employee-slug"
               type="text"
-              class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm font-mono transition-colors duration-150 focus:outline-none focus:border-primary"
+              class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm font-mono transition-colors duration-150 focus:outline-none focus:border-primary disabled:opacity-60"
               value={effectiveSlug()}
               onInput={(e) => {
                 setSlug(deriveSlug(e.currentTarget.value));
@@ -314,15 +375,21 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                 clearError();
               }}
               placeholder="e.g. research-assistant"
-              disabled={submitting()}
+              disabled={submitting() || editing()}
+              readOnly={editing()}
               aria-describedby="employee-slug-help"
             />
             <div
               id="employee-slug-help"
               class="mt-1 text-[10.5px] text-muted-foreground/80"
             >
-              Lowercase letters, numbers, and hyphens. Auto-derived from name
-              until edited.
+              <Show
+                when={!editing()}
+                fallback="Slug is fixed for the lifetime of the deployment."
+              >
+                Lowercase letters, numbers, and hyphens. Auto-derived from name
+                until edited.
+              </Show>
             </div>
           </div>
 
@@ -345,15 +412,18 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                     type="button"
                     role="radio"
                     aria-checked={mode() === option.value}
-                    class="text-left p-2.5 rounded-md border bg-card transition-all duration-100 cursor-pointer"
+                    class="text-left p-2.5 rounded-md border bg-card transition-all duration-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     classList={{
                       "border-primary bg-primary/[0.08]":
                         mode() === option.value,
                       "border-border hover:border-border/90 hover:bg-surface-2":
-                        mode() !== option.value,
+                        mode() !== option.value && !editing(),
                     }}
-                    onClick={() => setMode(option.value)}
-                    disabled={submitting()}
+                    onClick={() => {
+                      if (editing()) return;
+                      setMode(option.value);
+                    }}
+                    disabled={submitting() || editing()}
                   >
                     <div class="text-[12.5px] font-semibold text-foreground">
                       {option.title}
@@ -684,7 +754,13 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             onClick={handleSubmit}
             disabled={!canSubmit()}
           >
-            {submitting() ? "Deploying..." : "Deploy employee"}
+            {submitting()
+              ? editing()
+                ? "Saving..."
+                : "Deploying..."
+              : editing()
+                ? "Save changes"
+                : "Deploy employee"}
           </button>
         </div>
       </div>

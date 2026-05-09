@@ -10,6 +10,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
 import type {
   EmployeeMode,
@@ -94,6 +95,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [showKebab, setShowKebab] = createSignal(false);
   const [confirmDelete, setConfirmDelete] = createSignal(false);
+  const [showEdit, setShowEdit] = createSignal(false);
 
   const summary = createMemo<EmployeeSummary | undefined>(() =>
     employeeStore.byId(props.employeeId),
@@ -278,14 +280,19 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     <button
                       type="button"
                       role="menuitem"
-                      class="w-full text-left px-3 py-1.5 text-[13px] text-foreground hover:bg-surface-2 transition-colors"
+                      class="w-full text-left px-3 py-1.5 text-[13px] text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => {
                         setShowKebab(false);
-                        // Edit flow lands in a later phase.
+                        setShowEdit(true);
                       }}
-                      disabled
+                      disabled={!detailRecord()}
+                      title={
+                        detailRecord()
+                          ? "Edit this employee"
+                          : "Loading employee detail..."
+                      }
                     >
-                      Edit (coming soon)
+                      Edit
                     </button>
                     <button
                       type="button"
@@ -458,6 +465,18 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                 </Show>
               </div>
             </div>
+
+            <Show when={showEdit() && detailRecord()}>
+              {(d) => (
+                <CreateEmployeeModal
+                  employee={d()}
+                  onClose={() => setShowEdit(false)}
+                  onCreated={(id) => {
+                    void employeeStore.loadDetail(id);
+                  }}
+                />
+              )}
+            </Show>
 
             <Show when={confirmDelete()}>
               <div
