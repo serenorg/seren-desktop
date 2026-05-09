@@ -8,6 +8,7 @@ import {
   serenCloudDeploymentRunStream,
   serenCloudRun,
 } from "@/api/seren-cloud";
+import { formatApiError } from "@/lib/api-errors";
 
 interface ActiveRun {
   controller: AbortController;
@@ -73,45 +74,6 @@ export interface RunResult {
   runId: string | null;
   thinking: string | null;
   errorMessage: string | null;
-}
-
-function asMessage(error: unknown, fallback: string): string {
-  if (!error) return fallback;
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error.length > 0 ? error : fallback;
-  if (typeof error === "number" || typeof error === "boolean") {
-    return String(error);
-  }
-  if (typeof error === "object") {
-    const obj = error as Record<string, unknown>;
-    for (const key of [
-      "message",
-      "detail",
-      "error_description",
-      "error_message",
-      "error",
-      "title",
-      "reason",
-    ]) {
-      const value = obj[key];
-      if (typeof value === "string" && value.length > 0) return value;
-    }
-    if (typeof obj.status === "number" || typeof obj.code === "string") {
-      const status = typeof obj.status === "number" ? obj.status : null;
-      const code = typeof obj.code === "string" ? obj.code : null;
-      const tag = [status, code].filter(Boolean).join(" ");
-      if (tag) return `HTTP ${tag}`;
-    }
-    try {
-      const dump = JSON.stringify(error);
-      if (dump && dump !== "{}") {
-        return dump.length > 240 ? `${dump.slice(0, 237)}...` : dump;
-      }
-    } catch {
-      // Fall through to fallback if the body has a circular ref.
-    }
-  }
-  return fallback;
 }
 
 function fallbackTextFromResult(result: unknown): string {
@@ -295,8 +257,9 @@ async function pollUntilTerminal(
     });
     if (r.error || !r.data?.data) {
       throw new Error(
-        `Failed to read run ${runId}: ${asMessage(
+        `Failed to read run ${runId}: ${formatApiError(
           r.error,
+          r.response,
           "missing run data",
         )}`,
       );
@@ -453,8 +416,9 @@ export async function runEmployeeMessage(
     });
     if (created.error) {
       throw new Error(
-        `Failed to start employee run: ${asMessage(
+        `Failed to start employee run: ${formatApiError(
           created.error,
+          created.response,
           "the cloud trigger returned an error with no message",
         )}`,
       );

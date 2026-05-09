@@ -30,6 +30,7 @@ import {
   serenCloudDeploymentRuns,
   serenCloudRun,
 } from "@/api/seren-cloud";
+import { formatApiError } from "@/lib/api-errors";
 import type {
   EmployeeDetail,
   EmployeePatch,
@@ -44,19 +45,6 @@ import type {
   ModelChoice,
   NewEmployeeInput,
 } from "@/lib/employees/types";
-
-function asMessage(error: unknown, fallback: string): string {
-  if (!error) return fallback;
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  if (typeof error === "object") {
-    const obj = error as Record<string, unknown>;
-    if (typeof obj.message === "string") return obj.message;
-    if (typeof obj.detail === "string") return obj.detail;
-    if (typeof obj.error === "string") return obj.error;
-  }
-  return fallback;
-}
 
 function deriveModelChoice(row: CloudDeploymentSummary): ModelChoice {
   const reason = row.managed_agent?.routing_reason?.toLowerCase();
@@ -276,11 +264,13 @@ function updateSpecFromPatch(patch: EmployeePatch): AgentSpecUpdate {
 
 export const employees = {
   async list(): Promise<EmployeeSummary[]> {
-    const { data, error } = await serenAgentListDeployments({
+    const { data, error, response } = await serenAgentListDeployments({
       throwOnError: false,
     });
     if (error) {
-      throw new Error(`Failed to list employees: ${asMessage(error, "")}`);
+      throw new Error(
+        `Failed to list employees: ${formatApiError(error, response, "")}`,
+      );
     }
     const rows = data?.data ?? [];
     return rows.map(summaryFromCloud);
@@ -288,14 +278,16 @@ export const employees = {
 
   async get(id: string): Promise<EmployeeDetail> {
     const [
-      { data: listData, error: listError },
+      { data: listData, error: listError, response: listResponse },
       { data: detailData, error: detailError, response: detailResponse },
     ] = await Promise.all([
       serenAgentListDeployments({ throwOnError: false }),
       serenAgentGetManagedDeployment({ path: { id }, throwOnError: false }),
     ]);
     if (listError) {
-      throw new Error(`Failed to load employee: ${asMessage(listError, "")}`);
+      throw new Error(
+        `Failed to load employee: ${formatApiError(listError, listResponse, "")}`,
+      );
     }
     const summary = (listData?.data ?? []).find((row) => row.id === id);
     if (!summary) {
@@ -320,82 +312,97 @@ export const employees = {
           contextBudgetTokens: null,
         };
       }
-      throw new Error(`Failed to load employee: ${asMessage(detailError, "")}`);
+      throw new Error(
+        `Failed to load employee: ${formatApiError(detailError, detailResponse, "")}`,
+      );
     }
     return detailFromManaged(detailData.data, base);
   },
 
   async deploy(input: NewEmployeeInput): Promise<EmployeeSummary> {
-    const { data, error } = await serenAgentDeploy({
+    const { data, error, response } = await serenAgentDeploy({
       body: specFromInput(input),
       throwOnError: false,
     });
     if (error || !data?.data) {
-      throw new Error(`Failed to deploy employee: ${asMessage(error, "")}`);
+      throw new Error(
+        `Failed to deploy employee: ${formatApiError(error, response, "")}`,
+      );
     }
     return summaryFromCloud(data.data);
   },
 
   async update(id: string, patch: EmployeePatch): Promise<EmployeeSummary> {
-    const { data, error } = await serenAgentUpdateManagedDeployment({
+    const { data, error, response } = await serenAgentUpdateManagedDeployment({
       path: { id },
       body: updateSpecFromPatch(patch),
       throwOnError: false,
     });
     if (error || !data?.data) {
-      throw new Error(`Failed to update employee: ${asMessage(error, "")}`);
+      throw new Error(
+        `Failed to update employee: ${formatApiError(error, response, "")}`,
+      );
     }
     return summaryFromCloud(data.data);
   },
 
   async remove(id: string): Promise<void> {
-    const { error } = await serenAgentDeleteManagedDeployment({
-      path: { id },
-      throwOnError: false,
-    });
-    if (error) {
-      throw new Error(`Failed to delete employee: ${asMessage(error, "")}`);
-    }
-  },
-
-  async suspend(id: string): Promise<void> {
-    const { error } = await serenAgentStopManagedDeployment({
-      path: { id },
-      throwOnError: false,
-    });
-    if (error) {
-      throw new Error(`Failed to suspend employee: ${asMessage(error, "")}`);
-    }
-  },
-
-  async wake(id: string): Promise<void> {
-    const { error } = await serenAgentStartManagedDeployment({
-      path: { id },
-      throwOnError: false,
-    });
-    if (error) {
-      throw new Error(`Failed to wake employee: ${asMessage(error, "")}`);
-    }
-  },
-
-  async listPrivateModels(): Promise<PrivateModelCatalogEntry[]> {
-    const { data, error } = await serenAgentPrivateModels({
-      throwOnError: false,
-    });
-    if (error) {
-      throw new Error(`Failed to list private models: ${asMessage(error, "")}`);
-    }
-    return data?.data?.models ?? [];
-  },
-
-  async listRevisions(id: string): Promise<EmployeeRevision[]> {
-    const { data, error } = await serenAgentListManagedDeploymentRevisions({
+    const { error, response } = await serenAgentDeleteManagedDeployment({
       path: { id },
       throwOnError: false,
     });
     if (error) {
       throw new Error(
-        `Failed to list employee revisions: ${asMessage(error, "")}`,
+        `Failed to delete employee: ${formatApiError(error, response, "")}`,
+      );
+    }
+  },
+
+  async suspend(id: string): Promise<void> {
+    const { error, response } = await serenAgentStopManagedDeployment({
+      path: { id },
+      throwOnError: false,
+    });
+    if (error) {
+      throw new Error(
+        `Failed to suspend employee: ${formatApiError(error, response, "")}`,
+      );
+    }
+  },
+
+  async wake(id: string): Promise<void> {
+    const { error, response } = await serenAgentStartManagedDeployment({
+      path: { id },
+      throwOnError: false,
+    });
+    if (error) {
+      throw new Error(
+        `Failed to wake employee: ${formatApiError(error, response, "")}`,
+      );
+    }
+  },
+
+  async listPrivateModels(): Promise<PrivateModelCatalogEntry[]> {
+    const { data, error, response } = await serenAgentPrivateModels({
+      throwOnError: false,
+    });
+    if (error) {
+      throw new Error(
+        `Failed to list private models: ${formatApiError(error, response, "")}`,
+      );
+    }
+    return data?.data?.models ?? [];
+  },
+
+  async listRevisions(id: string): Promise<EmployeeRevision[]> {
+    const { data, error, response } =
+      await serenAgentListManagedDeploymentRevisions({
+        path: { id },
+        throwOnError: false,
+      });
+    if (error) {
+      throw new Error(
+        `Failed to list employee revisions: ${formatApiError(error, response, "")}`,
       );
     }
     const rows = data?.data ?? [];
@@ -406,12 +413,14 @@ export const employees = {
     deploymentId: string,
     runId: string,
   ): Promise<EmployeeRunDetail> {
-    const { data, error } = await serenCloudDeploymentRun({
+    const { data, error, response } = await serenCloudDeploymentRun({
       path: { id: deploymentId, run_id: runId },
       throwOnError: false,
     });
     if (error || !data?.data) {
-      throw new Error(`Failed to load run: ${asMessage(error, "")}`);
+      throw new Error(
+        `Failed to load run: ${formatApiError(error, response, "")}`,
+      );
     }
     return runDetailFromCloud(data.data);
   },
@@ -420,12 +429,14 @@ export const employees = {
     deploymentId: string,
     runId: string,
   ): Promise<EmployeeRunArtifact[]> {
-    const { data, error } = await serenCloudDeploymentRunArtifacts({
+    const { data, error, response } = await serenCloudDeploymentRunArtifacts({
       path: { id: deploymentId, run_id: runId },
       throwOnError: false,
     });
     if (error) {
-      throw new Error(`Failed to list run artifacts: ${asMessage(error, "")}`);
+      throw new Error(
+        `Failed to list run artifacts: ${formatApiError(error, response, "")}`,
+      );
     }
     const rows = data?.data ?? [];
     return rows.map(artifactFromCloud);
@@ -435,13 +446,15 @@ export const employees = {
     id: string,
     limit = 20,
   ): Promise<{ rows: EmployeeRun[]; hasMore: boolean; total: number }> {
-    const { data, error } = await serenCloudDeploymentRuns({
+    const { data, error, response } = await serenCloudDeploymentRuns({
       path: { id },
       query: { limit },
       throwOnError: false,
     });
     if (error) {
-      throw new Error(`Failed to list employee runs: ${asMessage(error, "")}`);
+      throw new Error(
+        `Failed to list employee runs: ${formatApiError(error, response, "")}`,
+      );
     }
     const rows = data?.data ?? [];
     return {
@@ -455,13 +468,14 @@ export const employees = {
     deploymentId: string,
     runId: string,
   ): Promise<EmployeeRunPendingApprovals> {
-    const { data, error } = await serenCloudDeploymentRunPendingApprovals({
-      path: { id: deploymentId, run_id: runId },
-      throwOnError: false,
-    });
+    const { data, error, response } =
+      await serenCloudDeploymentRunPendingApprovals({
+        path: { id: deploymentId, run_id: runId },
+        throwOnError: false,
+      });
     if (error || !data?.data) {
       throw new Error(
-        `Failed to load pending approvals: ${asMessage(error, "")}`,
+        `Failed to load pending approvals: ${formatApiError(error, response, "")}`,
       );
     }
     return pendingApprovalsFromCloud(data.data);
@@ -471,7 +485,7 @@ export const employees = {
     deploymentId: string,
     request: EmployeeRunResumeRequest,
   ): Promise<{ runId: string | null; status: string }> {
-    const { data, error } = await serenCloudRun({
+    const { data, error, response } = await serenCloudRun({
       path: { id: deploymentId },
       body: {
         resume_checkpoint_id: request.checkpointId,
@@ -484,7 +498,9 @@ export const employees = {
       throwOnError: false,
     });
     if (error || !data?.data) {
-      throw new Error(`Failed to resume run: ${asMessage(error, "")}`);
+      throw new Error(
+        `Failed to resume run: ${formatApiError(error, response, "")}`,
+      );
     }
     return {
       runId: data.data.run_id ?? null,
@@ -493,13 +509,17 @@ export const employees = {
   },
 
   async rollback(id: string, revisionId: string): Promise<EmployeeSummary> {
-    const { data, error } = await serenAgentRollbackManagedDeployment({
-      path: { id },
-      body: { revision_id: revisionId },
-      throwOnError: false,
-    });
+    const { data, error, response } = await serenAgentRollbackManagedDeployment(
+      {
+        path: { id },
+        body: { revision_id: revisionId },
+        throwOnError: false,
+      },
+    );
     if (error || !data?.data) {
-      throw new Error(`Failed to roll back employee: ${asMessage(error, "")}`);
+      throw new Error(
+        `Failed to roll back employee: ${formatApiError(error, response, "")}`,
+      );
     }
     return summaryFromCloud(data.data);
   },

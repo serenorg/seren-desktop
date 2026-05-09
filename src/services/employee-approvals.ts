@@ -5,6 +5,7 @@ import {
   type CloudPendingApprovalRun,
   serenCloudPendingApprovals,
 } from "@/api/seren-cloud";
+import { formatApiError } from "@/lib/api-errors";
 
 export type OrgPendingApprovalRun = {
   runId: string;
@@ -16,19 +17,6 @@ export type OrgPendingApprovalRun = {
   statusMessage: string | null;
   pendingCount: number;
 };
-
-function asMessage(error: unknown, fallback: string): string {
-  if (!error) return fallback;
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  if (typeof error === "object") {
-    const obj = error as Record<string, unknown>;
-    if (typeof obj.message === "string") return obj.message;
-    if (typeof obj.detail === "string") return obj.detail;
-    if (typeof obj.error === "string") return obj.error;
-  }
-  return fallback;
-}
 
 function fromCloud(row: CloudPendingApprovalRun): OrgPendingApprovalRun {
   return {
@@ -45,13 +33,13 @@ function fromCloud(row: CloudPendingApprovalRun): OrgPendingApprovalRun {
 
 export const employeeApprovals = {
   async listOrg(limit = 100): Promise<OrgPendingApprovalRun[]> {
-    const { data, error } = await serenCloudPendingApprovals({
+    const { data, error, response } = await serenCloudPendingApprovals({
       query: { limit },
       throwOnError: false,
     });
     if (error) {
       throw new Error(
-        `Failed to load pending approvals: ${asMessage(error, "")}`,
+        `Failed to load pending approvals: ${formatApiError(error, response, "")}`,
       );
     }
     return (data?.data ?? []).map(fromCloud);
