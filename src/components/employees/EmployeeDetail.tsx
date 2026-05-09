@@ -21,8 +21,22 @@ import type {
   EmployeeSummary,
 } from "@/lib/employees/types";
 import { employees as svc } from "@/services/employees";
+import {
+  cancelEmployeeRun,
+  runEmployeeMessage,
+} from "@/services/employees-runtime";
 import { employeeStore } from "@/stores/employees.store";
 import { threadStore } from "@/stores/thread.store";
+
+type ManualRunState =
+  | { kind: "running"; partial: string }
+  | { kind: "completed"; output: string }
+  | { kind: "cancelled" }
+  | { kind: "failed"; message: string };
+
+function manualRunKey(employeeId: string): string {
+  return `manual:${employeeId}`;
+}
 
 interface EmployeeDetailProps {
   employeeId: string;
@@ -102,6 +116,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const [confirmDelete, setConfirmDelete] = createSignal(false);
   const [showEdit, setShowEdit] = createSignal(false);
   const [showRevisions, setShowRevisions] = createSignal(false);
+  const [manualRun, setManualRun] = createSignal<ManualRunState | null>(null);
 
   const summary = createMemo<EmployeeSummary | undefined>(() =>
     employeeStore.byId(props.employeeId),
@@ -210,6 +225,38 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     } finally {
       setActionPending(null);
     }
+  };
+
+  const handleManualRun = async () => {
+    const id = props.employeeId;
+    if (manualRun()?.kind === "running") return;
+    setManualRun({ kind: "running", partial: "" });
+    try {
+      const result = await runEmployeeMessage(id, "", {
+        conversationId: manualRunKey(id),
+        onText: (chunk) => {
+          setManualRun((prev) =>
+            prev?.kind === "running"
+              ? { kind: "running", partial: prev.partial + chunk }
+              : prev,
+          );
+        },
+      });
+      setManualRun({ kind: "completed", output: result.text });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setManualRun({ kind: "cancelled" });
+        return;
+      }
+      setManualRun({
+        kind: "failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const handleManualCancel = () => {
+    void cancelEmployeeRun(manualRunKey(props.employeeId));
   };
 
   const detailRecord = () => employeeStore.detail(props.employeeId);
@@ -421,39 +468,139 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
               {/* Primary CTA */}
               <button
                 type="button"
-                class="w-full mb-6 py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium text-[14px] hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={emp().mode !== "always_on"}
+                class="w-full py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium text-[14px] hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={manualRun()?.kind === "running"}
                 title={
                   emp().mode === "always_on"
                     ? `Open a new chat with ${emp().name}`
-                    : "Manual run support is coming in a later phase"
+                    : `Run ${emp().name} once now`
                 }
                 onClick={async () => {
-                  if (emp().mode !== "always_on") return;
-                  try {
-                    // Pass the default title so conversationStore.addMessage's
-                    // auto-titler renames the thread based on the first user
-                    // message. Linkage to the employee is conveyed by the
-                    // sidebar grouping; we don't need the row title to repeat
-                    // the employee name.
-                    await threadStore.createChatThreadWithOptions("New Chat", {
-                      provider:
-                        emp().modelChoice === "private"
-                          ? "seren-private"
-                          : null,
-                      model: emp().modelId ?? undefined,
-                      employeeId: emp().id,
-                    });
-                    props.onClose();
-                  } catch (err) {
-                    setActionError(
-                      err instanceof Error ? err.message : String(err),
-                    );
+                  if (emp().mode === "always_on") {
+                    try {
+                      // Pass the default title so conversationStore.addMessage's
+                      // auto-titler renames the thread based on the first
+                      // user message. Linkage to the employee is conveyed by
+                      // the sidebar grouping; the row title doesn't need to
+                      // repeat the employee name.
+                      await threadStore.createChatThreadWithOptions(
+                        "New Chat",
+                        {
+                          provider:
+                            emp().modelChoice === "private"
+                              ? "seren-private"
+                              : null,
+                          model: emp().modelId ?? undefined,
+                          employeeId: emp().id,
+                        },
+                      );
+                      props.onClose();
+                    } catch (err) {
+                      setActionError(
+                        err instanceof Error ? err.message : String(err),
+                      );
+                    }
+                    return;
                   }
+                  await handleManualRun();
                 }}
               >
-                {primaryCtaLabel(emp().mode)}
+                {emp().mode !== "always_on" && manualRun()?.kind === "running"
+                  ? "Running..."
+                  : primaryCtaLabel(emp().mode)}
               </button>
+
+              {/* Inline manual-run status (cron / on-demand only) */}
+              <Show
+                when={emp().mode !== "always_on" && manualRun()}
+                fallback={<div class="mb-6" />}
+              >
+                {(run) => (
+                  <div class="mt-3 mb-6 border border-border rounded-md px-3 py-2.5 bg-card">
+                    <Show when={run().kind === "running"}>
+                      <div class="flex items-center justify-between gap-2">
+                        <span class="text-[12.5px] text-muted-foreground">
+                          Run in progress...
+                        </span>
+                        <button
+                          type="button"
+                          class="text-[11.5px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                          onClick={handleManualCancel}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <Show
+                        when={
+                          run().kind === "running" &&
+                          (run() as { partial: string }).partial
+                        }
+                      >
+                        <pre class="mt-2 whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed text-foreground/90 m-0">
+                          {(run() as { partial: string }).partial}
+                        </pre>
+                      </Show>
+                    </Show>
+                    <Show when={run().kind === "completed"}>
+                      <div class="flex items-center gap-2 mb-1.5">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full border border-emerald-500/30 bg-emerald-500/15 text-emerald-400 text-[10.5px] font-medium">
+                          Completed
+                        </span>
+                        <button
+                          type="button"
+                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground"
+                          onClick={() => setManualRun(null)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                      <Show
+                        when={(run() as { output: string }).output}
+                        fallback={
+                          <div class="text-[12.5px] text-muted-foreground italic">
+                            (no output)
+                          </div>
+                        }
+                      >
+                        <pre class="whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed text-foreground m-0">
+                          {(run() as { output: string }).output}
+                        </pre>
+                      </Show>
+                    </Show>
+                    <Show when={run().kind === "failed"}>
+                      <div class="flex items-center gap-2 mb-1.5">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full border border-red-500/30 bg-red-500/15 text-red-400 text-[10.5px] font-medium">
+                          Failed
+                        </span>
+                        <button
+                          type="button"
+                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground"
+                          onClick={() => setManualRun(null)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                      <div class="text-[12.5px] text-red-400" role="alert">
+                        {(run() as { message: string }).message}
+                      </div>
+                    </Show>
+                    <Show when={run().kind === "cancelled"}>
+                      <div class="flex items-center gap-2">
+                        <span class="text-[12.5px] text-muted-foreground italic">
+                          Run cancelled.
+                        </span>
+                        <button
+                          type="button"
+                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground"
+                          onClick={() => setManualRun(null)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </Show>
+                  </div>
+                )}
+              </Show>
 
               {/* Description */}
               <div class="mb-6">
