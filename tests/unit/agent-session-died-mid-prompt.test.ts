@@ -90,7 +90,10 @@ describe("#1805 — error event handler detects mid-prompt session death", () =>
   it("resets session status to ready and routes through setTurnError", () => {
     const detect = agentStoreSource.indexOf("isSessionDeath");
     expect(detect).toBeGreaterThan(0);
-    const body = agentStoreSource.slice(detect, detect + 1500);
+    // Window widened past the #1852 self-inflicted-suppression block which
+    // now sits between isSessionDeath detection and the setTurnError
+    // recovery branch.
+    const body = agentStoreSource.slice(detect, detect + 2500);
     expect(body).toContain('"ready" as SessionStatus');
     expect(body).toContain(
       'this.setTurnError(deathConvoId, "crash_ceiling"',

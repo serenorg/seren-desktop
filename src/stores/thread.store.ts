@@ -11,7 +11,10 @@ import {
   type SessionStatus,
 } from "@/services/providers";
 import { skills as skillsService } from "@/services/skills";
-import { agentStore } from "@/stores/agent.store";
+import {
+  agentStore,
+  registerActiveNavigationThreadIdGetter,
+} from "@/stores/agent.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { editorSessionStore } from "@/stores/editor.sessions";
@@ -140,6 +143,12 @@ const [state, setState] = createStore<ThreadState>({
   preferChat: false,
   projectOrder: loadProjectOrder(),
 });
+
+// Expose the user's current navigation target to agent.store's idle-reclaim
+// filter without forming a circular import. The getter is invoked lazily by
+// getIdleClaudeSessionIds, so referencing `state` here is safe even though
+// thread.store has only just begun evaluating. #1852.
+registerActiveNavigationThreadIdGetter(() => state.activeThreadId);
 
 // ============================================================================
 // Helpers
@@ -506,6 +515,13 @@ export const threadStore = {
         liveSession?.info.id,
       );
       if (liveSession) {
+        // Mark active synchronously so a parallel spawn's preemptive
+        // idle-reclaim cannot kill the session the user just clicked.
+        // Without this, state.activeSessionId still points at the previous
+        // thread until listSessions resolves, and getIdleClaudeSessionIds
+        // sees the just-clicked session as "idle and not active". #1852.
+        agentStore.setActiveSession(liveSession.info.id);
+
         // Verify the session actually exists in the Rust backend.
         // After an app restart the JS store may hold stale sessions
         // whose backend process is gone.
@@ -517,26 +533,21 @@ export const threadStore = {
           const alive = backendSessions.some(
             (s) => s.id === liveSession.info.id,
           );
-          if (alive) {
-            agentStore.setActiveSession(liveSession.info.id);
-          } else {
-            console.warn(
-              "[Thread] Session",
-              liveSession.info.id,
-              "exists in store but not in backend - resuming",
-            );
-            agentStore.setActiveSession(null);
-            await agentStore.terminateSession(liveSession.info.id);
-            if (
-              state.activeThreadId !== id ||
-              state.activeThreadKind !== kind
-            ) {
-              return;
-            }
-            const cwd = thread?.projectRoot || fileTreeState.rootPath;
-            if (cwd) {
-              void agentStore.resumeAgentConversation(id, cwd);
-            }
+          if (alive) return;
+
+          console.warn(
+            "[Thread] Session",
+            liveSession.info.id,
+            "exists in store but not in backend - resuming",
+          );
+          agentStore.setActiveSession(null);
+          await agentStore.terminateSession(liveSession.info.id);
+          if (state.activeThreadId !== id || state.activeThreadKind !== kind) {
+            return;
+          }
+          const cwd = thread?.projectRoot || fileTreeState.rootPath;
+          if (cwd) {
+            void agentStore.resumeAgentConversation(id, cwd);
           }
         });
       } else {
