@@ -17,6 +17,7 @@ import { EmployeeRunDetailModal } from "@/components/employees/EmployeeRunDetail
 import { EmployeeRunsList } from "@/components/employees/EmployeeRunsList";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
+import { extractPersonaSections } from "@/lib/employees/persona";
 import type {
   EmployeeMode,
   EmployeeStatus,
@@ -272,7 +273,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
         message: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      // Pull the new run into the list once the cloud has persisted it.
+      // Pull the persisted run into the list once cloud storage catches up.
       setRunsRefreshNonce((n) => n + 1);
     }
   };
@@ -286,10 +287,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const description = () => {
     const prompt = detailRecord()?.prompt;
     if (!prompt) return null;
-    // Strip YAML frontmatter and the leading H1 to surface just the body.
-    const withoutFrontmatter = prompt.replace(/^---[\s\S]*?---\n/, "");
-    const withoutHeading = withoutFrontmatter.replace(/^# .*\n+/, "");
-    return withoutHeading.trim();
+    return extractPersonaSections(prompt).skill.trim();
   };
 
   const copyEndpoint = async () => {

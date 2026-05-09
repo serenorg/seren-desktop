@@ -385,13 +385,25 @@ export async function runEmployeeMessage(
       once: true,
     });
   }
-  // Replace any prior in-flight run under this registry key so the new
+  // Supersede any in-flight run under this registry key so the active
   // run owns the cancellation slot. The previous controller, if any,
   // will be released by its own runEmployeeMessage finally block.
   const registered: ActiveRun | null = registryKey
     ? { controller, deploymentId, runId: null }
     : null;
   if (registered && registryKey) {
+    const previous = activeRuns.get(registryKey);
+    if (previous) {
+      previous.controller.abort();
+      if (previous.runId) {
+        void serenCloudDeploymentRunCancel({
+          path: { id: previous.deploymentId, run_id: previous.runId },
+          throwOnError: false,
+        }).catch(() => {
+          // Local abort is sufficient to stop stale callbacks.
+        });
+      }
+    }
     activeRuns.set(registryKey, registered);
   }
 

@@ -275,12 +275,12 @@ export const EmployeeRunDetailModal: Component<EmployeeRunDetailModalProps> = (
           decision: decisions[a.id] ?? "reject",
         })),
       });
-      // Refresh the run first so the awaiting_approval section unmounts
-      // before clearing local decisions; the approvals resource source
-      // returns null once status flips, so its fetcher short-circuits
-      // without an additional request.
-      await refetchRun();
-      setDecisions({});
+      const refreshed = await refetchRun();
+      if (refreshed?.status === "awaiting_approval") {
+        await refetchApprovals();
+      } else {
+        setDecisions({});
+      }
     } catch (e) {
       setResumeError(e instanceof Error ? e.message : String(e));
     } finally {
