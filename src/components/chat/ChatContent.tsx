@@ -67,7 +67,11 @@ import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { workspaceStore } from "@/stores/workspace.store";
-import type { ToolCallData, UnifiedMessage } from "@/types/conversation";
+import {
+  isRetryableWorker,
+  type ToolCallData,
+  type UnifiedMessage,
+} from "@/types/conversation";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { CompactedMessage } from "./CompactedMessage";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
@@ -1316,8 +1320,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                               <Show
                                 when={
                                   !message.request &&
-                                  (message.workerType === "orchestrator" ||
-                                    message.workerType === "employee")
+                                  isRetryableWorker(message.workerType)
                                 }
                               >
                                 <button
@@ -1382,8 +1385,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                               <Show
                                 when={
                                   !message.request &&
-                                  (message.workerType === "orchestrator" ||
-                                    message.workerType === "employee")
+                                  isRetryableWorker(message.workerType)
                                 }
                               >
                                 <button

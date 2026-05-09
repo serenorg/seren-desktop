@@ -11,6 +11,22 @@ export type WorkerType =
   | "orchestrator"
   | "employee";
 
+/**
+ * Worker types whose failed assistant messages are eligible for the
+ * Retry button in the chat composer. The retry path replays the saved
+ * orchestration parameters; both seren-models orchestrator turns and
+ * deployed-employee turns route through `orchestrate()` and so retry
+ * cleanly.
+ */
+export const RETRYABLE_WORKERS: ReadonlySet<WorkerType> = new Set([
+  "orchestrator",
+  "employee",
+]);
+
+export function isRetryableWorker(workerType: WorkerType | undefined): boolean {
+  return workerType !== undefined && RETRYABLE_WORKERS.has(workerType);
+}
+
 /** All message types in a unified conversation */
 export type MessageType =
   | "user"
@@ -203,12 +219,18 @@ export function isToolMessage(msg: UnifiedMessage): boolean {
   return msg.type === "tool_call" || msg.type === "tool_result";
 }
 
-/** Type guard: is this message from the orchestrator itself? */
+/**
+ * Type guard: is this message from an agentic worker (orchestrator or a
+ * deployed employee) rather than a plain chat-model response? Includes
+ * orchestrator-only message types (transition, reroute) which only the
+ * seren-models orchestrator produces today.
+ */
 export function isOrchestratorMessage(msg: UnifiedMessage): boolean {
   return (
     msg.type === "transition" ||
     msg.type === "reroute" ||
-    msg.workerType === "orchestrator"
+    msg.workerType === "orchestrator" ||
+    msg.workerType === "employee"
   );
 }
 

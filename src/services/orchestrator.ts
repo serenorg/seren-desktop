@@ -586,11 +586,6 @@ function handleComplete(
 
 /**
  * Translate a runtime `tool_call` envelope into a UnifiedMessage matching
- * the orchestrator's existing tool-card shape so the chat UI renders
- * identically. Status is "running" until the matching tool_result lands.
- */
-/**
- * Translate a runtime `tool_call` envelope into a UnifiedMessage matching
  * the orchestrator's existing tool-card shape. The chat UI keys card
  * rendering on type/toolCall, not workerType, so they render identically;
  * the workerType discriminant exists for telemetry/attribution.
@@ -611,6 +606,10 @@ function emitEmployeeToolCall(
       // available on toolCall.arguments for the card to display.
     }
   }
+  // The runtime's tool_call envelope (CloudRunOutputEvent | type "tool_call")
+  // exposes only id/name/arguments/status, so the tool slug is also the
+  // visible label. If the runtime ever emits a richer title field, surface
+  // it here in addition to name.
   const toolMessage: UnifiedMessage = {
     id: crypto.randomUUID(),
     type: "tool_call",
@@ -687,20 +686,53 @@ function emitEmployeeToolAudit(
   conversationId: string,
   event: ToolAuditEvent,
 ): void {
-  // Audit events are advisory (approval/skip notes); render as a small
-  // assistant text aside instead of as a tool card so the audit narrative
-  // sits inline with the conversation.
+  // Audit events are advisory (approval/skip notes), not model output.
+  // Render as a markdown blockquote so the existing chat renderer styles
+  // it as a distinct aside rather than letting the policy decision read
+  // like prose the assistant wrote.
+  const content = `> **Tool audit - ${event.tool}:** ${event.reason}`;
   const message: UnifiedMessage = {
     id: crypto.randomUUID(),
     type: "assistant",
     role: "assistant",
-    content: `Tool audit (${event.tool}): ${event.reason}`,
+    content,
     timestamp: Date.now(),
     status: "complete",
     workerType: "employee",
   };
   conversationStore.addMessage(message, conversationId);
   void conversationStore.persistMessage(message, conversationId);
+}
+
+/**
+ * Walk the conversation's messages and flip any tool_call card whose
+ * status is still "running" to a terminal state. Used when a turn
+ * aborts or errors before the matching tool_result lands so the chat
+ * UI doesn't show a perpetual spinner.
+ */
+function finalizeOrphanToolCalls(
+  conversationId: string,
+  finalStatus: "cancelled" | "error",
+  errorText?: string,
+): void {
+  const messages = conversationStore.getMessagesFor(conversationId);
+  for (const msg of messages) {
+    if (msg.type !== "tool_call" || msg.status !== "streaming") continue;
+    if (!msg.toolCall || msg.toolCall.status !== "running") continue;
+    conversationStore.updateMessage(
+      msg.id,
+      {
+        status: "complete",
+        toolCall: {
+          ...msg.toolCall,
+          status: finalStatus,
+          isError: finalStatus === "error",
+          result: errorText ?? msg.toolCall.result,
+        },
+      },
+      conversationId,
+    );
+  }
 }
 
 /**
@@ -758,10 +790,12 @@ async function runEmployeeTurn(
     // Persist the partial reply we already streamed so the user can read
     // it, then exit cleanly.
     if (error instanceof DOMException && error.name === "AbortError") {
+      finalizeOrphanToolCalls(conversationId, "cancelled");
       conversationStore.setRLMProcessing(false, conversationId);
       return;
     }
     const message = error instanceof Error ? error.message : String(error);
+    finalizeOrphanToolCalls(conversationId, "error", message);
     handleError(message, conversationId, "employee");
   } finally {
     conversationStore.setLoading(false, conversationId);

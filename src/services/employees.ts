@@ -19,10 +19,15 @@ import {
   serenAgentStopManagedDeployment,
   serenAgentUpdateManagedDeployment,
 } from "@/api/seren-agent";
+import {
+  type CloudDeploymentRunEvent,
+  serenCloudDeploymentRuns,
+} from "@/api/seren-cloud";
 import type {
   EmployeeDetail,
   EmployeePatch,
   EmployeeRevision,
+  EmployeeRun,
   EmployeeSummary,
   ModelChoice,
   NewEmployeeInput,
@@ -107,6 +112,22 @@ function revisionFromCloud(
     restoredFromRevisionId: row.restored_from_revision_id ?? null,
     createdAt: row.created_at,
     createdByUserId: row.created_by_user_id,
+  };
+}
+
+function runFromCloud(row: CloudDeploymentRunEvent): EmployeeRun {
+  return {
+    id: row.id,
+    deploymentId: row.deployment_id,
+    status: row.status,
+    source: row.source,
+    runName: row.run_name ?? null,
+    startedAt: row.started_at,
+    completedAt: row.completed_at ?? null,
+    executionTimeMs: row.execution_time_ms,
+    statusMessage: row.status_message ?? null,
+    stopReason: row.stop_reason ?? null,
+    output: row.output ?? null,
   };
 }
 
@@ -315,6 +336,26 @@ export const employees = {
     }
     const rows = data?.data ?? [];
     return rows.map(revisionFromCloud);
+  },
+
+  async listRecentRuns(
+    id: string,
+    limit = 20,
+  ): Promise<{ rows: EmployeeRun[]; hasMore: boolean; total: number }> {
+    const { data, error } = await serenCloudDeploymentRuns({
+      path: { id },
+      query: { limit },
+      throwOnError: false,
+    });
+    if (error) {
+      throw new Error(`Failed to list employee runs: ${asMessage(error, "")}`);
+    }
+    const rows = data?.data ?? [];
+    return {
+      rows: rows.map(runFromCloud),
+      hasMore: data?.pagination?.has_more ?? false,
+      total: data?.pagination?.total ?? rows.length,
+    };
   },
 
   async rollback(id: string, revisionId: string): Promise<EmployeeSummary> {

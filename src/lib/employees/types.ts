@@ -99,3 +99,17 @@ export type EmployeeRevision = {
   createdAt: string;
   createdByUserId: string;
 };
+
+export type EmployeeRun = {
+  id: string;
+  deploymentId: string;
+  status: string;
+  source: string;
+  runName: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  executionTimeMs: number;
+  statusMessage: string | null;
+  stopReason: string | null;
+  output: string | null;
+};

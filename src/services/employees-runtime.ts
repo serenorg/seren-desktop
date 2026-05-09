@@ -496,12 +496,9 @@ export async function runEmployeeMessage(
     if (FAILURE_STATUSES.has(final.status)) {
       throw new Error(errorMessage ?? (text || `Employee run ${final.status}`));
     }
-    if (final.status === "awaiting_approval") {
-      throw new Error(
-        "Employee run is awaiting approval. Approval flow is not yet supported in chat.",
-      );
-    }
-
+    // awaiting_approval is NOT thrown - the run is intentionally paused
+    // and the caller (chat / manual-run UI) decides how to surface that
+    // distinct from a hard failure.
     return {
       text,
       status: final.status,

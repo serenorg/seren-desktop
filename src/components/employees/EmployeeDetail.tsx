@@ -13,6 +13,7 @@ import {
   Show,
 } from "solid-js";
 import { EmployeeRevisionsModal } from "@/components/employees/EmployeeRevisionsModal";
+import { EmployeeRunsList } from "@/components/employees/EmployeeRunsList";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
 import type {
@@ -31,6 +32,7 @@ import { threadStore } from "@/stores/thread.store";
 type ManualRunState =
   | { kind: "running"; partial: string }
   | { kind: "completed"; output: string }
+  | { kind: "awaitingApproval"; output: string }
   | { kind: "cancelled" }
   | { kind: "failed"; message: string };
 
@@ -117,6 +119,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const [showEdit, setShowEdit] = createSignal(false);
   const [showRevisions, setShowRevisions] = createSignal(false);
   const [manualRun, setManualRun] = createSignal<ManualRunState | null>(null);
+  const [runsRefreshNonce, setRunsRefreshNonce] = createSignal(0);
 
   const summary = createMemo<EmployeeSummary | undefined>(() =>
     employeeStore.byId(props.employeeId),
@@ -242,7 +245,11 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
           );
         },
       });
-      setManualRun({ kind: "completed", output: result.text });
+      if (result.status === "awaiting_approval") {
+        setManualRun({ kind: "awaitingApproval", output: result.text });
+      } else {
+        setManualRun({ kind: "completed", output: result.text });
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         setManualRun({ kind: "cancelled" });
@@ -252,6 +259,9 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
         kind: "failed",
         message: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      // Pull the new run into the list once the cloud has persisted it.
+      setRunsRefreshNonce((n) => n + 1);
     }
   };
 
@@ -524,8 +534,9 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                         </span>
                         <button
                           type="button"
-                          class="text-[11.5px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                          class="text-[11.5px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                           onClick={handleManualCancel}
+                          aria-label="Cancel run"
                         >
                           Cancel
                         </button>
@@ -562,6 +573,29 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                           </div>
                         }
                       >
+                        <pre class="whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed text-foreground m-0">
+                          {(run() as { output: string }).output}
+                        </pre>
+                      </Show>
+                    </Show>
+                    <Show when={run().kind === "awaitingApproval"}>
+                      <div class="flex items-center gap-2 mb-1.5">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/15 text-amber-300 text-[10.5px] font-medium">
+                          Awaiting approval
+                        </span>
+                        <button
+                          type="button"
+                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground"
+                          onClick={() => setManualRun(null)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                      <div class="text-[12.5px] text-muted-foreground mb-1.5">
+                        The run is paused waiting on approval. Approval flow is
+                        not yet supported in the desktop app.
+                      </div>
+                      <Show when={(run() as { output: string }).output}>
                         <pre class="whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed text-foreground m-0">
                           {(run() as { output: string }).output}
                         </pre>
@@ -652,6 +686,18 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     </div>
                   </Show>
                 )}
+              </Show>
+
+              {/* Recent runs - cron and on-demand employees produce runs
+                  rather than chat threads; on-call employees show their
+                  threads under the employee in the sidebar instead. */}
+              <Show when={emp().mode !== "always_on"}>
+                <div class="mb-6">
+                  <EmployeeRunsList
+                    employeeId={emp().id}
+                    refreshNonce={runsRefreshNonce()}
+                  />
+                </div>
               </Show>
 
               {/* Deployment info */}
