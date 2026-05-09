@@ -183,7 +183,8 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
 
   const status = () => summary()?.status ?? "pending";
   const isRunning = () => status() === "running";
-  const isStopped = () => status() === "stopped";
+  const isWakeable = () => status() === "stopped" || status() === "failed";
+  const canStartRun = () => isRunning() && actionPending() === null;
 
   const handleSuspendOrWake = async () => {
     const id = props.employeeId;
@@ -201,7 +202,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
       } finally {
         setActionPending(null);
       }
-    } else if (isStopped()) {
+    } else if (isWakeable()) {
       setActionPending("wake");
       employeeStore.setStatus(id, "pending");
       try {
@@ -359,7 +360,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
               </div>
               <div class="flex items-center gap-2 flex-none relative">
                 <Show
-                  when={isRunning() || isStopped() || actionPending() !== null}
+                  when={isRunning() || isWakeable() || actionPending() !== null}
                   fallback={
                     <span
                       class="px-3 py-1.5 rounded-md border border-border text-[12px] font-medium text-muted-foreground"
@@ -374,7 +375,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     class="px-3 py-1.5 rounded-md border text-[12px] font-medium transition-colors disabled:opacity-50"
                     classList={{
                       "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10":
-                        isStopped(),
+                        isWakeable(),
                       "border-amber-500/40 text-amber-300 hover:bg-amber-500/10":
                         isRunning(),
                     }}
@@ -498,20 +499,21 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
               <button
                 type="button"
                 class="w-full py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium text-[14px] hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={manualRun()?.kind === "running"}
+                disabled={manualRun()?.kind === "running" || !canStartRun()}
                 title={
-                  emp().mode === "always_on"
-                    ? `Open a new chat with ${emp().name}`
-                    : `Run ${emp().name} once now`
+                  !canStartRun()
+                    ? `${emp().name} is ${statusLabel(emp().status).toLowerCase()}; wake it before starting a run`
+                    : emp().mode === "always_on"
+                      ? `Open a new chat with ${emp().name}`
+                      : `Run ${emp().name} once now`
+                }
+                aria-disabled={
+                  manualRun()?.kind === "running" || !canStartRun()
                 }
                 onClick={async () => {
+                  if (!canStartRun()) return;
                   if (emp().mode === "always_on") {
                     try {
-                      // Pass the default title so conversationStore.addMessage's
-                      // auto-titler renames the thread based on the first
-                      // user message. Linkage to the employee is conveyed by
-                      // the sidebar grouping; the row title doesn't need to
-                      // repeat the employee name.
                       await threadStore.createChatThreadWithOptions(
                         "New Chat",
                         {
@@ -538,6 +540,11 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                   ? "Running..."
                   : primaryCtaLabel(emp().mode)}
               </button>
+              <Show when={!canStartRun()}>
+                <div class="mt-2 mb-4 text-[12px] text-muted-foreground">
+                  Wake this employee before starting a chat or run.
+                </div>
+              </Show>
 
               {/* Inline manual-run status (cron / on-demand only) */}
               <Show
