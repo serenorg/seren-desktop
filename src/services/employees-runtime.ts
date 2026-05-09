@@ -134,6 +134,21 @@ export interface ToolAuditEvent {
   reason: string;
 }
 
+/** Mutable accumulator threaded through the live stream and the poll replay. */
+interface RunState {
+  text: string;
+  thinking: string;
+  errorMessage: string | null;
+  /**
+   * De-dup keys for tool envelopes so the same id+kind doesn't fire twice
+   * across the live stream and the post-stream replay. Keyed by event
+   * category and the runtime's kind discriminant where present, so a
+   * `tool_call_started` and a later `tool_call_completed` for the same
+   * id are NOT collapsed into one card.
+   */
+  seenToolEvents: Set<string>;
+}
+
 export interface RunCallbacks {
   /** Called for each text token streamed from the runtime. */
   onText?: (chunk: string) => void;
@@ -168,12 +183,7 @@ export interface RunOptions extends RunCallbacks {
 
 function applyEnvelope(
   raw: unknown,
-  state: {
-    text: string;
-    thinking: string;
-    errorMessage: string | null;
-    seenToolEvents: Set<string>;
-  },
+  state: RunState,
   callbacks: RunCallbacks,
 ): void {
   if (!raw || typeof raw !== "object") return;
@@ -192,9 +202,11 @@ function applyEnvelope(
       }
       break;
     case "tool_call": {
-      // De-dupe across the live stream and the post-run replay so the
-      // same tool_call doesn't render twice.
-      const key = `call:${ev.id}`;
+      // The runtime can emit a `tool_call_started` and a later
+      // `tool_call_completed` for the same id (with updated status/args).
+      // Include the kind in the key so the second envelope still surfaces
+      // instead of being silently de-duped against the first.
+      const key = `call:${ev.id}:${ev.kind ?? ""}`;
       if (state.seenToolEvents.has(key)) break;
       state.seenToolEvents.add(key);
       callbacks.onToolCall?.({
@@ -206,7 +218,7 @@ function applyEnvelope(
       break;
     }
     case "tool_result": {
-      const key = `result:${ev.id}`;
+      const key = `result:${ev.id}:${ev.kind ?? ""}`;
       if (state.seenToolEvents.has(key)) break;
       state.seenToolEvents.add(key);
       callbacks.onToolResult?.({
@@ -217,7 +229,7 @@ function applyEnvelope(
       break;
     }
     case "tool_audit": {
-      const key = `audit:${ev.id}`;
+      const key = `audit:${ev.id}:${ev.kind ?? ""}`;
       if (state.seenToolEvents.has(key)) break;
       state.seenToolEvents.add(key);
       callbacks.onToolAudit?.({
@@ -241,12 +253,7 @@ async function pollUntilTerminal(
   deploymentId: string,
   runId: string,
   signal: AbortSignal | undefined,
-  state: {
-    text: string;
-    thinking: string;
-    errorMessage: string | null;
-    seenToolEvents: Set<string>;
-  },
+  state: RunState,
   callbacks: RunCallbacks,
   startedAt: number,
 ): Promise<{
@@ -281,16 +288,11 @@ async function pollUntilTerminal(
       // de-dupes against tool events the stream already delivered.
       // Pass through tool callbacks only so any tool events the stream
       // missed still surface; text/thinking are diff'd separately below.
-      const recovered = {
+      const recovered: RunState = {
         text: "",
         thinking: "",
         errorMessage: null,
         seenToolEvents: state.seenToolEvents,
-      } as {
-        text: string;
-        thinking: string;
-        errorMessage: string | null;
-        seenToolEvents: Set<string>;
       };
       const replayCallbacks: RunCallbacks = {
         onToolCall: callbacks.onToolCall,
@@ -397,9 +399,12 @@ export async function runEmployeeMessage(
     // CloudDeploymentRunRequest's typed surface only knows {message, async,
     // run_id, ...}; the schema description allows additional fields. Cast
     // through `unknown` so the runtime sees `conversation_id` without
-    // upsetting the SDK's generated body type.
+    // upsetting the SDK's generated body type. `message` is optional on
+    // the runtime - omit it when blank so a manual run from the detail
+    // pane reaches the deployed agent as "no user message" rather than
+    // an empty string the prompt template would treat as content.
     const body = {
-      message,
+      ...(message ? { message } : {}),
       ...(conversationId ? { conversation_id: conversationId } : {}),
     } as unknown as Parameters<typeof serenCloudRun>[0]["body"];
 
@@ -436,16 +441,11 @@ export async function runEmployeeMessage(
       };
     }
 
-    const state = {
+    const state: RunState = {
       text: "",
       thinking: "",
       errorMessage: null,
       seenToolEvents: new Set<string>(),
-    } as {
-      text: string;
-      thinking: string;
-      errorMessage: string | null;
-      seenToolEvents: Set<string>;
     };
     const startedAt = Date.now();
 

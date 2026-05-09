@@ -92,27 +92,31 @@ interface EnvelopeShape {
   state?: string;
 }
 
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
 function eventLine(raw: unknown): { kind: string; text: string } | null {
   if (!raw || typeof raw !== "object") return null;
   const ev = raw as EnvelopeShape;
   if (ev.type === "text" && typeof ev.text === "string") {
-    return { kind: "text", text: ev.text };
+    return { kind: "text", text: truncate(ev.text, 200) };
   }
   if (ev.type === "thinking" && typeof ev.text === "string") {
-    return { kind: "thinking", text: ev.text };
+    return { kind: "thinking", text: truncate(ev.text, 200) };
   }
   if (ev.type === "tool_call") {
     const args = ev.arguments ?? "";
     return {
       kind: "tool_call",
-      text: `${ev.name ?? "tool"}(${args.length > 80 ? `${args.slice(0, 80)}...` : args})`,
+      text: `${ev.name ?? "tool"}(${truncate(args, 80)})`,
     };
   }
   if (ev.type === "tool_result") {
     const content = ev.content ?? "";
     return {
       kind: ev.is_error ? "tool_error" : "tool_result",
-      text: content.length > 200 ? `${content.slice(0, 200)}...` : content,
+      text: truncate(content, 200),
     };
   }
   if (ev.type === "tool_audit") {
@@ -129,6 +133,10 @@ function eventLine(raw: unknown): { kind: string; text: string } | null {
   }
   return null;
 }
+
+// Kinds where the visual style already conveys the event class, so the
+// inline kind tag is just noise.
+const HIDDEN_KIND_TAGS = new Set(["text", "thinking"]);
 
 function hasInvocationPayload(payload: unknown): boolean {
   if (payload === null || payload === undefined) return false;
@@ -170,6 +178,7 @@ export const EmployeeRunDetailModal: Component<EmployeeRunDetailModalProps> = (
   );
 
   let closeButtonRef: HTMLButtonElement | undefined;
+  let interval: ReturnType<typeof setInterval> | null = null;
 
   const handleDocumentKeydown = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return;
@@ -177,13 +186,37 @@ export const EmployeeRunDetailModal: Component<EmployeeRunDetailModalProps> = (
     props.onClose();
   };
 
+  // Refresh while the run is non-terminal so the modal stays live for
+  // an in-progress run opened from the list. Skip when the document is
+  // hidden so a backgrounded window doesn't poll.
+  const tickRefresh = () => {
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState !== "visible"
+    ) {
+      return;
+    }
+    const r = run();
+    if (!r) return;
+    if (
+      FAILURE_STATUSES.has(r.status) ||
+      r.status === "completed" ||
+      r.status === "awaiting_approval"
+    ) {
+      return;
+    }
+    void refetchRun();
+  };
+
   onMount(() => {
     document.addEventListener("keydown", handleDocumentKeydown);
     requestAnimationFrame(() => closeButtonRef?.focus());
+    interval = setInterval(tickRefresh, 3000);
   });
 
   onCleanup(() => {
     document.removeEventListener("keydown", handleDocumentKeydown);
+    if (interval !== null) clearInterval(interval);
   });
 
   const handleBackdropClick = (e: MouseEvent) => {
@@ -199,27 +232,6 @@ export const EmployeeRunDetailModal: Component<EmployeeRunDetailModalProps> = (
       if (line) lines.push(line);
     }
     return lines;
-  });
-
-  // Refresh while the run is non-terminal so the modal stays live for
-  // an in-progress run a user opens from the list.
-  let interval: ReturnType<typeof setInterval> | null = null;
-  onMount(() => {
-    interval = setInterval(() => {
-      const r = run();
-      if (!r) return;
-      if (
-        FAILURE_STATUSES.has(r.status) ||
-        r.status === "completed" ||
-        r.status === "awaiting_approval"
-      ) {
-        return;
-      }
-      void refetchRun();
-    }, 3000);
-  });
-  onCleanup(() => {
-    if (interval !== null) clearInterval(interval);
   });
 
   const copyRunId = async () => {
@@ -403,11 +415,13 @@ export const EmployeeRunDetailModal: Component<EmployeeRunDetailModalProps> = (
                         <For each={eventLines()}>
                           {(line) => (
                             <li
-                              class={`text-[11.5px] font-mono leading-snug ${eventKindClass(line.kind)}`}
+                              class={`text-[11.5px] font-mono leading-snug whitespace-pre-wrap ${eventKindClass(line.kind)}`}
                             >
-                              <span class="text-muted-foreground/70 mr-1">
-                                {line.kind}
-                              </span>
+                              <Show when={!HIDDEN_KIND_TAGS.has(line.kind)}>
+                                <span class="text-muted-foreground/70 mr-1">
+                                  {line.kind}
+                                </span>
+                              </Show>
                               {line.text}
                             </li>
                           )}

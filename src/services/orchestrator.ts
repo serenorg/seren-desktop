@@ -610,6 +610,30 @@ function emitEmployeeToolCall(
   // exposes only id/name/arguments/status, so the tool slug is also the
   // visible label. If the runtime ever emits a richer title field, surface
   // it here in addition to name.
+  // The runtime can emit a `tool_call_started` and a later
+  // `tool_call_completed` for the same id (the de-dup keys in
+  // employees-runtime now include `kind`). Update the existing card in
+  // place on the second envelope so we don't render two identical cards.
+  const messages = conversationStore.getMessagesFor(conversationId);
+  const existing = messages.find(
+    (m) => m.type === "tool_call" && m.toolCallId === event.id,
+  );
+  if (existing?.toolCall) {
+    conversationStore.updateMessage(
+      existing.id,
+      {
+        toolCall: {
+          ...existing.toolCall,
+          status: event.status ?? existing.toolCall.status,
+          name: event.name,
+          arguments: event.arguments ?? existing.toolCall.arguments,
+          parameters: parameters ?? existing.toolCall.parameters,
+        },
+      },
+      conversationId,
+    );
+    return;
+  }
   const toolMessage: UnifiedMessage = {
     id: crypto.randomUUID(),
     type: "tool_call",

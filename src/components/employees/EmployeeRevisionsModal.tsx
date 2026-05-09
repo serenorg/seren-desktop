@@ -125,7 +125,7 @@ export const EmployeeRevisionsModal: Component<EmployeeRevisionsModalProps> = (
           <button
             ref={closeButtonRef}
             type="button"
-            class="bg-transparent border-none text-muted-foreground text-2xl leading-none cursor-pointer py-1 px-2 rounded transition-all duration-150 hover:bg-muted hover:text-foreground disabled:opacity-50"
+            class="bg-transparent border-none text-muted-foreground text-2xl leading-none cursor-pointer py-1 px-2 rounded transition-all duration-150 hover:bg-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
             onClick={props.onClose}
             disabled={pendingId() !== null}
             title="Close"
@@ -233,7 +233,7 @@ export const EmployeeRevisionsModal: Component<EmployeeRevisionsModalProps> = (
                           <Show when={!isActive()}>
                             <button
                               type="button"
-                              class="px-2.5 py-1 rounded text-[12px] font-medium border border-border text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              class="px-2.5 py-1 rounded text-[12px] font-medium border border-border text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                               onClick={() => {
                                 setError(null);
                                 setConfirmId(rev.revisionId);
@@ -289,7 +289,7 @@ export const EmployeeRevisionsModal: Component<EmployeeRevisionsModalProps> = (
               <div class="flex justify-end gap-2 mt-5">
                 <button
                   type="button"
-                  class="py-2 px-4 rounded text-[13px] font-medium bg-transparent text-foreground border border-border hover:bg-muted disabled:opacity-50"
+                  class="py-2 px-4 rounded text-[13px] font-medium bg-transparent text-foreground border border-border hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                   onClick={() => setConfirmId(null)}
                   disabled={pendingId() !== null}
                 >
@@ -297,7 +297,7 @@ export const EmployeeRevisionsModal: Component<EmployeeRevisionsModalProps> = (
                 </button>
                 <button
                   type="button"
-                  class="py-2 px-4 rounded text-[13px] font-medium bg-primary text-primary-foreground border border-primary hover:bg-primary/90 disabled:opacity-50"
+                  class="py-2 px-4 rounded text-[13px] font-medium bg-primary text-primary-foreground border border-primary hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary-foreground/60"
                   onClick={() => handleRollback(rev().revisionId)}
                   disabled={pendingId() !== null}
                 >

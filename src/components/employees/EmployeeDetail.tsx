@@ -13,6 +13,7 @@ import {
   Show,
 } from "solid-js";
 import { EmployeeRevisionsModal } from "@/components/employees/EmployeeRevisionsModal";
+import { EmployeeRunDetailModal } from "@/components/employees/EmployeeRunDetailModal";
 import { EmployeeRunsList } from "@/components/employees/EmployeeRunsList";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
@@ -31,8 +32,8 @@ import { threadStore } from "@/stores/thread.store";
 
 type ManualRunState =
   | { kind: "running"; partial: string }
-  | { kind: "completed"; output: string }
-  | { kind: "awaitingApproval"; output: string }
+  | { kind: "completed"; output: string; runId: string | null }
+  | { kind: "awaitingApproval"; output: string; runId: string | null }
   | { kind: "cancelled" }
   | { kind: "failed"; message: string };
 
@@ -120,6 +121,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const [showRevisions, setShowRevisions] = createSignal(false);
   const [manualRun, setManualRun] = createSignal<ManualRunState | null>(null);
   const [runsRefreshNonce, setRunsRefreshNonce] = createSignal(0);
+  const [detailRunId, setDetailRunId] = createSignal<string | null>(null);
 
   const summary = createMemo<EmployeeSummary | undefined>(() =>
     employeeStore.byId(props.employeeId),
@@ -138,6 +140,8 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     if (showEdit()) return;
     // The revisions modal owns its own keydown listener.
     if (showRevisions()) return;
+    // The run detail modal owns its own keydown listener.
+    if (detailRunId()) return;
     if (confirmDelete()) {
       if (actionPending() === "delete") return;
       event.preventDefault();
@@ -246,9 +250,17 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
         },
       });
       if (result.status === "awaiting_approval") {
-        setManualRun({ kind: "awaitingApproval", output: result.text });
+        setManualRun({
+          kind: "awaitingApproval",
+          output: result.text,
+          runId: result.runId,
+        });
       } else {
-        setManualRun({ kind: "completed", output: result.text });
+        setManualRun({
+          kind: "completed",
+          output: result.text,
+          runId: result.runId,
+        });
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -296,12 +308,24 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
       <Show
         when={summary()}
         fallback={
-          <div class="flex items-center justify-center h-full text-muted-foreground text-sm">
+          <div class="flex items-center justify-center h-full text-muted-foreground text-sm px-6">
             <Show
               when={!detail.loading}
               fallback={<span>Loading employee...</span>}
             >
-              <span>Employee not found</span>
+              <Show
+                when={detail.error}
+                fallback={<span>Employee not found</span>}
+              >
+                <div
+                  class="py-2.5 px-3 bg-destructive/20 text-destructive rounded text-[13px] max-w-md"
+                  role="alert"
+                >
+                  {detail.error instanceof Error
+                    ? detail.error.message
+                    : String(detail.error)}
+                </div>
+              </Show>
             </Show>
           </div>
         }
@@ -336,45 +360,42 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                 </div>
               </div>
               <div class="flex items-center gap-2 flex-none relative">
-                <button
-                  type="button"
-                  class="px-3 py-1.5 rounded-md border text-[12px] font-medium transition-colors disabled:opacity-50"
-                  classList={{
-                    "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10":
-                      isStopped(),
-                    "border-amber-500/40 text-amber-300 hover:bg-amber-500/10":
-                      isRunning(),
-                    "border-border text-muted-foreground":
-                      !isRunning() && !isStopped(),
-                  }}
-                  disabled={
-                    actionPending() !== null || (!isRunning() && !isStopped())
+                <Show
+                  when={isRunning() || isStopped() || actionPending() !== null}
+                  fallback={
+                    <span
+                      class="px-3 py-1.5 rounded-md border border-border text-[12px] font-medium text-muted-foreground"
+                      aria-label={`Status: ${statusLabel(emp().status)}`}
+                    >
+                      {statusLabel(emp().status)}
+                    </span>
                   }
-                  onClick={handleSuspendOrWake}
                 >
-                  <Show when={actionPending() === "suspend"}>
-                    Suspending...
-                  </Show>
-                  <Show when={actionPending() === "wake"}>Waking...</Show>
-                  <Show
-                    when={
-                      actionPending() === null && (isRunning() || isStopped())
-                    }
+                  <button
+                    type="button"
+                    class="px-3 py-1.5 rounded-md border text-[12px] font-medium transition-colors disabled:opacity-50"
+                    classList={{
+                      "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10":
+                        isStopped(),
+                      "border-amber-500/40 text-amber-300 hover:bg-amber-500/10":
+                        isRunning(),
+                    }}
+                    disabled={actionPending() !== null}
+                    onClick={handleSuspendOrWake}
                   >
-                    {isRunning() ? "Suspend" : "Wake"}
-                  </Show>
-                  <Show
-                    when={
-                      actionPending() === null && !isRunning() && !isStopped()
-                    }
-                  >
-                    {statusLabel(emp().status)}
-                  </Show>
-                </button>
+                    <Show when={actionPending() === "suspend"}>
+                      Suspending...
+                    </Show>
+                    <Show when={actionPending() === "wake"}>Waking...</Show>
+                    <Show when={actionPending() === null}>
+                      {isRunning() ? "Suspend" : "Wake"}
+                    </Show>
+                  </button>
+                </Show>
                 <div ref={kebabContainerRef} class="relative">
                   <button
                     type="button"
-                    class="flex items-center justify-center w-8 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="flex items-center justify-center w-8 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                     aria-label="More actions"
                     aria-haspopup="menu"
                     aria-expanded={showKebab()}
@@ -401,7 +422,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                       <button
                         type="button"
                         role="menuitem"
-                        class="w-full text-left px-3 py-1.5 text-[13px] text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="w-full text-left px-3 py-1.5 text-[13px] text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:bg-surface-2"
                         onClick={() => {
                           setShowKebab(false);
                           setShowEdit(true);
@@ -418,7 +439,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                       <button
                         type="button"
                         role="menuitem"
-                        class="w-full text-left px-3 py-1.5 text-[13px] text-foreground hover:bg-surface-2 transition-colors"
+                        class="w-full text-left px-3 py-1.5 text-[13px] text-foreground hover:bg-surface-2 transition-colors focus-visible:outline-none focus-visible:bg-surface-2"
                         onClick={() => {
                           setShowKebab(false);
                           setShowRevisions(true);
@@ -429,7 +450,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                       <button
                         type="button"
                         role="menuitem"
-                        class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:bg-red-500/10 transition-colors"
+                        class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:bg-red-500/10 transition-colors focus-visible:outline-none focus-visible:bg-red-500/10"
                         onClick={() => {
                           setShowKebab(false);
                           setConfirmDelete(true);
@@ -442,7 +463,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                 </div>
                 <button
                   type="button"
-                  class="w-8 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
+                  class="w-8 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                   aria-label="Close"
                   onClick={props.onClose}
                 >
@@ -557,9 +578,28 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full border border-emerald-500/30 bg-emerald-500/15 text-emerald-400 text-[10.5px] font-medium">
                           Completed
                         </span>
+                        <Show
+                          when={
+                            (
+                              run() as {
+                                runId: string | null;
+                              }
+                            ).runId
+                          }
+                        >
+                          {(id) => (
+                            <button
+                              type="button"
+                              class="text-[11.5px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+                              onClick={() => setDetailRunId(id())}
+                            >
+                              Open run details
+                            </button>
+                          )}
+                        </Show>
                         <button
                           type="button"
-                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground"
+                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                           onClick={() => setManualRun(null)}
                         >
                           Dismiss
@@ -583,9 +623,28 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/15 text-amber-300 text-[10.5px] font-medium">
                           Awaiting approval
                         </span>
+                        <Show
+                          when={
+                            (
+                              run() as {
+                                runId: string | null;
+                              }
+                            ).runId
+                          }
+                        >
+                          {(id) => (
+                            <button
+                              type="button"
+                              class="text-[11.5px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+                              onClick={() => setDetailRunId(id())}
+                            >
+                              Open run details
+                            </button>
+                          )}
+                        </Show>
                         <button
                           type="button"
-                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground"
+                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                           onClick={() => setManualRun(null)}
                         >
                           Dismiss
@@ -593,7 +652,8 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                       </div>
                       <div class="text-[12.5px] text-muted-foreground mb-1.5">
                         The run is paused waiting on approval. Approval flow is
-                        not yet supported in the desktop app.
+                        not yet supported in the desktop app. Open run details
+                        to inspect the pending approvals.
                       </div>
                       <Show when={(run() as { output: string }).output}>
                         <pre class="whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed text-foreground m-0">
@@ -608,7 +668,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                         </span>
                         <button
                           type="button"
-                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground"
+                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                           onClick={() => setManualRun(null)}
                         >
                           Dismiss
@@ -625,7 +685,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                         </span>
                         <button
                           type="button"
-                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground"
+                          class="ml-auto text-[11.5px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                           onClick={() => setManualRun(null)}
                         >
                           Dismiss
@@ -718,7 +778,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                       </span>
                       <button
                         type="button"
-                        class="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
+                        class="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                         onClick={copyEndpoint}
                       >
                         Copy
@@ -772,6 +832,16 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
               />
             </Show>
 
+            <Show when={detailRunId()}>
+              {(id) => (
+                <EmployeeRunDetailModal
+                  deploymentId={emp().id}
+                  runId={id()}
+                  onClose={() => setDetailRunId(null)}
+                />
+              )}
+            </Show>
+
             <Show when={confirmDelete()}>
               <div
                 class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] animate-[fadeIn_0.15s_ease-out]"
@@ -809,7 +879,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                   <div class="flex justify-end gap-2 mt-5">
                     <button
                       type="button"
-                      class="py-2 px-4 rounded text-[13px] font-medium bg-transparent text-foreground border border-border hover:bg-muted disabled:opacity-50"
+                      class="py-2 px-4 rounded text-[13px] font-medium bg-transparent text-foreground border border-border hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                       onClick={() => setConfirmDelete(false)}
                       disabled={actionPending() === "delete"}
                     >
@@ -817,7 +887,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     </button>
                     <button
                       type="button"
-                      class="py-2 px-4 rounded text-[13px] font-medium bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
+                      class="py-2 px-4 rounded text-[13px] font-medium bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-300"
                       onClick={handleDelete}
                       disabled={actionPending() === "delete"}
                     >
