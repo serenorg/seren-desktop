@@ -9,6 +9,9 @@ import { executeTool } from "@/lib/tools/executor";
 import {
   cancelEmployeeRun,
   runEmployeeMessage,
+  type ToolAuditEvent,
+  type ToolCallEvent,
+  type ToolResultEvent,
 } from "@/services/employees-runtime";
 import { storeAssistantResponse } from "@/services/memory";
 import {
@@ -582,6 +585,119 @@ function handleComplete(
 }
 
 /**
+ * Translate a runtime `tool_call` envelope into a UnifiedMessage matching
+ * the orchestrator's existing tool-card shape so the chat UI renders
+ * identically. Status is "running" until the matching tool_result lands.
+ */
+function emitEmployeeToolCall(
+  conversationId: string,
+  event: ToolCallEvent,
+): void {
+  let parameters: Record<string, unknown> | undefined;
+  if (event.arguments) {
+    try {
+      const parsed = JSON.parse(event.arguments);
+      if (parsed && typeof parsed === "object") {
+        parameters = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Leave parameters undefined; the raw arguments string is still
+      // available on toolCall.arguments for the card to display.
+    }
+  }
+  const toolMessage: UnifiedMessage = {
+    id: crypto.randomUUID(),
+    type: "tool_call",
+    role: "assistant",
+    content: event.name,
+    timestamp: Date.now(),
+    status: "streaming",
+    workerType: "orchestrator",
+    toolCallId: event.id,
+    toolCall: {
+      toolCallId: event.id,
+      title: event.name,
+      kind: "",
+      status: event.status ?? "running",
+      name: event.name,
+      arguments: event.arguments ?? undefined,
+      parameters,
+    },
+  };
+  conversationStore.addMessage(toolMessage, conversationId);
+  void conversationStore.persistMessage(toolMessage, conversationId);
+}
+
+function emitEmployeeToolResult(
+  conversationId: string,
+  event: ToolResultEvent,
+): void {
+  // Match the prior tool_call message and flip its status, the same way
+  // handleToolResult does for orchestrator runs.
+  const messages = conversationStore.getMessagesFor(conversationId);
+  const toolCallMsg = messages.find(
+    (m) => m.toolCallId === event.id && m.type === "tool_call",
+  );
+  if (toolCallMsg?.toolCall) {
+    const newStatus = event.isError ? "error" : "completed";
+    conversationStore.updateMessage(
+      toolCallMsg.id,
+      {
+        status: "complete",
+        toolCall: {
+          ...toolCallMsg.toolCall,
+          status: newStatus,
+          result: event.content,
+          isError: event.isError,
+        },
+      },
+      conversationId,
+    );
+  }
+
+  const resultMessage: UnifiedMessage = {
+    id: crypto.randomUUID(),
+    type: "tool_result",
+    role: "assistant",
+    content: event.content,
+    timestamp: Date.now(),
+    status: "complete",
+    workerType: "orchestrator",
+    toolCallId: event.id,
+    toolCall: {
+      toolCallId: event.id,
+      title: "",
+      kind: "",
+      status: event.isError ? "error" : "completed",
+      isError: event.isError,
+      result: event.content,
+    },
+  };
+  conversationStore.addMessage(resultMessage, conversationId);
+  void conversationStore.persistMessage(resultMessage, conversationId);
+}
+
+function emitEmployeeToolAudit(
+  conversationId: string,
+  event: ToolAuditEvent,
+): void {
+  // Audit events are advisory (approval/skip notes); render as a small
+  // assistant text aside instead of as a tool card so the audit narrative
+  // sits inline with the conversation.
+  const message: UnifiedMessage = {
+    id: crypto.randomUUID(),
+    type: "assistant",
+    role: "assistant",
+    content: `Tool audit (${event.tool}): ${event.reason}`,
+    timestamp: Date.now(),
+    status: "complete",
+    workerType: "orchestrator",
+  };
+  conversationStore.addMessage(message, conversationId);
+  void conversationStore.persistMessage(message, conversationId);
+}
+
+/**
  * Run a single chat turn against a deployed virtual employee via seren-cloud.
  *
  * Bypasses the seren-models orchestrator entirely: the deployed agent owns
@@ -609,6 +725,9 @@ async function runEmployeeTurn(
       onThinking: (chunk) => {
         conversationStore.appendStreamingThinking(chunk, conversationId);
       },
+      onToolCall: (event) => emitEmployeeToolCall(conversationId, event),
+      onToolResult: (event) => emitEmployeeToolResult(conversationId, event),
+      onToolAudit: (event) => emitEmployeeToolAudit(conversationId, event),
     });
     conversationStore.finalizeStreaming(conversationId);
     const duration = Date.now() - stream.startTime;

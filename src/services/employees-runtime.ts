@@ -115,11 +115,36 @@ function abortableDelay(ms: number, signal: AbortSignal | undefined) {
   });
 }
 
+export interface ToolCallEvent {
+  id: string;
+  name: string;
+  arguments: string | null;
+  status: string | null;
+}
+
+export interface ToolResultEvent {
+  id: string;
+  content: string;
+  isError: boolean;
+}
+
+export interface ToolAuditEvent {
+  id: string;
+  tool: string;
+  reason: string;
+}
+
 export interface RunCallbacks {
   /** Called for each text token streamed from the runtime. */
   onText?: (chunk: string) => void;
   /** Called for each thinking-trace token streamed from the runtime. */
   onThinking?: (chunk: string) => void;
+  /** Fired when the deployed agent invokes a tool. */
+  onToolCall?: (event: ToolCallEvent) => void;
+  /** Fired with the corresponding tool result (matched by id). */
+  onToolResult?: (event: ToolResultEvent) => void;
+  /** Fired when a tool invocation is audited (approved/skipped/etc.). */
+  onToolAudit?: (event: ToolAuditEvent) => void;
 }
 
 export interface RunOptions extends RunCallbacks {
@@ -135,7 +160,12 @@ export interface RunOptions extends RunCallbacks {
 
 function applyEnvelope(
   raw: unknown,
-  state: { text: string; thinking: string; errorMessage: string | null },
+  state: {
+    text: string;
+    thinking: string;
+    errorMessage: string | null;
+    seenToolEvents: Set<string>;
+  },
   callbacks: RunCallbacks,
 ): void {
   if (!raw || typeof raw !== "object") return;
@@ -153,6 +183,42 @@ function applyEnvelope(
         callbacks.onThinking?.(ev.text);
       }
       break;
+    case "tool_call": {
+      // De-dupe across the live stream and the post-run replay so the
+      // same tool_call doesn't render twice.
+      const key = `call:${ev.id}`;
+      if (state.seenToolEvents.has(key)) break;
+      state.seenToolEvents.add(key);
+      callbacks.onToolCall?.({
+        id: ev.id,
+        name: ev.name,
+        arguments: ev.arguments ?? null,
+        status: ev.status ?? null,
+      });
+      break;
+    }
+    case "tool_result": {
+      const key = `result:${ev.id}`;
+      if (state.seenToolEvents.has(key)) break;
+      state.seenToolEvents.add(key);
+      callbacks.onToolResult?.({
+        id: ev.id,
+        content: ev.content,
+        isError: ev.is_error,
+      });
+      break;
+    }
+    case "tool_audit": {
+      const key = `audit:${ev.id}`;
+      if (state.seenToolEvents.has(key)) break;
+      state.seenToolEvents.add(key);
+      callbacks.onToolAudit?.({
+        id: ev.id,
+        tool: ev.tool,
+        reason: ev.reason,
+      });
+      break;
+    }
     case "error":
       if (typeof ev.message === "string" && !state.errorMessage) {
         state.errorMessage = ev.message;
@@ -167,7 +233,12 @@ async function pollUntilTerminal(
   deploymentId: string,
   runId: string,
   signal: AbortSignal | undefined,
-  state: { text: string; thinking: string; errorMessage: string | null },
+  state: {
+    text: string;
+    thinking: string;
+    errorMessage: string | null;
+    seenToolEvents: Set<string>;
+  },
   callbacks: RunCallbacks,
   startedAt: number,
 ): Promise<{
@@ -198,14 +269,29 @@ async function pollUntilTerminal(
       // dedupes/reorders tokens differently from the live stream, trust
       // the streamed state rather than splicing a non-prefix tail that
       // would garble the displayed reply.
-      const recovered = { text: "", thinking: "", errorMessage: null } as {
+      // Share the seenToolEvents set with the main state so the replay
+      // de-dupes against tool events the stream already delivered.
+      // Pass through tool callbacks only so any tool events the stream
+      // missed still surface; text/thinking are diff'd separately below.
+      const recovered = {
+        text: "",
+        thinking: "",
+        errorMessage: null,
+        seenToolEvents: state.seenToolEvents,
+      } as {
         text: string;
         thinking: string;
         errorMessage: string | null;
+        seenToolEvents: Set<string>;
+      };
+      const replayCallbacks: RunCallbacks = {
+        onToolCall: callbacks.onToolCall,
+        onToolResult: callbacks.onToolResult,
+        onToolAudit: callbacks.onToolAudit,
       };
       if (Array.isArray(event.output_events)) {
         for (const raw of event.output_events) {
-          applyEnvelope(raw, recovered, {});
+          applyEnvelope(raw, recovered, replayCallbacks);
         }
       }
       if (
@@ -328,10 +414,16 @@ export async function runEmployeeMessage(
       };
     }
 
-    const state = { text: "", thinking: "", errorMessage: null } as {
+    const state = {
+      text: "",
+      thinking: "",
+      errorMessage: null,
+      seenToolEvents: new Set<string>(),
+    } as {
       text: string;
       thinking: string;
       errorMessage: string | null;
+      seenToolEvents: Set<string>;
     };
     const startedAt = Date.now();
 
