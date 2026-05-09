@@ -5,13 +5,16 @@ import {
   type Component,
   createMemo,
   createResource,
+  createSignal,
   For,
   type JSX,
   onCleanup,
   onMount,
   Show,
 } from "solid-js";
+import { createStore } from "solid-js/store";
 import type {
+  EmployeeRunApprovalDecision,
   EmployeeRunArtifact,
   EmployeeRunDetail,
 } from "@/lib/employees/types";
@@ -176,6 +179,23 @@ export const EmployeeRunDetailModal: Component<EmployeeRunDetailModalProps> = (
     () => ({ id: props.deploymentId, runId: props.runId }),
     async ({ id, runId }) => svc.listRunArtifacts(id, runId),
   );
+  const [approvals, { refetch: refetchApprovals }] = createResource(
+    () => {
+      const r = run();
+      if (!r || r.status !== "awaiting_approval") return null;
+      return { id: props.deploymentId, runId: props.runId };
+    },
+    async (input) => {
+      if (!input) return null;
+      return svc.listPendingApprovals(input.id, input.runId);
+    },
+  );
+
+  const [decisions, setDecisions] = createStore<
+    Record<string, EmployeeRunApprovalDecision>
+  >({});
+  const [resumeError, setResumeError] = createSignal<string | null>(null);
+  const [resuming, setResuming] = createSignal(false);
 
   let closeButtonRef: HTMLButtonElement | undefined;
   let interval: ReturnType<typeof setInterval> | null = null;
@@ -198,14 +218,74 @@ export const EmployeeRunDetailModal: Component<EmployeeRunDetailModalProps> = (
     }
     const r = run();
     if (!r) return;
-    if (
-      FAILURE_STATUSES.has(r.status) ||
-      r.status === "completed" ||
-      r.status === "awaiting_approval"
-    ) {
+    if (FAILURE_STATUSES.has(r.status) || r.status === "completed") {
       return;
     }
     void refetchRun();
+    if (r.status === "awaiting_approval") {
+      void refetchApprovals();
+    }
+  };
+
+  const setDecision = (id: string, decision: EmployeeRunApprovalDecision) => {
+    setResumeError(null);
+    setDecisions(id, decision);
+  };
+
+  const setAllDecisions = (decision: EmployeeRunApprovalDecision) => {
+    setResumeError(null);
+    const list = approvals();
+    if (!list) return;
+    for (const item of list.approvals) {
+      setDecisions(item.id, decision);
+    }
+  };
+
+  const decidedCount = createMemo(() => {
+    const list = approvals();
+    if (!list) return 0;
+    let n = 0;
+    for (const item of list.approvals) {
+      if (decisions[item.id]) n++;
+    }
+    return n;
+  });
+
+  const handleResume = async () => {
+    const list = approvals();
+    if (!list?.checkpointId) {
+      setResumeError("Missing checkpoint id; refresh and try again.");
+      return;
+    }
+    if (list.approvals.length === 0) {
+      setResumeError("No pending approvals to resume.");
+      return;
+    }
+    if (decidedCount() < list.approvals.length) {
+      setResumeError("Decide on every pending approval before resuming.");
+      return;
+    }
+    setResuming(true);
+    setResumeError(null);
+    try {
+      await svc.resumeRun(props.deploymentId, {
+        checkpointId: list.checkpointId,
+        decisions: list.approvals.map((a) => ({
+          id: a.id,
+          decision: decisions[a.id] ?? "reject",
+        })),
+      });
+      // Refresh the run first so the awaiting_approval section unmounts
+      // before clearing local decisions; the approvals resource source
+      // returns null once status flips, so its fetcher short-circuits
+      // without an additional request.
+      await refetchRun();
+      setDecisions({});
+    } catch (e) {
+      setResumeError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setResuming(false);
+    }
   };
 
   onMount(() => {
@@ -383,6 +463,171 @@ export const EmployeeRunDetailModal: Component<EmployeeRunDetailModalProps> = (
                       {run.loading ? "Refreshing..." : "Refresh"}
                     </button>
                   </div>
+
+                  <Show when={r().status === "awaiting_approval"}>
+                    <section
+                      class="flex flex-col gap-3 border border-amber-500/30 bg-amber-500/5 rounded p-3"
+                      aria-labelledby="employee-run-approvals-heading"
+                      aria-busy={resuming()}
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <h3
+                          id="employee-run-approvals-heading"
+                          class="m-0 text-[12px] font-semibold text-amber-300"
+                        >
+                          Pending approvals
+                        </h3>
+                        <Show when={(approvals()?.approvals.length ?? 0) > 0}>
+                          <div class="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              class="text-[11px] px-2 py-0.5 rounded border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
+                              onClick={() => setAllDecisions("approve")}
+                              disabled={resuming()}
+                            >
+                              Approve all
+                            </button>
+                            <button
+                              type="button"
+                              class="text-[11px] px-2 py-0.5 rounded border border-red-500/40 text-red-300 hover:bg-red-500/10 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-400/60"
+                              onClick={() => setAllDecisions("reject")}
+                              disabled={resuming()}
+                            >
+                              Reject all
+                            </button>
+                          </div>
+                        </Show>
+                      </div>
+
+                      <Show when={approvals.error}>
+                        <div class="text-[12px] text-destructive" role="alert">
+                          {approvals.error instanceof Error
+                            ? approvals.error.message
+                            : String(approvals.error)}
+                        </div>
+                      </Show>
+
+                      <Show
+                        when={!approvals.loading}
+                        fallback={
+                          <div class="text-[12px] text-muted-foreground italic">
+                            Loading approvals...
+                          </div>
+                        }
+                      >
+                        <Show
+                          when={(approvals()?.approvals.length ?? 0) > 0}
+                          fallback={
+                            <Show when={!approvals.error}>
+                              <div class="text-[12px] text-muted-foreground italic">
+                                No pending approvals reported. Try refreshing.
+                              </div>
+                            </Show>
+                          }
+                        >
+                          <ul class="m-0 p-0 list-none flex flex-col gap-2">
+                            <For each={approvals()?.approvals ?? []}>
+                              {(item) => (
+                                <li class="flex flex-col gap-1.5 border border-border/60 rounded p-2.5 bg-background/40">
+                                  <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="text-[12.5px] font-mono font-semibold text-foreground">
+                                      {item.tool}
+                                    </span>
+                                    <Show when={item.functionCallId}>
+                                      <span
+                                        class="text-[10.5px] font-mono text-muted-foreground/70 truncate"
+                                        title={item.functionCallId ?? ""}
+                                      >
+                                        {item.functionCallId}
+                                      </span>
+                                    </Show>
+                                    <div class="ml-auto flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        class={`text-[11px] px-2 py-0.5 rounded border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60 ${
+                                          decisions[item.id] === "approve"
+                                            ? "bg-emerald-500/20 border-emerald-500/60 text-emerald-200"
+                                            : "border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10"
+                                        }`}
+                                        onClick={() =>
+                                          setDecision(item.id, "approve")
+                                        }
+                                        disabled={resuming()}
+                                        aria-pressed={
+                                          decisions[item.id] === "approve"
+                                        }
+                                      >
+                                        Approve
+                                      </button>
+                                      <button
+                                        type="button"
+                                        class={`text-[11px] px-2 py-0.5 rounded border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-400/60 ${
+                                          decisions[item.id] === "reject"
+                                            ? "bg-red-500/20 border-red-500/60 text-red-200"
+                                            : "border-red-500/30 text-red-300 hover:bg-red-500/10"
+                                        }`}
+                                        onClick={() =>
+                                          setDecision(item.id, "reject")
+                                        }
+                                        disabled={resuming()}
+                                        aria-pressed={
+                                          decisions[item.id] === "reject"
+                                        }
+                                      >
+                                        Reject
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <Show when={item.reason}>
+                                    <div class="text-[11.5px] text-muted-foreground">
+                                      {item.reason}
+                                    </div>
+                                  </Show>
+                                  <Show
+                                    when={
+                                      item.args !== null &&
+                                      item.args !== undefined
+                                    }
+                                  >
+                                    <pre class="m-0 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-snug text-foreground/85 bg-background/60 border border-border/60 rounded p-2">
+                                      {prettyJson(item.args)}
+                                    </pre>
+                                  </Show>
+                                </li>
+                              )}
+                            </For>
+                          </ul>
+                        </Show>
+                      </Show>
+
+                      <Show when={resumeError()}>
+                        <div class="text-[12px] text-destructive" role="alert">
+                          {resumeError()}
+                        </div>
+                      </Show>
+
+                      <div class="flex items-center justify-between gap-2">
+                        <span class="text-[11.5px] text-muted-foreground">
+                          {decidedCount()} of{" "}
+                          {approvals()?.approvals.length ?? 0} decided
+                        </span>
+                        <button
+                          type="button"
+                          class="text-[12px] px-3 py-1 rounded border border-amber-500/50 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={handleResume}
+                          disabled={
+                            resuming() ||
+                            (approvals()?.approvals.length ?? 0) === 0 ||
+                            decidedCount() <
+                              (approvals()?.approvals.length ?? 0) ||
+                            !approvals()?.checkpointId
+                          }
+                        >
+                          {resuming() ? "Resuming..." : "Resume run"}
+                        </button>
+                      </div>
+                    </section>
+                  </Show>
 
                   <Show when={hasInvocationPayload(r().invocationPayload)}>
                     <details class="group">

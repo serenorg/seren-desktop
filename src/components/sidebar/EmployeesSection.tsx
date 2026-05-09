@@ -17,6 +17,10 @@ import type {
   EmployeeStatus,
   EmployeeSummary,
 } from "@/lib/employees/types";
+import {
+  employeeApprovals,
+  type OrgPendingApprovalRun,
+} from "@/services/employee-approvals";
 import { employeeStore } from "@/stores/employees.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
@@ -82,42 +86,75 @@ function modeLabel(mode: EmployeeMode): string {
 const EmployeeRow: Component<{
   employee: EmployeeSummary;
   active: boolean;
+  pendingCount: number;
   onSelect: (id: string) => void;
-}> = (props) => (
-  <button
-    type="button"
-    class="flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2"
-    classList={{
-      "bg-surface-2/70": props.active,
-    }}
-    onClick={() => props.onSelect(props.employee.id)}
-    title={`${props.employee.name} (${modeLabel(props.employee.mode)})`}
-    aria-label={`Open ${props.employee.name}, ${modeLabel(props.employee.mode)}, ${statusLabel(props.employee.status, props.employee.mode)}`}
-  >
-    <Avatar name={props.employee.name} seed={props.employee.avatarSeed} />
-    <div class="flex-1 min-w-0">
-      <div class="text-[12.5px] text-foreground truncate">
-        {props.employee.name}
+}> = (props) => {
+  const pluralRuns = () => (props.pendingCount === 1 ? "" : "s");
+  const ariaSuffix = () =>
+    props.pendingCount > 0
+      ? `, ${props.pendingCount} run${pluralRuns()} need approval`
+      : "";
+  return (
+    <button
+      type="button"
+      class="flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2"
+      classList={{
+        "bg-surface-2/70": props.active,
+      }}
+      onClick={() => props.onSelect(props.employee.id)}
+      title={`${props.employee.name} (${modeLabel(props.employee.mode)})`}
+      aria-label={`Open ${props.employee.name}, ${modeLabel(props.employee.mode)}, ${statusLabel(props.employee.status, props.employee.mode)}${ariaSuffix()}`}
+    >
+      <Avatar name={props.employee.name} seed={props.employee.avatarSeed} />
+      <div class="flex-1 min-w-0">
+        <div class="text-[12.5px] text-foreground truncate">
+          {props.employee.name}
+        </div>
+        <div class="text-[10.5px] text-muted-foreground truncate">
+          {modeLabel(props.employee.mode)}
+          {" - "}
+          {statusLabel(props.employee.status, props.employee.mode)}
+        </div>
       </div>
-      <div class="text-[10.5px] text-muted-foreground truncate">
-        {modeLabel(props.employee.mode)}
-        {" - "}
-        {statusLabel(props.employee.status, props.employee.mode)}
-      </div>
-    </div>
-    <span
-      class={`w-1.5 h-1.5 rounded-full flex-none ${statusDotClass(props.employee.status, props.employee.mode)}`}
-      aria-hidden="true"
-    />
-  </button>
-);
+      <Show when={props.pendingCount > 0}>
+        <span
+          class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-200 text-[10px] font-semibold leading-none"
+          title={`${props.pendingCount} run${pluralRuns()} awaiting approval`}
+          aria-hidden="true"
+        >
+          {props.pendingCount}
+        </span>
+      </Show>
+      <span
+        class={`w-1.5 h-1.5 rounded-full flex-none ${statusDotClass(props.employee.status, props.employee.mode)}`}
+        aria-hidden="true"
+      />
+    </button>
+  );
+};
 
 export const EmployeesSection: Component = () => {
   const [activeId, setActiveId] = createSignal<string | null>(null);
   const [showCreate, setShowCreate] = createSignal(false);
+  const [pendingByDeployment, setPendingByDeployment] = createSignal<
+    Map<string, OrgPendingApprovalRun[]>
+  >(new Map());
 
   const employees = createMemo(() => employeeStore.employees);
   const threadsByEmployee = createMemo(() => threadStore.threadsByEmployee);
+
+  const refreshPending = async () => {
+    try {
+      const rows = await employeeApprovals.listOrg(100);
+      setPendingByDeployment(employeeApprovals.groupByDeployment(rows));
+    } catch {
+      // Sidebar approval badge is best-effort; a transient inbox failure
+      // should not poison the sidebar. The next tick retries.
+    }
+  };
+
+  const pendingCountFor = (deploymentId: string): number =>
+    pendingByDeployment().get(deploymentId)?.length ?? 0;
 
   const handleSelect = (id: string) => {
     setActiveId(id);
@@ -157,16 +194,19 @@ export const EmployeesSection: Component = () => {
     )
       return;
     void employeeStore.refresh();
+    void refreshPending();
   };
 
   const handleVisibility = () => {
     if (document.visibilityState === "visible") {
       void employeeStore.refresh();
+      void refreshPending();
     }
   };
 
   onMount(() => {
     void employeeStore.refresh();
+    void refreshPending();
     interval = setInterval(tick, STATUS_REFRESH_INTERVAL_MS);
     document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener(
@@ -213,6 +253,7 @@ export const EmployeesSection: Component = () => {
                 <EmployeeRow
                   employee={employee}
                   active={activeId() === employee.id}
+                  pendingCount={pendingCountFor(employee.id)}
                   onSelect={handleSelect}
                 />
                 <For each={threads()}>

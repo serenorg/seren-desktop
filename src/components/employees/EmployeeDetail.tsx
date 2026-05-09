@@ -619,7 +619,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                       </Show>
                     </Show>
                     <Show when={run().kind === "awaitingApproval"}>
-                      <div class="flex items-center gap-2 mb-1.5">
+                      <div class="flex items-center gap-2 mb-1.5 flex-wrap">
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/15 text-amber-300 text-[10.5px] font-medium">
                           Awaiting approval
                         </span>
@@ -635,10 +635,10 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                           {(id) => (
                             <button
                               type="button"
-                              class="text-[11.5px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+                              class="text-[11.5px] px-2 py-0.5 rounded border border-amber-500/50 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60"
                               onClick={() => setDetailRunId(id())}
                             >
-                              Open run details
+                              Review approvals
                             </button>
                           )}
                         </Show>
@@ -651,9 +651,8 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                         </button>
                       </div>
                       <div class="text-[12.5px] text-muted-foreground mb-1.5">
-                        The run is paused waiting on approval. Approval flow is
-                        not yet supported in the desktop app. Open run details
-                        to inspect the pending approvals.
+                        The run is paused waiting on approval. Open the run to
+                        approve or reject the pending tool calls.
                       </div>
                       <Show when={(run() as { output: string }).output}>
                         <pre class="whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed text-foreground m-0">

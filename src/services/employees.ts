@@ -22,9 +22,13 @@ import {
 import {
   type CloudDeploymentRunArtifact,
   type CloudDeploymentRunEvent,
+  type CloudRunPendingApproval,
+  type CloudRunPendingApprovalsResponse,
   serenCloudDeploymentRun,
   serenCloudDeploymentRunArtifacts,
+  serenCloudDeploymentRunPendingApprovals,
   serenCloudDeploymentRuns,
+  serenCloudRun,
 } from "@/api/seren-cloud";
 import type {
   EmployeeDetail,
@@ -33,6 +37,9 @@ import type {
   EmployeeRun,
   EmployeeRunArtifact,
   EmployeeRunDetail,
+  EmployeeRunPendingApproval,
+  EmployeeRunPendingApprovals,
+  EmployeeRunResumeRequest,
   EmployeeSummary,
   ModelChoice,
   NewEmployeeInput,
@@ -149,6 +156,29 @@ function runDetailFromCloud(row: CloudDeploymentRunEvent): EmployeeRunDetail {
     outputEvents: row.output_events,
     sessionId: row.session_id ?? null,
     conversationId: row.conversation_id ?? null,
+  };
+}
+
+function pendingApprovalFromCloud(
+  row: CloudRunPendingApproval,
+): EmployeeRunPendingApproval {
+  return {
+    id: row.id,
+    tool: row.tool,
+    reason: row.reason ?? null,
+    args: row.args,
+    functionCallId: row.function_call_id ?? null,
+  };
+}
+
+function pendingApprovalsFromCloud(
+  row: CloudRunPendingApprovalsResponse,
+): EmployeeRunPendingApprovals {
+  return {
+    runId: row.run_id,
+    status: row.status,
+    checkpointId: row.checkpoint_id ?? null,
+    approvals: (row.pending_approvals ?? []).map(pendingApprovalFromCloud),
   };
 }
 
@@ -418,6 +448,47 @@ export const employees = {
       rows: rows.map(runFromCloud),
       hasMore: data?.pagination?.has_more ?? false,
       total: data?.pagination?.total ?? rows.length,
+    };
+  },
+
+  async listPendingApprovals(
+    deploymentId: string,
+    runId: string,
+  ): Promise<EmployeeRunPendingApprovals> {
+    const { data, error } = await serenCloudDeploymentRunPendingApprovals({
+      path: { id: deploymentId, run_id: runId },
+      throwOnError: false,
+    });
+    if (error || !data?.data) {
+      throw new Error(
+        `Failed to load pending approvals: ${asMessage(error, "")}`,
+      );
+    }
+    return pendingApprovalsFromCloud(data.data);
+  },
+
+  async resumeRun(
+    deploymentId: string,
+    request: EmployeeRunResumeRequest,
+  ): Promise<{ runId: string | null; status: string }> {
+    const { data, error } = await serenCloudRun({
+      path: { id: deploymentId },
+      body: {
+        resume_checkpoint_id: request.checkpointId,
+        approval_decisions: request.decisions.map((d) => ({
+          id: d.id,
+          decision: d.decision,
+        })),
+        message: request.message,
+      },
+      throwOnError: false,
+    });
+    if (error || !data?.data) {
+      throw new Error(`Failed to resume run: ${asMessage(error, "")}`);
+    }
+    return {
+      runId: data.data.run_id ?? null,
+      status: data.data.status,
     };
   },
 

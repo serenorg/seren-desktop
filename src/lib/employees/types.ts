@@ -135,3 +135,26 @@ export type EmployeeRunArtifact = {
   payload: unknown;
   createdAt: string;
 };
+
+export type EmployeeRunPendingApproval = {
+  id: string;
+  tool: string;
+  reason: string | null;
+  args: unknown;
+  functionCallId: string | null;
+};
+
+export type EmployeeRunPendingApprovals = {
+  runId: string;
+  status: string;
+  checkpointId: string | null;
+  approvals: EmployeeRunPendingApproval[];
+};
+
+export type EmployeeRunApprovalDecision = "approve" | "reject";
+
+export type EmployeeRunResumeRequest = {
+  checkpointId: string;
+  decisions: { id: string; decision: EmployeeRunApprovalDecision }[];
+  message?: string;
+};

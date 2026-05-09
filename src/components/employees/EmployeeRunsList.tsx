@@ -244,14 +244,28 @@ export const EmployeeRunsList: Component<EmployeeRunsListProps> = (props) => {
                         Copy
                       </button>
                       <span>{durationLabel(run.executionTimeMs)}</span>
-                      <button
-                        type="button"
-                        class="ml-auto text-[11px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
-                        onClick={() => setDetailRunId(run.id)}
-                        aria-label="Open run detail"
+                      <Show
+                        when={run.status === "awaiting_approval"}
+                        fallback={
+                          <button
+                            type="button"
+                            class="ml-auto text-[11px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+                            onClick={() => setDetailRunId(run.id)}
+                            aria-label="Open run detail"
+                          >
+                            Details
+                          </button>
+                        }
                       >
-                        Details
-                      </button>
+                        <button
+                          type="button"
+                          class="ml-auto text-[11px] px-2 py-0.5 rounded border border-amber-500/50 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60"
+                          onClick={() => setDetailRunId(run.id)}
+                          aria-label="Review approvals"
+                        >
+                          Review
+                        </button>
+                      </Show>
                       <Show when={hasOutput()}>
                         <button
                           type="button"

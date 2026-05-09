@@ -496,6 +496,7 @@ describe("threadStore", () => {
         "auto",
         "/Users/dev/project-a",
         "seren",
+        null,
       );
       expect(id).toBe("chat-1");
       expect(threadStore.activeThreadId).toBe("chat-1");
