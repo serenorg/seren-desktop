@@ -11,6 +11,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { EmployeeRevisionsModal } from "@/components/employees/EmployeeRevisionsModal";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
 import type {
@@ -97,6 +98,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const [showKebab, setShowKebab] = createSignal(false);
   const [confirmDelete, setConfirmDelete] = createSignal(false);
   const [showEdit, setShowEdit] = createSignal(false);
+  const [showRevisions, setShowRevisions] = createSignal(false);
 
   const summary = createMemo<EmployeeSummary | undefined>(() =>
     employeeStore.byId(props.employeeId),
@@ -113,6 +115,8 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     if (event.key !== "Escape") return;
     // The edit modal owns its own keydown listener; let it handle Escape.
     if (showEdit()) return;
+    // The revisions modal owns its own keydown listener.
+    if (showRevisions()) return;
     if (confirmDelete()) {
       if (actionPending() === "delete") return;
       event.preventDefault();
@@ -352,6 +356,17 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                       <button
                         type="button"
                         role="menuitem"
+                        class="w-full text-left px-3 py-1.5 text-[13px] text-foreground hover:bg-surface-2 transition-colors"
+                        onClick={() => {
+                          setShowKebab(false);
+                          setShowRevisions(true);
+                        }}
+                      >
+                        View revisions
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
                         class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:bg-red-500/10 transition-colors"
                         onClick={() => {
                           setShowKebab(false);
@@ -532,6 +547,18 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                   }}
                 />
               )}
+            </Show>
+
+            <Show when={showRevisions()}>
+              <EmployeeRevisionsModal
+                employeeId={emp().id}
+                activeRevisionId={emp().activeRevisionId}
+                onClose={() => setShowRevisions(false)}
+                onRolledBack={() => {
+                  void employeeStore.refresh();
+                  void employeeStore.loadDetail(emp().id);
+                }}
+              />
             </Show>
 
             <Show when={confirmDelete()}>

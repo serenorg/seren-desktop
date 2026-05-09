@@ -80,3 +80,22 @@ export type EmployeePatch = Partial<
     modelChoice: ModelChoice;
   }
 >;
+
+export type EmployeeRevisionChangeKind = "create" | "update" | "rollback";
+
+export type EmployeeRevision = {
+  revisionId: string;
+  version: number;
+  name: string;
+  agentSlug: string;
+  modelId: string;
+  modelPolicy: EmployeeModelPolicy;
+  template: EmployeeTemplate;
+  approvalPolicy: EmployeeApprovalPolicy;
+  changeKind: EmployeeRevisionChangeKind;
+  changeSummary: string[];
+  changedFields: string[];
+  restoredFromRevisionId: string | null;
+  createdAt: string;
+  createdByUserId: string;
+};

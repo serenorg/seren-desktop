@@ -6,12 +6,15 @@ import {
   type AgentSpecUpdate,
   type CloudDeploymentSummary,
   type ManagedAgentDeploymentDetail,
+  type ManagedAgentDeploymentRevisionSummary,
   type PrivateModelCatalogEntry,
   serenAgentDeleteManagedDeployment,
   serenAgentDeploy,
   serenAgentGetManagedDeployment,
   serenAgentListDeployments,
+  serenAgentListManagedDeploymentRevisions,
   serenAgentPrivateModels,
+  serenAgentRollbackManagedDeployment,
   serenAgentStartManagedDeployment,
   serenAgentStopManagedDeployment,
   serenAgentUpdateManagedDeployment,
@@ -19,6 +22,7 @@ import {
 import type {
   EmployeeDetail,
   EmployeePatch,
+  EmployeeRevision,
   EmployeeSummary,
   ModelChoice,
   NewEmployeeInput,
@@ -82,6 +86,27 @@ function detailFromManaged(
     maxTimeoutSeconds: managed.max_timeout_seconds ?? null,
     maxToolOutputChars: managed.max_tool_output_chars ?? null,
     contextBudgetTokens: managed.context_budget_tokens ?? null,
+  };
+}
+
+function revisionFromCloud(
+  row: ManagedAgentDeploymentRevisionSummary,
+): EmployeeRevision {
+  return {
+    revisionId: row.revision_id,
+    version: row.version,
+    name: row.name,
+    agentSlug: row.agent_slug,
+    modelId: row.model_id,
+    modelPolicy: row.model_policy,
+    template: row.template,
+    approvalPolicy: row.approval_policy,
+    changeKind: row.change_kind,
+    changeSummary: row.change_summary,
+    changedFields: row.changed_fields,
+    restoredFromRevisionId: row.restored_from_revision_id ?? null,
+    createdAt: row.created_at,
+    createdByUserId: row.created_by_user_id,
   };
 }
 
@@ -276,5 +301,31 @@ export const employees = {
       throw new Error(`Failed to list private models: ${asMessage(error, "")}`);
     }
     return data?.data?.models ?? [];
+  },
+
+  async listRevisions(id: string): Promise<EmployeeRevision[]> {
+    const { data, error } = await serenAgentListManagedDeploymentRevisions({
+      path: { id },
+      throwOnError: false,
+    });
+    if (error) {
+      throw new Error(
+        `Failed to list employee revisions: ${asMessage(error, "")}`,
+      );
+    }
+    const rows = data?.data ?? [];
+    return rows.map(revisionFromCloud);
+  },
+
+  async rollback(id: string, revisionId: string): Promise<EmployeeSummary> {
+    const { data, error } = await serenAgentRollbackManagedDeployment({
+      path: { id },
+      body: { revision_id: revisionId },
+      throwOnError: false,
+    });
+    if (error || !data?.data) {
+      throw new Error(`Failed to roll back employee: ${asMessage(error, "")}`);
+    }
+    return summaryFromCloud(data.data);
   },
 };
