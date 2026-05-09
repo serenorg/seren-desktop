@@ -485,7 +485,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
             </div>
 
             {/* Body */}
-            <div class="flex-1 overflow-y-auto px-6 py-6 max-w-3xl w-full">
+            <div class="flex-1 overflow-y-auto px-6 py-6 w-full min-w-0">
               <Show when={actionError()}>
                 <div
                   class="mb-4 py-2.5 px-3 bg-destructive/20 text-destructive rounded text-[13px]"
