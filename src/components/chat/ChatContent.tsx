@@ -250,6 +250,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     const id = conversationId();
     return id ? conversationStore.getStreamingThinkingFor(id) : "";
   };
+  const streamingStalled = () => {
+    const id = conversationId();
+    return id ? conversationStore.getStreamingStalledFor(id) : false;
+  };
   markdownWorker.onmessage = (
     e: MessageEvent<{ id: string; html: string; error?: boolean }>,
   ) => {
@@ -1446,6 +1450,11 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                   <span class="inline-block w-[6px] h-[14px] bg-primary ml-0.5 animate-pulse" />
                 </Show>
               </div>
+              <Show when={streamingStalled()}>
+                <div class="mt-2 text-[11.5px] text-muted-foreground italic">
+                  Still working - the runtime hasn't sent a token in a while.
+                </div>
+              </Show>
             </article>
           </Show>
         </div>

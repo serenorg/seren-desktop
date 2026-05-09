@@ -743,6 +743,8 @@ function finalizeOrphanToolCalls(
  * just hand it the user's message and surface the reply as an assistant
  * message.
  */
+const STALL_THRESHOLD_MS = 30_000;
+
 async function runEmployeeTurn(
   conversationId: string,
   deploymentId: string,
@@ -754,18 +756,43 @@ async function runEmployeeTurn(
   };
   activeStreams.set(conversationId, stream);
 
+  // Track the last token-arrival timestamp so a long quiet window can
+  // surface a "this is taking a while" hint in the chat UI without
+  // killing the run. The stall flag flips back to false on every chunk.
+  let lastProgressAt = Date.now();
+  const stallTick = setInterval(() => {
+    if (Date.now() - lastProgressAt < STALL_THRESHOLD_MS) return;
+    conversationStore.setStreamingStalled(true, conversationId);
+  }, 5_000);
+
+  const markProgress = () => {
+    lastProgressAt = Date.now();
+    conversationStore.setStreamingStalled(false, conversationId);
+  };
+
   try {
     const result = await runEmployeeMessage(deploymentId, prompt, {
       conversationId,
       onText: (chunk) => {
+        markProgress();
         conversationStore.appendStreamingContent(chunk, conversationId);
       },
       onThinking: (chunk) => {
+        markProgress();
         conversationStore.appendStreamingThinking(chunk, conversationId);
       },
-      onToolCall: (event) => emitEmployeeToolCall(conversationId, event),
-      onToolResult: (event) => emitEmployeeToolResult(conversationId, event),
-      onToolAudit: (event) => emitEmployeeToolAudit(conversationId, event),
+      onToolCall: (event) => {
+        markProgress();
+        emitEmployeeToolCall(conversationId, event);
+      },
+      onToolResult: (event) => {
+        markProgress();
+        emitEmployeeToolResult(conversationId, event);
+      },
+      onToolAudit: (event) => {
+        markProgress();
+        emitEmployeeToolAudit(conversationId, event);
+      },
     });
     conversationStore.finalizeStreaming(conversationId);
     const duration = Date.now() - stream.startTime;
@@ -798,6 +825,7 @@ async function runEmployeeTurn(
     finalizeOrphanToolCalls(conversationId, "error", message);
     handleError(message, conversationId, "employee");
   } finally {
+    clearInterval(stallTick);
     conversationStore.setLoading(false, conversationId);
     conversationStore.setRLMProcessing(false, conversationId);
     activeStreams.delete(conversationId);

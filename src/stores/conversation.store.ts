@@ -40,6 +40,7 @@ interface ConversationState {
   error: string | null;
   streamingContent: Record<string, string>;
   streamingThinking: Record<string, string>;
+  streamingStalled: Record<string, boolean>;
 }
 
 const [state, setState] = createStore<ConversationState>({
@@ -51,6 +52,7 @@ const [state, setState] = createStore<ConversationState>({
   error: null,
   streamingContent: {},
   streamingThinking: {},
+  streamingStalled: {},
 });
 
 function dbToConversation(db: DbConversation): Conversation {
@@ -149,6 +151,26 @@ export const conversationStore = {
 
   getStreamingThinkingFor(conversationId: string): string {
     return state.streamingThinking[conversationId] ?? "";
+  },
+
+  /**
+   * True when a streaming run has gone quiet for long enough that the
+   * caller wants to surface a "this may take a while" hint. Set by the
+   * orchestrator's stall detector; unset on each token / on finalize.
+   */
+  get streamingStalled(): boolean {
+    if (!state.activeConversationId) return false;
+    return state.streamingStalled[state.activeConversationId] ?? false;
+  },
+
+  getStreamingStalledFor(conversationId: string): boolean {
+    return state.streamingStalled[conversationId] ?? false;
+  },
+
+  setStreamingStalled(stalled: boolean, conversationId?: string) {
+    const id = conversationId ?? state.activeConversationId;
+    if (!id) return;
+    setState("streamingStalled", id, stalled);
   },
 
   // === Conversation management ===
@@ -345,6 +367,7 @@ export const conversationStore = {
     if (!conversationId) return;
     setState("streamingContent", conversationId, "");
     setState("streamingThinking", conversationId, "");
+    setState("streamingStalled", conversationId, false);
   },
 
   // === Loading/error ===
