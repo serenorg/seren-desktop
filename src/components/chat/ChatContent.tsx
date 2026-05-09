@@ -1316,7 +1316,8 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                               <Show
                                 when={
                                   !message.request &&
-                                  message.workerType === "orchestrator"
+                                  (message.workerType === "orchestrator" ||
+                                    message.workerType === "employee")
                                 }
                               >
                                 <button
@@ -1381,7 +1382,8 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                               <Show
                                 when={
                                   !message.request &&
-                                  message.workerType === "orchestrator"
+                                  (message.workerType === "orchestrator" ||
+                                    message.workerType === "employee")
                                 }
                               >
                                 <button

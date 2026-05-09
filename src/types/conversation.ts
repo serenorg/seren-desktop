@@ -8,7 +8,8 @@ export type WorkerType =
   | "chat_model"
   | "local_agent"
   | "mcp_publisher"
-  | "orchestrator";
+  | "orchestrator"
+  | "employee";
 
 /** All message types in a unified conversation */
 export type MessageType =

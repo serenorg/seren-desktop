@@ -29,7 +29,7 @@ import { projectStore } from "@/stores/project.store";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
-import type { UnifiedMessage } from "@/types/conversation";
+import type { UnifiedMessage, WorkerType } from "@/types/conversation";
 
 // =============================================================================
 // Types matching the Rust orchestrator events
@@ -589,6 +589,12 @@ function handleComplete(
  * the orchestrator's existing tool-card shape so the chat UI renders
  * identically. Status is "running" until the matching tool_result lands.
  */
+/**
+ * Translate a runtime `tool_call` envelope into a UnifiedMessage matching
+ * the orchestrator's existing tool-card shape. The chat UI keys card
+ * rendering on type/toolCall, not workerType, so they render identically;
+ * the workerType discriminant exists for telemetry/attribution.
+ */
 function emitEmployeeToolCall(
   conversationId: string,
   event: ToolCallEvent,
@@ -612,7 +618,7 @@ function emitEmployeeToolCall(
     content: event.name,
     timestamp: Date.now(),
     status: "streaming",
-    workerType: "orchestrator",
+    workerType: "employee",
     toolCallId: event.id,
     toolCall: {
       toolCallId: event.id,
@@ -662,7 +668,7 @@ function emitEmployeeToolResult(
     content: event.content,
     timestamp: Date.now(),
     status: "complete",
-    workerType: "orchestrator",
+    workerType: "employee",
     toolCallId: event.id,
     toolCall: {
       toolCallId: event.id,
@@ -691,7 +697,7 @@ function emitEmployeeToolAudit(
     content: `Tool audit (${event.tool}): ${event.reason}`,
     timestamp: Date.now(),
     status: "complete",
-    workerType: "orchestrator",
+    workerType: "employee",
   };
   conversationStore.addMessage(message, conversationId);
   void conversationStore.persistMessage(message, conversationId);
@@ -738,7 +744,7 @@ async function runEmployeeTurn(
       content: result.text,
       timestamp: Date.now(),
       status: "complete",
-      workerType: "orchestrator",
+      workerType: "employee",
       thinking: result.thinking ?? undefined,
       modelId: undefined,
       duration,
@@ -756,7 +762,7 @@ async function runEmployeeTurn(
       return;
     }
     const message = error instanceof Error ? error.message : String(error);
-    handleError(message, conversationId);
+    handleError(message, conversationId, "employee");
   } finally {
     conversationStore.setLoading(false, conversationId);
     conversationStore.setRLMProcessing(false, conversationId);
@@ -764,7 +770,11 @@ async function runEmployeeTurn(
   }
 }
 
-function handleError(message: string, conversationId?: string): void {
+function handleError(
+  message: string,
+  conversationId?: string,
+  workerType: WorkerType = "orchestrator",
+): void {
   const stream = conversationId ? activeStreams.get(conversationId) : null;
   if (conversationId && stream) {
     const errorMessage: UnifiedMessage = {
@@ -775,7 +785,7 @@ function handleError(message: string, conversationId?: string): void {
       timestamp: Date.now(),
       status: "error",
       error: message,
-      workerType: "orchestrator",
+      workerType,
     };
     conversationStore.setRLMProcessing(false, conversationId);
     conversationStore.finalizeStreaming(conversationId);
