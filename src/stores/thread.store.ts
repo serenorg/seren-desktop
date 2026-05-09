@@ -15,6 +15,7 @@ import { agentStore } from "@/stores/agent.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { editorSessionStore } from "@/stores/editor.sessions";
+import { employeeStore } from "@/stores/employees.store";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 import { skillsStore } from "@/stores/skills.store";
@@ -376,7 +377,15 @@ export const threadStore = {
 
   get groupedThreads(): ThreadGroup[] {
     // Employee-linked threads are surfaced under the employee in the sidebar.
-    const threads = this.threads.filter((t) => !t.employeeId);
+    // Once the employees list has finished loading, threads whose employeeId
+    // no longer resolves to a known employee fall back to their project group
+    // so the conversation does not silently disappear from the UI.
+    const employeesLoaded = employeeStore.lastLoadedAt !== null;
+    const threads = this.threads.filter((t) => {
+      if (!t.employeeId) return true;
+      if (!employeesLoaded) return false;
+      return employeeStore.byId(t.employeeId) === undefined;
+    });
 
     // Group by projectRoot.
     const groups = new Map<string | null, Thread[]>();

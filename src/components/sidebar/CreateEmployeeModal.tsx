@@ -194,11 +194,12 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
   const buildSystemPrompt = (): string => {
     const employeeName = name().trim();
     // JSON.stringify produces a YAML 1.2-safe double-quoted scalar that survives
-    // any user content (including embedded `---`, quotes, or newlines).
+    // any user content (including embedded `---`, quotes, or newlines). The
+    // body markdown is passed through untouched so edit-mode round-trips are
+    // lossless: the closing `---` boundary above the body unambiguously ends
+    // the YAML even when the body itself contains horizontal rules.
     const yamlScalar = (s: string) => JSON.stringify(s);
-    const sanitizedRole = role()
-      .trim()
-      .replace(/^---\s*$/gm, "[hr]");
+    const body = role().trim();
     const frontmatter = [
       "---",
       `name: ${yamlScalar(effectiveSlug() || "employee")}`,
@@ -206,7 +207,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       "---",
       "",
     ].join("\n");
-    return `${frontmatter}# ${employeeName}\n\n${sanitizedRole}\n`;
+    return `${frontmatter}# ${employeeName}\n\n${body}\n`;
   };
 
   const toggleToolPreset = (preset: EmployeeToolPreset) => {
@@ -405,6 +406,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
               class="grid grid-cols-3 gap-2"
               role="radiogroup"
               aria-labelledby="employee-mode-label"
+              aria-describedby={editing() ? "employee-mode-help" : undefined}
             >
               <For each={MODES}>
                 {(option) => (
@@ -435,6 +437,14 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                 )}
               </For>
             </div>
+            <Show when={editing()}>
+              <div
+                id="employee-mode-help"
+                class="mt-1.5 text-[10.5px] text-muted-foreground/80"
+              >
+                Mode is fixed for the lifetime of the deployment.
+              </div>
+            </Show>
           </div>
 
           {/* Cron schedule (only when scheduled) */}

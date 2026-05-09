@@ -21,6 +21,7 @@ import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import {
+  CLOSE_EMPLOYEE_DETAIL_EVENT,
   type EmployeeDetailEventDetail,
   OPEN_EMPLOYEE_DETAIL_EVENT,
 } from "@/components/sidebar/EmployeesSection";
@@ -147,12 +148,20 @@ export const AppShell: Component<AppShellProps> = (props) => {
       OPEN_EMPLOYEE_DETAIL_EVENT,
       handleOpenEmployeeDetail,
     );
+    window.addEventListener(
+      CLOSE_EMPLOYEE_DETAIL_EVENT,
+      handleCloseEmployeeDetail,
+    );
   });
 
   onCleanup(() => {
     window.removeEventListener(
       OPEN_EMPLOYEE_DETAIL_EVENT,
       handleOpenEmployeeDetail,
+    );
+    window.removeEventListener(
+      CLOSE_EMPLOYEE_DETAIL_EVENT,
+      handleCloseEmployeeDetail,
     );
   });
 

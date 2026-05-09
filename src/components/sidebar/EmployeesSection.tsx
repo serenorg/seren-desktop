@@ -23,6 +23,7 @@ import { type Thread, threadStore } from "@/stores/thread.store";
 const STATUS_REFRESH_INTERVAL_MS = 30_000;
 
 export const OPEN_EMPLOYEE_DETAIL_EVENT = "seren:open-employee-detail";
+export const CLOSE_EMPLOYEE_DETAIL_EVENT = "seren:close-employee-detail";
 
 export type EmployeeDetailEventDetail = { employeeId: string };
 
@@ -116,6 +117,7 @@ export const EmployeesSection: Component = () => {
   const [showCreate, setShowCreate] = createSignal(false);
 
   const employees = createMemo(() => employeeStore.employees);
+  const threadsByEmployee = createMemo(() => threadStore.threadsByEmployee);
 
   const handleSelect = (id: string) => {
     setActiveId(id);
@@ -179,9 +181,8 @@ export const EmployeesSection: Component = () => {
         </Show>
         <For each={employees()}>
           {(employee) => {
-            const threads = createMemo<Thread[]>(
-              () => threadStore.threadsByEmployee[employee.id] ?? [],
-            );
+            const threads = (): Thread[] =>
+              threadsByEmployee()[employee.id] ?? [];
             return (
               <div>
                 <EmployeeRow
@@ -198,9 +199,16 @@ export const EmployeesSection: Component = () => {
                         "bg-surface-2/70":
                           threadStore.activeThreadId === thread.id,
                       }}
-                      onClick={() =>
-                        threadStore.selectThread(thread.id, thread.kind)
-                      }
+                      onClick={() => {
+                        threadStore.selectThread(thread.id, thread.kind);
+                        // Clear the active employee highlight and tell
+                        // AppShell to close the detail pane so the chat
+                        // takes over the main content area.
+                        setActiveId(null);
+                        window.dispatchEvent(
+                          new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT),
+                        );
+                      }}
                       title={thread.title}
                     >
                       <span class="text-[11.5px] text-muted-foreground truncate">

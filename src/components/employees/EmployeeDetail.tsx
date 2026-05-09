@@ -7,6 +7,7 @@ import {
   createResource,
   createSignal,
   For,
+  onCleanup,
   onMount,
   Show,
 } from "solid-js";
@@ -106,8 +107,48 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     async (id) => employeeStore.loadDetail(id),
   );
 
+  let kebabContainerRef: HTMLDivElement | undefined;
+
+  const handleDocumentKeydown = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    // The edit modal owns its own keydown listener; let it handle Escape.
+    if (showEdit()) return;
+    if (confirmDelete()) {
+      if (actionPending() === "delete") return;
+      event.preventDefault();
+      setConfirmDelete(false);
+      return;
+    }
+    if (showKebab()) {
+      event.preventDefault();
+      setShowKebab(false);
+      return;
+    }
+    event.preventDefault();
+    props.onClose();
+  };
+
+  const handleDocumentMousedown = (event: MouseEvent) => {
+    if (!showKebab()) return;
+    if (
+      kebabContainerRef &&
+      event.target instanceof Node &&
+      kebabContainerRef.contains(event.target)
+    ) {
+      return;
+    }
+    setShowKebab(false);
+  };
+
   onMount(() => {
     void employeeStore.refresh();
+    document.addEventListener("keydown", handleDocumentKeydown);
+    document.addEventListener("mousedown", handleDocumentMousedown);
+  });
+
+  onCleanup(() => {
+    document.removeEventListener("keydown", handleDocumentKeydown);
+    document.removeEventListener("mousedown", handleDocumentMousedown);
   });
 
   const status = () => summary()?.status ?? "pending";
@@ -151,12 +192,14 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     try {
       await svc.remove(id);
       employeeStore.remove(id);
+      setConfirmDelete(false);
       props.onClose();
     } catch (err) {
+      // Leave the confirm dialog open so the user sees the error in context
+      // rather than having it fade behind the now-dismissed modal.
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setActionPending(null);
-      setConfirmDelete(false);
     }
   };
 
@@ -262,51 +305,64 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     {statusLabel(emp().status)}
                   </Show>
                 </button>
-                <button
-                  type="button"
-                  class="w-8 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
-                  aria-label="More actions"
-                  aria-haspopup="menu"
-                  aria-expanded={showKebab()}
-                  onClick={() => setShowKebab((v) => !v)}
-                >
-                  ...
-                </button>
-                <Show when={showKebab()}>
-                  <div
-                    class="absolute right-0 top-10 z-10 min-w-[160px] bg-popover border border-border rounded-md shadow-lg py-1"
-                    role="menu"
+                <div ref={kebabContainerRef} class="relative">
+                  <button
+                    type="button"
+                    class="flex items-center justify-center w-8 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label="More actions"
+                    aria-haspopup="menu"
+                    aria-expanded={showKebab()}
+                    disabled={actionPending() !== null}
+                    onClick={() => setShowKebab((v) => !v)}
                   >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      class="w-full text-left px-3 py-1.5 text-[13px] text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      onClick={() => {
-                        setShowKebab(false);
-                        setShowEdit(true);
-                      }}
-                      disabled={!detailRecord()}
-                      title={
-                        detailRecord()
-                          ? "Edit this employee"
-                          : "Loading employee detail..."
-                      }
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 16 16"
+                      fill="currentColor"
+                      aria-hidden="true"
                     >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:bg-red-500/10 transition-colors"
-                      onClick={() => {
-                        setShowKebab(false);
-                        setConfirmDelete(true);
-                      }}
+                      <circle cx="3" cy="8" r="1.4" />
+                      <circle cx="8" cy="8" r="1.4" />
+                      <circle cx="13" cy="8" r="1.4" />
+                    </svg>
+                  </button>
+                  <Show when={showKebab()}>
+                    <div
+                      class="absolute right-0 top-10 z-10 min-w-[160px] bg-popover border border-border rounded-md shadow-lg py-1"
+                      role="menu"
                     >
-                      Delete
-                    </button>
-                  </div>
-                </Show>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        class="w-full text-left px-3 py-1.5 text-[13px] text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => {
+                          setShowKebab(false);
+                          setShowEdit(true);
+                        }}
+                        disabled={!detailRecord()}
+                        title={
+                          detailRecord()
+                            ? "Edit this employee"
+                            : "Loading employee detail..."
+                        }
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:bg-red-500/10 transition-colors"
+                        onClick={() => {
+                          setShowKebab(false);
+                          setConfirmDelete(true);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </Show>
+                </div>
                 <button
                   type="button"
                   class="w-8 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
@@ -482,7 +538,12 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
               <div
                 class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] animate-[fadeIn_0.15s_ease-out]"
                 onClick={(e) => {
-                  if (e.target === e.currentTarget) setConfirmDelete(false);
+                  if (
+                    e.target === e.currentTarget &&
+                    actionPending() !== "delete"
+                  ) {
+                    setConfirmDelete(false);
+                  }
                 }}
                 role="dialog"
                 aria-modal="true"
@@ -499,6 +560,14 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     This permanently removes the deployment. Any threads
                     associated with this employee will lose their link.
                   </p>
+                  <Show when={actionError()}>
+                    <div
+                      class="mt-3 py-2 px-3 bg-destructive/20 text-destructive rounded text-[12.5px]"
+                      role="alert"
+                    >
+                      {actionError()}
+                    </div>
+                  </Show>
                   <div class="flex justify-end gap-2 mt-5">
                     <button
                       type="button"
