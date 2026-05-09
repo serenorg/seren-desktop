@@ -69,11 +69,62 @@ interface CreateEmployeeModalProps {
   employee?: EmployeeDetail;
 }
 
+interface PersonaSections {
+  skill: string;
+  identity: string;
+  soul: string;
+}
+
+const PERSONA_SECTION_RE =
+  /^---\s*(SKILL\.md|IDENTITY\.md|SOUL\.md)\s*---\s*$/m;
+
+/**
+ * Pull the editable role body out of a deployed system_prompt.
+ *
+ * Strips the YAML frontmatter and the leading `# Name` H1 so the user
+ * sees only the prose they wrote.
+ */
 function extractRoleBody(prompt: string | null | undefined): string {
   if (!prompt) return "";
   const withoutFrontmatter = prompt.replace(/^---[\s\S]*?---\n/, "");
   const withoutHeading = withoutFrontmatter.replace(/^# .*\n+/, "");
   return withoutHeading.trim();
+}
+
+/**
+ * Split a deployed prompt body into SKILL.md / IDENTITY.md / SOUL.md
+ * sections if it was authored Truman-style with `--- SKILL.md ---`
+ * markers. Otherwise the entire body lands in SKILL.md and identity/soul
+ * stay empty.
+ */
+function extractPersonaSections(
+  prompt: string | null | undefined,
+): PersonaSections {
+  const body = extractRoleBody(prompt);
+  if (!body || !PERSONA_SECTION_RE.test(body)) {
+    return { skill: body, identity: "", soul: "" };
+  }
+  const sections: PersonaSections = { skill: "", identity: "", soul: "" };
+  let current: keyof PersonaSections | null = "skill";
+  const lines = body.split("\n");
+  const buf: Record<keyof PersonaSections, string[]> = {
+    skill: [],
+    identity: [],
+    soul: [],
+  };
+  for (const line of lines) {
+    const m = line.match(/^---\s*(SKILL|IDENTITY|SOUL)\.md\s*---\s*$/);
+    if (m) {
+      const next = m[1].toLowerCase() as keyof PersonaSections;
+      current = next;
+      continue;
+    }
+    if (current) buf[current].push(line);
+  }
+  sections.skill = buf.skill.join("\n").trim();
+  sections.identity = buf.identity.join("\n").trim();
+  sections.soul = buf.soul.join("\n").trim();
+  return sections;
 }
 
 export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
@@ -96,7 +147,10 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
   const [cronTimezone, setCronTimezone] = createSignal(
     initial?.cronTimezone ?? "UTC",
   );
-  const [role, setRole] = createSignal(extractRoleBody(initial?.prompt));
+  const initialSections = extractPersonaSections(initial?.prompt);
+  const [role, setRole] = createSignal(initialSections.skill);
+  const [identity, setIdentity] = createSignal(initialSections.identity);
+  const [soul, setSoul] = createSignal(initialSections.soul);
   const [modelChoice, setModelChoice] = createSignal<ModelChoice>(
     initial?.modelChoice ?? "standard",
   );
@@ -199,7 +253,9 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     // lossless: the closing `---` boundary above the body unambiguously ends
     // the YAML even when the body itself contains horizontal rules.
     const yamlScalar = (s: string) => JSON.stringify(s);
-    const body = role().trim();
+    const skillBody = role().trim();
+    const identityBody = identity().trim();
+    const soulBody = soul().trim();
     const frontmatter = [
       "---",
       `name: ${yamlScalar(effectiveSlug() || "employee")}`,
@@ -207,7 +263,21 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       "---",
       "",
     ].join("\n");
-    return `${frontmatter}# ${employeeName}\n\n${body}\n`;
+    // When the user has filled in IDENTITY.md or SOUL.md, emit the
+    // multi-section Truman-style layout so the deployed agent sees three
+    // distinct personality layers and edit-mode can split them back apart.
+    if (identityBody || soulBody) {
+      const parts: string[] = [];
+      parts.push("--- SKILL.md ---", "", skillBody, "");
+      if (identityBody) {
+        parts.push("--- IDENTITY.md ---", "", identityBody, "");
+      }
+      if (soulBody) {
+        parts.push("--- SOUL.md ---", "", soulBody, "");
+      }
+      return `${frontmatter}# ${employeeName}\n\n${parts.join("\n").trim()}\n`;
+    }
+    return `${frontmatter}# ${employeeName}\n\n${skillBody}\n`;
   };
 
   const toggleToolPreset = (preset: EmployeeToolPreset) => {
@@ -635,6 +705,52 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                 id="employee-advanced-panel"
                 class="mt-3 grid grid-cols-2 gap-3"
               >
+                <div class="col-span-2">
+                  <label
+                    for="employee-identity"
+                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                  >
+                    IDENTITY.md{" "}
+                    <span class="font-normal opacity-70 normal-case tracking-normal">
+                      (optional)
+                    </span>
+                  </label>
+                  <textarea
+                    id="employee-identity"
+                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
+                    value={identity()}
+                    onInput={(e) => {
+                      setIdentity(e.currentTarget.value);
+                      clearError();
+                    }}
+                    placeholder="Background, professional history, personality, voice..."
+                    disabled={submitting()}
+                  />
+                </div>
+
+                <div class="col-span-2">
+                  <label
+                    for="employee-soul"
+                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                  >
+                    SOUL.md{" "}
+                    <span class="font-normal opacity-70 normal-case tracking-normal">
+                      (optional)
+                    </span>
+                  </label>
+                  <textarea
+                    id="employee-soul"
+                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
+                    value={soul()}
+                    onInput={(e) => {
+                      setSoul(e.currentTarget.value);
+                      clearError();
+                    }}
+                    placeholder="Deeper convictions, decision philosophy, what this employee believes..."
+                    disabled={submitting()}
+                  />
+                </div>
+
                 <div class="col-span-2">
                   <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 mb-1.5">
                     Tool presets
