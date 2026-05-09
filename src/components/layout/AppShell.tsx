@@ -15,10 +15,15 @@ import {
 import { SessionExpiredModal } from "@/components/auth/SessionExpiredModal";
 import { SignIn } from "@/components/auth/SignIn";
 import { StatusBar } from "@/components/common/StatusBar";
+import { EmployeeDetail } from "@/components/employees/EmployeeDetail";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
+import {
+  type EmployeeDetailEventDetail,
+  OPEN_EMPLOYEE_DETAIL_EVENT,
+} from "@/components/sidebar/EmployeesSection";
 import { PublishSkillModal } from "@/components/sidebar/PublishSkillModal";
 import { PublishVersionModal } from "@/components/sidebar/PublishVersionModal";
 import { SkillsExplorer } from "@/components/sidebar/SkillsExplorer";
@@ -121,8 +126,34 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const [slidePanel, setSlidePanel] = createSignal<SlidePanelView>(
     loadInitialSlidePanel(),
   );
+  const [activeEmployeeId, setActiveEmployeeId] = createSignal<string | null>(
+    null,
+  );
   createEffect(() => {
     persistSlidePanel(slidePanel());
+  });
+
+  const handleOpenEmployeeDetail = (event: Event) => {
+    const detail = (event as CustomEvent<EmployeeDetailEventDetail>).detail;
+    if (detail?.employeeId) setActiveEmployeeId(detail.employeeId);
+  };
+
+  const handleCloseEmployeeDetail = () => {
+    setActiveEmployeeId(null);
+  };
+
+  onMount(() => {
+    window.addEventListener(
+      OPEN_EMPLOYEE_DETAIL_EVENT,
+      handleOpenEmployeeDetail,
+    );
+  });
+
+  onCleanup(() => {
+    window.removeEventListener(
+      OPEN_EMPLOYEE_DETAIL_EVENT,
+      handleOpenEmployeeDetail,
+    );
   });
 
   const handleSignInClick = () => {
@@ -422,7 +453,17 @@ export const AppShell: Component<AppShellProps> = (props) => {
         />
 
         <main class="flex-1 overflow-hidden flex flex-col min-w-0">
-          <ThreadContent onSignInClick={handleSignInClick} />
+          <Show
+            when={activeEmployeeId()}
+            fallback={<ThreadContent onSignInClick={handleSignInClick} />}
+          >
+            {(id) => (
+              <EmployeeDetail
+                employeeId={id()}
+                onClose={handleCloseEmployeeDetail}
+              />
+            )}
+          </Show>
         </main>
 
         <SlidePanel
