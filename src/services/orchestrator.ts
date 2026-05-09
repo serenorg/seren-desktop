@@ -578,6 +578,12 @@ async function runEmployeeTurn(
   deploymentId: string,
   prompt: string,
 ): Promise<void> {
+  const stream = {
+    messageId: crypto.randomUUID(),
+    startTime: Date.now(),
+  };
+  activeStreams.set(conversationId, stream);
+
   try {
     const result = await runEmployeeMessage(deploymentId, prompt, {
       conversationId,
@@ -589,8 +595,9 @@ async function runEmployeeTurn(
       },
     });
     conversationStore.finalizeStreaming(conversationId);
+    const duration = Date.now() - stream.startTime;
     const assistantMessage: UnifiedMessage = {
-      id: crypto.randomUUID(),
+      id: stream.messageId,
       type: "assistant",
       role: "assistant",
       content: result.text,
@@ -599,6 +606,7 @@ async function runEmployeeTurn(
       workerType: "orchestrator",
       thinking: result.thinking ?? undefined,
       modelId: undefined,
+      duration,
       request: { prompt },
     };
     conversationStore.addMessage(assistantMessage, conversationId);
@@ -610,6 +618,7 @@ async function runEmployeeTurn(
   } finally {
     conversationStore.setLoading(false, conversationId);
     conversationStore.setRLMProcessing(false, conversationId);
+    activeStreams.delete(conversationId);
   }
 }
 

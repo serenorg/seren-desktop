@@ -82,6 +82,7 @@ describe("conversationStore", () => {
         "arcee-ai/trinity-large-thinking",
         undefined,
         "/Users/dev/my-project",
+        undefined,
       );
     });
 

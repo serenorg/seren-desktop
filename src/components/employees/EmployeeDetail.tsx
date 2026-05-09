@@ -7,6 +7,7 @@ import {
   createResource,
   createSignal,
   For,
+  type JSX,
   onCleanup,
   onMount,
   Show,
@@ -79,13 +80,15 @@ const Avatar: Component<{ name: string; seed: string; size?: number }> = (
   );
 };
 
-const InfoRow: Component<{ label: string; children: unknown }> = (props) => (
+const InfoRow: Component<{ label: string; children: JSX.Element }> = (
+  props,
+) => (
   <div class="flex items-baseline gap-3">
     <div class="w-32 shrink-0 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
       {props.label}
     </div>
     <div class="text-[13px] text-foreground min-w-0 break-words">
-      {props.children as never}
+      {props.children}
     </div>
   </div>
 );
@@ -162,6 +165,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const handleSuspendOrWake = async () => {
     const id = props.employeeId;
     if (actionPending() !== null) return;
+    setActionError(null);
     if (isRunning()) {
       setActionPending("suspend");
       employeeStore.setStatus(id, "stopped");
@@ -192,6 +196,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const handleDelete = async () => {
     const id = props.employeeId;
     if (actionPending() !== null) return;
+    setActionError(null);
     setActionPending("delete");
     try {
       await svc.remove(id);
@@ -384,7 +389,20 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                   aria-label="Close"
                   onClick={props.onClose}
                 >
-                  ×
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M4 4l8 8M12 4l-8 8"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                    />
+                  </svg>
                 </button>
               </div>
             </div>

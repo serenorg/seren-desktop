@@ -13,6 +13,10 @@ import {
   Show,
 } from "solid-js";
 import { deriveSlug, gradientFor, initialFor } from "@/lib/employees/avatar";
+import {
+  buildEmployeeSystemPrompt,
+  extractPersonaSections,
+} from "@/lib/employees/persona";
 import type {
   EmployeeApprovalPolicy,
   EmployeeDetail,
@@ -67,65 +71,6 @@ interface CreateEmployeeModalProps {
    * immutable in edit mode (the backend update spec does not expose them).
    */
   employee?: EmployeeDetail;
-}
-
-interface PersonaSections {
-  skill: string;
-  identity: string;
-  soul: string;
-}
-
-/**
- * Pull the editable role body out of a deployed system_prompt.
- *
- * Strips the YAML frontmatter and the leading `# Name` H1 so the user
- * sees only the prose they wrote.
- */
-function extractRoleBody(prompt: string | null | undefined): string {
-  if (!prompt) return "";
-  const withoutFrontmatter = prompt.replace(/^---[\s\S]*?---\n/, "");
-  const withoutHeading = withoutFrontmatter.replace(/^# .*\n+/, "");
-  return withoutHeading.trim();
-}
-
-/**
- * Split a deployed prompt body into SKILL.md / IDENTITY.md / SOUL.md
- * sections if it was authored Truman-style with `--- SKILL.md ---`
- * markers. Otherwise the entire body lands in SKILL.md and identity/soul
- * stay empty.
- *
- * Multi-section parsing only fires when the body OPENS with the SKILL.md
- * marker so it can't be tripped by a user pasting documentation that
- * happens to quote the marker line.
- */
-function extractPersonaSections(
-  prompt: string | null | undefined,
-): PersonaSections {
-  const body = extractRoleBody(prompt);
-  if (!body || !/^---\s*SKILL\.md\s*---\s*$/m.test(body.split("\n", 1)[0])) {
-    return { skill: body, identity: "", soul: "" };
-  }
-  const sections: PersonaSections = { skill: "", identity: "", soul: "" };
-  let current: keyof PersonaSections | null = "skill";
-  const lines = body.split("\n");
-  const buf: Record<keyof PersonaSections, string[]> = {
-    skill: [],
-    identity: [],
-    soul: [],
-  };
-  for (const line of lines) {
-    const m = line.match(/^---\s*(SKILL|IDENTITY|SOUL)\.md\s*---\s*$/);
-    if (m) {
-      const next = m[1].toLowerCase() as keyof PersonaSections;
-      current = next;
-      continue;
-    }
-    if (current) buf[current].push(line);
-  }
-  sections.skill = buf.skill.join("\n").trim();
-  sections.identity = buf.identity.join("\n").trim();
-  sections.soul = buf.soul.join("\n").trim();
-  return sections;
 }
 
 export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
@@ -247,38 +192,13 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
   );
 
   const buildSystemPrompt = (): string => {
-    const employeeName = name().trim();
-    // JSON.stringify produces a YAML 1.2-safe double-quoted scalar that survives
-    // any user content (including embedded `---`, quotes, or newlines). The
-    // body markdown is passed through untouched so edit-mode round-trips are
-    // lossless: the closing `---` boundary above the body unambiguously ends
-    // the YAML even when the body itself contains horizontal rules.
-    const yamlScalar = (s: string) => JSON.stringify(s);
-    const skillBody = role().trim();
-    const identityBody = identity().trim();
-    const soulBody = soul().trim();
-    const frontmatter = [
-      "---",
-      `name: ${yamlScalar(effectiveSlug() || "employee")}`,
-      `description: ${yamlScalar(`${employeeName} - virtual employee`)}`,
-      "---",
-      "",
-    ].join("\n");
-    // When the user has filled in IDENTITY.md or SOUL.md, emit the
-    // multi-section Truman-style layout so the deployed agent sees three
-    // distinct personality layers and edit-mode can split them back apart.
-    if (identityBody || soulBody) {
-      const parts: string[] = [];
-      parts.push("--- SKILL.md ---", "", skillBody, "");
-      if (identityBody) {
-        parts.push("--- IDENTITY.md ---", "", identityBody, "");
-      }
-      if (soulBody) {
-        parts.push("--- SOUL.md ---", "", soulBody, "");
-      }
-      return `${frontmatter}# ${employeeName}\n\n${parts.join("\n").trim()}\n`;
-    }
-    return `${frontmatter}# ${employeeName}\n\n${skillBody}\n`;
+    return buildEmployeeSystemPrompt({
+      name: name(),
+      slug: effectiveSlug(),
+      skill: role(),
+      identity: identity(),
+      soul: soul(),
+    });
   };
 
   const toggleToolPreset = (preset: EmployeeToolPreset) => {
@@ -382,7 +302,20 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             title="Close"
             aria-label="Close"
           >
-            ×
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M4 4l8 8M12 4l-8 8"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
           </button>
         </div>
 

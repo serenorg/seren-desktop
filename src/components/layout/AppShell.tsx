@@ -143,6 +143,22 @@ export const AppShell: Component<AppShellProps> = (props) => {
     setActiveEmployeeId(null);
   };
 
+  const closeEmployeeDetailPane = () => {
+    setActiveEmployeeId(null);
+    window.dispatchEvent(new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT));
+  };
+
+  createEffect(
+    on(
+      () => threadStore.activeThreadId,
+      () => {
+        if (activeEmployeeId() === null) return;
+        closeEmployeeDetailPane();
+      },
+      { defer: true },
+    ),
+  );
+
   onMount(() => {
     window.addEventListener(
       OPEN_EMPLOYEE_DETAIL_EVENT,
@@ -469,7 +485,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
             {(id) => (
               <EmployeeDetail
                 employeeId={id()}
-                onClose={handleCloseEmployeeDetail}
+                onClose={closeEmployeeDetailPane}
               />
             )}
           </Show>

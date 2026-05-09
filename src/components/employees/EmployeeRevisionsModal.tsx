@@ -131,7 +131,20 @@ export const EmployeeRevisionsModal: Component<EmployeeRevisionsModalProps> = (
             title="Close"
             aria-label="Close"
           >
-            ×
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M4 4l8 8M12 4l-8 8"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
           </button>
         </div>
 
@@ -221,7 +234,10 @@ export const EmployeeRevisionsModal: Component<EmployeeRevisionsModalProps> = (
                             <button
                               type="button"
                               class="px-2.5 py-1 rounded text-[12px] font-medium border border-border text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                              onClick={() => setConfirmId(rev.revisionId)}
+                              onClick={() => {
+                                setError(null);
+                                setConfirmId(rev.revisionId);
+                              }}
                               disabled={pendingId() !== null}
                             >
                               Roll back

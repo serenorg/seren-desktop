@@ -244,8 +244,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         .prepare("SELECT employee_id FROM conversations LIMIT 1")
         .is_ok();
     if !has_employee_id {
-        conn.execute("ALTER TABLE conversations ADD COLUMN employee_id TEXT", [])
-            .ok();
+        conn.execute("ALTER TABLE conversations ADD COLUMN employee_id TEXT", [])?;
     }
 
     // Backfill project context for existing agent conversations.
@@ -603,6 +602,67 @@ mod tests {
             agent_metadata,
             Some("{\"pendingBootstrapPromptContext\":\"seed\"}".to_string())
         );
+    }
+
+    #[test]
+    fn migration_adds_employee_id_column_and_index() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        conn.execute(
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                selected_model TEXT,
+                selected_provider TEXT,
+                is_archived INTEGER DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'chat'
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                model TEXT,
+                timestamp INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        setup_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, employee_id)
+             VALUES ('c1', 'Employee Chat', 1000, 'dep_123')",
+            [],
+        )
+        .unwrap();
+
+        let employee_id: Option<String> = conn
+            .query_row(
+                "SELECT employee_id FROM conversations WHERE id = 'c1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(employee_id, Some("dep_123".to_string()));
+
+        let index_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM sqlite_master
+                 WHERE type = 'index'
+                   AND name = 'idx_conversations_employee_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index_count, 1);
     }
 
     #[test]

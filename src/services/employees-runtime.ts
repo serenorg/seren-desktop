@@ -17,10 +17,20 @@ const TERMINAL_STATUSES = new Set([
   "failed",
   "cancelled",
   "canceled",
+  "timeout",
+  "blocked",
+  "error",
   "awaiting_approval",
 ]);
 
-const FAILURE_STATUSES = new Set(["failed", "cancelled", "canceled"]);
+const FAILURE_STATUSES = new Set([
+  "failed",
+  "cancelled",
+  "canceled",
+  "timeout",
+  "blocked",
+  "error",
+]);
 
 export interface RunResult {
   text: string;
@@ -53,6 +63,21 @@ function fallbackTextFromResult(result: unknown): string {
     if (typeof obj.output === "string") return obj.output;
   }
   return "";
+}
+
+function abortableDelay(ms: number, signal: AbortSignal | undefined) {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export interface RunCallbacks {
@@ -122,7 +147,12 @@ async function pollUntilTerminal(
       throwOnError: false,
     });
     if (r.error || !r.data?.data) {
-      throw new Error(`Failed to read run ${runId}: ${asMessage(r.error, "")}`);
+      throw new Error(
+        `Failed to read run ${runId}: ${asMessage(
+          r.error,
+          "missing run data",
+        )}`,
+      );
     }
     const event = r.data.data;
     if (TERMINAL_STATUSES.has(event.status)) {
@@ -175,7 +205,7 @@ async function pollUntilTerminal(
         )}s`,
       );
     }
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    await abortableDelay(POLL_INTERVAL_MS, signal);
   }
 }
 
@@ -290,10 +320,10 @@ export async function runEmployeeMessage(
   const text = state.text || final.output || "";
   const errorMessage = state.errorMessage ?? final.statusMessage ?? null;
 
-  if (FAILURE_STATUSES.has(final.status) && !text) {
-    throw new Error(errorMessage ?? `Employee run ${final.status}`);
+  if (FAILURE_STATUSES.has(final.status)) {
+    throw new Error(errorMessage ?? (text || `Employee run ${final.status}`));
   }
-  if (final.status === "awaiting_approval" && !text) {
+  if (final.status === "awaiting_approval") {
     throw new Error(
       "Employee run is awaiting approval. Approval flow is not yet supported in chat.",
     );

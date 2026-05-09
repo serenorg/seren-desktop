@@ -139,6 +139,15 @@ export const EmployeesSection: Component = () => {
     );
   };
 
+  const handleOpenEmployeeDetail = (event: Event) => {
+    const detail = (event as CustomEvent<EmployeeDetailEventDetail>).detail;
+    setActiveId(detail?.employeeId ?? null);
+  };
+
+  const handleCloseEmployeeDetail = () => {
+    setActiveId(null);
+  };
+
   let interval: ReturnType<typeof setInterval> | null = null;
 
   const tick = () => {
@@ -160,11 +169,27 @@ export const EmployeesSection: Component = () => {
     void employeeStore.refresh();
     interval = setInterval(tick, STATUS_REFRESH_INTERVAL_MS);
     document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener(
+      OPEN_EMPLOYEE_DETAIL_EVENT,
+      handleOpenEmployeeDetail,
+    );
+    window.addEventListener(
+      CLOSE_EMPLOYEE_DETAIL_EVENT,
+      handleCloseEmployeeDetail,
+    );
   });
 
   onCleanup(() => {
     if (interval !== null) clearInterval(interval);
     document.removeEventListener("visibilitychange", handleVisibility);
+    window.removeEventListener(
+      OPEN_EMPLOYEE_DETAIL_EVENT,
+      handleOpenEmployeeDetail,
+    );
+    window.removeEventListener(
+      CLOSE_EMPLOYEE_DETAIL_EVENT,
+      handleCloseEmployeeDetail,
+    );
   });
 
   return (
