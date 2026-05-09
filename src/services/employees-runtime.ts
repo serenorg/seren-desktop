@@ -156,6 +156,14 @@ export interface RunOptions extends RunCallbacks {
    * run-request schema explicitly accepts additional JSON fields.
    */
   conversationId?: string;
+  /**
+   * Optional registry key used by `cancelEmployeeRun`. Defaults to
+   * `conversationId` when omitted. Pass an explicit key for runs that
+   * shouldn't be threaded into a runtime session - e.g. one-shot
+   * manual runs from the detail pane, where each click is independent
+   * and the runtime should not see them as the same conversation.
+   */
+  runKey?: string;
 }
 
 function applyEnvelope(
@@ -345,8 +353,22 @@ export async function runEmployeeMessage(
   message: string,
   options: RunOptions = {},
 ): Promise<RunResult> {
-  const { onText, onThinking, conversationId } = options;
-  const callbacks: RunCallbacks = { onText, onThinking };
+  const {
+    onText,
+    onThinking,
+    onToolCall,
+    onToolResult,
+    onToolAudit,
+    conversationId,
+  } = options;
+  const callbacks: RunCallbacks = {
+    onText,
+    onThinking,
+    onToolCall,
+    onToolResult,
+    onToolAudit,
+  };
+  const registryKey = options.runKey ?? conversationId;
   options.signal?.throwIfAborted();
 
   // Wrap the run in our own AbortController so cancelEmployeeRun can
@@ -361,14 +383,14 @@ export async function runEmployeeMessage(
       once: true,
     });
   }
-  // Replace any prior in-flight run for this conversation so the new run
-  // owns the cancellation slot. The previous controller, if any, will be
-  // released by its own runEmployeeMessage finally block.
-  const registered: ActiveRun | null = conversationId
+  // Replace any prior in-flight run under this registry key so the new
+  // run owns the cancellation slot. The previous controller, if any,
+  // will be released by its own runEmployeeMessage finally block.
+  const registered: ActiveRun | null = registryKey
     ? { controller, deploymentId, runId: null }
     : null;
-  if (registered && conversationId) {
-    activeRuns.set(conversationId, registered);
+  if (registered && registryKey) {
+    activeRuns.set(registryKey, registered);
   }
 
   try {
@@ -491,12 +513,12 @@ export async function runEmployeeMessage(
     if (options.signal && externalAbortHandler) {
       options.signal.removeEventListener("abort", externalAbortHandler);
     }
-    if (registered && conversationId) {
+    if (registered && registryKey) {
       // Only clear the slot if it still points at our run. A subsequent
-      // runEmployeeMessage call for the same conversation may have
-      // replaced the registration before we reached the finally.
-      if (activeRuns.get(conversationId) === registered) {
-        activeRuns.delete(conversationId);
+      // runEmployeeMessage call for the same key may have replaced the
+      // registration before we reached the finally.
+      if (activeRuns.get(registryKey) === registered) {
+        activeRuns.delete(registryKey);
       }
     }
   }

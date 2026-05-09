@@ -233,7 +233,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     setManualRun({ kind: "running", partial: "" });
     try {
       const result = await runEmployeeMessage(id, "", {
-        conversationId: manualRunKey(id),
+        runKey: manualRunKey(id),
         onText: (chunk) => {
           setManualRun((prev) =>
             prev?.kind === "running"
