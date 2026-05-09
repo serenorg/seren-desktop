@@ -12,6 +12,7 @@ import {
   Show,
   Switch,
 } from "solid-js";
+import { EmployeesSection } from "@/components/sidebar/EmployeesSection";
 import { openFolder } from "@/lib/files/service";
 import {
   encodeThreadDragPayload,
@@ -742,6 +743,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             }
           }}
         >
+          <EmployeesSection />
           <Show
             when={threadStore.groupedThreads.length > 0}
             fallback={
