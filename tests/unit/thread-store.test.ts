@@ -139,6 +139,7 @@ vi.mock("@/stores/agent.store", () => ({
     spawnSession: vi.fn(),
     refreshRecentAgentConversations: vi.fn(),
   },
+  registerActiveNavigationThreadIdGetter: vi.fn(),
 }));
 
 // Import after mocks are set up
@@ -348,6 +349,37 @@ describe("threadStore", () => {
       expect(threadStore.activeThreadKind).toBe("agent");
     });
 
+    // #1852 — Without synchronous active marking, a parallel spawn's
+    // preemptive idle-reclaim runs against state.activeSessionId from the
+    // *previous* thread and kills the just-clicked session before
+    // listSessions resolves.
+    it("marks live agent session active synchronously, before listSessions resolves", () => {
+      mockAgentConversations.push({
+        id: "agent-1",
+        title: "Agent",
+        created_at: 1000,
+        agent_type: "claude-code",
+        agent_session_id: "sess-1",
+        agent_cwd: "/dev",
+        agent_model_id: null,
+        project_id: null,
+        project_root: "/Users/dev/project-a",
+        is_archived: false,
+      });
+      mockSessions["sess-1"] = {
+        conversationId: "agent-1",
+        info: { id: "sess-1", status: "ready", agentType: "claude-code" },
+      };
+
+      vi.mocked(listSessions).mockImplementationOnce(
+        () => new Promise<AgentSessionInfo[]>(() => {}),
+      );
+
+      threadStore.selectThread("agent-1", "agent");
+
+      expect(agentStore.setActiveSession).toHaveBeenCalledWith("sess-1");
+    });
+
     it("ignores stale session checks after switching threads", async () => {
       mockConversations.conversations = [
         {
@@ -388,6 +420,10 @@ describe("threadStore", () => {
       );
 
       threadStore.selectThread("agent-1", "agent");
+      // Synchronous active marking from #1852 — captured here so we can
+      // distinguish it from any (unwanted) call made by the late resolution.
+      const callsAfterAgentClick = vi.mocked(agentStore.setActiveSession).mock
+        .calls.length;
       threadStore.selectThread("chat-1", "chat");
       resolveBackendSessions?.([
         {
@@ -408,7 +444,12 @@ describe("threadStore", () => {
       expect(conversationStore.setActiveConversation).toHaveBeenCalledWith(
         "chat-1",
       );
-      expect(agentStore.setActiveSession).not.toHaveBeenCalledWith("sess-1");
+      // The late listSessions resolution must not fire any further
+      // setActiveSession call — the early-return at the top of the
+      // resolution block enforces that. #1852.
+      expect(vi.mocked(agentStore.setActiveSession).mock.calls.length).toBe(
+        callsAfterAgentClick,
+      );
       expect(agentStore.resumeAgentConversation).not.toHaveBeenCalled();
     });
 

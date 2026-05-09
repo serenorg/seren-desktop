@@ -26,6 +26,28 @@ const spawningConversations = new Set<string>();
  *  into new/live sessions. Cleared when the global subscriber is torn down. */
 const terminatedSessionIds = new Set<string>();
 
+/** Session IDs that the agent store just terminated programmatically. The
+ *  runtime emits "Session terminated before request completed." (and other
+ *  death-string `provider://error` events) when in-flight control requests
+ *  reject during a programmatic kill — those are self-inflicted and must
+ *  not surface as user-visible chat errors. The error handler short-circuits
+ *  death-string events for ids in this set. Cleared at the end of
+ *  terminateSession after the IPC kill completes. #1852. */
+const expectedTerminateSessionIds = new Set<string>();
+
+/** Lazy getter for the user's current navigation target, registered by
+ *  thread.store. `getIdleClaudeSessionIds` consults this so a parallel spawn's
+ *  preemptive idle-reclaim never targets the conversation the user is viewing —
+ *  even when `state.activeSessionId` has not yet been updated for that thread.
+ *  thread.store -> agent.store is the existing import direction; the reverse
+ *  would cycle, so we use a registration callback instead. #1852. */
+let activeNavigationThreadIdGetter: (() => string | null) | null = null;
+export function registerActiveNavigationThreadIdGetter(
+  getter: () => string | null,
+): void {
+  activeNavigationThreadIdGetter = getter;
+}
+
 /** Lightweight context for sessions that are mid-spawn (IPC call in flight).
  *  Populated before providerService.spawnAgent and cleaned up after the session
  *  is registered in state.sessions. The global event logger consults this map
@@ -1212,6 +1234,7 @@ function isRetryableClaudeInitError(message: string): boolean {
 
 function getIdleClaudeSessionIds(excludeConversationId?: string): string[] {
   const activeId = state.activeSessionId;
+  const navTarget = activeNavigationThreadIdGetter?.() ?? null;
   return Object.entries(state.sessions)
     .filter(([id, session]) => {
       if (session.info.agentType !== "claude-code") return false;
@@ -1224,6 +1247,16 @@ function getIdleClaudeSessionIds(excludeConversationId?: string): string[] {
         excludeConversationId &&
         session.conversationId === excludeConversationId
       ) {
+        return false;
+      }
+      // Honour the user's navigation intent. selectThread sets the active
+      // thread synchronously, but a freshly-clicked thread's session may not
+      // yet be reflected in `state.activeSessionId` (the live-session branch
+      // marks it synchronously after #1852, but a respawning thread is
+      // briefly without an active session id). Excluding by conversationId
+      // closes that window so a parallel spawn's preemptive reclaim cannot
+      // kill the session the user just navigated to. #1852.
+      if (navTarget && session.conversationId === navTarget) {
         return false;
       }
       // Keep actively prompting sessions alive; only reclaim idle/errored ones.
@@ -1968,6 +2001,14 @@ export const agentStore = {
         rejectReady = reject;
       });
 
+      // Filter status events by the spawn's own session id. Without this
+      // filter a `terminated`/`error` event from an unrelated session can
+      // abort the new spawn, and a `ready` from an unrelated session can
+      // resolve the readyPromise with the wrong id. Seeded from
+      // localSessionId when the caller pre-allocated one (resume / re-spawn);
+      // otherwise updated to info.id once spawnAgent returns. #1852.
+      let expectedReadySessionId: string | null = localSessionId ?? null;
+
       // Listen to session status events temporarily so ready-state resolution does
       // not depend on global event routing order.
       const tempUnsubscribe =
@@ -1977,6 +2018,12 @@ export const agentStore = {
             console.log("[AgentStore] Received session status event:", data);
             if (state.sessions[data.sessionId]) {
               this.handleStatusChange(data.sessionId, data.status, data);
+            }
+            if (
+              expectedReadySessionId &&
+              data.sessionId !== expectedReadySessionId
+            ) {
+              return;
             }
             if (data.status === "ready" && resolveReady) {
               resolveReady(data.sessionId);
@@ -2203,6 +2250,7 @@ export const agentStore = {
           opts?.initialModelId,
         );
         console.log("[AgentStore] Spawn result:", info);
+        expectedReadySessionId = info.id;
 
         // The new session is alive — immediately clear the terminated flag so
         // early events (configOptionsUpdate, sessionStatus with models/modes)
@@ -3035,6 +3083,13 @@ export const agentStore = {
     // subscriber immediately starts dropping late-arriving events.
     terminatedSessionIds.add(sessionId);
 
+    // Mark this kill as self-inflicted BEFORE the IPC fires, so any
+    // death-string `provider://error` event the runtime emits while
+    // tearing down (rejected control requests, etc.) is silently
+    // discarded by the error handler instead of surfacing as chat noise.
+    // The flag is cleared at the end of this function. #1852.
+    expectedTerminateSessionIds.add(sessionId);
+
     // Dismiss any pending ActionConfirmation dialogs whose owning session is
     // going away — the user must not approve a tool call against a dead
     // session. If the promoted/new session still wants the tool, it will
@@ -3104,6 +3159,10 @@ export const agentStore = {
       terminatedSessionIds.clear();
       spawnContextMap.clear();
     }
+
+    // Self-inflicted death window is over: any further death-string events
+    // for this id are no longer ours to suppress. #1852.
+    expectedTerminateSessionIds.delete(sessionId);
   },
 
   /**
@@ -5342,8 +5401,6 @@ Structured summary:`;
           );
           this.addErrorMessage(sessionId, event.data.error);
         } else {
-          this.addErrorMessage(sessionId, event.data.error);
-
           // Mid-prompt session death — runtime emits one of these strings
           // when the child process is terminated or exits while a control
           // request is pending. sendPrompt's catch block at line ~3819 only
@@ -5358,6 +5415,24 @@ Structured summary:`;
             errStr.includes("stopped before request completed") ||
             errStr.includes("stopped while prompt was active") ||
             errStr.includes("Worker thread dropped");
+
+          // Self-inflicted death: agentStore.terminateSession just killed
+          // this session (e.g. preemptive idle-reclaim before a parallel
+          // spawn). The runtime emits the death string when in-flight
+          // control requests reject; the user did not experience a crash
+          // and must not see a stuck error banner. The cleanups above
+          // (flushPendingUserMessage, finalizeStreamingContent,
+          // markPendingToolCallsComplete) already ran; just return. #1852.
+          if (isSessionDeath && expectedTerminateSessionIds.has(sessionId)) {
+            console.info(
+              "[AgentStore] Suppressing self-inflicted death-string event:",
+              sessionId,
+            );
+            break;
+          }
+
+          this.addErrorMessage(sessionId, event.data.error);
+
           const deathConvoId = state.sessions[sessionId]?.conversationId;
           if (
             isSessionDeath &&
