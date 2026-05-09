@@ -128,8 +128,11 @@ async function pollUntilTerminal(
     if (TERMINAL_STATUSES.has(event.status)) {
       // Replay any events the caller has not seen yet (because we fell
       // back to polling without ever opening the stream, or because the
-      // stream dropped before terminal). Track length-only on text/thinking
-      // so we don't double-emit chunks already streamed.
+      // stream dropped before terminal). Only emit a diff when the
+      // persisted text starts with what we already streamed; if the server
+      // dedupes/reorders tokens differently from the live stream, trust
+      // the streamed state rather than splicing a non-prefix tail that
+      // would garble the displayed reply.
       const recovered = { text: "", thinking: "", errorMessage: null } as {
         text: string;
         thinking: string;
@@ -140,12 +143,18 @@ async function pollUntilTerminal(
           applyEnvelope(raw, recovered, {});
         }
       }
-      if (recovered.text.length > state.text.length) {
+      if (
+        recovered.text.length > state.text.length &&
+        recovered.text.startsWith(state.text)
+      ) {
         const diff = recovered.text.slice(state.text.length);
         state.text = recovered.text;
         callbacks.onText?.(diff);
       }
-      if (recovered.thinking.length > state.thinking.length) {
+      if (
+        recovered.thinking.length > state.thinking.length &&
+        recovered.thinking.startsWith(state.thinking)
+      ) {
         const diff = recovered.thinking.slice(state.thinking.length);
         state.thinking = recovered.thinking;
         callbacks.onThinking?.(diff);
@@ -244,24 +253,29 @@ export async function runEmployeeMessage(
       sseMaxRetryAttempts: STREAM_MAX_RETRY_ATTEMPTS,
       throwOnError: false,
     });
+    // heyapi's SSE generator catches stream errors internally and breaks
+    // out of its loop rather than rethrowing, so this for-await typically
+    // completes cleanly even when the connection drops mid-stream. The
+    // unconditional pollUntilTerminal call below is the actual recovery
+    // path - it reads canonical status and replays any events we missed.
     for await (const raw of stream) {
       signal?.throwIfAborted();
       applyEnvelope(raw, state, callbacks);
     }
   } catch (err) {
     if (signal?.aborted) throw err;
-    // Stream dropped (or never opened); fall through to the canonical
-    // terminal-state fetch below, which will replay any events we missed.
+    // Surfaced when the SSE request itself fails to open (URL/auth/etc.)
+    // or when our abort signal fires. Mid-stream errors are absorbed by
+    // heyapi's generator and don't reach here.
     console.warn(
-      "[employees-runtime] Stream failed, falling back to poll:",
+      "[employees-runtime] Stream open failed, falling back to poll:",
       err,
     );
   }
 
-  // Either the stream completed or it failed; in both cases the run is
-  // either already terminal or we need to poll until it is. If the stream
-  // closed cleanly we still poll once to read the canonical terminal
-  // status and recover any text we may have missed.
+  // Always poll the run for canonical terminal state and replay any
+  // events the stream missed (or all of them, if the stream never
+  // delivered any).
   const final = await pollUntilTerminal(
     deploymentId,
     runId,

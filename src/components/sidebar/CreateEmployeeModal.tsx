@@ -75,9 +75,6 @@ interface PersonaSections {
   soul: string;
 }
 
-const PERSONA_SECTION_RE =
-  /^---\s*(SKILL\.md|IDENTITY\.md|SOUL\.md)\s*---\s*$/m;
-
 /**
  * Pull the editable role body out of a deployed system_prompt.
  *
@@ -96,12 +93,16 @@ function extractRoleBody(prompt: string | null | undefined): string {
  * sections if it was authored Truman-style with `--- SKILL.md ---`
  * markers. Otherwise the entire body lands in SKILL.md and identity/soul
  * stay empty.
+ *
+ * Multi-section parsing only fires when the body OPENS with the SKILL.md
+ * marker so it can't be tripped by a user pasting documentation that
+ * happens to quote the marker line.
  */
 function extractPersonaSections(
   prompt: string | null | undefined,
 ): PersonaSections {
   const body = extractRoleBody(prompt);
-  if (!body || !PERSONA_SECTION_RE.test(body)) {
+  if (!body || !/^---\s*SKILL\.md\s*---\s*$/m.test(body.split("\n", 1)[0])) {
     return { skill: body, identity: "", soul: "" };
   }
   const sections: PersonaSections = { skill: "", identity: "", soul: "" };
@@ -557,13 +558,20 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             </div>
           </Show>
 
-          {/* Role / instructions */}
+          {/* Role / instructions (becomes the SKILL.md section when
+              IDENTITY.md or SOUL.md is filled in via Advanced) */}
           <div class="mb-4">
             <label
               for="employee-role"
               class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
             >
               Role / instructions
+              <Show when={identity().trim() || soul().trim()}>
+                <span class="font-normal opacity-70 normal-case tracking-normal">
+                  {" "}
+                  (SKILL.md)
+                </span>
+              </Show>
             </label>
             <textarea
               id="employee-role"
@@ -706,52 +714,6 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                 class="mt-3 grid grid-cols-2 gap-3"
               >
                 <div class="col-span-2">
-                  <label
-                    for="employee-identity"
-                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
-                  >
-                    IDENTITY.md{" "}
-                    <span class="font-normal opacity-70 normal-case tracking-normal">
-                      (optional)
-                    </span>
-                  </label>
-                  <textarea
-                    id="employee-identity"
-                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
-                    value={identity()}
-                    onInput={(e) => {
-                      setIdentity(e.currentTarget.value);
-                      clearError();
-                    }}
-                    placeholder="Background, professional history, personality, voice..."
-                    disabled={submitting()}
-                  />
-                </div>
-
-                <div class="col-span-2">
-                  <label
-                    for="employee-soul"
-                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
-                  >
-                    SOUL.md{" "}
-                    <span class="font-normal opacity-70 normal-case tracking-normal">
-                      (optional)
-                    </span>
-                  </label>
-                  <textarea
-                    id="employee-soul"
-                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
-                    value={soul()}
-                    onInput={(e) => {
-                      setSoul(e.currentTarget.value);
-                      clearError();
-                    }}
-                    placeholder="Deeper convictions, decision philosophy, what this employee believes..."
-                    disabled={submitting()}
-                  />
-                </div>
-
-                <div class="col-span-2">
                   <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 mb-1.5">
                     Tool presets
                   </div>
@@ -860,6 +822,55 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                   onInput={setContextBudget}
                   disabled={submitting()}
                 />
+
+                {/* IDENTITY.md and SOUL.md sit at the bottom of Advanced
+                    so frequent toggles (tool presets, approval policy,
+                    limits) stay near the top of the tab order. */}
+                <div class="col-span-2">
+                  <label
+                    for="employee-identity"
+                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                  >
+                    IDENTITY.md{" "}
+                    <span class="font-normal opacity-70 normal-case tracking-normal">
+                      (optional)
+                    </span>
+                  </label>
+                  <textarea
+                    id="employee-identity"
+                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
+                    value={identity()}
+                    onInput={(e) => {
+                      setIdentity(e.currentTarget.value);
+                      clearError();
+                    }}
+                    placeholder="Personality, voice, professional background."
+                    disabled={submitting()}
+                  />
+                </div>
+
+                <div class="col-span-2">
+                  <label
+                    for="employee-soul"
+                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                  >
+                    SOUL.md{" "}
+                    <span class="font-normal opacity-70 normal-case tracking-normal">
+                      (optional)
+                    </span>
+                  </label>
+                  <textarea
+                    id="employee-soul"
+                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
+                    value={soul()}
+                    onInput={(e) => {
+                      setSoul(e.currentTarget.value);
+                      clearError();
+                    }}
+                    placeholder="Values, decision philosophy, deeper convictions."
+                    disabled={submitting()}
+                  />
+                </div>
               </div>
             </Show>
           </div>

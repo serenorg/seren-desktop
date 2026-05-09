@@ -161,7 +161,7 @@ export async function orchestrate(
   // Employee-linked threads bypass the seren-models orchestrator and run
   // against the deployed agent's runtime via seren-cloud. The deployed
   // agent owns its own system_prompt, model_policy, tool_presets, and
-  // approval policy — we just hand it the user message and surface the
+  // approval policy - we just hand it the user message and surface the
   // reply.
   const conv = conversationStore.conversations.find(
     (c) => c.id === conversationId,

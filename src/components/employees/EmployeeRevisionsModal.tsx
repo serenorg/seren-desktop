@@ -48,6 +48,8 @@ export const EmployeeRevisionsModal: Component<EmployeeRevisionsModalProps> = (
   const [confirmId, setConfirmId] = createSignal<string | null>(null);
   const [error, setError] = createSignal<string | null>(null);
 
+  let closeButtonRef: HTMLButtonElement | undefined;
+
   const sorted = createMemo(() => {
     const list = revisions() ?? [];
     return [...list].sort((a, b) => b.version - a.version);
@@ -91,6 +93,7 @@ export const EmployeeRevisionsModal: Component<EmployeeRevisionsModalProps> = (
 
   onMount(() => {
     document.addEventListener("keydown", handleDocumentKeydown);
+    requestAnimationFrame(() => closeButtonRef?.focus());
   });
 
   onCleanup(() => {
@@ -120,6 +123,7 @@ export const EmployeeRevisionsModal: Component<EmployeeRevisionsModalProps> = (
             Revisions
           </h2>
           <button
+            ref={closeButtonRef}
             type="button"
             class="bg-transparent border-none text-muted-foreground text-2xl leading-none cursor-pointer py-1 px-2 rounded transition-all duration-150 hover:bg-muted hover:text-foreground disabled:opacity-50"
             onClick={props.onClose}
@@ -132,7 +136,11 @@ export const EmployeeRevisionsModal: Component<EmployeeRevisionsModalProps> = (
         </div>
 
         <div class="flex-1 overflow-y-auto px-5 py-4">
-          <Show when={error()}>
+          {/* Hide the outer error banner while the confirm dialog is open
+              so role="alert" only fires there - otherwise screen readers
+              announce the same error twice and the muted outer banner is
+              hidden behind the confirm backdrop anyway. */}
+          <Show when={error() && !confirmId()}>
             <div
               class="mb-4 py-2.5 px-3 bg-destructive/20 text-destructive rounded text-[13px]"
               role="alert"
@@ -203,7 +211,10 @@ export const EmployeeRevisionsModal: Component<EmployeeRevisionsModalProps> = (
                           </div>
                         </Show>
                         <div class="mt-2 flex items-center gap-2">
-                          <span class="font-mono text-[11px] text-muted-foreground/80 truncate flex-1">
+                          <span
+                            class="font-mono text-[11px] text-muted-foreground/80 truncate flex-1"
+                            title={rev.revisionId}
+                          >
                             {rev.revisionId}
                           </span>
                           <Show when={!isActive()}>
