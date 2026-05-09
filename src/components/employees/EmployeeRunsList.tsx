@@ -11,6 +11,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { EmployeeRunDetailModal } from "@/components/employees/EmployeeRunDetailModal";
 import type { EmployeeRun } from "@/lib/employees/types";
 import { employees as svc } from "@/services/employees";
 
@@ -92,6 +93,7 @@ const LOAD_MORE_STEP = 10;
 export const EmployeeRunsList: Component<EmployeeRunsListProps> = (props) => {
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
   const [limit, setLimit] = createSignal(props.limit ?? 10);
+  const [detailRunId, setDetailRunId] = createSignal<string | null>(null);
 
   const [runs, { refetch }] = createResource(
     () => ({
@@ -242,10 +244,18 @@ export const EmployeeRunsList: Component<EmployeeRunsListProps> = (props) => {
                         Copy
                       </button>
                       <span>{durationLabel(run.executionTimeMs)}</span>
+                      <button
+                        type="button"
+                        class="ml-auto text-[11px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+                        onClick={() => setDetailRunId(run.id)}
+                        aria-label="Open run detail"
+                      >
+                        Details
+                      </button>
                       <Show when={hasOutput()}>
                         <button
                           type="button"
-                          class="ml-auto text-[11px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+                          class="text-[11px] text-muted-foreground hover:text-foreground rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
                           onClick={() => toggle(run)}
                         >
                           {isOpen() ? "Hide output" : "View output"}
@@ -278,6 +288,16 @@ export const EmployeeRunsList: Component<EmployeeRunsListProps> = (props) => {
             </button>
           </Show>
         </Show>
+      </Show>
+
+      <Show when={detailRunId()}>
+        {(id) => (
+          <EmployeeRunDetailModal
+            deploymentId={props.employeeId}
+            runId={id()}
+            onClose={() => setDetailRunId(null)}
+          />
+        )}
       </Show>
     </div>
   );

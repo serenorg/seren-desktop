@@ -20,7 +20,10 @@ import {
   serenAgentUpdateManagedDeployment,
 } from "@/api/seren-agent";
 import {
+  type CloudDeploymentRunArtifact,
   type CloudDeploymentRunEvent,
+  serenCloudDeploymentRun,
+  serenCloudDeploymentRunArtifacts,
   serenCloudDeploymentRuns,
 } from "@/api/seren-cloud";
 import type {
@@ -28,6 +31,8 @@ import type {
   EmployeePatch,
   EmployeeRevision,
   EmployeeRun,
+  EmployeeRunArtifact,
+  EmployeeRunDetail,
   EmployeeSummary,
   ModelChoice,
   NewEmployeeInput,
@@ -128,6 +133,35 @@ function runFromCloud(row: CloudDeploymentRunEvent): EmployeeRun {
     statusMessage: row.status_message ?? null,
     stopReason: row.stop_reason ?? null,
     output: row.output ?? null,
+  };
+}
+
+function runDetailFromCloud(row: CloudDeploymentRunEvent): EmployeeRunDetail {
+  return {
+    ...runFromCloud(row),
+    computeBackend: row.compute_backend,
+    billedDurationMs: row.billed_duration_ms,
+    inferenceInputTokens: row.inference_input_tokens,
+    inferenceOutputTokens: row.inference_output_tokens,
+    inferenceCostUsd: row.inference_cost_usd,
+    computeCostUsd: row.compute_cost_usd,
+    invocationPayload: row.invocation_payload,
+    outputEvents: row.output_events,
+    sessionId: row.session_id ?? null,
+    conversationId: row.conversation_id ?? null,
+  };
+}
+
+function artifactFromCloud(
+  row: CloudDeploymentRunArtifact,
+): EmployeeRunArtifact {
+  return {
+    id: row.id,
+    artifactType: row.artifact_type,
+    title: row.title ?? null,
+    url: row.url ?? null,
+    payload: row.payload,
+    createdAt: row.created_at,
   };
 }
 
@@ -336,6 +370,35 @@ export const employees = {
     }
     const rows = data?.data ?? [];
     return rows.map(revisionFromCloud);
+  },
+
+  async getRun(
+    deploymentId: string,
+    runId: string,
+  ): Promise<EmployeeRunDetail> {
+    const { data, error } = await serenCloudDeploymentRun({
+      path: { id: deploymentId, run_id: runId },
+      throwOnError: false,
+    });
+    if (error || !data?.data) {
+      throw new Error(`Failed to load run: ${asMessage(error, "")}`);
+    }
+    return runDetailFromCloud(data.data);
+  },
+
+  async listRunArtifacts(
+    deploymentId: string,
+    runId: string,
+  ): Promise<EmployeeRunArtifact[]> {
+    const { data, error } = await serenCloudDeploymentRunArtifacts({
+      path: { id: deploymentId, run_id: runId },
+      throwOnError: false,
+    });
+    if (error) {
+      throw new Error(`Failed to list run artifacts: ${asMessage(error, "")}`);
+    }
+    const rows = data?.data ?? [];
+    return rows.map(artifactFromCloud);
   },
 
   async listRecentRuns(

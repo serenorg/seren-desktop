@@ -113,3 +113,25 @@ export type EmployeeRun = {
   stopReason: string | null;
   output: string | null;
 };
+
+export type EmployeeRunDetail = EmployeeRun & {
+  computeBackend: string;
+  billedDurationMs: number;
+  inferenceInputTokens: number;
+  inferenceOutputTokens: number;
+  inferenceCostUsd: string;
+  computeCostUsd: string;
+  invocationPayload: unknown;
+  outputEvents: unknown;
+  sessionId: string | null;
+  conversationId: string | null;
+};
+
+export type EmployeeRunArtifact = {
+  id: string;
+  artifactType: string;
+  title: string | null;
+  url: string | null;
+  payload: unknown;
+  createdAt: string;
+};
