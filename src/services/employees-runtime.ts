@@ -4,9 +4,44 @@
 import {
   type CloudRunOutputEventEnvelope,
   serenCloudDeploymentRun,
+  serenCloudDeploymentRunCancel,
   serenCloudDeploymentRunStream,
   serenCloudRun,
 } from "@/api/seren-cloud";
+
+interface ActiveRun {
+  controller: AbortController;
+  deploymentId: string;
+  runId: string | null;
+}
+
+/**
+ * In-flight employee runs keyed by the desktop conversation_id. Lets the
+ * orchestrator's cancel button reach into a running turn, abort the local
+ * stream/poll, and tell the cloud runtime to stop.
+ */
+const activeRuns = new Map<string, ActiveRun>();
+
+/**
+ * Abort the in-flight employee run for `conversationId` (if any) and ask
+ * the cloud runtime to cancel it. Safe to call when no run is active.
+ */
+export async function cancelEmployeeRun(conversationId: string): Promise<void> {
+  const active = activeRuns.get(conversationId);
+  if (!active) return;
+  active.controller.abort();
+  if (active.runId) {
+    try {
+      await serenCloudDeploymentRunCancel({
+        path: { id: active.deploymentId, run_id: active.runId },
+        throwOnError: false,
+      });
+    } catch {
+      // The local abort already stopped consumers; a network failure on
+      // the runtime-side cancel is acceptable.
+    }
+  }
+}
 
 const POLL_INTERVAL_MS = 600;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -224,116 +259,153 @@ export async function runEmployeeMessage(
   message: string,
   options: RunOptions = {},
 ): Promise<RunResult> {
-  const { signal, onText, onThinking, conversationId } = options;
+  const { onText, onThinking, conversationId } = options;
   const callbacks: RunCallbacks = { onText, onThinking };
-  signal?.throwIfAborted();
+  options.signal?.throwIfAborted();
 
-  // CloudDeploymentRunRequest's typed surface only knows {message, async,
-  // run_id, ...}; the schema description allows additional fields. Cast
-  // through `unknown` so the runtime sees `conversation_id` without
-  // upsetting the SDK's generated body type.
-  const body = {
-    message,
-    ...(conversationId ? { conversation_id: conversationId } : {}),
-  } as unknown as Parameters<typeof serenCloudRun>[0]["body"];
-
-  const created = await serenCloudRun({
-    path: { id: deploymentId },
-    body,
-    throwOnError: false,
-  });
-  if (created.error || !created.data?.data) {
-    throw new Error(
-      `Failed to start employee run: ${asMessage(created.error, "")}`,
-    );
+  // Wrap the run in our own AbortController so cancelEmployeeRun can
+  // reach in via the activeRuns registry. If the caller also passed a
+  // signal, forward its abort through.
+  const controller = new AbortController();
+  const signal = controller.signal;
+  let externalAbortHandler: (() => void) | null = null;
+  if (options.signal) {
+    externalAbortHandler = () => controller.abort(options.signal?.reason);
+    options.signal.addEventListener("abort", externalAbortHandler, {
+      once: true,
+    });
   }
-
-  const invocation = created.data.data;
-  const runId = invocation.run_id ?? null;
-
-  // Some compute backends complete synchronously and return the result
-  // inline without a run_id. Emit it as a single chunk and return.
-  if (!runId) {
-    const text = fallbackTextFromResult(invocation.result);
-    const status = invocation.status ?? "completed";
-    if (FAILURE_STATUSES.has(status) && !text) {
-      throw new Error(`Run ${status} with no output`);
-    }
-    if (text) callbacks.onText?.(text);
-    return {
-      text,
-      status,
-      runId: null,
-      thinking: null,
-      errorMessage: null,
-    };
+  // Replace any prior in-flight run for this conversation so the new run
+  // owns the cancellation slot. The previous controller, if any, will be
+  // released by its own runEmployeeMessage finally block.
+  const registered: ActiveRun | null = conversationId
+    ? { controller, deploymentId, runId: null }
+    : null;
+  if (registered && conversationId) {
+    activeRuns.set(conversationId, registered);
   }
-
-  const state = { text: "", thinking: "", errorMessage: null } as {
-    text: string;
-    thinking: string;
-    errorMessage: string | null;
-  };
-  const startedAt = Date.now();
 
   try {
-    const { stream } = await serenCloudDeploymentRunStream({
-      path: { id: deploymentId, run_id: runId },
-      signal,
-      sseMaxRetryAttempts: STREAM_MAX_RETRY_ATTEMPTS,
+    // CloudDeploymentRunRequest's typed surface only knows {message, async,
+    // run_id, ...}; the schema description allows additional fields. Cast
+    // through `unknown` so the runtime sees `conversation_id` without
+    // upsetting the SDK's generated body type.
+    const body = {
+      message,
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+    } as unknown as Parameters<typeof serenCloudRun>[0]["body"];
+
+    const created = await serenCloudRun({
+      path: { id: deploymentId },
+      body,
       throwOnError: false,
     });
-    // heyapi's SSE generator catches stream errors internally and breaks
-    // out of its loop rather than rethrowing, so this for-await typically
-    // completes cleanly even when the connection drops mid-stream. The
-    // unconditional pollUntilTerminal call below is the actual recovery
-    // path - it reads canonical status and replays any events we missed.
-    for await (const raw of stream) {
-      signal?.throwIfAborted();
-      applyEnvelope(raw, state, callbacks);
+    if (created.error || !created.data?.data) {
+      throw new Error(
+        `Failed to start employee run: ${asMessage(created.error, "")}`,
+      );
     }
-  } catch (err) {
-    if (signal?.aborted) throw err;
-    // Surfaced when the SSE request itself fails to open (URL/auth/etc.)
-    // or when our abort signal fires. Mid-stream errors are absorbed by
-    // heyapi's generator and don't reach here.
-    console.warn(
-      "[employees-runtime] Stream open failed, falling back to poll:",
-      err,
+
+    const invocation = created.data.data;
+    const runId = invocation.run_id ?? null;
+    if (registered) registered.runId = runId;
+
+    // Some compute backends complete synchronously and return the result
+    // inline without a run_id. Emit it as a single chunk and return.
+    if (!runId) {
+      const text = fallbackTextFromResult(invocation.result);
+      const status = invocation.status ?? "completed";
+      if (FAILURE_STATUSES.has(status) && !text) {
+        throw new Error(`Run ${status} with no output`);
+      }
+      if (text) callbacks.onText?.(text);
+      return {
+        text,
+        status,
+        runId: null,
+        thinking: null,
+        errorMessage: null,
+      };
+    }
+
+    const state = { text: "", thinking: "", errorMessage: null } as {
+      text: string;
+      thinking: string;
+      errorMessage: string | null;
+    };
+    const startedAt = Date.now();
+
+    try {
+      const { stream } = await serenCloudDeploymentRunStream({
+        path: { id: deploymentId, run_id: runId },
+        signal,
+        sseMaxRetryAttempts: STREAM_MAX_RETRY_ATTEMPTS,
+        throwOnError: false,
+      });
+      // heyapi's SSE generator catches stream errors internally and breaks
+      // out of its loop rather than rethrowing, so this for-await typically
+      // completes cleanly even when the connection drops mid-stream. The
+      // unconditional pollUntilTerminal call below is the actual recovery
+      // path - it reads canonical status and replays any events we missed.
+      for await (const raw of stream) {
+        signal.throwIfAborted();
+        applyEnvelope(raw, state, callbacks);
+      }
+    } catch (err) {
+      if (signal.aborted) throw err;
+      // Surfaced when the SSE request itself fails to open (URL/auth/etc.)
+      // or when our abort signal fires. Mid-stream errors are absorbed by
+      // heyapi's generator and don't reach here.
+      console.warn(
+        "[employees-runtime] Stream open failed, falling back to poll:",
+        err,
+      );
+    }
+
+    // Always poll the run for canonical terminal state and replay any
+    // events the stream missed (or all of them, if the stream never
+    // delivered any).
+    const final = await pollUntilTerminal(
+      deploymentId,
+      runId,
+      signal,
+      state,
+      callbacks,
+      startedAt,
     );
+
+    // Prefer streamed text; fall back to the runtime's raw stdout/stderr for
+    // backends that don't emit structured events (e.g. plain script runtimes).
+    const text = state.text || final.output || "";
+    const errorMessage = state.errorMessage ?? final.statusMessage ?? null;
+
+    if (FAILURE_STATUSES.has(final.status)) {
+      throw new Error(errorMessage ?? (text || `Employee run ${final.status}`));
+    }
+    if (final.status === "awaiting_approval") {
+      throw new Error(
+        "Employee run is awaiting approval. Approval flow is not yet supported in chat.",
+      );
+    }
+
+    return {
+      text,
+      status: final.status,
+      runId,
+      thinking: state.thinking || null,
+      errorMessage,
+    };
+  } finally {
+    if (options.signal && externalAbortHandler) {
+      options.signal.removeEventListener("abort", externalAbortHandler);
+    }
+    if (registered && conversationId) {
+      // Only clear the slot if it still points at our run. A subsequent
+      // runEmployeeMessage call for the same conversation may have
+      // replaced the registration before we reached the finally.
+      if (activeRuns.get(conversationId) === registered) {
+        activeRuns.delete(conversationId);
+      }
+    }
   }
-
-  // Always poll the run for canonical terminal state and replay any
-  // events the stream missed (or all of them, if the stream never
-  // delivered any).
-  const final = await pollUntilTerminal(
-    deploymentId,
-    runId,
-    signal,
-    state,
-    callbacks,
-    startedAt,
-  );
-
-  // Prefer streamed text; fall back to the runtime's raw stdout/stderr for
-  // backends that don't emit structured events (e.g. plain script runtimes).
-  const text = state.text || final.output || "";
-  const errorMessage = state.errorMessage ?? final.statusMessage ?? null;
-
-  if (FAILURE_STATUSES.has(final.status)) {
-    throw new Error(errorMessage ?? (text || `Employee run ${final.status}`));
-  }
-  if (final.status === "awaiting_approval") {
-    throw new Error(
-      "Employee run is awaiting approval. Approval flow is not yet supported in chat.",
-    );
-  }
-
-  return {
-    text,
-    status: final.status,
-    runId,
-    thinking: state.thinking || null,
-    errorMessage,
-  };
 }

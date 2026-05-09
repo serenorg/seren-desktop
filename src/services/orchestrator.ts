@@ -6,7 +6,10 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Attachment, ToolDefinition } from "@/lib/providers/types";
 import { getAllTools } from "@/lib/tools";
 import { executeTool } from "@/lib/tools/executor";
-import { runEmployeeMessage } from "@/services/employees-runtime";
+import {
+  cancelEmployeeRun,
+  runEmployeeMessage,
+} from "@/services/employees-runtime";
 import { storeAssistantResponse } from "@/services/memory";
 import {
   allowsClaudeAgent,
@@ -272,11 +275,24 @@ export async function orchestrate(
 }
 
 /**
- * Cancel an active orchestration.
+ * Cancel an active orchestration. For employee-linked threads this aborts
+ * the local stream/poll and asks the cloud runtime to stop the run; for
+ * everything else it routes through the Rust orchestrator's cancel.
  */
 export async function cancelOrchestration(
   conversationId: string,
 ): Promise<void> {
+  const conv = conversationStore.conversations.find(
+    (c) => c.id === conversationId,
+  );
+  if (conv?.employeeId) {
+    try {
+      await cancelEmployeeRun(conversationId);
+    } catch (error) {
+      console.warn("[orchestrator] Employee cancel failed:", error);
+    }
+    return;
+  }
   try {
     await invoke("cancel_orchestration", { conversationId });
   } catch (error) {
@@ -613,6 +629,13 @@ async function runEmployeeTurn(
     await conversationStore.persistMessage(assistantMessage, conversationId);
   } catch (error) {
     conversationStore.finalizeStreaming(conversationId);
+    // User-initiated aborts shouldn't surface as red error messages.
+    // Persist the partial reply we already streamed so the user can read
+    // it, then exit cleanly.
+    if (error instanceof DOMException && error.name === "AbortError") {
+      conversationStore.setRLMProcessing(false, conversationId);
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     handleError(message, conversationId);
   } finally {
