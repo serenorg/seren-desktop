@@ -1812,12 +1812,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               onAttach={handleAttachImages}
               onRemove={handleRemoveImage}
               isLoading={isAttaching()}
-              projectRoot={
-                activeAgentThread()?.projectRoot ??
-                fileTreeState.rootPath ??
-                null
-              }
-              threadId={activeAgentThread()?.id ?? null}
             />
             <div class="relative">
               <SlashCommandPopup
