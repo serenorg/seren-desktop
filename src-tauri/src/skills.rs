@@ -4,7 +4,7 @@
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 use url::Url;
 
@@ -825,12 +825,54 @@ pub fn validate_skill_payload(skills_dir: String, slug: String) -> Result<Vec<St
 
     for path in referenced {
         let full_path = skill_dir.join(&path);
-        if !full_path.exists() {
+        if !full_path.exists() && !has_template_sibling(&skill_dir, &path) {
             missing.push(path);
         }
     }
 
     Ok(missing)
+}
+
+/// Returns true when `path` is a user-provisioned target whose template
+/// sibling (`.example` / `.template` / `.sample`) ships in the bundle.
+/// SKILL.md routinely instructs users to copy the template — flagging the
+/// uncopied target as "missing" is a false positive.
+fn has_template_sibling(skill_dir: &Path, path: &str) -> bool {
+    let rel = Path::new(path);
+    let file_name = match rel.file_name().and_then(|n| n.to_str()) {
+        Some(name) => name,
+        None => return false,
+    };
+    let parent_dir = match rel.parent() {
+        Some(p) => skill_dir.join(p),
+        None => skill_dir.to_path_buf(),
+    };
+
+    const INFIXES: [&str; 3] = ["example", "template", "sample"];
+
+    // Pattern A: dotfile suffix (`.env` -> `.env.example`).
+    for infix in INFIXES {
+        if parent_dir.join(format!("{}.{}", file_name, infix)).exists() {
+            return true;
+        }
+    }
+
+    // Pattern B: extension infix (`config.json` -> `config.example.json`).
+    if let (Some(stem), Some(ext)) = (
+        rel.file_stem().and_then(|s| s.to_str()),
+        rel.extension().and_then(|e| e.to_str()),
+    ) {
+        for infix in INFIXES {
+            if parent_dir
+                .join(format!("{}.{}.{}", stem, infix, ext))
+                .exists()
+            {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 /// Rename a skill directory when the resolved slug no longer matches the
@@ -1422,6 +1464,69 @@ Run [agent](scripts/agent.py) with `requirements.txt`.
 
         let missing = validate_skill_payload(skills_dir, "test-skill".to_string()).unwrap();
         assert!(missing.is_empty(), "all referenced files should be present");
+    }
+
+    #[test]
+    fn validate_skill_payload_skips_files_with_example_sibling() {
+        // Real-world case: SKILL.md instructs `Copy config.example.json to config.json`.
+        // config.example.json ships in the bundle; config.json is user-provisioned.
+        // The validator must not flag it as missing.
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let content = r#"# Test
+Copy `config.example.json` to `config.json`.
+"#;
+        let extras = serde_json::json!([
+            {"path": "config.example.json", "content": "{}"},
+        ]);
+
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            content.to_string(),
+            Some(extras.to_string()),
+            None,
+        )
+        .unwrap();
+
+        let missing = validate_skill_payload(skills_dir, "test-skill".to_string()).unwrap();
+        assert!(
+            !missing.contains(&"config.json".to_string()),
+            "config.json must not be flagged when config.example.json sibling exists, got {:?}",
+            missing,
+        );
+    }
+
+    #[test]
+    fn validate_skill_payload_still_flags_truly_missing_files() {
+        // Regression guard: the user-provisioned-template skip must not
+        // hide genuinely broken references (file with no .example sibling).
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let content = r#"# Test
+Run [agent](scripts/agent.py) and read `config.example.json`.
+"#;
+        let extras = serde_json::json!([
+            {"path": "config.example.json", "content": "{}"},
+        ]);
+
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            content.to_string(),
+            Some(extras.to_string()),
+            None,
+        )
+        .unwrap();
+
+        let missing = validate_skill_payload(skills_dir, "test-skill".to_string()).unwrap();
+        assert!(
+            missing.contains(&"scripts/agent.py".to_string()),
+            "scripts/agent.py has no .example sibling and must still be flagged, got {:?}",
+            missing,
+        );
     }
 
     #[test]
