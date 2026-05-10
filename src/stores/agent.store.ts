@@ -3322,16 +3322,38 @@ Structured summary:`;
       // prompt — the post-compaction context-restore mechanism. No seed
       // turn is sent to the model; the prepend is consumed exactly once on
       // the first dispatch via `consumeCompactionPrepend`. #1829.
+      //
+      // Tool messages must ride along: MCP tool results carry the resource
+      // handles the conversation is actually manipulating (Google Sheets
+      // spreadsheet IDs, SerenDB project handles, R2 keys, ...). The
+      // structured summary template has no slot for opaque identifiers and
+      // caps each field at 1-2 sentences, so handles got summarized away
+      // and the user had to re-supply them. Tighter cap on tool results
+      // because they can be huge file contents / JSON dumps; user and
+      // assistant text gets the original 2000-char ceiling. #1858.
       const MAX_MSG_CHARS = 2000;
+      const MAX_TOOL_CHARS = 500;
       const preservedContext = toPreserve
-        .filter((m) => m.type === "user" || m.type === "assistant")
         .map((m) => {
-          const content =
-            m.content.length > MAX_MSG_CHARS
-              ? `${m.content.slice(0, MAX_MSG_CHARS)}... [truncated]`
-              : m.content;
-          return `${m.type.toUpperCase()}: ${content}`;
+          if (m.type === "user" || m.type === "assistant") {
+            const content =
+              m.content.length > MAX_MSG_CHARS
+                ? `${m.content.slice(0, MAX_MSG_CHARS)}... [truncated]`
+                : m.content;
+            return `${m.type.toUpperCase()}: ${content}`;
+          }
+          if (m.type === "tool" && m.toolCall?.result) {
+            const title = m.toolCall.title || "tool";
+            const result = m.toolCall.result;
+            const trimmed =
+              result.length > MAX_TOOL_CHARS
+                ? `${result.slice(0, MAX_TOOL_CHARS)}... [truncated]`
+                : result;
+            return `TOOL_RESULT (${title}): ${trimmed}`;
+          }
+          return null;
         })
+        .filter((s): s is string => s !== null)
         .join("\n\n");
       const prependText = preservedContext
         ? `Prior work summary:\n${summary}\n\nRecent messages:\n${preservedContext}`
@@ -4514,21 +4536,37 @@ Structured summary:`;
   async setModel(modelId: string, forSessionId?: string) {
     const sessionId = forSessionId ?? state.activeSessionId;
     if (!sessionId) return;
+    const session = state.sessions[sessionId];
+    if (!session) return;
 
     setState("sessions", sessionId, "pendingModelId", modelId);
     setState("sessions", sessionId, "userSelectedModelId", modelId);
     setState("sessions", sessionId, "currentModelId", modelId);
+    // The auto-compact denominator must follow the picker. Prior fixes
+    // (#1700, #1733, #1761, #1769, #1798) hardened the CLI-report path
+    // into contextWindowSize. The picker-driven mid-session swap path
+    // was never wired: switching `claude-opus-4-7` -> `claude-opus-4-7[1m]`
+    // left the spawn-time 200K denominator in place, so compaction fired
+    // at ~88% of 200K instead of waiting for ~88% of 1M — exactly 5x too
+    // early on every 1M-tier upgrade. Recompute against the new tier here;
+    // the next promptComplete's #1798 isOneMTierMismatch guard refines
+    // the value if the runtime emits something different. Reset the
+    // once-per-session alarm so the gate re-arms cleanly for the new
+    // tier. #1858.
+    setState(
+      "sessions",
+      sessionId,
+      "contextWindowSize",
+      defaultContextWindowFor(session.info.agentType, modelId),
+    );
+    setState("sessions", sessionId, "contextWindowMismatchReported", false);
     try {
       await providerService.setModel(sessionId, modelId);
-      const session = state.sessions[sessionId];
-      if (session) {
-        void setAgentConversationModelIdDb(
-          session.conversationId,
-          modelId,
-        ).catch((error) => {
+      void setAgentConversationModelIdDb(session.conversationId, modelId).catch(
+        (error) => {
           console.warn("Failed to persist agent model selection", error);
-        });
-      }
+        },
+      );
     } catch (error) {
       console.error("[AgentStore] Failed to set model:", error);
     }
