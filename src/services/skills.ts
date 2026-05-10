@@ -198,6 +198,52 @@ function objectKeys(value: unknown): string {
   return keys.length > 0 ? `: ${keys.join(", ")}` : "";
 }
 
+// Diagnostic for envelope-walking failures: walks the same data->result->body
+// chain that `findInResponseEnvelopes` uses and reports the keys at each
+// depth, so a "wrapped" bundle response like `{ data: { error: ... } }` is
+// debuggable from the user-facing error string alone. Surfaces a server
+// error envelope when one is detected at any depth.
+function describeBundleEnvelope(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  const layers: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = value;
+  let depth = 0;
+  while (
+    current &&
+    typeof current === "object" &&
+    !seen.has(current) &&
+    depth < 5
+  ) {
+    seen.add(current);
+    const obj = current as Record<string, unknown>;
+    const keys = Object.keys(obj).slice(0, 6);
+    layers.push(`{${keys.join(",")}}`);
+
+    const errorMessage =
+      typeof obj.error === "string"
+        ? obj.error
+        : typeof obj.message === "string" &&
+            (obj.error !== undefined ||
+              obj.code !== undefined ||
+              obj.status !== undefined)
+          ? obj.message
+          : null;
+    if (errorMessage) {
+      return `: ${layers.join(" -> ")} (server error: ${errorMessage})`;
+    }
+
+    const next =
+      (obj.data && typeof obj.data === "object" ? obj.data : null) ??
+      (obj.result && typeof obj.result === "object" ? obj.result : null) ??
+      (obj.body && typeof obj.body === "object" ? obj.body : null);
+    if (!next) break;
+    current = next;
+    depth++;
+  }
+  return layers.length > 0 ? `: ${layers.join(" -> ")}` : "";
+}
+
 // Generated SDK responses come back wrapped in unpredictable layers of
 // {data,result,body} envelopes at runtime. Walk the envelope tree breadth-first
 // and return the first object that satisfies `match`. Shared so list and
@@ -275,7 +321,7 @@ async function downloadSkillBundle(slug: string): Promise<SkillBundle> {
   const bundle = normalizeSkillBundle(data);
   if (!bundle) {
     throw new Error(
-      `Unexpected seren-skills bundle response for ${slug}${objectKeys(data)}`,
+      `Unexpected seren-skills bundle response for ${slug}${describeBundleEnvelope(data)}`,
     );
   }
   return bundle;

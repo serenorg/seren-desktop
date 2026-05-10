@@ -229,6 +229,48 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
     ).rejects.toThrow("Unexpected seren-skills bundle response for gamma");
   });
 
+  it("includes inner envelope keys when a wrapped bundle response cannot be normalized", async () => {
+    // Mirror of the production failure: the SDK returned `{ data: <inner> }`
+    // and the inner envelope is missing the bundle fields. The error must
+    // surface BOTH outer and inner keys so we can root-cause without
+    // redeploying the desktop client.
+    mockDownloadSkill.mockResolvedValueOnce({
+      data: { data: { content_hash: "abc" } },
+    });
+
+    const { skills } = await import("@/services/skills");
+    await expect(
+      skills.fetchContent({
+        id: "seren:wrapped",
+        slug: "wrapped",
+        name: "Wrapped",
+        description: "",
+        source: "seren",
+        sourceUrl: "seren-skills:wrapped",
+        tags: [],
+      }),
+    ).rejects.toThrow(/content_hash/);
+  });
+
+  it("surfaces server error envelopes when the bundle body carries an error payload", async () => {
+    mockDownloadSkill.mockResolvedValueOnce({
+      data: { data: { error: "forbidden", code: "PUBLISHER_DENIED" } },
+    });
+
+    const { skills } = await import("@/services/skills");
+    await expect(
+      skills.fetchContent({
+        id: "seren:denied",
+        slug: "denied",
+        name: "Denied",
+        description: "",
+        source: "seren",
+        sourceUrl: "seren-skills:denied",
+        tags: [],
+      }),
+    ).rejects.toThrow(/forbidden/);
+  });
+
   it("throws when the API returns an error", async () => {
     mockDownloadSkill.mockResolvedValueOnce({
       error: { message: "not found" },
