@@ -51,6 +51,12 @@ import {
   skillDragPayload,
 } from "@/lib/skill-drag";
 import {
+  buildSkillInvocationDirective,
+  buildSkillInvocationDisplay,
+  RUN_SKILL_EVENT,
+  type RunSkillEventDetail,
+} from "@/lib/skills/invoke";
+import {
   appendInputHistory,
   getInputHistory,
   getThreadDraft,
@@ -758,17 +764,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           console.warn("[AgentChat] Failed to load skill content:", err);
         }
 
-        const directive = skillContent
-          ? [
-              `<skill-invocation name="${skill.slug}">`,
-              `The user has invoked the /${skill.slug} skill. Execute it by following the skill instructions below.`,
-              args ? `\nUser request: ${args}` : "",
-              `\n${skillContent}`,
-              `</skill-invocation>`,
-            ].join("\n")
-          : args
-            ? `/${skill.slug} ${args}`
-            : `/${skill.slug}`;
+        const directive = buildSkillInvocationDirective({
+          slug: skill.slug,
+          content: skillContent,
+          args,
+        });
 
         await agentStore.sendPrompt(
           directive,
@@ -969,12 +969,41 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
   };
 
+  const handleRunSkillEvent = async (event: Event) => {
+    const detail = (event as CustomEvent<RunSkillEventDetail>).detail;
+    if (!detail || detail.kind !== "agent") return;
+    const thread = activeAgentThread();
+    if (!thread || thread.id !== detail.threadId) return;
+
+    let skillContent: string | null = null;
+    try {
+      skillContent = await skills.readContent(detail.skill);
+    } catch (err) {
+      console.warn("[AgentChat] Run skill: failed to load skill content:", err);
+    }
+
+    const directive = buildSkillInvocationDirective({
+      slug: detail.skill.slug,
+      content: skillContent,
+    });
+    const displayContent = buildSkillInvocationDisplay(detail.skill.slug);
+
+    await agentStore.sendPrompt(
+      directive,
+      undefined,
+      { displayContent },
+      threadSessionId() ?? undefined,
+    );
+  };
+
   onMount(() => {
     document.addEventListener("keydown", handleGlobalKeyDown);
+    window.addEventListener(RUN_SKILL_EVENT, handleRunSkillEvent);
   });
 
   onCleanup(() => {
     document.removeEventListener("keydown", handleGlobalKeyDown);
+    window.removeEventListener(RUN_SKILL_EVENT, handleRunSkillEvent);
   });
 
   const handleKeyDown = (event: KeyboardEvent) => {
