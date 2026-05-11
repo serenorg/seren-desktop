@@ -12,7 +12,12 @@ import {
   Show,
   Switch,
 } from "solid-js";
-import { EmployeesSection } from "@/components/sidebar/EmployeesSection";
+import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
+import {
+  type EmployeeDetailEventDetail,
+  EmployeesSection,
+  OPEN_EMPLOYEE_DETAIL_EVENT,
+} from "@/components/sidebar/EmployeesSection";
 import { openFolder } from "@/lib/files/service";
 import {
   encodeThreadDragPayload,
@@ -106,6 +111,7 @@ const EditorIcon: Component<{ size?: number; strokeWidth?: number }> = (
 
 export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   const [showLauncher, setShowLauncher] = createSignal(false);
+  const [showCreateEmployee, setShowCreateEmployee] = createSignal(false);
   const [collapsedGroups, setCollapsedGroups] = createSignal<
     Set<string | null>
   >(new Set());
@@ -126,12 +132,21 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     }
   };
 
+  const handleDocumentKeydown = (event: KeyboardEvent) => {
+    if (event.key === "Escape" && showLauncher()) {
+      event.preventDefault();
+      setShowLauncher(false);
+    }
+  };
+
   onMount(() => {
     document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleDocumentKeydown);
   });
 
   onCleanup(() => {
     document.removeEventListener("mousedown", handleClickOutside);
+    document.removeEventListener("keydown", handleDocumentKeydown);
   });
 
   const handleOpenFolder = async () => {
@@ -177,6 +192,19 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     } finally {
       setSpawning(false);
     }
+  };
+
+  const handleNewEmployee = () => {
+    setShowLauncher(false);
+    setShowCreateEmployee(true);
+  };
+
+  const handleEmployeeCreated = (employeeId: string) => {
+    window.dispatchEvent(
+      new CustomEvent<EmployeeDetailEventDetail>(OPEN_EMPLOYEE_DETAIL_EVENT, {
+        detail: { employeeId },
+      }),
+    );
   };
 
   const handleNewAgent = async (
@@ -506,6 +534,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             class="flex items-center gap-2 w-full py-2 px-3 bg-primary/8 border border-primary/15 rounded-lg text-primary text-[13px] font-medium cursor-pointer transition-all duration-150 hover:bg-primary/15 hover:border-primary/25 hover:shadow-[0_0_12px_rgba(56,189,248,0.1)] active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait disabled:hover:bg-primary/8"
             onClick={toggleLauncher}
             disabled={spawning()}
+            aria-haspopup="menu"
+            aria-expanded={showLauncher()}
           >
             <Show
               when={!spawning()}
@@ -743,7 +773,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             }
           }}
         >
-          <EmployeesSection />
+          <EmployeesSection onCreateEmployee={handleNewEmployee} />
           <Show
             when={threadStore.groupedThreads.length > 0}
             fallback={
@@ -1038,6 +1068,12 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             </div>
           </Show>
         </div>
+        <Show when={showCreateEmployee()}>
+          <CreateEmployeeModal
+            onClose={() => setShowCreateEmployee(false)}
+            onCreated={handleEmployeeCreated}
+          />
+        </Show>
       </Show>
     </aside>
   );

@@ -1,5 +1,5 @@
 // ABOUTME: Sidebar section listing virtual employees (deployed seren-agent workers).
-// ABOUTME: Shows status dots, supports click-to-open-detail, exposes a New employee button.
+// ABOUTME: Shows status dots, pending approval counts, and click-to-open detail.
 
 import {
   type Component,
@@ -10,7 +10,6 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
 import type {
   EmployeeMode,
@@ -31,11 +30,9 @@ export const CLOSE_EMPLOYEE_DETAIL_EVENT = "seren:close-employee-detail";
 
 export type EmployeeDetailEventDetail = { employeeId: string };
 
-const SectionLabel: Component<{ children: string }> = (props) => (
-  <div class="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 select-none">
-    {props.children}
-  </div>
-);
+interface EmployeesSectionProps {
+  onCreateEmployee: () => void;
+}
 
 const Avatar: Component<{ name: string; seed: string; size?: number }> = (
   props,
@@ -133,9 +130,8 @@ const EmployeeRow: Component<{
   );
 };
 
-export const EmployeesSection: Component = () => {
+export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
   const [activeId, setActiveId] = createSignal<string | null>(null);
-  const [showCreate, setShowCreate] = createSignal(false);
   const [pendingByDeployment, setPendingByDeployment] = createSignal<
     Map<string, OrgPendingApprovalRun[]>
   >(new Map());
@@ -157,17 +153,6 @@ export const EmployeesSection: Component = () => {
     pendingByDeployment().get(deploymentId)?.length ?? 0;
 
   const handleSelect = (id: string) => {
-    setActiveId(id);
-    window.dispatchEvent(
-      new CustomEvent<EmployeeDetailEventDetail>(OPEN_EMPLOYEE_DETAIL_EVENT, {
-        detail: { employeeId: id },
-      }),
-    );
-  };
-
-  const handleNew = () => setShowCreate(true);
-
-  const handleCreated = (id: string) => {
     setActiveId(id);
     window.dispatchEvent(
       new CustomEvent<EmployeeDetailEventDetail>(OPEN_EMPLOYEE_DETAIL_EVENT, {
@@ -234,7 +219,9 @@ export const EmployeesSection: Component = () => {
 
   return (
     <div class="mb-1.5">
-      <SectionLabel>Employees</SectionLabel>
+      <div class="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 select-none">
+        Employees
+      </div>
       <div class="flex flex-col gap-0.5 px-1">
         <Show when={employeeStore.error}>
           <div
@@ -287,39 +274,41 @@ export const EmployeesSection: Component = () => {
             );
           }}
         </For>
-        <Show when={!employeeStore.loading && employees().length === 0}>
-          <div class="px-2 py-1.5 text-[11px] text-muted-foreground/70">
-            No employees yet
-          </div>
-        </Show>
         <button
           type="button"
-          class="flex items-center gap-1.5 w-full px-2 py-1.5 mt-0.5 bg-transparent border border-dashed border-border/70 rounded-md text-muted-foreground text-[11.5px] cursor-pointer transition-colors duration-100 hover:border-primary/60 hover:text-primary hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:border-primary/60 focus-visible:text-primary"
-          onClick={handleNew}
+          class="group flex items-center gap-2.5 w-full px-2 py-1.5 mt-0.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/40"
+          onClick={props.onCreateEmployee}
+          aria-label="New employee"
         >
-          <svg
-            width="11"
-            height="11"
-            viewBox="0 0 16 16"
-            fill="none"
+          <span
+            class="flex items-center justify-center w-[22px] h-[22px] rounded-md border border-dashed border-border/80 text-muted-foreground/80 transition-colors duration-100 group-hover:border-primary/50 group-hover:text-primary"
             aria-hidden="true"
           >
-            <path
-              d="M8 3v10M3 8h10"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-            />
-          </svg>
-          New employee
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M8 3v10M3 8h10"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+          </span>
+          <div class="flex-1 min-w-0">
+            <div class="text-[12.5px] text-muted-foreground truncate transition-colors duration-100 group-hover:text-foreground">
+              New employee
+            </div>
+            <div class="text-[10.5px] text-muted-foreground/70 truncate">
+              Persistent cloud worker
+            </div>
+          </div>
         </button>
       </div>
-      <Show when={showCreate()}>
-        <CreateEmployeeModal
-          onClose={() => setShowCreate(false)}
-          onCreated={handleCreated}
-        />
-      </Show>
     </div>
   );
 };
