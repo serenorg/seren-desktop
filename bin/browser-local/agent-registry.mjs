@@ -2,7 +2,14 @@
 // ABOUTME: Keeps provider metadata and per-agent setup logic separate from session runtime handling.
 
 import { execFile, spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, readSync } from "node:fs";
+import {
+  accessSync,
+  closeSync,
+  constants as fsConstants,
+  existsSync,
+  openSync,
+  readSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -99,15 +106,71 @@ export function binaryRunsOnHost(filePath) {
   return fileArch === process.arch;
 }
 
-function launchLoginCommand(command) {
-  const loginCommand = `${command} login`;
+/**
+ * True when `candidate` exists and the current process has execute permission.
+ * Mirrors the spawn-time gate in claude-runtime.mjs so login and spawn agree
+ * on which candidates are viable. On Windows X_OK collapses to existence —
+ * which is the right semantic there (no separate exec bit). #1735, #1878.
+ */
+function isExecutableCandidate(candidate) {
+  try {
+    accessSync(candidate, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
+/**
+ * Build the shell command string that the platform terminal will execute.
+ * The resolved binary may be an absolute path that contains spaces (e.g.
+ * `/Users/Some User/.local/bin/claude`) or a single apostrophe. Naive
+ * interpolation breaks on both; previously this was unquoted and would
+ * silently fail or get re-parsed as multiple shell words.
+ *
+ * A path that's just the bare command name ("claude", "codex") passes
+ * through unquoted — the call site uses the sentinel when the resolver
+ * couldn't find an install, in which case we want the user's shell PATH
+ * to resolve the command. #1878.
+ */
+function buildLoginShellCommand(command) {
+  // No path separator and no whitespace → bare command, pass through.
+  // `path.sep` is `/` on POSIX and `\\` on Windows; check both since this
+  // function is platform-neutral.
+  const isBare = !/[\s/\\]/.test(command);
+  if (isBare) {
+    return `${command} login`;
+  }
+  // POSIX single-quote escape: close the quote, escape with backslash,
+  // reopen. AppleScript and POSIX shells both honor this idiom.
+  const quoted = `'${command.replace(/'/g, "'\\''")}'`;
+  return `${quoted} login`;
+}
+
+/**
+ * Launch `<command> login` in a new terminal window.
+ *
+ * Accepts either a bare command name (resolved by the user's shell PATH)
+ * or an absolute path returned by `resolveInstalled*Binary`. The latter
+ * guarantees that login targets the same binary `spawnSession` would have
+ * picked, preventing the auth/spawn split-brain in #1876.
+ *
+ * Exported for #1878 test coverage of shell-quoting behavior.
+ */
+export function launchLoginCommand(command) {
   if (process.platform === "darwin") {
+    const loginCommand = buildLoginShellCommand(command);
+    // AppleScript string layer: escape backslashes first, then double
+    // quotes. Without this, a path containing `"` would terminate the
+    // do-script string early and inject AppleScript.
+    const escapedForAppleScript = loginCommand
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"');
     spawn(
       "osascript",
       [
         "-e",
-        `tell application "Terminal" to do script "${loginCommand}"`,
+        `tell application "Terminal" to do script "${escapedForAppleScript}"`,
         "-e",
         'tell application "Terminal" to activate',
       ],
@@ -117,13 +180,21 @@ function launchLoginCommand(command) {
   }
 
   if (process.platform === "win32") {
-    spawn("cmd", ["/c", "start", "cmd", "/c", loginCommand], {
-      detached: true,
-      stdio: "ignore",
-    }).unref();
+    // `start` syntax: `start [title] [command]`. When the first quoted arg
+    // is present, `start` always treats it as the window title — so an
+    // unquoted path with spaces breaks parsing, and a quoted path silently
+    // becomes the title and never runs. Emit an explicit empty title to
+    // pin the window-title slot regardless of what the path looks like.
+    spawn(
+      "cmd",
+      ["/c", "start", "", command, "login"],
+      { detached: true, stdio: "ignore" },
+    ).unref();
     return;
   }
 
+  // x-terminal-emulator argv form: spaces survive argv boundaries, so the
+  // resolved absolute path needs no shell quoting.
   spawn("x-terminal-emulator", ["-e", command, "login"], {
     detached: true,
     stdio: "ignore",
@@ -530,8 +601,15 @@ export function resolveInstalledClaudeBinary() {
       // Distro package managers. #1665
       "/usr/bin/claude",
     ];
+    // Parity with claude-runtime's spawn-time gate (#1735): existsSync alone
+    // passes broken symlinks and non-executable files, both of which fail
+    // spawn at runtime. Login and spawn must agree, so use the same gate.
     for (const candidate of candidates) {
-      if (existsSync(candidate) && binaryRunsOnHost(candidate)) {
+      if (
+        existsSync(candidate) &&
+        isExecutableCandidate(candidate) &&
+        binaryRunsOnHost(candidate)
+      ) {
         return candidate;
       }
     }
@@ -632,7 +710,12 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         });
       },
       launchLogin() {
-        launchLoginCommand("codex");
+        // Login MUST target the same binary that providers.spawnCodex
+        // resolves (providers.mjs:130). Otherwise the OAuth flow writes
+        // credentials to one codex install while Seren spawns a different
+        // one. Mirrors the Gemini fix below (#1476) and Claude (#1878).
+        const resolved = resolveInstalledCodexBinary();
+        launchLoginCommand(resolved !== "codex" ? resolved : "codex");
       },
     },
     "claude-code": {
@@ -663,7 +746,14 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         return ensureClaudeCodeViaNativeInstaller(emit);
       },
       launchLogin() {
-        launchLoginCommand("claude");
+        // Login MUST target the same binary that claude-runtime resolves
+        // for spawnSession. When they diverge — or when both point at the
+        // same binary but `~/.claude/.credentials.json` was migrated from
+        // another machine — the OAuth flow writes a fresh token to one
+        // backend while the spawned claude reads from another and 401s on
+        // first prompt (#1876). Mirrors the Gemini fix (#1476).
+        const resolved = resolveInstalledClaudeBinary();
+        launchLoginCommand(resolved !== "claude" ? resolved : "claude");
       },
     },
     gemini: {
