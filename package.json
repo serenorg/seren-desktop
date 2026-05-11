@@ -64,7 +64,7 @@
     "pdfjs-dist": "^5.7.284",
     "qrcode": "^1.5.4",
     "solid-js": "^1.9.3",
-    "tailwind-merge": "^3.5.0",
+    "tailwind-merge": "^3.6.0",
     "tailwindcss": "4",
     "thirdweb": "^5.119.4",
     "ws": "^8.20.0"
