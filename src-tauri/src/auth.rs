@@ -35,6 +35,16 @@ fn get_refresh_token(app: &tauri::AppHandle) -> Result<Option<String>, String> {
         .and_then(|v| v.as_str().map(String::from)))
 }
 
+/// True when either an access token or a refresh token is present.
+///
+/// Callers use this to decide whether a Gateway request should attach
+/// stored auth at all. A signed-out cold start has neither token, so public
+/// endpoints (catalog, provider list) must go through unauthenticated rather
+/// than failing through the refresh path. See #1860.
+pub fn has_stored_credentials(app: &tauri::AppHandle) -> bool {
+    get_access_token(app).is_ok() || matches!(get_refresh_token(app), Ok(Some(_)))
+}
+
 /// Store new tokens after a successful refresh.
 fn store_tokens(
     app: &tauri::AppHandle,
@@ -62,6 +72,9 @@ fn clear_tokens(app: &tauri::AppHandle) -> Result<(), String> {
 /// Attempt to refresh the access token using the stored refresh token.
 ///
 /// Returns the new access token on success.
+/// On missing refresh token: clears tokens and returns an error WITHOUT
+/// emitting `auth:session-expired` — that state is "never signed in", not
+/// session expiry.
 /// On 401 from the refresh endpoint: clears both tokens, emits
 /// `auth:session-expired` to the frontend, and returns an error.
 /// On network error: does NOT clear tokens (user may be temporarily offline).
@@ -78,8 +91,11 @@ pub async fn refresh_access_token(app: &tauri::AppHandle) -> Result<String, Stri
     let refresh_token = match get_refresh_token(app)? {
         Some(rt) => rt,
         None => {
+            // No refresh token means never-signed-in or already-logged-out,
+            // not session expiry. Emitting auth:session-expired here turned
+            // every signed-out Gateway call into a spurious sign-in-modal
+            // request. See #1860.
             let _ = clear_tokens(app);
-            let _ = app.emit("auth:session-expired", ());
             return Err("No refresh token available".to_string());
         }
     };
@@ -143,7 +159,7 @@ where
     let token = match get_access_token(app) {
         Ok(t) => t,
         Err(_) => {
-            log::info!("[auth] No access token in store, attempting refresh...");
+            log::debug!("[auth] No access token in store, attempting refresh...");
             refresh_access_token(app).await?
         }
     };

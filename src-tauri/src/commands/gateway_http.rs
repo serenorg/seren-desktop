@@ -87,6 +87,21 @@ fn should_use_stored_auth(url: &Url, headers: &HeaderMap) -> bool {
     !headers.contains_key(AUTHORIZATION) && !should_skip_stored_auth(url.path())
 }
 
+/// Decide whether to attach stored auth to a Gateway request.
+///
+/// Returns true only when the caller did not pass their own Authorization
+/// header, the path is not an auth-bootstrap endpoint, AND the desktop has
+/// stored credentials. Without credentials the request goes unauthenticated
+/// so public endpoints keep working while signed out instead of failing
+/// through the refresh path. See #1860.
+fn should_attach_stored_auth(
+    url: &Url,
+    headers: &HeaderMap,
+    has_stored_credentials: bool,
+) -> bool {
+    should_use_stored_auth(url, headers) && has_stored_credentials
+}
+
 fn build_header_map(raw_headers: &HashMap<String, String>) -> Result<HeaderMap, String> {
     let mut headers = HeaderMap::new();
 
@@ -181,7 +196,8 @@ pub async fn gateway_http_start(
         .build()
         .map_err(|e| format!("Failed to create gateway HTTP client: {}", e))?;
 
-    let response = if should_use_stored_auth(&url, &headers) {
+    let has_credentials = crate::auth::has_stored_credentials(&app);
+    let response = if should_attach_stored_auth(&url, &headers, has_credentials) {
         crate::auth::authenticated_request(&app, &client, |client, token| {
             build_request(
                 client,
@@ -319,5 +335,24 @@ mod tests {
 
         let refresh = Url::parse("https://api.serendb.com/auth/refresh").unwrap();
         assert!(!should_use_stored_auth(&refresh, &no_auth_headers));
+    }
+
+    #[test]
+    fn attach_stored_auth_requires_credentials_for_protected_paths() {
+        let no_auth_headers = HeaderMap::new();
+        let catalog =
+            Url::parse("https://api.serendb.com/publishers/seren-skills/skills").unwrap();
+
+        // Signed-out cold start: public catalog must go through unauthenticated
+        // instead of failing through the refresh path. Regression guard for #1860.
+        assert!(!should_attach_stored_auth(&catalog, &no_auth_headers, false));
+
+        // Signed-in: same path attaches the bearer token via authenticated_request.
+        assert!(should_attach_stored_auth(&catalog, &no_auth_headers, true));
+
+        // Auth-bootstrap endpoints stay unauthenticated even when credentials exist,
+        // so /auth/refresh does not loop into itself.
+        let refresh = Url::parse("https://api.serendb.com/auth/refresh").unwrap();
+        assert!(!should_attach_stored_auth(&refresh, &no_auth_headers, true));
     }
 }
