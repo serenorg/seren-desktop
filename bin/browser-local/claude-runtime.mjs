@@ -16,6 +16,7 @@ import {
   DEFAULT_CLAUDE_EFFORT,
 } from "./effort.mjs";
 import { updatePeakInputTokens } from "./usage.mjs";
+import { binaryRunsOnHost } from "./agent-registry.mjs";
 import { chooseUpdatedModelId, inferCurrentModelId } from "./model-resolution.mjs";
 import {
   buildSyntheticTranscript as writeSyntheticJsonl,
@@ -64,8 +65,10 @@ function resolveClaudeBinary() {
       path.join(nodeDir, "claude"),
     ];
 
+    // binaryRunsOnHost rejects a wrong-arch binary that would otherwise pass
+    // the executability gate and then crash at spawn with EBADARCH. #1862
     for (const candidate of candidates) {
-      if (isExecutableCandidate(candidate)) {
+      if (isExecutableCandidate(candidate) && binaryRunsOnHost(candidate)) {
         return candidate;
       }
     }
@@ -76,7 +79,7 @@ function resolveClaudeBinary() {
         encoding: "utf8",
         timeout: 5_000,
       }).trim().split(/\r?\n/)[0];
-      if (resolved && isExecutableCandidate(resolved)) {
+      if (resolved && isExecutableCandidate(resolved) && binaryRunsOnHost(resolved)) {
         return resolved;
       }
     } catch {
@@ -96,8 +99,10 @@ function resolveClaudeBinary() {
     path.join(prefix, "bin", "claude"),
   ];
 
+  // binaryRunsOnHost rejects a wrong-arch binary that would otherwise pass
+  // the executability gate and then crash at spawn with EBADARCH. #1862
   for (const candidate of candidates) {
-    if (isExecutableCandidate(candidate)) {
+    if (isExecutableCandidate(candidate) && binaryRunsOnHost(candidate)) {
       return candidate;
     }
   }
@@ -108,7 +113,7 @@ function resolveClaudeBinary() {
       encoding: "utf8",
       timeout: 5_000,
     }).trim();
-    if (resolved && isExecutableCandidate(resolved)) {
+    if (resolved && isExecutableCandidate(resolved) && binaryRunsOnHost(resolved)) {
       return resolved;
     }
   } catch {
@@ -1728,15 +1733,34 @@ export function createClaudeRuntime({ emit }) {
       });
     }
 
-    // Catch spawn errors (e.g. ENOENT) to prevent crashing the provider runtime.
+    // Catch spawn errors (e.g. ENOENT, EBADARCH) to prevent crashing the provider runtime.
     processHandle.on("error", (spawnError) => {
       console.error(`[browser-local][claude] Spawn error: ${spawnError.message}`);
       sessions.delete(sessionId);
+      // macOS surfaces a wrong-arch binary as `errno: -86` / "Bad CPU type in
+      // executable" (EBADARCH). It hits when a prior install dropped the wrong
+      // slice (e.g. x86_64 claude on an arm64 Mac without Rosetta) and our
+      // resolver couldn't see that path was unusable. Surface a specific,
+      // actionable error so the user doesn't see "spawn Unknown system error -86". #1862
+      const isBadArch =
+        spawnError.errno === -86 ||
+        spawnError.code === "EBADARCH" ||
+        /bad cpu type in executable/i.test(spawnError.message ?? "");
+      let errorMessage;
+      if (spawnError.code === "ENOENT") {
+        errorMessage = `Claude Code CLI not found at "${claudeBin}". Install it from https://claude.ai/download`;
+      } else if (isBadArch) {
+        errorMessage =
+          `Claude Code CLI at "${claudeBin}" is the wrong CPU type for this Mac ` +
+          `(host arch: ${process.arch}). Install Rosetta 2 with ` +
+          `'softwareupdate --install-rosetta --agree-to-license', or delete that ` +
+          `binary and let Seren reinstall via npm on next launch.`;
+      } else {
+        errorMessage = `Failed to start Claude Code: ${spawnError.message}`;
+      }
       emit("provider://error", {
         sessionId,
-        error: spawnError.code === "ENOENT"
-          ? `Claude Code CLI not found at "${claudeBin}". Install it from https://claude.ai/download`
-          : `Failed to start Claude Code: ${spawnError.message}`,
+        error: errorMessage,
       });
       emit("provider://session-status", {
         sessionId,

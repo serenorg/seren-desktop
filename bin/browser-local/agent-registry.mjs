@@ -2,11 +2,102 @@
 // ABOUTME: Keeps provider metadata and per-agent setup logic separate from session runtime handling.
 
 import { execFile, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { backgroundUpdateCli } from "./cli-updater.mjs";
+
+/**
+ * Map a binary file's CPU architecture to Node's `process.arch` taxonomy.
+ *
+ * Reads Mach-O (macOS), ELF (Linux), and PE/COFF (Windows) headers without
+ * executing the file. Returns `"universal"` for fat Mach-O binaries (every
+ * slice is shipped, kernel picks the matching one). Returns `null` when the
+ * file isn't a recognized native binary — scripts and unknown formats fall
+ * through to the spawn site, which surfaces a real OS error instead of us
+ * silently rejecting something we can't classify.
+ *
+ * Exists for #1862: a wrong-arch claude binary at `~/.local/bin/claude`
+ * shadowed our working npm-installed arm64 build and spawned with
+ * `Bad CPU type in executable` (-86 / EBADARCH).
+ */
+function readBinaryArch(filePath) {
+  let fd;
+  try {
+    fd = openSync(filePath, "r");
+    const head = Buffer.alloc(64);
+    const headBytes = readSync(fd, head, 0, 64, 0);
+    if (headBytes < 8) return null;
+
+    // Mach-O 64-bit, little-endian. magic = MH_MAGIC_64 (0xFEEDFACF on disk).
+    if (head.readUInt32LE(0) === 0xfeedfacf) {
+      const cputype = head.readUInt32LE(4);
+      if (cputype === 0x0100000c) return "arm64"; // CPU_TYPE_ARM | ABI64
+      if (cputype === 0x01000007) return "x64";   // CPU_TYPE_X86 | ABI64
+      return null;
+    }
+
+    // Universal Mach-O (fat). Both BE and LE variants exist. Either way the
+    // kernel picks the right slice — treat as runnable on any host.
+    const beMagic = head.readUInt32BE(0);
+    if (beMagic === 0xcafebabe || beMagic === 0xcafebabf) {
+      return "universal";
+    }
+
+    // ELF: 7F 'E' 'L' 'F'. e_machine at offset 18 (2 bytes, endianness from EI_DATA).
+    if (head.readUInt32LE(0) === 0x464c457f) {
+      const isLE = head.readUInt8(5) === 1;
+      const machine = isLE ? head.readUInt16LE(18) : head.readUInt16BE(18);
+      if (machine === 0x3e) return "x64";    // EM_X86_64
+      if (machine === 0xb7) return "arm64";  // EM_AARCH64
+      if (machine === 0x28) return "arm";    // EM_ARM
+      if (machine === 0x03) return "ia32";   // EM_386
+      return null;
+    }
+
+    // PE/COFF: "MZ" DOS header, 32-bit PE offset at 0x3C, then "PE\0\0" +
+    // IMAGE_FILE_HEADER. Machine is the first 2 bytes after the signature.
+    if (head.readUInt16LE(0) === 0x5a4d) {
+      const peOffset = head.readUInt32LE(0x3c);
+      if (peOffset < 0 || peOffset > 0x10000) return null;
+      const peBuf = Buffer.alloc(8);
+      const peBytes = readSync(fd, peBuf, 0, 8, peOffset);
+      if (peBytes < 8) return null;
+      if (peBuf.readUInt32LE(0) !== 0x00004550) return null; // "PE\0\0"
+      const machine = peBuf.readUInt16LE(4);
+      if (machine === 0x8664) return "x64";    // IMAGE_FILE_MACHINE_AMD64
+      if (machine === 0xaa64) return "arm64";  // IMAGE_FILE_MACHINE_ARM64
+      if (machine === 0x14c) return "ia32";    // IMAGE_FILE_MACHINE_I386
+      return null;
+    }
+
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch {}
+    }
+  }
+}
+
+/**
+ * Returns true when the binary at `filePath` can be executed on the current
+ * host. Universal Mach-O and unrecognized formats (scripts, missing files)
+ * are treated as runnable so callers don't silently skip legitimate install
+ * shapes — only positively-identified arch mismatches are rejected.
+ *
+ * Use this to filter resolver candidates so a lingering wrong-arch binary
+ * stops shadowing a working install at a lower-priority path.
+ */
+export function binaryRunsOnHost(filePath) {
+  const fileArch = readBinaryArch(filePath);
+  if (fileArch === null || fileArch === "universal") {
+    return true;
+  }
+  return fileArch === process.arch;
+}
 
 function launchLoginCommand(command) {
   const loginCommand = `${command} login`;
@@ -152,8 +243,25 @@ async function ensureClaudeCodeViaNativeInstaller(emit) {
     return existing;
   }
 
+  // `which`/`where` may resolve to a path not covered by resolveInstalledClaudeBinary
+  // (a custom user PATH location). Arch-check the resolved path so a wrong-arch
+  // binary on PATH doesn't get spawned and fail with EBADARCH (#1862).
   if (await isCommandAvailable("claude")) {
-    return "claude";
+    try {
+      const whichCommand = process.platform === "win32" ? "where" : "which";
+      const resolvedPath = (await execText(whichCommand, ["claude"]))
+        .split(/\r?\n/)[0]
+        .trim();
+      if (
+        resolvedPath &&
+        existsSync(resolvedPath) &&
+        binaryRunsOnHost(resolvedPath)
+      ) {
+        return "claude";
+      }
+    } catch {
+      // which/where failed — fall through to install
+    }
   }
 
   // Strategy 1: Official native installer (PowerShell on Windows, bash on Unix)
@@ -185,7 +293,12 @@ async function ensureClaudeCodeViaNativeInstaller(emit) {
       });
     });
 
-    // Verify the binary actually landed where we expect
+    // Verify the binary actually landed where we expect AND that it's the
+    // right arch for this host. `resolveInstalledClaudeBinary` skips wrong-arch
+    // candidates, so a returned sentinel here means either no install dropped
+    // or install.sh dropped a wrong-arch slice (e.g. uname -m fooled by a
+    // Rosetta'd parent context). Both cases fall through to npm install, which
+    // uses our embedded arm64/x64 node and gets the arch right by construction. #1862
     const resolved = resolveInstalledClaudeBinary();
     if (resolved !== "claude") {
       emit("provider://cli-install-progress", {
@@ -195,8 +308,10 @@ async function ensureClaudeCodeViaNativeInstaller(emit) {
       return resolved;
     }
 
-    // Installer returned success but binary not found — treat as failure
-    console.warn("[agent-registry] Native installer succeeded but binary not found at expected paths");
+    console.warn(
+      "[agent-registry] Native installer succeeded but no arch-compatible binary " +
+        `was found at expected paths (host=${process.arch}). Falling back to npm install.`,
+    );
     nativeInstallerFailed = true;
   } catch (nativeError) {
     console.warn("[agent-registry] Native installer failed:", nativeError.message);
@@ -362,6 +477,11 @@ function resolveInstalledGeminiBinary() {
  * Resolve the installed Claude Code binary path.
  * GUI apps don't inherit shell PATH updates made by installers, so check
  * well-known install locations before falling back to bare command name.
+ *
+ * Candidates are filtered through `binaryRunsOnHost` so a leftover wrong-arch
+ * binary at one path (e.g. ~/.local/bin/claude dropped by a Rosetta'd install
+ * run) cannot shadow a working arch-matched install at a lower-priority path.
+ * See #1862.
  */
 export function resolveInstalledClaudeBinary() {
   if (process.platform === "win32") {
@@ -390,7 +510,7 @@ export function resolveInstalledClaudeBinary() {
       path.join(home, ".npm-global", "claude.cmd"),
     ];
     for (const candidate of candidates) {
-      if (existsSync(candidate)) {
+      if (existsSync(candidate) && binaryRunsOnHost(candidate)) {
         return candidate;
       }
     }
@@ -411,7 +531,7 @@ export function resolveInstalledClaudeBinary() {
       "/usr/bin/claude",
     ];
     for (const candidate of candidates) {
-      if (existsSync(candidate)) {
+      if (existsSync(candidate) && binaryRunsOnHost(candidate)) {
         return candidate;
       }
     }
