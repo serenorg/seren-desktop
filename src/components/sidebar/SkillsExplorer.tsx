@@ -35,6 +35,7 @@ import {
   parseSkillMd,
   resolveSkillDisplayName,
 } from "@/lib/skills";
+import { RUN_SKILL_EVENT } from "@/lib/skills/invoke";
 import {
   isUpstreamManagedSkill,
   skills as skillsService,
@@ -57,20 +58,16 @@ type Filter = "all" | "installed" | "needs-sync";
 const SKILL_CREATOR_SLUG = "skill-creator";
 const SKILL_CREATOR_SOURCE_URL = `seren-skills:${SKILL_CREATOR_SLUG}`;
 
-const PencilIcon: Component = () => (
+const PlayIcon: Component = () => (
   <svg
-    width="13"
-    height="13"
+    width="11"
+    height="11"
     viewBox="0 0 16 16"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.3"
-    stroke-linecap="round"
-    stroke-linejoin="round"
+    fill="currentColor"
     role="img"
-    aria-label="Edit"
+    aria-label="Run"
   >
-    <path d="M11.5 2L14 4.5l-8.5 8.5H3v-2.5L11.5 2z" />
+    <path d="M4 2.5v11l10-5.5z" />
   </svg>
 );
 
@@ -606,6 +603,46 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       context.threadId,
       skill.path,
     );
+  };
+
+  const runActionTitle = (): string => {
+    const context = activeThreadContext();
+    if (!context) return "Select a chat, agent, or terminal thread first";
+    if (context.kind === "terminal") {
+      return "Paste the SKILL.md prompt into the active terminal";
+    }
+    return "Run the skill in the active chat";
+  };
+
+  const handleRunSkill = async (skill: InstalledSkill) => {
+    const context = activeThreadContext();
+    if (!context) return;
+
+    setActionInProgress(skill.id);
+    setInstallError(null);
+    try {
+      if (context.kind === "terminal") {
+        await pasteSkillIntoTerminal(context.threadId, skill);
+        return;
+      }
+      window.dispatchEvent(
+        new CustomEvent(RUN_SKILL_EVENT, {
+          detail: {
+            kind: context.kind,
+            threadId: context.threadId,
+            skill,
+          },
+        }),
+      );
+    } catch (err) {
+      console.error("[SkillsExplorer] Failed to run skill:", err);
+      setInstallError({
+        slug: skill.slug,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setActionInProgress(null);
+    }
   };
 
   const handleAddInstalledSkill = async (skill: InstalledSkill) => {
@@ -1330,15 +1367,20 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                     <div class="shrink-0 mt-0.5 flex items-center gap-0.5">
                       <button
                         type="button"
-                        class="flex items-center justify-center w-7 h-7 bg-transparent border-none rounded-md text-muted-foreground cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
+                        class="flex items-center justify-center gap-1 px-2 h-7 bg-success text-white rounded-md text-[11px] font-medium cursor-pointer transition-colors hover:bg-success/80 disabled:opacity-40 disabled:cursor-default"
                         onClick={(e) => {
                           e.stopPropagation();
-                          void handleEditInEditor(editablePathFor(skill));
+                          void handleRunSkill(skill);
                         }}
-                        title="Edit SKILL.md in the editor"
-                        aria-label="Edit skill"
+                        disabled={
+                          actionInProgress() === skill.id ||
+                          !activeThreadContext()
+                        }
+                        title={runActionTitle()}
+                        aria-label="Run skill"
                       >
-                        <PencilIcon />
+                        <PlayIcon />
+                        Run
                       </button>
                       <Show
                         when={isPublishable(skill) || canPublishUpdate(skill)}
@@ -1382,7 +1424,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                         when={!activeThreadHasSkill(skill)}
                         fallback={
                           <span class="ml-1 px-2 py-1 text-[11px] text-success bg-success/10 rounded">
-                            Added
+                            Installed
                           </span>
                         }
                       >
@@ -1602,15 +1644,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             {actionInProgress() === skill.id
                               ? "Uninstalling..."
                               : "Uninstall"}
-                          </button>
-                          <button
-                            type="button"
-                            class="px-3 py-1 bg-transparent border border-border text-muted-foreground rounded-md text-[12px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
-                            onClick={() =>
-                              handleEditInEditor(editablePathFor(skill))
-                            }
-                          >
-                            Edit in Editor
                           </button>
                           <Show when={ownsSkill(skill)}>
                             <button

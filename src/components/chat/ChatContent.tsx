@@ -41,6 +41,12 @@ import {
   setCurrentSkillDragPayload,
   skillDragPayload,
 } from "@/lib/skill-drag";
+import {
+  buildSkillInvocationDirective,
+  buildSkillInvocationDisplay,
+  RUN_SKILL_EVENT,
+  type RunSkillEventDetail,
+} from "@/lib/skills/invoke";
 import { appendInputHistory, getInputHistory } from "@/lib/tauri-bridge";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -397,6 +403,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     // Listen for slash command events
     window.addEventListener("seren:pick-images", handlePickImages);
     window.addEventListener("seren:set-chat-input", handleSetChatInput);
+    window.addEventListener(RUN_SKILL_EVENT, handleRunSkillEvent);
 
     try {
       await conversationStore.loadHistory();
@@ -449,6 +456,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       "seren:set-chat-input",
       handleSetChatInput as EventListener,
     );
+    window.removeEventListener(RUN_SKILL_EVENT, handleRunSkillEvent);
 
     if (suggestionDebounceTimer) {
       clearTimeout(suggestionDebounceTimer);
@@ -666,6 +674,29 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     setAttachedImages((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const handleRunSkillEvent = async (event: Event) => {
+    const detail = (event as CustomEvent<RunSkillEventDetail>).detail;
+    if (!detail || detail.kind !== "chat") return;
+    if (conversationId() !== detail.threadId) return;
+
+    let skillContent: string | null = null;
+    try {
+      skillContent = await skills.readContent(detail.skill);
+    } catch (err) {
+      console.warn(
+        "[ChatContent] Run skill: failed to load skill content:",
+        err,
+      );
+    }
+
+    const directive = buildSkillInvocationDirective({
+      slug: detail.skill.slug,
+      content: skillContent,
+    });
+    const displayText = buildSkillInvocationDisplay(detail.skill.slug);
+    await sendMessageImmediate(directive, undefined, displayText);
+  };
+
   const executeSlashCommand = (trimmed: string) => {
     const parsed = parseCommand(trimmed, "chat");
     if (!parsed) return false;
@@ -746,19 +777,12 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
           console.warn("[ChatContent] Failed to load skill content:", err);
         }
 
-        const directive = skillContent
-          ? [
-              `<skill-invocation name="${skill.slug}">`,
-              `The user has invoked the /${skill.slug} skill. Execute it by following the skill instructions below.`,
-              args ? `\nUser request: ${args}` : "",
-              `\n${skillContent}`,
-              `</skill-invocation>`,
-            ].join("\n")
-          : args
-            ? `/${skill.slug} ${args}`
-            : `/${skill.slug}`;
-
-        const displayText = args ? `/${skill.slug} ${args}` : `/${skill.slug}`;
+        const directive = buildSkillInvocationDirective({
+          slug: skill.slug,
+          content: skillContent,
+          args,
+        });
+        const displayText = buildSkillInvocationDisplay(skill.slug, args);
         await sendMessageImmediate(directive, undefined, displayText);
         return;
       }
