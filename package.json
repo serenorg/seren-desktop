@@ -45,7 +45,7 @@
   "license": "MIT",
   "dependencies": {
     "@monaco-editor/loader": "^1.7.0",
-    "@playwright/mcp": "^0.0.73",
+    "@playwright/mcp": "^0.0.75",
     "@tailwindcss/vite": "4",
     "@tanstack/solid-query": "^5.100.9",
     "@tauri-apps/api": "^2",
