@@ -1707,8 +1707,14 @@ export function createClaudeRuntime({ emit }) {
     // browser-local diagnostics; mcpConfigJson is intentionally omitted to
     // avoid surfacing publisher credentials embedded in the inline config.
     // See #1854.
+    // Print BOTH ids: `sessionId` is the Seren-side handle every frontend
+    // event is tagged with, while `agentSessionId` is the Claude CLI's
+    // internal session id (used in --resume and JSONL paths). Logging
+    // only the latter made the [browser-local][claude] spawn line
+    // useless when correlating with [AgentRuntime] Event received logs
+    // in the renderer console. #1889
     console.error(
-      `[browser-local][claude] spawn sessionId=${remoteSessionId} preferredModel="${preferredModel}"`,
+      `[browser-local][claude] spawn sessionId=${sessionId} agentSessionId=${remoteSessionId} preferredModel="${preferredModel}"`,
     );
     const processHandle = spawn(
       claudeBin,
@@ -1829,18 +1835,40 @@ export function createClaudeRuntime({ emit }) {
       );
       session.currentModeId = resolvedMode;
 
-      if (resumeAgentSessionId) {
-        await replayClaudeHistoryBestEffort(
-          emit,
-          session,
-          cwd,
-          resumeAgentSessionId,
-        );
-      }
+      // Replay runs off the spawn await path. Awaiting it here blocks the
+      // JSON-RPC return until the entire transcript has streamed as live
+      // events, so the frontend's spawn ack arrives AFTER every replay
+      // event — events get parked in pendingSessionEvents (no session
+      // record yet), and the "Evaluating…" spinner sticks because turn
+      // bookkeeping rides the same drain. Kick replay off in the
+      // background and defer the "ready" emit until it drains so the
+      // frontend's readyPromise still gates sendPrompt. #1889
+      const replayPromise = resumeAgentSessionId
+        ? replayClaudeHistoryBestEffort(
+            emit,
+            session,
+            cwd,
+            resumeAgentSessionId,
+          ).catch((err) => {
+            console.warn(
+              "[browser-local][claude] history replay failed:",
+              err?.message ?? err,
+            );
+          })
+        : Promise.resolve();
 
-      session.status = "ready";
-
-      emit("provider://session-status", buildSessionStatus(session, "ready"));
+      replayPromise.then(() => {
+        // The session may have been terminated mid-replay (user closed
+        // the thread). Only flip status + emit if our record is still
+        // the active one for this sessionId.
+        if (sessions.get(sessionId) === session) {
+          session.status = "ready";
+          emit(
+            "provider://session-status",
+            buildSessionStatus(session, "ready"),
+          );
+        }
+      });
 
       return {
         id: session.id,
