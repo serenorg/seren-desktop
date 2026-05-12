@@ -1,6 +1,8 @@
 // ABOUTME: Test that refresh() auto-refreshes stale upstream-managed skills.
-// ABOUTME: Verifies concurrency guard (#1289), summary tracking, #1155, and #1558.
+// ABOUTME: Verifies concurrency guard (#1289), summary tracking, #1155, #1558, and silent-refresh contract (#1891).
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSkillsService = vi.hoisted(() => ({
@@ -480,5 +482,27 @@ describe("backfill triggers for slug/dirName mismatch (#1558)", () => {
     await skillsStore.refresh();
 
     expect(mockSkillsService.backfillSyncState).toHaveBeenCalled();
+  });
+});
+
+describe("silent skill refresh contract (#1891)", () => {
+  // Source-level contract for the manual-refresh path in SkillsExplorer.
+  // The component must not kill live agent sessions on "Refresh from upstream",
+  // and must not surface a modal/confirm asking to restart them. Refresh is a
+  // pure disk write; new files take effect on the next session spawn.
+  const explorerSource = readFileSync(
+    resolve(__dirname, "../../src/components/sidebar/SkillsExplorer.tsx"),
+    "utf-8",
+  );
+
+  it("does not terminate live agent sessions from the refresh handler", () => {
+    expect(explorerSource).not.toContain("terminateSession");
+    expect(explorerSource).not.toContain("resumeAgentConversation");
+  });
+
+  it("does not prompt to restart live agent sessions on refresh", () => {
+    expect(explorerSource).not.toContain("Restart live agent sessions");
+    expect(explorerSource).not.toContain("getAffectedLiveThreadIds");
+    expect(explorerSource).not.toContain("restartAffectedLiveThreads");
   });
 });
