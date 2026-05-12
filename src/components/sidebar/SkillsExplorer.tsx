@@ -41,7 +41,6 @@ import {
   skills as skillsService,
 } from "@/services/skills";
 import { skillsCatalogOptions } from "@/services/skills-query";
-import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { skillPublishStore } from "@/stores/skill-publish.store";
@@ -348,32 +347,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     skillsStore.installed.filter(
       (skill) => syncStatusFor(skill)?.hasLocalChanges,
     ).length;
-
-  const getAffectedLiveThreadIds = (skill: InstalledSkill) => {
-    return threadStore.threads.flatMap((thread) => {
-      if (thread.kind !== "agent" || !thread.isLive) return [];
-      const effectiveSkills = skillsStore.getThreadSkills(
-        thread.projectRoot,
-        thread.id,
-      );
-      return effectiveSkills.some(
-        (activeSkill) => activeSkill.path === skill.path,
-      )
-        ? [thread.id]
-        : [];
-    });
-  };
-
-  const restartAffectedLiveThreads = async (threadIds: string[]) => {
-    for (const threadId of threadIds) {
-      const thread = threadStore.threads.find((entry) => entry.id === threadId);
-      if (!thread || thread.kind !== "agent") continue;
-      await agentStore.resumeAgentConversation(
-        thread.id,
-        thread.projectRoot ?? undefined,
-      );
-    }
-  };
 
   const syncStatusLabel = (status: SkillSyncStatus | null | undefined) => {
     if (!status) return null;
@@ -810,49 +783,15 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       if (!confirmOverwrite) return;
     }
 
-    const affectedThreadIds = getAffectedLiveThreadIds(skill);
-    if (affectedThreadIds.length > 0) {
-      const confirmRestart = await confirm(
-        `${skill.name} is active in ${affectedThreadIds.length} live agent thread${affectedThreadIds.length === 1 ? "" : "s"}.\n\nSeren can stop those sessions, refresh the skill, and resume them so the next prompt runs against the updated files.\n\nContinue?`,
-        {
-          title: "Restart live agent sessions?",
-          kind: "warning",
-        },
-      );
-      if (!confirmRestart) return;
-    }
-
     setActionInProgress(skill.id);
-    let stoppedLiveThreads = false;
-    const terminatedThreadIds: string[] = [];
     try {
-      if (affectedThreadIds.length > 0) {
-        for (const threadId of affectedThreadIds) {
-          const liveSession = Object.values(agentStore.sessions).find(
-            (session) => session.conversationId === threadId,
-          );
-          if (!liveSession) continue;
-          await agentStore.terminateSession(liveSession.info.id);
-          terminatedThreadIds.push(threadId);
-        }
-        stoppedLiveThreads = terminatedThreadIds.length > 0;
-      }
-
       const refreshed = await skillsService.refreshInstalledSkill(skill, {
         expectedLocalManagedState: existingStatus.localManagedState,
       });
       skillsStore.replaceInstalled(refreshed.installed);
       setSyncStatusFor(refreshed.installed.path, refreshed.syncStatus);
-
-      if (terminatedThreadIds.length > 0) {
-        await restartAffectedLiveThreads(terminatedThreadIds);
-        stoppedLiveThreads = false;
-      }
     } catch (err) {
       console.error("[SkillsExplorer] Failed to refresh installed skill:", err);
-      if (stoppedLiveThreads) {
-        await restartAffectedLiveThreads(terminatedThreadIds);
-      }
       await loadSyncStatus(skill);
     } finally {
       setActionInProgress(null);
@@ -1598,18 +1537,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                                     {(file) => <li>{file}</li>}
                                   </For>
                                 </ul>
-                              </div>
-                            </Show>
-                            <Show
-                              when={getAffectedLiveThreadIds(skill).length > 0}
-                            >
-                              <div class="mt-2 text-warning">
-                                {getAffectedLiveThreadIds(skill).length} live
-                                agent thread
-                                {getAffectedLiveThreadIds(skill).length === 1
-                                  ? ""
-                                  : "s"}{" "}
-                                currently reference this skill.
                               </div>
                             </Show>
                             <Show when={syncStatusFor(skill)?.error}>
