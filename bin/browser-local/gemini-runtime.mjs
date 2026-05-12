@@ -8,6 +8,8 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 
+import { buildProviderMcpConfig } from "./mcp-config.mjs";
+
 // ============================================================================
 // Binary resolution
 // ============================================================================
@@ -221,7 +223,7 @@ function buildInitializeParams() {
 // Spawn / session record
 // ============================================================================
 
-function spawnGeminiProcess(cwd) {
+function spawnGeminiProcess(cwd, { extraEnv = {} } = {}) {
   const binary = resolveGeminiBinary();
   return spawn(binary, ["--acp"], {
     cwd,
@@ -229,6 +231,7 @@ function spawnGeminiProcess(cwd) {
       ...process.env,
       // Force unbuffered stdout so the parent reads ACP messages promptly.
       NODE_NO_READLINE: "1",
+      ...extraEnv,
     },
     stdio: ["pipe", "pipe", "pipe"],
     shell: process.platform === "win32",
@@ -658,6 +661,8 @@ export function createGeminiRuntime({ emit }) {
     const {
       cwd,
       localSessionId,
+      apiKey,
+      mcpServers,
       approvalPolicy,
       sandboxMode,
       networkEnabled,
@@ -666,7 +671,10 @@ export function createGeminiRuntime({ emit }) {
 
     const sessionId = localSessionId ?? randomUUID();
     const resolvedMode = geminiApprovalMode(approvalPolicy, sandboxMode);
-    const processHandle = spawnGeminiProcess(cwd);
+    const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
+    const processHandle = spawnGeminiProcess(cwd, {
+      extraEnv: mcpConfig.childEnv,
+    });
     const session = createGeminiSessionRecord({
       sessionId,
       cwd,
@@ -687,6 +695,13 @@ export function createGeminiRuntime({ emit }) {
         15_000,
       );
       session.geminiVersion = initResult?.agentInfo?.version ?? null;
+      // Per ACP, the client (us) is responsible for honoring the agent's
+      // advertised mcpCapabilities. gemini-cli v0.41.x advertises
+      // { http: true, sse: true }; we still gate here so a future build
+      // that drops one of those degrades cleanly instead of erroring on
+      // session/new. Stdio MCP is mandatory and does not need a flag.
+      const mcpCapabilities =
+        initResult?.agentCapabilities?.mcpCapabilities ?? {};
 
       // Verify the session is still tracked before proceeding to session/new.
       // A terminated process during init would otherwise hang on a dead pipe.
@@ -694,15 +709,16 @@ export function createGeminiRuntime({ emit }) {
         throw new Error("Gemini session was terminated during initialization.");
       }
 
-      // ACP step 2: create a new session in the requested cwd
+      // ACP step 2: create a new session in the requested cwd, wired up with
+      // the user's configured MCP servers (#1887). The gemini-cli child is a
+      // separate process and cannot see the Tauri-side MCP supervisor, so the
+      // wiring must be passed explicitly on every session/new.
       const sessionResult = await sendRequest(
         session,
         "session/new",
         {
           cwd,
-          // mcpServers is required by the schema; empty array is valid and
-          // means "no MCP servers" — the desktop manages MCP separately.
-          mcpServers: [],
+          mcpServers: mcpConfig.geminiMcpServers(mcpCapabilities),
         },
         20_000,
       );
