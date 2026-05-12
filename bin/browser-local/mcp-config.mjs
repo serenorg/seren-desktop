@@ -170,6 +170,54 @@ function buildCodexMcpOverride(servers) {
   return `mcp_servers=${encodeTomlValue(mcpServers)}`;
 }
 
+// serenorg/seren-desktop#1887 — Gemini consumes MCP via the ACP `session/new`
+// JSON-RPC `mcpServers` parameter, a discriminated union on `type` with
+// `headers`/`env` encoded as `[{name, value}]` arrays. Returned as a function
+// so the caller can pass the live `mcpCapabilities` block from `initialize`,
+// dropping HTTP/SSE entries if the running gemini-cli build does not
+// advertise support for them.
+function encodeGeminiPairs(record) {
+  return Object.entries(record ?? {}).map(([name, value]) => ({ name, value }));
+}
+
+function buildGeminiMcpServers(servers, { mcpCapabilities = {} } = {}) {
+  if (servers.length === 0) return [];
+  const supportsHttp = mcpCapabilities.http === true;
+  const supportsSse = mcpCapabilities.sse === true;
+
+  const out = [];
+  for (const server of servers) {
+    if (server.type === "http") {
+      if (!supportsHttp) continue;
+      out.push({
+        type: "http",
+        name: server.name,
+        url: server.url,
+        headers: encodeGeminiPairs(server.headers),
+      });
+      continue;
+    }
+    if (server.type === "sse") {
+      if (!supportsSse) continue;
+      out.push({
+        type: "sse",
+        name: server.name,
+        url: server.url,
+        headers: encodeGeminiPairs(server.headers),
+      });
+      continue;
+    }
+    out.push({
+      type: "stdio",
+      name: server.name,
+      command: resolveLocalServerCommand(server.command),
+      args: server.args ?? [],
+      env: encodeGeminiPairs(server.env),
+    });
+  }
+  return out;
+}
+
 export function buildProviderMcpConfig({ apiKey, mcpServers } = {}) {
   const normalizedServers = dedupeServers([
     createRemoteSerenServer(apiKey),
@@ -185,5 +233,7 @@ export function buildProviderMcpConfig({ apiKey, mcpServers } = {}) {
         : { [SEREN_MCP_API_KEY_ENV]: trimToNull(apiKey) },
     claudeMcpConfigJson: buildClaudeMcpConfig(normalizedServers),
     codexMcpConfigOverride: buildCodexMcpOverride(normalizedServers),
+    geminiMcpServers: (mcpCapabilities) =>
+      buildGeminiMcpServers(normalizedServers, { mcpCapabilities }),
   };
 }
