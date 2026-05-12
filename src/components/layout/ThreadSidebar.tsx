@@ -627,7 +627,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                   <div class="flex-1 min-w-0">
                     <div class="font-medium">Claude Code</div>
                     <div class="text-[11px] text-muted-foreground">
-                      Anthropic \u00B7 chat-style coding agent
+                      Anthropic · chat-style coding agent
                     </div>
                   </div>
                   <LauncherChip variant="subscription">
@@ -648,7 +648,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                   <div class="flex-1 min-w-0">
                     <div class="font-medium">Codex</div>
                     <div class="text-[11px] text-muted-foreground">
-                      OpenAI \u00B7 chat-style coding agent
+                      OpenAI · chat-style coding agent
                     </div>
                   </div>
                   <LauncherChip variant="subscription">
@@ -669,7 +669,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                   <div class="flex-1 min-w-0">
                     <div class="font-medium">Gemini</div>
                     <div class="text-[11px] text-muted-foreground">
-                      Google \u00B7 chat-style coding agent
+                      Google · chat-style coding agent
                     </div>
                   </div>
                   <LauncherChip variant="subscription">

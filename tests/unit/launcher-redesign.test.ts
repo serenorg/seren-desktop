@@ -140,3 +140,11 @@ describe("ThreadTabBar — chip vocabulary on the secondary +New menu (#1832)", 
     expect(tabBarTsx).toContain("allowsGeminiAgent(authStore.privateChatPolicy)");
   });
 });
+
+describe("ThreadSidebar — JSX text uses real · char, never literal \\u00B7", () => {
+  // JSX text content is plain HTML, not a JS string literal: `\uXXXX` is
+  // 6 visible characters, not an escape. Use the actual char (see L603).
+  it("contains no literal '\\u00B7' byte sequence", () => {
+    expect(sidebarTsx).not.toMatch(/\\u00B7/i);
+  });
+});
