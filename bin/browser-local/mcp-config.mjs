@@ -1,10 +1,37 @@
 // ABOUTME: Shared MCP configuration builder for direct provider runtimes.
 // ABOUTME: Normalizes Seren's MCP settings into provider-specific Claude/Codex formats.
 
+import path from "node:path";
+
 const SEREN_MCP_SERVER_NAME = "seren-mcp";
 const SEREN_MCP_API_KEY_ENV = "SEREN_API_KEY";
 const SEREN_MCP_GATEWAY_URL =
   process.env.SEREN_MCP_GATEWAY_URL ?? "https://mcp.serendb.com/mcp";
+
+// serenorg/seren-desktop#1883 — Claude / Codex CLIs are compiled binaries that
+// spawn stdio MCP children via libc execvp() against their own minimal PATH.
+// A bare "node" command fails silently in that resolution, so the playwright
+// MCP (and any other embedded node-based stdio server) never starts. The Rust
+// provider-runtime supervisor injects SEREN_EMBEDDED_NODE_BIN with the
+// absolute path to the embedded node binary it already spawned the runtime
+// with; we rewrite "node" to that absolute path before emitting the CLI
+// configs so the child CLI can exec it without a PATH lookup. Absolute paths
+// and other bare commands (npx, python, ...) pass through unchanged.
+function resolveLocalServerCommand(command) {
+  if (typeof command !== "string" || command.length === 0) {
+    return command;
+  }
+  if (path.isAbsolute(command) || command.includes(path.sep)) {
+    return command;
+  }
+  if (command === "node") {
+    const embeddedNode = process.env.SEREN_EMBEDDED_NODE_BIN;
+    if (typeof embeddedNode === "string" && embeddedNode.length > 0) {
+      return embeddedNode;
+    }
+  }
+  return command;
+}
 
 function trimToNull(value) {
   if (typeof value !== "string") {
@@ -107,7 +134,7 @@ function buildClaudeMcpConfig(servers) {
 
     mcpServers[server.name] = {
       type: "stdio",
-      command: server.command,
+      command: resolveLocalServerCommand(server.command),
       args: server.args ?? [],
       env: server.env ?? {},
     };
@@ -132,7 +159,7 @@ function buildCodexMcpOverride(servers) {
     }
 
     mcpServers[server.name] = {
-      command: server.command,
+      command: resolveLocalServerCommand(server.command),
       args: server.args ?? [],
       ...(server.env && Object.keys(server.env).length > 0
         ? { env: server.env }

@@ -351,6 +351,16 @@ fn spawn_node_process(
         command.env("PATH", embedded_path);
     }
 
+    // serenorg/seren-desktop#1883 — local stdio MCP servers (playwright,
+    // future bundled tools) are emitted by the provider runtime with
+    // `command: "node"`. The Claude / Codex CLIs are compiled binaries that
+    // resolve stdio MCP commands via libc execvp against their own minimal
+    // PATH, so a bare "node" silently fails to spawn and the agent never
+    // sees the tools. Expose the absolute embedded node binary so
+    // `mcp-config.mjs` can rewrite `node` → absolute path before emitting
+    // the per-CLI config JSON / TOML.
+    command.env("SEREN_EMBEDDED_NODE_BIN", node_bin);
+
     crate::embedded_runtime::sanitize_spawn_env(&mut command);
 
     command
