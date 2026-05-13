@@ -54,6 +54,26 @@ const PINNED_TOOL_NAMES: &[&str] = &[
     "seren__create_project",
     "seren__list_databases",
     "seren__create_database",
+    // Browser automation — fundamental capability with no shell substitute.
+    // Skills like prophet-bounty-runner require these to drive the Privy OTP
+    // flow; without them the agent has no way to log in to web services that
+    // lack a dedicated publisher. BM25 evicts them mid-thread whenever the
+    // next user prompt does not share keywords with browser tool docs (#1895).
+    "mcp__playwright__playwright_navigate",
+    "mcp__playwright__playwright_navigate_back",
+    "mcp__playwright__playwright_navigate_forward",
+    "mcp__playwright__playwright_click",
+    "mcp__playwright__playwright_hover",
+    "mcp__playwright__playwright_press",
+    "mcp__playwright__playwright_fill",
+    "mcp__playwright__playwright_select",
+    "mcp__playwright__playwright_evaluate",
+    "mcp__playwright__playwright_extract_content",
+    "mcp__playwright__playwright_screenshot",
+    "mcp__playwright__playwright_list_browsers",
+    "mcp__playwright__playwright_set_browser",
+    "mcp__playwright__playwright_reset",
+    "mcp__playwright__playwright_close",
 ];
 
 /// Model-aware tool cap: returns (max_tools, token_budget) for the given model.
@@ -789,6 +809,23 @@ mod tests {
         tools.push(make_tool("seren__list_databases", "List Seren databases"));
         tools.push(make_tool("seren__create_database", "Create a Seren database"));
 
+        // Browser automation (mcp__playwright__*) — same first-class status.
+        tools.push(make_tool("mcp__playwright__playwright_navigate", "Navigate browser"));
+        tools.push(make_tool("mcp__playwright__playwright_navigate_back", "Go back"));
+        tools.push(make_tool("mcp__playwright__playwright_navigate_forward", "Go forward"));
+        tools.push(make_tool("mcp__playwright__playwright_click", "Click element"));
+        tools.push(make_tool("mcp__playwright__playwright_hover", "Hover element"));
+        tools.push(make_tool("mcp__playwright__playwright_press", "Press key"));
+        tools.push(make_tool("mcp__playwright__playwright_fill", "Fill input"));
+        tools.push(make_tool("mcp__playwright__playwright_select", "Select dropdown"));
+        tools.push(make_tool("mcp__playwright__playwright_evaluate", "Evaluate JS"));
+        tools.push(make_tool("mcp__playwright__playwright_extract_content", "Extract page text"));
+        tools.push(make_tool("mcp__playwright__playwright_screenshot", "Capture screenshot"));
+        tools.push(make_tool("mcp__playwright__playwright_list_browsers", "List browsers"));
+        tools.push(make_tool("mcp__playwright__playwright_set_browser", "Choose browser"));
+        tools.push(make_tool("mcp__playwright__playwright_reset", "Reset browser"));
+        tools.push(make_tool("mcp__playwright__playwright_close", "Close browser"));
+
         // Fill with gateway tools so total exceeds budget
         for i in 0..62 {
             tools.push(make_tool(
@@ -820,6 +857,76 @@ mod tests {
                 found,
                 "pinned tool '{}' must always be included, but was dropped",
                 pinned_name
+            );
+        }
+    }
+
+    #[test]
+    fn playwright_mcp_tools_survive_non_playwright_query() {
+        // #1895: GLM 5.1 lost mcp__playwright__* tools mid-thread because the
+        // next user prompt ("taariq@serendb.com, gmail") shared no tokens with
+        // playwright tool docs. Browser automation is a fundamental capability
+        // with no shell substitute — the prophet-bounty-runner skill literally
+        // cannot drive the Privy OTP login without playwright_navigate. Pin all
+        // 15 playwright tools the same way file/exec/seren__ tools are pinned.
+        //
+        // Faithful reproduction: load gmail and seren__ tools whose docs DO
+        // match the query so they win BM25, plus enough noise to push the
+        // playwright tools below the 120-tool default cap by position. Without
+        // pinning, the playwright tools get evicted.
+        let mut tools: Vec<serde_json::Value> = Vec::new();
+
+        let playwright_names = [
+            "mcp__playwright__playwright_navigate",
+            "mcp__playwright__playwright_navigate_back",
+            "mcp__playwright__playwright_navigate_forward",
+            "mcp__playwright__playwright_click",
+            "mcp__playwright__playwright_hover",
+            "mcp__playwright__playwright_press",
+            "mcp__playwright__playwright_fill",
+            "mcp__playwright__playwright_select",
+            "mcp__playwright__playwright_evaluate",
+            "mcp__playwright__playwright_extract_content",
+            "mcp__playwright__playwright_screenshot",
+            "mcp__playwright__playwright_list_browsers",
+            "mcp__playwright__playwright_set_browser",
+            "mcp__playwright__playwright_reset",
+            "mcp__playwright__playwright_close",
+        ];
+
+        // Build a tool pool that genuinely exhausts the 120-tool budget with
+        // scored matches. Eight publishers × 20 tools whose docs include
+        // "gmail" so they all score > 0; per-publisher cap is 25 so 6+
+        // publishers can fully participate before the budget fills.
+        for pub_idx in 0..8 {
+            for tool_idx in 0..20 {
+                tools.push(make_tool(
+                    &format!("gateway__svc_{pub_idx}__action_{tool_idx}"),
+                    "Gmail-style inbox messaging operation for mail handling",
+                ));
+            }
+        }
+        // Playwright tools at the end — score 0 against the query, no shared
+        // publisher with the matchers above, so without pinning they fall
+        // outside the selection window.
+        for name in playwright_names {
+            tools.push(make_tool(name, "Browser automation primitive"));
+        }
+        assert!(tools.len() > 120);
+
+        // The actual prompt from the GLM bug report turn 4. Tokens are
+        // ["taariq", "serendb", "com", "gmail"] — gmail matches gmail tools
+        // strongly; playwright tool docs have zero overlap.
+        let result = select("taariq@serendb.com, gmail", &tools);
+
+        for name in playwright_names {
+            let found = result
+                .iter()
+                .any(|t| t.pointer("/function/name").and_then(|v| v.as_str()) == Some(name));
+            assert!(
+                found,
+                "pinned playwright tool '{}' must survive a non-playwright query",
+                name
             );
         }
     }
