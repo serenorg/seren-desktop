@@ -386,14 +386,17 @@ export const threadStore = {
 
   get groupedThreads(): ThreadGroup[] {
     // Employee-linked threads are surfaced under the employee in the sidebar.
-    // Once the employees list has finished loading, threads whose employeeId
-    // no longer resolves to a known employee fall back to their project group
-    // so the conversation does not silently disappear from the UI.
+    // Live employees parent their threads; archived employees do too (the
+    // sidebar still renders the parent row in a greyed state). A thread
+    // whose employeeId resolves to neither falls through to its project
+    // group so the conversation does not silently disappear from the UI.
     const employeesLoaded = employeeStore.lastLoadedAt !== null;
     const threads = this.threads.filter((t) => {
       if (!t.employeeId) return true;
       if (!employeesLoaded) return false;
-      return employeeStore.byId(t.employeeId) === undefined;
+      if (employeeStore.byId(t.employeeId) !== undefined) return false;
+      if (employeeStore.archivedById(t.employeeId) !== undefined) return false;
+      return true;
     });
 
     // Group by projectRoot.

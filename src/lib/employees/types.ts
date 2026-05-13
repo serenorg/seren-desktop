@@ -127,6 +127,15 @@ export type EmployeeRunDetail = EmployeeRun & {
   conversationId: string | null;
 };
 
+export type ArchivedEmployee = {
+  id: string;
+  slug: string;
+  name: string;
+  mode: EmployeeMode;
+  avatarSeed: string;
+  archivedAt: string;
+};
+
 export type EmployeeRunArtifact = {
   id: string;
   artifactType: string;

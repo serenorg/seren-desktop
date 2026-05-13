@@ -12,6 +12,7 @@ import {
 } from "solid-js";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
 import type {
+  ArchivedEmployee,
   EmployeeMode,
   EmployeeStatus,
   EmployeeSummary,
@@ -80,6 +81,58 @@ function modeLabel(mode: EmployeeMode): string {
   return "On-demand";
 }
 
+function relativeArchivedTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "recently";
+  const diffSec = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.round(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+const ArchivedEmployeeRow: Component<{
+  employee: ArchivedEmployee;
+  active: boolean;
+  onSelect: (id: string) => void;
+}> = (props) => (
+  <button
+    type="button"
+    class="flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 opacity-60 hover:opacity-80"
+    classList={{
+      "bg-surface-2/70 opacity-90": props.active,
+    }}
+    onClick={() => props.onSelect(props.employee.id)}
+    title={`${props.employee.name} (archived ${relativeArchivedTime(props.employee.archivedAt)})`}
+    aria-label={`Open archived employee ${props.employee.name}, deleted ${relativeArchivedTime(props.employee.archivedAt)}`}
+  >
+    <div
+      class="flex items-center justify-center text-white font-bold flex-none rounded-md grayscale"
+      style={{
+        width: "22px",
+        height: "22px",
+        background: gradientFor(props.employee.avatarSeed),
+        "font-size": "10px",
+      }}
+      aria-hidden="true"
+    >
+      {initialFor(props.employee.name)}
+    </div>
+    <div class="flex-1 min-w-0">
+      <div class="text-[12.5px] text-muted-foreground truncate line-through decoration-muted-foreground/40">
+        {props.employee.name}
+      </div>
+      <div class="text-[10.5px] text-muted-foreground/70 truncate">
+        Archived · {relativeArchivedTime(props.employee.archivedAt)}
+      </div>
+    </div>
+  </button>
+);
+
 const EmployeeRow: Component<{
   employee: EmployeeSummary;
   active: boolean;
@@ -137,6 +190,11 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
   >(new Map());
 
   const employees = createMemo(() => employeeStore.employees);
+  const archivedEmployees = createMemo(() =>
+    employeeStore.archived.filter(
+      (archived) => employeeStore.byId(archived.id) === undefined,
+    ),
+  );
   const threadsByEmployee = createMemo(() => threadStore.threadsByEmployee);
 
   const refreshPending = async () => {
@@ -274,6 +332,53 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
             );
           }}
         </For>
+        <Show when={archivedEmployees().length > 0}>
+          <Show when={employees().length > 0}>
+            <div
+              class="mx-2 my-1 border-t border-border/40"
+              aria-hidden="true"
+            />
+          </Show>
+          <For each={archivedEmployees()}>
+            {(archived) => {
+              const archivedThreads = (): Thread[] =>
+                threadsByEmployee()[archived.id] ?? [];
+              return (
+                <div>
+                  <ArchivedEmployeeRow
+                    employee={archived}
+                    active={activeId() === archived.id}
+                    onSelect={handleSelect}
+                  />
+                  <For each={archivedThreads()}>
+                    {(thread) => (
+                      <button
+                        type="button"
+                        class="flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 opacity-70"
+                        classList={{
+                          "bg-surface-2/70":
+                            threadStore.activeThreadId === thread.id,
+                        }}
+                        onClick={() => {
+                          threadStore.selectThread(thread.id, thread.kind);
+                          setActiveId(null);
+                          window.dispatchEvent(
+                            new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT),
+                          );
+                        }}
+                        title={thread.title}
+                      >
+                        <span class="text-[11.5px] text-muted-foreground/80 truncate">
+                          {thread.title}
+                        </span>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              );
+            }}
+          </For>
+        </Show>
         <button
           type="button"
           class="group flex items-center gap-2.5 w-full px-2 py-1.5 mt-0.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/40"

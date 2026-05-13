@@ -9,6 +9,64 @@ use tauri::{AppHandle, Manager};
 
 const MAX_MESSAGES_PER_CONVERSATION: i32 = 1000;
 
+pub(crate) fn delete_conversation_records(
+    conn: &Connection,
+    conversation_ids: &[String],
+) -> rusqlite::Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    let mut deleted = 0;
+    for id in conversation_ids {
+        tx.execute(
+            "DELETE FROM eval_signals
+             WHERE message_id IN (
+                 SELECT id FROM messages WHERE conversation_id = ?1
+             )",
+            params![id],
+        )?;
+        tx.execute(
+            "DELETE FROM plan_subtasks
+             WHERE plan_id IN (
+                 SELECT id FROM orchestration_plans WHERE conversation_id = ?1
+             )",
+            params![id],
+        )?;
+        tx.execute(
+            "DELETE FROM orchestration_plans WHERE conversation_id = ?1",
+            params![id],
+        )?;
+        tx.execute(
+            "DELETE FROM input_history WHERE conversation_id = ?1",
+            params![id],
+        )?;
+        tx.execute(
+            "DELETE FROM thread_skills WHERE thread_id = ?1",
+            params![id],
+        )?;
+        tx.execute(
+            "DELETE FROM thread_skill_override_state WHERE thread_id = ?1",
+            params![id],
+        )?;
+        tx.execute(
+            "DELETE FROM session_events
+             WHERE session_id IN (
+                 SELECT id FROM runtime_sessions WHERE thread_id = ?1
+             )",
+            params![id],
+        )?;
+        tx.execute(
+            "DELETE FROM runtime_sessions WHERE thread_id = ?1",
+            params![id],
+        )?;
+        tx.execute(
+            "DELETE FROM messages WHERE conversation_id = ?1",
+            params![id],
+        )?;
+        deleted += tx.execute("DELETE FROM conversations WHERE id = ?1", params![id])?;
+    }
+    tx.commit()?;
+    Ok(deleted)
+}
+
 fn normalize_project_root(path: &str) -> Option<String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -242,14 +300,25 @@ pub async fn archive_conversation(app: AppHandle, id: String) -> Result<(), Stri
 #[tauri::command]
 pub async fn delete_conversation(app: AppHandle, id: String) -> Result<(), String> {
     run_db(app, move |conn| {
-        // Delete messages first (foreign key constraint)
-        conn.execute(
-            "DELETE FROM messages WHERE conversation_id = ?1",
-            params![id],
-        )?;
-        // Then delete the conversation
-        conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])?;
+        delete_conversation_records(conn, &[id])?;
         Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn delete_conversations_by_employee(
+    app: AppHandle,
+    employee_id: String,
+) -> Result<i64, String> {
+    run_db(app, move |conn| {
+        let mut stmt = conn.prepare("SELECT id FROM conversations WHERE employee_id = ?1")?;
+        let conversation_ids = stmt
+            .query_map(params![employee_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        let deleted = delete_conversation_records(conn, &conversation_ids)?;
+        Ok(deleted as i64)
     })
     .await
 }

@@ -473,6 +473,27 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Archived virtual employees: snapshots captured at delete time so the
+    // sidebar can still render a parent row for chats whose cloud deployment
+    // has been removed. Local-only; the cloud roster will not include the
+    // archived id on subsequent refreshes.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS archived_employees (
+            id TEXT PRIMARY KEY NOT NULL,
+            slug TEXT NOT NULL,
+            name TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            avatar_seed TEXT NOT NULL,
+            archived_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_archived_employees_archived_at
+         ON archived_employees(archived_at DESC)",
+        [],
+    )?;
+
     // Migration: Create default conversation for orphan messages
     migrate_orphan_messages(conn)?;
 

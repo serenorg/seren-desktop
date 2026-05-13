@@ -10,6 +10,7 @@ pub mod commands {
     pub mod chat;
     pub mod claude_memory;
     pub mod cli_installer;
+    pub mod employees_archive;
     pub mod gateway_http;
     pub mod indexing;
     pub mod memory;
@@ -755,6 +756,10 @@ pub fn run() {
             commands::chat::update_conversation,
             commands::chat::archive_conversation,
             commands::chat::delete_conversation,
+            commands::chat::delete_conversations_by_employee,
+            commands::employees_archive::archive_employee,
+            commands::employees_archive::list_archived_employees,
+            commands::employees_archive::delete_archived_employee,
             // Agent conversation commands
             commands::chat::create_agent_conversation,
             commands::chat::get_agent_conversations,

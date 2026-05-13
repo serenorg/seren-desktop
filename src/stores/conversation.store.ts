@@ -226,6 +226,43 @@ export const conversationStore = {
     setState("activeConversationId", id);
   },
 
+  forgetByEmployee(employeeId: string) {
+    // Drop conversations whose link is the given employee. The caller is
+    // responsible for the SQLite cascade-delete; this only updates the
+    // in-memory state so the sidebar reflects the wipe immediately.
+    const removedIds = new Set(
+      state.conversations
+        .filter((c) => c.employeeId === employeeId)
+        .map((c) => c.id),
+    );
+    if (removedIds.size === 0) return;
+    setState("conversations", (convos) =>
+      convos.filter((c) => !removedIds.has(c.id)),
+    );
+    for (const key of [
+      "messages",
+      "loading",
+      "rlmProcessing",
+      "streamingContent",
+      "streamingThinking",
+      "streamingStalled",
+    ] as const) {
+      setState(key, (prev) => {
+        const next = { ...prev };
+        for (const id of removedIds) {
+          delete next[id];
+        }
+        return next;
+      });
+    }
+    if (
+      state.activeConversationId !== null &&
+      removedIds.has(state.activeConversationId)
+    ) {
+      setState("activeConversationId", null);
+    }
+  },
+
   async archiveConversation(id: string) {
     try {
       await archiveConversationDb(id);

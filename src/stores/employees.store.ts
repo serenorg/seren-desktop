@@ -3,14 +3,17 @@
 
 import { createStore } from "solid-js/store";
 import type {
+  ArchivedEmployee,
   EmployeeDetail,
   EmployeeStatus,
   EmployeeSummary,
 } from "@/lib/employees/types";
 import { employees as svc } from "@/services/employees";
+import { employeesArchiveStore } from "@/services/employees-archive";
 
 interface EmployeesState {
   employees: EmployeeSummary[];
+  archived: ArchivedEmployee[];
   details: Record<string, EmployeeDetail>;
   loading: boolean;
   error: string | null;
@@ -20,6 +23,7 @@ interface EmployeesState {
 
 const [state, setState] = createStore<EmployeesState>({
   employees: [],
+  archived: [],
   details: {},
   loading: false,
   error: null,
@@ -70,6 +74,10 @@ export const employeeStore = {
     return state.employees;
   },
 
+  get archived(): ArchivedEmployee[] {
+    return state.archived;
+  },
+
   get loading(): boolean {
     return state.loading;
   },
@@ -90,6 +98,10 @@ export const employeeStore = {
     return state.employees.find((emp) => emp.id === id);
   },
 
+  archivedById(id: string): ArchivedEmployee | undefined {
+    return state.archived.find((emp) => emp.id === id);
+  },
+
   bySlug(slug: string): EmployeeSummary | undefined {
     return state.employees.find((emp) => emp.slug === slug);
   },
@@ -102,16 +114,62 @@ export const employeeStore = {
     setState("loading", true);
     setState("error", null);
     try {
-      const list = await svc.list();
-      const ordered = applyOrder(list);
+      // Live list is fatal on failure (drives the whole employees pane).
+      // Archived list is best-effort: a corrupt local SQLite must not mask
+      // a successful cloud roster fetch. Mirrors loadArchived() semantics.
+      const [listResult, archivedResult] = await Promise.allSettled([
+        svc.list(),
+        employeesArchiveStore.list(),
+      ]);
+
+      if (listResult.status === "rejected") {
+        const err = listResult.reason;
+        setState("error", err instanceof Error ? err.message : String(err));
+        return;
+      }
+
+      const ordered = applyOrder(listResult.value);
       setState("employees", ordered);
+      if (archivedResult.status === "fulfilled") {
+        setState("archived", archivedResult.value);
+      } else {
+        console.warn(
+          "Failed to load archived employees:",
+          archivedResult.reason,
+        );
+        setState("archived", []);
+      }
       setState("lastLoadedAt", Date.now());
       persistOrder(ordered.map((row) => row.id));
-    } catch (err) {
-      setState("error", err instanceof Error ? err.message : String(err));
     } finally {
       setState("loading", false);
     }
+  },
+
+  async loadArchived(): Promise<void> {
+    try {
+      const archived = await employeesArchiveStore.list();
+      setState("archived", archived);
+    } catch (err) {
+      // Archived list is best-effort; surface to console only.
+      console.warn("Failed to load archived employees:", err);
+    }
+  },
+
+  addArchived(employee: ArchivedEmployee): void {
+    setState("archived", (rows) => {
+      const idx = rows.findIndex((row) => row.id === employee.id);
+      if (idx === -1) {
+        return [employee, ...rows];
+      }
+      const next = [...rows];
+      next[idx] = employee;
+      return next;
+    });
+  },
+
+  removeArchived(id: string): void {
+    setState("archived", (rows) => rows.filter((row) => row.id !== id));
   },
 
   async loadDetail(id: string): Promise<EmployeeDetail | null> {

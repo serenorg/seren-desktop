@@ -15,6 +15,7 @@ import {
 import { SessionExpiredModal } from "@/components/auth/SessionExpiredModal";
 import { SignIn } from "@/components/auth/SignIn";
 import { StatusBar } from "@/components/common/StatusBar";
+import { ArchivedEmployeeDetail } from "@/components/employees/ArchivedEmployeeDetail";
 import { EmployeeDetail } from "@/components/employees/EmployeeDetail";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { SessionPanel } from "@/components/session/SessionPanel";
@@ -36,6 +37,7 @@ import {
   pickEditorSessionForContext,
   restoreEditorSessions,
 } from "@/stores/editor.sessions";
+import { employeeStore } from "@/stores/employees.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { skillPublishStore } from "@/stores/skill-publish.store";
 import { skillsStore } from "@/stores/skills.store";
@@ -483,10 +485,23 @@ export const AppShell: Component<AppShellProps> = (props) => {
             fallback={<ThreadContent onSignInClick={handleSignInClick} />}
           >
             {(id) => (
-              <EmployeeDetail
-                employeeId={id()}
-                onClose={closeEmployeeDetailPane}
-              />
+              <Show
+                when={
+                  employeeStore.byId(id()) === undefined &&
+                  employeeStore.archivedById(id()) !== undefined
+                }
+                fallback={
+                  <EmployeeDetail
+                    employeeId={id()}
+                    onClose={closeEmployeeDetailPane}
+                  />
+                }
+              >
+                <ArchivedEmployeeDetail
+                  employeeId={id()}
+                  onClose={closeEmployeeDetailPane}
+                />
+              </Show>
             )}
           </Show>
         </main>

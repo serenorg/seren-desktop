@@ -24,10 +24,12 @@ import type {
   EmployeeSummary,
 } from "@/lib/employees/types";
 import { employees as svc } from "@/services/employees";
+import { employeesArchiveStore } from "@/services/employees-archive";
 import {
   cancelEmployeeRun,
   runEmployeeMessage,
 } from "@/services/employees-runtime";
+import { conversationStore } from "@/stores/conversation.store";
 import { employeeStore } from "@/stores/employees.store";
 import { threadStore } from "@/stores/thread.store";
 
@@ -118,6 +120,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [showKebab, setShowKebab] = createSignal(false);
   const [confirmDelete, setConfirmDelete] = createSignal(false);
+  const [removeChatsToo, setRemoveChatsToo] = createSignal(false);
   const [showEdit, setShowEdit] = createSignal(false);
   const [showRevisions, setShowRevisions] = createSignal(false);
   const [manualRun, setManualRun] = createSignal<ManualRunState | null>(null);
@@ -135,6 +138,14 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
 
   let kebabContainerRef: HTMLDivElement | undefined;
 
+  // Dismissing the confirm dialog resets the cascade-chats opt-in so a
+  // reopened dialog starts from the safe default rather than carrying a
+  // forgotten check across cancel/escape/backdrop dismissals.
+  const dismissConfirmDelete = () => {
+    setConfirmDelete(false);
+    setRemoveChatsToo(false);
+  };
+
   const handleDocumentKeydown = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return;
     // The edit modal owns its own keydown listener; let it handle Escape.
@@ -146,7 +157,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     if (confirmDelete()) {
       if (actionPending() === "delete") return;
       event.preventDefault();
-      setConfirmDelete(false);
+      dismissConfirmDelete();
       return;
     }
     if (showKebab()) {
@@ -222,10 +233,56 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     if (actionPending() !== null) return;
     setActionError(null);
     setActionPending("delete");
+    // Capture display metadata BEFORE the cloud delete so the archive snapshot
+    // survives the live row being removed from the store on success.
+    const snapshot = (() => {
+      const s = summary() ?? detail();
+      if (!s) return null;
+      return {
+        id: s.id,
+        slug: s.slug,
+        name: s.name,
+        mode: s.mode,
+        avatarSeed: s.avatarSeed,
+      };
+    })();
     try {
-      await svc.remove(id);
+      const cascadeChats = removeChatsToo();
+      if (cascadeChats) {
+        // Wipe local chat history first; if the cloud delete fails after this
+        // the user can re-run delete without an inconsistent half-state.
+        await employeesArchiveStore.cascadeDeleteChats(id);
+        await conversationStore.forgetByEmployee(id);
+      } else if (snapshot) {
+        // Persist the local parent before cloud deletion so a successful cloud
+        // wipe cannot strand the chats under "No project" if local archiving
+        // fails.
+        await employeesArchiveStore.archive(snapshot);
+      }
+      try {
+        await svc.remove(id);
+      } catch (err) {
+        if (!cascadeChats && snapshot) {
+          try {
+            await employeesArchiveStore.remove(snapshot.id);
+          } catch (cleanupErr) {
+            console.warn(
+              "Failed to roll back archived employee snapshot",
+              cleanupErr,
+            );
+          }
+        }
+        throw err;
+      }
+      if (!cascadeChats && snapshot) {
+        employeeStore.addArchived({
+          ...snapshot,
+          archivedAt: new Date().toISOString(),
+        });
+      }
       employeeStore.remove(id);
       setConfirmDelete(false);
+      setRemoveChatsToo(false);
       props.onClose();
     } catch (err) {
       // Leave the confirm dialog open so the user sees the error in context
@@ -854,7 +911,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     e.target === e.currentTarget &&
                     actionPending() !== "delete"
                   ) {
-                    setConfirmDelete(false);
+                    dismissConfirmDelete();
                   }
                 }}
                 role="dialog"
@@ -869,9 +926,38 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     Delete {emp().name}?
                   </h2>
                   <p class="m-0 text-[13px] text-muted-foreground leading-relaxed">
-                    This permanently removes the deployment. Any threads
-                    associated with this employee will lose their link.
+                    <Show
+                      when={removeChatsToo()}
+                      fallback={
+                        <>
+                          The cloud deployment will be removed. Past chats with{" "}
+                          {emp().name} stay in your sidebar under an archived
+                          row so you can still read them.
+                        </>
+                      }
+                    >
+                      The cloud deployment and all chats with {emp().name} will
+                      be permanently removed. This cannot be undone.
+                    </Show>
                   </p>
+                  <label class="mt-4 flex items-start gap-2 text-[12.5px] text-foreground cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      class="mt-[2px] accent-red-500 cursor-pointer"
+                      checked={removeChatsToo()}
+                      onChange={(e) =>
+                        setRemoveChatsToo(e.currentTarget.checked)
+                      }
+                      disabled={actionPending() === "delete"}
+                    />
+                    <span>
+                      Also remove past chats with this employee
+                      <span class="block text-[11.5px] text-muted-foreground/80 mt-0.5">
+                        Default keeps chats; check to wipe them with the
+                        deployment.
+                      </span>
+                    </span>
+                  </label>
                   <Show when={actionError()}>
                     <div
                       class="mt-3 py-2 px-3 bg-destructive/20 text-destructive rounded text-[12.5px]"
@@ -884,7 +970,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     <button
                       type="button"
                       class="py-2 px-4 rounded text-[13px] font-medium bg-transparent text-foreground border border-border hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
-                      onClick={() => setConfirmDelete(false)}
+                      onClick={dismissConfirmDelete}
                       disabled={actionPending() === "delete"}
                     >
                       Cancel
