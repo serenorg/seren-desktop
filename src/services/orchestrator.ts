@@ -14,6 +14,7 @@ import {
   type ToolResultEvent,
 } from "@/services/employees-runtime";
 import { storeAssistantResponse } from "@/services/memory";
+import { serializeHistory } from "@/services/orchestrator-history";
 import {
   allowsClaudeAgent,
   allowsCodexAgent,
@@ -1005,30 +1006,6 @@ function flushStreamingToMessage(conversationId: string): void {
       startTime: Date.now(),
     });
   }
-}
-
-/**
- * Serialize conversation messages into the format expected by the Rust backend.
- * Only includes user and assistant messages (not system, tool, transition, etc.)
- */
-function serializeHistory(
-  messages: UnifiedMessage[],
-): Record<string, unknown>[] {
-  return messages
-    .filter(
-      (m) =>
-        (m.role === "user" || m.role === "assistant") &&
-        m.type !== "transition" &&
-        m.type !== "reroute" &&
-        m.type !== "tool_call" &&
-        m.type !== "tool_result" &&
-        m.type !== "diff" &&
-        m.status === "complete",
-    )
-    .map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
 }
 
 /**
