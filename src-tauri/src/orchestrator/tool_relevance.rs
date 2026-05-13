@@ -57,21 +57,20 @@ const PINNED_TOOL_NAMES: &[&str] = &[
 ];
 
 /// Model-aware tool cap: returns (max_tools, token_budget) for the given model.
+///
+/// Vendor overrides exist only where empirical tool-selection accuracy degrades
+/// below the model's raw capacity. The default fits modern 100K+ context models
+/// (Claude 4.x, GPT-4o/o-series, Kimi K2.5, Llama 3.1+, DeepSeek, Qwen, Mistral
+/// Large, Grok, etc.) — new models in the registry inherit it without a patch.
 fn model_budget(model_id: &str) -> (usize, usize) {
     let id = model_id.to_lowercase();
-    if id.contains("gpt-3.5") || id.contains("gpt-4") || id.contains("/o1") || id.contains("/o3") {
-        // OpenAI: 128 API hard limit, accuracy degrades well before that.
-        (40, 6_000)
-    } else if id.contains("gemini") {
-        // Gemini: 256 limit, weaker tool selection at scale.
-        (50, 8_000)
-    } else if id.contains("claude") || id.contains("anthropic") {
-        // Anthropic: handles large toolsets well, but 200 is wasteful.
-        (80, DEFAULT_TOOL_TOKEN_BUDGET)
-    } else {
-        // Unknown models get a conservative budget.
-        (60, 8_000)
+    if id.contains("gemini") {
+        // Gemini: 256-tool API limit, but tool-selection accuracy regresses well
+        // before that. Hold it conservative until benchmarks say otherwise.
+        return (50, 8_000);
     }
+    // Default for modern models with competent tool selection.
+    (120, 24_000)
 }
 
 /// Check if a tool definition matches a pinned tool name.
@@ -831,20 +830,33 @@ mod tests {
 
     #[test]
     fn model_budget_returns_correct_caps() {
-        let (gpt_max, _) = model_budget("openai/gpt-4o");
-        let (claude_max, _) = model_budget("anthropic/claude-sonnet-4");
-        let (gemini_max, _) = model_budget("google/gemini-2.5-pro");
-        let (unknown_max, _) = model_budget("meta/llama-3.1-70b");
-
-        assert_eq!(gpt_max, 40);
-        assert_eq!(claude_max, 80);
+        // Gemini is the only vendor override — empirical tool-selection regression.
+        let (gemini_max, gemini_tokens) = model_budget(GEMINI_MODEL);
         assert_eq!(gemini_max, 50);
-        assert_eq!(unknown_max, 60);
+        assert_eq!(gemini_tokens, 8_000);
+
+        // Every other modern model — Claude, GPT/o-series, Kimi K2.5, Llama,
+        // and unknown ids — collapses to the same generous default. Adding a
+        // new model to the registry must not require a Rust patch here.
+        let cases = [
+            "anthropic/claude-sonnet-4",
+            "openai/gpt-4o",
+            "openai/o3",
+            "moonshotai/kimi-k2.5",
+            "meta/llama-3.1-70b",
+            "deepseek/deepseek-v3",
+            "totally-unknown/model-x",
+        ];
+        for model in cases {
+            let (max_tools, token_budget) = model_budget(model);
+            assert_eq!(max_tools, 120, "{model} should get 120 max tools");
+            assert_eq!(token_budget, 24_000, "{model} should get 24K token budget");
+        }
     }
 
     #[test]
-    fn gpt_gets_fewer_tools_than_claude() {
-        // Build 120 tools: enough to trigger filtering for both models.
+    fn gemini_gets_fewer_tools_than_default_models() {
+        // Build 120 tools: enough to trigger filtering for Gemini's 50-tool cap.
         let mut tools: Vec<serde_json::Value> = Vec::new();
         for i in 0..120 {
             tools.push(make_tool(
@@ -853,20 +865,21 @@ mod tests {
             ));
         }
 
-        let gpt_result = select_with_model("do something with the publisher", &tools, GPT_MODEL);
-        let claude_result =
+        let gemini_result =
+            select_with_model("do something with the publisher", &tools, GEMINI_MODEL);
+        let default_result =
             select_with_model("do something with the publisher", &tools, TEST_MODEL);
 
         assert!(
-            gpt_result.len() <= 40,
-            "GPT should get <= 40 tools, got {}",
-            gpt_result.len()
+            gemini_result.len() <= 50,
+            "Gemini should get <= 50 tools, got {}",
+            gemini_result.len()
         );
         assert!(
-            claude_result.len() > gpt_result.len(),
-            "Claude ({}) should get more tools than GPT ({})",
-            claude_result.len(),
-            gpt_result.len()
+            default_result.len() > gemini_result.len(),
+            "default-budget models ({}) should get more tools than Gemini ({})",
+            default_result.len(),
+            gemini_result.len()
         );
     }
 
@@ -949,8 +962,9 @@ mod tests {
                 "Some bigpub action",
             ));
         }
-        // Add enough other tools to force filtering
-        for i in 0..80 {
+        // Add enough other tools to exceed the default tool cap and force filtering
+        // (otherwise the fast path returns everything without invoking publisher scoping).
+        for i in 0..200 {
             tools.push(make_tool(
                 &format!("gateway__other__action_{i}"),
                 "Some other action",
