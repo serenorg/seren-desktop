@@ -2,6 +2,8 @@
 // ABOUTME: Components and stores never call the generated SDK directly; they go through this module.
 
 import {
+  type AgentBundle,
+  type AgentBundlePatch,
   type AgentSpec,
   type AgentSpecUpdate,
   type CloudDeploymentSummary,
@@ -13,6 +15,7 @@ import {
   serenAgentGetManagedDeployment,
   serenAgentListDeployments,
   serenAgentListManagedDeploymentRevisions,
+  serenAgentPatchManagedDeploymentFiles,
   serenAgentPrivateModels,
   serenAgentRollbackManagedDeployment,
   serenAgentStartManagedDeployment,
@@ -45,6 +48,12 @@ import type {
   ModelChoice,
   NewEmployeeInput,
 } from "@/lib/employees/types";
+
+function bundleFromInstructions(
+  instructions: AgentBundle["instructions"],
+): AgentBundle {
+  return { instructions, assets: [] };
+}
 
 function deriveModelChoice(row: CloudDeploymentSummary): ModelChoice {
   const reason = row.managed_agent?.routing_reason?.toLowerCase();
@@ -85,7 +94,8 @@ function detailFromManaged(
     approvalPolicy: managed.approval_policy,
     resolvedTools: managed.resolved_tools,
     visibility: managed.visibility,
-    prompt: managed.prompt ?? null,
+    bundle: managed.bundle,
+    instructions: managed.bundle.instructions ?? [],
     maxIterations: managed.max_iterations ?? null,
     maxToolCallsPerRun: managed.max_tool_calls_per_run ?? null,
     maxTimeoutSeconds: managed.max_timeout_seconds ?? null,
@@ -184,6 +194,7 @@ function artifactFromCloud(
 }
 
 function specFromInput(input: NewEmployeeInput): AgentSpec {
+  const bundle = input.bundle ?? bundleFromInstructions(input.instructions);
   return {
     name: input.name,
     agent_slug: input.slug,
@@ -201,7 +212,7 @@ function specFromInput(input: NewEmployeeInput): AgentSpec {
       publisher_only: false,
       execution: {
         type: "llm",
-        system_prompt: input.systemPrompt,
+        bundle,
         model_id:
           input.modelChoice === "private" ? (input.modelId ?? null) : null,
       },
@@ -232,15 +243,17 @@ function updateSpecFromPatch(patch: EmployeePatch): AgentSpecUpdate {
   if (patch.visibility !== undefined) update.visibility = patch.visibility;
   if (patch.modelPolicy !== undefined) update.model_policy = patch.modelPolicy;
   // AgentSpecUpdate.workload replaces the whole WorkloadSpec.
-  // Only build it when the caller knows the full system prompt;
-  // model-only changes without a prompt would otherwise wipe it.
-  if (patch.systemPrompt !== undefined) {
+  // Only build it when the caller knows the full bundle; model-only changes
+  // without bundle content would otherwise wipe it.
+  if (patch.bundle !== undefined || patch.instructions !== undefined) {
+    const bundle =
+      patch.bundle ?? bundleFromInstructions(patch.instructions ?? []);
     update.workload = {
       compute_backend: "aws_container",
       publisher_only: false,
       execution: {
         type: "llm",
-        system_prompt: patch.systemPrompt,
+        bundle,
         model_id:
           patch.modelChoice === "private" ? (patch.modelId ?? null) : null,
       },
@@ -256,7 +269,7 @@ function updateSpecFromPatch(patch: EmployeePatch): AgentSpecUpdate {
     };
   } else if (patch.modelChoice !== undefined || patch.limits !== undefined) {
     throw new Error(
-      "Updating modelChoice/limits requires systemPrompt (workload is replaced wholesale)",
+      "Updating modelChoice/limits requires bundle content (workload is replaced wholesale)",
     );
   }
   return update;
@@ -304,7 +317,8 @@ export const employees = {
           approvalPolicy: "read_only",
           resolvedTools: [],
           visibility: "opaque",
-          prompt: null,
+          bundle: { instructions: [], assets: [] },
+          instructions: [],
           maxIterations: null,
           maxToolCallsPerRun: null,
           maxTimeoutSeconds: null,
@@ -341,6 +355,24 @@ export const employees = {
     if (error || !data?.data) {
       throw new Error(
         `Failed to update employee: ${formatApiError(error, response, "")}`,
+      );
+    }
+    return summaryFromCloud(data.data);
+  },
+
+  async patchFiles(
+    id: string,
+    patch: AgentBundlePatch,
+  ): Promise<EmployeeSummary> {
+    const { data, error, response } =
+      await serenAgentPatchManagedDeploymentFiles({
+        path: { id },
+        body: patch,
+        throwOnError: false,
+      });
+    if (error || !data?.data) {
+      throw new Error(
+        `Failed to update employee files: ${formatApiError(error, response, "")}`,
       );
     }
     return summaryFromCloud(data.data);

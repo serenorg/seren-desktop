@@ -237,7 +237,7 @@ export const serenCloudListDeploymentsOptions = (options?: Options<SerenCloudLis
 });
 
 /**
- * Delete a deployment and clean up compute resources.
+ * Delete a deployment and clean up runtime resources.
  */
 export const serenCloudDeleteMutation = (options?: Partial<Options<SerenCloudDeleteData>>): MutationOptions<SerenCloudDeleteResponse, DefaultError, Options<SerenCloudDeleteData>> => {
     const mutationOptions: MutationOptions<SerenCloudDeleteResponse, DefaultError, Options<SerenCloudDeleteData>> = {
@@ -334,7 +334,7 @@ export const serenCloudDeploymentAuditInfiniteOptions = (options: Options<SerenC
 });
 
 /**
- * Record a minimized Dispatch channel turn for a deployment.
+ * Record a minimized external channel turn for a deployment.
  */
 export const serenCloudRecordChannelRunEventMutation = (options?: Partial<Options<SerenCloudRecordChannelRunEventData>>): MutationOptions<SerenCloudRecordChannelRunEventResponse, DefaultError, Options<SerenCloudRecordChannelRunEventData>> => {
     const mutationOptions: MutationOptions<SerenCloudRecordChannelRunEventResponse, DefaultError, Options<SerenCloudRecordChannelRunEventData>> = {

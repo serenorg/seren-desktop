@@ -17,7 +17,7 @@ import { EmployeeRunDetailModal } from "@/components/employees/EmployeeRunDetail
 import { EmployeeRunsList } from "@/components/employees/EmployeeRunsList";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
-import { extractPersonaSections } from "@/lib/employees/persona";
+import { extractInstructionSections } from "@/lib/employees/instructions";
 import type {
   EmployeeMode,
   EmployeeStatus,
@@ -343,9 +343,9 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const detailRecord = () => employeeStore.detail(props.employeeId);
 
   const description = () => {
-    const prompt = detailRecord()?.prompt;
-    if (!prompt) return null;
-    return extractPersonaSections(prompt).skill.trim();
+    const instructions = detailRecord()?.instructions;
+    if (!instructions) return null;
+    return extractInstructionSections(instructions).skill.trim();
   };
 
   const copyEndpoint = async () => {
@@ -760,7 +760,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
               {/* Description */}
               <div class="mb-6">
                 <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 mb-2">
-                  Role
+                  SKILL.md
                 </div>
                 <Show
                   when={description()}

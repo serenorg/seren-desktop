@@ -2,6 +2,9 @@
 // ABOUTME: Maps the generated SerenAgent SDK shapes onto a flatter desktop model.
 
 import type {
+  AgentBundle,
+  AgentBundlePatch,
+  AgentInstructionFile,
   CloudDeploymentMode,
   CloudDeploymentStatus,
   ManagedAgentApprovalPolicy,
@@ -44,7 +47,8 @@ export type EmployeeDetail = EmployeeSummary & {
   approvalPolicy: EmployeeApprovalPolicy;
   resolvedTools: string[];
   visibility: string;
-  prompt: string | null;
+  bundle: AgentBundle;
+  instructions: AgentInstructionFile[];
   maxIterations: number | null;
   maxToolCallsPerRun: number | null;
   maxTimeoutSeconds: number | null;
@@ -58,7 +62,8 @@ export type NewEmployeeInput = {
   mode: EmployeeMode;
   cronSchedule?: string;
   cronTimezone?: string;
-  systemPrompt: string;
+  bundle?: AgentBundle;
+  instructions: AgentInstructionFile[];
   modelChoice: ModelChoice;
   modelPolicy?: EmployeeModelPolicy;
   modelId?: string;
@@ -74,6 +79,8 @@ export type NewEmployeeInput = {
     contextBudgetTokens?: number;
   };
 };
+
+export type EmployeeFilesPatch = AgentBundlePatch;
 
 export type EmployeePatch = Partial<
   Omit<NewEmployeeInput, "slug" | "modelChoice"> & {

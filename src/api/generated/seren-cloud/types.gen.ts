@@ -5,6 +5,80 @@ export type ClientOptions = {
 };
 
 /**
+ * Non-prompt file that belongs to an agent bundle.
+ */
+export type AgentAssetFile = {
+    /**
+     * Base64-encoded file body.
+     */
+    content_base64: string;
+    /**
+     * Optional MIME type supplied by the caller.
+     */
+    content_type?: string | null;
+    /**
+     * Agent-bundle relative path.
+     */
+    path: string;
+    purpose?: null | AgentAssetPurpose;
+    /**
+     * Optional content digest for provenance. When present, the server verifies it.
+     */
+    sha256?: string | null;
+};
+
+export type AgentAssetPurpose = 'reference' | 'script' | 'schema' | 'resource' | 'eval';
+
+/**
+ * Authored agent bundle used by LLM workloads.
+ */
+export type AgentBundle = {
+    /**
+     * Additional files available to the agent runtime.
+     */
+    assets?: Array<AgentAssetFile>;
+    /**
+     * Prompt-bearing instruction files rendered server-side into the runtime
+     * system prompt.
+     */
+    instructions?: Array<AgentInstructionFile>;
+};
+
+/**
+ * One authored instruction file.
+ *
+ * Supports inline instruction bodies as well as packaged workload metadata.
+ */
+export type AgentInstructionFile = {
+    /**
+     * Optional tool allowlist carried by skill metadata.
+     */
+    allowed_tools?: Array<string> | null;
+    /**
+     * File body. Packaged workloads should provide the materialized instruction text.
+     */
+    content: string;
+    kind: AgentInstructionKind;
+    /**
+     * Original or packaged path, when known.
+     */
+    path?: string | null;
+    /**
+     * Optional content digest for packaged workload provenance.
+     */
+    sha256?: string | null;
+    /**
+     * Skill directory name, when the instruction came from a packaged skill.
+     */
+    skill_name?: string | null;
+};
+
+/**
+ * Typed instruction-file kind for managed LLM workloads.
+ */
+export type AgentInstructionKind = 'identity' | 'soul' | 'skill' | 'agents' | 'user' | 'tools' | 'memory' | 'heartbeat' | 'eval';
+
+/**
  * A single audit trail entry.
  */
 export type AuditEntry = {
@@ -123,7 +197,6 @@ export type CloudDeploymentComputeBackend = 'aws_container' | 'cloudflare_worker
  */
 export type CloudDeploymentEnvironment = {
     created_at: string;
-    deleted_at?: string | null;
     description?: string | null;
     docker_image: string;
     id: string;
@@ -362,7 +435,7 @@ export type CloudDeploymentSummary = {
     updated_at: string;
     user_id: string;
     /**
-     * Visibility mode: "open" (default) or "opaque" (hides internals from non-owners).
+     * Visibility mode: "open" (default) or "opaque" (redacts selected details from non-owners).
      */
     visibility: string;
 };
@@ -1339,7 +1412,6 @@ export type DataResponseCloudDeploymentEnvironment = {
      */
     data: {
         created_at: string;
-        deleted_at?: string | null;
         description?: string | null;
         docker_image: string;
         id: string;
@@ -1705,7 +1777,7 @@ export type DataResponseCloudDeploymentSummary = {
         updated_at: string;
         user_id: string;
         /**
-         * Visibility mode: "open" (default) or "opaque" (hides internals from non-owners).
+         * Visibility mode: "open" (default) or "opaque" (redacts selected details from non-owners).
          */
         visibility: string;
     };
@@ -2771,7 +2843,6 @@ export type DataResponseVecAuditEntry = {
 export type DataResponseVecCloudDeploymentEnvironment = {
     data: Array<{
         created_at: string;
-        deleted_at?: string | null;
         description?: string | null;
         docker_image: string;
         id: string;
@@ -3096,7 +3167,7 @@ export type DataResponseVecCloudDeploymentSummary = {
         updated_at: string;
         user_id: string;
         /**
-         * Visibility mode: "open" (default) or "opaque" (hides internals from non-owners).
+         * Visibility mode: "open" (default) or "opaque" (redacts selected details from non-owners).
          */
         visibility: string;
     }>;
@@ -3982,6 +4053,10 @@ export type VerificationResult = {
 export type WorkloadExecution = {
     adapter?: null | ManagedAgentRuntimeAdapter;
     /**
+     * Authored instruction and asset files for the LLM agent.
+     */
+    bundle: AgentBundle;
+    /**
      * Ordered list of fallback model identifiers tried on primary failure.
      */
     fallback_models?: Array<string> | null;
@@ -3994,10 +4069,6 @@ export type WorkloadExecution = {
      * Model identifier override (e.g. `"anthropic/claude-sonnet-4.6"`).
      */
     model_id?: string | null;
-    /**
-     * System prompt delivered to the language model at runtime.
-     */
-    system_prompt: string;
     /**
      * Tool definitions available to the LLM during execution.
      */
@@ -4067,7 +4138,7 @@ export type WorkloadSpec = {
     limits?: WorkloadLimits;
     network_policy?: null | CloudDeploymentNetworkPolicy;
     /**
-     * When true, the workload is exposed only to publisher-internal callers.
+     * When true, the workload is exposed only through publisher-managed entry points.
      */
     publisher_only?: boolean;
     /**
@@ -4331,7 +4402,7 @@ export type SerenCloudDeleteResponses = {
     /**
      * Deployment deleted
      */
-    204: void;
+    200: DataResponseCloudDeploymentActionStatusResponse;
 };
 
 export type SerenCloudDeleteResponse = SerenCloudDeleteResponses[keyof SerenCloudDeleteResponses];

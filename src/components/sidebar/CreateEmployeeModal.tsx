@@ -12,11 +12,19 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import type { AgentAssetFile } from "@/api/seren-agent";
 import { deriveSlug, gradientFor, initialFor } from "@/lib/employees/avatar";
 import {
-  buildEmployeeSystemPrompt,
-  extractPersonaSections,
-} from "@/lib/employees/persona";
+  type ImportFileEntry,
+  type InstructionSlot,
+  normalizeResourcePath,
+  routeFiles,
+  slotForFilename,
+} from "@/lib/employees/import";
+import {
+  buildEmployeeInstructionFiles,
+  extractInstructionSections,
+} from "@/lib/employees/instructions";
 import type {
   EmployeeApprovalPolicy,
   EmployeeDetail,
@@ -62,6 +70,10 @@ const DEFAULT_LIMITS = {
   contextBudgetTokens: 24000,
 };
 
+const MAX_AGENT_INSTRUCTION_BYTES = 1024 * 1024;
+const MAX_AGENT_ASSET_BYTES = 8 * 1024 * 1024;
+const MAX_AGENT_BUNDLE_TOTAL_BYTES = 16 * 1024 * 1024;
+
 interface CreateEmployeeModalProps {
   onClose: () => void;
   onCreated: (employeeId: string) => void;
@@ -72,6 +84,43 @@ interface CreateEmployeeModalProps {
    */
   employee?: EmployeeDetail;
 }
+
+interface BrowserFileEntry {
+  file: File;
+  path: string;
+}
+
+interface CollectedImportFiles {
+  entries: ImportFileEntry[];
+  skipped: string[];
+}
+
+interface FileSystemEntryLike {
+  name: string;
+  fullPath?: string;
+  isFile: boolean;
+  isDirectory: boolean;
+}
+
+interface FileSystemFileEntryLike extends FileSystemEntryLike {
+  file: (
+    success: (file: File) => void,
+    error?: (error: DOMException) => void,
+  ) => void;
+}
+
+interface FileSystemDirectoryEntryLike extends FileSystemEntryLike {
+  createReader: () => {
+    readEntries: (
+      success: (entries: FileSystemEntryLike[]) => void,
+      error?: (error: DOMException) => void,
+    ) => void;
+  };
+}
+
+type DataTransferItemWithEntry = DataTransferItem & {
+  webkitGetAsEntry?: () => FileSystemEntryLike | null;
+};
 
 export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
   props,
@@ -93,10 +142,23 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
   const [cronTimezone, setCronTimezone] = createSignal(
     initial?.cronTimezone ?? "UTC",
   );
-  const initialSections = extractPersonaSections(initial?.prompt);
-  const [role, setRole] = createSignal(initialSections.skill);
+  const initialSections = extractInstructionSections(initial?.instructions);
+  const [skillInstructions, setSkillInstructions] = createSignal(
+    initialSections.skill,
+  );
   const [identity, setIdentity] = createSignal(initialSections.identity);
   const [soul, setSoul] = createSignal(initialSections.soul);
+  const [agents, setAgents] = createSignal(initialSections.agents);
+  const [user, setUser] = createSignal(initialSections.user);
+  const [memory, setMemory] = createSignal(initialSections.memory);
+  const [tools, setTools] = createSignal(initialSections.tools);
+  const [heartbeat, setHeartbeat] = createSignal(initialSections.heartbeat);
+  const [evalInstructions, setEvalInstructions] = createSignal(
+    initialSections.eval,
+  );
+  const [assets, setAssets] = createSignal<AgentAssetFile[]>(
+    initial?.bundle.assets ?? [],
+  );
   const [modelChoice, setModelChoice] = createSignal<ModelChoice>(
     initial?.modelChoice ?? "standard",
   );
@@ -132,6 +194,299 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
 
   const [submitting, setSubmitting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [dragging, setDragging] = createSignal(false);
+  const [importNotice, setImportNotice] = createSignal<string | null>(null);
+
+  let fileInputRef: HTMLInputElement | undefined;
+
+  const setSection = (slot: InstructionSlot, body: string) => {
+    if (slot === "skill") setSkillInstructions(body);
+    else if (slot === "identity") setIdentity(body);
+    else if (slot === "soul") setSoul(body);
+    else if (slot === "agents") setAgents(body);
+    else if (slot === "user") setUser(body);
+    else if (slot === "memory") setMemory(body);
+    else if (slot === "tools") setTools(body);
+    else if (slot === "heartbeat") setHeartbeat(body);
+    else if (slot === "eval") setEvalInstructions(body);
+  };
+
+  const readFileBytes = (file: File): Promise<Uint8Array> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () =>
+        resolve(new Uint8Array(reader.result as ArrayBuffer));
+      reader.onerror = () => reject(reader.error ?? new Error("Read failed"));
+      reader.readAsArrayBuffer(file);
+    });
+
+  const bytesToBase64 = (bytes: Uint8Array) => {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  };
+
+  const sha256Hex = async (bytes: Uint8Array) => {
+    if (!globalThis.crypto?.subtle) return undefined;
+    const buffer = bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    ) as ArrayBuffer;
+    const digest = await crypto.subtle.digest("SHA-256", buffer);
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  };
+
+  const decodeInstructionText = (bytes: Uint8Array): string =>
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+
+  const summarizeNames = (names: string[]) => {
+    const shown = names.slice(0, 3).join(", ");
+    const remaining = names.length - 3;
+    return remaining > 0 ? `${shown}, +${remaining} more` : shown;
+  };
+
+  const filenameFromEntry = (entry: { name: string; path?: string }): string =>
+    entry.path && entry.path.length > 0 ? entry.path : entry.name;
+
+  const fileFromEntry = (
+    entry: FileSystemFileEntryLike,
+  ): Promise<BrowserFileEntry> =>
+    new Promise((resolve, reject) => {
+      entry.file(
+        (file) =>
+          resolve({
+            file,
+            path: (entry.fullPath ?? entry.name).replace(/^\/+/, ""),
+          }),
+        reject,
+      );
+    });
+
+  const readDirectoryEntries = async (
+    entry: FileSystemDirectoryEntryLike,
+  ): Promise<FileSystemEntryLike[]> => {
+    const reader = entry.createReader();
+    const entries: FileSystemEntryLike[] = [];
+
+    for (;;) {
+      const batch = await new Promise<FileSystemEntryLike[]>(
+        (resolve, reject) => reader.readEntries(resolve, reject),
+      );
+      if (batch.length === 0) break;
+      entries.push(...batch);
+    }
+
+    return entries;
+  };
+
+  const collectEntryFiles = async (
+    entry: FileSystemEntryLike,
+  ): Promise<BrowserFileEntry[]> => {
+    if (entry.isFile) {
+      return [await fileFromEntry(entry as FileSystemFileEntryLike)];
+    }
+    if (!entry.isDirectory) return [];
+
+    const children = await readDirectoryEntries(
+      entry as FileSystemDirectoryEntryLike,
+    );
+    const nested = await Promise.all(children.map(collectEntryFiles));
+    return nested.reduce<BrowserFileEntry[]>(
+      (acc, childFiles) => acc.concat(childFiles),
+      [],
+    );
+  };
+
+  // Read every file the user dragged in, including files nested in dropped
+  // directories when the browser exposes directory entries.
+  const collectDroppedFiles = async (
+    items: DataTransferItemList | null,
+    fallback: FileList | null,
+  ): Promise<CollectedImportFiles> => {
+    const entries: ImportFileEntry[] = [];
+    const skipped: string[] = [];
+    let importedBytes = 0;
+
+    const files: BrowserFileEntry[] = [];
+    if (items) {
+      for (const item of Array.from(items)) {
+        if (item.kind !== "file") continue;
+        const entry = (item as DataTransferItemWithEntry).webkitGetAsEntry?.();
+        if (entry) {
+          files.push(...(await collectEntryFiles(entry)));
+        } else {
+          const f = item.getAsFile();
+          if (f) files.push({ file: f, path: filenameFromEntry(f) });
+        }
+      }
+    }
+    if (files.length === 0 && fallback) {
+      for (const f of Array.from(fallback)) {
+        files.push({ file: f, path: filenameFromEntry(f) });
+      }
+    }
+
+    for (const { file, path } of files) {
+      const name = path;
+      const slot = slotForFilename(name);
+      const maxBytes = slot
+        ? MAX_AGENT_INSTRUCTION_BYTES
+        : MAX_AGENT_ASSET_BYTES;
+      if (file.size > maxBytes) {
+        skipped.push(`${name} (over ${Math.floor(maxBytes / 1024 / 1024)} MB)`);
+        continue;
+      }
+      if (importedBytes + file.size > MAX_AGENT_BUNDLE_TOTAL_BYTES) {
+        skipped.push(`${name} (bundle limit)`);
+        continue;
+      }
+      try {
+        const bytes = await readFileBytes(file);
+        const body = slot ? decodeInstructionText(bytes) : undefined;
+        const sha256 = await sha256Hex(bytes);
+        importedBytes += bytes.byteLength;
+        entries.push({
+          name,
+          body,
+          contentBase64: bytesToBase64(bytes),
+          contentType: file.type || null,
+          sha256,
+        });
+      } catch (err) {
+        skipped.push(`${name} (read failed)`);
+        console.warn(`Failed to read ${name}:`, err);
+      }
+    }
+    return { entries, skipped };
+  };
+
+  const mergeAssets = (resources: AgentAssetFile[]) => {
+    let replaced = 0;
+    setAssets((prev) => {
+      const byPath = new Map(
+        prev.map((asset) => [
+          normalizeResourcePath(asset.path) ?? asset.path,
+          asset,
+        ]),
+      );
+      for (const resource of resources) {
+        const key = normalizeResourcePath(resource.path) ?? resource.path;
+        if (byPath.has(key)) replaced += 1;
+        byPath.set(key, resource);
+      }
+      return Array.from(byPath.values());
+    });
+    return replaced;
+  };
+
+  const applyImportedFiles = (
+    entries: ImportFileEntry[],
+    sourceLabel: string,
+    skipped: string[] = [],
+  ) => {
+    if (entries.length === 0) {
+      const skippedText =
+        skipped.length > 0 ? ` Skipped: ${summarizeNames(skipped)}.` : "";
+      setImportNotice(
+        `No readable files in that ${sourceLabel}.${skippedText}`,
+      );
+      return;
+    }
+
+    const result = routeFiles(entries);
+
+    for (const [slot, body] of Object.entries(result.sections)) {
+      if (typeof body === "string") setSection(slot as InstructionSlot, body);
+    }
+    const replacedResources = mergeAssets(result.resources);
+    clearError();
+
+    const filledCount = Object.keys(result.sections).length;
+    const parts: string[] = [];
+    if (filledCount > 0) {
+      parts.push(
+        `Filled ${filledCount} section${filledCount === 1 ? "" : "s"}`,
+      );
+    }
+    if (result.resources.length > 0) {
+      parts.push(
+        `Added ${result.resources.length} resource${
+          result.resources.length === 1 ? "" : "s"
+        }`,
+      );
+    }
+    if (replacedResources > 0) {
+      parts.push(
+        `Replaced ${replacedResources} existing resource${
+          replacedResources === 1 ? "" : "s"
+        }`,
+      );
+    }
+    if (result.ignored.length > 0) {
+      parts.push(
+        `${result.ignored.length} ignored: ${summarizeNames(result.ignored)}`,
+      );
+    }
+    if (skipped.length > 0) {
+      parts.push(`${skipped.length} skipped: ${summarizeNames(skipped)}`);
+    }
+    if (!skillInstructions().trim() && result.sections.skill === undefined) {
+      parts.push("add SKILL.md instructions to finish");
+    }
+    setImportNotice(parts.length > 0 ? parts.join(" - ") : null);
+  };
+
+  const handleDrop = async (event: DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDragging(false);
+    if (submitting()) return;
+
+    const { entries, skipped } = await collectDroppedFiles(
+      event.dataTransfer?.items ?? null,
+      event.dataTransfer?.files ?? null,
+    );
+    applyImportedFiles(entries, "drop", skipped);
+  };
+
+  const handleFilePicker = async (event: Event) => {
+    const input = event.currentTarget as HTMLInputElement;
+    if (submitting() || !input.files) return;
+    const { entries, skipped } = await collectDroppedFiles(null, input.files);
+    applyImportedFiles(entries, "selection", skipped);
+    // Reset so picking the same file twice in a row still fires onChange.
+    input.value = "";
+  };
+
+  const openFilePicker = () => {
+    if (submitting()) return;
+    fileInputRef?.click();
+  };
+
+  const handleDragOver = (event: DragEvent) => {
+    if (!event.dataTransfer) return;
+    if (submitting()) return;
+    const types = event.dataTransfer.types;
+    // Older browsers expose `types` as DOMStringList rather than a plain
+    // array; both support iteration via Array.from, but guard against the
+    // (rare) case where the spec exposes nothing at all.
+    if (!types) return;
+    const hasFiles = Array.from(types).includes("Files");
+    if (!hasFiles) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    if (!dragging()) setDragging(true);
+  };
+
+  const handleDragLeave = (event: DragEvent) => {
+    if (event.currentTarget === event.target) setDragging(false);
+  };
 
   let nameInputRef: HTMLInputElement | undefined;
 
@@ -181,25 +536,44 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     return deriveSlug(name());
   });
 
+  const submitDisabledReason = createMemo(() => {
+    if (submitting()) return "";
+    if (name().trim().length === 0) return "Name is required.";
+    if (effectiveSlug().length === 0) return "Slug is required.";
+    if (skillInstructions().trim().length === 0)
+      return "SKILL.md instructions are required.";
+    if (mode() === "cron" && cronSchedule().trim().length === 0)
+      return "Cron schedule is required.";
+    if (modelChoice() === "private" && modelId().trim().length === 0)
+      return "Private model id is required.";
+    return "";
+  });
+
   const canSubmit = createMemo(
-    () =>
-      !submitting() &&
-      name().trim().length > 0 &&
-      effectiveSlug().length > 0 &&
-      role().trim().length > 0 &&
-      (mode() !== "cron" || cronSchedule().trim().length > 0) &&
-      (modelChoice() !== "private" || modelId().trim().length > 0),
+    () => !submitting() && submitDisabledReason() === "",
   );
 
-  const buildSystemPrompt = (): string => {
-    return buildEmployeeSystemPrompt({
+  const buildInstructions = () => {
+    return buildEmployeeInstructionFiles({
       name: name(),
       slug: effectiveSlug(),
-      skill: role(),
+      skill: skillInstructions(),
       identity: identity(),
       soul: soul(),
+      agents: agents(),
+      user: user(),
+      memory: memory(),
+      tools: tools(),
+      heartbeat: heartbeat(),
+      eval: evalInstructions(),
     });
   };
+
+  const buildExistingBundle = () => ({
+    ...props.employee?.bundle,
+    instructions: buildInstructions(),
+    assets: assets(),
+  });
 
   const toggleToolPreset = (preset: EmployeeToolPreset) => {
     setToolPresets((prev) =>
@@ -223,6 +597,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       };
       let summary: Awaited<ReturnType<typeof svc.deploy>>;
       if (props.employee) {
+        const bundle = buildExistingBundle();
         const patch: EmployeePatch = {
           name: name().trim(),
           // Mode is immutable on update; cron fields only flow when the
@@ -232,7 +607,8 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             props.employee.mode === "cron" ? cronSchedule().trim() : undefined,
           cronTimezone:
             props.employee.mode === "cron" ? cronTimezone().trim() : undefined,
-          systemPrompt: buildSystemPrompt(),
+          instructions: bundle.instructions ?? [],
+          bundle,
           modelChoice: modelChoice(),
           modelPolicy: modelChoice() === "standard" ? modelPolicy() : undefined,
           modelId: modelChoice() === "private" ? modelId().trim() : undefined,
@@ -242,13 +618,18 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
         };
         summary = await svc.update(props.employee.id, patch);
       } else {
+        const instructions = buildInstructions();
         const input: NewEmployeeInput = {
           name: name().trim(),
           slug: effectiveSlug(),
           mode: mode(),
           cronSchedule: mode() === "cron" ? cronSchedule().trim() : undefined,
           cronTimezone: mode() === "cron" ? cronTimezone().trim() : undefined,
-          systemPrompt: buildSystemPrompt(),
+          instructions,
+          bundle: {
+            instructions,
+            assets: assets(),
+          },
           modelChoice: modelChoice(),
           modelPolicy: modelChoice() === "standard" ? modelPolicy() : undefined,
           modelId: modelChoice() === "private" ? modelId().trim() : undefined,
@@ -491,27 +872,122 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             </div>
           </Show>
 
-          {/* Role / instructions (becomes the SKILL.md section when
-              IDENTITY.md or SOUL.md is filled in via Advanced) */}
+          {/* Drop zone: accept SKILL.md / IDENTITY.md / ... files or a folder
+              containing them. Files route by canonical filename. A hidden file
+              input backs the "Browse files" button so keyboard users can
+              attach without dragging. */}
           <div class="mb-4">
             <label
-              for="employee-role"
+              for="employee-drop-input"
               class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
             >
-              Role / instructions
-              <Show when={identity().trim() || soul().trim()}>
-                <span class="font-normal opacity-70 normal-case tracking-normal">
-                  {" "}
-                  (SKILL.md)
-                </span>
+              Import instruction files
+              <span class="font-normal opacity-70 normal-case tracking-normal">
+                {" "}
+                (optional)
+              </span>
+            </label>
+            <input
+              ref={fileInputRef}
+              id="employee-drop-input"
+              type="file"
+              multiple
+              class="sr-only"
+              onChange={handleFilePicker}
+              disabled={submitting()}
+            />
+            <div
+              id="employee-drop"
+              class="w-full py-3 px-3 bg-card text-foreground border border-dashed rounded text-[12px] leading-relaxed transition-colors"
+              classList={{
+                "border-primary/60 bg-primary/[0.06]":
+                  dragging() && !submitting(),
+                "border-border": !dragging() || submitting(),
+                "opacity-60": submitting(),
+              }}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <div class="text-muted-foreground">
+                Drop a <code class="font-mono text-[11.5px]">SKILL.md</code>
+                {", "}
+                <code class="font-mono text-[11.5px]">IDENTITY.md</code>
+                {", "}
+                <code class="font-mono text-[11.5px]">SOUL.md</code>
+                {", "}
+                <code class="font-mono text-[11.5px]">AGENTS.md</code>
+                {", "}
+                <code class="font-mono text-[11.5px]">USER.md</code>
+                {", "}
+                <code class="font-mono text-[11.5px]">MEMORY.md</code>
+                {", "}
+                <code class="font-mono text-[11.5px]">TOOLS.md</code>
+                {", or "}
+                <code class="font-mono text-[11.5px]">HEARTBEAT.md</code>
+                {", or "}
+                <code class="font-mono text-[11.5px]">EVAL.md</code>
+                {
+                  " file - or a folder containing instruction and resource files. Files are routed by canonical filename; other files are packaged as resources."
+                }
+              </div>
+              <Show when={assets().length > 0}>
+                <div class="mt-2 text-[11.5px] text-muted-foreground">
+                  {assets().length} resource
+                  {assets().length === 1 ? "" : "s"} packaged:
+                  <ul class="mt-1 list-disc pl-4 space-y-0.5">
+                    <For each={assets().slice(0, 5)}>
+                      {(asset) => (
+                        <li class="font-mono text-[11px] truncate">
+                          {asset.path}
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                  <Show when={assets().length > 5}>
+                    <div class="mt-0.5">
+                      +{assets().length - 5} more resource
+                      {assets().length - 5 === 1 ? "" : "s"}
+                    </div>
+                  </Show>
+                </div>
               </Show>
+              <div class="mt-2">
+                <button
+                  type="button"
+                  class="text-[11.5px] font-medium text-primary underline-offset-2 hover:underline focus:outline-none focus-visible:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={openFilePicker}
+                  disabled={submitting()}
+                >
+                  Browse files...
+                </button>
+              </div>
+              <Show when={importNotice()}>
+                <div
+                  class="mt-2 text-[11.5px] text-primary"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {importNotice()}
+                </div>
+              </Show>
+            </div>
+          </div>
+
+          {/* SKILL.md is the required instruction file for an employee. */}
+          <div class="mb-4">
+            <label
+              for="employee-skill-instructions"
+              class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+            >
+              SKILL.md
             </label>
             <textarea
-              id="employee-role"
+              id="employee-skill-instructions"
               class="w-full min-h-[110px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
-              value={role()}
+              value={skillInstructions()}
               onInput={(e) => {
-                setRole(e.currentTarget.value);
+                setSkillInstructions(e.currentTarget.value);
                 clearError();
               }}
               placeholder="Senior advisor with decades of perspective. Calm authority, plain language, and long-horizon thinking."
@@ -804,12 +1280,160 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                     disabled={submitting()}
                   />
                 </div>
+
+                <div class="col-span-2">
+                  <label
+                    for="employee-agents"
+                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                  >
+                    AGENTS.md{" "}
+                    <span class="font-normal opacity-70 normal-case tracking-normal">
+                      (optional - operating discipline)
+                    </span>
+                  </label>
+                  <textarea
+                    id="employee-agents"
+                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
+                    value={agents()}
+                    onInput={(e) => {
+                      setAgents(e.currentTarget.value);
+                      clearError();
+                    }}
+                    placeholder="Tool discipline, memory discipline, scope rules. e.g. Only call publisher_request after a topic_lookup."
+                    disabled={submitting()}
+                  />
+                </div>
+
+                <div class="col-span-2">
+                  <label
+                    for="employee-user"
+                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                  >
+                    USER.md{" "}
+                    <span class="font-normal opacity-70 normal-case tracking-normal">
+                      (optional - operator context)
+                    </span>
+                  </label>
+                  <textarea
+                    id="employee-user"
+                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
+                    value={user()}
+                    onInput={(e) => {
+                      setUser(e.currentTarget.value);
+                      clearError();
+                    }}
+                    placeholder="Timezone, preferences, access boundaries, and persistent operator context."
+                    disabled={submitting()}
+                  />
+                </div>
+
+                <div class="col-span-2">
+                  <label
+                    for="employee-tools"
+                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                  >
+                    TOOLS.md{" "}
+                    <span class="font-normal opacity-70 normal-case tracking-normal">
+                      (optional - tool usage guide)
+                    </span>
+                  </label>
+                  <textarea
+                    id="employee-tools"
+                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
+                    value={tools()}
+                    onInput={(e) => {
+                      setTools(e.currentTarget.value);
+                      clearError();
+                    }}
+                    placeholder="When and how to use each declared tool. Complements the tool presets above."
+                    disabled={submitting()}
+                  />
+                </div>
+
+                <div class="col-span-2">
+                  <label
+                    for="employee-memory"
+                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                  >
+                    MEMORY.md{" "}
+                    <span class="font-normal opacity-70 normal-case tracking-normal">
+                      (optional - memory policy)
+                    </span>
+                  </label>
+                  <textarea
+                    id="employee-memory"
+                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
+                    value={memory()}
+                    onInput={(e) => {
+                      setMemory(e.currentTarget.value);
+                      clearError();
+                    }}
+                    placeholder="What to remember, when to write, in what format. e.g. Persist user preferences after each turn under key 'pref:{topic}'."
+                    disabled={submitting()}
+                  />
+                </div>
+
+                <div class="col-span-2">
+                  <label
+                    for="employee-heartbeat"
+                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                  >
+                    HEARTBEAT.md{" "}
+                    <span class="font-normal opacity-70 normal-case tracking-normal">
+                      (optional - stored for scheduled or heartbeat-capable
+                      runs)
+                    </span>
+                  </label>
+                  <textarea
+                    id="employee-heartbeat"
+                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
+                    value={heartbeat()}
+                    onInput={(e) => {
+                      setHeartbeat(e.currentTarget.value);
+                      clearError();
+                    }}
+                    placeholder="Steps to execute on each scheduled run. e.g. 1. Check the calendar. 2. Summarize anything new. 3. Email if something needs attention."
+                    disabled={submitting()}
+                  />
+                </div>
+
+                <div class="col-span-2">
+                  <label
+                    for="employee-eval"
+                    class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                  >
+                    EVAL.md{" "}
+                    <span class="font-normal opacity-70 normal-case tracking-normal">
+                      (optional - packaged eval cases)
+                    </span>
+                  </label>
+                  <textarea
+                    id="employee-eval"
+                    class="w-full min-h-[90px] py-2 px-3 bg-card text-foreground border border-border rounded text-sm leading-relaxed resize-y focus:outline-none focus:border-primary"
+                    value={evalInstructions()}
+                    onInput={(e) => {
+                      setEvalInstructions(e.currentTarget.value);
+                      clearError();
+                    }}
+                    placeholder="Smoke or safety eval cases to package with this employee. Eval files are stored with the employee but omitted from the runtime prompt."
+                    disabled={submitting()}
+                  />
+                </div>
               </div>
             </Show>
           </div>
         </div>
 
         <div class="flex justify-end gap-2 py-4 px-5 border-t border-border sticky bottom-0 bg-popover">
+          <Show when={submitDisabledReason()}>
+            <span
+              id="employee-submit-reason"
+              class="mr-auto self-center text-[12px] text-muted-foreground"
+              role="status"
+            >
+              {submitDisabledReason()}
+            </span>
+          </Show>
           <button
             type="button"
             class="py-2 px-4 rounded text-[13px] font-medium cursor-pointer transition-all duration-150 bg-transparent text-foreground border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
@@ -823,6 +1447,10 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             class="py-2 px-4 rounded text-[13px] font-medium cursor-pointer transition-all duration-150 bg-primary text-primary-foreground border border-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleSubmit}
             disabled={!canSubmit()}
+            title={submitDisabledReason() || undefined}
+            aria-describedby={
+              submitDisabledReason() ? "employee-submit-reason" : undefined
+            }
           >
             {submitting()
               ? editing()

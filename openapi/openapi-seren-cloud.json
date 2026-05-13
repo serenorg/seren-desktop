@@ -412,7 +412,7 @@
         "tags": [
           "seren-cloud"
         ],
-        "summary": "Delete a deployment and clean up compute resources.",
+        "summary": "Delete a deployment and clean up runtime resources.",
         "operationId": "seren_cloud_delete",
         "parameters": [
           {
@@ -427,8 +427,15 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "Deployment deleted"
+          "200": {
+            "description": "Deployment deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_CloudDeploymentActionStatusResponse"
+                }
+              }
+            }
           },
           "404": {
             "description": "Not found"
@@ -574,7 +581,7 @@
         "tags": [
           "seren-cloud"
         ],
-        "summary": "Record a minimized Dispatch channel turn for a deployment.",
+        "summary": "Record a minimized external channel turn for a deployment.",
         "operationId": "seren_cloud_record_channel_run_event",
         "parameters": [
           {
@@ -3447,6 +3454,145 @@
   },
   "components": {
     "schemas": {
+      "AgentAssetFile": {
+        "type": "object",
+        "description": "Non-prompt file that belongs to an agent bundle.",
+        "required": [
+          "path",
+          "content_base64"
+        ],
+        "properties": {
+          "content_base64": {
+            "type": "string",
+            "description": "Base64-encoded file body."
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional MIME type supplied by the caller."
+          },
+          "path": {
+            "type": "string",
+            "description": "Agent-bundle relative path."
+          },
+          "purpose": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentAssetPurpose",
+                "description": "Optional caller-supplied purpose for UI grouping and runtime materialization."
+              }
+            ]
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional content digest for provenance. When present, the server verifies it."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentAssetPurpose": {
+        "type": "string",
+        "enum": [
+          "reference",
+          "script",
+          "schema",
+          "resource",
+          "eval"
+        ]
+      },
+      "AgentBundle": {
+        "type": "object",
+        "description": "Authored agent bundle used by LLM workloads.",
+        "properties": {
+          "assets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentAssetFile"
+            },
+            "description": "Additional files available to the agent runtime."
+          },
+          "instructions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentInstructionFile"
+            },
+            "description": "Prompt-bearing instruction files rendered server-side into the runtime\nsystem prompt."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentInstructionFile": {
+        "type": "object",
+        "description": "One authored instruction file.\n\nSupports inline instruction bodies as well as packaged workload metadata.",
+        "required": [
+          "kind",
+          "content"
+        ],
+        "properties": {
+          "allowed_tools": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional tool allowlist carried by skill metadata."
+          },
+          "content": {
+            "type": "string",
+            "description": "File body. Packaged workloads should provide the materialized instruction text."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AgentInstructionKind"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Original or packaged path, when known."
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional content digest for packaged workload provenance."
+          },
+          "skill_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Skill directory name, when the instruction came from a packaged skill."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentInstructionKind": {
+        "type": "string",
+        "description": "Typed instruction-file kind for managed LLM workloads.",
+        "enum": [
+          "identity",
+          "soul",
+          "skill",
+          "agents",
+          "user",
+          "tools",
+          "memory",
+          "heartbeat",
+          "eval"
+        ]
+      },
       "AuditEntry": {
         "type": "object",
         "description": "A single audit trail entry.",
@@ -3794,13 +3940,6 @@
         "properties": {
           "created_at": {
             "type": "string",
-            "format": "date-time"
-          },
-          "deleted_at": {
-            "type": [
-              "string",
-              "null"
-            ],
             "format": "date-time"
           },
           "description": {
@@ -4484,7 +4623,7 @@
           },
           "visibility": {
             "type": "string",
-            "description": "Visibility mode: \"open\" (default) or \"opaque\" (hides internals from non-owners)."
+            "description": "Visibility mode: \"open\" (default) or \"opaque\" (redacts selected details from non-owners)."
           }
         }
       },
@@ -6308,13 +6447,6 @@
                 "type": "string",
                 "format": "date-time"
               },
-              "deleted_at": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "format": "date-time"
-              },
               "description": {
                 "type": [
                   "string",
@@ -6829,7 +6961,7 @@
               },
               "visibility": {
                 "type": "string",
-                "description": "Visibility mode: \"open\" (default) or \"opaque\" (hides internals from non-owners)."
+                "description": "Visibility mode: \"open\" (default) or \"opaque\" (redacts selected details from non-owners)."
               }
             }
           },
@@ -7769,13 +7901,6 @@
                   "type": "string",
                   "format": "date-time"
                 },
-                "deleted_at": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "format": "date-time"
-                },
                 "description": {
                   "type": [
                     "string",
@@ -8284,7 +8409,7 @@
                 },
                 "visibility": {
                   "type": "string",
-                  "description": "Visibility mode: \"open\" (default) or \"opaque\" (hides internals from non-owners)."
+                  "description": "Visibility mode: \"open\" (default) or \"opaque\" (redacts selected details from non-owners)."
                 }
               }
             }
@@ -9670,7 +9795,7 @@
             "type": "object",
             "description": "LLM-orchestrated agent with optional tool definitions and model config.",
             "required": [
-              "system_prompt",
+              "bundle",
               "type"
             ],
             "properties": {
@@ -9684,6 +9809,10 @@
                     "description": "Runtime adapter used to run the agent loop."
                   }
                 ]
+              },
+              "bundle": {
+                "$ref": "#/components/schemas/AgentBundle",
+                "description": "Authored instruction and asset files for the LLM agent."
               },
               "fallback_models": {
                 "type": [
@@ -9715,10 +9844,6 @@
                   "null"
                 ],
                 "description": "Model identifier override (e.g. `\"anthropic/claude-sonnet-4.6\"`)."
-              },
-              "system_prompt": {
-                "type": "string",
-                "description": "System prompt delivered to the language model at runtime."
               },
               "tool_definitions": {
                 "type": [
@@ -9874,7 +9999,7 @@
           },
           "publisher_only": {
             "type": "boolean",
-            "description": "When true, the workload is exposed only to publisher-internal callers."
+            "description": "When true, the workload is exposed only through publisher-managed entry points."
           },
           "requirements": {
             "type": [

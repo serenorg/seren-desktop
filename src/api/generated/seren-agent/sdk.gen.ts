@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponses, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentErrors, SerenAgentDeleteManagedDeploymentResponses, SerenAgentDeployData, SerenAgentDeployErrors, SerenAgentDeployResponses, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentErrors, SerenAgentGetManagedDeploymentResponses, SerenAgentListDeploymentsData, SerenAgentListDeploymentsErrors, SerenAgentListDeploymentsResponses, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsErrors, SerenAgentListManagedDeploymentRevisionsResponses, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackErrors, SerenAgentPreviewManagedDeploymentRollbackResponses, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateErrors, SerenAgentPreviewManagedDeploymentUpdateResponses, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponses, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentErrors, SerenAgentRollbackManagedDeploymentResponses, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentErrors, SerenAgentStartManagedDeploymentResponses, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentErrors, SerenAgentStopManagedDeploymentResponses, SerenAgentTestRunData, SerenAgentTestRunErrors, SerenAgentTestRunResponses, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentErrors, SerenAgentUpdateManagedDeploymentResponses } from './types.gen';
+import type { SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponses, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentErrors, SerenAgentDeleteManagedDeploymentResponses, SerenAgentDeployData, SerenAgentDeployErrors, SerenAgentDeployResponses, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentErrors, SerenAgentGetManagedDeploymentResponses, SerenAgentListDeploymentsData, SerenAgentListDeploymentsErrors, SerenAgentListDeploymentsResponses, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsErrors, SerenAgentListManagedDeploymentRevisionsResponses, SerenAgentPatchManagedDeploymentFilesData, SerenAgentPatchManagedDeploymentFilesErrors, SerenAgentPatchManagedDeploymentFilesResponses, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackErrors, SerenAgentPreviewManagedDeploymentRollbackResponses, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateErrors, SerenAgentPreviewManagedDeploymentUpdateResponses, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponses, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentErrors, SerenAgentRollbackManagedDeploymentResponses, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentErrors, SerenAgentStartManagedDeploymentResponses, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentErrors, SerenAgentStopManagedDeploymentResponses, SerenAgentTestRunData, SerenAgentTestRunErrors, SerenAgentTestRunResponses, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentErrors, SerenAgentUpdateManagedDeploymentResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -50,7 +50,7 @@ export const serenAgentListDeployments = <ThrowOnError extends boolean = false>(
 });
 
 /**
- * Delete a managed seren-agent deployment.
+ * Delete a managed seren-agent deployment and clean up runtime resources.
  */
 export const serenAgentDeleteManagedDeployment = <ThrowOnError extends boolean = false>(options: Options<SerenAgentDeleteManagedDeploymentData, ThrowOnError>) => (options.client ?? client).delete<SerenAgentDeleteManagedDeploymentResponses, SerenAgentDeleteManagedDeploymentErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -73,6 +73,19 @@ export const serenAgentGetManagedDeployment = <ThrowOnError extends boolean = fa
 export const serenAgentUpdateManagedDeployment = <ThrowOnError extends boolean = false>(options: Options<SerenAgentUpdateManagedDeploymentData, ThrowOnError>) => (options.client ?? client).patch<SerenAgentUpdateManagedDeploymentResponses, SerenAgentUpdateManagedDeploymentErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/deployments/{id}/managed',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Update files for a managed deployment.
+ */
+export const serenAgentPatchManagedDeploymentFiles = <ThrowOnError extends boolean = false>(options: Options<SerenAgentPatchManagedDeploymentFilesData, ThrowOnError>) => (options.client ?? client).patch<SerenAgentPatchManagedDeploymentFilesResponses, SerenAgentPatchManagedDeploymentFilesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/managed/files',
     ...options,
     headers: {
         'Content-Type': 'application/json',

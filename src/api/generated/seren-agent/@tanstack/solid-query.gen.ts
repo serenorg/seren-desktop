@@ -3,8 +3,8 @@
 import { type DefaultError, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { type Options, serenAgentCapabilities, serenAgentDeleteManagedDeployment, serenAgentDeploy, serenAgentGetManagedDeployment, serenAgentListDeployments, serenAgentListManagedDeploymentRevisions, serenAgentPreviewManagedDeploymentRollback, serenAgentPreviewManagedDeploymentUpdate, serenAgentPrivateModels, serenAgentRollbackManagedDeployment, serenAgentStartManagedDeployment, serenAgentStopManagedDeployment, serenAgentTestRun, serenAgentUpdateManagedDeployment } from '../sdk.gen';
-import type { SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponse, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentResponse, SerenAgentDeployData, SerenAgentDeployResponse, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentResponse, SerenAgentListDeploymentsData, SerenAgentListDeploymentsResponse, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsResponse, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackResponse, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateResponse, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponse, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentResponse, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentResponse, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentResponse, SerenAgentTestRunData, SerenAgentTestRunResponse, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentResponse } from '../types.gen';
+import { type Options, serenAgentCapabilities, serenAgentDeleteManagedDeployment, serenAgentDeploy, serenAgentGetManagedDeployment, serenAgentListDeployments, serenAgentListManagedDeploymentRevisions, serenAgentPatchManagedDeploymentFiles, serenAgentPreviewManagedDeploymentRollback, serenAgentPreviewManagedDeploymentUpdate, serenAgentPrivateModels, serenAgentRollbackManagedDeployment, serenAgentStartManagedDeployment, serenAgentStopManagedDeployment, serenAgentTestRun, serenAgentUpdateManagedDeployment } from '../sdk.gen';
+import type { SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponse, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentResponse, SerenAgentDeployData, SerenAgentDeployResponse, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentResponse, SerenAgentListDeploymentsData, SerenAgentListDeploymentsResponse, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsResponse, SerenAgentPatchManagedDeploymentFilesData, SerenAgentPatchManagedDeploymentFilesResponse, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackResponse, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateResponse, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponse, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentResponse, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentResponse, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentResponse, SerenAgentTestRunData, SerenAgentTestRunResponse, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -93,7 +93,7 @@ export const serenAgentListDeploymentsOptions = (options?: Options<SerenAgentLis
 });
 
 /**
- * Delete a managed seren-agent deployment.
+ * Delete a managed seren-agent deployment and clean up runtime resources.
  */
 export const serenAgentDeleteManagedDeploymentMutation = (options?: Partial<Options<SerenAgentDeleteManagedDeploymentData>>): MutationOptions<SerenAgentDeleteManagedDeploymentResponse, DefaultError, Options<SerenAgentDeleteManagedDeploymentData>> => {
     const mutationOptions: MutationOptions<SerenAgentDeleteManagedDeploymentResponse, DefaultError, Options<SerenAgentDeleteManagedDeploymentData>> = {
@@ -134,6 +134,23 @@ export const serenAgentUpdateManagedDeploymentMutation = (options?: Partial<Opti
     const mutationOptions: MutationOptions<SerenAgentUpdateManagedDeploymentResponse, DefaultError, Options<SerenAgentUpdateManagedDeploymentData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await serenAgentUpdateManagedDeployment({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Update files for a managed deployment.
+ */
+export const serenAgentPatchManagedDeploymentFilesMutation = (options?: Partial<Options<SerenAgentPatchManagedDeploymentFilesData>>): MutationOptions<SerenAgentPatchManagedDeploymentFilesResponse, DefaultError, Options<SerenAgentPatchManagedDeploymentFilesData>> => {
+    const mutationOptions: MutationOptions<SerenAgentPatchManagedDeploymentFilesResponse, DefaultError, Options<SerenAgentPatchManagedDeploymentFilesData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await serenAgentPatchManagedDeploymentFiles({
                 ...options,
                 ...fnOptions,
                 throwOnError: true

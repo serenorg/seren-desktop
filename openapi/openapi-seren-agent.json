@@ -121,7 +121,7 @@
         "tags": [
           "seren-agent"
         ],
-        "summary": "Delete a managed seren-agent deployment.",
+        "summary": "Delete a managed seren-agent deployment and clean up runtime resources.",
         "operationId": "seren_agent_delete_managed_deployment",
         "parameters": [
           {
@@ -234,6 +234,63 @@
         "responses": {
           "200": {
             "description": "Managed deployment updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_CloudDeploymentSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "403": {
+            "description": "Managed deployment is opaque to this caller"
+          },
+          "404": {
+            "description": "Deployment not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/deployments/{id}/managed/files": {
+      "patch": {
+        "tags": [
+          "seren-agent"
+        ],
+        "summary": "Update files for a managed deployment.",
+        "operationId": "seren_agent_patch_managed_deployment_files",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Deployment ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentBundlePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Managed deployment files updated",
             "content": {
               "application/json": {
                 "schema": {
@@ -644,6 +701,116 @@
   },
   "components": {
     "schemas": {
+      "AgentAssetFile": {
+        "type": "object",
+        "description": "Non-prompt file that belongs to an agent bundle.",
+        "required": [
+          "path",
+          "content_base64"
+        ],
+        "properties": {
+          "content_base64": {
+            "type": "string",
+            "description": "Base64-encoded file body."
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional MIME type supplied by the caller."
+          },
+          "path": {
+            "type": "string",
+            "description": "Agent-bundle relative path."
+          },
+          "purpose": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentAssetPurpose",
+                "description": "Optional caller-supplied purpose for UI grouping and runtime materialization."
+              }
+            ]
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional content digest for provenance. When present, the server verifies it."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentAssetPurpose": {
+        "type": "string",
+        "enum": [
+          "reference",
+          "script",
+          "schema",
+          "resource",
+          "eval"
+        ]
+      },
+      "AgentBundle": {
+        "type": "object",
+        "description": "Authored agent bundle used by LLM workloads.",
+        "properties": {
+          "assets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentAssetFile"
+            },
+            "description": "Additional files available to the agent runtime."
+          },
+          "instructions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentInstructionFile"
+            },
+            "description": "Prompt-bearing instruction files rendered server-side into the runtime\nsystem prompt."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentBundlePatch": {
+        "type": "object",
+        "description": "Partial agent-bundle update for an existing managed deployment.",
+        "properties": {
+          "remove_assets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Asset paths to remove before applying upserts."
+          },
+          "remove_instructions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentInstructionFileSelector"
+            },
+            "description": "Instruction files to remove before applying upserts."
+          },
+          "upsert_assets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentAssetFile"
+            },
+            "description": "Asset files to insert or replace. Identity is `path`."
+          },
+          "upsert_instructions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentInstructionFile"
+            },
+            "description": "Instruction files to insert or replace. Identity is `(kind, path)`."
+          }
+        },
+        "additionalProperties": false
+      },
       "AgentCapabilitiesResponse": {
         "type": "object",
         "required": [
@@ -702,6 +869,90 @@
             "type": "boolean"
           }
         }
+      },
+      "AgentInstructionFile": {
+        "type": "object",
+        "description": "One authored instruction file.\n\nSupports inline instruction bodies as well as packaged workload metadata.",
+        "required": [
+          "kind",
+          "content"
+        ],
+        "properties": {
+          "allowed_tools": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional tool allowlist carried by skill metadata."
+          },
+          "content": {
+            "type": "string",
+            "description": "File body. Packaged workloads should provide the materialized instruction text."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AgentInstructionKind"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Original or packaged path, when known."
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional content digest for packaged workload provenance."
+          },
+          "skill_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Skill directory name, when the instruction came from a packaged skill."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentInstructionFileSelector": {
+        "type": "object",
+        "description": "Selects instruction files to remove from a managed deployment bundle.",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/AgentInstructionKind"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Original or packaged path. When omitted, every instruction with this kind is selected."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentInstructionKind": {
+        "type": "string",
+        "description": "Typed instruction-file kind for managed LLM workloads.",
+        "enum": [
+          "identity",
+          "soul",
+          "skill",
+          "agents",
+          "user",
+          "tools",
+          "memory",
+          "heartbeat",
+          "eval"
+        ]
       },
       "AgentSpec": {
         "type": "object",
@@ -1019,7 +1270,7 @@
               },
               {
                 "$ref": "#/components/schemas/WorkloadSpec",
-                "description": "Replaces the entire workload when present. Partial-workload patching\nis a future PR; for now, callers must send a complete `WorkloadSpec`\nto update any workload-level field."
+                "description": "Replaces the entire workload when present. Use the managed files endpoint\nfor targeted bundle file changes."
               }
             ]
           }
@@ -1379,7 +1630,7 @@
           },
           "visibility": {
             "type": "string",
-            "description": "Visibility mode: \"open\" (default) or \"opaque\" (hides internals from non-owners)."
+            "description": "Visibility mode: \"open\" (default) or \"opaque\" (redacts selected details from non-owners)."
           }
         }
       },
@@ -1679,7 +1930,7 @@
               },
               "visibility": {
                 "type": "string",
-                "description": "Visibility mode: \"open\" (default) or \"opaque\" (hides internals from non-owners)."
+                "description": "Visibility mode: \"open\" (default) or \"opaque\" (redacts selected details from non-owners)."
               }
             }
           },
@@ -1713,6 +1964,7 @@
               "compute_backend",
               "runtime_kind",
               "status",
+              "bundle",
               "model_id",
               "model_config",
               "template",
@@ -1764,6 +2016,9 @@
               },
               "approval_policy": {
                 "$ref": "#/components/schemas/ManagedAgentApprovalPolicy"
+              },
+              "bundle": {
+                "$ref": "#/components/schemas/AgentBundle"
               },
               "compute_backend": {
                 "$ref": "#/components/schemas/CloudDeploymentComputeBackend"
@@ -1881,12 +2136,6 @@
               },
               "private_output_policy": {
                 "$ref": "#/components/schemas/ManagedAgentPrivateOutputPolicy"
-              },
-              "prompt": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "requirements": {
                 "type": "array",
@@ -2381,7 +2630,7 @@
                 },
                 "visibility": {
                   "type": "string",
-                  "description": "Visibility mode: \"open\" (default) or \"opaque\" (hides internals from non-owners)."
+                  "description": "Visibility mode: \"open\" (default) or \"opaque\" (redacts selected details from non-owners)."
                 }
               }
             }
@@ -2539,6 +2788,7 @@
           "compute_backend",
           "runtime_kind",
           "status",
+          "bundle",
           "model_id",
           "model_config",
           "template",
@@ -2590,6 +2840,9 @@
           },
           "approval_policy": {
             "$ref": "#/components/schemas/ManagedAgentApprovalPolicy"
+          },
+          "bundle": {
+            "$ref": "#/components/schemas/AgentBundle"
           },
           "compute_backend": {
             "$ref": "#/components/schemas/CloudDeploymentComputeBackend"
@@ -2707,12 +2960,6 @@
           },
           "private_output_policy": {
             "$ref": "#/components/schemas/ManagedAgentPrivateOutputPolicy"
-          },
-          "prompt": {
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "requirements": {
             "type": "array",
@@ -3610,7 +3857,7 @@
             "type": "object",
             "description": "LLM-orchestrated agent with optional tool definitions and model config.",
             "required": [
-              "system_prompt",
+              "bundle",
               "type"
             ],
             "properties": {
@@ -3624,6 +3871,10 @@
                     "description": "Runtime adapter used to run the agent loop."
                   }
                 ]
+              },
+              "bundle": {
+                "$ref": "#/components/schemas/AgentBundle",
+                "description": "Authored instruction and asset files for the LLM agent."
               },
               "fallback_models": {
                 "type": [
@@ -3655,10 +3906,6 @@
                   "null"
                 ],
                 "description": "Model identifier override (e.g. `\"anthropic/claude-sonnet-4.6\"`)."
-              },
-              "system_prompt": {
-                "type": "string",
-                "description": "System prompt delivered to the language model at runtime."
               },
               "tool_definitions": {
                 "type": [
@@ -3814,7 +4061,7 @@
           },
           "publisher_only": {
             "type": "boolean",
-            "description": "When true, the workload is exposed only to publisher-internal callers."
+            "description": "When true, the workload is exposed only through publisher-managed entry points."
           },
           "requirements": {
             "type": [

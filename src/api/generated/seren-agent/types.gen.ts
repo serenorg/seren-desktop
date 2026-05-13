@@ -4,6 +4,68 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}/publishers/seren-agent` | (string & {});
 };
 
+/**
+ * Non-prompt file that belongs to an agent bundle.
+ */
+export type AgentAssetFile = {
+    /**
+     * Base64-encoded file body.
+     */
+    content_base64: string;
+    /**
+     * Optional MIME type supplied by the caller.
+     */
+    content_type?: string | null;
+    /**
+     * Agent-bundle relative path.
+     */
+    path: string;
+    purpose?: null | AgentAssetPurpose;
+    /**
+     * Optional content digest for provenance. When present, the server verifies it.
+     */
+    sha256?: string | null;
+};
+
+export type AgentAssetPurpose = 'reference' | 'script' | 'schema' | 'resource' | 'eval';
+
+/**
+ * Authored agent bundle used by LLM workloads.
+ */
+export type AgentBundle = {
+    /**
+     * Additional files available to the agent runtime.
+     */
+    assets?: Array<AgentAssetFile>;
+    /**
+     * Prompt-bearing instruction files rendered server-side into the runtime
+     * system prompt.
+     */
+    instructions?: Array<AgentInstructionFile>;
+};
+
+/**
+ * Partial agent-bundle update for an existing managed deployment.
+ */
+export type AgentBundlePatch = {
+    /**
+     * Asset paths to remove before applying upserts.
+     */
+    remove_assets?: Array<string>;
+    /**
+     * Instruction files to remove before applying upserts.
+     */
+    remove_instructions?: Array<AgentInstructionFileSelector>;
+    /**
+     * Asset files to insert or replace. Identity is `path`.
+     */
+    upsert_assets?: Array<AgentAssetFile>;
+    /**
+     * Instruction files to insert or replace. Identity is `(kind, path)`.
+     */
+    upsert_instructions?: Array<AgentInstructionFile>;
+};
+
 export type AgentCapabilitiesResponse = {
     deployment_runtime_api: string;
     deployment_targets: Array<string>;
@@ -16,6 +78,51 @@ export type AgentCapabilitiesResponse = {
     supports_direct_skill_deploy: boolean;
     supports_orchestrated_deploy: boolean;
 };
+
+/**
+ * One authored instruction file.
+ *
+ * Supports inline instruction bodies as well as packaged workload metadata.
+ */
+export type AgentInstructionFile = {
+    /**
+     * Optional tool allowlist carried by skill metadata.
+     */
+    allowed_tools?: Array<string> | null;
+    /**
+     * File body. Packaged workloads should provide the materialized instruction text.
+     */
+    content: string;
+    kind: AgentInstructionKind;
+    /**
+     * Original or packaged path, when known.
+     */
+    path?: string | null;
+    /**
+     * Optional content digest for packaged workload provenance.
+     */
+    sha256?: string | null;
+    /**
+     * Skill directory name, when the instruction came from a packaged skill.
+     */
+    skill_name?: string | null;
+};
+
+/**
+ * Selects instruction files to remove from a managed deployment bundle.
+ */
+export type AgentInstructionFileSelector = {
+    kind: AgentInstructionKind;
+    /**
+     * Original or packaged path. When omitted, every instruction with this kind is selected.
+     */
+    path?: string | null;
+};
+
+/**
+ * Typed instruction-file kind for managed LLM workloads.
+ */
+export type AgentInstructionKind = 'identity' | 'soul' | 'skill' | 'agents' | 'user' | 'tools' | 'memory' | 'heartbeat' | 'eval';
 
 /**
  * Managed deploy request for the `seren-agent` first-class publisher.
@@ -255,7 +362,7 @@ export type CloudDeploymentSummary = {
     updated_at: string;
     user_id: string;
     /**
-     * Visibility mode: "open" (default) or "opaque" (hides internals from non-owners).
+     * Visibility mode: "open" (default) or "opaque" (redacts selected details from non-owners).
      */
     visibility: string;
 };
@@ -535,7 +642,7 @@ export type DataResponseCloudDeploymentSummary = {
         updated_at: string;
         user_id: string;
         /**
-         * Visibility mode: "open" (default) or "opaque" (hides internals from non-owners).
+         * Visibility mode: "open" (default) or "opaque" (redacts selected details from non-owners).
          */
         visibility: string;
     };
@@ -623,6 +730,7 @@ export type DataResponseManagedAgentDeploymentDetail = {
         allowed_publisher_operations: Array<string>;
         allowed_remote_agent_origins?: Array<string>;
         approval_policy: ManagedAgentApprovalPolicy;
+        bundle: AgentBundle;
         compute_backend: CloudDeploymentComputeBackend;
         config?: unknown;
         context_budget_tokens?: number | null;
@@ -644,7 +752,6 @@ export type DataResponseManagedAgentDeploymentDetail = {
         name: string;
         network_policy?: null | CloudDeploymentNetworkPolicy;
         private_output_policy: ManagedAgentPrivateOutputPolicy;
-        prompt?: string | null;
         requirements: Array<RequirementSpec>;
         resolved_tools: Array<string>;
         routing_reason: string;
@@ -1097,7 +1204,7 @@ export type DataResponseVecCloudDeploymentSummary = {
         updated_at: string;
         user_id: string;
         /**
-         * Visibility mode: "open" (default) or "opaque" (hides internals from non-owners).
+         * Visibility mode: "open" (default) or "opaque" (redacts selected details from non-owners).
          */
         visibility: string;
     }>;
@@ -1215,6 +1322,7 @@ export type ManagedAgentDeploymentDetail = {
     allowed_publisher_operations: Array<string>;
     allowed_remote_agent_origins?: Array<string>;
     approval_policy: ManagedAgentApprovalPolicy;
+    bundle: AgentBundle;
     compute_backend: CloudDeploymentComputeBackend;
     config?: unknown;
     context_budget_tokens?: number | null;
@@ -1236,7 +1344,6 @@ export type ManagedAgentDeploymentDetail = {
     name: string;
     network_policy?: null | CloudDeploymentNetworkPolicy;
     private_output_policy: ManagedAgentPrivateOutputPolicy;
-    prompt?: string | null;
     requirements: Array<RequirementSpec>;
     resolved_tools: Array<string>;
     routing_reason: string;
@@ -1523,6 +1630,10 @@ export type ToolDefinition = {
 export type WorkloadExecution = {
     adapter?: null | ManagedAgentRuntimeAdapter;
     /**
+     * Authored instruction and asset files for the LLM agent.
+     */
+    bundle: AgentBundle;
+    /**
      * Ordered list of fallback model identifiers tried on primary failure.
      */
     fallback_models?: Array<string> | null;
@@ -1535,10 +1646,6 @@ export type WorkloadExecution = {
      * Model identifier override (e.g. `"anthropic/claude-sonnet-4.6"`).
      */
     model_id?: string | null;
-    /**
-     * System prompt delivered to the language model at runtime.
-     */
-    system_prompt: string;
     /**
      * Tool definitions available to the LLM during execution.
      */
@@ -1608,7 +1715,7 @@ export type WorkloadSpec = {
     limits?: WorkloadLimits;
     network_policy?: null | CloudDeploymentNetworkPolicy;
     /**
-     * When true, the workload is exposed only to publisher-internal callers.
+     * When true, the workload is exposed only through publisher-managed entry points.
      */
     publisher_only?: boolean;
     /**
@@ -1787,6 +1894,42 @@ export type SerenAgentUpdateManagedDeploymentResponses = {
 };
 
 export type SerenAgentUpdateManagedDeploymentResponse = SerenAgentUpdateManagedDeploymentResponses[keyof SerenAgentUpdateManagedDeploymentResponses];
+
+export type SerenAgentPatchManagedDeploymentFilesData = {
+    body: AgentBundlePatch;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/managed/files';
+};
+
+export type SerenAgentPatchManagedDeploymentFilesErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Managed deployment is opaque to this caller
+     */
+    403: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenAgentPatchManagedDeploymentFilesResponses = {
+    /**
+     * Managed deployment files updated
+     */
+    200: DataResponseCloudDeploymentSummary;
+};
+
+export type SerenAgentPatchManagedDeploymentFilesResponse = SerenAgentPatchManagedDeploymentFilesResponses[keyof SerenAgentPatchManagedDeploymentFilesResponses];
 
 export type SerenAgentPreviewManagedDeploymentUpdateData = {
     body: AgentSpecUpdate;

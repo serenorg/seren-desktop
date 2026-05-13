@@ -99,7 +99,7 @@ export const serenCloudListDeployments = <ThrowOnError extends boolean = false>(
 });
 
 /**
- * Delete a deployment and clean up compute resources.
+ * Delete a deployment and clean up runtime resources.
  */
 export const serenCloudDelete = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeleteData, ThrowOnError>) => (options.client ?? client).delete<SerenCloudDeleteResponses, SerenCloudDeleteErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -139,7 +139,7 @@ export const serenCloudDeploymentAudit = <ThrowOnError extends boolean = false>(
 });
 
 /**
- * Record a minimized Dispatch channel turn for a deployment.
+ * Record a minimized external channel turn for a deployment.
  */
 export const serenCloudRecordChannelRunEvent = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRecordChannelRunEventData, ThrowOnError>) => (options.client ?? client).post<SerenCloudRecordChannelRunEventResponses, SerenCloudRecordChannelRunEventErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
