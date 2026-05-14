@@ -14,6 +14,7 @@ import {
 } from "solid-js";
 import { SessionExpiredModal } from "@/components/auth/SessionExpiredModal";
 import { SignIn } from "@/components/auth/SignIn";
+import { CatalogList } from "@/components/catalog/CatalogList";
 import { StatusBar } from "@/components/common/StatusBar";
 import { ArchivedEmployeeDetail } from "@/components/employees/ArchivedEmployeeDetail";
 import { EmployeeDetail } from "@/components/employees/EmployeeDetail";
@@ -22,8 +23,10 @@ import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import {
+  CLOSE_CATALOG_EVENT,
   CLOSE_EMPLOYEE_DETAIL_EVENT,
   type EmployeeDetailEventDetail,
+  OPEN_CATALOG_EVENT,
   OPEN_EMPLOYEE_DETAIL_EVENT,
 } from "@/components/sidebar/EmployeesSection";
 import { PublishSkillModal } from "@/components/sidebar/PublishSkillModal";
@@ -132,13 +135,17 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const [activeEmployeeId, setActiveEmployeeId] = createSignal<string | null>(
     null,
   );
+  const [catalogOpen, setCatalogOpen] = createSignal(false);
   createEffect(() => {
     persistSlidePanel(slidePanel());
   });
 
   const handleOpenEmployeeDetail = (event: Event) => {
     const detail = (event as CustomEvent<EmployeeDetailEventDetail>).detail;
-    if (detail?.employeeId) setActiveEmployeeId(detail.employeeId);
+    if (detail?.employeeId) {
+      setActiveEmployeeId(detail.employeeId);
+      setCatalogOpen(false);
+    }
   };
 
   const handleCloseEmployeeDetail = () => {
@@ -148,6 +155,15 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const closeEmployeeDetailPane = () => {
     setActiveEmployeeId(null);
     window.dispatchEvent(new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT));
+  };
+
+  const handleOpenCatalog = () => {
+    setCatalogOpen(true);
+    setActiveEmployeeId(null);
+  };
+
+  const handleCloseCatalog = () => {
+    setCatalogOpen(false);
   };
 
   createEffect(
@@ -170,9 +186,13 @@ export const AppShell: Component<AppShellProps> = (props) => {
       CLOSE_EMPLOYEE_DETAIL_EVENT,
       handleCloseEmployeeDetail,
     );
+    window.addEventListener(OPEN_CATALOG_EVENT, handleOpenCatalog);
+    window.addEventListener(CLOSE_CATALOG_EVENT, handleCloseCatalog);
   });
 
   onCleanup(() => {
+    window.removeEventListener(OPEN_CATALOG_EVENT, handleOpenCatalog);
+    window.removeEventListener(CLOSE_CATALOG_EVENT, handleCloseCatalog);
     window.removeEventListener(
       OPEN_EMPLOYEE_DETAIL_EVENT,
       handleOpenEmployeeDetail,
@@ -479,30 +499,37 @@ export const AppShell: Component<AppShellProps> = (props) => {
           onToggle={() => setSidebarCollapsed((v) => !v)}
         />
 
-        <main class="flex-1 overflow-hidden flex flex-col min-w-0">
+        <main class="flex-1 overflow-auto flex flex-col min-w-0">
           <Show
-            when={activeEmployeeId()}
-            fallback={<ThreadContent onSignInClick={handleSignInClick} />}
-          >
-            {(id) => (
+            when={catalogOpen()}
+            fallback={
               <Show
-                when={
-                  employeeStore.byId(id()) === undefined &&
-                  employeeStore.archivedById(id()) !== undefined
-                }
-                fallback={
-                  <EmployeeDetail
-                    employeeId={id()}
-                    onClose={closeEmployeeDetailPane}
-                  />
-                }
+                when={activeEmployeeId()}
+                fallback={<ThreadContent onSignInClick={handleSignInClick} />}
               >
-                <ArchivedEmployeeDetail
-                  employeeId={id()}
-                  onClose={closeEmployeeDetailPane}
-                />
+                {(id) => (
+                  <Show
+                    when={
+                      employeeStore.byId(id()) === undefined &&
+                      employeeStore.archivedById(id()) !== undefined
+                    }
+                    fallback={
+                      <EmployeeDetail
+                        employeeId={id()}
+                        onClose={closeEmployeeDetailPane}
+                      />
+                    }
+                  >
+                    <ArchivedEmployeeDetail
+                      employeeId={id()}
+                      onClose={closeEmployeeDetailPane}
+                    />
+                  </Show>
+                )}
               </Show>
-            )}
+            }
+          >
+            <CatalogList />
           </Show>
         </main>
 

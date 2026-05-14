@@ -35,6 +35,105 @@ export type AddPaymentMethodRequest = {
 };
 
 /**
+ * A single catalog entry. The four fields `organization_id`, `namespace`,
+ * `name`, and `version` together form the immutable identity of an entry.
+ * `tag` is an optional mutable pointer (for example `stable`) that resolves
+ * to the underlying version at lookup time.
+ */
+export type AgentCatalogEntry = {
+    /**
+     * Narrative key/value annotations; not indexed and not queryable.
+     */
+    annotations: unknown;
+    category?: string | null;
+    created_at: string;
+    created_by_user_id?: string | null;
+    deprecated: boolean;
+    description: string;
+    id: string;
+    kind: AgentCatalogEntryKind;
+    /**
+     * Queryable key/value labels (e.g. `team=platform`, `env=prod`).
+     */
+    labels: unknown;
+    name: string;
+    namespace: string;
+    organization_id: string;
+    /**
+     * Dependencies this entry requires to be useful (`mcp_servers`,
+     * `connectors`, `features`).
+     */
+    requires: unknown;
+    /**
+     * Where the artifact lives. Free-form JSON so we can evolve the source
+     * shape (`inline`, `git`, `registry`, ...) without further migrations.
+     */
+    source: unknown;
+    tag?: string | null;
+    /**
+     * Trust and provenance metadata (`author`, `maintained_by`, `license`,
+     * `last_audit_at`). Free-form for now; concrete shape comes later.
+     */
+    trust: unknown;
+    updated_at: string;
+    version: string;
+};
+
+/**
+ * Request body for creating or upserting a catalog entry. The control plane
+ * owns the `id`, `organization_id`, timestamps, and `created_by_user_id`.
+ */
+export type AgentCatalogEntryCreateRequest = {
+    annotations?: unknown;
+    category?: string | null;
+    deprecated?: boolean | null;
+    description?: string | null;
+    kind: AgentCatalogEntryKind;
+    labels?: unknown;
+    name: string;
+    namespace?: string | null;
+    requires?: unknown;
+    source?: unknown;
+    tag?: string | null;
+    trust?: unknown;
+    version: string;
+};
+
+/**
+ * Closed set of catalog entry kinds. New kinds should be added here only
+ * when there is a clear semantic distinction, not to model variants of an
+ * existing kind.
+ */
+export type AgentCatalogEntryKind = 'agent' | 'skill' | 'mcp_server' | 'prompt' | 'runtime_policy';
+
+/**
+ * Partial update for an existing entry. The identity tuple
+ * `(organization_id, namespace, name, version)` is fixed; only mutable fields
+ * may change. To move a tag pointer set `tag` directly. To clear a tag set
+ * `clear_tag = true`.
+ */
+export type AgentCatalogEntryUpdateRequest = {
+    annotations?: unknown;
+    category?: string | null;
+    clear_category?: boolean;
+    clear_tag?: boolean;
+    deprecated?: boolean | null;
+    description?: string | null;
+    labels?: unknown;
+    requires?: unknown;
+    source?: unknown;
+    tag?: string | null;
+    trust?: unknown;
+};
+
+/**
+ * Response wrapping a list of catalog entries.
+ */
+export type AgentCatalogListResponse = {
+    data: Array<AgentCatalogEntry>;
+};
+
+/**
  * Source of an agent credit grant (fiat-only, no on-chain deposits)
  */
 export type AgentCreditSource = 'fiat_purchase' | 'signup_bonus' | 'payment_method_bonus' | 'daily_claim' | 'referral_reward' | 'admin_grant' | 'promo_code' | 'tier_bonus' | 'refund' | 'publisher_payout';
@@ -1068,6 +1167,204 @@ export type DataResponseAccountSecurity = {
          * Whether this account can authenticate directly with an email/password.
          */
         has_password: boolean;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseAgentCatalogEntry = {
+    /**
+     * A single catalog entry. The four fields `organization_id`, `namespace`,
+     * `name`, and `version` together form the immutable identity of an entry.
+     * `tag` is an optional mutable pointer (for example `stable`) that resolves
+     * to the underlying version at lookup time.
+     */
+    data: {
+        /**
+         * Narrative key/value annotations; not indexed and not queryable.
+         */
+        annotations: unknown;
+        category?: string | null;
+        created_at: string;
+        created_by_user_id?: string | null;
+        deprecated: boolean;
+        description: string;
+        id: string;
+        kind: AgentCatalogEntryKind;
+        /**
+         * Queryable key/value labels (e.g. `team=platform`, `env=prod`).
+         */
+        labels: unknown;
+        name: string;
+        namespace: string;
+        organization_id: string;
+        /**
+         * Dependencies this entry requires to be useful (`mcp_servers`,
+         * `connectors`, `features`).
+         */
+        requires: unknown;
+        /**
+         * Where the artifact lives. Free-form JSON so we can evolve the source
+         * shape (`inline`, `git`, `registry`, ...) without further migrations.
+         */
+        source: unknown;
+        tag?: string | null;
+        /**
+         * Trust and provenance metadata (`author`, `maintained_by`, `license`,
+         * `last_audit_at`). Free-form for now; concrete shape comes later.
+         */
+        trust: unknown;
+        updated_at: string;
+        version: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseAgentCatalogListResponse = {
+    /**
+     * Response wrapping a list of catalog entries.
+     */
+    data: {
+        data: Array<AgentCatalogEntry>;
     };
     pagination?: null | PaginationMeta;
 };
@@ -15124,6 +15421,251 @@ export type GetEndpointBillingEventsResponses = {
 };
 
 export type GetEndpointBillingEventsResponse = GetEndpointBillingEventsResponses[keyof GetEndpointBillingEventsResponses];
+
+export type ListCatalogEntriesData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+    };
+    query?: {
+        /**
+         * Filter by namespace
+         */
+        namespace?: string;
+        /**
+         * Filter by entry kind
+         */
+        kind?: AgentCatalogEntryKind;
+        /**
+         * Filter by entry name
+         */
+        name?: string;
+        /**
+         * Filter by mutable tag pointer
+         */
+        tag?: string;
+        /**
+         * Include deprecated entries
+         */
+        include_deprecated?: boolean;
+    };
+    url: '/organizations/{organization_id}/catalog';
+};
+
+export type ListCatalogEntriesErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type ListCatalogEntriesResponses = {
+    /**
+     * Catalog entries for the organization
+     */
+    200: DataResponseAgentCatalogListResponse;
+};
+
+export type ListCatalogEntriesResponse = ListCatalogEntriesResponses[keyof ListCatalogEntriesResponses];
+
+export type CreateCatalogEntryData = {
+    body: AgentCatalogEntryCreateRequest;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/catalog';
+};
+
+export type CreateCatalogEntryErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Entry with the same identity already exists
+     */
+    409: unknown;
+};
+
+export type CreateCatalogEntryResponses = {
+    /**
+     * Catalog entry created
+     */
+    201: DataResponseAgentCatalogEntry;
+};
+
+export type CreateCatalogEntryResponse = CreateCatalogEntryResponses[keyof CreateCatalogEntryResponses];
+
+export type DeleteCatalogEntryData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Catalog entry ID
+         */
+        entry_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/catalog/{entry_id}';
+};
+
+export type DeleteCatalogEntryErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Catalog entry not found
+     */
+    404: unknown;
+};
+
+export type DeleteCatalogEntryResponses = {
+    /**
+     * Catalog entry deleted
+     */
+    204: void;
+};
+
+export type DeleteCatalogEntryResponse = DeleteCatalogEntryResponses[keyof DeleteCatalogEntryResponses];
+
+export type GetCatalogEntryData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Catalog entry ID
+         */
+        entry_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/catalog/{entry_id}';
+};
+
+export type GetCatalogEntryErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Catalog entry not found
+     */
+    404: unknown;
+};
+
+export type GetCatalogEntryResponses = {
+    /**
+     * Catalog entry
+     */
+    200: DataResponseAgentCatalogEntry;
+};
+
+export type GetCatalogEntryResponse = GetCatalogEntryResponses[keyof GetCatalogEntryResponses];
+
+export type UpdateCatalogEntryData = {
+    body: AgentCatalogEntryUpdateRequest;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Catalog entry ID
+         */
+        entry_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/catalog/{entry_id}';
+};
+
+export type UpdateCatalogEntryErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Catalog entry not found
+     */
+    404: unknown;
+    /**
+     * Tag pointer collision
+     */
+    409: unknown;
+};
+
+export type UpdateCatalogEntryResponses = {
+    /**
+     * Catalog entry updated
+     */
+    200: DataResponseAgentCatalogEntry;
+};
+
+export type UpdateCatalogEntryResponse = UpdateCatalogEntryResponses[keyof UpdateCatalogEntryResponses];
+
+export type ResolveCatalogTagData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Catalog namespace
+         */
+        namespace: string;
+        /**
+         * Catalog entry name
+         */
+        name: string;
+        /**
+         * Mutable tag pointer to resolve
+         */
+        tag: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/catalog/{namespace}/{name}/by-tag/{tag}';
+};
+
+export type ResolveCatalogTagErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * No entry carries the named tag
+     */
+    404: unknown;
+};
+
+export type ResolveCatalogTagResponses = {
+    /**
+     * Catalog entry the tag points at
+     */
+    200: DataResponseAgentCatalogEntry;
+};
+
+export type ResolveCatalogTagResponse = ResolveCatalogTagResponses[keyof ResolveCatalogTagResponses];
 
 export type GetOrganizationConsumptionData = {
     body?: never;

@@ -28,6 +28,8 @@ const STATUS_REFRESH_INTERVAL_MS = 30_000;
 
 export const OPEN_EMPLOYEE_DETAIL_EVENT = "seren:open-employee-detail";
 export const CLOSE_EMPLOYEE_DETAIL_EVENT = "seren:close-employee-detail";
+export const OPEN_CATALOG_EVENT = "seren:open-catalog";
+export const CLOSE_CATALOG_EVENT = "seren:close-catalog";
 
 export type EmployeeDetailEventDetail = { employeeId: string };
 
