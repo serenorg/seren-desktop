@@ -13,7 +13,7 @@ const AVG_TOOL_WORDS: f32 = 60.0;
 const CHARS_PER_TOKEN: usize = 4;
 
 /// Default token budget for selected tools sent to the model per request.
-const DEFAULT_TOOL_TOKEN_BUDGET: usize = 12_000;
+const DEFAULT_TOOL_TOKEN_BUDGET: usize = 24_000;
 
 /// Minimum tools always included regardless of BM25 score.
 const MIN_TOOLS: usize = 5;
@@ -90,7 +90,7 @@ fn model_budget(model_id: &str) -> (usize, usize) {
         return (50, 8_000);
     }
     // Default for modern models with competent tool selection.
-    (120, 24_000)
+    (120, DEFAULT_TOOL_TOKEN_BUDGET)
 }
 
 /// Check if a tool definition matches a pinned tool name.
