@@ -42,6 +42,8 @@ import { type WorkspaceWindow, workspaceStore } from "@/stores/workspace.store";
 interface ThreadSidebarProps {
   collapsed: boolean;
   onToggle?: () => void;
+  onOpenCatalog?: () => void;
+  onOpenInbox?: () => void;
 }
 
 const PROJECT_GROUP_DRAG_MIME = "application/x-seren-project-group";
@@ -773,18 +775,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             }
           }}
         >
-          <EmployeesSection onCreateEmployee={handleNewEmployee} />
-          <div class="px-3 py-2 border-t border-border/40">
-            <button
-              type="button"
-              class="w-full text-left text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted/40 px-2 py-1.5 rounded transition-colors cursor-pointer"
-              onClick={() =>
-                window.dispatchEvent(new CustomEvent("seren:open-catalog"))
-              }
-            >
-              Agent catalog
-            </button>
-          </div>
+          <EmployeesSection
+            onCreateEmployee={handleNewEmployee}
+            onOpenCatalog={props.onOpenCatalog}
+            onOpenInbox={props.onOpenInbox}
+          />
           <Show
             when={threadStore.groupedThreads.length > 0}
             fallback={

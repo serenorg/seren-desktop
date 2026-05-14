@@ -12,9 +12,12 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { EmployeeCheckpointsList } from "@/components/employees/EmployeeCheckpointsList";
+import { EmployeeEvalDriftCard } from "@/components/employees/EmployeeEvalDriftCard";
 import { EmployeeRevisionsModal } from "@/components/employees/EmployeeRevisionsModal";
 import { EmployeeRunDetailModal } from "@/components/employees/EmployeeRunDetailModal";
 import { EmployeeRunsList } from "@/components/employees/EmployeeRunsList";
+import { EvalGateEditor } from "@/components/employees/EvalGateEditor";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
 import { extractInstructionSections } from "@/lib/employees/instructions";
@@ -23,6 +26,7 @@ import type {
   EmployeeStatus,
   EmployeeSummary,
 } from "@/lib/employees/types";
+import { getDefaultOrganizationId } from "@/lib/tauri-bridge";
 import { employees as svc } from "@/services/employees";
 import { employeesArchiveStore } from "@/services/employees-archive";
 import {
@@ -130,6 +134,12 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const [manualRun, setManualRun] = createSignal<ManualRunState | null>(null);
   const [runsRefreshNonce, setRunsRefreshNonce] = createSignal(0);
   const [detailRunId, setDetailRunId] = createSignal<string | null>(null);
+  const [editingEvalGate, setEditingEvalGate] = createSignal(false);
+  const [showCheckpoints, setShowCheckpoints] = createSignal(true);
+
+  const [organizationId] = createResource(async () =>
+    getDefaultOrganizationId(),
+  );
 
   const summary = createMemo<EmployeeSummary | undefined>(() =>
     employeeStore.byId(props.employeeId),
@@ -156,18 +166,10 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     });
   });
 
-  const hasRuntimeGovernance = createMemo(() => {
-    const d = detail();
-    if (!d) return false;
-    return (
-      d.runtimePolicy !== null ||
-      d.guardrails.length > 0 ||
-      d.memoryPolicy !== null ||
-      d.credentials.length > 0 ||
-      d.toolRefs.length > 0 ||
-      d.evalGate !== null
-    );
-  });
+  // The runtime governance section also hosts the eval gate row, which is
+  // the operator's entry point for attaching a gate on a minimal deployment.
+  // Showing the section as soon as detail loads keeps "Attach gate" reachable
+  // even when no other governance fields are set.
 
   let kebabContainerRef: HTMLDivElement | undefined;
 
@@ -536,7 +538,15 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                   </div>
                 </Show>
               </div>
-              <div class="flex items-center gap-2 flex-none relative">
+              <div class="flex items-center justify-end gap-2 flex-none relative flex-wrap max-w-[420px]">
+                <Show when={emp().mode === "always_on"}>
+                  <PrimaryActionButton employee={emp()} variant="compact" />
+                </Show>
+                <Show when={emp().mode === "always_on" && !canStartRun()}>
+                  <div class="basis-full text-right text-[12px] text-muted-foreground">
+                    Wake this employee before starting a chat.
+                  </div>
+                </Show>
                 <Show
                   when={isRunning() || isWakeable() || actionPending() !== null}
                   fallback={
@@ -947,18 +957,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                 </Show>
               </div>
 
-              <Show when={emp().mode === "always_on"}>
-                <div class="mt-3 mb-6 flex flex-col items-center">
-                  <PrimaryActionButton employee={emp()} variant="compact" />
-                  <Show when={!canStartRun()}>
-                    <div class="mt-2 text-center text-[12px] text-muted-foreground">
-                      Wake this employee before starting a chat.
-                    </div>
-                  </Show>
-                </div>
-              </Show>
-
-              <Show when={hasRuntimeGovernance()}>
+              <Show when={detail()}>
                 <div class="mb-2 grid gap-2 py-4 border-t border-border">
                   <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
                     Runtime governance
@@ -1032,20 +1031,111 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                   </Show>
                   <Show when={detail()?.evalGate}>
                     {(gate) => (
-                      <InfoRow label="Eval gate">
-                        <span class="text-[12px] text-muted-foreground">
-                          fresh within {gate().max_age_seconds}s
-                          <Show when={gate().block_on_failure === true}>
-                            <span class="ml-1 text-amber-700 font-medium">
-                              - blocks apply on failure
+                      <>
+                        <InfoRow label="Eval gate">
+                          <span class="flex items-center gap-2 flex-wrap">
+                            <span class="text-[12px] text-muted-foreground">
+                              set <span class="font-mono">{gate().set_id}</span>
+                              <span class="mx-1.5 text-muted-foreground/60">
+                                -
+                              </span>
+                              fresh within {gate().max_age_seconds}s
+                              <Show when={gate().block_on_failure === true}>
+                                <span class="ml-1 text-amber-700 font-medium">
+                                  - blocks apply on failure
+                                </span>
+                              </Show>
                             </span>
-                          </Show>
-                        </span>
-                      </InfoRow>
+                            <button
+                              type="button"
+                              class="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+                              onClick={() => setEditingEvalGate((v) => !v)}
+                              data-testid="employee-edit-eval-gate"
+                            >
+                              {editingEvalGate() ? "Close editor" : "Edit gate"}
+                            </button>
+                          </span>
+                        </InfoRow>
+                        <Show when={gate().schedule}>
+                          {(schedule) => (
+                            <InfoRow label="Eval schedule">
+                              <span class="text-[12px] text-muted-foreground">
+                                <span class="font-mono">{schedule().cron}</span>
+                                <Show when={schedule().timezone}>
+                                  <span class="ml-1.5">
+                                    ({schedule().timezone})
+                                  </span>
+                                </Show>
+                              </span>
+                            </InfoRow>
+                          )}
+                        </Show>
+                      </>
                     )}
                   </Show>
+                  <Show when={!detail()?.evalGate}>
+                    <InfoRow label="Eval gate">
+                      <span class="flex items-center gap-2 flex-wrap">
+                        <span class="text-[12px] text-muted-foreground italic">
+                          No gate attached.
+                        </span>
+                        <button
+                          type="button"
+                          class="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+                          onClick={() => setEditingEvalGate((v) => !v)}
+                          data-testid="employee-attach-eval-gate"
+                        >
+                          {editingEvalGate() ? "Close editor" : "Attach gate"}
+                        </button>
+                      </span>
+                    </InfoRow>
+                  </Show>
                 </div>
+                <Show when={editingEvalGate()}>
+                  <div class="mt-3">
+                    <EvalGateEditor
+                      deploymentId={emp().id}
+                      initial={detail()?.evalGate ?? null}
+                      onCancel={() => setEditingEvalGate(false)}
+                      onSaved={() => {
+                        setEditingEvalGate(false);
+                        void employeeStore.loadDetail(emp().id);
+                      }}
+                    />
+                  </div>
+                </Show>
+                <Show when={detail()?.evalGate}>
+                  <div class="mt-3">
+                    <EmployeeEvalDriftCard
+                      deploymentId={emp().id}
+                      organizationId={organizationId() ?? null}
+                    />
+                  </div>
+                </Show>
               </Show>
+
+              <div class="mb-2 grid gap-2 py-4 border-t border-border">
+                <button
+                  type="button"
+                  class="flex items-center justify-between text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 hover:text-foreground transition-colors"
+                  onClick={() => setShowCheckpoints((v) => !v)}
+                  aria-expanded={showCheckpoints()}
+                  data-testid="employee-toggle-checkpoints"
+                >
+                  <span>Session checkpoints</span>
+                  <span aria-hidden="true">
+                    {showCheckpoints() ? "-" : "+"}
+                  </span>
+                </button>
+                {/* Keep the list mounted across collapse so pagination state
+                    and the initial fetch survive a fold/unfold cycle. */}
+                <div hidden={!showCheckpoints()}>
+                  <EmployeeCheckpointsList
+                    deploymentId={emp().id}
+                    organizationId={organizationId() ?? null}
+                  />
+                </div>
+              </div>
             </div>
 
             <Show when={showEdit() && detailRecord()}>

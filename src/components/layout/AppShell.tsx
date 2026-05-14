@@ -18,6 +18,7 @@ import { CatalogList } from "@/components/catalog/CatalogList";
 import { StatusBar } from "@/components/common/StatusBar";
 import { ArchivedEmployeeDetail } from "@/components/employees/ArchivedEmployeeDetail";
 import { EmployeeDetail } from "@/components/employees/EmployeeDetail";
+import { InboxList } from "@/components/inbox/InboxList";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
@@ -25,9 +26,11 @@ import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import {
   CLOSE_CATALOG_EVENT,
   CLOSE_EMPLOYEE_DETAIL_EVENT,
+  CLOSE_INBOX_EVENT,
   type EmployeeDetailEventDetail,
   OPEN_CATALOG_EVENT,
   OPEN_EMPLOYEE_DETAIL_EVENT,
+  OPEN_INBOX_EVENT,
 } from "@/components/sidebar/EmployeesSection";
 import { PublishSkillModal } from "@/components/sidebar/PublishSkillModal";
 import { PublishVersionModal } from "@/components/sidebar/PublishVersionModal";
@@ -136,6 +139,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     null,
   );
   const [catalogOpen, setCatalogOpen] = createSignal(false);
+  const [inboxOpen, setInboxOpen] = createSignal(false);
   createEffect(() => {
     persistSlidePanel(slidePanel());
   });
@@ -145,6 +149,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     if (detail?.employeeId) {
       setActiveEmployeeId(detail.employeeId);
       setCatalogOpen(false);
+      setInboxOpen(false);
     }
   };
 
@@ -160,18 +165,32 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const handleOpenCatalog = () => {
     setCatalogOpen(true);
     setActiveEmployeeId(null);
+    setInboxOpen(false);
   };
 
   const handleCloseCatalog = () => {
     setCatalogOpen(false);
   };
 
+  const handleOpenInbox = () => {
+    setInboxOpen(true);
+    setActiveEmployeeId(null);
+    setCatalogOpen(false);
+  };
+
+  const handleCloseInbox = () => {
+    setInboxOpen(false);
+  };
+
   createEffect(
     on(
       () => threadStore.activeThreadId,
       () => {
-        if (activeEmployeeId() === null) return;
-        closeEmployeeDetailPane();
+        if (activeEmployeeId() !== null) {
+          closeEmployeeDetailPane();
+        }
+        setCatalogOpen(false);
+        setInboxOpen(false);
       },
       { defer: true },
     ),
@@ -188,11 +207,15 @@ export const AppShell: Component<AppShellProps> = (props) => {
     );
     window.addEventListener(OPEN_CATALOG_EVENT, handleOpenCatalog);
     window.addEventListener(CLOSE_CATALOG_EVENT, handleCloseCatalog);
+    window.addEventListener(OPEN_INBOX_EVENT, handleOpenInbox);
+    window.addEventListener(CLOSE_INBOX_EVENT, handleCloseInbox);
   });
 
   onCleanup(() => {
     window.removeEventListener(OPEN_CATALOG_EVENT, handleOpenCatalog);
     window.removeEventListener(CLOSE_CATALOG_EVENT, handleCloseCatalog);
+    window.removeEventListener(OPEN_INBOX_EVENT, handleOpenInbox);
+    window.removeEventListener(CLOSE_INBOX_EVENT, handleCloseInbox);
     window.removeEventListener(
       OPEN_EMPLOYEE_DETAIL_EVENT,
       handleOpenEmployeeDetail,
@@ -501,35 +524,44 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
         <main class="flex-1 overflow-auto flex flex-col min-w-0">
           <Show
-            when={catalogOpen()}
+            when={inboxOpen()}
             fallback={
               <Show
-                when={activeEmployeeId()}
-                fallback={<ThreadContent onSignInClick={handleSignInClick} />}
-              >
-                {(id) => (
+                when={catalogOpen()}
+                fallback={
                   <Show
-                    when={
-                      employeeStore.byId(id()) === undefined &&
-                      employeeStore.archivedById(id()) !== undefined
-                    }
+                    when={activeEmployeeId()}
                     fallback={
-                      <EmployeeDetail
-                        employeeId={id()}
-                        onClose={closeEmployeeDetailPane}
-                      />
+                      <ThreadContent onSignInClick={handleSignInClick} />
                     }
                   >
-                    <ArchivedEmployeeDetail
-                      employeeId={id()}
-                      onClose={closeEmployeeDetailPane}
-                    />
+                    {(id) => (
+                      <Show
+                        when={
+                          employeeStore.byId(id()) === undefined &&
+                          employeeStore.archivedById(id()) !== undefined
+                        }
+                        fallback={
+                          <EmployeeDetail
+                            employeeId={id()}
+                            onClose={closeEmployeeDetailPane}
+                          />
+                        }
+                      >
+                        <ArchivedEmployeeDetail
+                          employeeId={id()}
+                          onClose={closeEmployeeDetailPane}
+                        />
+                      </Show>
+                    )}
                   </Show>
-                )}
+                }
+              >
+                <CatalogList />
               </Show>
             }
           >
-            <CatalogList />
+            <InboxList />
           </Show>
         </main>
 

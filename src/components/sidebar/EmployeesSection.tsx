@@ -6,6 +6,7 @@ import {
   createMemo,
   createSignal,
   For,
+  type JSX,
   onCleanup,
   onMount,
   Show,
@@ -30,11 +31,15 @@ export const OPEN_EMPLOYEE_DETAIL_EVENT = "seren:open-employee-detail";
 export const CLOSE_EMPLOYEE_DETAIL_EVENT = "seren:close-employee-detail";
 export const OPEN_CATALOG_EVENT = "seren:open-catalog";
 export const CLOSE_CATALOG_EVENT = "seren:close-catalog";
+export const OPEN_INBOX_EVENT = "seren:open-inbox";
+export const CLOSE_INBOX_EVENT = "seren:close-inbox";
 
 export type EmployeeDetailEventDetail = { employeeId: string };
 
 interface EmployeesSectionProps {
   onCreateEmployee: () => void;
+  onOpenCatalog?: () => void;
+  onOpenInbox?: () => void;
 }
 
 const Avatar: Component<{ name: string; seed: string; size?: number }> = (
@@ -106,7 +111,8 @@ const ArchivedEmployeeRow: Component<{
     type="button"
     class="flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 opacity-60 hover:opacity-80"
     classList={{
-      "!bg-surface-2/80 !border-l-primary !opacity-90": props.active,
+      "!bg-primary/10 !border-l-transparent ring-1 ring-primary/20 !opacity-90":
+        props.active,
     }}
     aria-current={props.active ? "page" : undefined}
     onClick={() => props.onSelect(props.employee.id)}
@@ -155,7 +161,8 @@ const EmployeeRow: Component<{
       type="button"
       class="flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2"
       classList={{
-        "!bg-surface-2/80 !border-l-primary": props.active,
+        "!bg-primary/10 !border-l-transparent ring-1 ring-primary/20":
+          props.active,
       }}
       aria-current={props.active ? "page" : undefined}
       onClick={() => props.onSelect(props.employee.id)}
@@ -190,6 +197,34 @@ const EmployeeRow: Component<{
   );
 };
 
+const ManagementRow: Component<{
+  title: string;
+  description: string;
+  onClick: () => void;
+  testId?: string;
+  children: JSX.Element;
+}> = (props) => (
+  <button
+    type="button"
+    data-testid={props.testId}
+    class="group flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/40"
+    onClick={props.onClick}
+    aria-label={props.title}
+  >
+    <span class="flex items-center justify-center w-[22px] h-[22px] rounded-md border border-border/80 text-muted-foreground/80 transition-colors duration-100 group-hover:border-primary/50 group-hover:text-primary">
+      {props.children}
+    </span>
+    <div class="flex-1 min-w-0">
+      <div class="text-[12.5px] text-muted-foreground truncate transition-colors duration-100 group-hover:text-foreground">
+        {props.title}
+      </div>
+      <div class="text-[10.5px] text-muted-foreground/70 truncate">
+        {props.description}
+      </div>
+    </div>
+  </button>
+);
+
 export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
   const [activeId, setActiveId] = createSignal<string | null>(null);
   const [pendingByDeployment, setPendingByDeployment] = createSignal<
@@ -204,10 +239,26 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
   );
   const threadsByEmployee = createMemo(() => threadStore.threadsByEmployee);
 
+  const pendingMapsEqual = (
+    left: Map<string, OrgPendingApprovalRun[]>,
+    right: Map<string, OrgPendingApprovalRun[]>,
+  ): boolean => {
+    if (left.size !== right.size) return false;
+    for (const [key, rows] of left) {
+      const other = right.get(key);
+      if (!other || other.length !== rows.length) return false;
+      if (JSON.stringify(rows) !== JSON.stringify(other)) return false;
+    }
+    return true;
+  };
+
   const refreshPending = async () => {
     try {
       const rows = await employeeApprovals.listOrg(100);
-      setPendingByDeployment(employeeApprovals.groupByDeployment(rows));
+      const next = employeeApprovals.groupByDeployment(rows);
+      setPendingByDeployment((prev) =>
+        pendingMapsEqual(prev, next) ? prev : next,
+      );
     } catch {
       // Sidebar approval badge is best-effort; a transient inbox failure
       // should not poison the sidebar. The next tick retries.
@@ -236,6 +287,16 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
     setActiveId(null);
   };
 
+  const handleOpenCatalog = () => {
+    setActiveId(null);
+    props.onOpenCatalog?.();
+  };
+
+  const handleOpenInbox = () => {
+    setActiveId(null);
+    props.onOpenInbox?.();
+  };
+
   let interval: ReturnType<typeof setInterval> | null = null;
 
   const tick = () => {
@@ -244,13 +305,15 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
       document.visibilityState !== "visible"
     )
       return;
-    void employeeStore.refresh();
+    void employeeStore.refresh({ background: true });
     void refreshPending();
   };
 
   const handleVisibility = () => {
     if (document.visibilityState === "visible") {
-      void employeeStore.refresh();
+      void employeeStore.refresh({
+        background: employeeStore.lastLoadedAt !== null,
+      });
       void refreshPending();
     }
   };
@@ -289,6 +352,67 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
         Employees
       </div>
       <div class="flex flex-col gap-0.5 px-1">
+        <Show when={props.onOpenCatalog}>
+          <ManagementRow
+            title="Agent catalog"
+            description="Managed agent definitions"
+            onClick={handleOpenCatalog}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M3 3.5h10v9H3z"
+                stroke="currentColor"
+                stroke-width="1.3"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M5 6h6M5 8.5h4"
+                stroke="currentColor"
+                stroke-width="1.3"
+                stroke-linecap="round"
+              />
+            </svg>
+          </ManagementRow>
+        </Show>
+        <Show when={props.onOpenInbox}>
+          <ManagementRow
+            title="Approval inbox"
+            description="Runs needing review"
+            onClick={handleOpenInbox}
+            testId="sidebar-inbox"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M3 4h10v8.5H3z"
+                stroke="currentColor"
+                stroke-width="1.3"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M3 7h3l1 2h2l1-2h3"
+                stroke="currentColor"
+                stroke-width="1.3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </ManagementRow>
+        </Show>
+        <Show when={props.onOpenCatalog || props.onOpenInbox}>
+          <div class="mx-2 my-1 border-t border-border/40" aria-hidden="true" />
+        </Show>
         <Show when={employeeStore.error}>
           <div
             class="px-2 py-1 text-[11px] text-status-error opacity-80"
