@@ -376,6 +376,14 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
           throw new Error("Invalid command: must be a non-empty string");
         }
         const timeoutSecs = (args.timeout_secs as number) ?? 30;
+        const invokeArgs: {
+          command: string;
+          timeoutSecs: number;
+          injectSerenCredentials?: boolean;
+        } = { command, timeoutSecs };
+        if (typeof args.inject_seren_credentials === "boolean") {
+          invokeArgs.injectSerenCredentials = args.inject_seren_credentials;
+        }
 
         const approved = await requestShellApproval(command, timeoutSecs);
         if (!approved) {
@@ -391,7 +399,7 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
           stderr: string;
           exit_code: number | null;
           timed_out: boolean;
-        }>("execute_shell_command", { command, timeoutSecs });
+        }>("execute_shell_command", invokeArgs);
 
         if (cmdResult.timed_out) {
           result = `Command timed out after ${timeoutSecs} seconds.\nstderr: ${cmdResult.stderr}`;

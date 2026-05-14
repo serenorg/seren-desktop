@@ -3,8 +3,12 @@
 
 use serde::Serialize;
 use std::time::Duration;
+use tauri::{AppHandle, Runtime};
+use tauri_plugin_store::StoreExt;
 use tokio::process::Command;
 
+const AUTH_STORE: &str = "auth.json";
+const SEREN_API_KEY_KEY: &str = "seren_api_key";
 const MAX_OUTPUT_BYTES: usize = 50_000;
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_TIMEOUT_SECS: u64 = 300;
@@ -28,9 +32,52 @@ pub struct CommandResult {
 }
 
 #[tauri::command]
-pub async fn execute_shell_command(
+pub async fn execute_shell_command<R: Runtime>(
+    app: AppHandle<R>,
     command: String,
     timeout_secs: Option<u64>,
+    inject_seren_credentials: Option<bool>,
+) -> Result<CommandResult, String> {
+    let api_key = if should_inject_seren_credentials(&command, inject_seren_credentials) {
+        read_stored_seren_api_key(&app)?
+    } else {
+        None
+    };
+
+    execute_shell_command_inner(command, timeout_secs, api_key.as_deref()).await
+}
+
+/// Execute an AI tool shell command with optional stored Seren auth injection.
+///
+/// `inject_seren_credentials = None` uses the same narrow auto-detect policy as
+/// the Tauri command so skill-local commands keep working without exposing the
+/// key to ordinary commands such as `ls`.
+pub async fn execute_shell_command_for_tool<R: Runtime>(
+    app: &AppHandle<R>,
+    command: String,
+    timeout_secs: Option<u64>,
+    inject_seren_credentials: Option<bool>,
+) -> Result<CommandResult, String> {
+    let api_key = if should_inject_seren_credentials(&command, inject_seren_credentials) {
+        read_stored_seren_api_key(app)?
+    } else {
+        None
+    };
+
+    execute_shell_command_inner(command, timeout_secs, api_key.as_deref()).await
+}
+
+pub async fn execute_shell_command_without_seren_credentials(
+    command: String,
+    timeout_secs: Option<u64>,
+) -> Result<CommandResult, String> {
+    execute_shell_command_inner(command, timeout_secs, None).await
+}
+
+async fn execute_shell_command_inner(
+    command: String,
+    timeout_secs: Option<u64>,
+    seren_api_key: Option<&str>,
 ) -> Result<CommandResult, String> {
     if command.trim().is_empty() {
         return Err("Command must not be empty".to_string());
@@ -85,6 +132,13 @@ pub async fn execute_shell_command(
         cmd.env("PATH", &combined);
     }
 
+    cmd.env_remove("SEREN_API_KEY");
+    cmd.env_remove("API_KEY");
+    if let Some(api_key) = seren_api_key.filter(|key| !key.is_empty()) {
+        cmd.env("SEREN_API_KEY", api_key);
+        cmd.env("API_KEY", api_key);
+    }
+
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
@@ -129,6 +183,35 @@ pub async fn execute_shell_command(
             timed_out: true,
         }),
     }
+}
+
+fn read_stored_seren_api_key<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>, String> {
+    let key = app
+        .store(AUTH_STORE)
+        .map_err(|err| err.to_string())?
+        .get(SEREN_API_KEY_KEY)
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_default();
+
+    let trimmed = key.trim();
+    if trimmed.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(trimmed.to_string()))
+    }
+}
+
+fn should_inject_seren_credentials(command: &str, requested: Option<bool>) -> bool {
+    requested.unwrap_or_else(|| command_targets_seren_skill(command))
+}
+
+fn command_targets_seren_skill(command: &str) -> bool {
+    let normalized = command.replace('\\', "/").to_ascii_lowercase();
+    normalized.contains(".config/seren/skills/")
+        || normalized.contains("/seren/skills/")
+        || normalized.contains("%appdata%/seren/skills/")
+        || normalized.contains("appdata/roaming/seren/skills/")
+        || normalized.contains("appdata/local/seren/skills/")
 }
 
 /// Run DNS + HTTP connectivity checks from a shell process and report results.
@@ -190,7 +273,9 @@ pub async fn diagnose_shell_network() -> Result<serde_json::Value, String> {
 }
 
 async fn run_diagnostic_command(command: &str, timeout_secs: u64) -> CommandResult {
-    match execute_shell_command(command.to_string(), Some(timeout_secs)).await {
+    match execute_shell_command_without_seren_credentials(command.to_string(), Some(timeout_secs))
+        .await
+    {
         Ok(result) => result,
         Err(e) => CommandResult {
             stdout: String::new(),
@@ -225,6 +310,30 @@ fn truncate_output(s: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use tauri_plugin_store::StoreExt;
+
+    fn print_seren_key_env_command() -> &'static str {
+        if cfg!(target_os = "windows") {
+            "echo %SEREN_API_KEY%^|%API_KEY%"
+        } else {
+            "printf '%s|%s' \"${SEREN_API_KEY:-}\" \"${API_KEY:-}\""
+        }
+    }
+
+    fn mock_app_with_api_key(api_key: Option<&str>) -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app builds");
+
+        if let Some(api_key) = api_key {
+            let store = app.store(AUTH_STORE).expect("auth store opens");
+            store.set(SEREN_API_KEY_KEY, json!(api_key));
+        }
+
+        app
+    }
 
     #[test]
     fn wrap_for_cmd_slash_s_preserves_inner_quotes() {
@@ -238,5 +347,79 @@ mod tests {
         assert!(wrapped.starts_with('"'));
         assert!(wrapped.ends_with('"'));
         assert!(wrapped.contains(r#""C:\Users\test\script.py""#));
+    }
+
+    #[tokio::test]
+    async fn execute_shell_command_injects_stored_seren_credentials_when_requested() {
+        let app = mock_app_with_api_key(Some("seren_test_shell_key"));
+
+        let result = execute_shell_command(
+            app.handle().clone(),
+            print_seren_key_env_command().to_string(),
+            Some(5),
+            Some(true),
+        )
+        .await
+        .expect("command succeeds");
+
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(
+            result.stdout.trim(),
+            "seren_test_shell_key|seren_test_shell_key"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_shell_command_scrubs_seren_credentials_when_not_requested() {
+        let app = mock_app_with_api_key(Some("seren_test_shell_key"));
+
+        let result = execute_shell_command(
+            app.handle().clone(),
+            print_seren_key_env_command().to_string(),
+            Some(5),
+            None,
+        )
+        .await
+        .expect("command succeeds");
+
+        assert_eq!(result.exit_code, Some(0));
+        assert!(!result.stdout.contains("seren_test_shell_key"));
+    }
+
+    #[tokio::test]
+    async fn execute_shell_command_leaves_seren_credentials_empty_when_logged_out() {
+        let app = mock_app_with_api_key(None);
+
+        let result = execute_shell_command(
+            app.handle().clone(),
+            print_seren_key_env_command().to_string(),
+            Some(5),
+            Some(true),
+        )
+        .await
+        .expect("command succeeds");
+
+        assert_eq!(result.exit_code, Some(0));
+        assert_ne!(
+            result.stdout.trim(),
+            "seren_test_shell_key|seren_test_shell_key"
+        );
+    }
+
+    #[test]
+    fn auto_injection_only_targets_seren_skill_directories() {
+        assert!(should_inject_seren_credentials(
+            "cd ~/.config/seren/skills/prophet-arb-bot && python3 scripts/agent.py",
+            None,
+        ));
+        assert!(should_inject_seren_credentials(
+            r#"cd "%APPDATA%\Seren\skills\prophet-arb-bot" && python scripts\agent.py"#,
+            None,
+        ));
+        assert!(!should_inject_seren_credentials("ls -la", None));
+        assert!(!should_inject_seren_credentials(
+            "python3 ./scripts/agent.py",
+            None,
+        ));
     }
 }

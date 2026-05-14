@@ -106,4 +106,5 @@ discord = ["messaging", "dep:serenity"]
 whatsapp = ["messaging", "dep:whatsapp-rust", "dep:wacore"]
 
 [dev-dependencies]
+tauri = { version = "2", features = ["test"] }
 tempfile = "3.27.0"
