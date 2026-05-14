@@ -1424,42 +1424,50 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
           </div>
         </div>
 
-        <div class="flex justify-end gap-2 py-4 px-5 border-t border-border sticky bottom-0 bg-popover">
-          <Show when={submitDisabledReason()}>
-            <span
-              id="employee-submit-reason"
-              class="mr-auto self-center text-[12px] text-muted-foreground"
-              role="status"
+        <div class="sticky bottom-0 border-t border-border bg-popover py-4 px-5">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <Show
+              when={submitDisabledReason()}
+              fallback={<span class="hidden sm:block" aria-hidden="true" />}
             >
-              {submitDisabledReason()}
-            </span>
-          </Show>
-          <button
-            type="button"
-            class="py-2 px-4 rounded text-[13px] font-medium cursor-pointer transition-all duration-150 bg-transparent text-foreground border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={props.onClose}
-            disabled={submitting()}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="py-2 px-4 rounded text-[13px] font-medium cursor-pointer transition-all duration-150 bg-primary text-primary-foreground border border-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleSubmit}
-            disabled={!canSubmit()}
-            title={submitDisabledReason() || undefined}
-            aria-describedby={
-              submitDisabledReason() ? "employee-submit-reason" : undefined
-            }
-          >
-            {submitting()
-              ? editing()
-                ? "Saving..."
-                : "Deploying..."
-              : editing()
-                ? "Save changes"
-                : "Deploy employee"}
-          </button>
+              <span
+                id="employee-submit-reason"
+                class="min-w-0 truncate text-[12px] text-muted-foreground"
+                role="status"
+              >
+                {submitDisabledReason()}
+              </span>
+            </Show>
+
+            <div class="flex shrink-0 items-center justify-end gap-3">
+              <button
+                type="button"
+                class="inline-flex h-9 min-w-[88px] shrink-0 items-center justify-center whitespace-nowrap rounded border border-border bg-transparent px-4 text-[13px] font-medium text-foreground transition-all duration-150 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={props.onClose}
+                disabled={submitting()}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="inline-flex h-9 min-w-[132px] shrink-0 items-center justify-center whitespace-nowrap rounded border border-primary bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-all duration-150 hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={handleSubmit}
+                disabled={!canSubmit()}
+                title={submitDisabledReason() || undefined}
+                aria-describedby={
+                  submitDisabledReason() ? "employee-submit-reason" : undefined
+                }
+              >
+                {submitting()
+                  ? editing()
+                    ? "Saving..."
+                    : "Deploying..."
+                  : editing()
+                    ? "Save changes"
+                    : "Deploy employee"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

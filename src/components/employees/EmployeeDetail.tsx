@@ -373,6 +373,25 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     void cancelEmployeeRun(manualRunKey(props.employeeId));
   };
 
+  const handlePrimaryAction = async () => {
+    const employee = summary();
+    if (!employee || !canStartRun()) return;
+    if (employee.mode === "always_on") {
+      try {
+        await threadStore.createChatThreadWithOptions("New Chat", {
+          provider: employee.modelChoice === "private" ? "seren-private" : null,
+          model: employee.modelId ?? undefined,
+          employeeId: employee.id,
+        });
+        props.onClose();
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+    await handleManualRun();
+  };
+
   const detailRecord = () => employeeStore.detail(props.employeeId);
 
   const description = () => {
@@ -390,6 +409,54 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     } catch {
       // Clipboard write can fail without a user gesture; ignore silently.
     }
+  };
+
+  const PrimaryActionButton: Component<{
+    employee: EmployeeSummary;
+    variant?: "full" | "compact";
+  }> = (buttonProps) => {
+    const isCompact = () => buttonProps.variant === "compact";
+    return (
+      <button
+        type="button"
+        class={
+          isCompact()
+            ? "inline-flex h-10 min-w-[188px] items-center justify-center gap-2 rounded-md border border-primary bg-primary px-4 text-[13.5px] font-medium text-primary-foreground shadow-sm shadow-primary/20 transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            : "w-full py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium text-[14px] hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        }
+        disabled={manualRun()?.kind === "running" || !canStartRun()}
+        title={
+          !canStartRun()
+            ? `${buttonProps.employee.name} is ${statusLabel(buttonProps.employee.status).toLowerCase()}; wake it before starting a run`
+            : buttonProps.employee.mode === "always_on"
+              ? `Open a new chat with ${buttonProps.employee.name}`
+              : `Run ${buttonProps.employee.name} once now`
+        }
+        aria-disabled={manualRun()?.kind === "running" || !canStartRun()}
+        onClick={handlePrimaryAction}
+      >
+        <Show when={isCompact()}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M3.5 4.5h9v5.5h-5l-3 2v-2h-1z"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </Show>
+        {buttonProps.employee.mode !== "always_on" &&
+        manualRun()?.kind === "running"
+          ? "Running..."
+          : primaryCtaLabel(buttonProps.employee.mode)}
+      </button>
+    );
   };
 
   return (
@@ -606,55 +673,13 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                 </div>
               </Show>
 
-              {/* Primary CTA */}
-              <button
-                type="button"
-                class="w-full py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium text-[14px] hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={manualRun()?.kind === "running" || !canStartRun()}
-                title={
-                  !canStartRun()
-                    ? `${emp().name} is ${statusLabel(emp().status).toLowerCase()}; wake it before starting a run`
-                    : emp().mode === "always_on"
-                      ? `Open a new chat with ${emp().name}`
-                      : `Run ${emp().name} once now`
-                }
-                aria-disabled={
-                  manualRun()?.kind === "running" || !canStartRun()
-                }
-                onClick={async () => {
-                  if (!canStartRun()) return;
-                  if (emp().mode === "always_on") {
-                    try {
-                      await threadStore.createChatThreadWithOptions(
-                        "New Chat",
-                        {
-                          provider:
-                            emp().modelChoice === "private"
-                              ? "seren-private"
-                              : null,
-                          model: emp().modelId ?? undefined,
-                          employeeId: emp().id,
-                        },
-                      );
-                      props.onClose();
-                    } catch (err) {
-                      setActionError(
-                        err instanceof Error ? err.message : String(err),
-                      );
-                    }
-                    return;
-                  }
-                  await handleManualRun();
-                }}
-              >
-                {emp().mode !== "always_on" && manualRun()?.kind === "running"
-                  ? "Running..."
-                  : primaryCtaLabel(emp().mode)}
-              </button>
-              <Show when={!canStartRun()}>
-                <div class="mt-2 mb-4 text-[12px] text-muted-foreground">
-                  Wake this employee before starting a chat or run.
-                </div>
+              <Show when={emp().mode !== "always_on"}>
+                <PrimaryActionButton employee={emp()} />
+                <Show when={!canStartRun()}>
+                  <div class="mt-2 mb-4 text-[12px] text-muted-foreground">
+                    Wake this employee before starting a chat or run.
+                  </div>
+                </Show>
               </Show>
 
               {/* Inline manual-run status (cron / on-demand only) */}
@@ -921,6 +946,17 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                   </InfoRow>
                 </Show>
               </div>
+
+              <Show when={emp().mode === "always_on"}>
+                <div class="mt-3 mb-6 flex flex-col items-center">
+                  <PrimaryActionButton employee={emp()} variant="compact" />
+                  <Show when={!canStartRun()}>
+                    <div class="mt-2 text-center text-[12px] text-muted-foreground">
+                      Wake this employee before starting a chat.
+                    </div>
+                  </Show>
+                </div>
+              </Show>
 
               <Show when={hasRuntimeGovernance()}>
                 <div class="mb-2 grid gap-2 py-4 border-t border-border">

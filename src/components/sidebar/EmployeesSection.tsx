@@ -104,10 +104,11 @@ const ArchivedEmployeeRow: Component<{
 }> = (props) => (
   <button
     type="button"
-    class="flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 opacity-60 hover:opacity-80"
+    class="flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 opacity-60 hover:opacity-80"
     classList={{
-      "bg-surface-2/70 opacity-90": props.active,
+      "!bg-surface-2/80 !border-l-primary !opacity-90": props.active,
     }}
+    aria-current={props.active ? "page" : undefined}
     onClick={() => props.onSelect(props.employee.id)}
     title={`${props.employee.name} (archived ${relativeArchivedTime(props.employee.archivedAt)})`}
     aria-label={`Open archived employee ${props.employee.name}, deleted ${relativeArchivedTime(props.employee.archivedAt)}`}
@@ -125,7 +126,10 @@ const ArchivedEmployeeRow: Component<{
       {initialFor(props.employee.name)}
     </div>
     <div class="flex-1 min-w-0">
-      <div class="text-[12.5px] text-muted-foreground truncate line-through decoration-muted-foreground/40">
+      <div
+        class="text-[12.5px] text-muted-foreground truncate line-through decoration-muted-foreground/40"
+        classList={{ "!text-foreground": props.active }}
+      >
         {props.employee.name}
       </div>
       <div class="text-[10.5px] text-muted-foreground/70 truncate">
@@ -149,10 +153,11 @@ const EmployeeRow: Component<{
   return (
     <button
       type="button"
-      class="flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2"
+      class="flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2"
       classList={{
-        "bg-surface-2/70": props.active,
+        "!bg-surface-2/80 !border-l-primary": props.active,
       }}
+      aria-current={props.active ? "page" : undefined}
       onClick={() => props.onSelect(props.employee.id)}
       title={`${props.employee.name} (${modeLabel(props.employee.mode)})`}
       aria-label={`Open ${props.employee.name}, ${modeLabel(props.employee.mode)}, ${statusLabel(props.employee.status, props.employee.mode)}${ariaSuffix()}`}
@@ -213,6 +218,7 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
     pendingByDeployment().get(deploymentId)?.length ?? 0;
 
   const handleSelect = (id: string) => {
+    threadStore.setActiveThread(null);
     setActiveId(id);
     window.dispatchEvent(
       new CustomEvent<EmployeeDetailEventDetail>(OPEN_EMPLOYEE_DETAIL_EVENT, {
@@ -307,11 +313,16 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
                   {(thread) => (
                     <button
                       type="button"
-                      class="flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2"
+                      class="flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2"
                       classList={{
-                        "bg-surface-2/70":
+                        "!bg-surface-2/80 !border-l-primary":
                           threadStore.activeThreadId === thread.id,
                       }}
+                      aria-current={
+                        threadStore.activeThreadId === thread.id
+                          ? "page"
+                          : undefined
+                      }
                       onClick={() => {
                         threadStore.selectThread(thread.id, thread.kind);
                         // Clear the active employee highlight and tell
@@ -324,7 +335,13 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
                       }}
                       title={thread.title}
                     >
-                      <span class="text-[11.5px] text-muted-foreground truncate">
+                      <span
+                        class="text-[11.5px] text-muted-foreground truncate"
+                        classList={{
+                          "!text-foreground":
+                            threadStore.activeThreadId === thread.id,
+                        }}
+                      >
                         {thread.title}
                       </span>
                     </button>
@@ -356,11 +373,16 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
                     {(thread) => (
                       <button
                         type="button"
-                        class="flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 opacity-70"
+                        class="flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 opacity-70"
                         classList={{
-                          "bg-surface-2/70":
+                          "!bg-surface-2/80 !border-l-primary !opacity-90":
                             threadStore.activeThreadId === thread.id,
                         }}
+                        aria-current={
+                          threadStore.activeThreadId === thread.id
+                            ? "page"
+                            : undefined
+                        }
                         onClick={() => {
                           threadStore.selectThread(thread.id, thread.kind);
                           setActiveId(null);
@@ -370,7 +392,13 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
                         }}
                         title={thread.title}
                       >
-                        <span class="text-[11.5px] text-muted-foreground/80 truncate">
+                        <span
+                          class="text-[11.5px] text-muted-foreground/80 truncate"
+                          classList={{
+                            "!text-foreground":
+                              threadStore.activeThreadId === thread.id,
+                          }}
+                        >
                           {thread.title}
                         </span>
                       </button>
