@@ -268,7 +268,14 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   };
 
   onMount(() => {
-    void employeeStore.refresh();
+    // The sidebar polls the roster every 30s and on visibility change, so a
+    // foreground refresh here just toggles the store's loading state for no
+    // reason. Use background mode once the store has loaded at least once so
+    // mounting the detail doesn't ripple through any consumer that reads
+    // `loading` (and lets the sidebar/thread groups stay still).
+    void employeeStore.refresh({
+      background: employeeStore.lastLoadedAt !== null,
+    });
     document.addEventListener("keydown", handleDocumentKeydown);
     document.addEventListener("mousedown", handleDocumentMousedown);
   });
@@ -1218,13 +1225,15 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     />
                   </div>
                 </Show>
-                <Show when={detail()?.evalGate}>
-                  <div class="mt-3">
-                    <EmployeeEvalDriftCard
-                      deploymentId={emp().id}
-                      organizationId={organizationId() ?? null}
-                    />
-                  </div>
+                <Show when={detail()?.evalGate && organizationId()}>
+                  {(orgId) => (
+                    <div class="mt-3">
+                      <EmployeeEvalDriftCard
+                        deploymentId={emp().id}
+                        organizationId={orgId() as string}
+                      />
+                    </div>
+                  )}
                 </Show>
               </Show>
 
@@ -1242,12 +1251,23 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                   </span>
                 </button>
                 {/* Keep the list mounted across collapse so pagination state
-                    and the initial fetch survive a fold/unfold cycle. */}
+                    and the initial fetch survive a fold/unfold cycle. The
+                    org id resolves asynchronously via Tauri; gating on it
+                    here means the resource fires exactly once with real
+                    data rather than firing twice (null then real) and
+                    flashing an empty state in between. */}
                 <div hidden={!showCheckpoints()}>
-                  <EmployeeCheckpointsList
-                    deploymentId={emp().id}
-                    organizationId={organizationId() ?? null}
-                  />
+                  <Show
+                    when={organizationId()}
+                    fallback={<div class="min-h-11" aria-hidden="true" />}
+                  >
+                    {(orgId) => (
+                      <EmployeeCheckpointsList
+                        deploymentId={emp().id}
+                        organizationId={orgId() as string}
+                      />
+                    )}
+                  </Show>
                 </div>
               </div>
             </div>

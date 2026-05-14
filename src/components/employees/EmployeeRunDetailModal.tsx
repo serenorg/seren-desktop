@@ -17,6 +17,7 @@ import type {
   EmployeeRunApprovalDecision,
   EmployeeRunArtifact,
   EmployeeRunDetail,
+  EmployeeRunPendingApprovals,
 } from "@/lib/employees/types";
 import { employees as svc } from "@/services/employees";
 
@@ -171,23 +172,34 @@ function eventKindClass(kind: string): string {
 export const EmployeeRunDetailModal: Component<EmployeeRunDetailModalProps> = (
   props,
 ) => {
-  const [run, { refetch: refetchRun }] = createResource(
-    () => ({ id: props.deploymentId, runId: props.runId }),
-    async ({ id, runId }) => svc.getRun(id, runId),
-  );
+  // Derived string sources: createResource compares source values with
+  // Object.is. Object-literal sources return a fresh reference on every memo
+  // re-evaluation, so an unrelated upstream invalidation (the sidebar's 30s
+  // employee poll, which can cascade down to props through summary()) would
+  // refetch and visibly churn the modal. Strings stay stable when inputs do.
+  const runKey = () => `${props.deploymentId}::${props.runId}`;
+
+  const [run, { refetch: refetchRun }] = createResource(runKey, async (key) => {
+    const idx = key.indexOf("::");
+    return svc.getRun(key.slice(0, idx), key.slice(idx + 2));
+  });
   const [artifacts] = createResource(
-    () => ({ id: props.deploymentId, runId: props.runId }),
-    async ({ id, runId }) => svc.listRunArtifacts(id, runId),
+    runKey,
+    async (key): Promise<EmployeeRunArtifact[]> => {
+      const idx = key.indexOf("::");
+      return svc.listRunArtifacts(key.slice(0, idx), key.slice(idx + 2));
+    },
   );
   const [approvals, { refetch: refetchApprovals }] = createResource(
     () => {
       const r = run();
       if (!r || r.status !== "awaiting_approval") return null;
-      return { id: props.deploymentId, runId: props.runId };
+      return runKey();
     },
-    async (input) => {
-      if (!input) return null;
-      return svc.listPendingApprovals(input.id, input.runId);
+    async (key): Promise<EmployeeRunPendingApprovals | null> => {
+      if (!key) return null;
+      const idx = key.indexOf("::");
+      return svc.listPendingApprovals(key.slice(0, idx), key.slice(idx + 2));
     },
   );
 

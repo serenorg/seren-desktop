@@ -17,18 +17,42 @@ import {
 } from "@/services/session-checkpoints";
 
 interface EmployeeCheckpointsListProps {
-  organizationId: string | null;
+  // Parent gates this on a resolved org id so the resource fires once with
+  // real data rather than firing twice (null then real) and flashing an
+  // empty state in between.
+  organizationId: string;
   deploymentId: string;
 }
 
 const PAGE_SIZE = 25;
 
-type CheckpointResourceKey = {
+/**
+ * The resource source is a derived string ("org::dep") rather than an object
+ * literal because Solid's createResource compares source values with
+ * Object.is: an object literal returns a fresh reference on every memo
+ * evaluation, so an upstream invalidation (e.g. the 30s sidebar poll
+ * replacing `state.employees`) re-triggers the source memo, produces a new
+ * object reference, fails the equality check, and refetches the list - which
+ * then tears down every row in the `<For>` because keyed iteration uses
+ * identity. A string key collapses identical-input updates to a no-op.
+ */
+const KEY_SEPARATOR = "::";
+
+function makeKey(org: string, dep: string): string {
+  return `${org}${KEY_SEPARATOR}${dep}`;
+}
+
+function parseKey(key: string): { org: string; dep: string } {
+  const idx = key.indexOf(KEY_SEPARATOR);
+  return {
+    org: key.slice(0, idx),
+    dep: key.slice(idx + KEY_SEPARATOR.length),
+  };
+}
+
+type CheckpointInitialPage = {
   org: string;
   dep: string;
-};
-
-type CheckpointInitialPage = CheckpointResourceKey & {
   entries: SessionCheckpoint[];
   next: string | null;
 };
@@ -139,25 +163,32 @@ export const EmployeeCheckpointsList: Component<
   const [loadMoreError, setLoadMoreError] = createSignal<string | null>(null);
 
   const [initial] = createResource(
-    (): CheckpointResourceKey | null => {
-      if (props.organizationId === null) return null;
-      return { org: props.organizationId, dep: props.deploymentId };
-    },
-    async (keys): Promise<CheckpointInitialPage> => {
+    () => makeKey(props.organizationId, props.deploymentId),
+    async (key): Promise<CheckpointInitialPage> => {
+      const { org, dep } = parseKey(key);
+      // The fetcher only runs when the source key changes (different employee
+      // or org), so resetting paged-in extras here is the right moment - it
+      // discards the previous deployment's tail without nuking the operator's
+      // pagination on a same-key tick.
       setExtras([]);
-      const page = await sessionCheckpoints.list(keys.org, keys.dep, {
+      setCursor(null);
+      const page = await sessionCheckpoints.list(org, dep, {
         limit: PAGE_SIZE,
       });
       setCursor(page.next_cursor ?? null);
       return {
-        org: keys.org,
-        dep: keys.dep,
+        org,
+        dep,
         entries: page.entries,
         next: page.next_cursor ?? null,
       };
     },
   );
 
+  // createResource keeps the previous page in `initial()` while a refetch
+  // is in flight (e.g. when the operator switches employees). Guarding the
+  // displayed page on org+dep avoids momentarily rendering stale rows from
+  // the previous deployment.
   const visibleInitial = () => {
     const page = initial();
     if (!page) return null;
@@ -168,12 +199,8 @@ export const EmployeeCheckpointsList: Component<
   };
 
   const all = () => [...(visibleInitial()?.entries ?? []), ...extras()];
-  const shouldShowLoading = () =>
-    props.organizationId !== null &&
-    initial.loading &&
-    visibleInitial() === null;
+  const shouldShowLoading = () => initial.loading && visibleInitial() === null;
   const shouldShowEmpty = () =>
-    props.organizationId !== null &&
     !initial.loading &&
     !initial.error &&
     visibleInitial() !== null &&
@@ -203,11 +230,33 @@ export const EmployeeCheckpointsList: Component<
   return (
     <section aria-label="Session checkpoints">
       <Switch>
-        <Match when={props.organizationId === null}>
-          <div class="min-h-11" aria-hidden="true" />
-        </Match>
         <Match when={shouldShowLoading()}>
-          <div class="min-h-11" aria-hidden="true" />
+          {/* Skeleton rows reserve the same vertical space the loaded list
+              will occupy so the body doesn't jump when checkpoints arrive. */}
+          <div
+            class="relative rounded-md border border-border bg-card overflow-hidden animate-pulse"
+            role="status"
+            aria-label="Loading checkpoints"
+          >
+            <For each={[0, 1, 2]}>
+              {(i) => (
+                <div
+                  class="relative pl-9 pr-3 py-3"
+                  classList={{ "border-b border-border/40": i !== 2 }}
+                >
+                  <span
+                    class="absolute left-[11px] top-[14px] w-[9px] h-[9px] rounded-full border border-border bg-surface-2"
+                    aria-hidden="true"
+                  />
+                  <div class="flex items-baseline gap-3">
+                    <div class="h-[11px] w-32 rounded bg-muted/40" />
+                    <div class="ml-auto h-[11px] w-20 rounded bg-muted/30" />
+                  </div>
+                  <div class="mt-2 h-[10px] w-2/3 rounded bg-muted/30" />
+                </div>
+              )}
+            </For>
+          </div>
         </Match>
         <Match when={initial.error}>
           <div

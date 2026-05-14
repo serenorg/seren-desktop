@@ -95,13 +95,19 @@ export const EmployeeRunsList: Component<EmployeeRunsListProps> = (props) => {
   const [limit, setLimit] = createSignal(props.limit ?? 10);
   const [detailRunId, setDetailRunId] = createSignal<string | null>(null);
 
+  // Derived string source: createResource compares source values with
+  // Object.is. An object literal returns a fresh reference on every memo
+  // re-evaluation, so an upstream invalidation (the 30s sidebar poll
+  // replacing state.employees) would refetch even when nothing changed.
+  // The deliberate cadence below still uses refetch() to surface new runs.
   const [runs, { refetch }] = createResource(
-    () => ({
-      id: props.employeeId,
-      nonce: props.refreshNonce ?? 0,
-      limit: limit(),
-    }),
-    async ({ id, limit: l }) => svc.listRecentRuns(id, l),
+    () => `${props.employeeId}::${props.refreshNonce ?? 0}::${limit()}`,
+    async (
+      key,
+    ): Promise<{ rows: EmployeeRun[]; hasMore: boolean; total: number }> => {
+      const [id, , limitStr] = key.split("::");
+      return svc.listRecentRuns(id, Number.parseInt(limitStr, 10));
+    },
   );
 
   // Refresh on a slow cadence so cron-triggered runs appear without a

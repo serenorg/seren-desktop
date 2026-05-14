@@ -196,6 +196,13 @@ export async function clearSerenApiKey(): Promise<void> {
 // Default Organization ID (for API key creation)
 // ============================================================================
 
+// Module-level cache. The default org id is a per-session setting that any
+// number of detail/inbox/catalog/tasks components will read; without a cache
+// each mount fires a fresh Tauri invoke which manifests as a visible "loading"
+// flash on every navigation. The store-mutating helpers below invalidate.
+let cachedDefaultOrganizationId: string | null | undefined;
+let cachedDefaultOrganizationIdPromise: Promise<string | null> | null = null;
+
 /**
  * Store the user's default organization ID.
  * This is returned from login and used for API key creation.
@@ -212,23 +219,44 @@ export async function storeDefaultOrganizationId(orgId: string): Promise<void> {
     // Browser fallback for testing
     devStorage.setItem(DEFAULT_ORG_ID_STORAGE_KEY, orgId);
   }
+  cachedDefaultOrganizationId = orgId.length > 0 ? orgId : null;
+  cachedDefaultOrganizationIdPromise = null;
 }
 
 /**
  * Retrieve stored default organization ID.
- * Returns null if not stored.
+ * Returns null if not stored. Subsequent calls return the cached value
+ * instantly, avoiding a Tauri roundtrip on every detail/inbox mount.
  */
 export async function getDefaultOrganizationId(): Promise<string | null> {
-  const invoke = await getInvoke();
-  if (invoke) {
-    const result = await invoke<string | null>("get_setting", {
-      store: "auth.json",
-      key: "default_organization_id",
-    });
-    return result && result.length > 0 ? result : null;
+  if (cachedDefaultOrganizationId !== undefined) {
+    return cachedDefaultOrganizationId;
   }
-  // Browser fallback for testing
-  return devStorage.getItem(DEFAULT_ORG_ID_STORAGE_KEY);
+  if (cachedDefaultOrganizationIdPromise) {
+    return cachedDefaultOrganizationIdPromise;
+  }
+  cachedDefaultOrganizationIdPromise = (async () => {
+    try {
+      const invoke = await getInvoke();
+      let value: string | null;
+      if (invoke) {
+        const result = await invoke<string | null>("get_setting", {
+          store: "auth.json",
+          key: "default_organization_id",
+        });
+        value = result && result.length > 0 ? result : null;
+      } else {
+        // Browser fallback for testing
+        value = devStorage.getItem(DEFAULT_ORG_ID_STORAGE_KEY);
+      }
+      cachedDefaultOrganizationId = value;
+      return value;
+    } catch (err) {
+      cachedDefaultOrganizationIdPromise = null;
+      throw err;
+    }
+  })();
+  return cachedDefaultOrganizationIdPromise;
 }
 
 /**
@@ -246,6 +274,8 @@ export async function clearDefaultOrganizationId(): Promise<void> {
     // Browser fallback for testing
     devStorage.removeItem(DEFAULT_ORG_ID_STORAGE_KEY);
   }
+  cachedDefaultOrganizationId = null;
+  cachedDefaultOrganizationIdPromise = null;
 }
 
 // ============================================================================

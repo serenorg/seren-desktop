@@ -252,14 +252,18 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
     for (const [key, rows] of left) {
       const other = right.get(key);
       if (!other || other.length !== rows.length) return false;
-      if (JSON.stringify(rows) !== JSON.stringify(other)) return false;
     }
     return true;
   };
 
+  let disposed = false;
+  let pendingRefreshSeq = 0;
+
   const refreshPending = async () => {
+    const seq = ++pendingRefreshSeq;
     try {
       const rows = await employeeApprovals.listOrg(100);
+      if (disposed || seq !== pendingRefreshSeq) return;
       const next = employeeApprovals.groupByDeployment(rows);
       setPendingByDeployment((prev) =>
         pendingMapsEqual(prev, next) ? prev : next,
@@ -339,6 +343,7 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
   });
 
   onCleanup(() => {
+    disposed = true;
     if (interval !== null) clearInterval(interval);
     document.removeEventListener("visibilitychange", handleVisibility);
     window.removeEventListener(

@@ -178,11 +178,11 @@ export const employeeStore = {
           "Failed to load archived employees:",
           archivedResult.reason,
         );
-        if (!archivedEmployeesEqual(state.archived, [])) {
+        if (!background && !archivedEmployeesEqual(state.archived, [])) {
           setState("archived", []);
         }
       }
-      if (state.error !== null) {
+      if (!background && state.error !== null) {
         setState("error", null);
       }
       if (!background || state.lastLoadedAt === null) {

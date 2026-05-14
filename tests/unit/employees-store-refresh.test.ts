@@ -102,4 +102,60 @@ describe("employeeStore.refresh", () => {
     expect(employeeStore.lastLoadedAt).toBe(firstLastLoadedAt);
     expect(employeeStore.loading).toBe(false);
   });
+
+  it("does not clear a foreground error from a background success", async () => {
+    const { employeeStore } = await import("@/stores/employees.store");
+
+    listMock.mockRejectedValue(new Error("network down"));
+    archivedListMock.mockResolvedValue([]);
+
+    await employeeStore.refresh();
+
+    expect(employeeStore.error).toBe("network down");
+
+    listMock.mockResolvedValue([]);
+    archivedListMock.mockResolvedValue([]);
+
+    await employeeStore.refresh({ background: true });
+
+    expect(employeeStore.error).toBe("network down");
+  });
+
+  it("preserves archived employees when a background archive refresh fails", async () => {
+    const { employeeStore } = await import("@/stores/employees.store");
+
+    const archived = {
+      id: "archived_1",
+      slug: "retired-bot",
+      name: "Retired bot",
+      mode: "always_on",
+      status: "stopped",
+      modelChoice: "standard",
+      modelPolicy: "balanced",
+      modelId: null,
+      cronSchedule: null,
+      cronTimezone: null,
+      endpointUrl: null,
+      activeRevisionId: null,
+      errorMessage: null,
+      avatarSeed: "retired-bot",
+      createdAt: "2026-05-13T00:00:00Z",
+      updatedAt: "2026-05-13T00:00:00Z",
+      archivedAt: "2026-05-14T00:00:00Z",
+    };
+
+    listMock.mockResolvedValue([]);
+    archivedListMock.mockResolvedValue([archived]);
+
+    await employeeStore.refresh();
+
+    const firstArchived = employeeStore.archived;
+    expect(firstArchived).toHaveLength(1);
+
+    archivedListMock.mockRejectedValue(new Error("sqlite busy"));
+
+    await employeeStore.refresh({ background: true });
+
+    expect(employeeStore.archived).toBe(firstArchived);
+  });
 });

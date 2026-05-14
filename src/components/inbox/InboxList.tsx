@@ -274,7 +274,7 @@ export const InboxList: Component = () => {
 
   const grouped = createMemo(() => groupInboxEntries(allEntries()));
 
-  const hasMore = () => cursor() !== null;
+  const hasMore = () => !initialPage.loading && cursor() !== null;
 
   const refresh = () => {
     // A manual refresh discards optimistic overrides; the server is now the

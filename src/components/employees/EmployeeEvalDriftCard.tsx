@@ -16,7 +16,10 @@ import {
 } from "@/services/eval-drift";
 
 interface EmployeeEvalDriftCardProps {
-  organizationId: string | null;
+  // The parent is responsible for resolving the org id before mounting this
+  // component; rendering with a null org just produces a visible "empty →
+  // loading → content" flash when the id arrives later.
+  organizationId: string;
   deploymentId: string;
 }
 
@@ -173,14 +176,19 @@ const EmptyState: Component<{ title: string; detail: string }> = (props) => (
 export const EmployeeEvalDriftCard: Component<EmployeeEvalDriftCardProps> = (
   props,
 ) => {
+  // String source key: createResource compares source values with Object.is.
+  // An object literal returns a fresh reference each time its memo runs, so
+  // an unrelated upstream invalidation (e.g. the 30s sidebar poll replacing
+  // `state.employees`) would refetch the drift card and visibly flash the
+  // skeleton. Collapsing the source to a string makes same-input updates a
+  // no-op.
   const [drift] = createResource(
-    () => ({ org: props.organizationId, dep: props.deploymentId }),
-    async (keys: {
-      org: string | null;
-      dep: string;
-    }): Promise<CloudDeploymentEvalDrift | null> => {
-      if (!keys.org) return null;
-      return await getEvalDrift(keys.org, keys.dep);
+    () => `${props.organizationId}::${props.deploymentId}`,
+    async (key): Promise<CloudDeploymentEvalDrift> => {
+      const idx = key.indexOf("::");
+      const org = key.slice(0, idx);
+      const dep = key.slice(idx + 2);
+      return getEvalDrift(org, dep);
     },
   );
 
@@ -225,15 +233,21 @@ export const EmployeeEvalDriftCard: Component<EmployeeEvalDriftCardProps> = (
         </div>
         <Switch>
           <Match when={drift.loading}>
+            {/* Skeleton matches the channel-cell layout below so the card
+                reserves its final height while the request is in flight. */}
             <div
-              class="flex items-center gap-2 text-[12px] text-muted-foreground"
+              class="grid grid-cols-2 gap-6 animate-pulse"
               role="status"
+              aria-label="Loading eval drift"
             >
-              <span
-                class="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse"
-                aria-hidden="true"
-              />
-              Loading eval drift...
+              <div class="flex flex-col gap-1.5">
+                <div class="h-[10px] w-12 rounded bg-muted/40" />
+                <div class="h-[26px] w-16 rounded bg-muted/50" />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <div class="h-[10px] w-12 rounded bg-muted/40" />
+                <div class="h-[26px] w-16 rounded bg-muted/50" />
+              </div>
             </div>
           </Match>
           <Match when={drift.error}>
