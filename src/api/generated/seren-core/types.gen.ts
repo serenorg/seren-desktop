@@ -671,6 +671,10 @@ export type CreatePublisherRequest = {
      * Enable resource ownership tracking (legacy gateway parity)
      */
     ownership_tracking_enabled?: boolean | null;
+    /**
+     * Map of client-side header name to upstream header name for passthrough auth.
+     */
+    passthrough_header_rewrite?: unknown;
     price_per_call?: string | null;
     price_per_delete?: string | null;
     /**
@@ -5522,6 +5526,10 @@ export type DataResponsePublisherResponse = {
         oauth_provider_id?: string | null;
         ownership_tracking_enabled: boolean;
         /**
+         * Map of client-side header name to upstream header name for passthrough auth.
+         */
+        passthrough_header_rewrite: unknown;
+        /**
          * Pricing config per asset (if included)
          */
         pricing?: Array<PricingConfigResponse> | null;
@@ -8464,6 +8472,10 @@ export type DataResponseVecPublisherResponse = {
         oauth_provider_id?: string | null;
         ownership_tracking_enabled: boolean;
         /**
+         * Map of client-side header name to upstream header name for passthrough auth.
+         */
+        passthrough_header_rewrite: unknown;
+        /**
          * Pricing config per asset (if included)
          */
         pricing?: Array<PricingConfigResponse> | null;
@@ -9958,7 +9970,7 @@ export type DelegationType = 'in_loop' | 'full_handoff';
  */
 export type DepositRequest = {
     /**
-     * Amount in USD cents (minimum 500 = $5.00)
+     * Amount in USD cents (minimum 500 = $5.00, maximum 30000 = $300.00 by default)
      */
     amount_cents: number;
     /**
@@ -11005,6 +11017,10 @@ export type PaginatedResponseVecPublisherResponse = {
         oauth_provider_id?: string | null;
         ownership_tracking_enabled: boolean;
         /**
+         * Map of client-side header name to upstream header name for passthrough auth.
+         */
+        passthrough_header_rewrite: unknown;
+        /**
          * Pricing config per asset (if included)
          */
         pricing?: Array<PricingConfigResponse> | null;
@@ -11615,6 +11631,10 @@ export type PublisherResponse = {
      */
     oauth_provider_id?: string | null;
     ownership_tracking_enabled: boolean;
+    /**
+     * Map of client-side header name to upstream header name for passthrough auth.
+     */
+    passthrough_header_rewrite: unknown;
     /**
      * Pricing config per asset (if included)
      */
@@ -12591,6 +12611,10 @@ export type UpdatePublisherRequest = {
      * Enable resource ownership tracking (legacy gateway parity)
      */
     ownership_tracking_enabled?: boolean | null;
+    /**
+     * Map of client-side header name to upstream header name for passthrough auth.
+     */
+    passthrough_header_rewrite?: unknown;
     price_per_call?: string | null;
     price_per_delete?: string | null;
     /**

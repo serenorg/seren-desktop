@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type AgentBundle,
   type CloudDeploymentSummary,
+  type ManagedAgentDeploymentDetail,
+  serenAgentGetManagedDeployment,
+  serenAgentListDeployments,
   serenAgentUpdateManagedDeployment,
 } from "@/api/seren-agent";
 import { employees } from "@/services/employees";
@@ -111,5 +114,125 @@ describe("employees service", () => {
         throwOnError: false,
       }),
     );
+  });
+
+  it("maps typed governance fields onto EmployeeDetail when present", async () => {
+    const managedDetail: ManagedAgentDeploymentDetail = {
+      active_revision_id: "rev_1",
+      agent_slug: "atlas",
+      allowed_publisher_operations: [],
+      approval_policy: "read_only",
+      bundle: { instructions: [], assets: [] },
+      compute_backend: "aws_container",
+      conditions: [
+        {
+          type: "Ready",
+          status: "False",
+          reason: "Pending",
+          message: null,
+        },
+      ],
+      credentials: [
+        {
+          name: "openai",
+          binding: "env",
+          kind: "api_key",
+          ref_uri: "control-plane://providers/openai",
+        },
+      ],
+      deployment_id: "dep_1",
+      guardrails: [
+        {
+          name: "no_secrets",
+          target: "output",
+          validator: { kind: "regex", pattern: "secret" },
+        },
+      ],
+      memory_policy: {
+        semantic_memory: { enabled: true },
+      },
+      mode: "always_on",
+      model_config: null,
+      model_id: "claude-3",
+      model_policy: "balanced",
+      name: "Atlas",
+      private_output_policy: "control_plane",
+      requirements: [],
+      resolved_tools: [],
+      routing_reason: "standard",
+      runtime_adapter: "adk",
+      runtime_kind: "python",
+      runtime_policy: {
+        version: 1,
+        network: { default: "deny", egress_rules: [] },
+      },
+      secret_keys: [],
+      status: "running",
+      template: "research_monitor",
+      tool_presets: ["live_data"],
+      tool_refs: [
+        {
+          kind: "publisher",
+          publisher_slug: "seren-web",
+          operation_id: "fetch",
+        },
+      ],
+      eval_gate: {
+        set_id: "set_eval_1",
+        max_age_seconds: 3600,
+        block_on_failure: true,
+      },
+      visibility: "open",
+    };
+
+    vi.mocked(serenAgentListDeployments).mockResolvedValueOnce({
+      data: { data: [cloudSummary()] },
+      error: undefined,
+    } as never);
+    vi.mocked(serenAgentGetManagedDeployment).mockResolvedValueOnce({
+      data: { data: managedDetail },
+      error: undefined,
+    } as never);
+
+    const detail = await employees.get("dep_1");
+
+    expect(detail.conditions).toHaveLength(1);
+    expect(detail.conditions[0]).toMatchObject({
+      type: "Ready",
+      status: "False",
+    });
+    expect(detail.runtimePolicy?.network?.default).toBe("deny");
+    expect(detail.guardrails).toHaveLength(1);
+    expect(detail.memoryPolicy?.semantic_memory?.enabled).toBe(true);
+    expect(detail.credentials).toHaveLength(1);
+    expect(detail.toolRefs).toHaveLength(1);
+    expect(detail.evalGate).toMatchObject({
+      set_id: "set_eval_1",
+      max_age_seconds: 3600,
+      block_on_failure: true,
+    });
+  });
+
+  it("returns null governance defaults for opaque 403 detail responses", async () => {
+    vi.mocked(serenAgentListDeployments).mockResolvedValueOnce({
+      data: { data: [cloudSummary()] },
+      error: undefined,
+    } as never);
+    vi.mocked(serenAgentGetManagedDeployment).mockResolvedValueOnce({
+      data: undefined,
+      error: { detail: "forbidden" },
+      response: { status: 403 } as Response,
+    } as never);
+
+    const detail = await employees.get("dep_1");
+
+    expect(detail.conditions).toEqual([]);
+    expect(detail.runtimePolicy).toBeNull();
+    expect(detail.guardrails).toEqual([]);
+    expect(detail.memoryPolicy).toBeNull();
+    expect(detail.credentials).toEqual([]);
+    expect(detail.toolRefs).toEqual([]);
+    expect(detail.evalGate).toBeNull();
+    expect(detail.visibility).toBe("opaque");
   });
 });

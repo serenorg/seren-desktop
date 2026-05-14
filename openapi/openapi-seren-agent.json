@@ -870,6 +870,253 @@
           }
         }
       },
+      "AgentCredentialBinding": {
+        "type": "string",
+        "enum": [
+          "env",
+          "header",
+          "body",
+          "proxy_inject"
+        ]
+      },
+      "AgentCredentialKind": {
+        "type": "string",
+        "enum": [
+          "api_key",
+          "oauth2_token",
+          "basic",
+          "mtls",
+          "aws_sig_v4",
+          "gcp_service_account"
+        ]
+      },
+      "AgentCredentialRef": {
+        "type": "object",
+        "description": "Reference to a credential held by Seren's control plane or organization\nsecret store, injected at the declared binding point.",
+        "required": [
+          "name",
+          "ref_uri",
+          "kind",
+          "binding"
+        ],
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/AgentCredentialBinding",
+            "description": "How the credential is delivered. `env` is the only mode the runtime\nimplements today; other modes are accepted on the contract and reserved\nfor the egress proxy phase of the credential boundary work."
+          },
+          "binding_target": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AgentCredentialKind"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name the workload uses to address the credential."
+          },
+          "ref_uri": {
+            "type": "string",
+            "description": "URI of the credential record. Supported schemes:\n`control-plane://providers/{id}`, `org-secret://{key}`, `user-secret://{key}`."
+          },
+          "rotation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentCredentialRotationPolicy"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentCredentialRotationPolicy": {
+        "type": "object",
+        "required": [
+          "allow_rotate"
+        ],
+        "properties": {
+          "allow_rotate": {
+            "type": "boolean"
+          },
+          "max_age_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentFilesystemEnforcement": {
+        "type": "string",
+        "enum": [
+          "best_effort",
+          "hard_requirement"
+        ]
+      },
+      "AgentFilesystemPolicy": {
+        "type": "object",
+        "properties": {
+          "enforcement": {
+            "$ref": "#/components/schemas/AgentFilesystemEnforcement",
+            "description": "How strictly the runtime should enforce these paths."
+          },
+          "read_only_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Absolute paths the workload may read but not write."
+          },
+          "read_write_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Absolute paths the workload may read and write."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentGuardrailOnFail": {
+        "type": "string",
+        "enum": [
+          "retry",
+          "block",
+          "fix",
+          "human"
+        ]
+      },
+      "AgentGuardrailPolicy": {
+        "type": "object",
+        "description": "Typed guardrail policy attached to a managed agent.",
+        "required": [
+          "name",
+          "target",
+          "validator"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "human_inbox": {
+            "type": "boolean",
+            "description": "When true, fail events route into the unified approval inbox for human review."
+          },
+          "max_retries": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique within the deployment; used in `guardrail_pass`/`guardrail_fail`\nevents."
+          },
+          "on_fail": {
+            "$ref": "#/components/schemas/AgentGuardrailOnFail"
+          },
+          "target": {
+            "$ref": "#/components/schemas/AgentGuardrailTarget"
+          },
+          "tool": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional tool name; when present, the guardrail only fires on that tool."
+          },
+          "validator": {
+            "$ref": "#/components/schemas/AgentGuardrailValidator"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentGuardrailTarget": {
+        "type": "string",
+        "enum": [
+          "input",
+          "output",
+          "tool_input",
+          "tool_output"
+        ]
+      },
+      "AgentGuardrailValidator": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "pattern",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "regex"
+                ]
+              },
+              "pattern": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "prompt",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "llm_judge"
+                ]
+              },
+              "model": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "prompt": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "function_ref",
+              "kind"
+            ],
+            "properties": {
+              "function_ref": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "custom_fn"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "AgentInstructionFile": {
         "type": "object",
         "description": "One authored instruction file.\n\nSupports inline instruction bodies as well as packaged workload metadata.",
@@ -954,6 +1201,433 @@
           "eval"
         ]
       },
+      "AgentMemoryCompactionPolicy": {
+        "type": "object",
+        "required": [
+          "token_threshold",
+          "event_retention_count",
+          "overlap_tokens"
+        ],
+        "properties": {
+          "event_retention_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "overlap_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "summarizer_model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "token_threshold": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentMemoryPolicy": {
+        "type": "object",
+        "description": "Typed memory policy declared by a managed agent.",
+        "properties": {
+          "compaction": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentMemoryCompactionPolicy",
+                "description": "Optional context-window compaction policy."
+              }
+            ]
+          },
+          "semantic_memory": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentSemanticMemoryPolicy",
+                "description": "Semantic / long-term memory policy."
+              }
+            ]
+          },
+          "transcript_retention_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Optional retention for raw run transcripts (days).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentNetworkAccessPreset": {
+        "type": "string",
+        "enum": [
+          "read_only",
+          "read_write",
+          "full"
+        ]
+      },
+      "AgentNetworkDefault": {
+        "type": "string",
+        "enum": [
+          "deny",
+          "allow"
+        ]
+      },
+      "AgentNetworkEgressRule": {
+        "type": "object",
+        "required": [
+          "host",
+          "port",
+          "protocol"
+        ],
+        "properties": {
+          "access_preset": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentNetworkAccessPreset",
+                "description": "Optional convenience preset that expands to a method set when set."
+              }
+            ]
+          },
+          "binaries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional per-binary glob list restricting which processes may use the rule."
+          },
+          "enforcement": {
+            "$ref": "#/components/schemas/AgentNetworkEnforcement",
+            "description": "Whether matches enforce or just audit."
+          },
+          "host": {
+            "type": "string"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional HTTP methods this rule applies to (rest/sse protocols only)."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional path globs this rule applies to (rest/sse protocols only)."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/AgentNetworkProtocol"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentNetworkEnforcement": {
+        "type": "string",
+        "enum": [
+          "enforce",
+          "audit"
+        ]
+      },
+      "AgentNetworkPolicy": {
+        "type": "object",
+        "properties": {
+          "blocked_request_inbox": {
+            "type": "boolean",
+            "description": "When true, blocked egress requests are queued for operator approval\n(shares an inbox with tool approvals)."
+          },
+          "default": {
+            "$ref": "#/components/schemas/AgentNetworkDefault",
+            "description": "Default disposition when no rule matches a request."
+          },
+          "egress_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentNetworkEgressRule"
+            },
+            "description": "Ordered egress rules. The first matching rule decides the request."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentNetworkProtocol": {
+        "type": "string",
+        "enum": [
+          "tcp",
+          "rest",
+          "sse",
+          "websocket"
+        ]
+      },
+      "AgentProcessPolicy": {
+        "type": "object",
+        "properties": {
+          "capability_drop": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Linux capabilities to drop. Defaults to `[\"ALL\"]` at the controller."
+          },
+          "no_new_privileges": {
+            "type": "boolean"
+          },
+          "run_as_user": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional uid:gid pair (e.g. `1000:1000`) the workload runs under."
+          },
+          "seccomp_profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Seccomp profile name; defaults to the runtime default."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentRemoteAgentAuth": {
+        "type": "string",
+        "enum": [
+          "none",
+          "bearer",
+          "mtls"
+        ]
+      },
+      "AgentRemoteAgentTransport": {
+        "type": "string",
+        "enum": [
+          "https",
+          "sse",
+          "websocket"
+        ]
+      },
+      "AgentResourcePolicy": {
+        "type": "object",
+        "properties": {
+          "cpu_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cpu_request": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ephemeral_storage_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_artifact_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_output_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_runtime_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_tool_calls": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "memory_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "memory_request": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentRuntimeClass": {
+        "type": "string",
+        "enum": [
+          "default",
+          "gvisor",
+          "kata"
+        ]
+      },
+      "AgentRuntimePolicy": {
+        "type": "object",
+        "description": "Typed runtime policy that a managed agent declares as part of its `AgentSpec`.\n\nThe control plane validates this object on create/update; the runtime\ncontroller renders it into Kubernetes objects (security context, resource\nlimits, NetworkPolicy). Today the controller renders a subset; fields it\ndoes not yet honor remain part of the declared contract so revisions and\nrollbacks stay consistent.",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "filesystem": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentFilesystemPolicy"
+              }
+            ]
+          },
+          "network": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentNetworkPolicy"
+              }
+            ]
+          },
+          "process": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentProcessPolicy"
+              }
+            ]
+          },
+          "resources": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentResourcePolicy"
+              }
+            ]
+          },
+          "runtime_class": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentRuntimeClass",
+                "description": "Optional sandbox runtime class (for example `gvisor` or `kata`).\nWhen omitted, the platform default applies."
+              }
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Policy schema version. Must be `1` until a breaking field set is added.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentSemanticMemoryPolicy": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "embedding_model_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional embedding model reference."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "read_policy": {
+            "$ref": "#/components/schemas/AgentSemanticMemoryReadPolicy"
+          },
+          "retention_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "store": {
+            "$ref": "#/components/schemas/AgentSemanticMemoryStore"
+          },
+          "write_policy": {
+            "$ref": "#/components/schemas/AgentSemanticMemoryWritePolicy"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentSemanticMemoryReadPolicy": {
+        "type": "string",
+        "enum": [
+          "explicit_tool",
+          "always_on"
+        ]
+      },
+      "AgentSemanticMemoryStore": {
+        "type": "string",
+        "enum": [
+          "org_default",
+          "external"
+        ]
+      },
+      "AgentSemanticMemoryWritePolicy": {
+        "type": "string",
+        "enum": [
+          "explicit_tool",
+          "on_observation",
+          "none"
+        ]
+      },
       "AgentSpec": {
         "type": "object",
         "description": "Managed deploy request for the `seren-agent` first-class publisher.",
@@ -1001,6 +1675,16 @@
               }
             ]
           },
+          "credentials": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AgentCredentialRef"
+            },
+            "description": "Optional credential references resolved by the control plane at runtime."
+          },
           "cron_schedule": {
             "type": [
               "string",
@@ -1026,6 +1710,27 @@
               {
                 "$ref": "#/components/schemas/EvalGate",
                 "description": "Optional eval gate that must pass before runs proceed."
+              }
+            ]
+          },
+          "guardrails": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AgentGuardrailPolicy"
+            },
+            "description": "Optional guardrail policies applied at input/output/tool boundaries."
+          },
+          "memory_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentMemoryPolicy",
+                "description": "Optional memory policy (semantic memory, transcripts, compaction)."
               }
             ]
           },
@@ -1062,6 +1767,17 @@
               }
             ]
           },
+          "runtime_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentRuntimePolicy",
+                "description": "Optional typed runtime policy (filesystem, network, process, resources).\nToday the controller renders the network section as a NetworkPolicy and\nthe resources section as Pod resources; other sections are reserved."
+              }
+            ]
+          },
           "session_database": {
             "oneOf": [
               {
@@ -1093,6 +1809,16 @@
               "$ref": "#/components/schemas/ManagedAgentToolPreset"
             },
             "description": "Managed tool presets. Defaults to `live_data`."
+          },
+          "tool_refs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AgentToolRef"
+            },
+            "description": "Optional typed tool references. Coexists with `tool_presets` so the\nruntime can resolve from typed refs and preset groups together."
           },
           "visibility": {
             "type": [
@@ -1155,6 +1881,10 @@
             "type": "boolean",
             "description": "Clear any existing alert policy."
           },
+          "clear_credentials": {
+            "type": "boolean",
+            "description": "Clear any existing credential references."
+          },
           "clear_dashboard_config": {
             "type": "boolean",
             "description": "Clear any existing dashboard config."
@@ -1163,9 +1893,35 @@
             "type": "boolean",
             "description": "Clear any existing eval gate configuration."
           },
+          "clear_guardrails": {
+            "type": "boolean",
+            "description": "Clear any existing guardrail list."
+          },
+          "clear_memory_policy": {
+            "type": "boolean",
+            "description": "Clear any existing memory policy."
+          },
+          "clear_runtime_policy": {
+            "type": "boolean",
+            "description": "Clear any existing runtime policy."
+          },
           "clear_session_database": {
             "type": "boolean",
             "description": "Clear any existing external session database configuration."
+          },
+          "clear_tool_refs": {
+            "type": "boolean",
+            "description": "Clear any existing typed tool refs."
+          },
+          "credentials": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AgentCredentialRef"
+            },
+            "description": "Updated credential references. Replaces the entire previous list when present."
           },
           "cron_schedule": {
             "type": [
@@ -1195,6 +1951,27 @@
               }
             ]
           },
+          "guardrails": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AgentGuardrailPolicy"
+            },
+            "description": "Updated guardrail list. Replaces the entire previous list when present."
+          },
+          "memory_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentMemoryPolicy",
+                "description": "Updated memory policy. Replaces the entire previous policy when present."
+              }
+            ]
+          },
           "model_policy": {
             "oneOf": [
               {
@@ -1221,6 +1998,17 @@
               {
                 "$ref": "#/components/schemas/ManagedAgentPrivateOutputPolicy",
                 "description": "Updated output persistence policy for model/tool traces."
+              }
+            ]
+          },
+          "runtime_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentRuntimePolicy",
+                "description": "Updated runtime policy. Replaces the entire previous policy when present."
               }
             ]
           },
@@ -1256,6 +2044,16 @@
             },
             "description": "Updated managed tool presets."
           },
+          "tool_refs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AgentToolRef"
+            },
+            "description": "Updated typed tool refs. Replaces the entire previous list when present."
+          },
           "visibility": {
             "type": [
               "string",
@@ -1276,6 +2074,158 @@
           }
         },
         "additionalProperties": false
+      },
+      "AgentToolRef": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Reference to a first-class publisher operation.",
+            "required": [
+              "publisher_slug",
+              "operation_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "publisher"
+                ]
+              },
+              "operation_id": {
+                "type": "string"
+              },
+              "publisher_slug": {
+                "type": "string"
+              },
+              "require_approval": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Reference to a tool exposed by an MCP server registered with Seren.",
+            "required": [
+              "server_ref",
+              "tool_name",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "mcp"
+                ]
+              },
+              "require_approval": {
+                "type": "boolean"
+              },
+              "server_ref": {
+                "type": "string"
+              },
+              "tool_name": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Reference to a capability on an organization connector (Gmail, Slack, ...).",
+            "required": [
+              "connector_ref",
+              "capability",
+              "kind"
+            ],
+            "properties": {
+              "capability": {
+                "type": "string"
+              },
+              "connector_ref": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "connector"
+                ]
+              },
+              "require_approval": {
+                "type": "boolean"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Reference to a remote agent reachable via A2A.",
+            "required": [
+              "origin",
+              "transport",
+              "auth_mode",
+              "kind"
+            ],
+            "properties": {
+              "auth_mode": {
+                "$ref": "#/components/schemas/AgentRemoteAgentAuth"
+              },
+              "expected_card_digest": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "remote_agent"
+                ]
+              },
+              "origin": {
+                "type": "string"
+              },
+              "require_approval": {
+                "type": "boolean"
+              },
+              "timeout_ms": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              },
+              "transport": {
+                "$ref": "#/components/schemas/AgentRemoteAgentTransport"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Back-compat shim for the coarse `tool_presets` collections.",
+            "required": [
+              "preset",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "preset_group"
+                ]
+              },
+              "preset": {
+                "$ref": "#/components/schemas/ManagedAgentToolPreset"
+              }
+            }
+          }
+        ],
+        "description": "Typed tool reference attached to an agent. Lives alongside the coarser\n`tool_presets` field; future managed-agent flows resolve from typed refs and\npresets together."
       },
       "CloudDeploymentActionStatusResponse": {
         "type": "object",
@@ -2023,6 +2973,13 @@
               "compute_backend": {
                 "$ref": "#/components/schemas/CloudDeploymentComputeBackend"
               },
+              "conditions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ManagedDeploymentCondition"
+                },
+                "description": "Structured status conditions for the managed deployment. Today this is\nsynthesized from the flat lifecycle `status` and the last persisted\n`error_message`; future work will let the runtime controller report\nconditions directly."
+              },
               "config": {},
               "context_budget_tokens": {
                 "type": [
@@ -2031,6 +2988,13 @@
                 ],
                 "format": "int32",
                 "minimum": 0
+              },
+              "credentials": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AgentCredentialRef"
+                },
+                "description": "Credential references attached to this deployment, when any."
               },
               "cron_schedule": {
                 "type": [
@@ -2068,6 +3032,13 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "guardrails": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AgentGuardrailPolicy"
+                },
+                "description": "Guardrails attached to this deployment, when any."
               },
               "llm_connection": {
                 "oneOf": [
@@ -2110,6 +3081,17 @@
                 ],
                 "format": "int32",
                 "minimum": 0
+              },
+              "memory_policy": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AgentMemoryPolicy",
+                    "description": "Memory policy declared by the deployment, when set."
+                  }
+                ]
               },
               "mode": {
                 "$ref": "#/components/schemas/CloudDeploymentMode"
@@ -2158,6 +3140,17 @@
               "runtime_kind": {
                 "$ref": "#/components/schemas/CloudDeploymentRuntimeKind"
               },
+              "runtime_policy": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AgentRuntimePolicy",
+                    "description": "Typed runtime policy (filesystem/network/process/resources), when set."
+                  }
+                ]
+              },
               "secret_keys": {
                 "type": "array",
                 "items": {
@@ -2195,6 +3188,13 @@
                 "items": {
                   "$ref": "#/components/schemas/ManagedAgentToolPreset"
                 }
+              },
+              "tool_refs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AgentToolRef"
+                },
+                "description": "Typed tool refs declared on the deployment, when any."
               },
               "visibility": {
                 "type": "string"
@@ -2754,12 +3754,18 @@
       },
       "EvalGate": {
         "type": "object",
-        "description": "Eval gate configuration that must pass with a fresh verdict before runs proceed.",
+        "description": "Eval gate configuration that must pass with a fresh verdict before runs proceed.\n\n`block_on_failure` controls what happens at update or rollback apply time:\nwhen `Some(true)`, the control plane rejects the apply if the latest eval\nverdict has failed or has expired beyond `max_age_seconds`. The default\n(`None`/`false`) preserves the original freshness-only behavior for\nback-compat.",
         "required": [
           "set_id",
           "max_age_seconds"
         ],
         "properties": {
+          "block_on_failure": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "max_age_seconds": {
             "type": "integer",
             "format": "int32"
@@ -2847,6 +3853,13 @@
           "compute_backend": {
             "$ref": "#/components/schemas/CloudDeploymentComputeBackend"
           },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedDeploymentCondition"
+            },
+            "description": "Structured status conditions for the managed deployment. Today this is\nsynthesized from the flat lifecycle `status` and the last persisted\n`error_message`; future work will let the runtime controller report\nconditions directly."
+          },
           "config": {},
           "context_budget_tokens": {
             "type": [
@@ -2855,6 +3868,13 @@
             ],
             "format": "int32",
             "minimum": 0
+          },
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentCredentialRef"
+            },
+            "description": "Credential references attached to this deployment, when any."
           },
           "cron_schedule": {
             "type": [
@@ -2892,6 +3912,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "guardrails": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentGuardrailPolicy"
+            },
+            "description": "Guardrails attached to this deployment, when any."
           },
           "llm_connection": {
             "oneOf": [
@@ -2934,6 +3961,17 @@
             ],
             "format": "int32",
             "minimum": 0
+          },
+          "memory_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentMemoryPolicy",
+                "description": "Memory policy declared by the deployment, when set."
+              }
+            ]
           },
           "mode": {
             "$ref": "#/components/schemas/CloudDeploymentMode"
@@ -2982,6 +4020,17 @@
           "runtime_kind": {
             "$ref": "#/components/schemas/CloudDeploymentRuntimeKind"
           },
+          "runtime_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentRuntimePolicy",
+                "description": "Typed runtime policy (filesystem/network/process/resources), when set."
+              }
+            ]
+          },
           "secret_keys": {
             "type": "array",
             "items": {
@@ -3019,6 +4068,13 @@
             "items": {
               "$ref": "#/components/schemas/ManagedAgentToolPreset"
             }
+          },
+          "tool_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentToolRef"
+            },
+            "description": "Typed tool refs declared on the deployment, when any."
           },
           "visibility": {
             "type": "string"
@@ -3361,6 +4417,69 @@
           "live_data",
           "publisher_actions",
           "database"
+        ]
+      },
+      "ManagedDeploymentCondition": {
+        "type": "object",
+        "description": "Structured condition reported on a managed deployment's status. Mirrors the\nshape of `metav1.Condition` (Kubernetes) in our own DTOs without importing\nthe Kubernetes types into the public API. Each condition has a typed\n`type`, a tri-state `status`, and human-readable `reason`/`message` fields.",
+        "required": [
+          "type",
+          "status"
+        ],
+        "properties": {
+          "last_transition_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Timestamp of the most recent transition into the current `status`."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-readable explanation; safe to surface in operator UI."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short token describing why the condition has its current status."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ManagedDeploymentConditionState"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ManagedDeploymentConditionType"
+          }
+        }
+      },
+      "ManagedDeploymentConditionState": {
+        "type": "string",
+        "description": "Tri-state condition value. Mirrors Kubernetes condition status.",
+        "enum": [
+          "True",
+          "False",
+          "Unknown"
+        ]
+      },
+      "ManagedDeploymentConditionType": {
+        "type": "string",
+        "description": "Closed set of managed-deployment condition types. New types should be added\nhere only when there is a clear semantic, not for ad-hoc operator messages.",
+        "enum": [
+          "Accepted",
+          "Ready",
+          "AwaitingApproval",
+          "PolicyDenied",
+          "ImagePullFailed",
+          "ConfigFetchFailed",
+          "ReadinessProbeFailed",
+          "Suspended",
+          "Expired",
+          "Failed"
         ]
       },
       "OrchestrationMode": {
@@ -4074,7 +5193,7 @@
             "description": "Declared requirements validated at deploy time."
           },
           "secrets": {
-            "description": "Secret references available to the runtime (typed in a later milestone)."
+            "description": "Secret references available to the runtime."
           },
           "side_effect_policy": {
             "oneOf": [

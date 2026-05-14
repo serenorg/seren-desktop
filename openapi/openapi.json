@@ -9889,6 +9889,9 @@
             ],
             "description": "Enable resource ownership tracking (legacy gateway parity)"
           },
+          "passthrough_header_rewrite": {
+            "description": "Map of client-side header name to upstream header name for passthrough auth."
+          },
           "price_per_call": {
             "type": [
               "string",
@@ -13716,6 +13719,7 @@
               "billing_model",
               "gateway_fee_percent",
               "allowed_passthrough_headers",
+              "passthrough_header_rewrite",
               "request_content_type",
               "upstream_headers",
               "ownership_tracking_enabled",
@@ -13920,6 +13924,9 @@
               },
               "ownership_tracking_enabled": {
                 "type": "boolean"
+              },
+              "passthrough_header_rewrite": {
+                "description": "Map of client-side header name to upstream header name for passthrough auth."
               },
               "pricing": {
                 "type": [
@@ -16536,6 +16543,7 @@
                 "billing_model",
                 "gateway_fee_percent",
                 "allowed_passthrough_headers",
+                "passthrough_header_rewrite",
                 "request_content_type",
                 "upstream_headers",
                 "ownership_tracking_enabled",
@@ -16740,6 +16748,9 @@
                 },
                 "ownership_tracking_enabled": {
                   "type": "boolean"
+                },
+                "passthrough_header_rewrite": {
+                  "description": "Map of client-side header name to upstream header name for passthrough auth."
                 },
                 "pricing": {
                   "type": [
@@ -17964,7 +17975,9 @@
           "amount_cents": {
             "type": "integer",
             "format": "int64",
-            "description": "Amount in USD cents (minimum 500 = $5.00)"
+            "description": "Amount in USD cents (minimum 500 = $5.00, maximum 30000 = $300.00 by default)",
+            "maximum": 30000,
+            "minimum": 500
           },
           "referral_code": {
             "type": [
@@ -20499,6 +20512,7 @@
                 "billing_model",
                 "gateway_fee_percent",
                 "allowed_passthrough_headers",
+                "passthrough_header_rewrite",
                 "request_content_type",
                 "upstream_headers",
                 "ownership_tracking_enabled",
@@ -20703,6 +20717,9 @@
                 },
                 "ownership_tracking_enabled": {
                   "type": "boolean"
+                },
+                "passthrough_header_rewrite": {
+                  "description": "Map of client-side header name to upstream header name for passthrough auth."
                 },
                 "pricing": {
                   "type": [
@@ -22092,6 +22109,7 @@
           "billing_model",
           "gateway_fee_percent",
           "allowed_passthrough_headers",
+          "passthrough_header_rewrite",
           "request_content_type",
           "upstream_headers",
           "ownership_tracking_enabled",
@@ -22296,6 +22314,9 @@
           },
           "ownership_tracking_enabled": {
             "type": "boolean"
+          },
+          "passthrough_header_rewrite": {
+            "description": "Map of client-side header name to upstream header name for passthrough auth."
           },
           "pricing": {
             "type": [
@@ -24411,6 +24432,9 @@
               "null"
             ],
             "description": "Enable resource ownership tracking (legacy gateway parity)"
+          },
+          "passthrough_header_rewrite": {
+            "description": "Map of client-side header name to upstream header name for passthrough auth."
           },
           "price_per_call": {
             "type": [

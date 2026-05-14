@@ -653,9 +653,19 @@ export type CloudRunApprovalDecision = {
 };
 
 /**
+ * Decision recorded by an approval event.
+ */
+export type CloudRunApprovalDecisionKind = 'approve' | 'reject' | 'escalate';
+
+/**
  * Normalized approval action accepted by the cloud resume API.
  */
 export type CloudRunApprovalDecisionValue = 'approve' | 'reject';
+
+/**
+ * Terminal status reported by a `Done` event.
+ */
+export type CloudRunDoneStatus = 'ok' | 'error' | 'cancelled';
 
 /**
  * Eval records linked to a run, either as the promoted source or as an actual replay target.
@@ -665,6 +675,16 @@ export type CloudRunEvalsResponse = {
     run_id: string;
     source_eval_cases?: Array<CloudEvalCase>;
 };
+
+/**
+ * How the run responded to a failing guardrail.
+ */
+export type CloudRunGuardrailAction = 'retry' | 'block' | 'fix' | 'human';
+
+/**
+ * The target of a guardrail validator.
+ */
+export type CloudRunGuardrailTarget = 'input' | 'output' | 'tool_input' | 'tool_output';
 
 /**
  * A single event in the structured output trace.
@@ -701,6 +721,45 @@ export type CloudRunOutputEvent = {
     state: string;
     type: 'workflow';
 } | {
+    checkpoint_id?: string | null;
+    reason?: string | null;
+    tool_call_id?: string | null;
+    type: 'approval_wait';
+} | {
+    actor?: string | null;
+    checkpoint_id?: string | null;
+    decision: CloudRunApprovalDecisionKind;
+    reason?: string | null;
+    tool_call_id?: string | null;
+    type: 'approval_decision';
+} | {
+    name: string;
+    target: CloudRunGuardrailTarget;
+    type: 'guardrail_pass';
+} | {
+    action: CloudRunGuardrailAction;
+    attempt?: number | null;
+    message: string;
+    name: string;
+    target: CloudRunGuardrailTarget;
+    type: 'guardrail_fail';
+} | {
+    from_agent?: string | null;
+    reason?: string | null;
+    to_agent: string;
+    type: 'handoff';
+} | {
+    id: string;
+    kind: string;
+    sha256?: string | null;
+    size_bytes?: number | null;
+    type: 'artifact';
+    uri?: string | null;
+} | {
+    reason?: string | null;
+    status: CloudRunDoneStatus;
+    type: 'done';
+} | {
     message: string;
     type: 'error';
 };
@@ -720,7 +779,7 @@ export type CloudRunOutputEventEnvelope = CloudRunOutputEvent & {
 /**
  * Canonical taxonomy for structured run output events.
  */
-export type CloudRunOutputEventKind = 'text' | 'thinking' | 'tool_call_started' | 'tool_call_completed' | 'tool_audit' | 'workflow' | 'error' | 'unknown';
+export type CloudRunOutputEventKind = 'text' | 'thinking' | 'tool_call_started' | 'tool_call_completed' | 'tool_audit' | 'workflow' | 'approval_wait' | 'approval_decision' | 'guardrail_pass' | 'guardrail_fail' | 'handoff' | 'artifact' | 'done' | 'error' | 'unknown';
 
 /**
  * Pending approval attached to an `awaiting_approval` run.
@@ -3816,8 +3875,15 @@ export type DeploymentSpendSummary = {
 
 /**
  * Eval gate configuration that must pass with a fresh verdict before runs proceed.
+ *
+ * `block_on_failure` controls what happens at update or rollback apply time:
+ * when `Some(true)`, the control plane rejects the apply if the latest eval
+ * verdict has failed or has expired beyond `max_age_seconds`. The default
+ * (`None`/`false`) preserves the original freshness-only behavior for
+ * back-compat.
  */
 export type EvalGate = {
+    block_on_failure?: boolean | null;
     max_age_seconds: number;
     set_id: string;
 };
@@ -4146,7 +4212,7 @@ export type WorkloadSpec = {
      */
     requirements?: Array<RequirementSpec> | null;
     /**
-     * Secret references available to the runtime (typed in a later milestone).
+     * Secret references available to the runtime.
      */
     secrets?: unknown;
     side_effect_policy?: null | SideEffectPolicy;

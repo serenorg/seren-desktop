@@ -4,13 +4,20 @@
 import type {
   AgentBundle,
   AgentBundlePatch,
+  AgentCredentialRef,
+  AgentGuardrailPolicy,
   AgentInstructionFile,
+  AgentMemoryPolicy,
+  AgentRuntimePolicy,
+  AgentToolRef,
   CloudDeploymentMode,
   CloudDeploymentStatus,
+  EvalGate,
   ManagedAgentApprovalPolicy,
   ManagedAgentModelPolicy,
   ManagedAgentTemplate,
   ManagedAgentToolPreset,
+  ManagedDeploymentCondition,
 } from "@/api/seren-agent";
 
 export type EmployeeMode = CloudDeploymentMode;
@@ -54,6 +61,20 @@ export type EmployeeDetail = EmployeeSummary & {
   maxTimeoutSeconds: number | null;
   maxToolOutputChars: number | null;
   contextBudgetTokens: number | null;
+  /// Typed status conditions reported by the control plane.
+  conditions: ManagedDeploymentCondition[];
+  /// Typed runtime policy (filesystem/network/process/resources), when declared.
+  runtimePolicy: AgentRuntimePolicy | null;
+  /// Guardrail policies attached to the deployment.
+  guardrails: AgentGuardrailPolicy[];
+  /// Memory policy declared by the deployment, when set.
+  memoryPolicy: AgentMemoryPolicy | null;
+  /// Credential references resolved by the control plane.
+  credentials: AgentCredentialRef[];
+  /// Typed tool refs alongside the coarse tool_presets.
+  toolRefs: AgentToolRef[];
+  /// Eval gate (set + max age + block_on_failure) when one is attached.
+  evalGate: EvalGate | null;
 };
 
 export type NewEmployeeInput = {

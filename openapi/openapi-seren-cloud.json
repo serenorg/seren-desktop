@@ -5377,12 +5377,30 @@
           }
         }
       },
+      "CloudRunApprovalDecisionKind": {
+        "type": "string",
+        "description": "Decision recorded by an approval event.",
+        "enum": [
+          "approve",
+          "reject",
+          "escalate"
+        ]
+      },
       "CloudRunApprovalDecisionValue": {
         "type": "string",
         "description": "Normalized approval action accepted by the cloud resume API.",
         "enum": [
           "approve",
           "reject"
+        ]
+      },
+      "CloudRunDoneStatus": {
+        "type": "string",
+        "description": "Terminal status reported by a `Done` event.",
+        "enum": [
+          "ok",
+          "error",
+          "cancelled"
         ]
       },
       "CloudRunEvalsResponse": {
@@ -5409,6 +5427,26 @@
             }
           }
         }
+      },
+      "CloudRunGuardrailAction": {
+        "type": "string",
+        "description": "How the run responded to a failing guardrail.",
+        "enum": [
+          "retry",
+          "block",
+          "fix",
+          "human"
+        ]
+      },
+      "CloudRunGuardrailTarget": {
+        "type": "string",
+        "description": "The target of a guardrail validator.",
+        "enum": [
+          "input",
+          "output",
+          "tool_input",
+          "tool_output"
+        ]
       },
       "CloudRunOutputEvent": {
         "oneOf": [
@@ -5574,6 +5612,243 @@
           },
           {
             "type": "object",
+            "description": "Run is paused waiting on a user or operator approval decision.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "checkpoint_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool_call_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "approval_wait"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An approval decision was recorded for a previously paused checkpoint.",
+            "required": [
+              "decision",
+              "type"
+            ],
+            "properties": {
+              "actor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "checkpoint_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "decision": {
+                "$ref": "#/components/schemas/CloudRunApprovalDecisionKind"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool_call_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "approval_decision"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A guardrail check passed for the named target.",
+            "required": [
+              "name",
+              "target",
+              "type"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "target": {
+                "$ref": "#/components/schemas/CloudRunGuardrailTarget"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "guardrail_pass"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A guardrail check failed; the action taken indicates how the run responded.",
+            "required": [
+              "name",
+              "target",
+              "message",
+              "action",
+              "type"
+            ],
+            "properties": {
+              "action": {
+                "$ref": "#/components/schemas/CloudRunGuardrailAction"
+              },
+              "attempt": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              },
+              "message": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "target": {
+                "$ref": "#/components/schemas/CloudRunGuardrailTarget"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "guardrail_fail"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Control was handed off from one agent to another (multi-agent runs).",
+            "required": [
+              "to_agent",
+              "type"
+            ],
+            "properties": {
+              "from_agent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to_agent": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "handoff"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An artifact (file, blob, dataset) was produced by the run.",
+            "required": [
+              "id",
+              "kind",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "size_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "artifact"
+                ]
+              },
+              "uri": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Run completed; status indicates how it ended.",
+            "required": [
+              "status",
+              "type"
+            ],
+            "properties": {
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "$ref": "#/components/schemas/CloudRunDoneStatus"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "done"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "An error that occurred during execution.",
             "required": [
               "message",
@@ -5660,6 +5935,13 @@
           "tool_call_completed",
           "tool_audit",
           "workflow",
+          "approval_wait",
+          "approval_decision",
+          "guardrail_pass",
+          "guardrail_fail",
+          "handoff",
+          "artifact",
+          "done",
           "error",
           "unknown"
         ]
@@ -9142,12 +9424,18 @@
       },
       "EvalGate": {
         "type": "object",
-        "description": "Eval gate configuration that must pass with a fresh verdict before runs proceed.",
+        "description": "Eval gate configuration that must pass with a fresh verdict before runs proceed.\n\n`block_on_failure` controls what happens at update or rollback apply time:\nwhen `Some(true)`, the control plane rejects the apply if the latest eval\nverdict has failed or has expired beyond `max_age_seconds`. The default\n(`None`/`false`) preserves the original freshness-only behavior for\nback-compat.",
         "required": [
           "set_id",
           "max_age_seconds"
         ],
         "properties": {
+          "block_on_failure": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "max_age_seconds": {
             "type": "integer",
             "format": "int32"
@@ -10012,7 +10300,7 @@
             "description": "Declared requirements validated at deploy time."
           },
           "secrets": {
-            "description": "Secret references available to the runtime (typed in a later milestone)."
+            "description": "Secret references available to the runtime."
           },
           "side_effect_policy": {
             "oneOf": [

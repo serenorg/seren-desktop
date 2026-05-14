@@ -101,6 +101,13 @@ function detailFromManaged(
     maxTimeoutSeconds: managed.max_timeout_seconds ?? null,
     maxToolOutputChars: managed.max_tool_output_chars ?? null,
     contextBudgetTokens: managed.context_budget_tokens ?? null,
+    conditions: managed.conditions ?? [],
+    runtimePolicy: managed.runtime_policy ?? null,
+    guardrails: managed.guardrails ?? [],
+    memoryPolicy: managed.memory_policy ?? null,
+    credentials: managed.credentials ?? [],
+    toolRefs: managed.tool_refs ?? [],
+    evalGate: managed.eval_gate ?? null,
   };
 }
 
@@ -324,6 +331,13 @@ export const employees = {
           maxTimeoutSeconds: null,
           maxToolOutputChars: null,
           contextBudgetTokens: null,
+          conditions: [],
+          runtimePolicy: null,
+          guardrails: [],
+          memoryPolicy: null,
+          credentials: [],
+          toolRefs: [],
+          evalGate: null,
         };
       }
       throw new Error(

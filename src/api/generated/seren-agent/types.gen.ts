@@ -79,6 +79,97 @@ export type AgentCapabilitiesResponse = {
     supports_orchestrated_deploy: boolean;
 };
 
+export type AgentCredentialBinding = 'env' | 'header' | 'body' | 'proxy_inject';
+
+export type AgentCredentialKind = 'api_key' | 'oauth2_token' | 'basic' | 'mtls' | 'aws_sig_v4' | 'gcp_service_account';
+
+/**
+ * Reference to a credential held by Seren's control plane or organization
+ * secret store, injected at the declared binding point.
+ */
+export type AgentCredentialRef = {
+    /**
+     * How the credential is delivered. `env` is the only mode the runtime
+     * implements today; other modes are accepted on the contract and reserved
+     * for the egress proxy phase of the credential boundary work.
+     */
+    binding: AgentCredentialBinding;
+    binding_target?: string | null;
+    kind: AgentCredentialKind;
+    /**
+     * Name the workload uses to address the credential.
+     */
+    name: string;
+    /**
+     * URI of the credential record. Supported schemes:
+     * `control-plane://providers/{id}`, `org-secret://{key}`, `user-secret://{key}`.
+     */
+    ref_uri: string;
+    rotation?: null | AgentCredentialRotationPolicy;
+};
+
+export type AgentCredentialRotationPolicy = {
+    allow_rotate: boolean;
+    max_age_seconds?: number | null;
+};
+
+export type AgentFilesystemEnforcement = 'best_effort' | 'hard_requirement';
+
+export type AgentFilesystemPolicy = {
+    /**
+     * How strictly the runtime should enforce these paths.
+     */
+    enforcement?: AgentFilesystemEnforcement;
+    /**
+     * Absolute paths the workload may read but not write.
+     */
+    read_only_paths?: Array<string>;
+    /**
+     * Absolute paths the workload may read and write.
+     */
+    read_write_paths?: Array<string>;
+};
+
+export type AgentGuardrailOnFail = 'retry' | 'block' | 'fix' | 'human';
+
+/**
+ * Typed guardrail policy attached to a managed agent.
+ */
+export type AgentGuardrailPolicy = {
+    description?: string | null;
+    /**
+     * When true, fail events route into the unified approval inbox for human review.
+     */
+    human_inbox?: boolean;
+    max_retries?: number | null;
+    /**
+     * Unique within the deployment; used in `guardrail_pass`/`guardrail_fail`
+     * events.
+     */
+    name: string;
+    on_fail?: AgentGuardrailOnFail;
+    target: AgentGuardrailTarget;
+    /**
+     * Optional tool name; when present, the guardrail only fires on that tool.
+     */
+    tool?: string | null;
+    validator: AgentGuardrailValidator;
+};
+
+export type AgentGuardrailTarget = 'input' | 'output' | 'tool_input' | 'tool_output';
+
+export type AgentGuardrailValidator = {
+    kind: 'regex';
+    pattern: string;
+} | {
+    kind: 'llm_judge';
+    model?: string | null;
+    prompt: string;
+} | {
+    function_ref: string;
+    kind: 'custom_fn';
+};
+
 /**
  * One authored instruction file.
  *
@@ -124,6 +215,145 @@ export type AgentInstructionFileSelector = {
  */
 export type AgentInstructionKind = 'identity' | 'soul' | 'skill' | 'agents' | 'user' | 'tools' | 'memory' | 'heartbeat' | 'eval';
 
+export type AgentMemoryCompactionPolicy = {
+    event_retention_count: number;
+    overlap_tokens: number;
+    summarizer_model?: string | null;
+    token_threshold: number;
+};
+
+/**
+ * Typed memory policy declared by a managed agent.
+ */
+export type AgentMemoryPolicy = {
+    compaction?: null | AgentMemoryCompactionPolicy;
+    semantic_memory?: null | AgentSemanticMemoryPolicy;
+    /**
+     * Optional retention for raw run transcripts (days).
+     */
+    transcript_retention_days?: number | null;
+};
+
+export type AgentNetworkAccessPreset = 'read_only' | 'read_write' | 'full';
+
+export type AgentNetworkDefault = 'deny' | 'allow';
+
+export type AgentNetworkEgressRule = {
+    access_preset?: null | AgentNetworkAccessPreset;
+    /**
+     * Optional per-binary glob list restricting which processes may use the rule.
+     */
+    binaries?: Array<string>;
+    /**
+     * Whether matches enforce or just audit.
+     */
+    enforcement?: AgentNetworkEnforcement;
+    host: string;
+    /**
+     * Optional HTTP methods this rule applies to (rest/sse protocols only).
+     */
+    methods?: Array<string>;
+    /**
+     * Optional path globs this rule applies to (rest/sse protocols only).
+     */
+    paths?: Array<string>;
+    port: number;
+    protocol: AgentNetworkProtocol;
+};
+
+export type AgentNetworkEnforcement = 'enforce' | 'audit';
+
+export type AgentNetworkPolicy = {
+    /**
+     * When true, blocked egress requests are queued for operator approval
+     * (shares an inbox with tool approvals).
+     */
+    blocked_request_inbox?: boolean;
+    /**
+     * Default disposition when no rule matches a request.
+     */
+    default?: AgentNetworkDefault;
+    /**
+     * Ordered egress rules. The first matching rule decides the request.
+     */
+    egress_rules?: Array<AgentNetworkEgressRule>;
+};
+
+export type AgentNetworkProtocol = 'tcp' | 'rest' | 'sse' | 'websocket';
+
+export type AgentProcessPolicy = {
+    /**
+     * Linux capabilities to drop. Defaults to `["ALL"]` at the controller.
+     */
+    capability_drop?: Array<string>;
+    no_new_privileges?: boolean;
+    /**
+     * Optional uid:gid pair (e.g. `1000:1000`) the workload runs under.
+     */
+    run_as_user?: string | null;
+    /**
+     * Seccomp profile name; defaults to the runtime default.
+     */
+    seccomp_profile?: string | null;
+};
+
+export type AgentRemoteAgentAuth = 'none' | 'bearer' | 'mtls';
+
+export type AgentRemoteAgentTransport = 'https' | 'sse' | 'websocket';
+
+export type AgentResourcePolicy = {
+    cpu_limit?: string | null;
+    cpu_request?: string | null;
+    ephemeral_storage_limit?: string | null;
+    max_artifact_bytes?: number | null;
+    max_output_bytes?: number | null;
+    max_runtime_seconds?: number | null;
+    max_tool_calls?: number | null;
+    memory_limit?: string | null;
+    memory_request?: string | null;
+};
+
+export type AgentRuntimeClass = 'default' | 'gvisor' | 'kata';
+
+/**
+ * Typed runtime policy that a managed agent declares as part of its `AgentSpec`.
+ *
+ * The control plane validates this object on create/update; the runtime
+ * controller renders it into Kubernetes objects (security context, resource
+ * limits, NetworkPolicy). Today the controller renders a subset; fields it
+ * does not yet honor remain part of the declared contract so revisions and
+ * rollbacks stay consistent.
+ */
+export type AgentRuntimePolicy = {
+    filesystem?: null | AgentFilesystemPolicy;
+    network?: null | AgentNetworkPolicy;
+    process?: null | AgentProcessPolicy;
+    resources?: null | AgentResourcePolicy;
+    runtime_class?: null | AgentRuntimeClass;
+    /**
+     * Policy schema version. Must be `1` until a breaking field set is added.
+     */
+    version: number;
+};
+
+export type AgentSemanticMemoryPolicy = {
+    /**
+     * Optional embedding model reference.
+     */
+    embedding_model_ref?: string | null;
+    enabled: boolean;
+    read_policy?: AgentSemanticMemoryReadPolicy;
+    retention_days?: number | null;
+    store?: AgentSemanticMemoryStore;
+    write_policy?: AgentSemanticMemoryWritePolicy;
+};
+
+export type AgentSemanticMemoryReadPolicy = 'explicit_tool' | 'always_on';
+
+export type AgentSemanticMemoryStore = 'org_default' | 'external';
+
+export type AgentSemanticMemoryWritePolicy = 'explicit_tool' | 'on_observation' | 'none';
+
 /**
  * Managed deploy request for the `seren-agent` first-class publisher.
  */
@@ -142,6 +372,10 @@ export type AgentSpec = {
     allowed_remote_agent_origins?: Array<string> | null;
     approval_policy?: null | ManagedAgentApprovalPolicy;
     /**
+     * Optional credential references resolved by the control plane at runtime.
+     */
+    credentials?: Array<AgentCredentialRef> | null;
+    /**
      * Cron schedule expression, required when `mode` is `cron`.
      */
     cron_schedule?: string | null;
@@ -155,6 +389,11 @@ export type AgentSpec = {
     dashboard_config?: unknown;
     eval_gate?: null | EvalGate;
     /**
+     * Optional guardrail policies applied at input/output/tool boundaries.
+     */
+    guardrails?: Array<AgentGuardrailPolicy> | null;
+    memory_policy?: null | AgentMemoryPolicy;
+    /**
      * Deployment mode.
      */
     mode: CloudDeploymentMode;
@@ -164,12 +403,18 @@ export type AgentSpec = {
      */
     name?: string | null;
     private_output_policy?: null | ManagedAgentPrivateOutputPolicy;
+    runtime_policy?: null | AgentRuntimePolicy;
     session_database?: null | ManagedAgentSessionDatabase;
     template?: null | ManagedAgentTemplate;
     /**
      * Managed tool presets. Defaults to `live_data`.
      */
     tool_presets?: Array<ManagedAgentToolPreset> | null;
+    /**
+     * Optional typed tool references. Coexists with `tool_presets` so the
+     * runtime can resolve from typed refs and preset groups together.
+     */
+    tool_refs?: Array<AgentToolRef> | null;
     /**
      * Visibility mode (`open` or `opaque`).
      */
@@ -203,6 +448,10 @@ export type AgentSpecUpdate = {
      */
     clear_alert_policy?: boolean;
     /**
+     * Clear any existing credential references.
+     */
+    clear_credentials?: boolean;
+    /**
      * Clear any existing dashboard config.
      */
     clear_dashboard_config?: boolean;
@@ -211,9 +460,29 @@ export type AgentSpecUpdate = {
      */
     clear_eval_gate?: boolean;
     /**
+     * Clear any existing guardrail list.
+     */
+    clear_guardrails?: boolean;
+    /**
+     * Clear any existing memory policy.
+     */
+    clear_memory_policy?: boolean;
+    /**
+     * Clear any existing runtime policy.
+     */
+    clear_runtime_policy?: boolean;
+    /**
      * Clear any existing external session database configuration.
      */
     clear_session_database?: boolean;
+    /**
+     * Clear any existing typed tool refs.
+     */
+    clear_tool_refs?: boolean;
+    /**
+     * Updated credential references. Replaces the entire previous list when present.
+     */
+    credentials?: Array<AgentCredentialRef> | null;
     /**
      * Updated cron schedule. Only valid for cron deployments.
      */
@@ -227,12 +496,18 @@ export type AgentSpecUpdate = {
      */
     dashboard_config?: unknown;
     eval_gate?: null | EvalGate;
+    /**
+     * Updated guardrail list. Replaces the entire previous list when present.
+     */
+    guardrails?: Array<AgentGuardrailPolicy> | null;
+    memory_policy?: null | AgentMemoryPolicy;
     model_policy?: null | ManagedAgentModelPolicy;
     /**
      * Updated human-readable agent name.
      */
     name?: string | null;
     private_output_policy?: null | ManagedAgentPrivateOutputPolicy;
+    runtime_policy?: null | AgentRuntimePolicy;
     session_database?: null | ManagedAgentSessionDatabase;
     template?: null | ManagedAgentTemplate;
     /**
@@ -240,10 +515,48 @@ export type AgentSpecUpdate = {
      */
     tool_presets?: Array<ManagedAgentToolPreset> | null;
     /**
+     * Updated typed tool refs. Replaces the entire previous list when present.
+     */
+    tool_refs?: Array<AgentToolRef> | null;
+    /**
      * Updated visibility mode (`open` or `opaque`).
      */
     visibility?: string | null;
     workload?: null | WorkloadSpec;
+};
+
+/**
+ * Typed tool reference attached to an agent. Lives alongside the coarser
+ * `tool_presets` field; future managed-agent flows resolve from typed refs and
+ * presets together.
+ */
+export type AgentToolRef = {
+    kind: 'publisher';
+    operation_id: string;
+    publisher_slug: string;
+    require_approval?: boolean;
+} | {
+    kind: 'mcp';
+    require_approval?: boolean;
+    server_ref: string;
+    tool_name: string;
+} | {
+    capability: string;
+    connector_ref: string;
+    kind: 'connector';
+    require_approval?: boolean;
+    scopes?: Array<string>;
+} | {
+    auth_mode: AgentRemoteAgentAuth;
+    expected_card_digest?: string | null;
+    kind: 'remote_agent';
+    origin: string;
+    require_approval?: boolean;
+    timeout_ms?: number | null;
+    transport: AgentRemoteAgentTransport;
+} | {
+    kind: 'preset_group';
+    preset: ManagedAgentToolPreset;
 };
 
 /**
@@ -732,19 +1045,35 @@ export type DataResponseManagedAgentDeploymentDetail = {
         approval_policy: ManagedAgentApprovalPolicy;
         bundle: AgentBundle;
         compute_backend: CloudDeploymentComputeBackend;
+        /**
+         * Structured status conditions for the managed deployment. Today this is
+         * synthesized from the flat lifecycle `status` and the last persisted
+         * `error_message`; future work will let the runtime controller report
+         * conditions directly.
+         */
+        conditions?: Array<ManagedDeploymentCondition>;
         config?: unknown;
         context_budget_tokens?: number | null;
+        /**
+         * Credential references attached to this deployment, when any.
+         */
+        credentials?: Array<AgentCredentialRef>;
         cron_schedule?: string | null;
         cron_timezone?: string | null;
         dashboard_config?: unknown;
         deployment_id: string;
         eval_gate?: null | EvalGate;
         fallback_models?: Array<string> | null;
+        /**
+         * Guardrails attached to this deployment, when any.
+         */
+        guardrails?: Array<AgentGuardrailPolicy>;
         llm_connection?: null | ManagedAgentLlmConnection;
         max_iterations?: number | null;
         max_timeout_seconds?: number | null;
         max_tool_calls_per_run?: number | null;
         max_tool_output_chars?: number | null;
+        memory_policy?: null | AgentMemoryPolicy;
         mode: CloudDeploymentMode;
         model_config: unknown;
         model_id: string;
@@ -757,12 +1086,17 @@ export type DataResponseManagedAgentDeploymentDetail = {
         routing_reason: string;
         runtime_adapter: ManagedAgentRuntimeAdapter;
         runtime_kind: CloudDeploymentRuntimeKind;
+        runtime_policy?: null | AgentRuntimePolicy;
         secret_keys: Array<string>;
         session_database?: null | ManagedAgentSessionDatabase;
         side_effect_policy?: null | SideEffectPolicy;
         status: CloudDeploymentStatus;
         template: ManagedAgentTemplate;
         tool_presets: Array<ManagedAgentToolPreset>;
+        /**
+         * Typed tool refs declared on the deployment, when any.
+         */
+        tool_refs?: Array<AgentToolRef>;
         visibility: string;
     };
     pagination?: null | PaginationMeta;
@@ -1304,8 +1638,15 @@ export type DataResponseVecManagedAgentDeploymentRevisionSummary = {
 
 /**
  * Eval gate configuration that must pass with a fresh verdict before runs proceed.
+ *
+ * `block_on_failure` controls what happens at update or rollback apply time:
+ * when `Some(true)`, the control plane rejects the apply if the latest eval
+ * verdict has failed or has expired beyond `max_age_seconds`. The default
+ * (`None`/`false`) preserves the original freshness-only behavior for
+ * back-compat.
  */
 export type EvalGate = {
+    block_on_failure?: boolean | null;
     max_age_seconds: number;
     set_id: string;
 };
@@ -1324,19 +1665,35 @@ export type ManagedAgentDeploymentDetail = {
     approval_policy: ManagedAgentApprovalPolicy;
     bundle: AgentBundle;
     compute_backend: CloudDeploymentComputeBackend;
+    /**
+     * Structured status conditions for the managed deployment. Today this is
+     * synthesized from the flat lifecycle `status` and the last persisted
+     * `error_message`; future work will let the runtime controller report
+     * conditions directly.
+     */
+    conditions?: Array<ManagedDeploymentCondition>;
     config?: unknown;
     context_budget_tokens?: number | null;
+    /**
+     * Credential references attached to this deployment, when any.
+     */
+    credentials?: Array<AgentCredentialRef>;
     cron_schedule?: string | null;
     cron_timezone?: string | null;
     dashboard_config?: unknown;
     deployment_id: string;
     eval_gate?: null | EvalGate;
     fallback_models?: Array<string> | null;
+    /**
+     * Guardrails attached to this deployment, when any.
+     */
+    guardrails?: Array<AgentGuardrailPolicy>;
     llm_connection?: null | ManagedAgentLlmConnection;
     max_iterations?: number | null;
     max_timeout_seconds?: number | null;
     max_tool_calls_per_run?: number | null;
     max_tool_output_chars?: number | null;
+    memory_policy?: null | AgentMemoryPolicy;
     mode: CloudDeploymentMode;
     model_config: unknown;
     model_id: string;
@@ -1349,12 +1706,17 @@ export type ManagedAgentDeploymentDetail = {
     routing_reason: string;
     runtime_adapter: ManagedAgentRuntimeAdapter;
     runtime_kind: CloudDeploymentRuntimeKind;
+    runtime_policy?: null | AgentRuntimePolicy;
     secret_keys: Array<string>;
     session_database?: null | ManagedAgentSessionDatabase;
     side_effect_policy?: null | SideEffectPolicy;
     status: CloudDeploymentStatus;
     template: ManagedAgentTemplate;
     tool_presets: Array<ManagedAgentToolPreset>;
+    /**
+     * Typed tool refs declared on the deployment, when any.
+     */
+    tool_refs?: Array<AgentToolRef>;
     visibility: string;
 };
 
@@ -1453,6 +1815,40 @@ export type ManagedAgentSummary = {
 export type ManagedAgentTemplate = 'research_monitor' | 'workflow_agent';
 
 export type ManagedAgentToolPreset = 'live_data' | 'publisher_actions' | 'database';
+
+/**
+ * Structured condition reported on a managed deployment's status. Mirrors the
+ * shape of `metav1.Condition` (Kubernetes) in our own DTOs without importing
+ * the Kubernetes types into the public API. Each condition has a typed
+ * `type`, a tri-state `status`, and human-readable `reason`/`message` fields.
+ */
+export type ManagedDeploymentCondition = {
+    /**
+     * Timestamp of the most recent transition into the current `status`.
+     */
+    last_transition_time?: string | null;
+    /**
+     * Human-readable explanation; safe to surface in operator UI.
+     */
+    message?: string | null;
+    /**
+     * Short token describing why the condition has its current status.
+     */
+    reason?: string | null;
+    status: ManagedDeploymentConditionState;
+    type: ManagedDeploymentConditionType;
+};
+
+/**
+ * Tri-state condition value. Mirrors Kubernetes condition status.
+ */
+export type ManagedDeploymentConditionState = 'True' | 'False' | 'Unknown';
+
+/**
+ * Closed set of managed-deployment condition types. New types should be added
+ * here only when there is a clear semantic, not for ad-hoc operator messages.
+ */
+export type ManagedDeploymentConditionType = 'Accepted' | 'Ready' | 'AwaitingApproval' | 'PolicyDenied' | 'ImagePullFailed' | 'ConfigFetchFailed' | 'ReadinessProbeFailed' | 'Suspended' | 'Expired' | 'Failed';
 
 /**
  * Cloud deployment orchestration mode.
@@ -1723,7 +2119,7 @@ export type WorkloadSpec = {
      */
     requirements?: Array<RequirementSpec> | null;
     /**
-     * Secret references available to the runtime (typed in a later milestone).
+     * Secret references available to the runtime.
      */
     secrets?: unknown;
     side_effect_policy?: null | SideEffectPolicy;

@@ -40,6 +40,10 @@ type ManualRunState =
   | { kind: "cancelled" }
   | { kind: "failed"; message: string };
 
+// Condition types whose healthy steady state is `True`. Everything else is a
+// problem signal whose healthy steady state is `False`.
+const POSITIVE_CONDITION_TYPES = new Set(["Accepted", "Ready"]);
+
 function manualRunKey(employeeId: string): string {
   return `manual:${employeeId}`;
 }
@@ -135,6 +139,35 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     () => props.employeeId,
     async (id) => employeeStore.loadDetail(id),
   );
+
+  // Surface only conditions that warrant operator attention.
+  // `Accepted`/`Ready` are positive conditions whose healthy steady state is
+  // `True`; any other status (False/Unknown) means the spec did not validate
+  // or the workload is not serving yet. Every other condition type is a
+  // problem signal whose healthy steady state is `False`; True or Unknown
+  // means the deployment is in (or may be in) that failure mode.
+  const alertConditions = createMemo(() => {
+    const conditions = detail()?.conditions ?? [];
+    return conditions.filter((condition) => {
+      if (POSITIVE_CONDITION_TYPES.has(condition.type)) {
+        return condition.status !== "True";
+      }
+      return condition.status !== "False";
+    });
+  });
+
+  const hasRuntimeGovernance = createMemo(() => {
+    const d = detail();
+    if (!d) return false;
+    return (
+      d.runtimePolicy !== null ||
+      d.guardrails.length > 0 ||
+      d.memoryPolicy !== null ||
+      d.credentials.length > 0 ||
+      d.toolRefs.length > 0 ||
+      d.evalGate !== null
+    );
+  });
 
   let kebabContainerRef: HTMLDivElement | undefined;
 
@@ -414,6 +447,27 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     <span class="font-mono">{emp().cronSchedule}</span>
                   </Show>
                 </div>
+                <Show when={alertConditions().length > 0}>
+                  <div class="mt-2 flex items-center gap-1.5 flex-wrap">
+                    <For each={alertConditions()}>
+                      {(condition) => (
+                        <span
+                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-900 text-[11px] font-medium"
+                          title={
+                            condition.message ?? condition.reason ?? undefined
+                          }
+                        >
+                          {condition.type}
+                          <Show when={condition.reason}>
+                            <span class="text-amber-700">
+                              - {condition.reason}
+                            </span>
+                          </Show>
+                        </span>
+                      )}
+                    </For>
+                  </div>
+                </Show>
               </div>
               <div class="flex items-center gap-2 flex-none relative">
                 <Show
@@ -867,6 +921,95 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                   </InfoRow>
                 </Show>
               </div>
+
+              <Show when={hasRuntimeGovernance()}>
+                <div class="mb-2 grid gap-2 py-4 border-t border-border">
+                  <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                    Runtime governance
+                  </div>
+                  <Show when={detail()?.runtimePolicy?.network}>
+                    {(network) => (
+                      <InfoRow label="Network">
+                        <span class="text-[12px] text-muted-foreground">
+                          Default {network().default}
+                          <Show
+                            when={(network().egress_rules ?? []).length > 0}
+                          >
+                            {" - "}
+                            {(network().egress_rules ?? []).length} egress rule
+                            {(network().egress_rules ?? []).length === 1
+                              ? ""
+                              : "s"}
+                          </Show>
+                        </span>
+                      </InfoRow>
+                    )}
+                  </Show>
+                  <Show when={detail()?.runtimePolicy?.resources}>
+                    {(resources) => (
+                      <InfoRow label="Resources">
+                        <span class="text-[12px] text-muted-foreground">
+                          <Show when={resources().cpu_limit}>
+                            cpu {resources().cpu_limit}
+                          </Show>
+                          <Show when={resources().memory_limit}>
+                            {resources().cpu_limit ? " - " : ""}
+                            mem {resources().memory_limit}
+                          </Show>
+                        </span>
+                      </InfoRow>
+                    )}
+                  </Show>
+                  <Show when={(detail()?.guardrails ?? []).length > 0}>
+                    <InfoRow label="Guardrails">
+                      <span class="text-[12px] text-muted-foreground">
+                        {(detail()?.guardrails ?? []).length} declared
+                      </span>
+                    </InfoRow>
+                  </Show>
+                  <Show when={detail()?.memoryPolicy}>
+                    {(policy) => (
+                      <InfoRow label="Memory">
+                        <span class="text-[12px] text-muted-foreground">
+                          {policy().semantic_memory?.enabled
+                            ? "Semantic memory enabled"
+                            : "Configured"}
+                        </span>
+                      </InfoRow>
+                    )}
+                  </Show>
+                  <Show when={(detail()?.credentials ?? []).length > 0}>
+                    <InfoRow label="Credentials">
+                      <span class="text-[12px] text-muted-foreground">
+                        {(detail()?.credentials ?? []).length} reference
+                        {(detail()?.credentials ?? []).length === 1 ? "" : "s"}
+                      </span>
+                    </InfoRow>
+                  </Show>
+                  <Show when={(detail()?.toolRefs ?? []).length > 0}>
+                    <InfoRow label="Tool refs">
+                      <span class="text-[12px] text-muted-foreground">
+                        {(detail()?.toolRefs ?? []).length} typed ref
+                        {(detail()?.toolRefs ?? []).length === 1 ? "" : "s"}
+                      </span>
+                    </InfoRow>
+                  </Show>
+                  <Show when={detail()?.evalGate}>
+                    {(gate) => (
+                      <InfoRow label="Eval gate">
+                        <span class="text-[12px] text-muted-foreground">
+                          fresh within {gate().max_age_seconds}s
+                          <Show when={gate().block_on_failure === true}>
+                            <span class="ml-1 text-amber-700 font-medium">
+                              - blocks apply on failure
+                            </span>
+                          </Show>
+                        </span>
+                      </InfoRow>
+                    )}
+                  </Show>
+                </div>
+              </Show>
             </div>
 
             <Show when={showEdit() && detailRecord()}>
