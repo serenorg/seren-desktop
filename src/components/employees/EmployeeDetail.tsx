@@ -94,7 +94,7 @@ const Avatar: Component<{ name: string; seed: string; size?: number }> = (
   const size = () => props.size ?? 44;
   return (
     <div
-      class="flex items-center justify-center text-white font-bold flex-none rounded-lg"
+      class="flex items-center justify-center text-white font-bold flex-none rounded-lg shadow-[inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.18)]"
       style={{
         width: `${size()}px`,
         height: `${size()}px`,
@@ -107,6 +107,57 @@ const Avatar: Component<{ name: string; seed: string; size?: number }> = (
     </div>
   );
 };
+
+/**
+ * Small inline status dot used inside the header status pill. Pulses for
+ * transitory states (running/building/pending) so the operator gets an
+ * ambient "this is live" signal without scanning text.
+ */
+const StatusDot: Component<{ status: EmployeeStatus }> = (props) => {
+  const tone = () => {
+    if (props.status === "running") return "bg-emerald-400";
+    if (props.status === "failed") return "bg-red-400";
+    if (props.status === "stopped") return "bg-slate-400";
+    return "bg-sky-400";
+  };
+  const transitory = () =>
+    props.status === "running" ||
+    props.status === "pending" ||
+    props.status === "building";
+  return (
+    <span class="relative inline-flex w-1.5 h-1.5 shrink-0" aria-hidden="true">
+      <Show when={transitory()}>
+        <span
+          class={`absolute inset-0 rounded-full ${tone()} opacity-60 animate-ping`}
+        />
+      </Show>
+      <span
+        class={`relative inline-block w-1.5 h-1.5 rounded-full ${tone()}`}
+      />
+    </span>
+  );
+};
+
+/**
+ * Presence-style indicator notched into the bottom-right of the avatar.
+ * Conveys deployment status at a glance even when the status pill is off
+ * screen (e.g. when the operator is reading past the header).
+ */
+const AvatarPresence: Component<{ status: EmployeeStatus }> = (props) => (
+  <span
+    class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-[2px] border-background"
+    classList={{
+      "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.55)]":
+        props.status === "running",
+      "bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.55)]":
+        props.status === "failed",
+      "bg-sky-400 animate-pulse":
+        props.status === "pending" || props.status === "building",
+      "bg-slate-500": props.status === "stopped",
+    }}
+    aria-hidden="true"
+  />
+);
 
 const InfoRow: Component<{ label: string; children: JSX.Element }> = (
   props,
@@ -418,43 +469,102 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     variant?: "full" | "compact";
   }> = (buttonProps) => {
     const isCompact = () => buttonProps.variant === "compact";
+    const isAlwaysOn = () => buttonProps.employee.mode === "always_on";
+    // Only on-demand/cron buttons drive a manual run; always-on never enters
+    // this loading state because the action opens a chat instead.
+    const isManualRunInFlight = () =>
+      !isAlwaysOn() && manualRun()?.kind === "running";
+    const isDisabled = () => isManualRunInFlight() || !canStartRun();
+    const actionNoun = () => (isAlwaysOn() ? "chat" : "run");
+    const title = () => {
+      if (!canStartRun()) {
+        return `${buttonProps.employee.name} is ${statusLabel(
+          buttonProps.employee.status,
+        ).toLowerCase()}; wake it before starting a ${actionNoun()}`;
+      }
+      return isAlwaysOn()
+        ? `Open a new chat with ${buttonProps.employee.name}`
+        : `Run ${buttonProps.employee.name} once now`;
+    };
+
+    // `min-w-[12rem]` keeps the compact button at a stable footprint so the
+    // header doesn't reflow when the label or icon changes width.
+    const compactClass =
+      "inline-flex h-10 min-w-[12rem] items-center justify-center gap-2 rounded-md border border-primary bg-primary px-4 text-[13.5px] font-medium text-primary-foreground shadow-sm shadow-primary/20 transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+    const fullClass =
+      "inline-flex w-full items-center justify-center gap-2 py-3 px-4 rounded-lg bg-primary text-primary-foreground font-medium text-[14px] transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+
     return (
       <button
         type="button"
-        class={
-          isCompact()
-            ? "inline-flex h-10 min-w-[188px] items-center justify-center gap-2 rounded-md border border-primary bg-primary px-4 text-[13.5px] font-medium text-primary-foreground shadow-sm shadow-primary/20 transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-            : "w-full py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium text-[14px] hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        }
-        disabled={manualRun()?.kind === "running" || !canStartRun()}
-        title={
-          !canStartRun()
-            ? `${buttonProps.employee.name} is ${statusLabel(buttonProps.employee.status).toLowerCase()}; wake it before starting a run`
-            : buttonProps.employee.mode === "always_on"
-              ? `Open a new chat with ${buttonProps.employee.name}`
-              : `Run ${buttonProps.employee.name} once now`
-        }
-        aria-disabled={manualRun()?.kind === "running" || !canStartRun()}
+        class={isCompact() ? compactClass : fullClass}
+        disabled={isDisabled()}
+        title={title()}
         onClick={handlePrimaryAction}
       >
-        <Show when={isCompact()}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 16 16"
-            fill="none"
-            aria-hidden="true"
+        <Show
+          when={!isManualRunInFlight()}
+          fallback={
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+              class="shrink-0 animate-spin"
+            >
+              <circle
+                cx="8"
+                cy="8"
+                r="6"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-dasharray="22 14"
+              />
+            </svg>
+          }
+        >
+          <Show
+            when={isAlwaysOn()}
+            fallback={
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+                class="shrink-0"
+              >
+                <path
+                  d="M5 4 L12 8 L5 12 Z"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linejoin="round"
+                  stroke-linecap="round"
+                />
+              </svg>
+            }
           >
-            <path
-              d="M3.5 4.5h9v5.5h-5l-3 2v-2h-1z"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linejoin="round"
-            />
-          </svg>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+              class="shrink-0"
+            >
+              <path
+                d="M3.5 4.5h9v5.5h-5l-3 2v-2h-1z"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linejoin="round"
+                stroke-linecap="round"
+              />
+            </svg>
+          </Show>
         </Show>
-        {buttonProps.employee.mode !== "always_on" &&
-        manualRun()?.kind === "running"
+        {isManualRunInFlight()
           ? "Running..."
           : primaryCtaLabel(buttonProps.employee.mode)}
       </button>
@@ -492,15 +602,19 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
           <>
             {/* Header */}
             <div class="flex items-start gap-4 px-6 py-5 border-b border-border">
-              <Avatar name={emp().name} seed={emp().avatarSeed} />
+              <div class="relative flex-none">
+                <Avatar name={emp().name} seed={emp().avatarSeed} />
+                <AvatarPresence status={emp().status} />
+              </div>
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
-                  <h1 class="m-0 text-xl font-semibold text-foreground truncate">
+                  <h1 class="m-0 text-xl font-semibold text-foreground truncate tracking-tight">
                     {emp().name}
                   </h1>
                   <span
                     class={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[11px] font-medium ${statusPillClass(emp().status)}`}
                   >
+                    <StatusDot status={emp().status} />
                     {statusLabel(emp().status)}
                   </span>
                 </div>
@@ -687,7 +801,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                 <PrimaryActionButton employee={emp()} />
                 <Show when={!canStartRun()}>
                   <div class="mt-2 mb-4 text-[12px] text-muted-foreground">
-                    Wake this employee before starting a chat or run.
+                    Wake this employee before starting a run.
                   </div>
                 </Show>
               </Show>

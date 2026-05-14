@@ -37,18 +37,23 @@ const DECISION_LABEL: Record<ApprovalDecisionState, string> = {
   expired: "Expired",
 };
 
+/**
+ * Compact relative timestamps tuned for an at-a-glance inbox scan: a single
+ * unit + suffix per row ("30s", "5m", "1h", "3d") rather than a full prose
+ * phrase. Falls back to a locale date once the entry is more than a week old.
+ */
 function relativeAge(iso: string): string {
   const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "moments ago";
+  if (Number.isNaN(then)) return "-";
   const diffSec = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (diffSec < 60) return diffSec <= 1 ? "just now" : `${diffSec} seconds ago`;
+  if (diffSec < 5) return "just now";
+  if (diffSec < 60) return `${diffSec}s`;
   const diffMin = Math.round(diffSec / 60);
-  if (diffMin < 60)
-    return diffMin === 1 ? "1 minute ago" : `${diffMin} minutes ago`;
+  if (diffMin < 60) return `${diffMin}m`;
   const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return diffHr === 1 ? "1 hour ago" : `${diffHr} hours ago`;
+  if (diffHr < 24) return `${diffHr}h`;
   const diffDay = Math.round(diffHr / 24);
-  if (diffDay < 7) return diffDay === 1 ? "1 day ago" : `${diffDay} days ago`;
+  if (diffDay < 7) return `${diffDay}d`;
   return new Date(iso).toLocaleDateString();
 }
 
@@ -130,7 +135,10 @@ const EntryRow: Component<{
           <div class="text-[12px] text-muted-foreground truncate">
             {summary()}
           </div>
-          <div class="text-[11px] text-muted-foreground/70 mt-0.5">
+          <div
+            class="text-[11px] text-muted-foreground/70 mt-0.5 tabular-nums"
+            title={props.entry.created_at}
+          >
             {relativeAge(props.entry.created_at)}
           </div>
         </div>
@@ -169,19 +177,34 @@ const EntryRow: Component<{
 
 const EmptyState: Component = () => (
   <div
-    class="flex flex-col items-center justify-center text-center py-16 px-6 text-muted-foreground"
+    class="flex flex-col items-center justify-center text-center py-20 px-6 text-muted-foreground"
     role="status"
   >
-    <div
-      class="w-12 h-12 rounded-full border border-border/60 flex items-center justify-center mb-3 text-[20px] opacity-60"
-      aria-hidden="true"
-    >
-      {"\u2713"}
+    <div class="relative mb-4" aria-hidden="true">
+      {/* Soft emerald halo behind the check so "all clear" reads as a real
+          steady state, not an empty-bordered placeholder. */}
+      <div class="absolute inset-0 -m-3 rounded-full bg-emerald-500/[0.08] blur-xl" />
+      <div class="relative w-14 h-14 rounded-full border border-emerald-500/30 bg-emerald-500/[0.06] flex items-center justify-center">
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 20 20"
+          fill="none"
+          aria-hidden="true"
+          class="text-emerald-400"
+        >
+          <path
+            d="M4.5 10.5 L8.25 14 L15.5 6.5"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </div>
     </div>
-    <div class="text-[13px] font-medium text-foreground/80">
-      No approvals waiting
-    </div>
-    <div class="text-[12px] text-muted-foreground/70 mt-1">
+    <div class="text-[13.5px] font-medium text-foreground/90">All clear</div>
+    <div class="text-[12px] text-muted-foreground/70 mt-1 max-w-[280px] leading-relaxed">
       Operator decisions land here as agents request them.
     </div>
   </div>

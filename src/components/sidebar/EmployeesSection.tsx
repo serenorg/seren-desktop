@@ -63,10 +63,15 @@ const Avatar: Component<{ name: string; seed: string; size?: number }> = (
 };
 
 function statusDotClass(status: EmployeeStatus, mode: EmployeeMode): string {
+  // A faint colored shadow on healthy/live dots reads as a hardware LED;
+  // operators scan the sidebar for "what's lit up". Stopped/idle stays flat.
   if (status === "running") {
-    return mode === "cron" ? "bg-amber-400" : "bg-emerald-400";
+    return mode === "cron"
+      ? "bg-amber-400 shadow-[0_0_4px_rgba(251,191,36,0.55)]"
+      : "bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.55)]";
   }
-  if (status === "failed") return "bg-red-500";
+  if (status === "failed")
+    return "bg-red-500 shadow-[0_0_3px_rgba(248,113,113,0.5)]";
   if (status === "stopped") return "bg-slate-500";
   if (status === "pending" || status === "building")
     return "bg-sky-400 animate-pulse";
