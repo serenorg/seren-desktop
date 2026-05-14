@@ -69,6 +69,30 @@ function applyOrder(rows: EmployeeSummary[]): EmployeeSummary[] {
   });
 }
 
+function employeeSummariesEqual(
+  left: EmployeeSummary[],
+  right: EmployeeSummary[],
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((row, index) => {
+    const other = right[index];
+    if (!other) return false;
+    return JSON.stringify(row) === JSON.stringify(other);
+  });
+}
+
+function archivedEmployeesEqual(
+  left: ArchivedEmployee[],
+  right: ArchivedEmployee[],
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((row, index) => {
+    const other = right[index];
+    if (!other) return false;
+    return JSON.stringify(row) === JSON.stringify(other);
+  });
+}
+
 export const employeeStore = {
   get employees(): EmployeeSummary[] {
     return state.employees;
@@ -110,9 +134,12 @@ export const employeeStore = {
     return state.detailErrors[id];
   },
 
-  async refresh(): Promise<void> {
-    setState("loading", true);
-    setState("error", null);
+  async refresh(options?: { background?: boolean }): Promise<void> {
+    const background = options?.background === true;
+    if (!background) {
+      setState("loading", true);
+      setState("error", null);
+    }
     try {
       // Live list is fatal on failure (drives the whole employees pane).
       // Archived list is best-effort: a corrupt local SQLite must not mask
@@ -124,25 +151,50 @@ export const employeeStore = {
 
       if (listResult.status === "rejected") {
         const err = listResult.reason;
-        setState("error", err instanceof Error ? err.message : String(err));
+        if (!background || state.lastLoadedAt === null) {
+          setState("error", err instanceof Error ? err.message : String(err));
+        }
         return;
       }
 
       const ordered = applyOrder(listResult.value);
-      setState("employees", ordered);
+      const employeesChanged = !employeeSummariesEqual(
+        state.employees,
+        ordered,
+      );
+      if (employeesChanged) {
+        setState("employees", ordered);
+      }
       if (archivedResult.status === "fulfilled") {
-        setState("archived", archivedResult.value);
+        const archivedChanged = !archivedEmployeesEqual(
+          state.archived,
+          archivedResult.value,
+        );
+        if (archivedChanged) {
+          setState("archived", archivedResult.value);
+        }
       } else {
         console.warn(
           "Failed to load archived employees:",
           archivedResult.reason,
         );
-        setState("archived", []);
+        if (!archivedEmployeesEqual(state.archived, [])) {
+          setState("archived", []);
+        }
       }
-      setState("lastLoadedAt", Date.now());
-      persistOrder(ordered.map((row) => row.id));
+      if (state.error !== null) {
+        setState("error", null);
+      }
+      if (!background || state.lastLoadedAt === null) {
+        setState("lastLoadedAt", Date.now());
+      }
+      if (employeesChanged) {
+        persistOrder(ordered.map((row) => row.id));
+      }
     } finally {
-      setState("loading", false);
+      if (!background) {
+        setState("loading", false);
+      }
     }
   },
 
