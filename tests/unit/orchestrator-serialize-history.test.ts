@@ -85,7 +85,7 @@ describe("serializeHistory (#1895)", () => {
       "assistant.tool_calls[] must be present so extract_recent_publishers sees the publisher",
     ).toBe(true);
     expect(toolCalls).toHaveLength(1);
-    expect((toolCalls as Array<Record<string, unknown>>)[0]).toMatchObject({
+    expect((toolCalls as unknown as Array<Record<string, unknown>>)[0]).toMatchObject({
       type: "function",
       function: { name: "mcp__playwright__playwright_list_browsers" },
     });
