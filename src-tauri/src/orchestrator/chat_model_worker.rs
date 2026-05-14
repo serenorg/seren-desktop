@@ -1176,7 +1176,18 @@ created if missing.",
 
     /// Execute a local tool by name with the given arguments.
     /// Returns (result_content, is_error).
+    #[cfg(test)]
     async fn execute_tool(name: &str, arguments: &str) -> (String, bool) {
+        Self::execute_tool_with_app(None, name, arguments).await
+    }
+
+    /// Execute a local tool with app context when secure storage is needed.
+    /// Returns (result_content, is_error).
+    async fn execute_tool_with_app(
+        app: Option<&tauri::AppHandle>,
+        name: &str,
+        arguments: &str,
+    ) -> (String, bool) {
         let args: serde_json::Value = match serde_json::from_str(arguments) {
             Ok(v) => v,
             Err(e) => {
@@ -1278,7 +1289,24 @@ created if missing.",
                     return ("Missing required parameter: command".to_string(), true);
                 }
                 let timeout_secs = args["timeout_secs"].as_u64();
-                match crate::shell::execute_shell_command(command, timeout_secs).await {
+                let inject_seren_credentials =
+                    args.get("inject_seren_credentials").and_then(|v| v.as_bool());
+                let command_result = if let Some(app) = app {
+                    crate::shell::execute_shell_command_for_tool(
+                        app,
+                        command,
+                        timeout_secs,
+                        inject_seren_credentials,
+                    )
+                    .await
+                } else {
+                    crate::shell::execute_shell_command_without_seren_credentials(
+                        command,
+                        timeout_secs,
+                    )
+                    .await
+                };
+                match command_result {
                     Ok(cmd_result) => {
                         let mut output = String::new();
                         if !cmd_result.stdout.is_empty() {
@@ -1674,7 +1702,7 @@ impl Worker for ChatModelWorker {
                         );
 
                         let (result_content, is_error) = if Self::is_local_tool(&tc.name) {
-                            Self::execute_tool(&tc.name, &tc.arguments).await
+                            Self::execute_tool_with_app(Some(app), &tc.name, &tc.arguments).await
                         } else {
                             // Route non-local tools (gateway__, mcp__)
                             // to the frontend for execution via the tool bridge.

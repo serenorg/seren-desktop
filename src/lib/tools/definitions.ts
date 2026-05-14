@@ -361,6 +361,13 @@ export const FILE_TOOLS: ToolDefinition[] = [
             description:
               "Timeout in seconds (default: 30, max: 300). Use longer timeouts for commands like npm install.",
           },
+          inject_seren_credentials: {
+            type: "boolean",
+            description:
+              "Set true only for Seren-owned skill scripts or publisher clients that need Desktop auth. " +
+              "This injects the logged-in user's SEREN_API_KEY and API_KEY into the subprocess. " +
+              "Do not set for ordinary user-requested shell commands.",
+          },
         },
         required: ["command"],
       },
