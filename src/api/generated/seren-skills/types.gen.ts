@@ -123,10 +123,84 @@ export type CreateVersionResponse = {
     version?: null | SkillVersion;
 };
 
+/**
+ * `DELETE /skills/{slug}/files/{path...}` body.
+ */
+export type DeleteFileRequest = {
+    expected_current_version_id: string;
+    version_label?: string | null;
+};
+
+/**
+ * Per-file edit response. `unchanged: true` means the resulting
+ * bundle hash matches the current version's `content_hash_bundle`
+ * and no new version was written; `version` then carries the
+ * existing current version. On conflict, `status = "conflict"` and
+ * `draft` + `merge_state` come from the standard chat-conflict
+ * pipeline reused from `create_version`.
+ */
+export type FileEditResponse = {
+    draft?: null | ChatDraftResponse;
+    merge_state?: null | MergeStateResponse;
+    status: string;
+    unchanged: boolean;
+    version?: null | SkillVersion;
+};
+
+/**
+ * One row in the [`ListFilesResponse`]. `preview` is the first 200
+ * chars of the file when it is text; `null` for binaries.
+ */
+export type FileListing = {
+    content_hash: string;
+    is_binary: boolean;
+    mode: number;
+    path: string;
+    preview?: string | null;
+    size_bytes: number;
+};
+
+/**
+ * `GET /skills/{slug}/files/{path...}` response: one file's bytes.
+ */
+export type GetFileResponse = {
+    content_b64: string;
+    content_hash: string;
+    is_binary: boolean;
+    mode: number;
+    path: string;
+    version?: string | null;
+};
+
+/**
+ * Health of the GitHub mirror for a public/paid skill, as observed by
+ * the forward-publish worker. Surfaced on `SkillSummary` so owners see
+ * a broken mirror without a separate `/skills/{slug}/github` lookup.
+ *
+ * - `Pending`: row not yet attempted, or the skill is private and the
+ * mirror is intentionally inactive. Default for new skills.
+ * - `Healthy`: most recent terminal worker outcome was a successful
+ * push.
+ * - `Degraded`: reserved for partial-push or transient-failure flows;
+ * not currently emitted by the worker but defined so the column is
+ * future-proof against a finer-grained health model.
+ * - `Failed`: most recent terminal worker outcome exhausted retries
+ * without pushing. Owner action required.
+ */
+export type GithubMirrorHealth = 'pending' | 'healthy' | 'degraded' | 'failed';
+
 export type GithubPublishStatusResponse = {
     commit_sha?: string | null;
     folder_slug: string;
     last_error?: string | null;
+    /**
+     * Source that supplied `folder_slug` at enqueue time.
+     * `"skill"` -> per-skill override (`skills.folder_slug`).
+     * `"organization"` -> org default (`skill_org_folders.folder_slug`).
+     * Pinned at enqueue rather than recomputed on read because both
+     * underlying values can drift after the publish row is written.
+     */
+    resolved_via: string;
     skill_folder_name: string;
     skill_id: string;
     status: string;
@@ -137,18 +211,41 @@ export type ListCollaboratorsResponse = {
     collaborators: Array<Collaborator>;
 };
 
+/**
+ * `GET /skills/{slug}/files` response: every path in the current
+ * bundle including a synthetic `SKILL.md` entry for completeness.
+ */
+export type ListFilesResponse = {
+    files: Array<FileListing>;
+};
+
 export type ListSkillsQuery = {
     limit?: number | null;
     mine?: boolean | null;
     offset?: number | null;
     q?: string | null;
+    sort?: null | ListSkillsSort;
     visibility?: null | SkillVisibility;
 };
 
 export type ListSkillsResponse = {
+    /**
+     * True when more pages remain after this one. Equivalent to
+     * `offset + skills.len() < total`, exposed so callers (and LLM
+     * agents reading SKILL.md) don't have to compute the loop
+     * condition themselves.
+     */
+    has_more: boolean;
+    /**
+     * The `offset` value to pass on the next request to continue
+     * paging, or `None` when the catalog is exhausted.
+     */
+    next_offset?: number | null;
     skills: Array<SkillSummary>;
     total: number;
 };
+
+export type ListSkillsSort = 'updated' | 'installs';
 
 export type ListUpdateRequestCommentsResponse = {
     comments: Array<UpdateRequestComment>;
@@ -187,6 +284,54 @@ export type PurchaseResponse = {
     purchase_id?: string | null;
     skill_id: string;
     source: string;
+};
+
+/**
+ * `PUT /skills/{slug}/files/{path...}` body. `expected_content_hash`
+ * is the per-file hex SHA from `GET /files`; it is an *optional*
+ * pre-flight check that fails fast (409) before the version write.
+ * `expected_current_version_id` is forwarded to `create_version`'s
+ * existing conflict-draft path -- mismatch returns 409 with a chat
+ * draft + merge-state pointer.
+ */
+export type PutFileRequest = {
+    content_b64: string;
+    expected_content_hash?: string | null;
+    expected_current_version_id: string;
+    mode?: number | null;
+    /**
+     * Optional override for the auto-synthesised
+     * `file-edit-<hash>` version label.
+     */
+    version_label?: string | null;
+};
+
+/**
+ * Body of `POST /skills/{slug}/github/reconcile-orphans`.
+ */
+export type ReconcileOrphansRequest = {
+    /**
+     * Must be `true` -- the handler 409s on `false` or missing. The
+     * guard exists so a misconfigured CLI/script cannot quietly
+     * delete canonical-repo paths.
+     */
+    confirm?: boolean;
+    /**
+     * When true, the handler returns the planned commit shape
+     * without touching GitHub. The audit row is still recorded so
+     * the operator's preview is auditable.
+     */
+    dry_run?: boolean;
+    /**
+     * The orphan-path set the operator computed (e.g. via the
+     * `reconcile_canonical_repo` binary). The handler 409s if the
+     * live set against canonical HEAD has diverged.
+     */
+    expected_orphan_paths?: Array<string>;
+    /**
+     * Optional free-text reason (recorded on the audit row).
+     */
+    reason?: string | null;
 };
 
 export type ResolveConflictRequest = {
@@ -274,7 +419,15 @@ export type SkillSummary = {
     deleted_at?: string | null;
     description: string;
     discoverability: SkillDiscoverability;
+    /**
+     * Per-skill override for the GitHub mirror folder. When set, takes
+     * precedence over `skill_org_folders.folder_slug`. `None` means
+     * fall through to the org default. See migration 009 + issue #17.
+     */
+    folder_slug?: string | null;
+    github_mirror_health: GithubMirrorHealth;
     id: string;
+    install_count: number;
     name: string;
     owner_kind: SkillOwnerKind;
     owner_organization_id: string;
@@ -304,6 +457,11 @@ export type SkillVersion = {
 };
 
 export type SkillVisibility = 'private' | 'public' | 'paid';
+
+export type TransferOrgFolderRequest = {
+    display_name?: string | null;
+    folder_slug: string;
+};
 
 export type UpdateRequest = {
     base_version_id?: string | null;
@@ -346,6 +504,13 @@ export type UpdateRequestDiff = {
 export type UpdateSkillRequest = {
     description?: string | null;
     discoverability?: null | SkillDiscoverability;
+    /**
+     * Per-skill GitHub mirror folder override. Three-state field:
+     * field absent → no change; explicit `null` → clear the override
+     * (fall back to org default); string → set the override.
+     * See issue #17.
+     */
+    folder_slug?: string | null;
     name?: string | null;
     price_cents?: number | null;
     status?: null | SkillStatus;
@@ -517,6 +682,67 @@ export type CreateOrgFolderResponses = {
 
 export type CreateOrgFolderResponse = CreateOrgFolderResponses[keyof CreateOrgFolderResponses];
 
+export type ReplaceOrgFolderData = {
+    body: UpsertOrgFolderRequest;
+    path: {
+        /**
+         * Organization ID
+         */
+        org_id: string;
+    };
+    query?: never;
+    url: '/organizations/{org_id}/folder';
+};
+
+export type ReplaceOrgFolderResponses = {
+    /**
+     * Organization folder
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type ReplaceOrgFolderResponse = ReplaceOrgFolderResponses[keyof ReplaceOrgFolderResponses];
+
+export type TransferOrgFolderData = {
+    body: TransferOrgFolderRequest;
+    path: {
+        /**
+         * Organization ID
+         */
+        org_id: string;
+    };
+    query?: never;
+    url: '/organizations/{org_id}/folder/transfer';
+};
+
+export type TransferOrgFolderErrors = {
+    /**
+     * Caller is not org-admin or personal-owner of {org_id}
+     */
+    403: unknown;
+    /**
+     * Slug is not held by any folder row
+     */
+    404: unknown;
+    /**
+     * Slug is held by a real organization, not a placeholder
+     */
+    409: unknown;
+};
+
+export type TransferOrgFolderResponses = {
+    /**
+     * Organization folder
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type TransferOrgFolderResponse = TransferOrgFolderResponses[keyof TransferOrgFolderResponses];
+
 export type SkillMdData = {
     body?: never;
     path?: never;
@@ -538,6 +764,7 @@ export type ListSkillsData = {
         q?: string | null;
         visibility?: null | SkillVisibility;
         mine?: boolean | null;
+        sort?: null | ListSkillsSort;
         limit?: number | null;
         offset?: number | null;
     };
@@ -831,6 +1058,102 @@ export type GetSkillEditDocumentResponses = {
 
 export type GetSkillEditDocumentResponse = GetSkillEditDocumentResponses[keyof GetSkillEditDocumentResponses];
 
+export type ListFilesData = {
+    body?: never;
+    path: {
+        /**
+         * Skill slug
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/skills/{slug}/files';
+};
+
+export type ListFilesResponses = {
+    /**
+     * Bundle file listing
+     */
+    200: ListFilesResponse;
+};
+
+export type ListFilesResponse2 = ListFilesResponses[keyof ListFilesResponses];
+
+export type DeleteFileData = {
+    body: DeleteFileRequest;
+    path: {
+        /**
+         * Skill slug
+         */
+        slug: string;
+        /**
+         * Bundle path; SKILL.md is rejected with 400
+         */
+        path: string;
+    };
+    query?: never;
+    url: '/skills/{slug}/files/{path}';
+};
+
+export type DeleteFileResponses = {
+    /**
+     * Per-file delete result
+     */
+    200: FileEditResponse;
+};
+
+export type DeleteFileResponse = DeleteFileResponses[keyof DeleteFileResponses];
+
+export type GetFileData = {
+    body?: never;
+    path: {
+        /**
+         * Skill slug
+         */
+        slug: string;
+        /**
+         * Bundle path or 'SKILL.md'
+         */
+        path: string;
+    };
+    query?: never;
+    url: '/skills/{slug}/files/{path}';
+};
+
+export type GetFileResponses = {
+    /**
+     * Single bundle file
+     */
+    200: GetFileResponse;
+};
+
+export type GetFileResponse2 = GetFileResponses[keyof GetFileResponses];
+
+export type PutFileData = {
+    body: PutFileRequest;
+    path: {
+        /**
+         * Skill slug
+         */
+        slug: string;
+        /**
+         * Bundle path or 'SKILL.md'
+         */
+        path: string;
+    };
+    query?: never;
+    url: '/skills/{slug}/files/{path}';
+};
+
+export type PutFileResponses = {
+    /**
+     * Per-file edit result
+     */
+    200: FileEditResponse;
+};
+
+export type PutFileResponse = PutFileResponses[keyof PutFileResponses];
+
 export type GithubStatusData = {
     body?: never;
     path: {
@@ -854,6 +1177,40 @@ export type GithubStatusResponses = {
 
 export type GithubStatusResponse = GithubStatusResponses[keyof GithubStatusResponses];
 
+export type ReconcileOrphansData = {
+    body: ReconcileOrphansRequest;
+    path: {
+        /**
+         * Skill slug
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/skills/{slug}/github/reconcile-orphans';
+};
+
+export type ReconcileOrphansErrors = {
+    /**
+     * Mismatch or unconfirmed request
+     */
+    409: {
+        [key: string]: unknown;
+    };
+};
+
+export type ReconcileOrphansError = ReconcileOrphansErrors[keyof ReconcileOrphansErrors];
+
+export type ReconcileOrphansResponses = {
+    /**
+     * Reconcile result
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type ReconcileOrphansResponse = ReconcileOrphansResponses[keyof ReconcileOrphansResponses];
+
 export type RetryGithubPublishData = {
     body?: never;
     path: {
@@ -876,6 +1233,29 @@ export type RetryGithubPublishResponses = {
 };
 
 export type RetryGithubPublishResponse = RetryGithubPublishResponses[keyof RetryGithubPublishResponses];
+
+export type SyncFromMainData = {
+    body?: never;
+    path: {
+        /**
+         * Skill slug
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/skills/{slug}/github/sync-from-main';
+};
+
+export type SyncFromMainResponses = {
+    /**
+     * GitHub sync-from-main result
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type SyncFromMainResponse = SyncFromMainResponses[keyof SyncFromMainResponses];
 
 export type PurchaseSkillData = {
     body?: never;

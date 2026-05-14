@@ -3321,6 +3321,84 @@
         ]
       }
     },
+    "/organizations/{organization_id}/catalog/{namespace}/{name}/promote": {
+      "post": {
+        "tags": [
+          "Agent Catalog"
+        ],
+        "summary": "Atomically promote a mutable tag pointer from one immutable version\nto another within `(namespace, name)`. Distinct from a generic PATCH so\nthe action surfaces as a promotion in audit history rather than a\ngeneric edit.",
+        "operationId": "promote_catalog_tag",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "path",
+            "description": "Catalog namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Catalog entry name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentCatalogTagPromotionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Tag promoted; response is the post-promotion entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_AgentCatalogEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (from_version == to_version, malformed tokens)"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Destination version not found"
+          },
+          "409": {
+            "description": "from_version no longer holds the tag; refresh and retry"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/organizations/{organization_id}/consumption": {
       "get": {
         "tags": [
@@ -8768,7 +8846,6 @@
           "labels",
           "annotations",
           "trust",
-          "requires",
           "deprecated",
           "created_at",
           "updated_at"
@@ -8821,7 +8898,8 @@
             "format": "uuid"
           },
           "requires": {
-            "description": "Dependencies this entry requires to be useful (`mcp_servers`,\n`connectors`, `features`)."
+            "$ref": "#/components/schemas/EntryRequires",
+            "description": "Dependencies this entry requires to be useful. Typed so the control\nplane can validate references at apply time without parsing free-form\nJSON. Stored as JSONB; unknown fields are tolerated on read so a\nschema bump does not invalidate old rows."
           },
           "source": {
             "description": "Where the artifact lives. Free-form JSON so we can evolve the source\nshape (`inline`, `git`, `registry`, ...) without further migrations."
@@ -8885,7 +8963,16 @@
               "null"
             ]
           },
-          "requires": {},
+          "requires": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EntryRequires"
+              }
+            ]
+          },
           "source": {},
           "tag": {
             "type": [
@@ -8941,7 +9028,16 @@
             ]
           },
           "labels": {},
-          "requires": {},
+          "requires": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EntryRequires"
+              }
+            ]
+          },
           "source": {},
           "tag": {
             "type": [
@@ -8967,6 +9063,30 @@
             }
           }
         }
+      },
+      "AgentCatalogTagPromotionRequest": {
+        "type": "object",
+        "description": "Request body for atomic tag promotion. Moves a mutable tag pointer\n(`stable`, `canary`, ...) from one immutable version to another in a\nsingle transaction. Distinct from a generic update so the action is\nauditable as a promotion rather than an arbitrary edit.",
+        "required": [
+          "from_version",
+          "to_version",
+          "tag"
+        ],
+        "properties": {
+          "from_version": {
+            "type": "string",
+            "description": "Version that currently holds the tag. Must match the current pointer\nor the request fails so promotions are linearizable against caller\nstate."
+          },
+          "tag": {
+            "type": "string",
+            "description": "Tag being promoted. Must match the catalog tag regex."
+          },
+          "to_version": {
+            "type": "string",
+            "description": "Version that should hold the tag after the promotion completes."
+          }
+        },
+        "additionalProperties": false
       },
       "AgentCreditSource": {
         "type": "string",
@@ -11075,7 +11195,6 @@
               "labels",
               "annotations",
               "trust",
-              "requires",
               "deprecated",
               "created_at",
               "updated_at"
@@ -11128,7 +11247,8 @@
                 "format": "uuid"
               },
               "requires": {
-                "description": "Dependencies this entry requires to be useful (`mcp_servers`,\n`connectors`, `features`)."
+                "$ref": "#/components/schemas/EntryRequires",
+                "description": "Dependencies this entry requires to be useful. Typed so the control\nplane can validate references at apply time without parsing free-form\nJSON. Stored as JSONB; unknown fields are tolerated on read so a\nschema bump does not invalidate old rows."
               },
               "source": {
                 "description": "Where the artifact lives. Free-form JSON so we can evolve the source\nshape (`inline`, `git`, `registry`, ...) without further migrations."
@@ -19016,6 +19136,36 @@
           }
         }
       },
+      "EntryRequires": {
+        "type": "object",
+        "description": "Typed dependency declarations for a catalog entry. All sub-collections\ndefault to empty so legacy rows storing `{}` deserialize cleanly. Stored\nin the `requires` JSONB column. Unknown top-level fields are tolerated\nat read time so a future schema bump does not invalidate existing rows;\nrequest DTOs deny unknown fields to surface client typos.",
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "connectors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequiredConnectorRef"
+            }
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mcp_servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequiredMcpServerRef"
+            }
+          }
+        }
+      },
       "EstimateRequestBody": {
         "type": "object",
         "description": "Query estimate request body",
@@ -23579,6 +23729,40 @@
           }
         }
       },
+      "RequiredConnectorRef": {
+        "type": "object",
+        "description": "Reference to a connector the catalog item depends on. `kind` is optional\nmetadata for UI grouping or provider-specific platform hints\n(gmail|slack|browser|telegram|...). The connector itself is resolved by\n`name` against the org's connector inventory at apply time. Messaging\nchannel entries remain provider-defined: Seren's deployment contract uses\nconnector tool refs with capability/scopes metadata rather than a closed\nchannel enum.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "RequiredMcpServerRef": {
+        "type": "object",
+        "description": "Reference to an MCP server entry the catalog item depends on. `semver`\ncarries a constraint expression resolved at apply time against the\ninstalled MCP catalog (validation is shape-only here; resolution lives\nin the deployment apply path).",
+        "required": [
+          "name",
+          "semver"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "semver": {
+            "type": "string"
+          }
+        }
+      },
       "ResendVerificationRequest": {
         "type": "object",
         "required": [
@@ -26365,10 +26549,6 @@
     {
       "name": "agent",
       "description": "Agent commerce and paid query execution"
-    },
-    {
-      "name": "agent-internal",
-      "description": "Agent internal endpoints for SerenDB proxy"
     },
     {
       "name": "agent-wallet",

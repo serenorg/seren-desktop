@@ -60,10 +60,12 @@ export type AgentCatalogEntry = {
     namespace: string;
     organization_id: string;
     /**
-     * Dependencies this entry requires to be useful (`mcp_servers`,
-     * `connectors`, `features`).
+     * Dependencies this entry requires to be useful. Typed so the control
+     * plane can validate references at apply time without parsing free-form
+     * JSON. Stored as JSONB; unknown fields are tolerated on read so a
+     * schema bump does not invalidate old rows.
      */
-    requires: unknown;
+    requires?: EntryRequires;
     /**
      * Where the artifact lives. Free-form JSON so we can evolve the source
      * shape (`inline`, `git`, `registry`, ...) without further migrations.
@@ -92,7 +94,7 @@ export type AgentCatalogEntryCreateRequest = {
     labels?: unknown;
     name: string;
     namespace?: string | null;
-    requires?: unknown;
+    requires?: null | EntryRequires;
     source?: unknown;
     tag?: string | null;
     trust?: unknown;
@@ -120,7 +122,7 @@ export type AgentCatalogEntryUpdateRequest = {
     deprecated?: boolean | null;
     description?: string | null;
     labels?: unknown;
-    requires?: unknown;
+    requires?: null | EntryRequires;
     source?: unknown;
     tag?: string | null;
     trust?: unknown;
@@ -131,6 +133,29 @@ export type AgentCatalogEntryUpdateRequest = {
  */
 export type AgentCatalogListResponse = {
     data: Array<AgentCatalogEntry>;
+};
+
+/**
+ * Request body for atomic tag promotion. Moves a mutable tag pointer
+ * (`stable`, `canary`, ...) from one immutable version to another in a
+ * single transaction. Distinct from a generic update so the action is
+ * auditable as a promotion rather than an arbitrary edit.
+ */
+export type AgentCatalogTagPromotionRequest = {
+    /**
+     * Version that currently holds the tag. Must match the current pointer
+     * or the request fails so promotions are linearizable against caller
+     * state.
+     */
+    from_version: string;
+    /**
+     * Tag being promoted. Must match the catalog tag regex.
+     */
+    tag: string;
+    /**
+     * Version that should hold the tag after the promotion completes.
+     */
+    to_version: string;
 };
 
 /**
@@ -1268,10 +1293,12 @@ export type DataResponseAgentCatalogEntry = {
         namespace: string;
         organization_id: string;
         /**
-         * Dependencies this entry requires to be useful (`mcp_servers`,
-         * `connectors`, `features`).
+         * Dependencies this entry requires to be useful. Typed so the control
+         * plane can validate references at apply time without parsing free-form
+         * JSON. Stored as JSONB; unknown fields are tolerated on read so a
+         * schema bump does not invalidate old rows.
          */
-        requires: unknown;
+        requires?: EntryRequires;
         /**
          * Where the artifact lives. Free-form JSON so we can evolve the source
          * shape (`inline`, `git`, `registry`, ...) without further migrations.
@@ -10451,6 +10478,20 @@ export type EndpointDefinition = {
 };
 
 /**
+ * Typed dependency declarations for a catalog entry. All sub-collections
+ * default to empty so legacy rows storing `{}` deserialize cleanly. Stored
+ * in the `requires` JSONB column. Unknown top-level fields are tolerated
+ * at read time so a future schema bump does not invalidate existing rows;
+ * request DTOs deny unknown fields to surface client typos.
+ */
+export type EntryRequires = {
+    capabilities?: Array<string>;
+    connectors?: Array<RequiredConnectorRef>;
+    features?: Array<string>;
+    mcp_servers?: Array<RequiredMcpServerRef>;
+};
+
+/**
  * Query estimate request body
  */
 export type EstimateRequestBody = {
@@ -12176,6 +12217,31 @@ export type RefreshTokenRequest = {
 
 export type RefundChargeRequest = {
     reason: string;
+};
+
+/**
+ * Reference to a connector the catalog item depends on. `kind` is optional
+ * metadata for UI grouping or provider-specific platform hints
+ * (gmail|slack|browser|telegram|...). The connector itself is resolved by
+ * `name` against the org's connector inventory at apply time. Messaging
+ * channel entries remain provider-defined: Seren's deployment contract uses
+ * connector tool refs with capability/scopes metadata rather than a closed
+ * channel enum.
+ */
+export type RequiredConnectorRef = {
+    kind?: string | null;
+    name: string;
+};
+
+/**
+ * Reference to an MCP server entry the catalog item depends on. `semver`
+ * carries a constraint expression resolved at apply time against the
+ * installed MCP catalog (validation is shape-only here; resolution lives
+ * in the deployment apply path).
+ */
+export type RequiredMcpServerRef = {
+    name: string;
+    semver: string;
 };
 
 export type ResendVerificationRequest = {
@@ -15666,6 +15732,54 @@ export type ResolveCatalogTagResponses = {
 };
 
 export type ResolveCatalogTagResponse = ResolveCatalogTagResponses[keyof ResolveCatalogTagResponses];
+
+export type PromoteCatalogTagData = {
+    body: AgentCatalogTagPromotionRequest;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Catalog namespace
+         */
+        namespace: string;
+        /**
+         * Catalog entry name
+         */
+        name: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/catalog/{namespace}/{name}/promote';
+};
+
+export type PromoteCatalogTagErrors = {
+    /**
+     * Invalid request (from_version == to_version, malformed tokens)
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Destination version not found
+     */
+    404: unknown;
+    /**
+     * from_version no longer holds the tag; refresh and retry
+     */
+    409: unknown;
+};
+
+export type PromoteCatalogTagResponses = {
+    /**
+     * Tag promoted; response is the post-promotion entry
+     */
+    200: DataResponseAgentCatalogEntry;
+};
+
+export type PromoteCatalogTagResponse = PromoteCatalogTagResponses[keyof PromoteCatalogTagResponses];
 
 export type GetOrganizationConsumptionData = {
     body?: never;

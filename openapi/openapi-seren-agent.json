@@ -701,6 +701,47 @@
   },
   "components": {
     "schemas": {
+      "ActionLease": {
+        "type": "object",
+        "description": "Lease for a single action on a tool. Borrows the OpenFang/IronClaw\npattern: permission is granted per-action, not per-process, with optional\nexpiry, use budget, and a parent lease ref for sub-agent inheritance.\n\n`capability` distinguishes blanket grants (all sub-actions of `action`)\nfrom a closed `Specific` set. Sub-agents that fork from a parent must\nhold leases whose capability is a subset of the parent's — runtime\nenforcement (when implemented) lives outside this DTO; here we validate\nshape only.",
+        "required": [
+          "action",
+          "capability"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Action name being leased. Free-form per tool; e.g. `read`, `send`,\n`execute`, `delete`, `list`."
+          },
+          "capability": {
+            "$ref": "#/components/schemas/GrantedActions"
+          },
+          "expiry": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Lease expiry as RFC 3339; `None` means no time bound."
+          },
+          "parent_lease_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of the parent lease this one inherits from. Shape-only\nvalidation here checks that the value is non-empty when set; the\nreferenced lease is not looked up. Inheritance resolution (parent must\nhold a capability superset) happens at runtime."
+          },
+          "use_budget": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Maximum number of invocations before the lease must be re-issued.\n`None` means unlimited.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "AgentAssetFile": {
         "type": "object",
         "description": "Non-prompt file that belongs to an agent bundle.",
@@ -1357,6 +1398,15 @@
           "blocked_request_inbox": {
             "type": "boolean",
             "description": "When true, blocked egress requests are queued for operator approval\n(shares an inbox with tool approvals)."
+          },
+          "blocked_request_max_wait_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Wall-clock cap (in seconds) on how long the runtime will hold a\nsingle blocked-egress request waiting for an operator decision before\nsurfacing it as `Expired`. When `None`, the runtime applies its\nbuilt-in default (30 minutes).",
+            "minimum": 0
           },
           "default": {
             "$ref": "#/components/schemas/AgentNetworkDefault",
@@ -2095,6 +2145,12 @@
               "operation_id": {
                 "type": "string"
               },
+              "permitted_actions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActionLease"
+                }
+              },
               "publisher_slug": {
                 "type": "string"
               },
@@ -2118,6 +2174,12 @@
                   "mcp"
                 ]
               },
+              "permitted_actions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActionLease"
+                }
+              },
               "require_approval": {
                 "type": "boolean"
               },
@@ -2131,7 +2193,7 @@
           },
           {
             "type": "object",
-            "description": "Reference to a capability on an organization connector (Gmail, Slack, ...).",
+            "description": "Reference to a capability on an organization connector (Gmail, Slack, ...).\n\n`capability == \"messaging\"` is the generic convention for connectors\nthat adapt user conversations through a channel such as Telegram, Slack,\nSMS, Discord, email, or a publisher-provided messaging surface. Seren\ndoes not route channel traffic from this field. The `connector_ref`\nidentifies the concrete integration, and `scopes` stays\nprovider-defined so connector manifests and publisher ecosystems can\nevolve without a Seren API enum update.",
             "required": [
               "connector_ref",
               "capability",
@@ -2149,6 +2211,12 @@
                 "enum": [
                   "connector"
                 ]
+              },
+              "permitted_actions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActionLease"
+                }
               },
               "require_approval": {
                 "type": "boolean"
@@ -2189,6 +2257,12 @@
               "origin": {
                 "type": "string"
               },
+              "permitted_actions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActionLease"
+                }
+              },
               "require_approval": {
                 "type": "boolean"
               },
@@ -2207,7 +2281,7 @@
           },
           {
             "type": "object",
-            "description": "Back-compat shim for the coarse `tool_presets` collections.",
+            "description": "Back-compat shim for the coarse `tool_presets` collections. Presets\nare bulk grants and intentionally do not carry action leases.",
             "required": [
               "preset",
               "kind"
@@ -2225,7 +2299,7 @@
             }
           }
         ],
-        "description": "Typed tool reference attached to an agent. Lives alongside the coarser\n`tool_presets` field; future managed-agent flows resolve from typed refs and\npresets together."
+        "description": "Typed tool reference attached to an agent. Lives alongside the coarser\n`tool_presets` field; future managed-agent flows resolve from typed refs and\npresets together. Each non-preset variant carries an optional\n`permitted_actions` collection of `ActionLease`s — the per-action gate\nborrowed from OpenFang/IronClaw that lets the spec say \"this Connector may\nperform `read` but not `send`\" without inventing a separate ACL surface."
       },
       "CloudDeploymentActionStatusResponse": {
         "type": "object",
@@ -3244,6 +3318,17 @@
                 "type": "string",
                 "format": "uuid"
               },
+              "eval_gate_status": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CloudDeploymentEvalGateStatus",
+                    "description": "Current eval gate status; when `block_on_failure` is set on the\nproposed gate and `blocking` is true here, applying this rollback will\nbe rejected by the control plane."
+                  }
+                ]
+              },
               "proposed": {
                 "$ref": "#/components/schemas/ManagedAgentDeploymentDetail"
               },
@@ -3293,6 +3378,17 @@
               "deployment_id": {
                 "type": "string",
                 "format": "uuid"
+              },
+              "eval_gate_status": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CloudDeploymentEvalGateStatus",
+                    "description": "Current eval gate status for the proposed gate. When the proposed gate\nsets `block_on_failure` and `blocking` is true here, the apply will be\nrejected by the control plane."
+                  }
+                ]
               },
               "proposed": {
                 "$ref": "#/components/schemas/ManagedAgentDeploymentDetail"
@@ -3754,7 +3850,7 @@
       },
       "EvalGate": {
         "type": "object",
-        "description": "Eval gate configuration that must pass with a fresh verdict before runs proceed.\n\n`block_on_failure` controls what happens at update or rollback apply time:\nwhen `Some(true)`, the control plane rejects the apply if the latest eval\nverdict has failed or has expired beyond `max_age_seconds`. The default\n(`None`/`false`) preserves the original freshness-only behavior for\nback-compat.",
+        "description": "Eval gate configuration that must pass with a fresh verdict before runs proceed.\n\n`block_on_failure` controls what happens at update or rollback apply time:\nwhen `Some(true)`, the control plane rejects the apply if the latest eval\nverdict has failed or has expired beyond `max_age_seconds`. The default\n(`None`/`false`) preserves the original freshness-only behavior for\nback-compat.\n\n`schedule` is an operator-supplied cron expression that asks the control\nplane to run the gated eval set on a fixed cadence so freshness stays\ncurrent without manual triggering. The actual scheduling-loop dispatch is\nowned by the eval-set scheduler today (see `CloudEvalSetSchedule`); this\nfield records the operator intent on the deployment side.\n\n`drift_baseline` is captured by the apply path when an update or rollback\ncommits with a passing gate. Subsequent eval runs compare against the\nbaseline so operators see regressions explicitly.",
         "required": [
           "set_id",
           "max_age_seconds"
@@ -3766,9 +3862,31 @@
               "null"
             ]
           },
+          "drift_baseline": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EvalGateDriftBaseline",
+                "description": "Eval-set verdict captured at the most recent successful apply. Set by\nthe control plane; clients may submit this field but the control plane\nwill overwrite it on every successful apply."
+              }
+            ]
+          },
           "max_age_seconds": {
             "type": "integer",
             "format": "int32"
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EvalGateSchedule",
+                "description": "Optional cron-driven cadence for re-running the gated eval set."
+              }
+            ]
           },
           "set_id": {
             "type": "string",
@@ -3776,6 +3894,103 @@
           }
         },
         "additionalProperties": false
+      },
+      "EvalGateDriftBaseline": {
+        "type": "object",
+        "description": "Snapshot of an eval-set verdict captured at the last successful apply.\nSubsequent eval runs (manual or scheduled) compare against this snapshot\nto surface drift; the apply path overwrites this value on every commit.",
+        "required": [
+          "baseline_set_id",
+          "baseline_run_id",
+          "baseline_passed",
+          "baseline_failed",
+          "baseline_captured_at"
+        ],
+        "properties": {
+          "baseline_captured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "baseline_failed": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "baseline_passed": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "baseline_run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "baseline_set_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EvalGateSchedule": {
+        "type": "object",
+        "description": "Cron-driven cadence requested by the operator for an eval gate. The\ntimezone is an IANA name (e.g. `UTC`, `America/New_York`); when omitted the\ncontrol plane defaults to UTC.",
+        "required": [
+          "cron"
+        ],
+        "properties": {
+          "cron": {
+            "type": "string",
+            "description": "Standard 5-field cron expression. Validated against the same parser\nthat backs deployment cron schedules."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional IANA timezone. Defaults to `UTC` when absent."
+          }
+        },
+        "additionalProperties": false
+      },
+      "GrantedActions": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "actions",
+              "kind"
+            ],
+            "properties": {
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "specific"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Capability granted by an `ActionLease`. `All` grants every sub-action of\nthe named action; `Specific` enumerates a closed set."
       },
       "ManagedAgentApprovalPolicy": {
         "type": "string",
@@ -4185,6 +4400,17 @@
             "type": "string",
             "format": "uuid"
           },
+          "eval_gate_status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CloudDeploymentEvalGateStatus",
+                "description": "Current eval gate status; when `block_on_failure` is set on the\nproposed gate and `blocking` is true here, applying this rollback will\nbe rejected by the control plane."
+              }
+            ]
+          },
           "proposed": {
             "$ref": "#/components/schemas/ManagedAgentDeploymentDetail"
           },
@@ -4214,6 +4440,17 @@
           "deployment_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "eval_gate_status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CloudDeploymentEvalGateStatus",
+                "description": "Current eval gate status for the proposed gate. When the proposed gate\nsets `block_on_failure` and `blocking` is true here, the apply will be\nrejected by the control plane."
+              }
+            ]
           },
           "proposed": {
             "$ref": "#/components/schemas/ManagedAgentDeploymentDetail"

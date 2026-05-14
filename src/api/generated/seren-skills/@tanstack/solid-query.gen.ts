@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { acceptUpdateRequest, createOrgFolder, createSkill, createUpdateRequest, createUpdateRequestComment, createVersion, deleteCollaborator, deleteSkill, downloadSkill, getAuthorIdentity, getDraft, getMergeState, getOrgFolder, getSkill, getSkillEditDocument, getUpdateRequest, getUpdateRequestDiff, getVersionManifest, githubStatus, listCollaborators, listSkills, listUpdateRequestComments, listUpdateRequests, listUsageEvents, listVersions, type Options, publisherRoot, purchaseSkill, rejectUpdateRequest, resolveConflict, retryGithubPublish, skillMd, updateOrgFolder, updateSkill, updateSponsor, upsertAuthorIdentity, upsertCollaborator, usageSummary } from '../sdk.gen';
-import type { AcceptUpdateRequestData, AcceptUpdateRequestResponse, CreateOrgFolderData, CreateOrgFolderResponse, CreateSkillData, CreateSkillResponse, CreateUpdateRequestCommentData, CreateUpdateRequestCommentResponse, CreateUpdateRequestData, CreateUpdateRequestResponse, CreateVersionData, CreateVersionResponse2, DeleteCollaboratorData, DeleteCollaboratorResponse, DeleteSkillData, DeleteSkillResponse, DownloadSkillData, DownloadSkillResponse, GetAuthorIdentityData, GetAuthorIdentityResponse, GetDraftData, GetDraftResponse, GetMergeStateData, GetMergeStateResponse, GetOrgFolderData, GetOrgFolderResponse, GetSkillData, GetSkillEditDocumentData, GetSkillEditDocumentResponse, GetSkillResponse, GetUpdateRequestData, GetUpdateRequestDiffData, GetUpdateRequestDiffResponse, GetUpdateRequestResponse, GetVersionManifestData, GetVersionManifestResponse, GithubStatusData, GithubStatusResponse, ListCollaboratorsData, ListCollaboratorsResponse2, ListSkillsData, ListSkillsResponse2, ListUpdateRequestCommentsData, ListUpdateRequestCommentsResponse2, ListUpdateRequestsData, ListUpdateRequestsResponse2, ListUsageEventsData, ListUsageEventsResponse2, ListVersionsData, ListVersionsResponse2, PublisherRootData, PublisherRootResponse, PurchaseSkillData, PurchaseSkillResponse, RejectUpdateRequestData, RejectUpdateRequestResponse, ResolveConflictData, ResolveConflictResponse, RetryGithubPublishData, RetryGithubPublishResponse, SkillMdData, UpdateOrgFolderData, UpdateOrgFolderResponse, UpdateSkillData, UpdateSkillResponse, UpdateSponsorData, UpdateSponsorResponse, UpsertAuthorIdentityData, UpsertAuthorIdentityResponse, UpsertCollaboratorData, UpsertCollaboratorResponse, UsageSummaryData, UsageSummaryResponse2 } from '../types.gen';
+import { acceptUpdateRequest, createOrgFolder, createSkill, createUpdateRequest, createUpdateRequestComment, createVersion, deleteCollaborator, deleteFile, deleteSkill, downloadSkill, getAuthorIdentity, getDraft, getFile, getMergeState, getOrgFolder, getSkill, getSkillEditDocument, getUpdateRequest, getUpdateRequestDiff, getVersionManifest, githubStatus, listCollaborators, listFiles, listSkills, listUpdateRequestComments, listUpdateRequests, listUsageEvents, listVersions, type Options, publisherRoot, purchaseSkill, putFile, reconcileOrphans, rejectUpdateRequest, replaceOrgFolder, resolveConflict, retryGithubPublish, skillMd, syncFromMain, transferOrgFolder, updateOrgFolder, updateSkill, updateSponsor, upsertAuthorIdentity, upsertCollaborator, usageSummary } from '../sdk.gen';
+import type { AcceptUpdateRequestData, AcceptUpdateRequestResponse, CreateOrgFolderData, CreateOrgFolderResponse, CreateSkillData, CreateSkillResponse, CreateUpdateRequestCommentData, CreateUpdateRequestCommentResponse, CreateUpdateRequestData, CreateUpdateRequestResponse, CreateVersionData, CreateVersionResponse2, DeleteCollaboratorData, DeleteCollaboratorResponse, DeleteFileData, DeleteFileResponse, DeleteSkillData, DeleteSkillResponse, DownloadSkillData, DownloadSkillResponse, GetAuthorIdentityData, GetAuthorIdentityResponse, GetDraftData, GetDraftResponse, GetFileData, GetFileResponse2, GetMergeStateData, GetMergeStateResponse, GetOrgFolderData, GetOrgFolderResponse, GetSkillData, GetSkillEditDocumentData, GetSkillEditDocumentResponse, GetSkillResponse, GetUpdateRequestData, GetUpdateRequestDiffData, GetUpdateRequestDiffResponse, GetUpdateRequestResponse, GetVersionManifestData, GetVersionManifestResponse, GithubStatusData, GithubStatusResponse, ListCollaboratorsData, ListCollaboratorsResponse2, ListFilesData, ListFilesResponse2, ListSkillsData, ListSkillsResponse2, ListUpdateRequestCommentsData, ListUpdateRequestCommentsResponse2, ListUpdateRequestsData, ListUpdateRequestsResponse2, ListUsageEventsData, ListUsageEventsResponse2, ListVersionsData, ListVersionsResponse2, PublisherRootData, PublisherRootResponse, PurchaseSkillData, PurchaseSkillResponse, PutFileData, PutFileResponse, ReconcileOrphansData, ReconcileOrphansError, ReconcileOrphansResponse, RejectUpdateRequestData, RejectUpdateRequestResponse, ReplaceOrgFolderData, ReplaceOrgFolderResponse, ResolveConflictData, ResolveConflictResponse, RetryGithubPublishData, RetryGithubPublishResponse, SkillMdData, SyncFromMainData, SyncFromMainResponse, TransferOrgFolderData, TransferOrgFolderResponse, UpdateOrgFolderData, UpdateOrgFolderResponse, UpdateSkillData, UpdateSkillResponse, UpdateSponsorData, UpdateSponsorResponse, UpsertAuthorIdentityData, UpsertAuthorIdentityResponse, UpsertCollaboratorData, UpsertCollaboratorResponse, UsageSummaryData, UsageSummaryResponse2 } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -116,6 +116,34 @@ export const createOrgFolderMutation = (options?: Partial<Options<CreateOrgFolde
     const mutationOptions: MutationOptions<CreateOrgFolderResponse, DefaultError, Options<CreateOrgFolderData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await createOrgFolder({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const replaceOrgFolderMutation = (options?: Partial<Options<ReplaceOrgFolderData>>): MutationOptions<ReplaceOrgFolderResponse, DefaultError, Options<ReplaceOrgFolderData>> => {
+    const mutationOptions: MutationOptions<ReplaceOrgFolderResponse, DefaultError, Options<ReplaceOrgFolderData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await replaceOrgFolder({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const transferOrgFolderMutation = (options?: Partial<Options<TransferOrgFolderData>>): MutationOptions<TransferOrgFolderResponse, DefaultError, Options<TransferOrgFolderData>> => {
+    const mutationOptions: MutationOptions<TransferOrgFolderResponse, DefaultError, Options<TransferOrgFolderData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await transferOrgFolder({
                 ...options,
                 ...fnOptions,
                 throwOnError: true
@@ -383,6 +411,77 @@ export const getSkillEditDocumentOptions = (options: Options<GetSkillEditDocumen
     queryKey: getSkillEditDocumentQueryKey(options)
 });
 
+export const listFilesQueryKey = (options: Options<ListFilesData>) => createQueryKey('listFiles', options);
+
+/**
+ * `GET /skills/{slug}/files` -- list every file in the current
+ * version's bundle, plus a synthetic `SKILL.md` entry.
+ */
+export const listFilesOptions = (options: Options<ListFilesData>) => queryOptions<ListFilesResponse2, DefaultError, ListFilesResponse2, ReturnType<typeof listFilesQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listFiles({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listFilesQueryKey(options)
+});
+
+/**
+ * `DELETE /skills/{slug}/files/{path...}` -- drop one file.
+ */
+export const deleteFileMutation = (options?: Partial<Options<DeleteFileData>>): MutationOptions<DeleteFileResponse, DefaultError, Options<DeleteFileData>> => {
+    const mutationOptions: MutationOptions<DeleteFileResponse, DefaultError, Options<DeleteFileData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await deleteFile({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const getFileQueryKey = (options: Options<GetFileData>) => createQueryKey('getFile', options);
+
+/**
+ * `GET /skills/{slug}/files/{path...}` -- one file's bytes.
+ */
+export const getFileOptions = (options: Options<GetFileData>) => queryOptions<GetFileResponse2, DefaultError, GetFileResponse2, ReturnType<typeof getFileQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await getFile({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: getFileQueryKey(options)
+});
+
+/**
+ * `PUT /skills/{slug}/files/{path...}` -- replace or add one file.
+ */
+export const putFileMutation = (options?: Partial<Options<PutFileData>>): MutationOptions<PutFileResponse, DefaultError, Options<PutFileData>> => {
+    const mutationOptions: MutationOptions<PutFileResponse, DefaultError, Options<PutFileData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await putFile({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
 export const githubStatusQueryKey = (options: Options<GithubStatusData>) => createQueryKey('githubStatus', options);
 
 export const githubStatusOptions = (options: Options<GithubStatusData>) => queryOptions<GithubStatusResponse, DefaultError, GithubStatusResponse, ReturnType<typeof githubStatusQueryKey>>({
@@ -398,10 +497,67 @@ export const githubStatusOptions = (options: Options<GithubStatusData>) => query
     queryKey: githubStatusQueryKey(options)
 });
 
+/**
+ * `POST /skills/{slug}/github/reconcile-orphans` -- ops endpoint
+ * that mechanically removes canonical-repo paths the gateway no
+ * longer claims for this skill. Issue #22 acceptance:
+ *
+ * - Owner-or-operator-only authz (same `ensure_can_manage_skill`
+ * pattern as `/github/sync-from-main` and `/github/retry`).
+ * - `confirm: true` is required. `false` or missing returns 409.
+ * - The handler re-derives the **live** orphan-path set against the
+ * canonical-repo HEAD and returns 409 if it does not match the
+ * `expected_orphan_paths` payload (optimistic concurrency mirrors
+ * `expected_current_version_id`).
+ * - On match (and `dry_run: false`): stages one signed commit on
+ * the canonical branch deleting every path. Author/committer is
+ * the forward-publish bot pair so reverse-sync skips the commit
+ * via `is_forward_publish_commit`.
+ * - On `dry_run: true`: skips the commit and returns the planned
+ * shape (paths + parent commit SHA + audit row id) without
+ * touching GitHub.
+ * - Records a `skill_orphan_reconciliations` audit row in both
+ * modes (issue #22 acceptance criterion + migration 011).
+ */
+export const reconcileOrphansMutation = (options?: Partial<Options<ReconcileOrphansData>>): MutationOptions<ReconcileOrphansResponse, ReconcileOrphansError, Options<ReconcileOrphansData>> => {
+    const mutationOptions: MutationOptions<ReconcileOrphansResponse, ReconcileOrphansError, Options<ReconcileOrphansData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await reconcileOrphans({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
 export const retryGithubPublishMutation = (options?: Partial<Options<RetryGithubPublishData>>): MutationOptions<RetryGithubPublishResponse, DefaultError, Options<RetryGithubPublishData>> => {
     const mutationOptions: MutationOptions<RetryGithubPublishResponse, DefaultError, Options<RetryGithubPublishData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await retryGithubPublish({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * `POST /skills/{slug}/github/sync-from-main` -- ops endpoint that
+ * re-fetches the canonical GitHub bundle at HEAD and reconciles it
+ * into a new gateway version. No-op when the resulting
+ * `content_hash_bundle` matches the current version. Owner-only,
+ * same authz pattern as `retry_github_publish`.
+ */
+export const syncFromMainMutation = (options?: Partial<Options<SyncFromMainData>>): MutationOptions<SyncFromMainResponse, DefaultError, Options<SyncFromMainData>> => {
+    const mutationOptions: MutationOptions<SyncFromMainResponse, DefaultError, Options<SyncFromMainData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await syncFromMain({
                 ...options,
                 ...fnOptions,
                 throwOnError: true

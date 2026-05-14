@@ -5,6 +5,42 @@ export type ClientOptions = {
 };
 
 /**
+ * Lease for a single action on a tool. Borrows the OpenFang/IronClaw
+ * pattern: permission is granted per-action, not per-process, with optional
+ * expiry, use budget, and a parent lease ref for sub-agent inheritance.
+ *
+ * `capability` distinguishes blanket grants (all sub-actions of `action`)
+ * from a closed `Specific` set. Sub-agents that fork from a parent must
+ * hold leases whose capability is a subset of the parent's — runtime
+ * enforcement (when implemented) lives outside this DTO; here we validate
+ * shape only.
+ */
+export type ActionLease = {
+    /**
+     * Action name being leased. Free-form per tool; e.g. `read`, `send`,
+     * `execute`, `delete`, `list`.
+     */
+    action: string;
+    capability: GrantedActions;
+    /**
+     * Lease expiry as RFC 3339; `None` means no time bound.
+     */
+    expiry?: string | null;
+    /**
+     * Identifier of the parent lease this one inherits from. Shape-only
+     * validation here checks that the value is non-empty when set; the
+     * referenced lease is not looked up. Inheritance resolution (parent must
+     * hold a capability superset) happens at runtime.
+     */
+    parent_lease_ref?: string | null;
+    /**
+     * Maximum number of invocations before the lease must be re-issued.
+     * `None` means unlimited.
+     */
+    use_budget?: number | null;
+};
+
+/**
  * Non-prompt file that belongs to an agent bundle.
  */
 export type AgentAssetFile = {
@@ -270,6 +306,13 @@ export type AgentNetworkPolicy = {
      */
     blocked_request_inbox?: boolean;
     /**
+     * Wall-clock cap (in seconds) on how long the runtime will hold a
+     * single blocked-egress request waiting for an operator decision before
+     * surfacing it as `Expired`. When `None`, the runtime applies its
+     * built-in default (30 minutes).
+     */
+    blocked_request_max_wait_seconds?: number | null;
+    /**
      * Default disposition when no rule matches a request.
      */
     default?: AgentNetworkDefault;
@@ -528,15 +571,20 @@ export type AgentSpecUpdate = {
 /**
  * Typed tool reference attached to an agent. Lives alongside the coarser
  * `tool_presets` field; future managed-agent flows resolve from typed refs and
- * presets together.
+ * presets together. Each non-preset variant carries an optional
+ * `permitted_actions` collection of `ActionLease`s — the per-action gate
+ * borrowed from OpenFang/IronClaw that lets the spec say "this Connector may
+ * perform `read` but not `send`" without inventing a separate ACL surface.
  */
 export type AgentToolRef = {
     kind: 'publisher';
     operation_id: string;
+    permitted_actions?: Array<ActionLease>;
     publisher_slug: string;
     require_approval?: boolean;
 } | {
     kind: 'mcp';
+    permitted_actions?: Array<ActionLease>;
     require_approval?: boolean;
     server_ref: string;
     tool_name: string;
@@ -544,6 +592,7 @@ export type AgentToolRef = {
     capability: string;
     connector_ref: string;
     kind: 'connector';
+    permitted_actions?: Array<ActionLease>;
     require_approval?: boolean;
     scopes?: Array<string>;
 } | {
@@ -551,6 +600,7 @@ export type AgentToolRef = {
     expected_card_digest?: string | null;
     kind: 'remote_agent';
     origin: string;
+    permitted_actions?: Array<ActionLease>;
     require_approval?: boolean;
     timeout_ms?: number | null;
     transport: AgentRemoteAgentTransport;
@@ -1177,6 +1227,7 @@ export type DataResponseManagedAgentDeploymentRollbackPreview = {
         changed_fields: Array<ManagedAgentFieldChange>;
         current: ManagedAgentDeploymentDetail;
         deployment_id: string;
+        eval_gate_status?: null | CloudDeploymentEvalGateStatus;
         proposed: ManagedAgentDeploymentDetail;
         target_revision: ManagedAgentDeploymentRevisionSummary;
     };
@@ -1258,6 +1309,7 @@ export type DataResponseManagedAgentDeploymentUpdatePreview = {
         changed_fields: Array<ManagedAgentFieldChange>;
         current: ManagedAgentDeploymentDetail;
         deployment_id: string;
+        eval_gate_status?: null | CloudDeploymentEvalGateStatus;
         proposed: ManagedAgentDeploymentDetail;
     };
     pagination?: null | PaginationMeta;
@@ -1644,11 +1696,64 @@ export type DataResponseVecManagedAgentDeploymentRevisionSummary = {
  * verdict has failed or has expired beyond `max_age_seconds`. The default
  * (`None`/`false`) preserves the original freshness-only behavior for
  * back-compat.
+ *
+ * `schedule` is an operator-supplied cron expression that asks the control
+ * plane to run the gated eval set on a fixed cadence so freshness stays
+ * current without manual triggering. The actual scheduling-loop dispatch is
+ * owned by the eval-set scheduler today (see `CloudEvalSetSchedule`); this
+ * field records the operator intent on the deployment side.
+ *
+ * `drift_baseline` is captured by the apply path when an update or rollback
+ * commits with a passing gate. Subsequent eval runs compare against the
+ * baseline so operators see regressions explicitly.
  */
 export type EvalGate = {
     block_on_failure?: boolean | null;
+    drift_baseline?: null | EvalGateDriftBaseline;
     max_age_seconds: number;
+    schedule?: null | EvalGateSchedule;
     set_id: string;
+};
+
+/**
+ * Snapshot of an eval-set verdict captured at the last successful apply.
+ * Subsequent eval runs (manual or scheduled) compare against this snapshot
+ * to surface drift; the apply path overwrites this value on every commit.
+ */
+export type EvalGateDriftBaseline = {
+    baseline_captured_at: string;
+    baseline_failed: number;
+    baseline_passed: number;
+    baseline_run_id: string;
+    baseline_set_id: string;
+};
+
+/**
+ * Cron-driven cadence requested by the operator for an eval gate. The
+ * timezone is an IANA name (e.g. `UTC`, `America/New_York`); when omitted the
+ * control plane defaults to UTC.
+ */
+export type EvalGateSchedule = {
+    /**
+     * Standard 5-field cron expression. Validated against the same parser
+     * that backs deployment cron schedules.
+     */
+    cron: string;
+    /**
+     * Optional IANA timezone. Defaults to `UTC` when absent.
+     */
+    timezone?: string | null;
+};
+
+/**
+ * Capability granted by an `ActionLease`. `All` grants every sub-action of
+ * the named action; `Specific` enumerates a closed set.
+ */
+export type GrantedActions = {
+    kind: 'all';
+} | {
+    actions: Array<string>;
+    kind: 'specific';
 };
 
 export type ManagedAgentApprovalPolicy = 'read_only' | 'allow_mutations';
@@ -1742,6 +1847,7 @@ export type ManagedAgentDeploymentRollbackPreview = {
     changed_fields: Array<ManagedAgentFieldChange>;
     current: ManagedAgentDeploymentDetail;
     deployment_id: string;
+    eval_gate_status?: null | CloudDeploymentEvalGateStatus;
     proposed: ManagedAgentDeploymentDetail;
     target_revision: ManagedAgentDeploymentRevisionSummary;
 };
@@ -1750,6 +1856,7 @@ export type ManagedAgentDeploymentUpdatePreview = {
     changed_fields: Array<ManagedAgentFieldChange>;
     current: ManagedAgentDeploymentDetail;
     deployment_id: string;
+    eval_gate_status?: null | CloudDeploymentEvalGateStatus;
     proposed: ManagedAgentDeploymentDetail;
 };
 

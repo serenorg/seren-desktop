@@ -79,6 +79,152 @@ export type AgentInstructionFile = {
 export type AgentInstructionKind = 'identity' | 'soul' | 'skill' | 'agents' | 'user' | 'tools' | 'memory' | 'heartbeat' | 'eval';
 
 /**
+ * Lifecycle state of a single inbox entry.
+ *
+ * The state machine is `pending -> approved | denied | expired`. Decisions are
+ * terminal; an entry can never transition from a terminal state back to
+ * pending. `expired` is a passive transition driven by `expires_at`.
+ */
+export type ApprovalDecisionState = 'pending' | 'approved' | 'denied' | 'expired';
+
+/**
+ * Blocked egress approval surfaced when `AgentNetworkPolicy.blocked_request_inbox`
+ * holds a request for operator review.
+ *
+ * `request_id` is the durable identifier the runtime emitted with the
+ * `BlockedEgress` event so a decision can be threaded back to the originating
+ * request.
+ */
+export type ApprovalInboxBlockedEgress = {
+    /**
+     * Free-form additional context captured at block time (rule id, matched
+     * hostname pattern, request size, etc.).
+     */
+    details?: unknown;
+    host: string;
+    method?: string | null;
+    path?: string | null;
+    port: number;
+    reason?: string | null;
+    request_id: string;
+};
+
+/**
+ * Body for `POST /inbox/approvals/{entry_id}/decide`.
+ */
+export type ApprovalInboxDecisionRequest = {
+    /**
+     * Optional operator note recorded in the audit chain alongside the
+     * decision.
+     */
+    comment?: string | null;
+    decision: ApprovalInboxDecisionVerb;
+};
+
+/**
+ * Response returned after recording a decision.
+ */
+export type ApprovalInboxDecisionResponse = {
+    decision_state: ApprovalDecisionState;
+    entry_id: string;
+};
+
+/**
+ * Decision verb accepted by the inbox decision endpoint.
+ *
+ * Distinct from `CloudRunApprovalDecisionValue` (which uses `approve`/`reject`)
+ * because the inbox is the operator surface and `deny` reads better than
+ * `reject` for non-tool kinds like blocked egress. The mapping into the
+ * existing tool-call resume path is internal.
+ */
+export type ApprovalInboxDecisionVerb = 'approve' | 'deny';
+
+/**
+ * One entry in the unified approval inbox.
+ *
+ * `entry_id` is inbox-scoped and stable for the lifetime of the entry; callers
+ * pass it back to the decision endpoint. Tool-call entries encode
+ * `(run_id, tool_call_id)` so the inbox does not need a separate persistence
+ * row. Blocked-egress entries use a real UUID backed by storage.
+ */
+export type ApprovalInboxEntry = (ApprovalInboxToolCall & {
+    created_at: string;
+    decision_state: ApprovalDecisionState;
+    deployment_id: string;
+    entry_id: string;
+    expires_at?: string | null;
+    run_id: string;
+} & {
+    kind: 'tool_call';
+}) | (ApprovalInboxBlockedEgress & {
+    created_at: string;
+    decision_state: ApprovalDecisionState;
+    deployment_id: string;
+    entry_id: string;
+    expires_at?: string | null;
+    /**
+     * Egress can fire outside of a run (background reconciliation,
+     * scheduled jobs that haven't claimed a run row yet).
+     */
+    run_id?: string | null;
+} & {
+    kind: 'blocked_egress';
+}) | (ApprovalInboxOther & {
+    created_at: string;
+    decision_state: ApprovalDecisionState;
+    deployment_id: string;
+    entry_id: string;
+    expires_at?: string | null;
+    run_id?: string | null;
+} & {
+    kind: 'other';
+});
+
+/**
+ * Listing response for the approval inbox.
+ */
+export type ApprovalInboxListResponse = {
+    entries: Array<ApprovalInboxEntry>;
+    /**
+     * Opaque cursor for the next page; absent when no further entries exist.
+     */
+    next_cursor?: string | null;
+};
+
+/**
+ * Catch-all variant so future approval kinds can land in the inbox without a
+ * model rev. Callers that do not yet know the subkind should still be able
+ * to render the row.
+ *
+ * `subkind` (rather than `kind`) avoids clashing with the enum-level
+ * `kind` discriminator tag.
+ */
+export type ApprovalInboxOther = {
+    payload?: unknown;
+    reason?: string | null;
+    subkind: string;
+};
+
+/**
+ * Tool-call approval surfaced from an `awaiting_approval` run.
+ *
+ * `tool_call_id` is the orchestrator-supplied id that round-trips into the
+ * `approval_decisions` array on resume. `tool_ref` is the human-meaningful
+ * tool name (e.g. `seren_publisher_request`).
+ */
+export type ApprovalInboxToolCall = {
+    function_call_id?: string | null;
+    reason?: string | null;
+    /**
+     * Arguments preview. Callers may truncate large payloads upstream; this
+     * field is opaque JSON so the renderer decides how to display it.
+     */
+    request_payload_summary?: unknown;
+    tool_call_id: string;
+    tool_ref: string;
+};
+
+/**
  * A single audit trail entry.
  */
 export type AuditEntry = {
@@ -168,25 +314,6 @@ export type CloudDeploymentBundleDownloadResponse = {
  */
 export type CloudDeploymentBundleSourceKind = 'tar_gz';
 
-export type CloudDeploymentChannelRunEventRequest = {
-    conversation_id?: string | null;
-    execution_id: string;
-    execution_time_ms?: number | null;
-    inference_cost_atomic?: number | null;
-    inference_input_tokens?: number | null;
-    inference_output_tokens?: number | null;
-    invocation_payload?: unknown;
-    metadata?: unknown;
-    output?: string | null;
-    output_events?: unknown;
-    run_name?: string | null;
-    session_id?: string | null;
-    session_url?: string | null;
-    status: string;
-    status_message?: string | null;
-    stop_reason?: string | null;
-};
-
 /**
  * Cloud deployment compute backend target.
  */
@@ -206,6 +333,38 @@ export type CloudDeploymentEnvironment = {
     setup_commands: unknown;
     updated_at: string;
     user_id: string;
+};
+
+/**
+ * Snapshot of the current eval-set verdict alongside the baseline captured at
+ * the last successful apply. Reports the delta on `passed` so operators can
+ * see regressions explicitly. `current_passed`/`current_failed` are `None`
+ * when no eval run has completed against the gated set yet; in that case the
+ * status carries an explanatory `reason`.
+ */
+export type CloudDeploymentEvalDrift = {
+    baseline?: null | EvalGateDriftBaseline;
+    checked_at: string;
+    current_completed_at?: string | null;
+    current_failed?: number | null;
+    current_passed?: number | null;
+    current_run_id?: string | null;
+    current_run_status?: string | null;
+    current_verdict_status?: string | null;
+    deployment_id: string;
+    eval_gate_set_id: string;
+    /**
+     * `current_failed - baseline_failed` when both sides are present.
+     */
+    failed_delta?: number | null;
+    /**
+     * Operator-safe one-line summary of the drift state. Always present.
+     */
+    message: string;
+    /**
+     * `current_passed - baseline_passed` when both sides are present.
+     */
+    passed_delta?: number | null;
 };
 
 /**
@@ -668,6 +827,12 @@ export type CloudRunApprovalDecisionValue = 'approve' | 'reject';
 export type CloudRunDoneStatus = 'ok' | 'error' | 'cancelled';
 
 /**
+ * Typed cause of a terminal `error` event. Operator-safe descriptors only;
+ * the offending content must not appear in the cause label.
+ */
+export type CloudRunErrorCause = 'agent' | 'model' | 'tool' | 'session' | 'artifact' | 'memory' | 'config' | 'io' | 'serialization' | 'timeout' | 'task' | 'guardrail' | 'approval' | 'unknown';
+
+/**
  * Eval records linked to a run, either as the promoted source or as an actual replay target.
  */
 export type CloudRunEvalsResponse = {
@@ -711,9 +876,16 @@ export type CloudRunOutputEvent = {
     is_error: boolean;
     type: 'tool_result';
 } | {
+    action?: string | null;
     id: string;
+    input_bytes?: number | null;
+    latency_ms?: number | null;
+    lease_ref?: string | null;
+    output_bytes?: number | null;
     reason: string;
+    status?: null | CloudRunToolAuditStatus;
     tool: string;
+    tool_ref_kind?: null | CloudRunToolRefKind;
     type: 'tool_audit';
 } | {
     checkpoint_id?: string | null;
@@ -760,6 +932,18 @@ export type CloudRunOutputEvent = {
     status: CloudRunDoneStatus;
     type: 'done';
 } | {
+    summarizer_model_ref?: string | null;
+    token_threshold?: number | null;
+    tokens_before?: number | null;
+    type: 'compaction_started';
+} | {
+    retained_event_count?: number | null;
+    summarizer_model_ref?: string | null;
+    tokens_after?: number | null;
+    tokens_before?: number | null;
+    type: 'compaction_finished';
+} | {
+    cause?: null | CloudRunErrorCause;
     message: string;
     type: 'error';
 };
@@ -779,7 +963,7 @@ export type CloudRunOutputEventEnvelope = CloudRunOutputEvent & {
 /**
  * Canonical taxonomy for structured run output events.
  */
-export type CloudRunOutputEventKind = 'text' | 'thinking' | 'tool_call_started' | 'tool_call_completed' | 'tool_audit' | 'workflow' | 'approval_wait' | 'approval_decision' | 'guardrail_pass' | 'guardrail_fail' | 'handoff' | 'artifact' | 'done' | 'error' | 'unknown';
+export type CloudRunOutputEventKind = 'text' | 'thinking' | 'tool_call_started' | 'tool_call_completed' | 'tool_audit' | 'workflow' | 'approval_wait' | 'approval_decision' | 'guardrail_pass' | 'guardrail_fail' | 'handoff' | 'artifact' | 'compaction_started' | 'compaction_finished' | 'done' | 'error' | 'unknown';
 
 /**
  * Pending approval attached to an `awaiting_approval` run.
@@ -852,6 +1036,18 @@ export type CloudRunStreamCloseResponse = {
     session_id: string;
     status: string;
 };
+
+/**
+ * Success/failure status reported by a `tool_audit` event.
+ */
+export type CloudRunToolAuditStatus = 'success' | 'failure';
+
+/**
+ * Kind of underlying tool_ref a `tool_audit` event applies to. Mirrors the
+ * `AgentToolRef` variants so operators can distinguish publisher calls from
+ * MCP, connector, remote-agent, or preset-group invocations.
+ */
+export type CloudRunToolRefKind = 'publisher' | 'mcp' | 'connector' | 'remote_agent' | 'preset_group' | 'builtin' | 'unknown';
 
 /**
  * Request body for registering a content-addressed deployment bundle.
@@ -965,6 +1161,171 @@ export type CreateCloudEvalSetRequest = {
     metadata?: unknown;
     name: string;
     schedule?: null | CloudEvalSetScheduleRequest;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseApprovalInboxDecisionResponse = {
+    /**
+     * Response returned after recording a decision.
+     */
+    data: {
+        decision_state: ApprovalDecisionState;
+        entry_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseApprovalInboxListResponse = {
+    /**
+     * Listing response for the approval inbox.
+     */
+    data: {
+        entries: Array<ApprovalInboxEntry>;
+        /**
+         * Opaque cursor for the next page; absent when no further entries exist.
+         */
+        next_cursor?: string | null;
+    };
+    pagination?: null | PaginationMeta;
 };
 
 /**
@@ -1480,6 +1841,111 @@ export type DataResponseCloudDeploymentEnvironment = {
         setup_commands: unknown;
         updated_at: string;
         user_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudDeploymentEvalDrift = {
+    /**
+     * Snapshot of the current eval-set verdict alongside the baseline captured at
+     * the last successful apply. Reports the delta on `passed` so operators can
+     * see regressions explicitly. `current_passed`/`current_failed` are `None`
+     * when no eval run has completed against the gated set yet; in that case the
+     * status carries an explanatory `reason`.
+     */
+    data: {
+        baseline?: null | EvalGateDriftBaseline;
+        checked_at: string;
+        current_completed_at?: string | null;
+        current_failed?: number | null;
+        current_passed?: number | null;
+        current_run_id?: string | null;
+        current_run_status?: string | null;
+        current_verdict_status?: string | null;
+        deployment_id: string;
+        eval_gate_set_id: string;
+        /**
+         * `current_failed - baseline_failed` when both sides are present.
+         */
+        failed_delta?: number | null;
+        /**
+         * Operator-safe one-line summary of the drift state. Always present.
+         */
+        message: string;
+        /**
+         * `current_passed - baseline_passed` when both sides are present.
+         */
+        passed_delta?: number | null;
     };
     pagination?: null | PaginationMeta;
 };
@@ -3881,11 +4347,53 @@ export type DeploymentSpendSummary = {
  * verdict has failed or has expired beyond `max_age_seconds`. The default
  * (`None`/`false`) preserves the original freshness-only behavior for
  * back-compat.
+ *
+ * `schedule` is an operator-supplied cron expression that asks the control
+ * plane to run the gated eval set on a fixed cadence so freshness stays
+ * current without manual triggering. The actual scheduling-loop dispatch is
+ * owned by the eval-set scheduler today (see `CloudEvalSetSchedule`); this
+ * field records the operator intent on the deployment side.
+ *
+ * `drift_baseline` is captured by the apply path when an update or rollback
+ * commits with a passing gate. Subsequent eval runs compare against the
+ * baseline so operators see regressions explicitly.
  */
 export type EvalGate = {
     block_on_failure?: boolean | null;
+    drift_baseline?: null | EvalGateDriftBaseline;
     max_age_seconds: number;
+    schedule?: null | EvalGateSchedule;
     set_id: string;
+};
+
+/**
+ * Snapshot of an eval-set verdict captured at the last successful apply.
+ * Subsequent eval runs (manual or scheduled) compare against this snapshot
+ * to surface drift; the apply path overwrites this value on every commit.
+ */
+export type EvalGateDriftBaseline = {
+    baseline_captured_at: string;
+    baseline_failed: number;
+    baseline_passed: number;
+    baseline_run_id: string;
+    baseline_set_id: string;
+};
+
+/**
+ * Cron-driven cadence requested by the operator for an eval gate. The
+ * timezone is an IANA name (e.g. `UTC`, `America/New_York`); when omitted the
+ * control plane defaults to UTC.
+ */
+export type EvalGateSchedule = {
+    /**
+     * Standard 5-field cron expression. Validated against the same parser
+     * that backs deployment cron schedules.
+     */
+    cron: string;
+    /**
+     * Optional IANA timezone. Defaults to `UTC` when absent.
+     */
+    timezone?: string | null;
 };
 
 export type ManagedAgentApprovalPolicy = 'read_only' | 'allow_mutations';
@@ -4574,46 +5082,6 @@ export type SerenCloudDeploymentAuditResponses = {
 
 export type SerenCloudDeploymentAuditResponse = SerenCloudDeploymentAuditResponses[keyof SerenCloudDeploymentAuditResponses];
 
-export type SerenCloudRecordChannelRunEventData = {
-    body: CloudDeploymentChannelRunEventRequest;
-    path: {
-        /**
-         * Deployment ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/deployments/{id}/channel-run-events';
-};
-
-export type SerenCloudRecordChannelRunEventErrors = {
-    /**
-     * Bad request
-     */
-    400: unknown;
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Forbidden
-     */
-    403: unknown;
-    /**
-     * Deployment not found
-     */
-    404: unknown;
-};
-
-export type SerenCloudRecordChannelRunEventResponses = {
-    /**
-     * Channel run event recorded
-     */
-    201: DataResponseCloudDeploymentRunEvent;
-};
-
-export type SerenCloudRecordChannelRunEventResponse = SerenCloudRecordChannelRunEventResponses[keyof SerenCloudRecordChannelRunEventResponses];
-
 export type SerenCloudGetDeploymentBundleDownloadData = {
     body?: never;
     path: {
@@ -4654,144 +5122,7 @@ export type SerenCloudGetDeploymentBundleDownloadResponses = {
 
 export type SerenCloudGetDeploymentBundleDownloadResponse = SerenCloudGetDeploymentBundleDownloadResponses[keyof SerenCloudGetDeploymentBundleDownloadResponses];
 
-export type SerenCloudDeploymentFsData = {
-    body?: never;
-    path: {
-        /**
-         * Deployment ID
-         */
-        id: string;
-    };
-    query?: {
-        /**
-         * Namespace root to inspect: artifacts or state (default: artifacts)
-         */
-        namespace?: string;
-        /**
-         * Relative path under the selected namespace root
-         */
-        path?: string;
-        /**
-         * Max directory entries to return (default: 200, max: 1000)
-         */
-        limit?: number;
-    };
-    url: '/deployments/{id}/fs';
-};
-
-export type SerenCloudDeploymentFsErrors = {
-    /**
-     * Bad request
-     */
-    400: unknown;
-    /**
-     * Not found
-     */
-    404: unknown;
-};
-
-export type SerenCloudDeploymentFsResponses = {
-    /**
-     * Filesystem entry or directory listing
-     */
-    200: unknown;
-};
-
-export type SerenCloudDeploymentFsReadBytesData = {
-    body?: never;
-    path: {
-        /**
-         * Deployment ID
-         */
-        id: string;
-    };
-    query: {
-        /**
-         * Namespace root to inspect: artifacts or state (default: artifacts)
-         */
-        namespace?: string;
-        /**
-         * Relative file path under the selected namespace root
-         */
-        path: string;
-        /**
-         * Starting byte offset
-         */
-        offset?: number;
-        /**
-         * Max bytes to read (default: 65536, max: 1048576)
-         */
-        length?: number;
-    };
-    url: '/deployments/{id}/fs/read_bytes';
-};
-
-export type SerenCloudDeploymentFsReadBytesErrors = {
-    /**
-     * Bad request
-     */
-    400: unknown;
-    /**
-     * Not found
-     */
-    404: unknown;
-};
-
-export type SerenCloudDeploymentFsReadBytesResponses = {
-    /**
-     * Base64-encoded file bytes
-     */
-    200: unknown;
-};
-
-export type SerenCloudDeploymentFsReadTextData = {
-    body?: never;
-    path: {
-        /**
-         * Deployment ID
-         */
-        id: string;
-    };
-    query: {
-        /**
-         * Namespace root to inspect: artifacts or state (default: artifacts)
-         */
-        namespace?: string;
-        /**
-         * Relative file path under the selected namespace root
-         */
-        path: string;
-        /**
-         * Max bytes to read (default: 65536, max: 1048576)
-         */
-        max_bytes?: number;
-    };
-    url: '/deployments/{id}/fs/read_text';
-};
-
-export type SerenCloudDeploymentFsReadTextErrors = {
-    /**
-     * Bad request
-     */
-    400: unknown;
-    /**
-     * Not found
-     */
-    404: unknown;
-    /**
-     * File is not valid UTF-8
-     */
-    422: unknown;
-};
-
-export type SerenCloudDeploymentFsReadTextResponses = {
-    /**
-     * Text file contents
-     */
-    200: unknown;
-};
-
-export type SerenCloudLogsData = {
+export type SerenCloudGetDeploymentEvalDriftData = {
     body?: never;
     path: {
         /**
@@ -4800,22 +5131,28 @@ export type SerenCloudLogsData = {
         id: string;
     };
     query?: never;
-    url: '/deployments/{id}/logs';
+    url: '/deployments/{id}/eval-drift';
 };
 
-export type SerenCloudLogsErrors = {
+export type SerenCloudGetDeploymentEvalDriftErrors = {
+    /**
+     * Deployment has no eval gate configured
+     */
+    400: unknown;
     /**
      * Not found
      */
     404: unknown;
 };
 
-export type SerenCloudLogsResponses = {
+export type SerenCloudGetDeploymentEvalDriftResponses = {
     /**
-     * Logs retrieved
+     * Drift snapshot
      */
-    200: unknown;
+    200: DataResponseCloudDeploymentEvalDrift;
 };
+
+export type SerenCloudGetDeploymentEvalDriftResponse = SerenCloudGetDeploymentEvalDriftResponses[keyof SerenCloudGetDeploymentEvalDriftResponses];
 
 export type SerenCloudDeploymentPendingApprovalsData = {
     body?: never;
@@ -5878,6 +6215,86 @@ export type SerenCloudGetEvalCaseResultResponses = {
 };
 
 export type SerenCloudGetEvalCaseResultResponse = SerenCloudGetEvalCaseResultResponses[keyof SerenCloudGetEvalCaseResultResponses];
+
+export type SerenCloudApprovalInboxListData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Max entries per page (default: 50, max: 100)
+         */
+        limit?: number;
+        /**
+         * Opaque cursor from a previous response. Cursors expire after 24h; reject malformed or expired cursors with 400.
+         */
+        cursor?: string;
+    };
+    url: '/inbox/approvals';
+};
+
+export type SerenCloudApprovalInboxListErrors = {
+    /**
+     * Malformed limit or cursor
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type SerenCloudApprovalInboxListResponses = {
+    /**
+     * Approval inbox entries
+     */
+    200: DataResponseApprovalInboxListResponse;
+};
+
+export type SerenCloudApprovalInboxListResponse = SerenCloudApprovalInboxListResponses[keyof SerenCloudApprovalInboxListResponses];
+
+export type SerenCloudApprovalInboxDecideData = {
+    body: ApprovalInboxDecisionRequest;
+    path: {
+        /**
+         * Inbox-scoped entry id (e.g. tool:<run>:<call_id>)
+         */
+        entry_id: string;
+    };
+    query?: never;
+    url: '/inbox/approvals/{entry_id}/decide';
+};
+
+export type SerenCloudApprovalInboxDecideErrors = {
+    /**
+     * Malformed body
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Inbox entry not found
+     */
+    404: unknown;
+    /**
+     * Entry no longer pending
+     */
+    409: unknown;
+};
+
+export type SerenCloudApprovalInboxDecideResponses = {
+    /**
+     * Decision recorded
+     */
+    200: DataResponseApprovalInboxDecisionResponse;
+};
+
+export type SerenCloudApprovalInboxDecideResponse = SerenCloudApprovalInboxDecideResponses[keyof SerenCloudApprovalInboxDecideResponses];
 
 export type SerenCloudPendingApprovalsData = {
     body?: never;

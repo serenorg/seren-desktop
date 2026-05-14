@@ -14,7 +14,8 @@
   },
   "servers": [
     {
-      "url": "/publishers/seren-skills"
+      "url": "/publishers/seren-skills",
+      "description": "Hosted at the Seren gateway publisher path"
     }
   ],
   "paths": {
@@ -117,6 +118,46 @@
           }
         }
       },
+      "put": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "replace_org_folder",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertOrgFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Organization folder",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "skills"
@@ -198,6 +239,57 @@
         }
       }
     },
+    "/organizations/{org_id}/folder/transfer": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "transfer_org_folder",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferOrgFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Organization folder",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not org-admin or personal-owner of {org_id}"
+          },
+          "404": {
+            "description": "Slug is not held by any folder row"
+          },
+          "409": {
+            "description": "Slug is held by a real organization, not a placeholder"
+          }
+        }
+      }
+    },
     "/skill.md": {
       "get": {
         "tags": [
@@ -255,6 +347,21 @@
               "type": [
                 "boolean",
                 "null"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/ListSkillsSort"
+                }
               ]
             }
           },
@@ -743,6 +850,177 @@
         }
       }
     },
+    "/skills/{slug}/files": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "`GET /skills/{slug}/files` -- list every file in the current\nversion's bundle, plus a synthetic `SKILL.md` entry.",
+        "operationId": "list_files",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Skill slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bundle file listing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListFilesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/skills/{slug}/files/{path}": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "`GET /skills/{slug}/files/{path...}` -- one file's bytes.",
+        "operationId": "get_file",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Skill slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Bundle path or 'SKILL.md'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Single bundle file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetFileResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "`PUT /skills/{slug}/files/{path...}` -- replace or add one file.",
+        "operationId": "put_file",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Skill slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Bundle path or 'SKILL.md'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Per-file edit result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileEditResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "`DELETE /skills/{slug}/files/{path...}` -- drop one file.",
+        "operationId": "delete_file",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Skill slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Bundle path; SKILL.md is rejected with 400",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Per-file delete result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileEditResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/skills/{slug}/github": {
       "get": {
         "tags": [
@@ -774,6 +1052,59 @@
         }
       }
     },
+    "/skills/{slug}/github/reconcile-orphans": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "`POST /skills/{slug}/github/reconcile-orphans` -- ops endpoint\nthat mechanically removes canonical-repo paths the gateway no\nlonger claims for this skill. Issue #22 acceptance:",
+        "description": "- Owner-or-operator-only authz (same `ensure_can_manage_skill`\n  pattern as `/github/sync-from-main` and `/github/retry`).\n- `confirm: true` is required. `false` or missing returns 409.\n- The handler re-derives the **live** orphan-path set against the\n  canonical-repo HEAD and returns 409 if it does not match the\n  `expected_orphan_paths` payload (optimistic concurrency mirrors\n  `expected_current_version_id`).\n- On match (and `dry_run: false`): stages one signed commit on\n  the canonical branch deleting every path. Author/committer is\n  the forward-publish bot pair so reverse-sync skips the commit\n  via `is_forward_publish_commit`.\n- On `dry_run: true`: skips the commit and returns the planned\n  shape (paths + parent commit SHA + audit row id) without\n  touching GitHub.\n- Records a `skill_orphan_reconciliations` audit row in both\n  modes (issue #22 acceptance criterion + migration 011).",
+        "operationId": "reconcile_orphans",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Skill slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileOrphansRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Reconcile result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Mismatch or unconfirmed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/skills/{slug}/github/retry": {
       "post": {
         "tags": [
@@ -794,6 +1125,38 @@
         "responses": {
           "200": {
             "description": "GitHub publish retry queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/skills/{slug}/github/sync-from-main": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "`POST /skills/{slug}/github/sync-from-main` -- ops endpoint that\nre-fetches the canonical GitHub bundle at HEAD and reconciles it\ninto a new gateway version. No-op when the resulting\n`content_hash_bundle` matches the current version. Owner-only,\nsame authz pattern as `retry_github_publish`.",
+        "operationId": "sync_from_main",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Skill slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GitHub sync-from-main result",
             "content": {
               "application/json": {
                 "schema": {
@@ -1732,6 +2095,154 @@
           }
         }
       },
+      "DeleteFileRequest": {
+        "type": "object",
+        "description": "`DELETE /skills/{slug}/files/{path...}` body.",
+        "required": [
+          "expected_current_version_id"
+        ],
+        "properties": {
+          "expected_current_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "FileEditResponse": {
+        "type": "object",
+        "description": "Per-file edit response. `unchanged: true` means the resulting\nbundle hash matches the current version's `content_hash_bundle`\nand no new version was written; `version` then carries the\nexisting current version. On conflict, `status = \"conflict\"` and\n`draft` + `merge_state` come from the standard chat-conflict\npipeline reused from `create_version`.",
+        "required": [
+          "status",
+          "unchanged"
+        ],
+        "properties": {
+          "draft": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ChatDraftResponse"
+              }
+            ]
+          },
+          "merge_state": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MergeStateResponse"
+              }
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "unchanged": {
+            "type": "boolean"
+          },
+          "version": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SkillVersion"
+              }
+            ]
+          }
+        }
+      },
+      "FileListing": {
+        "type": "object",
+        "description": "One row in the [`ListFilesResponse`]. `preview` is the first 200\nchars of the file when it is text; `null` for binaries.",
+        "required": [
+          "path",
+          "mode",
+          "is_binary",
+          "size_bytes",
+          "content_hash"
+        ],
+        "properties": {
+          "content_hash": {
+            "type": "string"
+          },
+          "is_binary": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "path": {
+            "type": "string"
+          },
+          "preview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "GetFileResponse": {
+        "type": "object",
+        "description": "`GET /skills/{slug}/files/{path...}` response: one file's bytes.",
+        "required": [
+          "path",
+          "content_b64",
+          "mode",
+          "is_binary",
+          "content_hash"
+        ],
+        "properties": {
+          "content_b64": {
+            "type": "string"
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "is_binary": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "path": {
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "GithubMirrorHealth": {
+        "type": "string",
+        "description": "Health of the GitHub mirror for a public/paid skill, as observed by\nthe forward-publish worker. Surfaced on `SkillSummary` so owners see\na broken mirror without a separate `/skills/{slug}/github` lookup.\n\n- `Pending`: row not yet attempted, or the skill is private and the\n  mirror is intentionally inactive. Default for new skills.\n- `Healthy`: most recent terminal worker outcome was a successful\n  push.\n- `Degraded`: reserved for partial-push or transient-failure flows;\n  not currently emitted by the worker but defined so the column is\n  future-proof against a finer-grained health model.\n- `Failed`: most recent terminal worker outcome exhausted retries\n  without pushing. Owner action required.",
+        "enum": [
+          "pending",
+          "healthy",
+          "degraded",
+          "failed"
+        ]
+      },
       "GithubPublishStatusResponse": {
         "type": "object",
         "required": [
@@ -1739,7 +2250,8 @@
           "version_id",
           "folder_slug",
           "skill_folder_name",
-          "status"
+          "status",
+          "resolved_via"
         ],
         "properties": {
           "commit_sha": {
@@ -1756,6 +2268,10 @@
               "string",
               "null"
             ]
+          },
+          "resolved_via": {
+            "type": "string",
+            "description": "Source that supplied `folder_slug` at enqueue time.\n`\"skill\"` -> per-skill override (`skills.folder_slug`).\n`\"organization\"` -> org default (`skill_org_folders.folder_slug`).\nPinned at enqueue rather than recomputed on read because both\nunderlying values can drift after the publish row is written."
           },
           "skill_folder_name": {
             "type": "string"
@@ -1783,6 +2299,21 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Collaborator"
+            }
+          }
+        }
+      },
+      "ListFilesResponse": {
+        "type": "object",
+        "description": "`GET /skills/{slug}/files` response: every path in the current\nbundle including a synthetic `SKILL.md` entry for completeness.",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileListing"
             }
           }
         }
@@ -1816,6 +2347,16 @@
               "null"
             ]
           },
+          "sort": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ListSkillsSort"
+              }
+            ]
+          },
           "visibility": {
             "oneOf": [
               {
@@ -1832,9 +2373,22 @@
         "type": "object",
         "required": [
           "skills",
-          "total"
+          "total",
+          "has_more"
         ],
         "properties": {
+          "has_more": {
+            "type": "boolean",
+            "description": "True when more pages remain after this one. Equivalent to\n`offset + skills.len() < total`, exposed so callers (and LLM\nagents reading SKILL.md) don't have to compute the loop\ncondition themselves."
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The `offset` value to pass on the next request to continue\npaging, or `None` when the catalog is exhausted."
+          },
           "skills": {
             "type": "array",
             "items": {
@@ -1846,6 +2400,13 @@
             "format": "int64"
           }
         }
+      },
+      "ListSkillsSort": {
+        "type": "string",
+        "enum": [
+          "updated",
+          "installs"
+        ]
       },
       "ListUpdateRequestCommentsResponse": {
         "type": "object",
@@ -2003,6 +2564,72 @@
           },
           "source": {
             "type": "string"
+          }
+        }
+      },
+      "PutFileRequest": {
+        "type": "object",
+        "description": "`PUT /skills/{slug}/files/{path...}` body. `expected_content_hash`\nis the per-file hex SHA from `GET /files`; it is an *optional*\npre-flight check that fails fast (409) before the version write.\n`expected_current_version_id` is forwarded to `create_version`'s\nexisting conflict-draft path -- mismatch returns 409 with a chat\ndraft + merge-state pointer.",
+        "required": [
+          "content_b64",
+          "expected_current_version_id"
+        ],
+        "properties": {
+          "content_b64": {
+            "type": "string"
+          },
+          "expected_content_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected_current_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "version_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional override for the auto-synthesised\n`file-edit-<hash>` version label."
+          }
+        }
+      },
+      "ReconcileOrphansRequest": {
+        "type": "object",
+        "description": "Body of `POST /skills/{slug}/github/reconcile-orphans`.",
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "description": "Must be `true` -- the handler 409s on `false` or missing. The\nguard exists so a misconfigured CLI/script cannot quietly\ndelete canonical-repo paths."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "When true, the handler returns the planned commit shape\nwithout touching GitHub. The audit row is still recorded so\nthe operator's preview is auditable."
+          },
+          "expected_orphan_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The orphan-path set the operator computed (e.g. via the\n`reconcile_canonical_repo` binary). The handler 409s if the\nlive set against canonical HEAD has diverged."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional free-text reason (recorded on the audit row)."
           }
         }
       },
@@ -2244,8 +2871,10 @@
           "status",
           "sponsor_mode",
           "price_cents",
+          "install_count",
           "owner_organization_id",
           "created_by_user_id",
+          "github_mirror_health",
           "created_at",
           "updated_at"
         ],
@@ -2284,9 +2913,23 @@
           "discoverability": {
             "$ref": "#/components/schemas/SkillDiscoverability"
           },
+          "folder_slug": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Per-skill override for the GitHub mirror folder. When set, takes\nprecedence over `skill_org_folders.folder_slug`. `None` means\nfall through to the org default. See migration 009 + issue #17."
+          },
+          "github_mirror_health": {
+            "$ref": "#/components/schemas/GithubMirrorHealth"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "install_count": {
+            "type": "integer",
+            "format": "int64"
           },
           "name": {
             "type": "string"
@@ -2398,6 +3041,23 @@
           "public",
           "paid"
         ]
+      },
+      "TransferOrgFolderRequest": {
+        "type": "object",
+        "required": [
+          "folder_slug"
+        ],
+        "properties": {
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "folder_slug": {
+            "type": "string"
+          }
+        }
       },
       "UpdateRequest": {
         "type": "object",
@@ -2583,6 +3243,13 @@
                 "$ref": "#/components/schemas/SkillDiscoverability"
               }
             ]
+          },
+          "folder_slug": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Per-skill GitHub mirror folder override. Three-state field:\nfield absent → no change; explicit `null` → clear the override\n(fall back to org default); string → set the override.\nSee issue #17."
           },
           "name": {
             "type": [

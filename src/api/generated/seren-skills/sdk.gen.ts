@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AcceptUpdateRequestData, AcceptUpdateRequestResponses, CreateOrgFolderData, CreateOrgFolderResponses, CreateSkillData, CreateSkillResponses, CreateUpdateRequestCommentData, CreateUpdateRequestCommentResponses, CreateUpdateRequestData, CreateUpdateRequestResponses, CreateVersionData, CreateVersionResponses, DeleteCollaboratorData, DeleteCollaboratorResponses, DeleteSkillData, DeleteSkillResponses, DownloadSkillData, DownloadSkillResponses, GetAuthorIdentityData, GetAuthorIdentityResponses, GetDraftData, GetDraftResponses, GetMergeStateData, GetMergeStateResponses, GetOrgFolderData, GetOrgFolderResponses, GetSkillData, GetSkillEditDocumentData, GetSkillEditDocumentErrors, GetSkillEditDocumentResponses, GetSkillResponses, GetUpdateRequestData, GetUpdateRequestDiffData, GetUpdateRequestDiffResponses, GetUpdateRequestResponses, GetVersionManifestData, GetVersionManifestResponses, GithubStatusData, GithubStatusResponses, ListCollaboratorsData, ListCollaboratorsResponses, ListSkillsData, ListSkillsResponses, ListUpdateRequestCommentsData, ListUpdateRequestCommentsResponses, ListUpdateRequestsData, ListUpdateRequestsResponses, ListUsageEventsData, ListUsageEventsResponses, ListVersionsData, ListVersionsResponses, PublisherRootData, PublisherRootResponses, PurchaseSkillData, PurchaseSkillErrors, PurchaseSkillResponses, RejectUpdateRequestData, RejectUpdateRequestResponses, ResolveConflictData, ResolveConflictResponses, RetryGithubPublishData, RetryGithubPublishResponses, SkillMdData, SkillMdResponses, UpdateOrgFolderData, UpdateOrgFolderResponses, UpdateSkillData, UpdateSkillResponses, UpdateSponsorData, UpdateSponsorResponses, UpsertAuthorIdentityData, UpsertAuthorIdentityResponses, UpsertCollaboratorData, UpsertCollaboratorResponses, UsageSummaryData, UsageSummaryResponses } from './types.gen';
+import type { AcceptUpdateRequestData, AcceptUpdateRequestResponses, CreateOrgFolderData, CreateOrgFolderResponses, CreateSkillData, CreateSkillResponses, CreateUpdateRequestCommentData, CreateUpdateRequestCommentResponses, CreateUpdateRequestData, CreateUpdateRequestResponses, CreateVersionData, CreateVersionResponses, DeleteCollaboratorData, DeleteCollaboratorResponses, DeleteFileData, DeleteFileResponses, DeleteSkillData, DeleteSkillResponses, DownloadSkillData, DownloadSkillResponses, GetAuthorIdentityData, GetAuthorIdentityResponses, GetDraftData, GetDraftResponses, GetFileData, GetFileResponses, GetMergeStateData, GetMergeStateResponses, GetOrgFolderData, GetOrgFolderResponses, GetSkillData, GetSkillEditDocumentData, GetSkillEditDocumentErrors, GetSkillEditDocumentResponses, GetSkillResponses, GetUpdateRequestData, GetUpdateRequestDiffData, GetUpdateRequestDiffResponses, GetUpdateRequestResponses, GetVersionManifestData, GetVersionManifestResponses, GithubStatusData, GithubStatusResponses, ListCollaboratorsData, ListCollaboratorsResponses, ListFilesData, ListFilesResponses, ListSkillsData, ListSkillsResponses, ListUpdateRequestCommentsData, ListUpdateRequestCommentsResponses, ListUpdateRequestsData, ListUpdateRequestsResponses, ListUsageEventsData, ListUsageEventsResponses, ListVersionsData, ListVersionsResponses, PublisherRootData, PublisherRootResponses, PurchaseSkillData, PurchaseSkillErrors, PurchaseSkillResponses, PutFileData, PutFileResponses, ReconcileOrphansData, ReconcileOrphansErrors, ReconcileOrphansResponses, RejectUpdateRequestData, RejectUpdateRequestResponses, ReplaceOrgFolderData, ReplaceOrgFolderResponses, ResolveConflictData, ResolveConflictResponses, RetryGithubPublishData, RetryGithubPublishResponses, SkillMdData, SkillMdResponses, SyncFromMainData, SyncFromMainResponses, TransferOrgFolderData, TransferOrgFolderErrors, TransferOrgFolderResponses, UpdateOrgFolderData, UpdateOrgFolderResponses, UpdateSkillData, UpdateSkillResponses, UpdateSponsorData, UpdateSponsorResponses, UpsertAuthorIdentityData, UpsertAuthorIdentityResponses, UpsertCollaboratorData, UpsertCollaboratorResponses, UsageSummaryData, UsageSummaryResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -44,6 +44,24 @@ export const updateOrgFolder = <ThrowOnError extends boolean = false>(options: O
 
 export const createOrgFolder = <ThrowOnError extends boolean = false>(options: Options<CreateOrgFolderData, ThrowOnError>) => (options.client ?? client).post<CreateOrgFolderResponses, unknown, ThrowOnError>({
     url: '/organizations/{org_id}/folder',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const replaceOrgFolder = <ThrowOnError extends boolean = false>(options: Options<ReplaceOrgFolderData, ThrowOnError>) => (options.client ?? client).put<ReplaceOrgFolderResponses, unknown, ThrowOnError>({
+    url: '/organizations/{org_id}/folder',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const transferOrgFolder = <ThrowOnError extends boolean = false>(options: Options<TransferOrgFolderData, ThrowOnError>) => (options.client ?? client).post<TransferOrgFolderResponses, TransferOrgFolderErrors, ThrowOnError>({
+    url: '/organizations/{org_id}/folder/transfer',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -107,9 +125,84 @@ export const resolveConflict = <ThrowOnError extends boolean = false>(options: O
 
 export const getSkillEditDocument = <ThrowOnError extends boolean = false>(options: Options<GetSkillEditDocumentData, ThrowOnError>) => (options.client ?? client).get<GetSkillEditDocumentResponses, GetSkillEditDocumentErrors, ThrowOnError>({ url: '/skills/{slug}/edit', ...options });
 
+/**
+ * `GET /skills/{slug}/files` -- list every file in the current
+ * version's bundle, plus a synthetic `SKILL.md` entry.
+ */
+export const listFiles = <ThrowOnError extends boolean = false>(options: Options<ListFilesData, ThrowOnError>) => (options.client ?? client).get<ListFilesResponses, unknown, ThrowOnError>({ url: '/skills/{slug}/files', ...options });
+
+/**
+ * `DELETE /skills/{slug}/files/{path...}` -- drop one file.
+ */
+export const deleteFile = <ThrowOnError extends boolean = false>(options: Options<DeleteFileData, ThrowOnError>) => (options.client ?? client).delete<DeleteFileResponses, unknown, ThrowOnError>({
+    url: '/skills/{slug}/files/{path}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * `GET /skills/{slug}/files/{path...}` -- one file's bytes.
+ */
+export const getFile = <ThrowOnError extends boolean = false>(options: Options<GetFileData, ThrowOnError>) => (options.client ?? client).get<GetFileResponses, unknown, ThrowOnError>({ url: '/skills/{slug}/files/{path}', ...options });
+
+/**
+ * `PUT /skills/{slug}/files/{path...}` -- replace or add one file.
+ */
+export const putFile = <ThrowOnError extends boolean = false>(options: Options<PutFileData, ThrowOnError>) => (options.client ?? client).put<PutFileResponses, unknown, ThrowOnError>({
+    url: '/skills/{slug}/files/{path}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
 export const githubStatus = <ThrowOnError extends boolean = false>(options: Options<GithubStatusData, ThrowOnError>) => (options.client ?? client).get<GithubStatusResponses, unknown, ThrowOnError>({ url: '/skills/{slug}/github', ...options });
 
+/**
+ * `POST /skills/{slug}/github/reconcile-orphans` -- ops endpoint
+ * that mechanically removes canonical-repo paths the gateway no
+ * longer claims for this skill. Issue #22 acceptance:
+ *
+ * - Owner-or-operator-only authz (same `ensure_can_manage_skill`
+ * pattern as `/github/sync-from-main` and `/github/retry`).
+ * - `confirm: true` is required. `false` or missing returns 409.
+ * - The handler re-derives the **live** orphan-path set against the
+ * canonical-repo HEAD and returns 409 if it does not match the
+ * `expected_orphan_paths` payload (optimistic concurrency mirrors
+ * `expected_current_version_id`).
+ * - On match (and `dry_run: false`): stages one signed commit on
+ * the canonical branch deleting every path. Author/committer is
+ * the forward-publish bot pair so reverse-sync skips the commit
+ * via `is_forward_publish_commit`.
+ * - On `dry_run: true`: skips the commit and returns the planned
+ * shape (paths + parent commit SHA + audit row id) without
+ * touching GitHub.
+ * - Records a `skill_orphan_reconciliations` audit row in both
+ * modes (issue #22 acceptance criterion + migration 011).
+ */
+export const reconcileOrphans = <ThrowOnError extends boolean = false>(options: Options<ReconcileOrphansData, ThrowOnError>) => (options.client ?? client).post<ReconcileOrphansResponses, ReconcileOrphansErrors, ThrowOnError>({
+    url: '/skills/{slug}/github/reconcile-orphans',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
 export const retryGithubPublish = <ThrowOnError extends boolean = false>(options: Options<RetryGithubPublishData, ThrowOnError>) => (options.client ?? client).post<RetryGithubPublishResponses, unknown, ThrowOnError>({ url: '/skills/{slug}/github/retry', ...options });
+
+/**
+ * `POST /skills/{slug}/github/sync-from-main` -- ops endpoint that
+ * re-fetches the canonical GitHub bundle at HEAD and reconciles it
+ * into a new gateway version. No-op when the resulting
+ * `content_hash_bundle` matches the current version. Owner-only,
+ * same authz pattern as `retry_github_publish`.
+ */
+export const syncFromMain = <ThrowOnError extends boolean = false>(options: Options<SyncFromMainData, ThrowOnError>) => (options.client ?? client).post<SyncFromMainResponses, unknown, ThrowOnError>({ url: '/skills/{slug}/github/sync-from-main', ...options });
 
 export const purchaseSkill = <ThrowOnError extends boolean = false>(options: Options<PurchaseSkillData, ThrowOnError>) => (options.client ?? client).post<PurchaseSkillResponses, PurchaseSkillErrors, ThrowOnError>({ url: '/skills/{slug}/purchase', ...options });
 

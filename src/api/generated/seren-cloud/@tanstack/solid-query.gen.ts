@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { type Options, serenCloudCompleteDeploymentBundleUpload, serenCloudCreateDeploymentBundle, serenCloudCreateEnvironment, serenCloudCreateEvalSet, serenCloudDelete, serenCloudDeleteEnvironment, serenCloudDeploy, serenCloudDeploymentAudit, serenCloudDeploymentFs, serenCloudDeploymentFsReadBytes, serenCloudDeploymentFsReadText, serenCloudDeploymentPendingApprovals, serenCloudDeploymentRun, serenCloudDeploymentRunArtifacts, serenCloudDeploymentRunCancel, serenCloudDeploymentRunEvals, serenCloudDeploymentRunEvents, serenCloudDeploymentRunPendingApprovals, serenCloudDeploymentRuns, serenCloudDeploymentRunStreamClose, serenCloudEvalCases, serenCloudEvalRunResults, serenCloudEvalRuns, serenCloudEvalSets, serenCloudGetAuditEntry, serenCloudGetDeployment, serenCloudGetDeploymentBundle, serenCloudGetDeploymentBundleDownload, serenCloudGetDeploymentSpend, serenCloudGetEnvironment, serenCloudGetEvalCase, serenCloudGetEvalCaseResult, serenCloudGetEvalRun, serenCloudGetEvalSet, serenCloudListAuditEntries, serenCloudListDeployments, serenCloudListEnvironments, serenCloudLogs, serenCloudPendingApprovals, serenCloudPromoteRunToEvalCase, serenCloudRecordChannelRunEvent, serenCloudRun, serenCloudRunArtifacts, serenCloudRunAudit, serenCloudRunCancel, serenCloudRunCompare, serenCloudRunDetail, serenCloudRunEvals, serenCloudRunEvalSet, serenCloudRunEvents, serenCloudRunPendingApprovals, serenCloudRuns, serenCloudRunStreamClose, serenCloudStart, serenCloudStop, serenCloudUpdateConfig, serenCloudUpdateEnvironment, serenCloudUpdateEvalSet, serenCloudVerifyAudit } from '../sdk.gen';
-import type { SerenCloudCompleteDeploymentBundleUploadData, SerenCloudCompleteDeploymentBundleUploadResponse, SerenCloudCreateDeploymentBundleData, SerenCloudCreateDeploymentBundleResponse, SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentResponse, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetResponse, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentResponse, SerenCloudDeleteResponse, SerenCloudDeployData, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditResponse, SerenCloudDeploymentFsData, SerenCloudDeploymentFsReadBytesData, SerenCloudDeploymentFsReadTextData, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsResponse, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsResponse, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelResponse, SerenCloudDeploymentRunData, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsResponse, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsResponse, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsResponse, SerenCloudDeploymentRunResponse, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsResponse, SerenCloudDeploymentRunStreamCloseData, SerenCloudDeploymentRunStreamCloseResponse, SerenCloudDeployResponse, SerenCloudEvalCasesData, SerenCloudEvalCasesResponse, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsResponse, SerenCloudEvalRunsData, SerenCloudEvalRunsResponse, SerenCloudEvalSetsData, SerenCloudEvalSetsResponse, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryResponse, SerenCloudGetDeploymentBundleData, SerenCloudGetDeploymentBundleDownloadData, SerenCloudGetDeploymentBundleDownloadResponse, SerenCloudGetDeploymentBundleResponse, SerenCloudGetDeploymentData, SerenCloudGetDeploymentResponse, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendResponse, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentResponse, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseResponse, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultResponse, SerenCloudGetEvalRunData, SerenCloudGetEvalRunResponse, SerenCloudGetEvalSetData, SerenCloudGetEvalSetResponse, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponse, SerenCloudListDeploymentsData, SerenCloudListDeploymentsResponse, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponse, SerenCloudLogsData, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsResponse, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseResponse, SerenCloudRecordChannelRunEventData, SerenCloudRecordChannelRunEventResponse, SerenCloudRunArtifactsData, SerenCloudRunArtifactsResponse, SerenCloudRunAuditData, SerenCloudRunAuditResponse, SerenCloudRunCancelData, SerenCloudRunCancelResponse, SerenCloudRunCompareData, SerenCloudRunCompareResponse, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailResponse, SerenCloudRunEvalsData, SerenCloudRunEvalSetData, SerenCloudRunEvalSetResponse, SerenCloudRunEvalsResponse, SerenCloudRunEventsData, SerenCloudRunEventsResponse, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsResponse, SerenCloudRunResponse, SerenCloudRunsData, SerenCloudRunsResponse, SerenCloudRunStreamCloseData, SerenCloudRunStreamCloseResponse, SerenCloudStartData, SerenCloudStartResponse, SerenCloudStopData, SerenCloudStopResponse, SerenCloudUpdateConfigData, SerenCloudUpdateConfigResponse, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentResponse, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetResponse, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponse } from '../types.gen';
+import { type Options, serenCloudApprovalInboxDecide, serenCloudApprovalInboxList, serenCloudCompleteDeploymentBundleUpload, serenCloudCreateDeploymentBundle, serenCloudCreateEnvironment, serenCloudCreateEvalSet, serenCloudDelete, serenCloudDeleteEnvironment, serenCloudDeploy, serenCloudDeploymentAudit, serenCloudDeploymentPendingApprovals, serenCloudDeploymentRun, serenCloudDeploymentRunArtifacts, serenCloudDeploymentRunCancel, serenCloudDeploymentRunEvals, serenCloudDeploymentRunEvents, serenCloudDeploymentRunPendingApprovals, serenCloudDeploymentRuns, serenCloudDeploymentRunStreamClose, serenCloudEvalCases, serenCloudEvalRunResults, serenCloudEvalRuns, serenCloudEvalSets, serenCloudGetAuditEntry, serenCloudGetDeployment, serenCloudGetDeploymentBundle, serenCloudGetDeploymentBundleDownload, serenCloudGetDeploymentEvalDrift, serenCloudGetDeploymentSpend, serenCloudGetEnvironment, serenCloudGetEvalCase, serenCloudGetEvalCaseResult, serenCloudGetEvalRun, serenCloudGetEvalSet, serenCloudListAuditEntries, serenCloudListDeployments, serenCloudListEnvironments, serenCloudPendingApprovals, serenCloudPromoteRunToEvalCase, serenCloudRun, serenCloudRunArtifacts, serenCloudRunAudit, serenCloudRunCancel, serenCloudRunCompare, serenCloudRunDetail, serenCloudRunEvals, serenCloudRunEvalSet, serenCloudRunEvents, serenCloudRunPendingApprovals, serenCloudRuns, serenCloudRunStreamClose, serenCloudStart, serenCloudStop, serenCloudUpdateConfig, serenCloudUpdateEnvironment, serenCloudUpdateEvalSet, serenCloudVerifyAudit } from '../sdk.gen';
+import type { SerenCloudApprovalInboxDecideData, SerenCloudApprovalInboxDecideResponse, SerenCloudApprovalInboxListData, SerenCloudApprovalInboxListResponse, SerenCloudCompleteDeploymentBundleUploadData, SerenCloudCompleteDeploymentBundleUploadResponse, SerenCloudCreateDeploymentBundleData, SerenCloudCreateDeploymentBundleResponse, SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentResponse, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetResponse, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentResponse, SerenCloudDeleteResponse, SerenCloudDeployData, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditResponse, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsResponse, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsResponse, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelResponse, SerenCloudDeploymentRunData, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsResponse, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsResponse, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsResponse, SerenCloudDeploymentRunResponse, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsResponse, SerenCloudDeploymentRunStreamCloseData, SerenCloudDeploymentRunStreamCloseResponse, SerenCloudDeployResponse, SerenCloudEvalCasesData, SerenCloudEvalCasesResponse, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsResponse, SerenCloudEvalRunsData, SerenCloudEvalRunsResponse, SerenCloudEvalSetsData, SerenCloudEvalSetsResponse, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryResponse, SerenCloudGetDeploymentBundleData, SerenCloudGetDeploymentBundleDownloadData, SerenCloudGetDeploymentBundleDownloadResponse, SerenCloudGetDeploymentBundleResponse, SerenCloudGetDeploymentData, SerenCloudGetDeploymentEvalDriftData, SerenCloudGetDeploymentEvalDriftResponse, SerenCloudGetDeploymentResponse, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendResponse, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentResponse, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseResponse, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultResponse, SerenCloudGetEvalRunData, SerenCloudGetEvalRunResponse, SerenCloudGetEvalSetData, SerenCloudGetEvalSetResponse, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponse, SerenCloudListDeploymentsData, SerenCloudListDeploymentsResponse, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponse, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsResponse, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseResponse, SerenCloudRunArtifactsData, SerenCloudRunArtifactsResponse, SerenCloudRunAuditData, SerenCloudRunAuditResponse, SerenCloudRunCancelData, SerenCloudRunCancelResponse, SerenCloudRunCompareData, SerenCloudRunCompareResponse, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailResponse, SerenCloudRunEvalsData, SerenCloudRunEvalSetData, SerenCloudRunEvalSetResponse, SerenCloudRunEvalsResponse, SerenCloudRunEventsData, SerenCloudRunEventsResponse, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsResponse, SerenCloudRunResponse, SerenCloudRunsData, SerenCloudRunsResponse, SerenCloudRunStreamCloseData, SerenCloudRunStreamCloseResponse, SerenCloudStartData, SerenCloudStartResponse, SerenCloudStopData, SerenCloudStopResponse, SerenCloudUpdateConfigData, SerenCloudUpdateConfigResponse, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentResponse, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetResponse, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -333,23 +333,6 @@ export const serenCloudDeploymentAuditInfiniteOptions = (options: Options<SerenC
     queryKey: serenCloudDeploymentAuditInfiniteQueryKey(options)
 });
 
-/**
- * Record a minimized external channel turn for a deployment.
- */
-export const serenCloudRecordChannelRunEventMutation = (options?: Partial<Options<SerenCloudRecordChannelRunEventData>>): MutationOptions<SerenCloudRecordChannelRunEventResponse, DefaultError, Options<SerenCloudRecordChannelRunEventData>> => {
-    const mutationOptions: MutationOptions<SerenCloudRecordChannelRunEventResponse, DefaultError, Options<SerenCloudRecordChannelRunEventData>> = {
-        mutationFn: async (fnOptions) => {
-            const { data } = await serenCloudRecordChannelRunEvent({
-                ...options,
-                ...fnOptions,
-                throwOnError: true
-            });
-            return data;
-        }
-    };
-    return mutationOptions;
-};
-
 export const serenCloudGetDeploymentBundleDownloadQueryKey = (options: Options<SerenCloudGetDeploymentBundleDownloadData>) => createQueryKey('serenCloudGetDeploymentBundleDownload', options);
 
 /**
@@ -368,14 +351,16 @@ export const serenCloudGetDeploymentBundleDownloadOptions = (options: Options<Se
     queryKey: serenCloudGetDeploymentBundleDownloadQueryKey(options)
 });
 
-export const serenCloudDeploymentFsQueryKey = (options: Options<SerenCloudDeploymentFsData>) => createQueryKey('serenCloudDeploymentFs', options);
+export const serenCloudGetDeploymentEvalDriftQueryKey = (options: Options<SerenCloudGetDeploymentEvalDriftData>) => createQueryKey('serenCloudGetDeploymentEvalDrift', options);
 
 /**
- * Inspect the managed deployment filesystem within the state or artifacts namespace.
+ * Compare the deployment's current eval-set verdict against the baseline
+ * captured at the last successful apply. Reports `passed`/`failed` deltas
+ * plus an operator-safe summary message.
  */
-export const serenCloudDeploymentFsOptions = (options: Options<SerenCloudDeploymentFsData>) => queryOptions<unknown, DefaultError, unknown, ReturnType<typeof serenCloudDeploymentFsQueryKey>>({
+export const serenCloudGetDeploymentEvalDriftOptions = (options: Options<SerenCloudGetDeploymentEvalDriftData>) => queryOptions<SerenCloudGetDeploymentEvalDriftResponse, DefaultError, SerenCloudGetDeploymentEvalDriftResponse, ReturnType<typeof serenCloudGetDeploymentEvalDriftQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
-        const { data } = await serenCloudDeploymentFs({
+        const { data } = await serenCloudGetDeploymentEvalDrift({
             ...options,
             ...queryKey[0],
             signal,
@@ -383,88 +368,7 @@ export const serenCloudDeploymentFsOptions = (options: Options<SerenCloudDeploym
         });
         return data;
     },
-    queryKey: serenCloudDeploymentFsQueryKey(options)
-});
-
-export const serenCloudDeploymentFsReadBytesQueryKey = (options: Options<SerenCloudDeploymentFsReadBytesData>) => createQueryKey('serenCloudDeploymentFsReadBytes', options);
-
-/**
- * Read a byte range from the managed deployment filesystem.
- */
-export const serenCloudDeploymentFsReadBytesOptions = (options: Options<SerenCloudDeploymentFsReadBytesData>) => queryOptions<unknown, DefaultError, unknown, ReturnType<typeof serenCloudDeploymentFsReadBytesQueryKey>>({
-    queryFn: async ({ queryKey, signal }) => {
-        const { data } = await serenCloudDeploymentFsReadBytes({
-            ...options,
-            ...queryKey[0],
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudDeploymentFsReadBytesQueryKey(options)
-});
-
-export const serenCloudDeploymentFsReadBytesInfiniteQueryKey = (options: Options<SerenCloudDeploymentFsReadBytesData>): QueryKey<Options<SerenCloudDeploymentFsReadBytesData>> => createQueryKey('serenCloudDeploymentFsReadBytes', options, true);
-
-/**
- * Read a byte range from the managed deployment filesystem.
- */
-export const serenCloudDeploymentFsReadBytesInfiniteOptions = (options: Options<SerenCloudDeploymentFsReadBytesData>) => infiniteQueryOptions<unknown, DefaultError, InfiniteData<unknown>, QueryKey<Options<SerenCloudDeploymentFsReadBytesData>>, number | Pick<QueryKey<Options<SerenCloudDeploymentFsReadBytesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudDeploymentFsReadBytesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudDeploymentFsReadBytes({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudDeploymentFsReadBytesInfiniteQueryKey(options)
-});
-
-export const serenCloudDeploymentFsReadTextQueryKey = (options: Options<SerenCloudDeploymentFsReadTextData>) => createQueryKey('serenCloudDeploymentFsReadText', options);
-
-/**
- * Read a UTF-8 text file from the managed deployment filesystem.
- */
-export const serenCloudDeploymentFsReadTextOptions = (options: Options<SerenCloudDeploymentFsReadTextData>) => queryOptions<unknown, DefaultError, unknown, ReturnType<typeof serenCloudDeploymentFsReadTextQueryKey>>({
-    queryFn: async ({ queryKey, signal }) => {
-        const { data } = await serenCloudDeploymentFsReadText({
-            ...options,
-            ...queryKey[0],
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudDeploymentFsReadTextQueryKey(options)
-});
-
-export const serenCloudLogsQueryKey = (options: Options<SerenCloudLogsData>) => createQueryKey('serenCloudLogs', options);
-
-/**
- * Get logs for a deployment.
- */
-export const serenCloudLogsOptions = (options: Options<SerenCloudLogsData>) => queryOptions<unknown, DefaultError, unknown, ReturnType<typeof serenCloudLogsQueryKey>>({
-    queryFn: async ({ queryKey, signal }) => {
-        const { data } = await serenCloudLogs({
-            ...options,
-            ...queryKey[0],
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudLogsQueryKey(options)
+    queryKey: serenCloudGetDeploymentEvalDriftQueryKey(options)
 });
 
 export const serenCloudDeploymentPendingApprovalsQueryKey = (options: Options<SerenCloudDeploymentPendingApprovalsData>) => createQueryKey('serenCloudDeploymentPendingApprovals', options);
@@ -1207,6 +1111,87 @@ export const serenCloudGetEvalCaseResultOptions = (options: Options<SerenCloudGe
     },
     queryKey: serenCloudGetEvalCaseResultQueryKey(options)
 });
+
+export const serenCloudApprovalInboxListQueryKey = (options?: Options<SerenCloudApprovalInboxListData>) => createQueryKey('serenCloudApprovalInboxList', options);
+
+/**
+ * List every awaiting approval the operator owns across all approval kinds.
+ *
+ * Returns `ToolCall` entries (derived from `awaiting_approval` runs) and
+ * `BlockedEgress` entries (from `blocked_egress_inbox_entries`) merged into
+ * a single timeline ordered by `created_at DESC`. Pagination is cursor-only:
+ * the response includes `next_cursor` when more entries are available, and
+ * the caller passes it back in `?cursor=`.
+ */
+export const serenCloudApprovalInboxListOptions = (options?: Options<SerenCloudApprovalInboxListData>) => queryOptions<SerenCloudApprovalInboxListResponse, DefaultError, SerenCloudApprovalInboxListResponse, ReturnType<typeof serenCloudApprovalInboxListQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await serenCloudApprovalInboxList({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: serenCloudApprovalInboxListQueryKey(options)
+});
+
+export const serenCloudApprovalInboxListInfiniteQueryKey = (options?: Options<SerenCloudApprovalInboxListData>): QueryKey<Options<SerenCloudApprovalInboxListData>> => createQueryKey('serenCloudApprovalInboxList', options, true);
+
+/**
+ * List every awaiting approval the operator owns across all approval kinds.
+ *
+ * Returns `ToolCall` entries (derived from `awaiting_approval` runs) and
+ * `BlockedEgress` entries (from `blocked_egress_inbox_entries`) merged into
+ * a single timeline ordered by `created_at DESC`. Pagination is cursor-only:
+ * the response includes `next_cursor` when more entries are available, and
+ * the caller passes it back in `?cursor=`.
+ */
+export const serenCloudApprovalInboxListInfiniteOptions = (options?: Options<SerenCloudApprovalInboxListData>) => infiniteQueryOptions<SerenCloudApprovalInboxListResponse, DefaultError, InfiniteData<SerenCloudApprovalInboxListResponse>, QueryKey<Options<SerenCloudApprovalInboxListData>>, string | Pick<QueryKey<Options<SerenCloudApprovalInboxListData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+// @ts-ignore
+{
+    queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<QueryKey<Options<SerenCloudApprovalInboxListData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+            query: {
+                cursor: pageParam
+            }
+        };
+        const params = createInfiniteParams(queryKey, page);
+        const { data } = await serenCloudApprovalInboxList({
+            ...options,
+            ...params,
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: serenCloudApprovalInboxListInfiniteQueryKey(options)
+});
+
+/**
+ * Record an operator approve/deny decision for a single inbox entry.
+ *
+ * Tool-call entries record an audit row and rely on the existing run-resume
+ * flow to emit the `approval_decision` event. Blocked-egress entries flip
+ * the row's `decision_state` so the runtime wait long-poll releases or
+ * drops the corresponding request on its next tick. Re-deciding an
+ * already-terminal blocked-egress row returns the current state instead of
+ * 409 so the agent runtime's at-least-once retries are idempotent.
+ */
+export const serenCloudApprovalInboxDecideMutation = (options?: Partial<Options<SerenCloudApprovalInboxDecideData>>): MutationOptions<SerenCloudApprovalInboxDecideResponse, DefaultError, Options<SerenCloudApprovalInboxDecideData>> => {
+    const mutationOptions: MutationOptions<SerenCloudApprovalInboxDecideResponse, DefaultError, Options<SerenCloudApprovalInboxDecideData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await serenCloudApprovalInboxDecide({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
 
 export const serenCloudPendingApprovalsQueryKey = (options?: Options<SerenCloudPendingApprovalsData>) => createQueryKey('serenCloudPendingApprovals', options);
 

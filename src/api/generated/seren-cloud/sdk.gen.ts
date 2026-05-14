@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { SerenCloudCompleteDeploymentBundleUploadData, SerenCloudCompleteDeploymentBundleUploadErrors, SerenCloudCompleteDeploymentBundleUploadResponses, SerenCloudCreateDeploymentBundleData, SerenCloudCreateDeploymentBundleErrors, SerenCloudCreateDeploymentBundleResponses, SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentErrors, SerenCloudCreateEnvironmentResponses, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetErrors, SerenCloudCreateEvalSetResponses, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentErrors, SerenCloudDeleteEnvironmentResponses, SerenCloudDeleteErrors, SerenCloudDeleteResponses, SerenCloudDeployData, SerenCloudDeployErrors, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditErrors, SerenCloudDeploymentAuditResponses, SerenCloudDeploymentFsData, SerenCloudDeploymentFsErrors, SerenCloudDeploymentFsReadBytesData, SerenCloudDeploymentFsReadBytesErrors, SerenCloudDeploymentFsReadBytesResponses, SerenCloudDeploymentFsReadTextData, SerenCloudDeploymentFsReadTextErrors, SerenCloudDeploymentFsReadTextResponses, SerenCloudDeploymentFsResponses, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsErrors, SerenCloudDeploymentPendingApprovalsResponses, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsErrors, SerenCloudDeploymentRunArtifactsResponses, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelErrors, SerenCloudDeploymentRunCancelResponses, SerenCloudDeploymentRunData, SerenCloudDeploymentRunErrors, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsErrors, SerenCloudDeploymentRunEvalsResponses, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsErrors, SerenCloudDeploymentRunEventsResponses, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsErrors, SerenCloudDeploymentRunPendingApprovalsResponses, SerenCloudDeploymentRunResponses, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsErrors, SerenCloudDeploymentRunsResponses, SerenCloudDeploymentRunStreamCloseData, SerenCloudDeploymentRunStreamCloseErrors, SerenCloudDeploymentRunStreamCloseResponses, SerenCloudDeploymentRunStreamData, SerenCloudDeploymentRunStreamErrors, SerenCloudDeploymentRunStreamResponses, SerenCloudDeployResponses, SerenCloudEvalCasesData, SerenCloudEvalCasesErrors, SerenCloudEvalCasesResponses, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsErrors, SerenCloudEvalRunResultsResponses, SerenCloudEvalRunsData, SerenCloudEvalRunsErrors, SerenCloudEvalRunsResponses, SerenCloudEvalSetsData, SerenCloudEvalSetsResponses, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryErrors, SerenCloudGetAuditEntryResponses, SerenCloudGetDeploymentBundleData, SerenCloudGetDeploymentBundleDownloadData, SerenCloudGetDeploymentBundleDownloadErrors, SerenCloudGetDeploymentBundleDownloadResponses, SerenCloudGetDeploymentBundleErrors, SerenCloudGetDeploymentBundleResponses, SerenCloudGetDeploymentData, SerenCloudGetDeploymentErrors, SerenCloudGetDeploymentResponses, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendErrors, SerenCloudGetDeploymentSpendResponses, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentErrors, SerenCloudGetEnvironmentResponses, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseErrors, SerenCloudGetEvalCaseResponses, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultErrors, SerenCloudGetEvalCaseResultResponses, SerenCloudGetEvalRunData, SerenCloudGetEvalRunErrors, SerenCloudGetEvalRunResponses, SerenCloudGetEvalSetData, SerenCloudGetEvalSetErrors, SerenCloudGetEvalSetResponses, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponses, SerenCloudListDeploymentsData, SerenCloudListDeploymentsErrors, SerenCloudListDeploymentsResponses, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponses, SerenCloudLogsData, SerenCloudLogsErrors, SerenCloudLogsResponses, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsErrors, SerenCloudPendingApprovalsResponses, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseErrors, SerenCloudPromoteRunToEvalCaseResponses, SerenCloudRecordChannelRunEventData, SerenCloudRecordChannelRunEventErrors, SerenCloudRecordChannelRunEventResponses, SerenCloudRunArtifactsData, SerenCloudRunArtifactsErrors, SerenCloudRunArtifactsResponses, SerenCloudRunAuditData, SerenCloudRunAuditErrors, SerenCloudRunAuditResponses, SerenCloudRunCancelData, SerenCloudRunCancelErrors, SerenCloudRunCancelResponses, SerenCloudRunCompareData, SerenCloudRunCompareErrors, SerenCloudRunCompareResponses, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailErrors, SerenCloudRunDetailResponses, SerenCloudRunErrors, SerenCloudRunEvalsData, SerenCloudRunEvalsErrors, SerenCloudRunEvalSetData, SerenCloudRunEvalSetErrors, SerenCloudRunEvalSetResponses, SerenCloudRunEvalsResponses, SerenCloudRunEventsData, SerenCloudRunEventsErrors, SerenCloudRunEventsResponses, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsErrors, SerenCloudRunPendingApprovalsResponses, SerenCloudRunResponses, SerenCloudRunsData, SerenCloudRunsErrors, SerenCloudRunsResponses, SerenCloudRunStreamCloseData, SerenCloudRunStreamCloseErrors, SerenCloudRunStreamCloseResponses, SerenCloudRunStreamData, SerenCloudRunStreamErrors, SerenCloudRunStreamResponses, SerenCloudStartData, SerenCloudStartErrors, SerenCloudStartResponses, SerenCloudStopData, SerenCloudStopErrors, SerenCloudStopResponses, SerenCloudUpdateConfigData, SerenCloudUpdateConfigErrors, SerenCloudUpdateConfigResponses, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentErrors, SerenCloudUpdateEnvironmentResponses, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetErrors, SerenCloudUpdateEvalSetResponses, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponses } from './types.gen';
+import type { SerenCloudApprovalInboxDecideData, SerenCloudApprovalInboxDecideErrors, SerenCloudApprovalInboxDecideResponses, SerenCloudApprovalInboxListData, SerenCloudApprovalInboxListErrors, SerenCloudApprovalInboxListResponses, SerenCloudCompleteDeploymentBundleUploadData, SerenCloudCompleteDeploymentBundleUploadErrors, SerenCloudCompleteDeploymentBundleUploadResponses, SerenCloudCreateDeploymentBundleData, SerenCloudCreateDeploymentBundleErrors, SerenCloudCreateDeploymentBundleResponses, SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentErrors, SerenCloudCreateEnvironmentResponses, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetErrors, SerenCloudCreateEvalSetResponses, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentErrors, SerenCloudDeleteEnvironmentResponses, SerenCloudDeleteErrors, SerenCloudDeleteResponses, SerenCloudDeployData, SerenCloudDeployErrors, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditErrors, SerenCloudDeploymentAuditResponses, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsErrors, SerenCloudDeploymentPendingApprovalsResponses, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsErrors, SerenCloudDeploymentRunArtifactsResponses, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelErrors, SerenCloudDeploymentRunCancelResponses, SerenCloudDeploymentRunData, SerenCloudDeploymentRunErrors, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsErrors, SerenCloudDeploymentRunEvalsResponses, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsErrors, SerenCloudDeploymentRunEventsResponses, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsErrors, SerenCloudDeploymentRunPendingApprovalsResponses, SerenCloudDeploymentRunResponses, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsErrors, SerenCloudDeploymentRunsResponses, SerenCloudDeploymentRunStreamCloseData, SerenCloudDeploymentRunStreamCloseErrors, SerenCloudDeploymentRunStreamCloseResponses, SerenCloudDeploymentRunStreamData, SerenCloudDeploymentRunStreamErrors, SerenCloudDeploymentRunStreamResponses, SerenCloudDeployResponses, SerenCloudEvalCasesData, SerenCloudEvalCasesErrors, SerenCloudEvalCasesResponses, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsErrors, SerenCloudEvalRunResultsResponses, SerenCloudEvalRunsData, SerenCloudEvalRunsErrors, SerenCloudEvalRunsResponses, SerenCloudEvalSetsData, SerenCloudEvalSetsResponses, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryErrors, SerenCloudGetAuditEntryResponses, SerenCloudGetDeploymentBundleData, SerenCloudGetDeploymentBundleDownloadData, SerenCloudGetDeploymentBundleDownloadErrors, SerenCloudGetDeploymentBundleDownloadResponses, SerenCloudGetDeploymentBundleErrors, SerenCloudGetDeploymentBundleResponses, SerenCloudGetDeploymentData, SerenCloudGetDeploymentErrors, SerenCloudGetDeploymentEvalDriftData, SerenCloudGetDeploymentEvalDriftErrors, SerenCloudGetDeploymentEvalDriftResponses, SerenCloudGetDeploymentResponses, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendErrors, SerenCloudGetDeploymentSpendResponses, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentErrors, SerenCloudGetEnvironmentResponses, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseErrors, SerenCloudGetEvalCaseResponses, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultErrors, SerenCloudGetEvalCaseResultResponses, SerenCloudGetEvalRunData, SerenCloudGetEvalRunErrors, SerenCloudGetEvalRunResponses, SerenCloudGetEvalSetData, SerenCloudGetEvalSetErrors, SerenCloudGetEvalSetResponses, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponses, SerenCloudListDeploymentsData, SerenCloudListDeploymentsErrors, SerenCloudListDeploymentsResponses, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponses, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsErrors, SerenCloudPendingApprovalsResponses, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseErrors, SerenCloudPromoteRunToEvalCaseResponses, SerenCloudRunArtifactsData, SerenCloudRunArtifactsErrors, SerenCloudRunArtifactsResponses, SerenCloudRunAuditData, SerenCloudRunAuditErrors, SerenCloudRunAuditResponses, SerenCloudRunCancelData, SerenCloudRunCancelErrors, SerenCloudRunCancelResponses, SerenCloudRunCompareData, SerenCloudRunCompareErrors, SerenCloudRunCompareResponses, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailErrors, SerenCloudRunDetailResponses, SerenCloudRunErrors, SerenCloudRunEvalsData, SerenCloudRunEvalsErrors, SerenCloudRunEvalSetData, SerenCloudRunEvalSetErrors, SerenCloudRunEvalSetResponses, SerenCloudRunEvalsResponses, SerenCloudRunEventsData, SerenCloudRunEventsErrors, SerenCloudRunEventsResponses, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsErrors, SerenCloudRunPendingApprovalsResponses, SerenCloudRunResponses, SerenCloudRunsData, SerenCloudRunsErrors, SerenCloudRunsResponses, SerenCloudRunStreamCloseData, SerenCloudRunStreamCloseErrors, SerenCloudRunStreamCloseResponses, SerenCloudRunStreamData, SerenCloudRunStreamErrors, SerenCloudRunStreamResponses, SerenCloudStartData, SerenCloudStartErrors, SerenCloudStartResponses, SerenCloudStopData, SerenCloudStopErrors, SerenCloudStopResponses, SerenCloudUpdateConfigData, SerenCloudUpdateConfigErrors, SerenCloudUpdateConfigResponses, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentErrors, SerenCloudUpdateEnvironmentResponses, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetErrors, SerenCloudUpdateEvalSetResponses, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -139,19 +139,6 @@ export const serenCloudDeploymentAudit = <ThrowOnError extends boolean = false>(
 });
 
 /**
- * Record a minimized external channel turn for a deployment.
- */
-export const serenCloudRecordChannelRunEvent = <ThrowOnError extends boolean = false>(options: Options<SerenCloudRecordChannelRunEventData, ThrowOnError>) => (options.client ?? client).post<SerenCloudRecordChannelRunEventResponses, SerenCloudRecordChannelRunEventErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/deployments/{id}/channel-run-events',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-/**
  * Get a short-lived direct download URL for a deployment runtime bundle.
  */
 export const serenCloudGetDeploymentBundleDownload = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetDeploymentBundleDownloadData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetDeploymentBundleDownloadResponses, SerenCloudGetDeploymentBundleDownloadErrors, ThrowOnError>({
@@ -161,38 +148,13 @@ export const serenCloudGetDeploymentBundleDownload = <ThrowOnError extends boole
 });
 
 /**
- * Inspect the managed deployment filesystem within the state or artifacts namespace.
+ * Compare the deployment's current eval-set verdict against the baseline
+ * captured at the last successful apply. Reports `passed`/`failed` deltas
+ * plus an operator-safe summary message.
  */
-export const serenCloudDeploymentFs = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentFsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentFsResponses, SerenCloudDeploymentFsErrors, ThrowOnError>({
+export const serenCloudGetDeploymentEvalDrift = <ThrowOnError extends boolean = false>(options: Options<SerenCloudGetDeploymentEvalDriftData, ThrowOnError>) => (options.client ?? client).get<SerenCloudGetDeploymentEvalDriftResponses, SerenCloudGetDeploymentEvalDriftErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/deployments/{id}/fs',
-    ...options
-});
-
-/**
- * Read a byte range from the managed deployment filesystem.
- */
-export const serenCloudDeploymentFsReadBytes = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentFsReadBytesData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentFsReadBytesResponses, SerenCloudDeploymentFsReadBytesErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/deployments/{id}/fs/read_bytes',
-    ...options
-});
-
-/**
- * Read a UTF-8 text file from the managed deployment filesystem.
- */
-export const serenCloudDeploymentFsReadText = <ThrowOnError extends boolean = false>(options: Options<SerenCloudDeploymentFsReadTextData, ThrowOnError>) => (options.client ?? client).get<SerenCloudDeploymentFsReadTextResponses, SerenCloudDeploymentFsReadTextErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/deployments/{id}/fs/read_text',
-    ...options
-});
-
-/**
- * Get logs for a deployment.
- */
-export const serenCloudLogs = <ThrowOnError extends boolean = false>(options: Options<SerenCloudLogsData, ThrowOnError>) => (options.client ?? client).get<SerenCloudLogsResponses, SerenCloudLogsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/deployments/{id}/logs',
+    url: '/deployments/{id}/eval-drift',
     ...options
 });
 
@@ -498,6 +460,41 @@ export const serenCloudGetEvalCaseResult = <ThrowOnError extends boolean = false
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/eval-sets/{id}/runs/{run_id}/results/{case_id}',
     ...options
+});
+
+/**
+ * List every awaiting approval the operator owns across all approval kinds.
+ *
+ * Returns `ToolCall` entries (derived from `awaiting_approval` runs) and
+ * `BlockedEgress` entries (from `blocked_egress_inbox_entries`) merged into
+ * a single timeline ordered by `created_at DESC`. Pagination is cursor-only:
+ * the response includes `next_cursor` when more entries are available, and
+ * the caller passes it back in `?cursor=`.
+ */
+export const serenCloudApprovalInboxList = <ThrowOnError extends boolean = false>(options?: Options<SerenCloudApprovalInboxListData, ThrowOnError>) => (options?.client ?? client).get<SerenCloudApprovalInboxListResponses, SerenCloudApprovalInboxListErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/inbox/approvals',
+    ...options
+});
+
+/**
+ * Record an operator approve/deny decision for a single inbox entry.
+ *
+ * Tool-call entries record an audit row and rely on the existing run-resume
+ * flow to emit the `approval_decision` event. Blocked-egress entries flip
+ * the row's `decision_state` so the runtime wait long-poll releases or
+ * drops the corresponding request on its next tick. Re-deciding an
+ * already-terminal blocked-egress row returns the current state instead of
+ * 409 so the agent runtime's at-least-once retries are idempotent.
+ */
+export const serenCloudApprovalInboxDecide = <ThrowOnError extends boolean = false>(options: Options<SerenCloudApprovalInboxDecideData, ThrowOnError>) => (options.client ?? client).post<SerenCloudApprovalInboxDecideResponses, SerenCloudApprovalInboxDecideErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/inbox/approvals/{entry_id}/decide',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });
 
 /**
