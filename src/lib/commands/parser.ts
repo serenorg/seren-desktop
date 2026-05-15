@@ -77,6 +77,13 @@ export function matchSkillCommand(
 
   for (const skill of installed) {
     if (!skill.enabled) continue;
+    // Issue #1917 — block invocation of skills whose payload didn't fully
+    // land on disk. Letting the slash command through here would inject the
+    // SKILL.md into the agent's system prompt with the absolute runtime
+    // directory header pointing at an empty directory; the agent would then
+    // scaffold from scratch. Treat failed-payload skills as if they don't
+    // exist; the user sees them in the sidebar with their failure marker.
+    if (skill.payloadStatus === "failed") continue;
     if (skill.slug.toLowerCase() === lower) {
       return { skill, args };
     }
@@ -96,6 +103,9 @@ function searchInstalledSkills(partial: string): SlashCommand[] {
   const results: SlashCommand[] = [];
   for (const skill of installed) {
     if (!skill.enabled) continue;
+    // Hide failed-payload skills from autocomplete so the user can't
+    // accidentally tab-complete into a skill we know we'd block (#1917).
+    if (skill.payloadStatus === "failed") continue;
 
     const slugMatch = skill.slug.toLowerCase().startsWith(partial);
     const nameMatch = skill.name.toLowerCase().startsWith(partial);

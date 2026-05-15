@@ -833,6 +833,94 @@ pub fn validate_skill_payload(skills_dir: String, slug: String) -> Result<Vec<St
     Ok(missing)
 }
 
+/// Append one JSON line per install/refresh failure to a long-lived log file.
+///
+/// Issue serenorg/seren-desktop#1917: when `validate_skill_payload` reports
+/// missing files post-install, callers used to only log to the in-memory
+/// console. That made silent partial-installs invisible after an app restart
+/// and caused agents to scaffold from scratch (e.g. Windows users hitting
+/// `prophet-arb-bot`). This command writes a durable audit line so the
+/// failure survives the process and can be inspected after the fact.
+///
+/// Schema (one JSON object per line, append-only):
+///   {
+///     "timestamp": "2026-05-15T16:00:00.000Z",
+///     "slug": "<skill slug>",
+///     "phase": "install" | "refresh",
+///     "missingFiles": ["scripts/agent.py", ...]
+///   }
+#[tauri::command]
+pub fn log_skill_install_failure(
+    log_path: String,
+    slug: String,
+    phase: String,
+    missing_files: Vec<String>,
+) -> Result<(), String> {
+    use std::io::Write;
+
+    let path = PathBuf::from(&log_path);
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create log directory: {}", e))?;
+        }
+    }
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Failed to read clock: {}", e))?;
+    let secs = timestamp.as_secs();
+    let millis = timestamp.subsec_millis();
+    // ISO-8601 (UTC). Hand-formatted so we don't pull in a date crate.
+    let datetime = format_iso8601_utc(secs, millis);
+
+    let entry = serde_json::json!({
+        "timestamp": datetime,
+        "slug": slug,
+        "phase": phase,
+        "missingFiles": missing_files,
+    });
+    let mut line = serde_json::to_string(&entry)
+        .map_err(|e| format!("Failed to serialize log entry: {}", e))?;
+    line.push('\n');
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("Failed to open install log {}: {}", path.display(), e))?;
+    file.write_all(line.as_bytes())
+        .map_err(|e| format!("Failed to write install-log entry: {}", e))?;
+
+    Ok(())
+}
+
+fn format_iso8601_utc(secs: u64, millis: u32) -> String {
+    // Days since 1970-01-01 (UTC). Civil-from-days conversion (Howard Hinnant).
+    const SECS_PER_DAY: u64 = 86_400;
+    let days = (secs / SECS_PER_DAY) as i64;
+    let seconds_in_day = secs % SECS_PER_DAY;
+    let hour = (seconds_in_day / 3600) as u32;
+    let minute = ((seconds_in_day % 3600) / 60) as u32;
+    let second = (seconds_in_day % 60) as u32;
+
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = if month <= 2 { y + 1 } else { y };
+
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        year, month, day, hour, minute, second, millis
+    )
+}
+
 /// Returns true when `path` is a user-provisioned target whose template
 /// sibling (`.example` / `.template` / `.sample`) ships in the bundle.
 /// SKILL.md routinely instructs users to copy the template — flagging the
@@ -1770,5 +1858,114 @@ Run [agent](scripts/agent.py) and read `config.example.json`.
         let payload = list_skill_payload_files(skills_dir, "test-skill".to_string()).unwrap();
         assert_eq!(payload.len(), 1);
         assert_eq!(payload[0].path, "scripts/agent.py");
+    }
+
+    #[test]
+    fn log_skill_install_failure_appends_jsonl_line() {
+        // Critical regression guard for #1917: install/refresh failures must
+        // produce a durable audit line so silent partial-installs are never
+        // invisible. The TS layer calls this after validate_skill_payload
+        // returns missing files; this test pins the on-disk schema.
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("skill-install.log");
+
+        log_skill_install_failure(
+            log_path.to_string_lossy().to_string(),
+            "prophet-arb-bot".to_string(),
+            "install".to_string(),
+            vec![
+                "scripts/agent.py".to_string(),
+                "requirements.txt".to_string(),
+            ],
+        )
+        .unwrap();
+
+        let raw = fs::read_to_string(&log_path).unwrap();
+        let line = raw.trim_end();
+        assert!(!line.is_empty(), "log file should contain one JSONL line");
+
+        let entry: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(entry["slug"], "prophet-arb-bot");
+        assert_eq!(entry["phase"], "install");
+        assert_eq!(
+            entry["missingFiles"],
+            serde_json::json!(["scripts/agent.py", "requirements.txt"])
+        );
+        assert!(
+            entry["timestamp"].as_str().is_some(),
+            "timestamp must be an ISO-8601 string, got {:?}",
+            entry["timestamp"]
+        );
+
+        // Append-only: a second call adds a new line, never truncates.
+        log_skill_install_failure(
+            log_path.to_string_lossy().to_string(),
+            "another-skill".to_string(),
+            "refresh".to_string(),
+            vec!["lib/missing.py".to_string()],
+        )
+        .unwrap();
+
+        let after = fs::read_to_string(&log_path).unwrap();
+        assert_eq!(after.lines().count(), 2);
+    }
+
+    #[test]
+    fn install_skill_writes_sync_state_atomically_with_payload() {
+        // Regression guard for #1917: `.seren-sync.json` must land in the
+        // staging directory before the rename, so a partial install can
+        // never produce an active skill dir with payload files but no
+        // sync manifest (or vice versa). The agent's downstream payload
+        // check relies on the manifest matching the on-disk files.
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+
+        let extra_files = serde_json::json!([
+            { "path": "scripts/agent.py", "content": "print('hi')\n" }
+        ])
+        .to_string();
+        let sync_state = serde_json::json!({
+            "version": 1,
+            "upstreamSource": "seren",
+            "upstreamSourceUrl": "seren-skills:prophet-arb-bot",
+            "syncedAt": 1,
+            "managedFiles": { "SKILL.md": "abc" },
+        })
+        .to_string();
+
+        install_skill(
+            skills_dir.to_string_lossy().to_string(),
+            "prophet-arb-bot".to_string(),
+            "# Prophet Arb Bot\n".to_string(),
+            Some(extra_files),
+            Some(sync_state),
+        )
+        .unwrap();
+
+        let active_dir = skills_dir.join("prophet-arb-bot");
+        assert!(active_dir.join("SKILL.md").exists());
+        assert!(active_dir.join("scripts/agent.py").exists());
+        assert!(
+            active_dir.join(".seren-sync.json").exists(),
+            "sync state must land alongside payload in the activated dir"
+        );
+
+        // And the staging dir must be cleaned up — no stray `*.installing.*`
+        // sibling left behind that could fool a future scan.
+        let leftover_staging: Vec<_> = fs::read_dir(&skills_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".installing.")
+            })
+            .collect();
+        assert!(
+            leftover_staging.is_empty(),
+            "no .installing.* leftovers expected"
+        );
     }
 }

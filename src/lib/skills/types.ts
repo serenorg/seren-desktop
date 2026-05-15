@@ -192,6 +192,17 @@ export interface InstalledSkill extends Skill {
   upstreamSourceUrl?: string;
   /** Persisted sync metadata for upstream-managed files */
   syncState?: SkillSyncState | null;
+  /**
+   * Result of post-install / post-refresh payload validation (#1917).
+   * `'failed'` means SKILL.md references files that are missing from disk
+   * and have no template sibling (`config.example.json`-style). The skill
+   * row is kept in `state.installed` so the user can see it, but slash
+   * commands and system-prompt injection skip it until a successful
+   * refresh moves it back to `'ready'`.
+   */
+  payloadStatus?: "ready" | "failed";
+  /** Files referenced by SKILL.md but missing from disk after install. */
+  missingPayloadFiles?: string[];
 }
 
 /**
