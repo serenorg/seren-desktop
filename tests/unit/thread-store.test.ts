@@ -44,6 +44,8 @@ const mockConversations = {
     isArchived: boolean;
   }>,
   activeConversationId: null as string | null,
+  streamingContent: {} as Record<string, string>,
+  loading: {} as Record<string, boolean>,
 };
 
 vi.mock("@/stores/conversation.store", () => ({
@@ -54,6 +56,10 @@ vi.mock("@/stores/conversation.store", () => ({
     get activeConversationId() {
       return mockConversations.activeConversationId;
     },
+    getStreamingContentFor: (id: string) =>
+      mockConversations.streamingContent[id] ?? "",
+    getLoadingFor: (id: string) =>
+      mockConversations.loading[id] ?? false,
     setActiveConversation: vi.fn((id: string | null) => {
       mockConversations.activeConversationId = id;
     }),
@@ -155,6 +161,8 @@ describe("threadStore", () => {
     // Reset mock state
     mockConversations.conversations = [];
     mockConversations.activeConversationId = null;
+    mockConversations.streamingContent = {};
+    mockConversations.loading = {};
     mockFileTreeState.rootPath = "/Users/dev/project-a";
     Object.keys(mockSessions).forEach((k) => delete mockSessions[k]);
     mockAgentConversations.length = 0;
@@ -262,6 +270,51 @@ describe("threadStore", () => {
       const threads = threadStore.threads;
       expect(threads[0].status).toBe("running");
       expect(threads[0].isLive).toBe(true);
+    });
+
+    // #1915 — Seren chat and Private chat threads must surface the same
+    // green active indicator as agent threads. The sidebar renders the
+    // indicator whenever `thread.status === "running"`, so chat threads
+    // need to map streaming/loading state from conversationStore into
+    // `status` instead of being hardcoded as idle.
+    it("reflects streaming/loading state for chat threads", () => {
+      mockConversations.conversations = [
+        {
+          id: "chat-streaming",
+          title: "Streaming chat",
+          createdAt: 3000,
+          selectedModel: "test",
+          selectedProvider: "seren",
+          projectRoot: null,
+          isArchived: false,
+        },
+        {
+          id: "chat-loading",
+          title: "Private chat waiting for first token",
+          createdAt: 2000,
+          selectedModel: "test",
+          selectedProvider: "seren-private",
+          projectRoot: null,
+          isArchived: false,
+        },
+        {
+          id: "chat-idle",
+          title: "Idle chat",
+          createdAt: 1000,
+          selectedModel: "test",
+          selectedProvider: "seren",
+          projectRoot: null,
+          isArchived: false,
+        },
+      ];
+      mockConversations.streamingContent["chat-streaming"] = "partial tokens";
+      mockConversations.loading["chat-loading"] = true;
+
+      const threads = threadStore.threads;
+      const byId = new Map(threads.map((t) => [t.id, t]));
+      expect(byId.get("chat-streaming")?.status).toBe("running");
+      expect(byId.get("chat-loading")?.status).toBe("running");
+      expect(byId.get("chat-idle")?.status).toBe("idle");
     });
   });
 
