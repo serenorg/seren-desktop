@@ -285,7 +285,11 @@ export async function launchBrowserWithFallback(
 
 // ── State ──────────────────────────────────────────────────────────────────────
 
-let activeBrowserName: string = parseBrowserType(process.env.BROWSER_TYPE);
+// Lazy: eager resolution synchronously walked Playwright's registry at module
+// load, and a slow cold-disk probe could outrun the MCP stdio `initialize`
+// handshake — leaving the prophet-arb-bot Python child stuck on
+// `blocked_auth_unexpected:TimeoutError`. Resolve on first read instead (#1921).
+let activeBrowserName: string | null = null;
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
 let page: Page | null = null;
@@ -294,6 +298,9 @@ let stealthApplied = false;
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 export function getActiveBrowserType(): string {
+  if (activeBrowserName === null) {
+    activeBrowserName = parseBrowserType(process.env.BROWSER_TYPE);
+  }
   return activeBrowserName;
 }
 
@@ -346,7 +353,7 @@ export async function getBrowser(): Promise<Browser> {
 
     try {
       const launched = await launchBrowserWithFallback(
-        activeBrowserName,
+        getActiveBrowserType(),
         installed,
         async (browserName, engine, launchOptions) => {
           if (isChromiumBased(engine) && !stealthApplied) {
@@ -375,7 +382,7 @@ export async function getBrowser(): Promise<Browser> {
 export async function getContext(): Promise<BrowserContext> {
   if (!context) {
     const b = await getBrowser();
-    const engine = resolveBrowserName(activeBrowserName);
+    const engine = resolveBrowserName(getActiveBrowserType());
     context = await b.newContext({
       userAgent: DEFAULT_USER_AGENTS[engine],
       viewport: { width: 1920, height: 1080 },
@@ -391,7 +398,7 @@ export async function getPage(): Promise<Page> {
     const ctx = await getContext();
     page = await ctx.newPage();
 
-    const engine = resolveBrowserName(activeBrowserName);
+    const engine = resolveBrowserName(getActiveBrowserType());
     if (isChromiumBased(engine)) {
       await page.addInitScript(() => {
         Object.defineProperty(navigator, "webdriver", {
