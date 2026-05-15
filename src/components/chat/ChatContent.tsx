@@ -34,6 +34,10 @@ import { createDragDrop } from "@/lib/drag-drop";
 import { openExternalLink } from "@/lib/external-link";
 import { openFileInTab } from "@/lib/files/service";
 import { formatDurationWithVerb } from "@/lib/format-duration";
+import {
+  groupConsecutiveToolCalls,
+  toToolCallEvent,
+} from "@/lib/group-tool-calls";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
 import { isPaymentError } from "@/lib/payment-errors";
 import type { Attachment } from "@/lib/providers/types";
@@ -67,7 +71,6 @@ import {
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
 } from "@/services/organization-policy";
-import type { ToolCallEvent } from "@/services/providers";
 import { skills } from "@/services/skills";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
@@ -77,11 +80,7 @@ import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { workspaceStore } from "@/stores/workspace.store";
-import {
-  isRetryableWorker,
-  type ToolCallData,
-  type UnifiedMessage,
-} from "@/types/conversation";
+import { isRetryableWorker, type UnifiedMessage } from "@/types/conversation";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { CompactedMessage } from "./CompactedMessage";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
@@ -99,79 +98,6 @@ import { ToolCallGroup } from "./ToolCallGroup";
 import { ToolsetSelector } from "./ToolsetSelector";
 import { TransitionAnnouncement } from "./TransitionAnnouncement";
 import "highlight.js/styles/github-dark.css";
-
-/** Map orchestrator ToolCallData to the ToolCallEvent shape ToolCallCard expects. */
-function toToolCallEvent(data: ToolCallData): ToolCallEvent {
-  // Use pre-parsed parameters if available, otherwise parse arguments (backward compat)
-  let params: Record<string, unknown> | undefined = data.parameters;
-  if (!params && data.arguments) {
-    try {
-      params = JSON.parse(data.arguments);
-    } catch {
-      /* non-JSON arguments — skip */
-    }
-  }
-  return {
-    sessionId: "",
-    toolCallId: data.toolCallId,
-    title: data.title || data.name || "Tool",
-    kind: data.kind,
-    status: data.status,
-    parameters: params,
-    result: data.isError ? undefined : data.result,
-    error: data.isError ? data.result : undefined,
-  };
-}
-
-type GroupedMessage =
-  | { type: "single"; message: UnifiedMessage }
-  | {
-      type: "tool_group";
-      /**
-       * Stable identity for this group across regroup remounts (#1748).
-       * Derived from the first tool call's id so per-group UI state
-       * (expand/Tail) survives the rebuild.
-       */
-      id: string;
-      messages: UnifiedMessage[];
-      toolCalls: ToolCallEvent[];
-    };
-
-function flushToolGroup(group: UnifiedMessage[], out: GroupedMessage[]): void {
-  if (group.length === 0) return;
-  if (group.length >= 3) {
-    const toolCalls = group
-      .filter((m) => m.toolCall)
-      .map((m) => toToolCallEvent(m.toolCall as ToolCallData));
-    const id = toolCalls[0]?.toolCallId ?? group[0].id;
-    out.push({ type: "tool_group", id, messages: group, toolCalls });
-  } else {
-    for (const msg of group) {
-      out.push({ type: "single", message: msg });
-    }
-  }
-}
-
-/** Group consecutive tool_call messages into collapsed groups */
-function groupConsecutiveToolCalls(
-  messages: UnifiedMessage[],
-): GroupedMessage[] {
-  const grouped: GroupedMessage[] = [];
-  let currentGroup: UnifiedMessage[] = [];
-
-  for (const message of messages) {
-    if (message.type === "tool_call" && message.toolCall) {
-      currentGroup.push(message);
-    } else {
-      flushToolGroup(currentGroup, grouped);
-      currentGroup = [];
-      grouped.push({ type: "single", message });
-    }
-  }
-  flushToolGroup(currentGroup, grouped);
-
-  return grouped;
-}
 
 // Keywords that trigger publisher suggestions
 const SUGGESTION_KEYWORDS = [
