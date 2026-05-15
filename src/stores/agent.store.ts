@@ -322,6 +322,13 @@ function defaultContextWindowFor(agentType: string, modelId?: string): number {
   return 200_000;
 }
 
+import {
+  type AgentThinkingMarkupParts,
+  type AgentThinkingMarkupStreamState,
+  consumeAgentThinkingMarkupChunk,
+  createAgentThinkingMarkupStreamState,
+  flushAgentThinkingMarkupRemainder,
+} from "@/lib/agent-thinking-markup";
 import { isLikelyAuthError } from "@/lib/auth-errors";
 import { buildChatRequest, sendProviderMessage } from "@/lib/providers";
 import {
@@ -1086,6 +1093,10 @@ const LEGACY_CLAUDE_LOCAL_SESSION_ID_RE = /^session-\d+$/;
 const CHUNK_FLUSH_MS = 50;
 const chunkBufs = new Map<string, { content: string; thinking: string }>();
 const chunkFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const thinkingMarkupStreamStates = new Map<
+  string,
+  AgentThinkingMarkupStreamState
+>();
 
 // Tool event accumulation buffers — plain JS, not reactive.
 // During high-velocity tool-call chains (e.g. Codex doing 20+ sequential
@@ -1100,6 +1111,60 @@ interface PendingToolEvent {
 const toolEventBufs = new Map<string, PendingToolEvent[]>();
 const toolEventFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+function thinkingMarkupStateFor(
+  sessionId: string,
+): AgentThinkingMarkupStreamState {
+  let parserState = thinkingMarkupStreamStates.get(sessionId);
+  if (!parserState) {
+    parserState = createAgentThinkingMarkupStreamState();
+    thinkingMarkupStreamStates.set(sessionId, parserState);
+  }
+  return parserState;
+}
+
+function appendThinkingMarkupParts(
+  sessionId: string,
+  parts: AgentThinkingMarkupParts,
+): void {
+  if (parts.content) {
+    setState(
+      "sessions",
+      sessionId,
+      "streamingContent",
+      (c) => c + parts.content,
+    );
+  }
+  if (parts.thinking) {
+    const session = state.sessions[sessionId];
+    if (session && !session.streamingThinking) {
+      setState(
+        "sessions",
+        sessionId,
+        "streamingThinkingTimestamp",
+        session.streamingThinkingTimestamp ??
+          session.streamingContentTimestamp ??
+          Date.now(),
+      );
+    }
+    setState(
+      "sessions",
+      sessionId,
+      "streamingThinking",
+      (c) => c + parts.thinking,
+    );
+  }
+}
+
+function flushThinkingMarkupStreamState(sessionId: string): void {
+  const parserState = thinkingMarkupStreamStates.get(sessionId);
+  if (!parserState) return;
+  appendThinkingMarkupParts(
+    sessionId,
+    flushAgentThinkingMarkupRemainder(parserState),
+  );
+  thinkingMarkupStreamStates.delete(sessionId);
+}
+
 function flushChunkBuf(sessionId: string): void {
   const timer = chunkFlushTimers.get(sessionId);
   if (timer !== undefined) {
@@ -1109,7 +1174,13 @@ function flushChunkBuf(sessionId: string): void {
   const buf = chunkBufs.get(sessionId);
   if (!buf) return;
   if (buf.content) {
-    setState("sessions", sessionId, "streamingContent", (c) => c + buf.content);
+    appendThinkingMarkupParts(
+      sessionId,
+      consumeAgentThinkingMarkupChunk(
+        thinkingMarkupStateFor(sessionId),
+        buf.content,
+      ),
+    );
     buf.content = "";
   }
   if (buf.thinking) {
@@ -1130,6 +1201,7 @@ function clearChunkBuf(sessionId: string): void {
     chunkFlushTimers.delete(sessionId);
   }
   chunkBufs.delete(sessionId);
+  thinkingMarkupStreamStates.delete(sessionId);
 }
 
 function clearToolEventBuf(sessionId: string): void {
@@ -1156,6 +1228,7 @@ function disposeAgentStoreRuntimeBindings(): void {
   }
   chunkFlushTimers.clear();
   chunkBufs.clear();
+  thinkingMarkupStreamStates.clear();
   for (const timer of toolEventFlushTimers.values()) {
     clearTimeout(timer);
   }
@@ -5737,6 +5810,7 @@ Structured summary:`;
     // Flush buffered chunks before reading streamingContent so tool cards
     // appear in correct chronological order relative to assistant text.
     flushChunkBuf(sessionId);
+    flushThinkingMarkupStreamState(sessionId);
     if (session.streamingThinking) {
       const thinkingMsg: AgentMessage = {
         id: crypto.randomUUID(),
@@ -6060,6 +6134,7 @@ Structured summary:`;
     const isReplay = opts?.isReplay ?? false;
     // Flush any buffered chunks before reading store state
     flushChunkBuf(sessionId);
+    flushThinkingMarkupStreamState(sessionId);
 
     const session = state.sessions[sessionId];
     if (!session) return;

@@ -19,6 +19,7 @@ import { AgentPermissionDialog } from "@/components/agent/AgentPermissionDialog"
 import { DiffProposalDialog } from "@/components/agent/DiffProposalDialog";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
+import { extractAgentThinkingMarkup } from "@/lib/agent-thinking-markup";
 import { isAuthError, isLikelyAuthError } from "@/lib/auth-errors";
 import { collapseBuildOutput } from "@/lib/build-output";
 import {
@@ -225,11 +226,19 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // The worker returns HTML via onmessage → setHtmlCache → reactive DOM update.
   createEffect(() => {
     for (const msg of threadMessages()) {
+      const visibleAssistantContent =
+        msg.type === "assistant"
+          ? extractAgentThinkingMarkup(msg.content).content
+          : "";
       if (
         msg.type === "assistant" &&
+        visibleAssistantContent &&
         untrack(() => htmlCache[msg.id]) === undefined
       ) {
-        markdownWorker.postMessage({ id: msg.id, markdown: msg.content });
+        markdownWorker.postMessage({
+          id: msg.id,
+          markdown: visibleAssistantContent,
+        });
       }
     }
   });
@@ -1221,21 +1230,30 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         );
       }
 
-      case "assistant":
+      case "assistant": {
+        const normalized = extractAgentThinkingMarkup(message.content);
+        const visibleContent = normalized.content;
         return (
           <article class="group/msg relative px-5 py-4 border-b border-surface-2 [contain:layout]">
+            <Show when={normalized.thinking}>
+              <div class={visibleContent ? "mb-3" : ""}>
+                <ThinkingBlock thinking={normalized.thinking} />
+              </div>
+            </Show>
             <Show
               when={isLastMessage && isLikelyAuthError(message.content)}
               fallback={
-                <div
-                  class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-sm [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
-                  innerHTML={collapseBuildOutput(
-                    collapseDirectoryListings(
-                      htmlCache[message.id] ??
-                        escapeHtml(message.content).replace(/\n/g, "<br>"),
-                    ),
-                  )}
-                />
+                <Show when={visibleContent}>
+                  <div
+                    class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-sm [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
+                    innerHTML={collapseBuildOutput(
+                      collapseDirectoryListings(
+                        htmlCache[message.id] ??
+                          escapeHtml(visibleContent).replace(/\n/g, "<br>"),
+                      ),
+                    )}
+                  />
+                </Show>
               }
             >
               <div class="px-3 py-2 border rounded-md text-sm bg-warning/10 border-warning/40 text-warning">
@@ -1300,6 +1318,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             </Show>
           </article>
         );
+      }
 
       case "thought":
         return (
