@@ -23,6 +23,69 @@ fn wrap_for_cmd_slash_s(command: &str) -> String {
     format!("\"{}\"", command)
 }
 
+/// Match the Microsoft Store / WindowsApps `python.exe` stub stderr. The
+/// stub never runs Python — it tells the user to install from the Store
+/// and exits 9009. Detecting it lets us retry with `py -3` (the python.org
+/// launcher) so a skill that says `python foo.py` keeps working without
+/// the user having to disable the App Execution Alias by hand.
+///
+/// Compiled in on Windows (where the retry path uses it) and under `test`
+/// so the matcher is unit-tested on every CI runner.
+#[cfg(any(target_os = "windows", test))]
+fn looks_like_windows_apps_python_stub(stderr: &str) -> bool {
+    stderr.contains("Python was not found") && stderr.contains("Microsoft Store")
+}
+
+/// Rewrite `python` invocations in a shell command to `py -3`, but only
+/// at shell-token boundaries. Returns `None` when there is nothing to
+/// rewrite — callers use that to skip the Windows retry entirely.
+///
+/// Boundary rules: the `python` token must start at end-of-string, after
+/// whitespace, or after one of `& | ; (`. It must end at end-of-string,
+/// before whitespace, or before one of `& | ; )`. That keeps `python3`,
+/// `python.exe`, `/usr/bin/python` (preceded by `/`), and `pythonista`
+/// untouched while still rewriting `python` at the start of a command or
+/// after a shell separator.
+#[cfg(any(target_os = "windows", test))]
+fn translate_python_to_py_launcher(command: &str) -> Option<String> {
+    const NEEDLE: &str = "python";
+
+    fn is_boundary_before(prev: Option<char>) -> bool {
+        match prev {
+            None => true,
+            Some(c) => matches!(c, ' ' | '\t' | '&' | '|' | ';' | '(' | '\n' | '\r'),
+        }
+    }
+
+    fn is_boundary_after(next: Option<char>) -> bool {
+        match next {
+            None => true,
+            Some(c) => matches!(c, ' ' | '\t' | '&' | '|' | ';' | ')' | '\n' | '\r'),
+        }
+    }
+
+    let mut result = String::with_capacity(command.len() + 4);
+    let mut last = 0usize;
+    let mut replaced = false;
+
+    for (idx, _) in command.match_indices(NEEDLE) {
+        let prev = command[..idx].chars().last();
+        let next = command[idx + NEEDLE.len()..].chars().next();
+        if is_boundary_before(prev) && is_boundary_after(next) {
+            result.push_str(&command[last..idx]);
+            result.push_str("py -3");
+            last = idx + NEEDLE.len();
+            replaced = true;
+        }
+    }
+
+    if !replaced {
+        return None;
+    }
+    result.push_str(&command[last..]);
+    Some(result)
+}
+
 #[derive(Debug, Serialize)]
 pub struct CommandResult {
     pub stdout: String,
@@ -86,6 +149,36 @@ async fn execute_shell_command_inner(
     let secs = timeout_secs
         .unwrap_or(DEFAULT_TIMEOUT_SECS)
         .min(MAX_TIMEOUT_SECS);
+
+    let result = spawn_one_shot(&command, secs, seren_api_key).await?;
+
+    // GH #1908: on Windows, when the user has no real Python on PATH but the
+    // App Execution Alias for Python is still enabled, `python …` is routed
+    // to the WindowsApps stub which prints a Microsoft Store prompt and
+    // exits without running Python. The python.org installer registers a
+    // separate `py` launcher that always finds a real interpreter. When we
+    // see both conditions — stub stderr and a rewritable `python` token —
+    // retry once via the launcher.
+    #[cfg(target_os = "windows")]
+    {
+        if looks_like_windows_apps_python_stub(&result.stderr) {
+            if let Some(retry_command) = translate_python_to_py_launcher(&command) {
+                log::info!(
+                    "[Shell] WindowsApps Python stub detected; retrying via `py` launcher"
+                );
+                return spawn_one_shot(&retry_command, secs, seren_api_key).await;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+async fn spawn_one_shot(
+    command: &str,
+    secs: u64,
+    seren_api_key: Option<&str>,
+) -> Result<CommandResult, String> {
     let timeout = Duration::from_secs(secs);
 
     let mut cmd = Command::new(if cfg!(target_os = "windows") {
@@ -105,13 +198,13 @@ async fn execute_shell_command_inner(
             .raw_arg("/D")
             .raw_arg("/S")
             .raw_arg("/C")
-            .raw_arg(wrap_for_cmd_slash_s(&command));
+            .raw_arg(wrap_for_cmd_slash_s(command));
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        cmd.args(["-c", &command]);
+        cmd.args(["-c", command]);
     }
 
     // Prepend embedded runtime to PATH so shell commands can find bundled Node/Git
@@ -421,5 +514,76 @@ mod tests {
             "python3 ./scripts/agent.py",
             None,
         ));
+    }
+
+    /// GH #1908: the matcher must recognise the WindowsApps stub stderr and
+    /// reject ordinary Python stderr. This is the only signal we have to
+    /// trigger the `py -3` retry; a false negative leaves Windows users
+    /// looking at a Microsoft Store prompt, a false positive would silently
+    /// retry a legitimate Python error and confuse the user further.
+    #[test]
+    fn looks_like_windows_apps_python_stub_matches_only_store_stub() {
+        let real_stub = "Python was not found; run without arguments to install \
+                         from the Microsoft Store, or disable this shortcut from \
+                         Settings > Apps > Advanced app settings > App execution \
+                         aliases.";
+        assert!(looks_like_windows_apps_python_stub(real_stub));
+
+        // Real Python tracebacks must not match — they don't carry the
+        // Store anchor, even if the word "Python" shows up.
+        let traceback = "Traceback (most recent call last):\n  File \"a.py\", \
+                        line 1, in <module>\nModuleNotFoundError: No module named 'foo'";
+        assert!(!looks_like_windows_apps_python_stub(traceback));
+
+        // An unrelated "Microsoft Store" string with no Python anchor must
+        // not match either — we require both phrases.
+        assert!(!looks_like_windows_apps_python_stub(
+            "Some other tool referenced the Microsoft Store."
+        ));
+
+        assert!(!looks_like_windows_apps_python_stub(""));
+    }
+
+    /// GH #1908: token-boundary safety. The retry rewrite must replace
+    /// `python` only when it's the actual invocation, and never when it's
+    /// part of a longer word, a versioned binary, a path component, or
+    /// `python3`. Each assertion here corresponds to a real shell pattern
+    /// seen in production skill commands.
+    #[test]
+    fn translate_python_to_py_launcher_respects_token_boundaries() {
+        // Start-of-command and chained command — both must rewrite.
+        assert_eq!(
+            translate_python_to_py_launcher("python scripts/agent.py").as_deref(),
+            Some("py -3 scripts/agent.py")
+        );
+        assert_eq!(
+            translate_python_to_py_launcher(
+                "cd ~/.config/seren/skills/prophet-arb-bot && python scripts/agent.py"
+            )
+            .as_deref(),
+            Some("cd ~/.config/seren/skills/prophet-arb-bot && py -3 scripts/agent.py")
+        );
+
+        // Command-only invocation with no args — boundary at end-of-string.
+        assert_eq!(
+            translate_python_to_py_launcher("python").as_deref(),
+            Some("py -3")
+        );
+
+        // `python3` keeps `python` as a prefix but is not a bare token —
+        // it must not be rewritten because the python.org `py -3` launcher
+        // is for users who only have the Microsoft Store stub installed;
+        // `python3` already resolves to a real interpreter when present.
+        assert!(translate_python_to_py_launcher("python3 scripts/agent.py").is_none());
+
+        // `python.exe`, path-prefixed `python`, and longer words must all
+        // be left alone.
+        assert!(translate_python_to_py_launcher("python.exe scripts/agent.py").is_none());
+        assert!(translate_python_to_py_launcher("/usr/bin/python scripts/agent.py").is_none());
+        assert!(translate_python_to_py_launcher("pythonista --help").is_none());
+
+        // No-python commands return None so the retry path stays inert.
+        assert!(translate_python_to_py_launcher("ls -la").is_none());
+        assert!(translate_python_to_py_launcher("").is_none());
     }
 }
