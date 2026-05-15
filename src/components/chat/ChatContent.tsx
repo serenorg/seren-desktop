@@ -21,6 +21,10 @@ import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { DepositModal } from "@/components/wallet/DepositModal";
 import { isAuthError, isContextOverflowError } from "@/lib/auth-errors";
 import {
+  formatChatHistoryMarkdown,
+  hasExportableMessages,
+} from "@/lib/chat-history-export";
+import {
   getCompletions,
   matchSkillCommand,
   parseCommand,
@@ -1000,20 +1004,12 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
 
   const copyAllChatHistory = async () => {
     const messages = conversationMessages();
-    if (messages.length === 0) {
+    if (!hasExportableMessages(messages)) {
       alert("No chat history to copy");
       return;
     }
 
-    // Format messages as markdown
-    let markdown = "# Chat History\n\n";
-    for (const msg of messages) {
-      if (msg.role === "user") {
-        markdown += `**You:** ${msg.content}\n\n`;
-      } else if (msg.role === "assistant") {
-        markdown += `**Assistant:** ${msg.content}\n\n`;
-      }
-    }
+    const markdown = formatChatHistoryMarkdown(messages);
 
     try {
       await navigator.clipboard.writeText(markdown);
@@ -1029,20 +1025,13 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   const downloadChatHistory = async () => {
     if (isSaving()) return;
     const messages = conversationMessages();
-    if (messages.length === 0) return;
+    if (!hasExportableMessages(messages)) return;
 
-    const dateStr = new Date().toISOString().split("T")[0];
+    const now = new Date();
+    const dateStr = now.toISOString().split("T")[0];
     const title = `Chat History - ${dateStr}`;
 
-    let markdown = "# Chat History\n\n";
-    markdown += `*Exported ${new Date().toLocaleString()}*\n\n---\n\n`;
-    for (const msg of messages) {
-      if (msg.role === "user") {
-        markdown += `**You:** ${msg.content}\n\n`;
-      } else if (msg.role === "assistant") {
-        markdown += `**Assistant:** ${msg.content}\n\n`;
-      }
-    }
+    const markdown = formatChatHistoryMarkdown(messages, { exportedAt: now });
 
     setIsSaving(true);
     try {
