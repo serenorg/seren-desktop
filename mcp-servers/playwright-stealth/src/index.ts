@@ -353,11 +353,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
-  console.error(
-    `[playwright-stealth] Starting with browser: ${getActiveBrowserType()}`,
-  );
+  // Connect stdio first so the MCP `initialize` handshake can resolve before
+  // any browser detection happens. `getActiveBrowserType()` lazily walks
+  // Playwright's registry — a slow probe was timing out the prophet-arb-bot
+  // Python child on cold start (#1921).
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  console.error(
+    `[playwright-stealth] Stdio transport ready; default browser: ${getActiveBrowserType()}`,
+  );
 }
 
 main().catch((error) => {
