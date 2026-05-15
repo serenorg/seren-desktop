@@ -279,19 +279,28 @@ export const threadStore = {
    * from agentStore into a single unified list.
    */
   get threads(): Thread[] {
-    // Chat conversations -> Thread
+    // Chat conversations -> Thread. A chat is "running" while the
+    // orchestrator is waiting on the model (loading[id]) or streaming
+    // tokens back (streamingContent[id] non-empty). The sidebar's green
+    // active dot keys off `status === "running"`, so this is what
+    // surfaces it for Seren chat and Private chat. (#1915)
     const chatThreads: Thread[] = conversationStore.conversations
       .filter((c) => !c.isArchived)
-      .map((c) => ({
-        id: c.id,
-        title: c.title,
-        kind: "chat" as const,
-        status: "idle" as ThreadStatus,
-        projectRoot: c.projectRoot,
-        employeeId: c.employeeId,
-        timestamp: c.createdAt,
-        isLive: false,
-      }));
+      .map((c) => {
+        const isActive =
+          conversationStore.getLoadingFor(c.id) ||
+          conversationStore.getStreamingContentFor(c.id) !== "";
+        return {
+          id: c.id,
+          title: c.title,
+          kind: "chat" as const,
+          status: (isActive ? "running" : "idle") as ThreadStatus,
+          projectRoot: c.projectRoot,
+          employeeId: c.employeeId,
+          timestamp: c.createdAt,
+          isLive: isActive,
+        };
+      });
 
     // Agent conversations -> Thread
     const agentThreads: Thread[] = agentStore.recentAgentConversations
