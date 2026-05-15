@@ -22,7 +22,11 @@ env:
   # Signing availability flags (for conditional steps)
   HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' }}
   # SSL.com eSigner cloud signing for Windows EV code signing
-  HAS_WINDOWS_SIGNING: ${{ secrets.ES_USERNAME != '' }}
+  # TEMPORARY: forced off for v3.36.1 — SSL.com cs.ssl.com scan_code endpoint is
+  # returning HTML, server-side blocks batch_sign even with malware_block: false.
+  # Restore to `${{ secrets.ES_USERNAME != '' }}` once SSL.com fixes the service
+  # (support ticket aeb-1kni2anP).
+  HAS_WINDOWS_SIGNING: 'false'
 
 jobs:
   create-release:
