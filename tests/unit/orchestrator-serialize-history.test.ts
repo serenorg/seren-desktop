@@ -130,4 +130,39 @@ describe("serializeHistory (#1895)", () => {
     const toolReply = serialized.find((m) => m.role === "tool");
     expect(toolReply?.tool_call_id).toBe("tc-complete");
   });
+
+  it("drops orphan tool replies so providers never see function outputs without matching calls", () => {
+    // Reproduces GH #574: a completed prior tool_result can remain in stored
+    // history after its assistant tool_call row was compacted, filtered, or not
+    // serialized. OpenAI-compatible providers reject that as
+    // "No tool call found for function call output with call_id ...".
+    const history: UnifiedMessage[] = [
+      makeMessage({
+        id: "u1",
+        type: "user",
+        role: "user",
+        content: "Run Prophet Arb Bot.",
+      }),
+      makeMessage({
+        id: "a1",
+        type: "assistant",
+        role: "assistant",
+        content: "Checking local paths.",
+      }),
+      makeMessage({
+        id: "orphan-result",
+        type: "tool_result",
+        role: "assistant",
+        content: "false",
+        toolCallId: "toolu_bdrk_01JYn7yvn44yHMH4M7UpUgcw",
+      }),
+    ];
+
+    const serialized = serializeHistory(history);
+
+    expect(serialized.some((m) => m.role === "tool")).toBe(false);
+    expect(
+      serialized.find((m) => m.role === "assistant")?.tool_calls,
+    ).toBeUndefined();
+  });
 });

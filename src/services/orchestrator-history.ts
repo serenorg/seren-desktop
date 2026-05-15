@@ -114,22 +114,26 @@ export function serializeHistory(
     pendingAssistantIdx = m.role === "assistant" ? out.length - 1 : null;
   }
 
-  return dropOrphanToolCalls(out);
+  return dropUnpairedToolMessages(out);
 }
 
 /**
- * Belt-and-braces: if an assistant row ended up with tool_calls but the
- * stream was cut before the corresponding tool_result rows were persisted,
- * strip the orphaned ids so the gateway doesn't reject the payload. Mutates
- * each affected assistant in place rather than copying the full array.
+ * Belt-and-braces: keep only complete assistant tool_call <-> tool reply
+ * pairs. Providers reject either side when its counterpart is missing:
+ * - assistant.tool_calls[] without matching role: "tool" replies
+ * - role: "tool" replies without matching assistant.tool_calls[]
  */
-function dropOrphanToolCalls(out: SerializedMessage[]): SerializedMessage[] {
+function dropUnpairedToolMessages(
+  out: SerializedMessage[],
+): SerializedMessage[] {
   const seenToolReplyIds = new Set<string>();
   for (const msg of out) {
     if (msg.role === "tool" && typeof msg.tool_call_id === "string") {
       seenToolReplyIds.add(msg.tool_call_id);
     }
   }
+
+  const keptToolCallIds = new Set<string>();
   for (const msg of out) {
     if (msg.role !== "assistant" || !msg.tool_calls) continue;
     const kept = msg.tool_calls.filter((tc) => seenToolReplyIds.has(tc.id));
@@ -137,7 +141,17 @@ function dropOrphanToolCalls(out: SerializedMessage[]): SerializedMessage[] {
       delete msg.tool_calls;
     } else {
       msg.tool_calls = kept;
+      for (const tc of kept) {
+        keptToolCallIds.add(tc.id);
+      }
     }
   }
-  return out;
+
+  return out.filter((msg) => {
+    if (msg.role !== "tool") return true;
+    return (
+      typeof msg.tool_call_id === "string" &&
+      keptToolCallIds.has(msg.tool_call_id)
+    );
+  });
 }
