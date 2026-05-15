@@ -595,7 +595,7 @@ jobs:
           dir_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis
           output_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis-signed
           environment_name: PROD
-          malware_block: false
+          malware_block: true
 
       # Copy signed files back to original location
       - name: Copy signed NSIS installer
