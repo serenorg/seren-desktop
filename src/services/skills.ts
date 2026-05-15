@@ -525,6 +525,98 @@ async function fetchRemoteSkillRevision(
   return remoteRevisionFromBundle(await downloadSkillBundle(slug));
 }
 
+/**
+ * Validate post-install/post-refresh payload files. If any are missing,
+ * (a) append a durable line to the per-scope install log so the failure
+ * survives an app restart, and (b) attempt one silent retry via the
+ * supplied closure (typically a re-fetch + reinstall). Returns the final
+ * status the caller should stamp on the InstalledSkill.
+ *
+ * Issue serenorg/seren-desktop#1917 — closes the race where a partial
+ * install would still get its SKILL.md injected into the agent's system
+ * prompt, causing the agent to scaffold from scratch over an empty dir.
+ */
+async function validateAndRetryInstall(args: {
+  skillsDir: string;
+  slug: string;
+  phase: "install" | "refresh";
+  retry: (() => Promise<boolean | null>) | null;
+}): Promise<{ status: "ready" | "failed"; missingFiles: string[] }> {
+  const { skillsDir, slug, phase, retry } = args;
+  const installLogPath = `${skillsDir.replace(/[/\\]+$/, "")}/.install-log.jsonl`;
+
+  const missing = await validatePayloadSafe(skillsDir, slug);
+  if (missing.length === 0) {
+    return { status: "ready", missingFiles: [] };
+  }
+
+  log.warn(
+    `[Skills] Payload validation failed after ${phase} of ${slug} — missing:`,
+    missing,
+  );
+  await logInstallFailure(installLogPath, slug, phase, missing);
+
+  if (retry) {
+    try {
+      const retried = await retry();
+      if (retried) {
+        const afterRetry = await validatePayloadSafe(skillsDir, slug);
+        if (afterRetry.length === 0) {
+          log.info(`[Skills] Auto-retry recovered ${slug} after ${phase}`);
+          return { status: "ready", missingFiles: [] };
+        }
+        log.warn(
+          `[Skills] Auto-retry of ${slug} (${phase}) still missing:`,
+          afterRetry,
+        );
+        await logInstallFailure(installLogPath, slug, phase, afterRetry);
+        return { status: "failed", missingFiles: afterRetry };
+      }
+    } catch (error) {
+      log.warn(`[Skills] Auto-retry of ${slug} (${phase}) threw:`, error);
+    }
+  }
+
+  return { status: "failed", missingFiles: missing };
+}
+
+async function validatePayloadSafe(
+  skillsDir: string,
+  slug: string,
+): Promise<string[]> {
+  if (!isTauriRuntime()) return [];
+  try {
+    return await invoke<string[]>("validate_skill_payload", {
+      skillsDir,
+      slug,
+    });
+  } catch (error) {
+    log.warn("[Skills] validate_skill_payload threw:", error);
+    return [];
+  }
+}
+
+async function logInstallFailure(
+  logPath: string,
+  slug: string,
+  phase: "install" | "refresh",
+  missingFiles: string[],
+): Promise<void> {
+  if (!isTauriRuntime()) return;
+  try {
+    await invoke("log_skill_install_failure", {
+      logPath,
+      slug,
+      phase,
+      missingFiles,
+    });
+  } catch (error) {
+    // Logging failure must never bubble — it would mask the real install
+    // error we are trying to record.
+    log.warn("[Skills] log_skill_install_failure threw:", error);
+  }
+}
+
 async function fetchUpstreamSkillBundle(skill: {
   sourceUrl?: string;
   slug?: string;
@@ -1083,26 +1175,33 @@ export const skills = {
 
     log.info("[Skills] Installed skill:", skill.slug, "to", scope, "scope");
 
-    // Validate payload after install
-    try {
-      const missingFiles = await invoke<string[]>("validate_skill_payload", {
-        skillsDir,
-        slug: skill.slug,
-      });
-      if (missingFiles.length > 0) {
-        // These are user-provisioned files (requirements.txt, config.json, etc.)
-        // referenced in the SKILL.md but not included in the marketplace payload.
-        // Demote to debug — absence is expected and not an install failure.
-        log.debug(
-          "[Skills] Skill",
-          skill.slug,
-          "references files not present in payload (user must provision):",
-          missingFiles,
-        );
-      }
-    } catch (error) {
-      log.warn("[Skills] Payload validation failed:", error);
-    }
+    // Validate payload after install (#1917). If files are missing on disk
+    // we attempt one silent retry by re-fetching the upstream bundle, then
+    // mark payloadStatus so slash-command + system-prompt callers can skip
+    // the skill until a refresh succeeds.
+    const validation = await validateAndRetryInstall({
+      skillsDir,
+      slug: skill.slug,
+      phase: "install",
+      retry:
+        skill.source === "seren" && skill.sourceUrl
+          ? async () => {
+              const bundle = await fetchUpstreamSkillBundle(skill);
+              if (!bundle) return null;
+              await invoke<string>("install_skill", {
+                skillsDir,
+                slug: skill.slug,
+                content: bundle.skillMd,
+                extraFiles:
+                  bundle.payloadFiles.length > 0
+                    ? JSON.stringify(bundle.payloadFiles)
+                    : null,
+                syncStateJson: syncState ? JSON.stringify(syncState) : null,
+              });
+              return true;
+            }
+          : null,
+    });
 
     return {
       ...skill,
@@ -1118,6 +1217,11 @@ export const skills = {
       upstreamSource: syncState?.upstreamSource,
       upstreamSourceUrl: syncState?.upstreamSourceUrl ?? skill.sourceUrl,
       syncState,
+      payloadStatus: validation.status,
+      missingPayloadFiles:
+        validation.missingFiles.length > 0
+          ? validation.missingFiles
+          : undefined,
       // Override with parsed metadata in case it differs
       name: resolveSkillDisplayName(parsed, skill.slug),
       displayName: parsed.metadata.displayName,
@@ -1364,6 +1468,25 @@ export const skills = {
       syncStateJson: JSON.stringify(syncState),
     });
 
+    const validation = await validateAndRetryInstall({
+      skillsDir: skill.skillsDir,
+      slug: skill.dirName,
+      phase: "refresh",
+      // Refresh already pulled the freshest bundle. A second fetch is unlikely
+      // to recover from a write failure on this machine, so retry with the
+      // same in-memory bundle to ride out a transient fs hiccup.
+      retry: async () => {
+        await invoke<string>("install_skill", {
+          skillsDir: skill.skillsDir,
+          slug: skill.dirName,
+          content: bundle.skillMd,
+          extraFiles: JSON.stringify(bundle.payloadFiles),
+          syncStateJson: JSON.stringify(syncState),
+        });
+        return true;
+      },
+    });
+
     const hash = await computeContentHash(bundle.skillMd);
     const parsed = parseSkillMd(bundle.skillMd);
     const refreshed: InstalledSkill = {
@@ -1375,6 +1498,11 @@ export const skills = {
       upstreamSource: syncState.upstreamSource,
       upstreamSourceUrl: syncState.upstreamSourceUrl,
       syncState,
+      payloadStatus: validation.status,
+      missingPayloadFiles:
+        validation.missingFiles.length > 0
+          ? validation.missingFiles
+          : undefined,
     };
 
     return {

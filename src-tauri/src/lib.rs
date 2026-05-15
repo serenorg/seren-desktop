@@ -860,6 +860,7 @@ pub fn run() {
             skills::list_skill_dirs,
             skills::install_skill,
             skills::validate_skill_payload,
+            skills::log_skill_install_failure,
             skills::rename_skill_dir,
             skills::remove_skill,
             skills::read_skill_content,

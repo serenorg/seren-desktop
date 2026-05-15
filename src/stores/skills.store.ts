@@ -518,17 +518,23 @@ export const skillsStore = {
     // including "seren-desktop" is never resolved, even if a stale
     // project config or cached ref still points at it.
     // Spec: serenorg/seren-desktop#1496
+    // Also fail-closed on payload validation (#1917): a skill whose
+    // referenced files didn't make it onto disk must never reach the
+    // agent's system prompt — otherwise the agent ls's the empty
+    // runtime directory and tries to scaffold from scratch.
     if (Array.isArray(refs)) {
-      return this.resolveRefs(refs).filter((skill) =>
-        isSkillCompatibleWithHost(skill),
+      return this.resolveRefs(refs).filter(
+        (skill) =>
+          isSkillCompatibleWithHost(skill) && skill.payloadStatus !== "failed",
       );
     }
 
     // No override yet — fall back to project/global defaults so existing
     // threads don't lose their skills on upgrade. New threads get an
     // explicit empty override when the user first toggles a skill.
-    return this.getProjectSkills(projectRoot).filter((skill) =>
-      isSkillCompatibleWithHost(skill),
+    return this.getProjectSkills(projectRoot).filter(
+      (skill) =>
+        isSkillCompatibleWithHost(skill) && skill.payloadStatus !== "failed",
     );
   },
 
