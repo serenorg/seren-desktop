@@ -328,5 +328,66 @@ describe("conversationStore", () => {
       expect(msgs[0].modelId).toBe("gemini-2.5-flash");
       expect(msgs[0].taskType).toBe("code_generation");
     });
+
+    it("restores tool_call and tool_result types from persisted metadata", async () => {
+      const bridge = await import("@/lib/tauri-bridge");
+      vi.mocked(bridge.getConversations).mockResolvedValueOnce([
+        {
+          id: "conv-tools",
+          title: "Tool Chat",
+          created_at: 1000,
+          selected_model: null,
+          selected_provider: null,
+          project_root: null,
+          is_archived: false,
+          employee_id: null,
+        },
+      ]);
+      vi.mocked(bridge.getMessages).mockResolvedValueOnce([
+        {
+          id: "msg-call",
+          conversation_id: "conv-tools",
+          role: "assistant",
+          content: "",
+          model: null,
+          timestamp: 3000,
+          metadata: JSON.stringify({
+            v: 1,
+            message_type: "tool_call",
+            worker_type: "orchestrator",
+            tool_call: {
+              id: "tc-99",
+              name: "list_projects",
+              arguments: "{}",
+            },
+          }),
+        },
+        {
+          id: "msg-result",
+          conversation_id: "conv-tools",
+          role: "assistant",
+          content: '{"name":"gitignore","is_directory":false}',
+          model: null,
+          timestamp: 3001,
+          metadata: JSON.stringify({
+            v: 1,
+            message_type: "tool_result",
+            worker_type: "orchestrator",
+            tool_call: {
+              id: "tc-99",
+              name: "list_projects",
+            },
+          }),
+        },
+      ]);
+
+      await conversationStore.loadHistory();
+
+      const msgs = conversationStore.getMessagesFor("conv-tools");
+      expect(msgs).toHaveLength(2);
+      expect(msgs[0].type).toBe("tool_call");
+      expect(msgs[0].toolCall?.toolCallId).toBe("tc-99");
+      expect(msgs[1].type).toBe("tool_result");
+    });
   });
 });

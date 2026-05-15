@@ -463,11 +463,13 @@ export const conversationStore = {
             const metaFields = deserializeMetadata(m.metadata);
             return {
               id: m.id,
-              type: (metaFields.workerType
-                ? "assistant"
-                : m.role === "user"
-                  ? "user"
-                  : "assistant") as UnifiedMessage["type"],
+              type: (metaFields.type
+                ? metaFields.type
+                : metaFields.workerType
+                  ? "assistant"
+                  : m.role === "user"
+                    ? "user"
+                    : "assistant") as UnifiedMessage["type"],
               role: m.role as UnifiedMessage["role"],
               content: m.content,
               timestamp: m.timestamp,
