@@ -44,6 +44,7 @@ This MCP server is automatically configured in Seren Desktop. It provides the sa
 - `playwright_reset` - Reset page
 - `playwright_list_browsers` - List all installed browsers available for automation
 - `playwright_set_browser` - Switch to a different installed browser at runtime
+- `playwright_get_cookie` - Read a cookie value (including HttpOnly cookies) from the active page's origin
 
 ## Browser Configuration
 

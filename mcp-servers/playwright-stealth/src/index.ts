@@ -221,6 +221,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["browser"],
         },
       },
+      {
+        name: "playwright_get_cookie",
+        description:
+          "Read a cookie value from the current browser context. Works for HttpOnly cookies, which document.cookie / playwright_evaluate cannot see. Returns { value: string | null } — null if no cookie with that name exists for the active page's origin.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "Cookie name to read.",
+            },
+          },
+          required: ["name"],
+        },
+      },
     ],
   };
 });
@@ -288,6 +303,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "playwright_list_browsers":
         result = tools.listBrowsers();
+        break;
+      case "playwright_get_cookie":
+        result = await tools.getCookie(args.name as string);
         break;
       case "playwright_set_browser": {
         const browserArg =
