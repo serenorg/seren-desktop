@@ -113,6 +113,7 @@ export interface ChatContextData {
 /** Versioned metadata blob stored in the database `metadata` TEXT column. */
 export interface MessageMetadata {
   v: 1;
+  message_type?: MessageType | null;
   worker_type?: WorkerType | null;
   model_id?: string | null;
   task_type?: string | null;
@@ -130,9 +131,27 @@ export interface MessageMetadata {
   } | null;
 }
 
+/**
+ * Message types that need a persisted discriminator. Plain user/assistant
+ * messages don't — `role` is authoritative for those. Without this, loading
+ * a tool_call/tool_result back from the database collapses it to a generic
+ * assistant bubble and renders the raw JSON content as markdown.
+ */
+const PERSISTED_DISCRIMINATOR_TYPES: ReadonlySet<MessageType> = new Set([
+  "tool_call",
+  "tool_result",
+  "diff",
+  "thought",
+  "transition",
+  "reroute",
+  "error",
+]);
+
 /** Serialize orchestrator fields from a UnifiedMessage into a metadata JSON string. */
 export function serializeMetadata(msg: UnifiedMessage): string | null {
+  const needsTypeDiscriminator = PERSISTED_DISCRIMINATOR_TYPES.has(msg.type);
   if (
+    !needsTypeDiscriminator &&
     !msg.workerType &&
     !msg.modelId &&
     !msg.taskType &&
@@ -145,6 +164,7 @@ export function serializeMetadata(msg: UnifiedMessage): string | null {
   }
   const meta: MessageMetadata = {
     v: 1,
+    message_type: needsTypeDiscriminator ? msg.type : null,
     worker_type: msg.workerType ?? null,
     model_id: msg.modelId ?? null,
     task_type: msg.taskType ?? null,
@@ -181,6 +201,12 @@ export function deserializeMetadata(
       return {};
     }
     const result: Partial<UnifiedMessage> = {};
+    if (
+      typeof meta.message_type === "string" &&
+      PERSISTED_DISCRIMINATOR_TYPES.has(meta.message_type as MessageType)
+    ) {
+      result.type = meta.message_type as MessageType;
+    }
     if (typeof meta.worker_type === "string") {
       result.workerType = meta.worker_type as WorkerType;
     }
