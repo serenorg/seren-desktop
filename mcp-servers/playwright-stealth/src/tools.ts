@@ -40,6 +40,18 @@ export async function evaluate(script: string): Promise<unknown> {
   return await page.evaluate(script);
 }
 
+// page.context().cookies() reads from the BrowserContext server-side, so
+// HttpOnly cookies are visible — unlike document.cookie / page.evaluate
+// which only see JS-readable cookies.
+export async function getCookie(
+  name: string,
+): Promise<{ value: string | null }> {
+  const page = await getPage();
+  const cookies = await page.context().cookies(page.url());
+  const match = cookies.find((c) => c.name === name);
+  return { value: match ? match.value : null };
+}
+
 export async function extractContent(selector?: string): Promise<string> {
   const page = await getPage();
   if (selector) {
