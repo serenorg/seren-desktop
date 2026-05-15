@@ -704,25 +704,18 @@ created if missing.",
                     .unwrap_or("")
                     .to_string();
 
-                // Store raw chunk for accumulation in stream_response
+                // Accumulate raw chunks for stream_response to flush at stream end.
+                // We deliberately do not emit a WorkerEvent::ToolCall per chunk:
+                // OpenAI-style streaming splits `function.arguments` into
+                // partial JSON fragments, and the frontend cannot JSON.parse
+                // a fragment. The completed call is flushed by
+                // emit_accumulated_tool_calls once the stream finishes.
                 result.tool_call_chunks.push(ToolCallChunk {
                     index,
-                    id: id.clone(),
-                    name: name.clone(),
-                    arguments: arguments.clone(),
+                    id,
+                    name,
+                    arguments,
                 });
-
-                // Emit ToolCall event for frontend display (first chunk with id+name)
-                let id_str = id.unwrap_or_default();
-                let name_str = name.unwrap_or_default();
-                if !id_str.is_empty() && !name_str.is_empty() {
-                    result.events.push(WorkerEvent::ToolCall {
-                        tool_call_id: id_str,
-                        name: name_str.clone(),
-                        arguments,
-                        title: name_str,
-                    });
-                }
             }
         }
 
@@ -744,6 +737,35 @@ created if missing.",
         }
 
         result
+    }
+
+    /// Flush one WorkerEvent::ToolCall per accumulated tool call with the
+    /// fully concatenated arguments. Called once per stream after the SSE
+    /// loop finishes so the frontend sees a single, JSON-parseable arguments
+    /// payload — never a partial fragment.
+    async fn emit_accumulated_tool_calls(
+        pending: &HashMap<usize, AccumulatedToolCall>,
+        event_tx: &mpsc::Sender<WorkerEvent>,
+    ) -> Result<(), String> {
+        let mut sorted: Vec<(&usize, &AccumulatedToolCall)> = pending.iter().collect();
+        sorted.sort_by_key(|(idx, _)| **idx);
+        for (_idx, tc) in sorted {
+            if tc.id.is_empty() || tc.name.is_empty() {
+                // Defensive: an id/name-less entry can't be addressed by
+                // the frontend store and would never receive a ToolResult.
+                continue;
+            }
+            event_tx
+                .send(WorkerEvent::ToolCall {
+                    tool_call_id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    arguments: tc.arguments.clone(),
+                    title: tc.name.clone(),
+                })
+                .await
+                .map_err(|e| format!("Failed to send tool call event: {}", e))?;
+        }
+        Ok(())
     }
 
     /// Build a StreamOutcome from accumulated state.
@@ -825,7 +847,9 @@ created if missing.",
             *last_finish_reason = Some(reason.clone());
         }
 
-        // Forward events (Content, Thinking, ToolCall) to frontend
+        // Forward per-chunk events (Content, Thinking, Error) to the
+        // frontend. ToolCall events are deferred to stream end — see
+        // emit_accumulated_tool_calls.
         for event in &result.events {
             match event {
                 WorkerEvent::Content { text } => {
@@ -865,6 +889,7 @@ created if missing.",
         while let Some(chunk_result) = stream.next().await {
             // Check cancellation
             if *self.cancelled.lock().await {
+                Self::emit_accumulated_tool_calls(&pending_tool_calls, event_tx).await?;
                 return Ok(Self::build_stream_outcome(
                     &last_finish_reason,
                     pending_tool_calls,
@@ -928,6 +953,7 @@ created if missing.",
                         last_finish_reason,
                         pending_tool_calls.len()
                     );
+                    Self::emit_accumulated_tool_calls(&pending_tool_calls, event_tx).await?;
                     return Ok(Self::build_stream_outcome(
                         &last_finish_reason,
                         pending_tool_calls,
@@ -1069,6 +1095,7 @@ created if missing.",
             }
         }
 
+        Self::emit_accumulated_tool_calls(&pending_tool_calls, event_tx).await?;
         Ok(Self::build_stream_outcome(
             &last_finish_reason,
             pending_tool_calls,
@@ -2038,24 +2065,17 @@ mod tests {
 
     #[test]
     fn parses_tool_call_sse_data() {
+        // Per-chunk parsing collects raw deltas but does not emit a ToolCall
+        // event yet: the first chunk's `arguments` is typically empty or a
+        // partial JSON fragment, and the frontend cannot JSON.parse a
+        // fragment. The completed-call event is emitted at stream end —
+        // see streaming_tool_call_emits_full_arguments_at_stream_end.
         let data = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_1","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"news\"}"}}]},"finish_reason":null}]}"#;
         let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
-            WorkerEvent::ToolCall {
-                tool_call_id,
-                name,
-                arguments,
-                title,
-            } => {
-                assert_eq!(tool_call_id, "tc_1");
-                assert_eq!(name, "web_search");
-                assert!(arguments.contains("news"));
-                assert_eq!(title, "web_search");
-            }
-            _ => panic!("Expected ToolCall event"),
-        }
-        // Also check tool_call_chunks
+        assert!(
+            result.events.is_empty(),
+            "parse_sse_data must not emit a ToolCall on a chunk — args may be partial"
+        );
         assert_eq!(result.tool_call_chunks.len(), 1);
         assert_eq!(result.tool_call_chunks[0].index, 0);
         assert_eq!(result.tool_call_chunks[0].id, Some("tc_1".to_string()));
@@ -2067,15 +2087,15 @@ mod tests {
 
     #[test]
     fn accumulates_tool_call_argument_chunks() {
-        // First chunk: has id and name, partial arguments
+        // First chunk: has id and name, partial arguments.
         let data1 = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_1","type":"function","function":{"name":"write_file","arguments":"{\"path"}}]},"finish_reason":null}]}"#;
         let result1 = ChatModelWorker::parse_sse_data(data1);
         assert_eq!(result1.tool_call_chunks.len(), 1);
         assert_eq!(result1.tool_call_chunks[0].arguments, "{\"path");
-        // First chunk emits a ToolCall event (has id+name)
-        assert_eq!(result1.events.len(), 1);
+        // Chunks never emit per-delta ToolCall events — args may be partial.
+        assert!(result1.events.is_empty());
 
-        // Continuation chunk: only arguments, no id/name
+        // Continuation chunk: only arguments, no id/name.
         let data2 = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":\"/tmp/test.txt\""}}]},"finish_reason":null}]}"#;
         let result2 = ChatModelWorker::parse_sse_data(data2);
         assert_eq!(result2.tool_call_chunks.len(), 1);
@@ -2085,8 +2105,89 @@ mod tests {
         );
         assert_eq!(result2.tool_call_chunks[0].id, None);
         assert_eq!(result2.tool_call_chunks[0].name, None);
-        // Continuation chunk should NOT emit a ToolCall event
         assert!(result2.events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn streaming_tool_call_emits_full_arguments_at_stream_end() {
+        // Regression guard for serenorg/seren-desktop#1905: OpenAI-style
+        // streaming splits `tool_calls.function.arguments` across many SSE
+        // deltas. The first delta typically carries `id`+`name`+empty
+        // arguments; later deltas append the JSON fragment piecewise. The
+        // frontend's ToolCallCard JSON.parses `arguments` once, so the
+        // single ToolCall event we emit must carry the FULLY accumulated
+        // arguments — not the first-chunk fragment.
+        let chunks = [
+            // chunk 1: id + name + empty args (Anthropic-via-OpenRouter pattern)
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_abc","type":"function","function":{"name":"execute_command","arguments":""}}]},"finish_reason":null}]}"#,
+            // chunk 2: opening brace + partial command
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"command\":\""}}]},"finish_reason":null}]}"#,
+            // chunk 3: rest of command + closing brace
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ls /tmp\"}"}}]},"finish_reason":null}]}"#,
+            // chunk 4: finish_reason
+            r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+        ];
+
+        let (tx, mut rx) = mpsc::channel::<WorkerEvent>(32);
+        let mut pending: HashMap<usize, AccumulatedToolCall> = HashMap::new();
+        let mut content = String::new();
+        let mut thinking = String::new();
+        let mut cost: f64 = 0.0;
+        let mut finish_reason: Option<String> = None;
+
+        for chunk in &chunks {
+            let result = ChatModelWorker::parse_sse_data(chunk);
+            ChatModelWorker::process_parse_result(
+                &result,
+                &mut pending,
+                &mut content,
+                &mut thinking,
+                &mut cost,
+                &mut finish_reason,
+                &tx,
+            )
+            .await
+            .unwrap();
+        }
+
+        // Match the stream-end emission in stream_response: the worker must
+        // flush a single ToolCall event per accumulated tool call once the
+        // stream finishes.
+        ChatModelWorker::emit_accumulated_tool_calls(&pending, &tx)
+            .await
+            .unwrap();
+        drop(tx);
+
+        let mut tool_calls = Vec::new();
+        while let Some(event) = rx.recv().await {
+            if let WorkerEvent::ToolCall {
+                tool_call_id,
+                name,
+                arguments,
+                title,
+            } = event
+            {
+                tool_calls.push((tool_call_id, name, arguments, title));
+            }
+        }
+
+        assert_eq!(
+            tool_calls.len(),
+            1,
+            "exactly one ToolCall event must reach the frontend per tool call"
+        );
+        let (id, name, args, title) = &tool_calls[0];
+        assert_eq!(id, "tc_abc");
+        assert_eq!(name, "execute_command");
+        assert_eq!(title, "execute_command");
+        assert_eq!(
+            args, r#"{"command":"ls /tmp"}"#,
+            "emitted arguments must be the fully concatenated JSON, not the first-chunk fragment"
+        );
+        // Sanity: the JSON must parse — that is what the frontend does.
+        let parsed: serde_json::Value =
+            serde_json::from_str(args).expect("emitted arguments must be valid JSON");
+        assert_eq!(parsed["command"], "ls /tmp");
     }
 
     #[test]
