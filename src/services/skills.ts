@@ -1402,13 +1402,19 @@ export const skills = {
       const content = await this.readContent(skill);
       if (content) {
         const parsed = parseSkillMd(content);
-        const runtimeDir = `${skill.skillsDir}/${skill.dirName}`;
+        const isWindowsRuntime =
+          skill.skillsDir.includes("\\") || /^[A-Za-z]:/.test(skill.skillsDir);
+        const sep = isWindowsRuntime ? "\\" : "/";
+        const runtimeDir = `${skill.skillsDir}${sep}${skill.dirName}`;
         const hasIncludes =
           parsed.metadata.includes && parsed.metadata.includes.length > 0;
         const depsNote = hasIncludes
-          ? `\n> **Shared dependencies:** \`${runtimeDir}/_deps/\` contains shared files from declared \`includes\` paths.\n`
+          ? `\n> **Shared dependencies:** \`${runtimeDir}${sep}_deps${sep}\` contains shared files from declared \`includes\` paths.\n`
           : "";
-        const runtimeNote = `> **Skill runtime directory:** \`${runtimeDir}\`\n> Use this absolute path to reference skill files. Do not create local copies or fallback scaffolds.${depsNote}\n\n`;
+        const platformNote = isWindowsRuntime
+          ? `\n> **Platform:** Windows. Skill docs commonly use Unix conventions (\`python3\`, \`~/.config/seren/skills/<name>\`, forward-slash paths). On this machine, translate before running:\n> - Use \`python\` (or \`py\`) instead of \`python3\`.\n> - Replace any \`~/.config/seren/skills/<name>\` reference with the absolute runtime directory above.\n> - Use backslashes inside paths.\n> Always \`cd\` into the absolute runtime directory above before invoking skill scripts.`
+          : "";
+        const runtimeNote = `> **Skill runtime directory:** \`${runtimeDir}\`\n> Use this absolute path to reference skill files. Do not create local copies or fallback scaffolds.${platformNote}${depsNote}\n\n`;
         contents.push(
           `## Skill: ${skill.name}\n\n${runtimeNote}${parsed.content}`,
         );
