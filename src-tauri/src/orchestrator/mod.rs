@@ -12,6 +12,7 @@ pub mod provider_worker;
 pub mod rlm;
 pub mod router;
 pub mod service;
+pub mod subtask_context;
 pub mod tool_bridge;
 pub mod tool_relevance;
 pub mod trust;

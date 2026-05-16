@@ -70,24 +70,85 @@ pub fn decompose(
 // Numbered List Detection
 // =============================================================================
 
+/// Maximum number of numbered items that may be split into separate subtasks.
+/// Lists longer than this are almost always narrative or an Objective block
+/// shipped alongside surrounding prose; decomposing them shreds intent.
+const MAX_NUMBERED_LIST_ITEMS: usize = 4;
+
+/// Maximum number of non-numbered non-empty lines tolerated as preamble before
+/// the first numbered item. Anything beyond this means the list is embedded in
+/// prose, not the entire instruction.
+const MAX_NUMBERED_LIST_PREAMBLE_LINES: usize = 2;
+
+/// Pronoun-style references that signal an item depends on surrounding prose.
+const NUMBERED_LIST_PRONOUNS: &[&str] = &[
+    "it",
+    "its",
+    "they",
+    "them",
+    "their",
+    "this",
+    "that",
+    "these",
+    "those",
+    "above",
+    "below",
+];
+
 /// Detect numbered list items (e.g. "1. Do X\n2. Do Y\n3. Do Z").
 ///
 /// Each numbered item becomes a sequential sub-task depending on the previous one.
+///
+/// To prevent prose containing a numbered block from being shredded into N
+/// independent subtasks (see GH #1930), the list must structurally dominate the
+/// prompt:
+///   - 2-4 numbered items (lists longer than this are narrative, not actions).
+///   - At most a short preamble heading before the first item.
+///   - No trailing prose after the last item.
+///   - Each item must be verb-initial (an actionable imperative).
+///   - No item may reference surrounding context via pronouns ("it", "above").
 fn try_numbered_list(prompt: &str, skills: &[SkillRef]) -> Option<Vec<SubTask>> {
     let mut items: Vec<String> = Vec::new();
+    let mut preamble_lines: usize = 0;
+    let mut trailing_prose_lines: usize = 0;
+    let mut last_item_index: Option<usize> = None;
 
-    for line in prompt.lines() {
+    let lines: Vec<&str> = prompt.lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
         // Match patterns: "1. ", "1) ", "2. ", etc.
         if let Some(rest) = strip_numbered_prefix(trimmed) {
             let rest = rest.trim();
             if !rest.is_empty() {
                 items.push(rest.to_string());
+                last_item_index = Some(idx);
             }
+        } else if last_item_index.is_none() {
+            preamble_lines += 1;
+        } else {
+            trailing_prose_lines += 1;
         }
     }
 
-    if items.len() < 2 {
+    if items.len() < 2 || items.len() > MAX_NUMBERED_LIST_ITEMS {
+        return None;
+    }
+
+    if preamble_lines > MAX_NUMBERED_LIST_PREAMBLE_LINES {
+        return None;
+    }
+
+    if trailing_prose_lines > 0 {
+        return None;
+    }
+
+    if items
+        .iter()
+        .any(|item| !is_actionable_imperative(item) || contains_pronoun_reference(item))
+    {
         return None;
     }
 
@@ -111,6 +172,22 @@ fn try_numbered_list(prompt: &str, skills: &[SkillRef]) -> Option<Vec<SubTask>> 
     }
 
     Some(subtasks)
+}
+
+/// An item is actionable iff it starts with one of the verbs recognised as a
+/// clause starter elsewhere in this module. Narrative items ("The audit
+/// results show…") fail this gate.
+fn is_actionable_imperative(item: &str) -> bool {
+    looks_like_clause(item)
+}
+
+/// Returns true if the item contains a free-standing pronoun-style reference,
+/// implying it depends on context from surrounding prose (`it`, `above`, …).
+fn contains_pronoun_reference(item: &str) -> bool {
+    let lower = item.to_lowercase();
+    lower.split(|c: char| !c.is_alphanumeric()).any(|token| {
+        !token.is_empty() && NUMBERED_LIST_PRONOUNS.contains(&token)
+    })
 }
 
 /// Strip a numbered prefix like "1. ", "2) ", "10. " from a string.
@@ -766,6 +843,100 @@ mod tests {
         assert_eq!(result.len(), 2);
         // Second task should depend on first (sequential, not parallel)
         assert_eq!(result[1].depends_on, vec![result[0].id.clone()]);
+    }
+
+    // =========================================================================
+    // GH #1930 — Numbered-list shredding regression
+    // =========================================================================
+
+    #[test]
+    fn numbered_list_embedded_in_prose_does_not_split() {
+        // Prose containing an Objective block must stay one task. Before the
+        // fix this got shredded into N independent subtasks, divorcing each
+        // item from the explanation that gives it meaning.
+        let classification = make_classification();
+        let prompt = "We need to plan the next milestone. Please review the \
+                      following objectives and respond with a single \
+                      consolidated plan. 1. Validate the migration path 2. \
+                      Confirm rollback works 3. Sign off with QA. Thanks!";
+        let result = decompose(prompt, &classification, &[]);
+        assert_eq!(
+            result.len(),
+            1,
+            "numbered list embedded in prose must not split"
+        );
+    }
+
+    #[test]
+    fn long_numbered_list_falls_through_to_single_task() {
+        // 11-item Objective + Update blocks like the one from the audit.
+        // Long numbered lists are almost always narrative and must not be
+        // shredded into 11 sequential subtasks.
+        let classification = make_classification();
+        let prompt = "Update:\n\
+                      1. Shipped the new chat panel\n\
+                      2. Fixed two flaky tests\n\
+                      3. Cut the v1.4 release candidate\n\
+                      4. Updated the changelog\n\
+                      \n\
+                      Objective:\n\
+                      1. Audit orchestrator routing\n\
+                      2. Document the failure modes\n\
+                      3. Write regression fixtures\n\
+                      4. Review with the team\n\
+                      5. Land the fix on main\n\
+                      6. Cut a follow-up release\n\
+                      7. Notify the support team";
+        let result = decompose(prompt, &classification, &[]);
+        assert_eq!(
+            result.len(),
+            1,
+            "numbered list with >4 items must not split (audit regression)"
+        );
+    }
+
+    #[test]
+    fn numbered_list_with_pronoun_references_does_not_split() {
+        // Items that reference surrounding context via pronouns cannot stand
+        // alone. The model has to hallucinate what "it" / "that" refer to.
+        let classification = make_classification();
+        let prompt = "1. Review the proposal\n2. Summarize it for the team\n3. Send that to the customer";
+        let result = decompose(prompt, &classification, &[]);
+        assert_eq!(
+            result.len(),
+            1,
+            "numbered list with pronoun references must not split"
+        );
+    }
+
+    #[test]
+    fn short_action_list_still_decomposes() {
+        // A genuine 3-step action list must still decompose so the
+        // Research → Write → Review pattern in #1930's acceptance criteria
+        // keeps working.
+        let classification = make_classification();
+        let prompt = "1. Research AI news\n2. Write a summary\n3. Review the draft";
+        let result = decompose(prompt, &classification, &[]);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].prompt, "Research AI news");
+        assert_eq!(result[1].prompt, "Write a summary");
+        assert_eq!(result[2].prompt, "Review the draft");
+    }
+
+    #[test]
+    fn numbered_list_with_non_imperative_items_does_not_split() {
+        // Narrative items that don't start with a verb (status updates,
+        // observations) are not actionable subtasks.
+        let classification = make_classification();
+        let prompt = "1. Sales are up 20% this quarter\n\
+                      2. Customer churn improved\n\
+                      3. The marketing team grew by three people";
+        let result = decompose(prompt, &classification, &[]);
+        assert_eq!(
+            result.len(),
+            1,
+            "narrative numbered list must not split"
+        );
     }
 
     // =========================================================================
