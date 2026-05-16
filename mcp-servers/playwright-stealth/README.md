@@ -173,6 +173,9 @@ Use this server instead of standard Playwright when:
   - `puppeteer-extra-plugin-stealth` - Anti-detection plugin
   - `@modelcontextprotocol/sdk` - MCP protocol implementation
 - **Transport**: stdio (command-line invocation)
+  - Accepts legacy newline-delimited JSON-RPC used by Seren Desktop.
+  - Accepts `Content-Length` framed JSON-RPC used by first-party MCP gateways.
+  - Responses mirror the framing mode used by the caller's request.
 
 ## License
 

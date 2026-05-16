@@ -3,12 +3,12 @@
 // ABOUTME: MCP server entry point for Playwright stealth browser automation
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { getActiveBrowserType } from "./browser.js";
+import { DualStdioServerTransport } from "./dual_stdio_transport.js";
 import * as tools from "./tools.js";
 
 const server = new Server(
@@ -357,10 +357,10 @@ async function main() {
   // any browser detection happens. `getActiveBrowserType()` lazily walks
   // Playwright's registry — a slow probe was timing out the prophet-arb-bot
   // Python child on cold start (#1921).
-  const transport = new StdioServerTransport();
+  const transport = new DualStdioServerTransport();
   await server.connect(transport);
   console.error(
-    `[playwright-stealth] Stdio transport ready; default browser: ${getActiveBrowserType()}`,
+    `[playwright-stealth] Stdio transport ready; framing: line-jsonrpc, content-length; default browser: ${getActiveBrowserType()}`,
   );
 }
 
