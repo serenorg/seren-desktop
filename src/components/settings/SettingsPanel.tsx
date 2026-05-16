@@ -30,10 +30,11 @@ import {
   toggleMcpServer,
 } from "@/stores/settings.store";
 import { claimDaily, walletState } from "@/stores/wallet.store";
+import { KeysSettings } from "./KeysSettings";
+import { MessagingSettings } from "./MessagingSettings";
 import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
-import { MessagingSettings } from "./MessagingSettings";
 import { ToolsetsSettings } from "./ToolsetsSettings";
 
 type SettingsSection =
@@ -41,6 +42,7 @@ type SettingsSection =
   | "agent"
   | "providers"
   | "logins"
+  | "keys"
   | "toolsets"
   | "editor"
   | "wallet"
@@ -191,6 +193,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "agent", label: "Agent", icon: "🛡️" },
     { id: "providers", label: "AI Providers", icon: "🤖" },
     { id: "logins", label: "Logins", icon: "🔐" },
+    { id: "keys", label: "Keys", icon: "🔑" },
     { id: "toolsets", label: "Toolsets", icon: "📦" },
     { id: "editor", label: "Editor", icon: "📝" },
     { id: "wallet", label: "Wallet", icon: "💳" },
@@ -487,6 +490,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
         <Show when={activeSection() === "logins"}>
           <OAuthLogins onSignInClick={props.onSignInClick} />
+        </Show>
+
+        <Show when={activeSection() === "keys"}>
+          <KeysSettings />
         </Show>
 
         <Show when={activeSection() === "toolsets"}>

@@ -41,6 +41,7 @@ mod path_util;
 mod pdf;
 mod polymarket;
 mod provider_runtime;
+mod secret_broker;
 mod shell;
 mod skills;
 mod support;
@@ -514,8 +515,6 @@ pub fn run() {
         .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
             as polymarket::commands::PolymarketWsState);
 
-
-
     builder
         .on_menu_event(|app, event| {
             if event.id().0 == "about" {
@@ -807,6 +806,15 @@ pub fn run() {
             polymarket::commands::get_polymarket_address,
             polymarket::commands::clear_polymarket_credentials,
             polymarket::commands::sign_polymarket_request,
+            // Skill Keys host-side secret broker
+            secret_broker::list_skill_secret_bindings,
+            secret_broker::upsert_skill_secret_binding,
+            secret_broker::request_skill_secret_env,
+            secret_broker::delete_skill_secret_binding,
+            secret_broker::scan_skill_env_migrations,
+            secret_broker::list_secret_access_audit,
+            secret_broker::grant_skill_secret_session,
+            secret_broker::end_skill_secret_session,
             // Polymarket WebSocket commands
             polymarket::commands::connect_polymarket_websocket,
             polymarket::commands::subscribe_polymarket_market,
