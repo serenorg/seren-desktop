@@ -375,6 +375,15 @@ fn write_skill_tree(
             ));
         }
 
+        let normalized = normalize_bundle_path(&file.path);
+        if is_user_state_path(&normalized) {
+            log::warn!(
+                "bundle claimed user-state path {}; refusing to write (defense-in-depth, see #1933)",
+                normalized
+            );
+            continue;
+        }
+
         let target = skill_dir.join(&relative);
 
         if let Some(parent) = target.parent() {
@@ -820,6 +829,11 @@ pub fn install_skill(
 /// file, and the sync manifest when one is being written. Anything outside
 /// this set in the previous installation is user-provisioned and must survive
 /// a re-install.
+///
+/// Paths matching [`is_user_state_path`] are stripped here even when the
+/// bundle's `extra_files` claim them. Defense-in-depth against a publisher
+/// that leaks `.env`, `state/*`, `logs/*`, or `config.json` into a bundle —
+/// see serenorg/seren-desktop#1933.
 fn bundle_managed_paths(
     extra_files: &[ExtraFile],
     sync_state_provided: bool,
@@ -830,13 +844,58 @@ fn bundle_managed_paths(
         set.insert(SKILL_SYNC_STATE_FILE.to_string());
     }
     for file in extra_files {
-        set.insert(normalize_bundle_path(&file.path));
+        let normalized = normalize_bundle_path(&file.path);
+        if is_user_state_path(&normalized) {
+            log::warn!(
+                "bundle claimed user-state path {}; ignoring claim (defense-in-depth, see #1933)",
+                normalized
+            );
+            continue;
+        }
+        set.insert(normalized);
     }
     set
 }
 
 fn normalize_bundle_path(path: &str) -> String {
     path.trim_start_matches("./").replace('\\', "/")
+}
+
+/// Paths the user owns inside a skill directory. Bundles may not claim them
+/// even when the publisher ships them — defense-in-depth for #1933 against
+/// the upstream contamination tracked in seren-skills-publisher#36.
+///
+/// Deny-list (matched on a normalized POSIX path):
+///   - `.env` and any `.env.*` except `.env.example` / `.env.sample` / `.env.template`
+///   - `config.json` (but `config.example.json` is allowed)
+///   - `state/`, `logs/`, `.venv/`, `node_modules/`, `__pycache__/`, `.pytest_cache/`
+///     anywhere in the path
+///   - any `*.pyc`
+///   - `.DS_Store`
+fn is_user_state_path(rel: &str) -> bool {
+    let basename = rel.rsplit('/').next().unwrap_or(rel);
+
+    match basename {
+        ".env.example" | ".env.sample" | ".env.template" | "config.example.json" => {
+            return false;
+        }
+        ".env" | "config.json" | ".DS_Store" => return true,
+        _ => {}
+    }
+
+    if basename.starts_with(".env.") {
+        return true;
+    }
+    if basename.ends_with(".pyc") {
+        return true;
+    }
+
+    rel.split('/').any(|segment| {
+        matches!(
+            segment,
+            "state" | "logs" | ".venv" | "node_modules" | "__pycache__" | ".pytest_cache"
+        )
+    })
 }
 
 /// Move every file in `backup_dir` whose relative path is not part of the new
@@ -2251,6 +2310,208 @@ Run [agent](scripts/agent.py) — it writes to `state/session_cache.json` lazily
             fs::read_to_string(active_dir.join("scripts/agent.py")).unwrap(),
             "print('v2')\n",
             "bundle files must be replaced with v2",
+        );
+    }
+
+    #[test]
+    fn is_user_state_path_denies_runtime_artifacts_and_allows_templates() {
+        // Issue serenorg/seren-desktop#1933: paths the user owns must be
+        // classified as user-state even when the bundle claims them. Template
+        // siblings (`.env.example`, `config.example.json`) stay bundle-owned.
+        let user_state = [
+            ".env",
+            ".env.local",
+            ".env.production",
+            "config.json",
+            "state",
+            "state/wallet.local.json",
+            "state/cost_basis_lots.json",
+            "logs/trading.jsonl",
+            "scripts/state/cache.bin",
+            ".venv/bin/python",
+            "node_modules/foo/index.js",
+            "scripts/__pycache__/agent.cpython.pyc",
+            ".pytest_cache/v/cache",
+            "build/foo.pyc",
+            ".DS_Store",
+            "subdir/.DS_Store",
+        ];
+        for path in user_state {
+            assert!(
+                is_user_state_path(path),
+                "expected {} to classify as user-state",
+                path
+            );
+        }
+        let bundle_owned = [
+            "SKILL.md",
+            "scripts/agent.py",
+            "requirements.txt",
+            "config.example.json",
+            ".env.example",
+            ".env.sample",
+            ".env.template",
+            "state.md",
+            "logs.md",
+        ];
+        for path in bundle_owned {
+            assert!(
+                !is_user_state_path(path),
+                "expected {} to classify as bundle-owned",
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn bundle_managed_paths_drops_user_state_claims() {
+        // The publisher must not be able to claim user-owned paths. If it
+        // tries, `bundle_managed_paths` strips them so `preserve_user_files`
+        // keeps the backup copy and `write_skill_tree` refuses to lay down
+        // the contaminated bundle file.
+        let extras = vec![
+            ExtraFile {
+                path: "scripts/agent.py".to_string(),
+                content: "print('ok')\n".to_string(),
+            },
+            ExtraFile {
+                path: ".env".to_string(),
+                content: "SEREN_API_KEY=leaked\n".to_string(),
+            },
+            ExtraFile {
+                path: "state/session.json".to_string(),
+                content: "{}\n".to_string(),
+            },
+            ExtraFile {
+                path: "logs/old.jsonl".to_string(),
+                content: "".to_string(),
+            },
+            ExtraFile {
+                path: ".env.example".to_string(),
+                content: "SEREN_API_KEY=\n".to_string(),
+            },
+        ];
+        let paths = bundle_managed_paths(&extras, true);
+        assert!(paths.contains("SKILL.md"));
+        assert!(paths.contains(SKILL_SYNC_STATE_FILE));
+        assert!(paths.contains("scripts/agent.py"));
+        assert!(paths.contains(".env.example"));
+        assert!(
+            !paths.contains(".env"),
+            ".env must not be bundle-managed even when extras claim it",
+        );
+        assert!(!paths.contains("state/session.json"));
+        assert!(!paths.contains("logs/old.jsonl"));
+    }
+
+    #[test]
+    fn install_skill_refuses_contaminated_bundle_overwriting_user_state() {
+        // Issue serenorg/seren-desktop#1933: defense-in-depth against the
+        // publisher leaking user-state files into a bundle. A re-install
+        // whose extras claim `.env`, `state/*`, `logs/*`, or `config.json`
+        // must (a) preserve the user's existing copy, and (b) refuse to
+        // write the bundle's contaminated version anywhere on disk.
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let v1_extras = serde_json::json!([
+            { "path": "scripts/agent.py", "content": "print('v1')\n" },
+        ])
+        .to_string();
+        install_skill(
+            skills_dir.clone(),
+            "leaky-skill".to_string(),
+            "# v1\n".to_string(),
+            Some(v1_extras),
+            None,
+        )
+        .unwrap();
+
+        let active_dir = tmp.path().join("leaky-skill");
+        fs::write(active_dir.join(".env"), "SEREN_API_KEY=user-real\n").unwrap();
+        fs::write(active_dir.join("config.json"), "{\"funded\":true}\n").unwrap();
+        fs::create_dir_all(active_dir.join("state")).unwrap();
+        fs::write(active_dir.join("state/session.json"), "{\"jwt\":\"eyJ\"}\n").unwrap();
+        fs::create_dir_all(active_dir.join("logs")).unwrap();
+        fs::write(active_dir.join("logs/trades.jsonl"), "{\"t\":1}\n").unwrap();
+
+        let contaminated_extras = serde_json::json!([
+            { "path": "scripts/agent.py", "content": "print('v2')\n" },
+            { "path": ".env", "content": "SEREN_API_KEY=leaked-template\n" },
+            { "path": "config.json", "content": "{\"funded\":false}\n" },
+            { "path": "state/session.json", "content": "{}\n" },
+            { "path": "logs/trades.jsonl", "content": "\n" },
+        ])
+        .to_string();
+        install_skill(
+            skills_dir,
+            "leaky-skill".to_string(),
+            "# v2\n".to_string(),
+            Some(contaminated_extras),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(active_dir.join(".env")).unwrap(),
+            "SEREN_API_KEY=user-real\n",
+            ".env must survive even when the bundle claims it",
+        );
+        assert_eq!(
+            fs::read_to_string(active_dir.join("config.json")).unwrap(),
+            "{\"funded\":true}\n",
+            "config.json must survive even when the bundle claims it",
+        );
+        assert_eq!(
+            fs::read_to_string(active_dir.join("state/session.json")).unwrap(),
+            "{\"jwt\":\"eyJ\"}\n",
+            "state/* must survive even when the bundle claims it",
+        );
+        assert_eq!(
+            fs::read_to_string(active_dir.join("logs/trades.jsonl")).unwrap(),
+            "{\"t\":1}\n",
+            "logs/* must survive even when the bundle claims it",
+        );
+        assert_eq!(
+            fs::read_to_string(active_dir.join("scripts/agent.py")).unwrap(),
+            "print('v2')\n",
+            "non-user-state bundle files must still be replaced",
+        );
+    }
+
+    #[test]
+    fn install_skill_skips_user_state_extras_on_fresh_install() {
+        // On a fresh install (no backup dir to merge from), the deny-list
+        // must still refuse to lay down user-state files from the bundle.
+        // Otherwise a contaminated `.env` would land on disk on the very
+        // first install — the preservation path never gets a chance.
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let contaminated_extras = serde_json::json!([
+            { "path": "scripts/agent.py", "content": "print('ok')\n" },
+            { "path": ".env", "content": "SEREN_API_KEY=leaked\n" },
+            { "path": "state/cache.bin", "content": "" },
+        ])
+        .to_string();
+        install_skill(
+            skills_dir,
+            "fresh-skill".to_string(),
+            "# fresh\n".to_string(),
+            Some(contaminated_extras),
+            None,
+        )
+        .unwrap();
+
+        let active_dir = tmp.path().join("fresh-skill");
+        assert!(active_dir.join("scripts/agent.py").exists());
+        assert!(
+            !active_dir.join(".env").exists(),
+            "user-state .env must never be written from a bundle",
+        );
+        assert!(
+            !active_dir.join("state/cache.bin").exists(),
+            "user-state state/* must never be written from a bundle",
         );
     }
 }
