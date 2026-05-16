@@ -788,18 +788,121 @@ pub fn install_skill(
 
     if let Some(backup_dir) = backup_skill_dir {
         if backup_dir.exists() {
-            if let Err(error) = fs::remove_dir_all(&backup_dir) {
-                log::warn!(
-                    "Installed skill '{}' successfully but failed to remove backup directory {}: {}",
-                    slug,
-                    backup_dir.display(),
-                    error
-                );
+            let bundle_paths =
+                bundle_managed_paths(&parsed_extra_files, sync_state_json.is_some());
+            match preserve_user_files(&backup_dir, &skill_dir, &bundle_paths) {
+                Ok(()) => {
+                    if let Err(error) = fs::remove_dir_all(&backup_dir) {
+                        log::warn!(
+                            "Installed skill '{}' successfully but failed to remove backup directory {}: {}",
+                            slug,
+                            backup_dir.display(),
+                            error
+                        );
+                    }
+                }
+                Err(error) => {
+                    log::warn!(
+                        "Installed skill '{}' but preserving user files from backup {} failed: {}. Backup retained for manual recovery.",
+                        slug,
+                        backup_dir.display(),
+                        error
+                    );
+                }
             }
         }
     }
 
     Ok(skill_dir.join("SKILL.md").to_string_lossy().to_string())
+}
+
+/// Build the set of relative paths the bundle owns: `SKILL.md`, every payload
+/// file, and the sync manifest when one is being written. Anything outside
+/// this set in the previous installation is user-provisioned and must survive
+/// a re-install.
+fn bundle_managed_paths(
+    extra_files: &[ExtraFile],
+    sync_state_provided: bool,
+) -> std::collections::HashSet<String> {
+    let mut set = std::collections::HashSet::new();
+    set.insert("SKILL.md".to_string());
+    if sync_state_provided {
+        set.insert(SKILL_SYNC_STATE_FILE.to_string());
+    }
+    for file in extra_files {
+        set.insert(normalize_bundle_path(&file.path));
+    }
+    set
+}
+
+fn normalize_bundle_path(path: &str) -> String {
+    path.trim_start_matches("./").replace('\\', "/")
+}
+
+/// Move every file in `backup_dir` whose relative path is not part of the new
+/// bundle into `skill_dir`. Preserves user-provisioned files like `.env`,
+/// `config.json`, and runtime artifacts (`state/`, `logs/`, ...) across a
+/// re-install. Bundle files that the publisher updated are left in `backup_dir`
+/// and removed by the caller's cleanup.
+fn preserve_user_files(
+    backup_dir: &Path,
+    skill_dir: &Path,
+    bundle_paths: &std::collections::HashSet<String>,
+) -> Result<(), String> {
+    preserve_user_files_recursive(backup_dir, backup_dir, skill_dir, bundle_paths)
+}
+
+fn preserve_user_files_recursive(
+    current: &Path,
+    backup_root: &Path,
+    skill_dir: &Path,
+    bundle_paths: &std::collections::HashSet<String>,
+) -> Result<(), String> {
+    let entries = fs::read_dir(current)
+        .map_err(|e| format!("Failed to read backup directory {}: {}", current.display(), e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read backup entry: {}", e))?;
+        let path = entry.path();
+        let rel = path.strip_prefix(backup_root).map_err(|_| {
+            format!(
+                "Backup entry {} escapes backup root {}",
+                path.display(),
+                backup_root.display()
+            )
+        })?;
+        let rel_key = rel.to_string_lossy().replace('\\', "/");
+
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("Failed to read entry type for {}: {}", rel_key, e))?;
+
+        if file_type.is_dir() {
+            preserve_user_files_recursive(&path, backup_root, skill_dir, bundle_paths)?;
+            continue;
+        }
+
+        if bundle_paths.contains(&rel_key) {
+            continue;
+        }
+
+        let target = skill_dir.join(rel);
+        if target.exists() {
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "Failed to create parent for preserved file {}: {}",
+                    rel_key, e
+                )
+            })?;
+        }
+        fs::rename(&path, &target)
+            .map_err(|e| format!("Failed to preserve user file {}: {}", rel_key, e))?;
+    }
+
+    Ok(())
 }
 
 /// Validate that a skill directory contains all files referenced in SKILL.md.
@@ -2057,6 +2160,97 @@ Run [agent](scripts/agent.py) — it writes to `state/session_cache.json` lazily
         assert!(
             leftover_staging.is_empty(),
             "no .installing.* leftovers expected"
+        );
+    }
+
+    #[test]
+    fn install_skill_preserves_user_files_on_reinstall() {
+        // Issue serenorg/seren-desktop#1928: re-installing a skill used to
+        // wipe everything the user added to the skill dir (`.env`,
+        // `config.json`, `state/*`, `logs/*`, etc.). Files outside the new
+        // bundle must survive a refresh; bundle files must be replaced.
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let v1_extras = serde_json::json!([
+            { "path": "scripts/agent.py", "content": "print('v1')\n" },
+            { "path": "config.example.json", "content": "{\"v\":1}\n" },
+        ])
+        .to_string();
+        install_skill(
+            skills_dir.clone(),
+            "prophet-arb-bot".to_string(),
+            "# v1\n".to_string(),
+            Some(v1_extras),
+            None,
+        )
+        .unwrap();
+
+        let active_dir = tmp.path().join("prophet-arb-bot");
+        fs::write(active_dir.join(".env"), "SEREN_API_KEY=secret\n").unwrap();
+        fs::write(active_dir.join("config.json"), "{\"funded\":true}\n").unwrap();
+        fs::create_dir_all(active_dir.join("state")).unwrap();
+        fs::write(
+            active_dir.join("state/session_cache.json"),
+            "{\"jwt\":\"eyJ\"}\n",
+        )
+        .unwrap();
+        fs::create_dir_all(active_dir.join("logs")).unwrap();
+        fs::write(
+            active_dir.join("logs/trading_2026.jsonl"),
+            "{\"trade\":1}\n",
+        )
+        .unwrap();
+
+        let v2_extras = serde_json::json!([
+            { "path": "scripts/agent.py", "content": "print('v2')\n" },
+            { "path": "config.example.json", "content": "{\"v\":2}\n" },
+        ])
+        .to_string();
+        install_skill(
+            skills_dir,
+            "prophet-arb-bot".to_string(),
+            "# v2\n".to_string(),
+            Some(v2_extras),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(active_dir.join(".env")).ok().as_deref(),
+            Some("SEREN_API_KEY=secret\n"),
+            ".env must survive re-install",
+        );
+        assert_eq!(
+            fs::read_to_string(active_dir.join("config.json"))
+                .ok()
+                .as_deref(),
+            Some("{\"funded\":true}\n"),
+            "config.json must survive re-install",
+        );
+        assert_eq!(
+            fs::read_to_string(active_dir.join("state/session_cache.json"))
+                .ok()
+                .as_deref(),
+            Some("{\"jwt\":\"eyJ\"}\n"),
+            "state/* must survive re-install",
+        );
+        assert_eq!(
+            fs::read_to_string(active_dir.join("logs/trading_2026.jsonl"))
+                .ok()
+                .as_deref(),
+            Some("{\"trade\":1}\n"),
+            "logs/* must survive re-install",
+        );
+        assert_eq!(
+            fs::read_to_string(active_dir.join("SKILL.md")).unwrap(),
+            "# v2\n",
+            "SKILL.md must be replaced with v2",
+        );
+        assert_eq!(
+            fs::read_to_string(active_dir.join("scripts/agent.py")).unwrap(),
+            "print('v2')\n",
+            "bundle files must be replaced with v2",
         );
     }
 }
