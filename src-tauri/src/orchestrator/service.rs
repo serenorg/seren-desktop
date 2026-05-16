@@ -16,6 +16,9 @@ use super::decomposer;
 use super::mcp_publisher_worker::McpPublisherWorker;
 use super::rlm;
 use super::router;
+use super::subtask_context::{
+    MAX_CONTEXT_SUBTASKS, MAX_SUBTASK_RESULT_BYTES, inject_dependency_results,
+};
 use super::trust;
 use super::types::{
     DelegationType, ImageAttachment, OrchestratorEvent, RoutingDecision, SkillRef, SubTask,
@@ -887,6 +890,18 @@ async fn execute_multi_task(
     let mut consecutive_failures: u32 = 0;
     const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
+    // Index subtasks for dependency lookups during context injection.
+    let subtasks_by_id: HashMap<String, SubTask> = subtasks
+        .iter()
+        .cloned()
+        .map(|st| (st.id.clone(), st))
+        .collect();
+
+    // Accumulates the final assistant content for each completed sub-task so
+    // downstream layers can see what earlier sub-tasks produced (GH #1930).
+    let subtask_results: Arc<Mutex<HashMap<String, String>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
     'layers: for (layer_idx, layer) in layers.iter().enumerate() {
         log::info!(
             "[Orchestrator] Executing layer {} with {} subtask(s)",
@@ -968,10 +983,24 @@ async fn execute_multi_task(
             let subtask_id = subtask.id.clone();
             let worker_routing = routing.clone();
             let worker_app = app.clone();
-            let worker_history = history.to_vec();
+            // Inject completed ancestor sub-task results so this worker sees
+            // what earlier layers produced (GH #1930). For layer-0 sub-tasks
+            // this is a no-op since they have no dependencies.
+            let worker_history = {
+                let snapshot = subtask_results.lock().await.clone();
+                inject_dependency_results(
+                    history,
+                    subtask,
+                    &subtasks_by_id,
+                    &snapshot,
+                    MAX_CONTEXT_SUBTASKS,
+                    MAX_SUBTASK_RESULT_BYTES,
+                )
+            };
             let worker_images = images.to_vec();
             let layer_tx = shared_tx.clone();
             let worker_conversation_id = conversation_id.to_string();
+            let results_for_handle = Arc::clone(&subtask_results);
 
             let handle = tokio::spawn(async move {
                 let (tx, mut rx) = mpsc::channel::<WorkerEvent>(64);
@@ -992,11 +1021,31 @@ async fn execute_multi_task(
                         .await
                 });
 
-                // Forward events tagged with subtask_id
+                // Forward events tagged with subtask_id, accumulating the
+                // assistant content so downstream sub-tasks can see it.
+                let mut streamed_content = String::new();
+                let mut final_content: Option<String> = None;
                 while let Some(event) = rx.recv().await {
+                    match &event {
+                        WorkerEvent::Content { text } => {
+                            streamed_content.push_str(text);
+                        }
+                        WorkerEvent::Complete { final_content: fc, .. } => {
+                            if !fc.is_empty() {
+                                final_content = Some(fc.clone());
+                            }
+                        }
+                        _ => {}
+                    }
                     if layer_tx.send((subtask_id.clone(), event)).await.is_err() {
                         break;
                     }
+                }
+
+                let captured = final_content.unwrap_or(streamed_content);
+                if !captured.trim().is_empty() {
+                    let mut results = results_for_handle.lock().await;
+                    results.insert(subtask_id.clone(), captured);
                 }
 
                 exec_handle.await
