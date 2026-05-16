@@ -824,6 +824,9 @@ pub fn validate_skill_payload(skills_dir: String, slug: String) -> Result<Vec<St
     let mut missing = Vec::new();
 
     for path in referenced {
+        if is_runtime_artifact_path(&path) {
+            continue;
+        }
         let full_path = skill_dir.join(&path);
         if !full_path.exists() && !has_template_sibling(&skill_dir, &path) {
             missing.push(path);
@@ -831,6 +834,30 @@ pub fn validate_skill_payload(skills_dir: String, slug: String) -> Result<Vec<St
     }
 
     Ok(missing)
+}
+
+/// Returns true when `path` refers to a runtime artifact a skill creates
+/// lazily at execution time (caches, logs, output dirs, scratch files,
+/// host-absolute paths), rather than a payload file the publisher ships.
+///
+/// Issue serenorg/seren-desktop#1926: `extract_referenced_files` matches
+/// any backticked `*.json` / `*.log` / `*.txt` / etc. mention in prose,
+/// which misclassifies runtime mentions like `state/session_cache.json`
+/// or `logs/trading_*.log` as missing bundle files. Skipping these here
+/// keeps the validator strict for real payload references while letting
+/// SKILL.md document runtime artifacts in prose without tripping it.
+fn is_runtime_artifact_path(path: &str) -> bool {
+    let trimmed = path.trim_start_matches("./");
+    const RUNTIME_PREFIXES: [&str; 7] = [
+        "state/", "logs/", "log/", "cache/", ".cache/", "output/", "tmp/",
+    ];
+    if RUNTIME_PREFIXES.iter().any(|p| trimmed.starts_with(p)) {
+        return true;
+    }
+    // Host-absolute or user-home references are never bundle-relative.
+    trimmed.starts_with('~')
+        || trimmed.starts_with('/')
+        || trimmed.starts_with("$HOME")
 }
 
 /// Append one JSON line per install/refresh failure to a long-lived log file.
@@ -1613,6 +1640,70 @@ Run [agent](scripts/agent.py) and read `config.example.json`.
         assert!(
             missing.contains(&"scripts/agent.py".to_string()),
             "scripts/agent.py has no .example sibling and must still be flagged, got {:?}",
+            missing,
+        );
+    }
+
+    #[test]
+    fn validate_skill_payload_skips_runtime_artifact_paths() {
+        // Issue #1926: SKILL.md prose mentions runtime artifacts that the
+        // skill creates lazily at execution time (JWT caches, logs, output
+        // dirs, etc.). The publisher does not ship these — the runtime
+        // creates them on first use. The validator must not flag them.
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let content = r#"# Test
+The operator must pre-supply a JWT or seed `state/session_cache.json` by hand.
+Logs are written to `logs/trading_2026.log`.
+The pipeline writes `output/persist_sql.json` and `cache/markets.json`.
+Temporary scratch goes in `tmp/scratch.txt`.
+"#;
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            content.to_string(),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let missing = validate_skill_payload(skills_dir, "test-skill".to_string()).unwrap();
+        assert!(
+            missing.is_empty(),
+            "runtime artifact paths must not be flagged as missing, got {:?}",
+            missing,
+        );
+    }
+
+    #[test]
+    fn validate_skill_payload_skips_runtime_paths_but_still_flags_real_payload() {
+        // Regression guard: runtime-path skip must not mask a genuinely
+        // missing bundle payload file referenced alongside runtime paths.
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let content = r#"# Test
+Run [agent](scripts/agent.py) — it writes to `state/session_cache.json` lazily.
+"#;
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            content.to_string(),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let missing = validate_skill_payload(skills_dir, "test-skill".to_string()).unwrap();
+        assert!(
+            missing.contains(&"scripts/agent.py".to_string()),
+            "scripts/agent.py is a real payload reference and must still be flagged, got {:?}",
+            missing,
+        );
+        assert!(
+            !missing.contains(&"state/session_cache.json".to_string()),
+            "state/* is a runtime path and must be skipped, got {:?}",
             missing,
         );
     }
