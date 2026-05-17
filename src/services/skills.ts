@@ -1540,7 +1540,7 @@ export const skills = {
           ? `\n> **Shared dependencies:** \`${runtimeDir}${sep}_deps${sep}\` contains shared files from declared \`includes\` paths.\n`
           : "";
         const platformNote = isWindowsRuntime
-          ? `\n> **Platform:** Windows. Skill docs commonly use Unix conventions (\`python3\`, \`~/.config/seren/skills/<name>\`, forward-slash paths). On this machine, translate before running:\n> - Use \`python\` (or \`py\`) instead of \`python3\`.\n> - Replace any \`~/.config/seren/skills/<name>\` reference with the absolute runtime directory above.\n> - Use backslashes inside paths.\n> Always \`cd\` into the absolute runtime directory above before invoking skill scripts.`
+          ? `\n> **Platform:** Windows. Python (\`python\` and \`python3\`) is bundled with Seren Desktop — no install needed. Skill docs commonly reference \`~/.config/seren/skills/<name>\` and forward-slash paths; on this machine:\n> - Replace any \`~/.config/seren/skills/<name>\` reference with the absolute runtime directory above.\n> - Use backslashes inside paths.\n> Always \`cd\` into the absolute runtime directory above before invoking skill scripts.`
           : "";
         const runtimeNote = `> **Skill runtime directory:** \`${runtimeDir}\`\n> Use this absolute path to reference skill files. Do not create local copies or fallback scaffolds.${platformNote}${depsNote}\n\n`;
         contents.push(

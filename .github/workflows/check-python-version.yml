@@ -1,0 +1,110 @@
+# Monthly check for newer CPython patch releases. Opens a PR to bump the
+# pinned version in build/win32/prepare-python-runtime.ts when python.org
+# publishes a newer patch on the same minor track. Minor-version bumps
+# (e.g. 3.12 -> 3.13) stay manual because wheel availability for skills'
+# transitive deps lags release.
+#
+# Issue: serenorg/seren-desktop#1947
+name: Check Python Version
+
+on:
+  schedule:
+    # 03:00 UTC on the 1st of every month
+    - cron: "0 3 1 * *"
+  workflow_dispatch:
+
+jobs:
+  bump-pinned-python:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned Python version
+        id: pinned
+        run: |
+          PINNED=$(grep -oE 'PYTHON_VERSION = "[0-9]+\.[0-9]+\.[0-9]+"' build/win32/prepare-python-runtime.ts | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          if [ -z "$PINNED" ]; then
+            echo "Could not read pinned Python version from prepare-python-runtime.ts" >&2
+            exit 1
+          fi
+          echo "version=$PINNED" >> "$GITHUB_OUTPUT"
+          MINOR=$(echo "$PINNED" | cut -d. -f1-2)
+          echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve latest patch on the pinned minor track
+        id: latest
+        env:
+          PINNED_MINOR: ${{ steps.pinned.outputs.minor }}
+        run: |
+          # python.org's release index is a stable HTML page. Look for the
+          # newest tagged release on the pinned minor track (e.g. 3.12.x).
+          # Filtering on the embed-amd64 URL avoids matching beta/rc tags.
+          INDEX=$(curl -fsSL https://www.python.org/ftp/python/)
+          CANDIDATES=$(echo "$INDEX" \
+            | grep -oE "${PINNED_MINOR}\.[0-9]+/" \
+            | sed 's:/$::' \
+            | sort -V \
+            | uniq)
+
+          # Verify the embed-amd64 zip actually exists for each candidate
+          # (some directories are tag-only with no Windows release).
+          LATEST=""
+          for candidate in $CANDIDATES; do
+            if curl -fsSL --head "https://www.python.org/ftp/python/$candidate/python-$candidate-embed-amd64.zip" > /dev/null; then
+              LATEST="$candidate"
+            fi
+          done
+
+          if [ -z "$LATEST" ]; then
+            echo "No Windows embed releases found on track $PINNED_MINOR" >&2
+            exit 1
+          fi
+          echo "version=$LATEST" >> "$GITHUB_OUTPUT"
+
+      - name: Compare versions
+        id: compare
+        env:
+          PINNED: ${{ steps.pinned.outputs.version }}
+          LATEST: ${{ steps.latest.outputs.version }}
+        run: |
+          if [ "$PINNED" = "$LATEST" ]; then
+            echo "Pinned $PINNED matches latest $LATEST; nothing to do."
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Pinned $PINNED < latest $LATEST; bump available."
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump pinned version
+        if: steps.compare.outputs.bump == 'true'
+        env:
+          PINNED: ${{ steps.pinned.outputs.version }}
+          LATEST: ${{ steps.latest.outputs.version }}
+        run: |
+          sed -i "s/PYTHON_VERSION = \"$PINNED\"/PYTHON_VERSION = \"$LATEST\"/" build/win32/prepare-python-runtime.ts
+
+      - name: Open pull request
+        if: steps.compare.outputs.bump == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: maintenance/python-${{ steps.latest.outputs.version }}
+          commit-message: |
+            chore: bump bundled Python to ${{ steps.latest.outputs.version }} (#1947)
+          title: "chore: bump bundled Python to ${{ steps.latest.outputs.version }}"
+          body: |
+            Automated patch-version bump for the bundled Windows CPython
+            distribution (issue #1947).
+
+            - Previous: ${{ steps.pinned.outputs.version }}
+            - Latest patch on the ${{ steps.pinned.outputs.minor }} track: ${{ steps.latest.outputs.version }}
+
+            Minor-version bumps (3.X -> 3.Y) stay manual because wheel
+            availability for transitive skill dependencies (`py-clob-client`,
+            `eth-account`, etc.) typically lags a CPython minor release.
+
+            Verify the Windows release build still completes before merging.
+          labels: maintenance,automated
+          delete-branch: true
