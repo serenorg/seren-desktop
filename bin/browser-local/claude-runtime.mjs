@@ -1284,8 +1284,16 @@ function handleSystemMessage(emit, session, payload) {
 function handleAssistantMessage(emit, session, payload) {
   const message = payload?.message ?? {};
   const blocks = Array.isArray(message.content) ? message.content : [];
-  const sawStreamedAssistant =
-    session.currentPrompt != null && session.currentPromptHasChunks === true;
+  // Track text vs thinking suppression independently — Claude Code's
+  // stream-json reliably emits text_delta partials but may omit thinking_delta
+  // for Opus 4.7. A single boolean dropped the only carrier of reasoning
+  // content from the final assistant envelope when text streamed alone. #1935.
+  const sawStreamedText =
+    session.currentPrompt != null &&
+    session.currentPromptHasStreamedText === true;
+  const sawStreamedThinking =
+    session.currentPrompt != null &&
+    session.currentPromptHasStreamedThinking === true;
 
   // Track the largest per-turn input across tool-call iterations. message.usage
   // is the authoritative per-API-call count from Anthropic — see #1611.
@@ -1348,8 +1356,8 @@ function handleAssistantMessage(emit, session, payload) {
   for (const block of blocks) {
     switch (block?.type) {
       case "text":
-        if (!sawStreamedAssistant && typeof block.text === "string" && block.text.length > 0) {
-          session.currentPromptHasChunks = true;
+        if (!sawStreamedText && typeof block.text === "string" && block.text.length > 0) {
+          session.currentPromptHasStreamedText = true;
           emit("provider://message-chunk", {
             sessionId: session.id,
             text: block.text,
@@ -1359,11 +1367,11 @@ function handleAssistantMessage(emit, session, payload) {
 
       case "thinking":
         if (
-          !sawStreamedAssistant &&
+          !sawStreamedThinking &&
           typeof block.thinking === "string" &&
           block.thinking.length > 0
         ) {
-          session.currentPromptHasChunks = true;
+          session.currentPromptHasStreamedThinking = true;
           emit("provider://message-chunk", {
             sessionId: session.id,
             text: block.thinking,
@@ -1406,13 +1414,14 @@ function handleStreamEvent(emit, session, payload) {
   const event = payload?.event ?? {};
   switch (event.type) {
     case "message_start":
-      session.currentPromptHasChunks = false;
+      session.currentPromptHasStreamedText = false;
+      session.currentPromptHasStreamedThinking = false;
       return;
 
     case "content_block_delta": {
       const delta = event.delta ?? {};
       if (delta.type === "text_delta" && typeof delta.text === "string") {
-        session.currentPromptHasChunks = true;
+        session.currentPromptHasStreamedText = true;
         emit("provider://message-chunk", {
           sessionId: session.id,
           text: delta.text,
@@ -1421,7 +1430,7 @@ function handleStreamEvent(emit, session, payload) {
         delta.type === "thinking_delta" &&
         typeof delta.thinking === "string"
       ) {
-        session.currentPromptHasChunks = true;
+        session.currentPromptHasStreamedThinking = true;
         emit("provider://message-chunk", {
           sessionId: session.id,
           text: delta.thinking,
@@ -1618,7 +1627,8 @@ export function createClaudeRuntime({ emit }) {
       nextControlRequestId: 1,
       pendingPermissions: new Map(),
       currentPrompt: null,
-      currentPromptHasChunks: false,
+      currentPromptHasStreamedText: false,
+      currentPromptHasStreamedThinking: false,
       allowedTools: new Set(),
       toolInputs: new Map(),
       agentSessionId,
@@ -1904,7 +1914,8 @@ export function createClaudeRuntime({ emit }) {
 
     const combinedPrompt = combinePrompt(prompt, context);
     session.status = "prompting";
-    session.currentPromptHasChunks = false;
+    session.currentPromptHasStreamedText = false;
+    session.currentPromptHasStreamedThinking = false;
     emit("provider://session-status", {
       sessionId,
       status: "prompting",
@@ -2254,4 +2265,6 @@ export {
   comparePickerEntries as _comparePickerEntries,
   resolveSpawnShell as _resolveSpawnShell,
   buildClaudeArgs as _buildClaudeArgs,
+  handleAssistantMessage as _handleAssistantMessage,
+  handleStreamEvent as _handleStreamEvent,
 };
