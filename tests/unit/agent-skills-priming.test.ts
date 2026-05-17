@@ -38,16 +38,17 @@ describe("agent skill context priming", () => {
 
   it("only records the primed signature after a successful provider send", () => {
     const sendPromptBody = methodBody("async sendPrompt");
+    const recoverDroppedPromptBody = methodBody("async recoverDroppedPrompt");
     const firstSend = sendPromptBody.indexOf(
       "await providerService.sendPrompt(sessionId, dispatchedPrompt, merged)",
     );
     const firstMark = sendPromptBody.indexOf(
       "this.markPromptContextPrimed(sessionId, newSignature)",
     );
-    const retrySend = sendPromptBody.indexOf(
-      "await providerService.sendPrompt(\n                  newSessionId,",
+    const retrySend = recoverDroppedPromptBody.indexOf(
+      "await providerService.sendPrompt(\n          newSessionId,",
     );
-    const retryMark = sendPromptBody.indexOf(
+    const retryMark = recoverDroppedPromptBody.indexOf(
       "this.markPromptContextPrimed(newSessionId, newSignature)",
     );
 

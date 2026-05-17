@@ -69,7 +69,9 @@ describe("#1733 Bug A — every continuation spawnSession site passes initialMod
   });
 
   it("session-crash recovery spawn passes initialModelId", () => {
-    expect(regionAfter("const doRecovery =")).toMatch(/initialModelId:/);
+    expect(regionAfter("async recoverDroppedPrompt(", 4000)).toMatch(
+      /spawnSession\([\s\S]*?initialModelId/,
+    );
   });
 
   it("fork spawn passes initialModelId", () => {
