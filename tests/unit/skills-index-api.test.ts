@@ -254,7 +254,13 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
 
   it("surfaces server error envelopes when the bundle body carries an error payload", async () => {
     mockDownloadSkill.mockResolvedValueOnce({
-      data: { data: { error: "forbidden", code: "PUBLISHER_DENIED" } },
+      data: {
+        data: {
+          body: {
+            error: { code: "PUBLISHER_DENIED", message: "forbidden" },
+          },
+        },
+      },
     });
 
     const { skills } = await import("@/services/skills");
@@ -269,6 +275,36 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
         tags: [],
       }),
     ).rejects.toThrow(/forbidden/);
+  });
+
+  it("treats publisher ApiResultResponse failures as failed downloads", async () => {
+    mockDownloadSkill.mockResolvedValueOnce({
+      data: {
+        data: {
+          status: 404,
+          body: { error: { code: 404, message: "skill not found" } },
+          response_bytes: 50,
+          execution_time_ms: 33,
+          cost: "0",
+          asset_symbol: "USDC",
+        },
+      },
+    });
+
+    const { skills } = await import("@/services/skills");
+    await expect(
+      skills.fetchContent({
+        id: "seren:curve-gauge-yield-trader",
+        slug: "curve-gauge-yield-trader",
+        name: "Curve Gauge Yield Trader",
+        description: "",
+        source: "seren",
+        sourceUrl: "seren-skills:curve-gauge-yield-trader",
+        tags: [],
+      }),
+    ).rejects.toThrow(
+      "Failed to download skill curve-gauge-yield-trader: 404 (skill not found)",
+    );
   });
 
   it("throws when the API returns an error", async () => {
