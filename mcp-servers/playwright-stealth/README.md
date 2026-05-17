@@ -80,6 +80,23 @@ Configure the browser in MCP server settings by adding to the server's environme
 }
 ```
 
+### Ping / Idle Timeout
+
+By default, the bundled transport keeps its existing stdio behavior. Agents
+that keep a browser session warm while doing long server-side work between MCP
+tool calls can opt into an idle watchdog with `PLAYWRIGHT_MCP_PING_TIMEOUT_MS`:
+
+```bash
+# Keep the MCP transport alive through long no-traffic windows.
+PLAYWRIGHT_MCP_PING_TIMEOUT_MS=300000 node dist/index.js
+```
+
+Leave the variable unset for casual use. For workflows with long no-traffic
+windows between `tools/call` requests, such as waiting on a remote AI
+calculation before returning to the browser, use `300000` (5 minutes) or higher.
+Seren Desktop and skill subprocesses pass this variable through to the bundled
+MCP child when it is present in the process environment.
+
 ### Runtime Browser Switching
 
 Use MCP tools to discover and switch browsers during a session:
@@ -183,6 +200,9 @@ Use this server instead of standard Playwright when:
   - Accepts legacy newline-delimited JSON-RPC used by Seren Desktop.
   - Accepts `Content-Length` framed JSON-RPC used by first-party MCP gateways.
   - Responses mirror the framing mode used by the caller's request.
+  - `PLAYWRIGHT_MCP_PING_TIMEOUT_MS` optionally closes an idle transport after
+    the configured no-traffic window. Leave unset to preserve the default
+    bundled behavior.
 - **Navigation waits**: `playwright_navigate` defaults to Playwright's `load`
   event. Callers may pass `waitUntil: "domcontentloaded"` or
   `waitUntil: "networkidle"` and `timeout` in milliseconds when they need

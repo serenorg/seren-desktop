@@ -597,6 +597,27 @@ mod tests {
             "every POLLUTING_PARENT_ENV_VARS entry must appear exactly once as a removal"
         );
     }
+
+    #[test]
+    fn sanitize_spawn_env_preserves_playwright_ping_timeout_var() {
+        // serenorg/seren-desktop#1954: skills may opt into a longer idle
+        // heartbeat window by setting this env var before spawning the bundled
+        // playwright-stealth MCP. The Electron/env scrubber must not strip it.
+        let mut cmd = tokio::process::Command::new("/bin/true");
+
+        sanitize_spawn_env(&mut cmd);
+
+        let removed = cmd
+            .as_std()
+            .get_envs()
+            .any(|(key, value)| {
+                key == "PLAYWRIGHT_MCP_PING_TIMEOUT_MS" && value.is_none()
+            });
+        assert!(
+            !removed,
+            "sanitize_spawn_env must preserve PLAYWRIGHT_MCP_PING_TIMEOUT_MS for child MCP spawns"
+        );
+    }
 }
 
 /// Tauri command to get embedded runtime information (for debugging/UI)

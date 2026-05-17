@@ -8,7 +8,10 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { getActiveBrowserType } from "./browser.js";
-import { DualStdioServerTransport } from "./dual_stdio_transport.js";
+import {
+  DualStdioServerTransport,
+  pingTimeoutMsFromEnv,
+} from "./dual_stdio_transport.js";
 import {
   createNavigateToolDefinition,
   type NavigateOptions,
@@ -443,7 +446,13 @@ async function main() {
   // any browser detection happens. `getActiveBrowserType()` lazily walks
   // Playwright's registry — a slow probe was timing out the prophet-arb-bot
   // Python child on cold start (#1921).
-  const transport = new DualStdioServerTransport();
+  const transport = new DualStdioServerTransport(
+    process.stdin,
+    process.stdout,
+    {
+      idleTimeoutMs: pingTimeoutMsFromEnv(),
+    },
+  );
   await server.connect(transport);
   console.error(
     `[playwright-stealth] Stdio transport ready; framing: line-jsonrpc, content-length; default browser: ${getActiveBrowserType()}`,
