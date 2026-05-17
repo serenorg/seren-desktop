@@ -69,6 +69,17 @@ export interface ImportFileEntry {
   sha256?: string;
 }
 
+export function importPathForFile(file: {
+  name: string;
+  path?: string;
+  webkitRelativePath?: string;
+}): string {
+  if (file.webkitRelativePath && file.webkitRelativePath.length > 0) {
+    return file.webkitRelativePath;
+  }
+  return file.name;
+}
+
 /**
  * Resolve a set of `{filename, body}` entries to per-slot bodies.
  *

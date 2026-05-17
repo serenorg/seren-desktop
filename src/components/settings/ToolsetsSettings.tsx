@@ -10,6 +10,11 @@ import {
 } from "solid-js";
 import { listConnections, listStorePublishers } from "@/api";
 import {
+  formatMcpDiscoveryStatus,
+  type McpDiscoveryStatus,
+  normalizeMcpDiscoveryStatus,
+} from "@/services/catalog";
+import {
   addPublisherToToolset,
   createToolset,
   deleteToolset,
@@ -25,7 +30,12 @@ interface Publisher {
   logo_url: string | null;
   description: string | null;
   categories: string[];
+  mcp_discovery: McpDiscoveryStatus | null;
 }
+
+type PublisherWithDiscovery = {
+  mcp_discovery?: unknown;
+};
 
 export const ToolsetsSettings: Component = () => {
   const [showCreateModal, setShowCreateModal] = createSignal(false);
@@ -62,6 +72,9 @@ export const ToolsetsSettings: Component = () => {
       logo_url: p.logo_url ?? null,
       description: p.description ?? null,
       categories: p.categories || [],
+      mcp_discovery: normalizeMcpDiscoveryStatus(
+        (p as PublisherWithDiscovery).mcp_discovery,
+      ),
     }));
     return pubs;
   });
@@ -463,6 +476,7 @@ export const ToolsetsSettings: Component = () => {
                           const isSelected = () =>
                             formPublishers().includes(pub.slug);
                           const status = getConnectionStatus(pub.slug);
+                          const discoveryStatus = formatMcpDiscoveryStatus(pub);
                           return (
                             <label
                               class={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-border last:border-b-0 transition-colors ${
@@ -478,19 +492,29 @@ export const ToolsetsSettings: Component = () => {
                                 class="w-4 h-4 accent-accent cursor-pointer"
                               />
                               <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2">
-                                  <span class="text-sm text-foreground">
+                                <div class="flex items-center gap-2 min-w-0">
+                                  <span class="text-sm text-foreground truncate">
                                     {pub.name}
                                   </span>
                                   <Show when={status === "connected"}>
-                                    <span class="text-[10px] px-1.5 py-0.5 bg-success/20 text-success rounded">
+                                    <span class="shrink-0 text-[10px] px-1.5 py-0.5 bg-success/20 text-success rounded">
                                       Connected
                                     </span>
                                   </Show>
                                   <Show when={status === "expired"}>
-                                    <span class="text-[10px] px-1.5 py-0.5 bg-warning/20 text-warning/85 rounded">
+                                    <span class="shrink-0 text-[10px] px-1.5 py-0.5 bg-warning/20 text-warning/85 rounded">
                                       Expired
                                     </span>
+                                  </Show>
+                                  <Show when={discoveryStatus}>
+                                    {(status) => (
+                                      <span
+                                        class="shrink-0 text-[10px] px-1.5 py-0.5 bg-warning/20 text-warning/85 rounded"
+                                        title={status()}
+                                      >
+                                        MCP issue
+                                      </span>
+                                    )}
                                   </Show>
                                 </div>
                                 <Show when={pub.description}>

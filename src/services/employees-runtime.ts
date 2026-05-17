@@ -120,6 +120,54 @@ export interface ToolAuditEvent {
   id: string;
   tool: string;
   reason: string;
+  toolRefKind: string | null;
+  action: string | null;
+  leaseRef: string | null;
+  status: string | null;
+  inputBytes: number | null;
+  outputBytes: number | null;
+  latencyMs: number | null;
+}
+
+function formatToolAuditText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.replace(/\s+/g, " ").trim();
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value).replace(/\s+/g, " ").trim();
+  } catch {
+    return String(value).replace(/\s+/g, " ").trim();
+  }
+}
+
+function formatToolAuditBytes(label: string, value: unknown): string | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? `${label} ${value}B`
+    : null;
+}
+
+export function formatToolAuditEvent(event: ToolAuditEvent): string {
+  const reason = formatToolAuditText(event.reason);
+  const tool = formatToolAuditText(event.tool) || "tool";
+  const action = formatToolAuditText(event.action);
+  const leaseRef = formatToolAuditText(event.leaseRef);
+  const details = [
+    formatToolAuditText(event.toolRefKind),
+    action ? `action ${action}` : null,
+    leaseRef ? `lease ${leaseRef}` : null,
+    formatToolAuditText(event.status),
+    formatToolAuditBytes("in", event.inputBytes),
+    formatToolAuditBytes("out", event.outputBytes),
+    typeof event.latencyMs === "number" &&
+    Number.isFinite(event.latencyMs) &&
+    event.latencyMs >= 0
+      ? `${event.latencyMs}ms`
+      : null,
+  ].filter((part): part is string => Boolean(part));
+  const suffix = details.length > 0 ? ` (${details.join(" - ")})` : "";
+  return reason ? `${tool}: ${reason}${suffix}` : `${tool}${suffix}`;
 }
 
 /** Mutable accumulator threaded through the live stream and the poll replay. */
@@ -224,6 +272,13 @@ function applyEnvelope(
         id: ev.id,
         tool: ev.tool,
         reason: ev.reason,
+        toolRefKind: ev.tool_ref_kind ?? null,
+        action: ev.action ?? null,
+        leaseRef: ev.lease_ref ?? null,
+        status: ev.status ?? null,
+        inputBytes: ev.input_bytes ?? null,
+        outputBytes: ev.output_bytes ?? null,
+        latencyMs: ev.latency_ms ?? null,
       });
       break;
     }

@@ -2,7 +2,11 @@
 // ABOUTME: Shows clickable suggestions with name, description, and pricing info.
 
 import { type Component, For, Show } from "solid-js";
-import { getPricingDisplay, type Publisher } from "@/services/catalog";
+import {
+  formatMcpDiscoveryStatus,
+  getPricingDisplay,
+  type Publisher,
+} from "@/services/catalog";
 
 interface PublisherSuggestionsProps {
   suggestions: Publisher[];
@@ -63,15 +67,25 @@ export const PublisherSuggestions: Component<PublisherSuggestionsProps> = (
                       )}
                     </Show>
                     <div class="flex-1 min-w-0 flex flex-col gap-0.5">
-                      <span class="flex items-center gap-1 text-sm font-medium text-foreground">
-                        {publisher.name}
+                      <span class="flex items-center gap-1 min-w-0 text-sm font-medium text-foreground">
+                        <span class="truncate">{publisher.name}</span>
                         <Show when={publisher.is_verified}>
                           <span
-                            class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-success text-black text-[10px] font-bold"
+                            class="inline-flex items-center justify-center w-3.5 h-3.5 shrink-0 rounded-full bg-success text-black text-[10px] font-bold"
                             title="Verified"
                           >
                             ✓
                           </span>
+                        </Show>
+                        <Show when={formatMcpDiscoveryStatus(publisher)}>
+                          {(status) => (
+                            <span
+                              class="inline-flex shrink-0 items-center px-1.5 py-0.5 rounded bg-warning/15 text-warning text-[10px] font-medium"
+                              title={status()}
+                            >
+                              MCP issue
+                            </span>
+                          )}
                         </Show>
                       </span>
                       <span class="text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis">

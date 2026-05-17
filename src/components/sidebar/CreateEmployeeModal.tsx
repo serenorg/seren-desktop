@@ -18,6 +18,7 @@ import { buildEmployeeFilesPatch } from "@/lib/employees/bundle-patch";
 import {
   type ImportFileEntry,
   type InstructionSlot,
+  importPathForFile,
   normalizeResourcePath,
   routeFiles,
   slotForFilename,
@@ -34,7 +35,11 @@ import {
   CONNECTOR_ACCESS_OPTIONS,
   type ConnectorAccessMode,
   connectorAccessModeFromToolRefs,
+  firstRemoteHttpToolRef,
   mergeConnectorAccessToolRefs,
+  mergeRemoteHttpToolRef,
+  type RemoteHttpToolRef,
+  remoteHttpToolRefDraftError,
   sameToolRefs,
 } from "@/lib/employees/tool-refs";
 import type {
@@ -66,6 +71,22 @@ const POLICIES: { value: EmployeeModelPolicy; label: string }[] = [
   { value: "fast", label: "Fast" },
   { value: "balanced", label: "Balanced" },
   { value: "deep", label: "Deep" },
+];
+
+const REMOTE_HTTP_METHODS: RemoteHttpToolRef["method"][] = [
+  "get",
+  "post",
+  "put",
+  "patch",
+  "delete",
+];
+
+const REMOTE_HTTP_AUTHS: RemoteHttpToolRef["auth_mode"][] = [
+  "none",
+  "bearer",
+  "api_key",
+  "basic",
+  "mtls",
 ];
 
 const TOOL_PRESETS: { value: EmployeeToolPreset; label: string }[] = [
@@ -138,6 +159,7 @@ interface FileSystemDirectoryEntryLike extends FileSystemEntryLike {
 }
 
 type DataTransferItemWithEntry = DataTransferItem & {
+  getAsEntry?: () => FileSystemEntryLike | null;
   webkitGetAsEntry?: () => FileSystemEntryLike | null;
 };
 
@@ -199,6 +221,30 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     createSignal<ConnectorAccessMode>(
       connectorAccessModeFromToolRefs(initial?.toolRefs ?? []),
     );
+  const initialRemoteHttp = firstRemoteHttpToolRef(initial?.toolRefs ?? []);
+  const remoteHttpRefCount = createMemo(
+    () =>
+      (props.employee?.toolRefs ?? []).filter(
+        (ref) => ref.kind === "remote_http",
+      ).length,
+  );
+  const [remoteHttpEnabled, setRemoteHttpEnabled] = createSignal(
+    Boolean(initialRemoteHttp),
+  );
+  const [remoteHttpName, setRemoteHttpName] = createSignal(
+    initialRemoteHttp?.name ?? "",
+  );
+  const [remoteHttpEndpoint, setRemoteHttpEndpoint] = createSignal(
+    initialRemoteHttp?.endpoint ?? "",
+  );
+  const [remoteHttpMethod, setRemoteHttpMethod] = createSignal<
+    RemoteHttpToolRef["method"]
+  >(initialRemoteHttp?.method ?? "post");
+  const [remoteHttpAuthMode, setRemoteHttpAuthMode] = createSignal<
+    RemoteHttpToolRef["auth_mode"]
+  >(initialRemoteHttp?.auth_mode ?? "none");
+  const [remoteHttpRequiresApproval, setRemoteHttpRequiresApproval] =
+    createSignal(initialRemoteHttp?.require_approval ?? false);
   const [maxIterations, setMaxIterations] = createSignal(
     initial?.maxIterations ?? DEFAULT_LIMITS.maxIterations,
   );
@@ -219,8 +265,10 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
   const [error, setError] = createSignal<string | null>(null);
   const [dragging, setDragging] = createSignal(false);
   const [importNotice, setImportNotice] = createSignal<string | null>(null);
+  const [folderPickerSupported, setFolderPickerSupported] = createSignal(false);
 
   let fileInputRef: HTMLInputElement | undefined;
+  let folderInputRef: HTMLInputElement | undefined;
 
   const setSection = (slot: InstructionSlot, body: string) => {
     if (slot === "skill") setSkillInstructions(body);
@@ -272,9 +320,6 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     const remaining = names.length - 3;
     return remaining > 0 ? `${shown}, +${remaining} more` : shown;
   };
-
-  const filenameFromEntry = (entry: { name: string; path?: string }): string =>
-    entry.path && entry.path.length > 0 ? entry.path : entry.name;
 
   const fileFromEntry = (
     entry: FileSystemFileEntryLike,
@@ -339,18 +384,20 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     if (items) {
       for (const item of Array.from(items)) {
         if (item.kind !== "file") continue;
-        const entry = (item as DataTransferItemWithEntry).webkitGetAsEntry?.();
+        const itemWithEntry = item as DataTransferItemWithEntry;
+        const entry =
+          itemWithEntry.webkitGetAsEntry?.() ?? itemWithEntry.getAsEntry?.();
         if (entry) {
           files.push(...(await collectEntryFiles(entry)));
         } else {
           const f = item.getAsFile();
-          if (f) files.push({ file: f, path: filenameFromEntry(f) });
+          if (f) files.push({ file: f, path: importPathForFile(f) });
         }
       }
     }
     if (files.length === 0 && fallback) {
       for (const f of Array.from(fallback)) {
-        files.push({ file: f, path: filenameFromEntry(f) });
+        files.push({ file: f, path: importPathForFile(f) });
       }
     }
 
@@ -479,16 +526,28 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
 
   const handleFilePicker = async (event: Event) => {
     const input = event.currentTarget as HTMLInputElement;
-    if (submitting() || !input.files) return;
-    const { entries, skipped } = await collectDroppedFiles(null, input.files);
-    applyImportedFiles(entries, "selection", skipped);
-    // Reset so picking the same file twice in a row still fires onChange.
-    input.value = "";
+    if (submitting() || !input.files) {
+      input.value = "";
+      return;
+    }
+    try {
+      const { entries, skipped } = await collectDroppedFiles(null, input.files);
+      applyImportedFiles(entries, "selection", skipped);
+    } finally {
+      // Reset so picking the same file or folder twice still fires onChange.
+      input.value = "";
+    }
   };
 
   const openFilePicker = () => {
     if (submitting()) return;
     fileInputRef?.click();
+  };
+
+  const openFolderPicker = () => {
+    if (submitting()) return;
+    if (!folderPickerSupported()) return;
+    folderInputRef?.click();
   };
 
   const handleDragOver = (event: DragEvent) => {
@@ -546,6 +605,13 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
   };
 
   onMount(() => {
+    const testInput = document.createElement("input");
+    const supportsFolderPicker = "webkitdirectory" in testInput;
+    setFolderPickerSupported(supportsFolderPicker);
+    if (supportsFolderPicker) {
+      folderInputRef?.setAttribute("webkitdirectory", "");
+      folderInputRef?.setAttribute("directory", "");
+    }
     requestAnimationFrame(() => nameInputRef?.focus());
     document.addEventListener("keydown", handleDocumentKeydown);
   });
@@ -559,6 +625,38 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     return deriveSlug(name());
   });
 
+  const remoteHttpToolRef = createMemo<RemoteHttpToolRef | undefined>(() => {
+    if (!remoteHttpEnabled()) return undefined;
+    const endpoint = remoteHttpEndpoint().trim();
+    return {
+      ...(initialRemoteHttp ?? {
+        kind: "remote_http",
+        permitted_actions: [
+          {
+            action: "execute",
+            capability: { kind: "all" },
+          },
+        ],
+      }),
+      name: remoteHttpName().trim(),
+      endpoint,
+      method: remoteHttpMethod(),
+      auth_mode: remoteHttpAuthMode(),
+      require_approval: remoteHttpRequiresApproval(),
+    };
+  });
+
+  const remoteHttpDraftError = createMemo(() => {
+    return remoteHttpToolRefDraftError({
+      enabled: remoteHttpEnabled(),
+      name: remoteHttpName(),
+      endpoint: remoteHttpEndpoint(),
+      method: remoteHttpMethod(),
+      existingRefs: props.employee?.toolRefs ?? [],
+      editingRef: initialRemoteHttp,
+    });
+  });
+
   const submitDisabledReason = createMemo(() => {
     if (submitting()) return "";
     if (name().trim().length === 0) return "Name is required.";
@@ -569,6 +667,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       return "Cron schedule is required.";
     if (modelChoice() === "private" && modelId().trim().length === 0)
       return "Private model id is required.";
+    if (remoteHttpDraftError()) return remoteHttpDraftError();
     return "";
   });
 
@@ -599,9 +698,12 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
   });
 
   const currentToolRefs = createMemo(() =>
-    mergeConnectorAccessToolRefs(
-      props.employee?.toolRefs ?? [],
-      connectorAccess(),
+    mergeRemoteHttpToolRef(
+      mergeConnectorAccessToolRefs(
+        props.employee?.toolRefs ?? [],
+        connectorAccess(),
+      ),
+      remoteHttpToolRef(),
     ),
   );
 
@@ -1004,6 +1106,16 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
               onChange={handleFilePicker}
               disabled={submitting()}
             />
+            <input
+              ref={folderInputRef}
+              type="file"
+              multiple
+              class="sr-only"
+              tabIndex={-1}
+              aria-label="Import instruction folder"
+              onChange={handleFilePicker}
+              disabled={submitting()}
+            />
             <div
               id="employee-drop"
               class="w-full py-3 px-3 bg-card text-foreground border border-dashed rounded text-[12px] leading-relaxed transition-colors"
@@ -1069,6 +1181,16 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                 >
                   Browse files...
                 </button>
+                <Show when={folderPickerSupported()}>
+                  <button
+                    type="button"
+                    class="ml-3 text-[11.5px] font-medium text-primary underline-offset-2 hover:underline focus:outline-none focus-visible:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={openFolderPicker}
+                    disabled={submitting()}
+                  >
+                    Browse folder...
+                  </button>
+                </Show>
               </div>
               <Show when={importNotice()}>
                 <div
@@ -1300,6 +1422,135 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                       )}
                     </For>
                   </div>
+                </div>
+
+                <div class="col-span-2 border border-border rounded-md bg-card p-3 space-y-3">
+                  <label class="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      class="mt-0.5 h-4 w-4 rounded border-border bg-surface-2 text-primary"
+                      checked={remoteHttpEnabled()}
+                      onChange={(event) =>
+                        setRemoteHttpEnabled(event.currentTarget.checked)
+                      }
+                      disabled={submitting()}
+                    />
+                    <span>
+                      <span class="block text-[12.5px] font-semibold text-foreground">
+                        Remote HTTP tool
+                      </span>
+                      <span class="block text-[10.5px] text-muted-foreground leading-tight mt-0.5">
+                        Expose one HTTP(S) endpoint as an execute tool
+                      </span>
+                    </span>
+                  </label>
+                  <Show when={remoteHttpEnabled()}>
+                    <div class="grid grid-cols-2 gap-3">
+                      <label class="block">
+                        <span class="block text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70 mb-1">
+                          Name
+                        </span>
+                        <input
+                          type="text"
+                          value={remoteHttpName()}
+                          onInput={(event) =>
+                            setRemoteHttpName(event.currentTarget.value)
+                          }
+                          placeholder="webhook_lookup"
+                          disabled={submitting()}
+                          class="w-full px-2.5 py-1.5 rounded-md bg-surface-2 border border-border text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/50"
+                        />
+                      </label>
+                      <label class="block">
+                        <span class="block text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70 mb-1">
+                          Method
+                        </span>
+                        <select
+                          value={remoteHttpMethod()}
+                          onChange={(event) =>
+                            setRemoteHttpMethod(
+                              event.currentTarget
+                                .value as RemoteHttpToolRef["method"],
+                            )
+                          }
+                          disabled={submitting()}
+                          class="w-full px-2.5 py-1.5 rounded-md bg-surface-2 border border-border text-[12px] text-foreground focus:outline-none focus:border-primary/50"
+                        >
+                          <For each={REMOTE_HTTP_METHODS}>
+                            {(method) => (
+                              <option value={method}>
+                                {method.toUpperCase()}
+                              </option>
+                            )}
+                          </For>
+                        </select>
+                      </label>
+                      <label class="block col-span-2">
+                        <span class="block text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70 mb-1">
+                          Endpoint
+                        </span>
+                        <input
+                          type="url"
+                          value={remoteHttpEndpoint()}
+                          onInput={(event) =>
+                            setRemoteHttpEndpoint(event.currentTarget.value)
+                          }
+                          placeholder="https://api.example.com/tools/lookup"
+                          disabled={submitting()}
+                          class="w-full px-2.5 py-1.5 rounded-md bg-surface-2 border border-border text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/50"
+                        />
+                      </label>
+                      <label class="block">
+                        <span class="block text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70 mb-1">
+                          Auth
+                        </span>
+                        <select
+                          value={remoteHttpAuthMode()}
+                          onChange={(event) =>
+                            setRemoteHttpAuthMode(
+                              event.currentTarget
+                                .value as RemoteHttpToolRef["auth_mode"],
+                            )
+                          }
+                          disabled={submitting()}
+                          class="w-full px-2.5 py-1.5 rounded-md bg-surface-2 border border-border text-[12px] text-foreground focus:outline-none focus:border-primary/50"
+                        >
+                          <For each={REMOTE_HTTP_AUTHS}>
+                            {(auth) => (
+                              <option value={auth}>
+                                {auth.replace("_", " ").toUpperCase()}
+                              </option>
+                            )}
+                          </For>
+                        </select>
+                      </label>
+                      <label class="flex items-center gap-2 pt-5 text-[12px] text-foreground">
+                        <input
+                          type="checkbox"
+                          class="h-4 w-4 rounded border-border bg-surface-2 text-primary"
+                          checked={remoteHttpRequiresApproval()}
+                          onChange={(event) =>
+                            setRemoteHttpRequiresApproval(
+                              event.currentTarget.checked,
+                            )
+                          }
+                          disabled={submitting()}
+                        />
+                        Requires approval
+                      </label>
+                    </div>
+                    <Show when={remoteHttpRefCount() > 1}>
+                      <div class="text-[11px] text-muted-foreground">
+                        Editing 1 of {remoteHttpRefCount()} remote HTTP refs;
+                        other refs are preserved.
+                      </div>
+                    </Show>
+                    <Show when={remoteHttpDraftError()}>
+                      <div class="text-[11px] text-destructive">
+                        {remoteHttpDraftError()}
+                      </div>
+                    </Show>
+                  </Show>
                 </div>
 
                 <div class="col-span-2">

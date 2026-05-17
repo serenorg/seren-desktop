@@ -94,6 +94,22 @@ describe("buildEmployeePolicyReviewSummary", () => {
           ],
         },
         {
+          kind: "remote_http",
+          name: "webhook_lookup",
+          endpoint: "https://api.example.com/tools/lookup",
+          method: "post",
+          auth_mode: "api_key",
+          timeout_ms: 5000,
+          require_approval: true,
+          permitted_actions: [
+            {
+              action: "execute",
+              capability: { kind: "all" },
+              use_budget: 3,
+            },
+          ],
+        },
+        {
           kind: "preset_group",
           preset: "live_data",
         },
@@ -112,13 +128,38 @@ describe("buildEmployeePolicyReviewSummary", () => {
       "Publisher seren-web/fetch; no per-action leases",
       "MCP github/create_issue; write: issues.create; requires approval",
       "Remote agent https://agents.example.com; delegate: triage; requires approval",
+      "Remote HTTP POST webhook_lookup; endpoint api.example.com; execute: all; requires approval",
       "Preset Live data; no per-action leases",
     ]);
     expect(summary.approvalRules).toEqual([
       "Mutation-capable tools allowed",
-      "3 typed tools require approval",
+      "4 typed tools require approval",
       "Blocked egress requests route to approval inbox",
       "1 guardrail can route to inbox",
+    ]);
+  });
+
+  it("summarizes remote HTTP endpoint origin without exposing path or query", () => {
+    const summary = buildEmployeePolicyReviewSummary({
+      approvalPolicy: "read_only",
+      toolPresets: [],
+      toolRefs: [
+        {
+          kind: "remote_http",
+          name: "customer_lookup",
+          endpoint:
+            "https://api.example.com/internal/customer/search?token=secret",
+          method: "get",
+          auth_mode: "bearer",
+        },
+      ],
+    });
+
+    expect(summary.toolAccess[1]).toBe(
+      "Typed refs: Remote HTTP GET customer_lookup",
+    );
+    expect(summary.toolRefDetails).toEqual([
+      "Remote HTTP GET customer_lookup; endpoint api.example.com; no per-action leases",
     ]);
   });
 });

@@ -1047,7 +1047,7 @@ export type CloudRunToolAuditStatus = 'success' | 'failure';
  * `AgentToolRef` variants so operators can distinguish publisher calls from
  * MCP, connector, remote-agent, or preset-group invocations.
  */
-export type CloudRunToolRefKind = 'publisher' | 'mcp' | 'connector' | 'remote_agent' | 'preset_group' | 'builtin' | 'unknown';
+export type CloudRunToolRefKind = 'publisher' | 'mcp' | 'connector' | 'remote_agent' | 'remote_http' | 'preset_group' | 'builtin' | 'unknown';
 
 /**
  * Request body for registering a content-addressed deployment bundle.

@@ -46,6 +46,21 @@ function compactList(items: readonly string[], empty: string, limit = 4) {
   return remaining > 0 ? `${shown}, +${remaining} more` : shown;
 }
 
+function clipText(value: string, maxLength: number) {
+  return value.length > maxLength
+    ? `${value.slice(0, Math.max(0, maxLength - 3))}...`
+    : value;
+}
+
+function formatRemoteHttpEndpoint(endpoint: string) {
+  try {
+    const url = new URL(endpoint);
+    return clipText(url.host, 64);
+  } catch {
+    return "custom endpoint";
+  }
+}
+
 function formatToolPreset(preset: ManagedAgentToolPreset) {
   return TOOL_PRESET_LABELS[preset] ?? preset;
 }
@@ -74,6 +89,8 @@ function formatToolRef(ref: AgentToolRef) {
       return `Connector ${ref.connector_ref} (${ref.capability})`;
     case "remote_agent":
       return `Remote agent ${ref.origin}`;
+    case "remote_http":
+      return `Remote HTTP ${ref.method.toUpperCase()} ${clipText(ref.name, 48)}`;
     case "preset_group":
       return `Preset ${formatToolPreset(ref.preset)}`;
   }
@@ -161,7 +178,11 @@ function toolRefDetailLines(toolRefs: readonly AgentToolRef[]) {
       ref.kind === "connector"
         ? `; scopes: ${compactList(ref.scopes ?? [], "none")}`
         : "";
-    return `${formatToolRef(ref)}${scopes}; ${formatActionLeases(ref)}${approval}`;
+    const endpoint =
+      ref.kind === "remote_http"
+        ? `; endpoint ${formatRemoteHttpEndpoint(ref.endpoint)}`
+        : "";
+    return `${formatToolRef(ref)}${endpoint}${scopes}; ${formatActionLeases(ref)}${approval}`;
   });
 }
 

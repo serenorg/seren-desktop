@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { AgentToolRef } from "@/api/seren-agent";
 import {
   connectorAccessModeFromToolRefs,
+  firstRemoteHttpToolRef,
   mergeConnectorAccessToolRefs,
+  mergeRemoteHttpToolRef,
+  remoteHttpToolRefDraftError,
   sameToolRefs,
 } from "@/lib/employees/tool-refs";
 
@@ -190,6 +193,219 @@ describe("employee tool-ref helpers", () => {
       },
     ];
     expect(sameToolRefs(a, b)).toBe(false);
+  });
+
+  it("sameToolRefs compares remote http refs structurally", () => {
+    const a: AgentToolRef[] = [
+      {
+        kind: "remote_http",
+        name: "webhook_lookup",
+        endpoint: "https://api.example.com/tools/lookup",
+        method: "post",
+        auth_mode: "api_key",
+        require_approval: false,
+      },
+    ];
+    const b: AgentToolRef[] = [
+      {
+        kind: "remote_http",
+        name: "webhook_lookup",
+        endpoint: "https://api.example.com/tools/lookup",
+        method: "post",
+        auth_mode: "api_key",
+        require_approval: null as unknown as boolean,
+        timeout_ms: null,
+      },
+    ];
+    const c: AgentToolRef[] = [
+      {
+        kind: "remote_http",
+        name: "webhook_lookup",
+        endpoint: "https://api.example.com/tools/lookup",
+        method: "get",
+        auth_mode: "api_key",
+      },
+    ];
+
+    expect(sameToolRefs(a, b)).toBe(true);
+    expect(sameToolRefs(a, c)).toBe(false);
+  });
+
+  it("replaces the first remote http ref while preserving other refs", () => {
+    const primary: AgentToolRef = {
+      kind: "remote_http",
+      name: "lookup",
+      endpoint: "https://api.example.com/tools/lookup",
+      method: "post",
+      auth_mode: "api_key",
+    };
+    const secondary: AgentToolRef = {
+      kind: "remote_http",
+      name: "notify",
+      endpoint: "https://api.example.com/tools/notify",
+      method: "post",
+      auth_mode: "bearer",
+    };
+    const connector: AgentToolRef = {
+      kind: "connector",
+      connector_ref: "slack",
+      capability: "messaging",
+    };
+    const replacement: AgentToolRef = {
+      kind: "remote_http",
+      name: "lookup_v2",
+      endpoint: "https://api.example.com/tools/lookup-v2",
+      method: "get",
+      auth_mode: "none",
+    };
+
+    expect(firstRemoteHttpToolRef([connector, primary, secondary])).toEqual(
+      primary,
+    );
+    expect(
+      mergeRemoteHttpToolRef([connector, primary, secondary], replacement),
+    ).toEqual([connector, replacement, secondary]);
+    expect(mergeRemoteHttpToolRef([connector, primary, secondary], undefined))
+      .toEqual([connector, secondary]);
+  });
+
+  it("preserves hidden remote http fields while editing the first ref", () => {
+    const primary: AgentToolRef = {
+      kind: "remote_http",
+      name: "lookup",
+      endpoint: "https://api.example.com/tools/lookup",
+      method: "post",
+      auth_mode: "bearer",
+      timeout_ms: 5000,
+      require_approval: true,
+      permitted_actions: [
+        {
+          action: "execute",
+          capability: { kind: "specific", actions: ["lookup.customer"] },
+        },
+      ],
+    };
+    const replacement: AgentToolRef = {
+      ...primary,
+      name: "lookup_v2",
+    };
+
+    expect(mergeRemoteHttpToolRef([primary], replacement)).toEqual([
+      replacement,
+    ]);
+  });
+
+  it("validates remote http drafts with backend URL parity", () => {
+    const valid = {
+      enabled: true,
+      name: "lookup",
+      endpoint: "https://api.example.com/tools/lookup?region=us",
+    };
+
+    expect(remoteHttpToolRefDraftError({ ...valid, enabled: false })).toBe("");
+    expect(remoteHttpToolRefDraftError(valid)).toBe("");
+    expect(remoteHttpToolRefDraftError({ ...valid, name: " " })).toBe(
+      "Remote HTTP name is required.",
+    );
+    expect(remoteHttpToolRefDraftError({ ...valid, name: " lookup" })).toBe(
+      "Remote HTTP name must not include leading or trailing whitespace.",
+    );
+    expect(remoteHttpToolRefDraftError({ ...valid, name: "look up" })).toBe(
+      "Remote HTTP name may only contain letters, numbers, underscores, dashes, and dots.",
+    );
+    expect(
+      remoteHttpToolRefDraftError({
+        ...valid,
+        name: "x".repeat(129),
+      }),
+    ).toBe("Remote HTTP name must be at most 128 characters.");
+    expect(remoteHttpToolRefDraftError({ ...valid, endpoint: " " })).toBe(
+      "Remote HTTP endpoint is required.",
+    );
+    expect(
+      remoteHttpToolRefDraftError({
+        ...valid,
+        endpoint: "ftp://api.example.com/tools/lookup",
+      }),
+    ).toBe("Remote HTTP endpoint must be an HTTP(S) URL.");
+    expect(
+      remoteHttpToolRefDraftError({
+        ...valid,
+        endpoint: "https://user:secret@api.example.com/tools/lookup",
+      }),
+    ).toBe("Remote HTTP endpoint must not include credentials.");
+    for (const endpoint of [
+      "https://localhost/tools/lookup",
+      "https://127.0.0.1/tools/lookup",
+      "https://169.254.169.254/latest/meta-data",
+      "https://10.0.0.1/tools/lookup",
+      "https://[::1]/tools/lookup",
+    ]) {
+      expect(remoteHttpToolRefDraftError({ ...valid, endpoint })).toBe(
+        "Remote HTTP endpoint must not target localhost or private IPs.",
+      );
+    }
+    expect(
+      remoteHttpToolRefDraftError({
+        ...valid,
+        endpoint: "https://api.example.com/tools/lookup#",
+      }),
+    ).toBe("Remote HTTP endpoint must not include a fragment.");
+    expect(
+      remoteHttpToolRefDraftError({
+        ...valid,
+        endpoint: "https://api.example.com/tools/lookup#section",
+      }),
+    ).toBe("Remote HTTP endpoint must not include a fragment.");
+  });
+
+  it("validates remote http drafts against existing refs", () => {
+    const editing: AgentToolRef = {
+      kind: "remote_http",
+      name: "lookup",
+      endpoint: "https://api.example.com/tools/lookup",
+      method: "post",
+      auth_mode: "bearer",
+    };
+    const secondary: AgentToolRef = {
+      kind: "remote_http",
+      name: "notify",
+      endpoint: "https://api.example.com/tools/notify",
+      method: "post",
+      auth_mode: "none",
+    };
+    const existingRefs = [editing, secondary];
+
+    expect(
+      remoteHttpToolRefDraftError({
+        enabled: true,
+        name: "lookup",
+        endpoint: "https://API.example.com:443/tools/lookup",
+        method: "post",
+        existingRefs,
+        editingRef: editing,
+      }),
+    ).toBe("");
+    expect(
+      remoteHttpToolRefDraftError({
+        enabled: true,
+        name: "notify",
+        endpoint: "https://api.example.com/tools/lookup-v2",
+        method: "post",
+        existingRefs,
+        editingRef: editing,
+      }),
+    ).toBe("Remote HTTP name already exists.");
+    expect(
+      remoteHttpToolRefDraftError({
+        enabled: true,
+        name: "lookup_v2",
+        endpoint: "https://api.example.com:443/tools/notify",
+        method: "post",
+        existingRefs,
+        editingRef: editing,
+      }),
+    ).toBe("Remote HTTP endpoint already exists for this method.");
   });
 
   it("connectorAccessModeFromToolRefs returns none for non-preset gmail refs", () => {

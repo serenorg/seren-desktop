@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  importPathForFile,
   normalizeResourcePath,
   routeFiles,
   slotForFilename,
@@ -50,6 +51,36 @@ describe("normalizeResourcePath", () => {
     expect(normalizeResourcePath("")).toBeNull();
     expect(normalizeResourcePath("../secret.txt")).toBeNull();
     expect(normalizeResourcePath("refs/\0secret.txt")).toBeNull();
+  });
+});
+
+describe("importPathForFile", () => {
+  it("preserves directory-relative browser file picker paths", () => {
+    expect(
+      importPathForFile({
+        name: "SKILL.md",
+        webkitRelativePath: "agent/SKILL.md",
+      }),
+    ).toBe("agent/SKILL.md");
+  });
+
+  it("ignores native local paths so bundle paths stay relative", () => {
+    expect(
+      importPathForFile({
+        name: "SKILL.md",
+        path: "/Users/christian/agent/SKILL.md",
+        webkitRelativePath: "agent/SKILL.md",
+      }),
+    ).toBe("agent/SKILL.md");
+  });
+
+  it("falls back to the visible filename for individual file picks", () => {
+    expect(
+      importPathForFile({
+        name: "README.md",
+        path: "/Users/christian/agent/README.md",
+      }),
+    ).toBe("README.md");
   });
 });
 

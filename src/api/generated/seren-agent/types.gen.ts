@@ -344,6 +344,10 @@ export type AgentRemoteAgentAuth = 'none' | 'bearer' | 'mtls';
 
 export type AgentRemoteAgentTransport = 'https' | 'sse' | 'websocket';
 
+export type AgentRemoteHttpAuth = 'none' | 'bearer' | 'api_key' | 'basic' | 'mtls';
+
+export type AgentRemoteHttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
+
 export type AgentResourcePolicy = {
     cpu_limit?: string | null;
     cpu_request?: string | null;
@@ -604,6 +608,15 @@ export type AgentToolRef = {
     require_approval?: boolean;
     timeout_ms?: number | null;
     transport: AgentRemoteAgentTransport;
+} | {
+    auth_mode: AgentRemoteHttpAuth;
+    endpoint: string;
+    kind: 'remote_http';
+    method: AgentRemoteHttpMethod;
+    name: string;
+    permitted_actions?: Array<ActionLease>;
+    require_approval?: boolean;
+    timeout_ms?: number | null;
 } | {
     kind: 'preset_group';
     preset: ManagedAgentToolPreset;

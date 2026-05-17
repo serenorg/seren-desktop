@@ -6545,6 +6545,7 @@
           "mcp",
           "connector",
           "remote_agent",
+          "remote_http",
           "preset_group",
           "builtin",
           "unknown"

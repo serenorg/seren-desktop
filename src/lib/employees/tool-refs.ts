@@ -4,6 +4,7 @@
 import type { AgentToolRef } from "@/api/seren-agent";
 
 export type ConnectorAccessMode = "none" | "gmail_read" | "gmail_send_approval";
+export type RemoteHttpToolRef = Extract<AgentToolRef, { kind: "remote_http" }>;
 
 export type ConnectorAccessOption = {
   value: ConnectorAccessMode;
@@ -92,6 +93,170 @@ export function mergeConnectorAccessToolRefs(
   return refs;
 }
 
+export function firstRemoteHttpToolRef(
+  refs: readonly AgentToolRef[],
+): RemoteHttpToolRef | undefined {
+  return refs.find(
+    (ref): ref is RemoteHttpToolRef => ref.kind === "remote_http",
+  );
+}
+
+export function mergeRemoteHttpToolRef(
+  existing: readonly AgentToolRef[],
+  remoteHttp: RemoteHttpToolRef | undefined,
+): AgentToolRef[] {
+  let replaced = false;
+  const refs: AgentToolRef[] = [];
+  for (const ref of existing) {
+    if (ref.kind === "remote_http" && !replaced) {
+      replaced = true;
+      if (remoteHttp) refs.push(remoteHttp);
+    } else {
+      refs.push(ref);
+    }
+  }
+  if (!replaced && remoteHttp) refs.push(remoteHttp);
+  return refs;
+}
+
+export function remoteHttpToolRefDraftError(input: {
+  enabled: boolean;
+  name: string;
+  endpoint: string;
+  method?: RemoteHttpToolRef["method"];
+  existingRefs?: readonly AgentToolRef[];
+  editingRef?: RemoteHttpToolRef;
+}): string {
+  if (!input.enabled) return "";
+  const nameError = remoteHttpNameDraftError(input.name);
+  if (nameError) return nameError;
+  const endpoint = input.endpoint.trim();
+  if (endpoint.length === 0) return "Remote HTTP endpoint is required.";
+  try {
+    const url = new URL(endpoint);
+    if (
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      url.hostname.length === 0
+    ) {
+      return "Remote HTTP endpoint must be an HTTP(S) URL.";
+    }
+    if (url.username || url.password) {
+      return "Remote HTTP endpoint must not include credentials.";
+    }
+    if (isBlockedRemoteHttpHost(url.hostname)) {
+      return "Remote HTTP endpoint must not target localhost or private IPs.";
+    }
+    if (endpoint.includes("#")) {
+      return "Remote HTTP endpoint must not include a fragment.";
+    }
+    const duplicateError = duplicateRemoteHttpDraftError({
+      name: input.name,
+      endpoint,
+      method: input.method ?? "post",
+      existingRefs: input.existingRefs ?? [],
+      editingRef: input.editingRef,
+    });
+    if (duplicateError) return duplicateError;
+  } catch {
+    return "Remote HTTP endpoint must be a valid URL.";
+  }
+  return "";
+}
+
+function remoteHttpNameDraftError(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return "Remote HTTP name is required.";
+  if (trimmed !== name) {
+    return "Remote HTTP name must not include leading or trailing whitespace.";
+  }
+  if (trimmed.length > 128) {
+    return "Remote HTTP name must be at most 128 characters.";
+  }
+  if (!/^[A-Za-z0-9_.-]+$/.test(trimmed)) {
+    return "Remote HTTP name may only contain letters, numbers, underscores, dashes, and dots.";
+  }
+  return "";
+}
+
+function duplicateRemoteHttpDraftError(input: {
+  name: string;
+  endpoint: string;
+  method: RemoteHttpToolRef["method"];
+  existingRefs: readonly AgentToolRef[];
+  editingRef?: RemoteHttpToolRef;
+}): string {
+  const name = input.name.trim();
+  const endpointKey = remoteHttpEndpointIdentityKey(
+    input.method,
+    input.endpoint,
+  );
+  for (const ref of input.existingRefs) {
+    if (ref.kind !== "remote_http") continue;
+    if (input.editingRef && sameToolRef(ref, input.editingRef)) continue;
+    if (ref.name.trim() === name) return "Remote HTTP name already exists.";
+    if (
+      remoteHttpEndpointIdentityKey(ref.method, ref.endpoint) === endpointKey
+    ) {
+      return "Remote HTTP endpoint already exists for this method.";
+    }
+  }
+  return "";
+}
+
+function remoteHttpEndpointIdentityKey(
+  method: RemoteHttpToolRef["method"],
+  endpoint: string,
+): string {
+  try {
+    const url = new URL(endpoint.trim());
+    if (
+      (url.protocol === "https:" && url.port === "443") ||
+      (url.protocol === "http:" && url.port === "80")
+    ) {
+      url.port = "";
+    }
+    url.hostname = url.hostname.toLowerCase();
+    return `${method}:${url.toString()}`;
+  } catch {
+    return `${method}:${endpoint.trim()}`;
+  }
+}
+
+function isBlockedRemoteHttpHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host === "localhost.") return true;
+  if (host === "::1" || host.startsWith("fe80:")) {
+    return true;
+  }
+  if (host.includes(":") && (host.startsWith("fc") || host.startsWith("fd"))) {
+    return true;
+  }
+
+  const parts = host.split(".");
+  if (parts.length !== 4) return false;
+  const octets = parts.map((part) => Number(part));
+  if (
+    octets.some(
+      (octet, index) =>
+        !Number.isInteger(octet) ||
+        octet < 0 ||
+        octet > 255 ||
+        String(octet) !== parts[index],
+    )
+  ) {
+    return false;
+  }
+  const [a, b] = octets;
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    a === 0
+  );
+}
+
 // Compare two tool-ref lists element-wise with a structural equality check
 // rather than relying on JSON.stringify (which is sensitive to key order and
 // whether optional fields are emitted vs omitted).
@@ -149,6 +314,18 @@ function sameToolRef(a: AgentToolRef, b: AgentToolRef): boolean {
         sameActionLeases(a.permitted_actions, b.permitted_actions)
       );
     }
+    case "remote_http": {
+      if (b.kind !== "remote_http") return false;
+      return (
+        a.name === b.name &&
+        a.endpoint === b.endpoint &&
+        a.method === b.method &&
+        a.auth_mode === b.auth_mode &&
+        (a.timeout_ms ?? null) === (b.timeout_ms ?? null) &&
+        sameOptionalBool(a.require_approval, b.require_approval) &&
+        sameActionLeases(a.permitted_actions, b.permitted_actions)
+      );
+    }
     case "preset_group": {
       if (b.kind !== "preset_group") return false;
       return a.preset === b.preset;
@@ -160,7 +337,10 @@ function sameToolRef(a: AgentToolRef, b: AgentToolRef): boolean {
   }
 }
 
-function sameOptionalBool(a: boolean | undefined, b: boolean | undefined) {
+function sameOptionalBool(
+  a: boolean | null | undefined,
+  b: boolean | null | undefined,
+) {
   // Backend treats missing as `false` for these flags, so unify undefined/false.
   return (a ?? false) === (b ?? false);
 }

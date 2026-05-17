@@ -21,6 +21,12 @@ export type PublisherType = "database" | "api" | "mcp" | "compute";
  */
 export type BillingModel = "x402_per_request" | "prepaid_credits";
 
+export interface McpDiscoveryStatus {
+  last_attempt_at?: string | null;
+  last_success_at?: string | null;
+  error?: string | null;
+}
+
 /**
  * Publisher data structure (normalized for UI).
  */
@@ -47,12 +53,19 @@ export interface Publisher {
   endpoints: EndpointDefinition[];
   api_url: string | null;
   mcp_endpoint: string | null;
+  mcp_discovery: McpDiscoveryStatus | null;
   is_verified: boolean;
   is_active: boolean;
 }
 
 // Use the generated PublisherResponse type as the raw API structure
-type RawPublisher = PublisherResponse;
+type RawPublisher = PublisherResponse & {
+  mcp_discovery?: unknown;
+};
+
+type RawPublisherSuggestion = {
+  mcp_discovery?: unknown;
+};
 
 /**
  * Parse a numeric value that could be string or number.
@@ -68,7 +81,39 @@ function parseNumericPrice(
 /**
  * Transform raw API publisher to normalized UI publisher.
  */
-function transformPublisher(raw: RawPublisher): Publisher {
+function normalizeNullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+export function normalizeDiscoveryError(error: unknown): string | null {
+  if (typeof error !== "string") return null;
+  const normalized = error.replace(/\s+/g, " ").trim();
+  return normalized ? normalized : null;
+}
+
+export function normalizeMcpDiscoveryStatus(
+  value: unknown,
+): McpDiscoveryStatus | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const status = value as Record<string, unknown>;
+  return {
+    last_attempt_at: normalizeNullableString(status.last_attempt_at),
+    last_success_at: normalizeNullableString(status.last_success_at),
+    error: normalizeDiscoveryError(status.error),
+  };
+}
+
+export function formatMcpDiscoveryStatus(
+  publisher: Pick<Publisher, "mcp_discovery">,
+): string | null {
+  const error = normalizeDiscoveryError(publisher.mcp_discovery?.error);
+  if (!error) return null;
+  return `MCP discovery failed: ${error}`;
+}
+
+export function transformPublisher(raw: RawPublisher): Publisher {
   // Handle logo_url - convert relative paths to absolute URLs
   let logoUrl = raw.logo_url;
   if (logoUrl?.startsWith("/")) {
@@ -139,6 +184,7 @@ function transformPublisher(raw: RawPublisher): Publisher {
     endpoints: raw.endpoints ?? [],
     api_url: raw.api_url ?? null,
     mcp_endpoint: raw.mcp_endpoint ?? null,
+    mcp_discovery: normalizeMcpDiscoveryStatus(raw.mcp_discovery),
     is_verified: raw.is_verified ?? false,
     is_active: raw.is_active ?? true,
   };
@@ -302,31 +348,35 @@ export const catalog = {
     // suggestPublishers returns PublisherSuggestion[], which has a subset of fields
     // We need to fetch full publisher details or return partial data
     // For now, map what we can from the suggestion
-    return data.data.publishers.map((suggestion) => ({
-      id: "",
-      slug: suggestion.slug,
-      name: suggestion.name,
-      resource_name: null,
-      resource_description: null,
-      description: suggestion.description || "",
-      logo_url: null, // PublisherSuggestion doesn't include logo_url
-      publisher_type: "api" as PublisherType,
-      billing_model: null,
-      price_per_call: null,
-      base_price_per_1000_rows: suggestion.pricing?.base_price_per_1000_rows
-        ? parseNumericPrice(suggestion.pricing.base_price_per_1000_rows)
-        : null,
-      price_per_execution: null,
-      total_transactions: 0,
-      unique_agents_served: 0,
-      categories: suggestion.capabilities || [],
-      capabilities: suggestion.capabilities || [],
-      endpoints: [],
-      api_url: null,
-      mcp_endpoint: null,
-      is_verified: false,
-      is_active: true,
-    }));
+    return data.data.publishers.map((suggestion) => {
+      const discovery = (suggestion as RawPublisherSuggestion).mcp_discovery;
+      return {
+        id: "",
+        slug: suggestion.slug,
+        name: suggestion.name,
+        resource_name: null,
+        resource_description: null,
+        description: suggestion.description || "",
+        logo_url: null, // PublisherSuggestion doesn't include logo_url
+        publisher_type: "api" as PublisherType,
+        billing_model: null,
+        price_per_call: null,
+        base_price_per_1000_rows: suggestion.pricing?.base_price_per_1000_rows
+          ? parseNumericPrice(suggestion.pricing.base_price_per_1000_rows)
+          : null,
+        price_per_execution: null,
+        total_transactions: 0,
+        unique_agents_served: 0,
+        categories: suggestion.capabilities || [],
+        capabilities: suggestion.capabilities || [],
+        endpoints: [],
+        api_url: null,
+        mcp_endpoint: null,
+        mcp_discovery: normalizeMcpDiscoveryStatus(discovery),
+        is_verified: false,
+        is_active: true,
+      };
+    });
   },
 
   /**

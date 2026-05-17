@@ -8,6 +8,7 @@ import { getAllTools } from "@/lib/tools";
 import { executeTool } from "@/lib/tools/executor";
 import {
   cancelEmployeeRun,
+  formatToolAuditEvent,
   runEmployeeMessage,
   type ToolAuditEvent,
   type ToolCallEvent,
@@ -715,7 +716,7 @@ function emitEmployeeToolAudit(
   // Render as a markdown blockquote so the existing chat renderer styles
   // it as a distinct aside rather than letting the policy decision read
   // like prose the assistant wrote.
-  const content = `> **Tool audit - ${event.tool}:** ${event.reason}`;
+  const content = `> **Tool audit:** ${formatToolAuditEvent(event)}`;
   const message: UnifiedMessage = {
     id: crypto.randomUUID(),
     type: "assistant",

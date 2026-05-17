@@ -1477,6 +1477,26 @@
           "websocket"
         ]
       },
+      "AgentRemoteHttpAuth": {
+        "type": "string",
+        "enum": [
+          "none",
+          "bearer",
+          "api_key",
+          "basic",
+          "mtls"
+        ]
+      },
+      "AgentRemoteHttpMethod": {
+        "type": "string",
+        "enum": [
+          "get",
+          "post",
+          "put",
+          "patch",
+          "delete"
+        ]
+      },
       "AgentResourcePolicy": {
         "type": "object",
         "properties": {
@@ -2276,6 +2296,54 @@
               },
               "transport": {
                 "$ref": "#/components/schemas/AgentRemoteAgentTransport"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Reference to a remote HTTP tool endpoint exposed as a managed tool.",
+            "required": [
+              "name",
+              "endpoint",
+              "method",
+              "auth_mode",
+              "kind"
+            ],
+            "properties": {
+              "auth_mode": {
+                "$ref": "#/components/schemas/AgentRemoteHttpAuth"
+              },
+              "endpoint": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "remote_http"
+                ]
+              },
+              "method": {
+                "$ref": "#/components/schemas/AgentRemoteHttpMethod"
+              },
+              "name": {
+                "type": "string"
+              },
+              "permitted_actions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActionLease"
+                }
+              },
+              "require_approval": {
+                "type": "boolean"
+              },
+              "timeout_ms": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
               }
             }
           },

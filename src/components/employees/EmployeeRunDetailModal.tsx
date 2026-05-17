@@ -20,6 +20,7 @@ import type {
   EmployeeRunPendingApprovals,
 } from "@/lib/employees/types";
 import { employees as svc } from "@/services/employees";
+import { formatToolAuditEvent } from "@/services/employees-runtime";
 
 interface EmployeeRunDetailModalProps {
   deploymentId: string;
@@ -93,6 +94,13 @@ interface EnvelopeShape {
   is_error?: boolean;
   reason?: string;
   tool?: string;
+  tool_ref_kind?: string | null;
+  action?: string | null;
+  lease_ref?: string | null;
+  status?: string | null;
+  input_bytes?: number | null;
+  output_bytes?: number | null;
+  latency_ms?: number | null;
   state?: string;
 }
 
@@ -126,7 +134,18 @@ function eventLine(raw: unknown): { kind: string; text: string } | null {
   if (ev.type === "tool_audit") {
     return {
       kind: "tool_audit",
-      text: `${ev.tool ?? "tool"}: ${ev.reason ?? ""}`,
+      text: formatToolAuditEvent({
+        id: "",
+        tool: ev.tool ?? "tool",
+        reason: ev.reason ?? "",
+        toolRefKind: ev.tool_ref_kind ?? null,
+        action: ev.action ?? null,
+        leaseRef: ev.lease_ref ?? null,
+        status: ev.status ?? null,
+        inputBytes: ev.input_bytes ?? null,
+        outputBytes: ev.output_bytes ?? null,
+        latencyMs: ev.latency_ms ?? null,
+      }),
     };
   }
   if (ev.type === "workflow") {
