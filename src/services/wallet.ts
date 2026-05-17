@@ -3,6 +3,8 @@
 
 import { createDeposit, getTransactions, getWalletBalance } from "@/api";
 
+const TRANSACTIONS_TIMEOUT_MS = 15_000;
+
 // Re-export generated types directly
 export type {
   DepositResponse as TopUpCheckout,
@@ -119,18 +121,34 @@ export async function initiateCryptoDeposit(
  * @throws Error if not authenticated or network error
  */
 export async function fetchTransactions(limit = 20, offset = 0) {
-  const { data, error } = await getTransactions({
-    query: { limit, offset },
-    throwOnError: false,
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    TRANSACTIONS_TIMEOUT_MS,
+  );
 
-  if (error) {
-    throw new Error("Failed to fetch transactions");
+  try {
+    const { data, error } = await getTransactions({
+      query: { limit, offset },
+      signal: controller.signal,
+      throwOnError: false,
+    });
+
+    if (error) {
+      throw new Error("Failed to fetch transactions");
+    }
+
+    if (!data?.data) {
+      throw new Error("No transaction data returned");
+    }
+
+    return data.data;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Transaction request timed out");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-
-  if (!data?.data) {
-    throw new Error("No transaction data returned");
-  }
-
-  return data.data;
 }
