@@ -148,6 +148,13 @@ await playwright_set_browser({ browser: "firefox" });
 // Navigate to a site
 await playwright_navigate({ url: "https://example.com" });
 
+// Use a stricter wait only when the target can actually become idle
+await playwright_navigate({
+  url: "https://example.com",
+  waitUntil: "networkidle",
+  timeout: 10000,
+});
+
 // Extract data
 const content = await playwright_extract_content();
 
@@ -176,6 +183,15 @@ Use this server instead of standard Playwright when:
   - Accepts legacy newline-delimited JSON-RPC used by Seren Desktop.
   - Accepts `Content-Length` framed JSON-RPC used by first-party MCP gateways.
   - Responses mirror the framing mode used by the caller's request.
+- **Navigation waits**: `playwright_navigate` defaults to Playwright's `load`
+  event. Callers may pass `waitUntil: "domcontentloaded"` or
+  `waitUntil: "networkidle"` and `timeout` in milliseconds when they need
+  different semantics. Avoid `networkidle` for SPAs that keep websocket,
+  GraphQL, auth-refresh, or analytics requests alive.
+- **Timeout layering**: When this server is driven by another subprocess, keep
+  the MCP-side navigation timeout strictly lower than the client-side request
+  timeout. Equal timeouts can cause the client to report an opaque transport
+  timeout before it receives Playwright's own error envelope.
 
 ## License
 

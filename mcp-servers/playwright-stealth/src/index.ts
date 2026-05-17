@@ -9,6 +9,10 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { getActiveBrowserType } from "./browser.js";
 import { DualStdioServerTransport } from "./dual_stdio_transport.js";
+import {
+  createNavigateToolDefinition,
+  type NavigateOptions,
+} from "./tool_definitions.js";
 import * as tools from "./tools.js";
 
 const server = new Server(
@@ -26,20 +30,7 @@ const server = new Server(
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
-      {
-        name: "playwright_navigate",
-        description: "Navigate to a URL with stealth features enabled",
-        inputSchema: {
-          type: "object",
-          properties: {
-            url: {
-              type: "string",
-              description: "The URL to navigate to",
-            },
-          },
-          required: ["url"],
-        },
-      },
+      createNavigateToolDefinition(),
       {
         name: "playwright_screenshot",
         description: "Capture a screenshot of the current page",
@@ -325,7 +316,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     switch (name) {
       case "playwright_navigate":
-        result = await tools.navigate(args.url as string);
+        result = await tools.navigate(args.url as string, {
+          waitUntil: args.waitUntil as NavigateOptions["waitUntil"],
+          timeout: args.timeout as number | undefined,
+        });
         break;
       case "playwright_screenshot":
         result = await tools.screenshot(args.name as string | undefined);
