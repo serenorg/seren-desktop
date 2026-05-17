@@ -11,15 +11,24 @@ import {
   resetPage,
   setBrowser,
 } from "./browser.js";
+import type { NavigateOptions } from "./tool_definitions.js";
 
 type CookieInput = Parameters<BrowserContext["addCookies"]>[0][number];
 type WaitForSelectorOptions = NonNullable<
   Parameters<Page["waitForSelector"]>[1]
 >;
 
-export async function navigate(url: string): Promise<string> {
+const DEFAULT_NAVIGATION_TIMEOUT_MS = 30_000;
+
+export async function navigate(
+  url: string,
+  options?: NavigateOptions,
+): Promise<string> {
   const page = await getPage();
-  await page.goto(url, { waitUntil: "networkidle" });
+  await page.goto(url, {
+    waitUntil: options?.waitUntil ?? "load",
+    timeout: options?.timeout ?? DEFAULT_NAVIGATION_TIMEOUT_MS,
+  });
   return `Navigated to ${url}`;
 }
 
