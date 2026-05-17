@@ -198,6 +198,46 @@ function objectKeys(value: unknown): string {
   return keys.length > 0 ? `: ${keys.join(", ")}` : "";
 }
 
+function extractStructuredErrorMessage(
+  value: unknown,
+  depth = 0,
+): string | null {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object" || depth > 3) return null;
+
+  const obj = value as Record<string, unknown>;
+  for (const key of ["message", "detail", "error", "code"]) {
+    if (typeof obj[key] === "string") return obj[key];
+  }
+  for (const key of ["error", "message", "detail"]) {
+    const nested = obj[key];
+    if (nested && typeof nested === "object") {
+      const message = extractStructuredErrorMessage(nested, depth + 1);
+      if (message) return message;
+    }
+  }
+  return null;
+}
+
+function extractEnvelopeErrorMessage(
+  obj: Record<string, unknown>,
+): string | null {
+  if (typeof obj.error === "string") return obj.error;
+  if (obj.error && typeof obj.error === "object") {
+    const nested = extractStructuredErrorMessage(obj.error);
+    if (nested) return nested;
+  }
+  if (
+    typeof obj.message === "string" &&
+    (obj.error !== undefined ||
+      obj.code !== undefined ||
+      obj.status !== undefined)
+  ) {
+    return obj.message;
+  }
+  return null;
+}
+
 // Diagnostic for envelope-walking failures: walks the same data->result->body
 // chain that `findInResponseEnvelopes` uses and reports the keys at each
 // depth, so a "wrapped" bundle response like `{ data: { error: ... } }` is
@@ -220,15 +260,7 @@ function describeBundleEnvelope(value: unknown): string {
     const keys = Object.keys(obj).slice(0, 6);
     layers.push(`{${keys.join(",")}}`);
 
-    const errorMessage =
-      typeof obj.error === "string"
-        ? obj.error
-        : typeof obj.message === "string" &&
-            (obj.error !== undefined ||
-              obj.code !== undefined ||
-              obj.status !== undefined)
-          ? obj.message
-          : null;
+    const errorMessage = extractEnvelopeErrorMessage(obj);
     if (errorMessage) {
       return `: ${layers.join(" -> ")} (server error: ${errorMessage})`;
     }
@@ -277,6 +309,22 @@ function findInResponseEnvelopes<T>(
   return null;
 }
 
+function findApiResultFailure(
+  value: unknown,
+): { status: number; message: string | null } | null {
+  return findInResponseEnvelopes(value, (candidate) => {
+    const apiResult = candidate as { body?: unknown; status?: unknown };
+    if (typeof apiResult.status !== "number" || apiResult.status < 400) {
+      return null;
+    }
+
+    const message =
+      extractStructuredErrorMessage(apiResult.body) ??
+      extractEnvelopeErrorMessage(candidate as Record<string, unknown>);
+    return { status: apiResult.status, message };
+  });
+}
+
 function normalizeSkillsCatalogPage(
   value: unknown,
 ): SkillsCatalogResponsePage | null {
@@ -317,6 +365,15 @@ async function downloadSkillBundle(slug: string): Promise<SkillBundle> {
   if (error || !data) {
     const status = response ? `: ${response.status}` : "";
     throw new Error(`Failed to download skill ${slug}${status}`);
+  }
+  const apiResultFailure = findApiResultFailure(data);
+  if (apiResultFailure) {
+    const message = apiResultFailure.message
+      ? ` (${apiResultFailure.message})`
+      : "";
+    throw new Error(
+      `Failed to download skill ${slug}: ${apiResultFailure.status}${message}`,
+    );
   }
   const bundle = normalizeSkillBundle(data);
   if (!bundle) {
