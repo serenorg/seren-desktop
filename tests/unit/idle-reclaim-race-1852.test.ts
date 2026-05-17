@@ -72,7 +72,9 @@ describe("#1852 — Fix 3: self-inflicted terminates do not surface in chat", ()
   });
 
   it("the error handler short-circuits death-string events for expected terminates BEFORE addErrorMessage", () => {
-    const idx = agentStoreSource.indexOf("isSessionDeath");
+    const idx = agentStoreSource.indexOf(
+      "const isSessionDeath = isSessionDeathMessage(errStr)",
+    );
     expect(idx).toBeGreaterThan(0);
     // Walk backwards to the enclosing `case "error"` block, then forward to
     // make sure the expectedTerminate guard sits ahead of the addErrorMessage

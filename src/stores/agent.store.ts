@@ -889,6 +889,124 @@ function buildForkBootstrapContext(
   return sections.join("\n\n");
 }
 
+function isSessionDeathMessage(message: string): boolean {
+  return (
+    message.includes("Session terminated") ||
+    message.includes("stopped before request completed") ||
+    message.includes("stopped while prompt was active") ||
+    message.includes("Worker thread dropped")
+  );
+}
+
+function isRecoverableDeadSessionSendFailure(message: string): boolean {
+  if (message.includes("Task cancelled")) {
+    return false;
+  }
+  return (
+    message.includes("unresponsive") ||
+    message.includes("Worker thread dropped") ||
+    message.includes("not found") ||
+    message.includes("Session not initialized")
+  );
+}
+
+function filterDroppedPromptRecoveryMessages(
+  messages: AgentMessage[],
+): AgentMessage[] {
+  return messages.filter((message) => {
+    if (message.type !== "error") {
+      return true;
+    }
+    return (
+      !message.content.includes("unresponsive") &&
+      !isSessionDeathMessage(message.content)
+    );
+  });
+}
+
+function mergeRecoveryMessages(
+  liveMessages: AgentMessage[],
+  persistedMessages: AgentMessage[],
+): AgentMessage[] {
+  const byId = new Map<string, AgentMessage>();
+  for (const message of persistedMessages) {
+    byId.set(message.id, message);
+  }
+  for (const message of liveMessages) {
+    byId.set(message.id, message);
+  }
+  return [...byId.values()].sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function buildDroppedPromptRecoveryBootstrapContext(
+  session: ActiveSession,
+  messages: AgentMessage[],
+  reason: string,
+  persistedContext: string,
+): string | null {
+  const summary = session.compactedSummary?.content.trim();
+  const transcript = messages
+    .map(formatForkBootstrapMessage)
+    .filter((line): line is string => Boolean(line))
+    .join("\n\n");
+
+  if (!summary && !transcript && !persistedContext.trim()) {
+    return null;
+  }
+
+  const sections = [
+    "Seren Desktop restarted the coding-agent worker while a prompt was active.",
+    `Recovery reason: ${truncateBootstrapText(reason)}`,
+    "Use the recovered history below as authoritative context for the restarted worker.",
+    "The user's original prompt will be replayed automatically after this context; do not ask the user to type continue.",
+  ];
+
+  if (summary) {
+    sections.push(`Earlier summary:\n${summary}`);
+  }
+
+  if (transcript) {
+    sections.push(`Recovered transcript:\n${transcript}`);
+  } else if (persistedContext.trim()) {
+    sections.push(`Persisted transcript fallback:\n${persistedContext}`);
+  }
+
+  sections.push(
+    "Continue the interrupted task from the recovered context and the replayed prompt.",
+  );
+
+  return sections.join("\n\n");
+}
+
+async function buildDroppedPromptRecoverySnapshot(
+  session: ActiveSession,
+  reason: string,
+  currentUserMessageId?: string,
+): Promise<{
+  restoredMessages: AgentMessage[];
+  bootstrapPromptContext?: string;
+}> {
+  const liveMessages = filterDroppedPromptRecoveryMessages([
+    ...session.messages,
+  ]);
+  const persisted = await loadPersistedAgentHistory(session.conversationId);
+  const restoredMessages = filterDroppedPromptRecoveryMessages(
+    mergeRecoveryMessages(liveMessages, persisted.messages),
+  );
+  const bootstrapMessages = currentUserMessageId
+    ? restoredMessages.filter((message) => message.id !== currentUserMessageId)
+    : restoredMessages;
+  const bootstrapPromptContext =
+    buildDroppedPromptRecoveryBootstrapContext(
+      session,
+      bootstrapMessages,
+      reason,
+      persisted.context,
+    ) ?? undefined;
+
+  return { restoredMessages, bootstrapPromptContext };
+}
+
 function parseAgentConversationMetadata(
   raw: string | null | undefined,
 ): AgentConversationMetadata {
@@ -1614,6 +1732,164 @@ export const agentStore = {
   clearTurnError(threadId: string): void {
     if (!state.threadStates[threadId]) return;
     setState("threadStates", threadId, "turnError", null);
+  },
+
+  async recoverDroppedPrompt(
+    sessionId: string,
+    reason: string,
+    replay?: {
+      prompt?: string;
+      context?: Array<Record<string, string>>;
+      displayContent?: string;
+      docNames?: string[];
+      currentUserMessageId?: string;
+      retry?: boolean;
+    },
+  ): Promise<string | null> {
+    const existingRecovery = recoveryInFlightMap.get(sessionId);
+    if (existingRecovery) {
+      console.info(
+        `[AgentStore] recoverDroppedPrompt: recovery already in-flight for ${sessionId}`,
+      );
+      return existingRecovery;
+    }
+
+    const recoveryPromise = (async (): Promise<string | null> => {
+      const session = state.sessions[sessionId];
+      if (!session) {
+        return null;
+      }
+
+      const conversationId = session.conversationId;
+      const threadState = state.threadStates[conversationId];
+      const promptText = replay?.prompt ?? threadState?.lastPromptText;
+      const promptContext = replay?.context ?? threadState?.lastPromptContext;
+      const shouldRetry = replay?.retry ?? true;
+
+      if (!conversationId || !threadState?.turnInFlight) {
+        return null;
+      }
+
+      if (!promptText && shouldRetry) {
+        console.warn(
+          "[AgentStore] recoverDroppedPrompt: no last prompt to replay for",
+          conversationId,
+        );
+        this.setTurnError(
+          conversationId,
+          "crash_ceiling",
+          "Session died before a prompt could be recovered.",
+        );
+        return null;
+      }
+
+      const restartExpiresAt = threadState.restartTimerExpiresAt;
+      if (restartExpiresAt != null && Date.now() > restartExpiresAt) {
+        this.setTurnError(
+          conversationId,
+          "crash_ceiling",
+          "Worker-drop recovery exceeded the restart budget.",
+        );
+        return null;
+      }
+
+      console.info(
+        `[AgentStore] Recovering dropped ${agentDisplayName(session.info.agentType)} prompt silently: ${reason}`,
+      );
+      if (restartExpiresAt == null) {
+        this.armRestartTimer(conversationId, BUDGET_CRASH_MS, "crash_ceiling");
+      }
+
+      const snapshot = await buildDroppedPromptRecoverySnapshot(
+        session,
+        reason,
+        replay?.currentUserMessageId,
+      );
+      const wasActive = state.activeSessionId === sessionId;
+      const { cwd } = session;
+      const agentType = session.info.agentType;
+      const initialModelId = session.currentModelId;
+
+      await this.terminateSession(sessionId, { nextActiveSessionId: null });
+
+      const newSessionId = await this.spawnSession(cwd, agentType, {
+        localSessionId: conversationId,
+        restoredMessages: snapshot.restoredMessages,
+        bootstrapPromptContext: snapshot.bootstrapPromptContext,
+        initialModelId,
+      });
+
+      if (!newSessionId) {
+        this.setTurnError(
+          conversationId,
+          "crash_ceiling",
+          "Session died and could not be restarted.",
+        );
+        return null;
+      }
+
+      if (wasActive) {
+        setState("activeSessionId", newSessionId);
+      }
+
+      await this.restoreSessionSettings(session, newSessionId);
+
+      if (!shouldRetry) {
+        console.info(
+          "[AgentStore] recoverDroppedPrompt: fresh session ready after cancel, skipping replay",
+        );
+        this.setTurnInFlight(conversationId, false);
+        this.clearTurnError(conversationId);
+        return newSessionId;
+      }
+
+      try {
+        const { merged: retryContext, newSignature } =
+          await this.buildPromptContext(newSessionId, promptContext);
+        await providerService.sendPrompt(
+          newSessionId,
+          promptText as string,
+          retryContext,
+        );
+        this.clearBootstrapPromptContext(newSessionId);
+        if (newSignature !== null) {
+          this.markPromptContextPrimed(newSessionId, newSignature);
+        }
+        console.info(
+          `[AgentStore] Dropped-prompt replay dispatched on ${newSessionId}`,
+        );
+      } catch (retryError) {
+        const retryMessage =
+          retryError instanceof Error ? retryError.message : String(retryError);
+        if (
+          isRecoverableDeadSessionSendFailure(retryMessage) &&
+          state.threadStates[conversationId]?.restartTimerExpiresAt != null &&
+          Date.now() <=
+            (state.threadStates[conversationId]?.restartTimerExpiresAt ?? 0)
+        ) {
+          console.info(
+            "[AgentStore] Dropped-prompt replay hit another recoverable session failure; retrying silently:",
+            retryMessage,
+          );
+          return this.recoverDroppedPrompt(newSessionId, retryMessage, {
+            prompt: promptText,
+            context: promptContext,
+            displayContent: replay?.displayContent,
+            docNames: replay?.docNames,
+          });
+        }
+
+        console.error("[AgentStore] Dropped-prompt replay failed:", retryError);
+        this.setTurnError(conversationId, "restart_timeout", retryMessage);
+      }
+
+      return newSessionId;
+    })().finally(() => {
+      recoveryInFlightMap.delete(sessionId);
+    });
+
+    recoveryInFlightMap.set(sessionId, recoveryPromise);
+    return recoveryPromise;
   },
 
   /**
@@ -3190,7 +3466,15 @@ export const agentStore = {
       try {
         await providerService.terminateSession(sessionId);
       } catch (error) {
-        console.error("Failed to terminate session:", error);
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("not found")) {
+          console.info(
+            "[AgentStore] terminateSession: backend session already gone:",
+            sessionId,
+          );
+        } else {
+          console.error("Failed to terminate session:", error);
+        }
       }
     }
 
@@ -4381,133 +4665,29 @@ Structured summary:`;
       const agentLabel = agentDisplayName(
         state.sessions[sessionId]?.info.agentType,
       );
-      console.error(`[AgentStore] sendPrompt error (${agentLabel}):`, error);
       const message = error instanceof Error ? error.message : String(error);
 
       // Auto-recover from dead/zombie sessions.
       // "unresponsive" = agent force-stopped after timeout (prompt or cancel deadline).
       // Other patterns = session died unexpectedly.
       // NOTE: "Task cancelled" (graceful cancel) is excluded — not a dead session.
-      const isForceStop = message.includes("unresponsive");
-      const isDeadSession =
-        message.includes("Worker thread dropped") ||
-        message.includes("not found") ||
-        message.includes("Session not initialized");
-      if (
-        isForceStop ||
-        (!message.includes("Task cancelled") && isDeadSession)
-      ) {
-        // If another recovery is already in-flight for this session, wait
-        // for it instead of spawning a duplicate session.
-        const existingRecovery = recoveryInFlightMap.get(sessionId);
-        if (existingRecovery) {
-          console.info(
-            `[AgentStore] Recovery already in-flight for ${sessionId}, waiting for it...`,
-          );
-          await existingRecovery;
-          return;
-        }
-
+      if (isRecoverableDeadSessionSendFailure(message)) {
         console.info(
-          "[AgentStore] Session appears dead, attempting auto-recovery...",
+          `[AgentStore] sendPrompt recoverable ${agentLabel} failure:`,
+          message,
         );
-
-        // Preserve conversation history and cwd before cleanup.
-        // Filter out any "unresponsive" error messages that the event handler
-        // may have added before this catch block ran — restoring them would
-        // create duplicate banners in the new session.
-        const existingMessages = [...session.messages].filter(
-          (m) =>
-            m.id !== userMessage.id &&
-            !(m.type === "error" && m.content.includes("unresponsive")),
-        );
-        const cwd = session.cwd;
-        const agentType = session.info.agentType;
-        // Snapshot cancel intent before cleanup clears session state.
-        const wasUserCancel = session.cancelRequested === true;
-
-        // Clean up the dead session
-        await this.terminateSession(sessionId);
-
-        // Guard against concurrent recoveries: set the in-flight promise
-        // before spawning so any parallel sendPrompt calls will wait.
-        const doRecovery = async (): Promise<string | null> => {
-          const newSessionId = await this.spawnSession(cwd, agentType, {
-            localSessionId: session.conversationId,
-            bootstrapPromptContext: session.bootstrapPromptContext,
-            initialModelId: session.currentModelId,
-          });
-          if (newSessionId) {
-            await this.restoreSessionSettings(session, newSessionId);
-
-            // Restore conversation history to the new session.
-            // Mark as restored so the message-count threshold ignores them.
-            if (existingMessages.length > 0) {
-              setState("sessions", newSessionId, "messages", existingMessages);
-              setState(
-                "sessions",
-                newSessionId,
-                "restoredMessageCount",
-                existingMessages.length,
-              );
-            }
-
-            if (wasUserCancel) {
-              console.info(
-                "[AgentStore] Agent unresponsive after cancel — spawned fresh session, skipping retry",
-              );
-            } else {
-              setState("sessions", newSessionId, "messages", (msgs) => [
-                ...msgs,
-                userMessage,
-              ]);
-              const newConvoId = state.sessions[newSessionId]?.conversationId;
-              if (newConvoId) {
-                persistAgentMessage(newConvoId, userMessage);
-              }
-
-              console.info(
-                `[AgentStore] Retrying prompt on new session ${newSessionId}`,
-              );
-              try {
-                const { merged: retryContext, newSignature } =
-                  await this.buildPromptContext(newSessionId, context);
-                await providerService.sendPrompt(
-                  newSessionId,
-                  prompt,
-                  retryContext,
-                );
-                this.clearBootstrapPromptContext(newSessionId);
-                if (newSignature !== null) {
-                  this.markPromptContextPrimed(newSessionId, newSignature);
-                }
-                console.log("[AgentStore] Retry succeeded on new session");
-              } catch (retryError) {
-                console.error("[AgentStore] Retry failed:", retryError);
-                this.setTurnError(
-                  session.conversationId,
-                  "restart_timeout",
-                  retryError instanceof Error
-                    ? retryError.message
-                    : String(retryError),
-                );
-              }
-            }
-          }
-          return newSessionId;
-        };
-
-        const recoveryPromise = doRecovery().finally(() => {
-          recoveryInFlightMap.delete(sessionId);
+        await this.recoverDroppedPrompt(sessionId, message, {
+          prompt,
+          context,
+          displayContent: options?.displayContent,
+          docNames: options?.docNames,
+          currentUserMessageId: userMessage.id,
+          retry: session.cancelRequested !== true,
         });
-        recoveryInFlightMap.set(sessionId, recoveryPromise);
-
-        const newSessionId = await recoveryPromise;
-        if (!newSessionId) {
-          setState("error", "Session died and could not be restarted.");
-        }
         return;
       }
+
+      console.error(`[AgentStore] sendPrompt error (${agentLabel}):`, error);
 
       // For prompt-too-long errors, wait for the in-flight compactAndRetry
       // to finish before giving up. Without this, sendPrompt rejects while
@@ -5335,9 +5515,12 @@ Structured summary:`;
         // RPC-timeout filter from #1699. #1708.
         const errorMessage = String(event.data.error);
         const isGracefulCancel = errorMessage.includes("Task cancelled");
+        const isRecoverableSessionDeath = isSessionDeathMessage(errorMessage);
         const errorPrefix = `[AgentStore] Error event for session ${sessionId} (${agentDisplayName(state.sessions[sessionId]?.info.agentType)}):`;
         if (isGracefulCancel) {
           console.error(errorPrefix, errorMessage);
+        } else if (isRecoverableSessionDeath) {
+          console.info(errorPrefix, errorMessage);
         } else {
           console.error(errorPrefix, event.data.error);
         }
@@ -5531,11 +5714,7 @@ Structured summary:`;
           // turnInFlight stays true, so ThinkingStatus runs indefinitely.
           // Catalog covers all three providers (#1805).
           const errStr = String(event.data.error);
-          const isSessionDeath =
-            errStr.includes("Session terminated") ||
-            errStr.includes("stopped before request completed") ||
-            errStr.includes("stopped while prompt was active") ||
-            errStr.includes("Worker thread dropped");
+          const isSessionDeath = isSessionDeathMessage(errStr);
 
           // Self-inflicted death: agentStore.terminateSession just killed
           // this session (e.g. preemptive idle-reclaim before a parallel
@@ -5552,22 +5731,15 @@ Structured summary:`;
             break;
           }
 
-          this.addErrorMessage(sessionId, event.data.error);
-
           const deathConvoId = state.sessions[sessionId]?.conversationId;
           if (
             isSessionDeath &&
             deathConvoId &&
             this.isTurnInFlight(deathConvoId)
           ) {
-            setState(
-              "sessions",
-              sessionId,
-              "info",
-              "status",
-              "ready" as SessionStatus,
-            );
-            this.setTurnError(deathConvoId, "crash_ceiling", errStr);
+            void this.recoverDroppedPrompt(sessionId, errStr);
+          } else {
+            this.addErrorMessage(sessionId, event.data.error);
           }
         }
         break;
@@ -6129,11 +6301,11 @@ Structured summary:`;
       if (
         convoId &&
         this.isTurnInFlight(convoId) &&
-        !this.getTurnError(convoId)
+        !this.getTurnError(convoId) &&
+        !expectedTerminateSessionIds.has(sessionId)
       ) {
-        this.setTurnError(
-          convoId,
-          "crash_ceiling",
+        void this.recoverDroppedPrompt(
+          sessionId,
           `Session ${status} mid-prompt`,
         );
       }
