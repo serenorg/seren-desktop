@@ -331,6 +331,12 @@ describe("employee tool-ref helpers", () => {
     expect(
       remoteHttpToolRefDraftError({
         ...valid,
+        endpoint: "http://api.example.com/tools/lookup",
+      }),
+    ).toBe("Remote HTTP endpoint must use HTTPS.");
+    expect(
+      remoteHttpToolRefDraftError({
+        ...valid,
         endpoint: "https://user:secret@api.example.com/tools/lookup",
       }),
     ).toBe("Remote HTTP endpoint must not include credentials.");
@@ -339,11 +345,35 @@ describe("employee tool-ref helpers", () => {
       "https://127.0.0.1/tools/lookup",
       "https://169.254.169.254/latest/meta-data",
       "https://10.0.0.1/tools/lookup",
+      "https://172.16.0.1/tools/lookup",
+      "https://172.31.255.255/tools/lookup",
+      "https://192.168.1.1/tools/lookup",
+      "https://192.0.2.1/tools/lookup",
+      "https://198.51.100.1/tools/lookup",
+      "https://203.0.113.1/tools/lookup",
+      "https://0.0.0.0/tools/lookup",
+      "https://255.255.255.255/tools/lookup",
       "https://[::1]/tools/lookup",
+      "https://[::]/tools/lookup",
+      "https://[fe80::1]/tools/lookup",
+      "https://[fe90::1]/tools/lookup",
+      "https://[2001:db8::1]/tools/lookup",
+      "https://[::ffff:127.0.0.1]/tools/lookup",
+      "https://[::ffff:192.168.1.1]/tools/lookup",
     ]) {
       expect(remoteHttpToolRefDraftError({ ...valid, endpoint })).toBe(
         "Remote HTTP endpoint must not target localhost or private IPs.",
       );
+    }
+    for (const endpoint of [
+      "https://8.8.8.8/tools/lookup",
+      "https://172.32.0.1/tools/lookup",
+      "https://0.1.2.3/tools/lookup",
+      "https://[2001:4860:4860::8888]/tools/lookup",
+      "https://[fec0::1]/tools/lookup",
+      "https://[::ffff:8.8.8.8]/tools/lookup",
+    ]) {
+      expect(remoteHttpToolRefDraftError({ ...valid, endpoint })).toBe("");
     }
     expect(
       remoteHttpToolRefDraftError({

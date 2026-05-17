@@ -129,16 +129,30 @@ export interface ToolAuditEvent {
   latencyMs: number | null;
 }
 
-function formatToolAuditText(value: unknown): string {
+interface ToolAuditFormatOptions {
+  escapeMarkdown?: boolean;
+}
+
+function formatToolAuditText(
+  value: unknown,
+  options: ToolAuditFormatOptions,
+): string {
+  const clean = (text: string) =>
+    options.escapeMarkdown
+      ? text
+          .replace(/\s+/g, " ")
+          .trim()
+          .replace(/[`*>]/g, (character) => `\\${character}`)
+      : text.replace(/\s+/g, " ").trim();
   if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value.replace(/\s+/g, " ").trim();
+  if (typeof value === "string") return clean(value);
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
   try {
-    return JSON.stringify(value).replace(/\s+/g, " ").trim();
+    return clean(JSON.stringify(value));
   } catch {
-    return String(value).replace(/\s+/g, " ").trim();
+    return clean(String(value));
   }
 }
 
@@ -148,16 +162,19 @@ function formatToolAuditBytes(label: string, value: unknown): string | null {
     : null;
 }
 
-export function formatToolAuditEvent(event: ToolAuditEvent): string {
-  const reason = formatToolAuditText(event.reason);
-  const tool = formatToolAuditText(event.tool) || "tool";
-  const action = formatToolAuditText(event.action);
-  const leaseRef = formatToolAuditText(event.leaseRef);
+export function formatToolAuditEvent(
+  event: ToolAuditEvent,
+  options: ToolAuditFormatOptions = {},
+): string {
+  const reason = formatToolAuditText(event.reason, options);
+  const tool = formatToolAuditText(event.tool, options) || "tool";
+  const action = formatToolAuditText(event.action, options);
+  const leaseRef = formatToolAuditText(event.leaseRef, options);
   const details = [
-    formatToolAuditText(event.toolRefKind),
+    formatToolAuditText(event.toolRefKind, options),
     action ? `action ${action}` : null,
     leaseRef ? `lease ${leaseRef}` : null,
-    formatToolAuditText(event.status),
+    formatToolAuditText(event.status, options),
     formatToolAuditBytes("in", event.inputBytes),
     formatToolAuditBytes("out", event.outputBytes),
     typeof event.latencyMs === "number" &&

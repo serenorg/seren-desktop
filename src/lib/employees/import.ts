@@ -32,10 +32,18 @@ export function normalizeResourcePath(path: string): string | null {
     const trimmed = part.trim();
     if (!trimmed || trimmed === ".") continue;
     if (trimmed === "..") return null;
+    if (trimmed.startsWith(".")) return null;
     parts.push(trimmed);
   }
 
   return parts.length > 0 ? parts.join("/") : null;
+}
+
+export function hasHiddenPathSegment(path: string): boolean {
+  return path
+    .replace(/\\/g, "/")
+    .split("/")
+    .some((part) => part.length > 1 && part.startsWith("."));
 }
 
 /**
@@ -55,6 +63,8 @@ export interface ImportResult {
   sections: Partial<Record<InstructionSlot, string>>;
   /** Filenames the importer recognized and routed. */
   routed: string[];
+  /** Recognized instruction filenames skipped because an earlier file filled the slot. */
+  collided: string[];
   /** Non-instruction files kept as runtime-readable bundle resources. */
   resources: AgentAssetFile[];
   /** Filenames the importer could not safely package. */
@@ -89,6 +99,7 @@ export function importPathForFile(file: {
 export function routeFiles(files: ImportFileEntry[]): ImportResult {
   const sections: Partial<Record<InstructionSlot, string>> = {};
   const routed: string[] = [];
+  const collided: string[] = [];
   const resources: AgentAssetFile[] = [];
   const ignored: string[] = [];
   const seenResourcePaths = new Set<string>();
@@ -116,13 +127,12 @@ export function routeFiles(files: ImportFileEntry[]): ImportResult {
       continue;
     }
     if (sections[slot] !== undefined) {
-      // Already filled by an earlier file in the same drop; skip silently.
-      routed.push(name);
+      collided.push(name);
       continue;
     }
     sections[slot] = body;
     routed.push(name);
   }
 
-  return { sections, routed, resources, ignored };
+  return { sections, routed, collided, resources, ignored };
 }

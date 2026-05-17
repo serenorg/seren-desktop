@@ -93,6 +93,11 @@ function formatToolRef(ref: AgentToolRef) {
       return `Remote HTTP ${ref.method.toUpperCase()} ${clipText(ref.name, 48)}`;
     case "preset_group":
       return `Preset ${formatToolPreset(ref.preset)}`;
+    default:
+      return `Unknown tool ref ${clipText(
+        (ref as { kind?: string }).kind ?? "unknown",
+        48,
+      )}`;
   }
 }
 

@@ -716,7 +716,9 @@ function emitEmployeeToolAudit(
   // Render as a markdown blockquote so the existing chat renderer styles
   // it as a distinct aside rather than letting the policy decision read
   // like prose the assistant wrote.
-  const content = `> **Tool audit:** ${formatToolAuditEvent(event)}`;
+  const content = `> **Tool audit:** ${formatToolAuditEvent(event, {
+    escapeMarkdown: true,
+  })}`;
   const message: UnifiedMessage = {
     id: crypto.randomUUID(),
     type: "assistant",

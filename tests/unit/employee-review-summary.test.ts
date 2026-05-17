@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { AgentToolRef } from "@/api/seren-agent";
 import { buildEmployeePolicyReviewSummary } from "@/lib/employees/review-summary";
 
 describe("buildEmployeePolicyReviewSummary", () => {
@@ -160,6 +161,23 @@ describe("buildEmployeePolicyReviewSummary", () => {
     );
     expect(summary.toolRefDetails).toEqual([
       "Remote HTTP GET customer_lookup; endpoint api.example.com; no per-action leases",
+    ]);
+  });
+
+  it("summarizes future unknown tool-ref kinds with a fallback label", () => {
+    const summary = buildEmployeePolicyReviewSummary({
+      approvalPolicy: "read_only",
+      toolPresets: [],
+      toolRefs: [
+        {
+          kind: "future_tool",
+        } as unknown as AgentToolRef,
+      ],
+    });
+
+    expect(summary.toolAccess[1]).toBe("Typed refs: Unknown tool ref future_tool");
+    expect(summary.toolRefDetails).toEqual([
+      "Unknown tool ref future_tool; no per-action leases",
     ]);
   });
 });

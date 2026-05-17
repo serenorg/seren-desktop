@@ -76,6 +76,24 @@ describe("publisher catalog MCP discovery status", () => {
     );
   });
 
+  it("strips terminal controls and caps discovery error length", () => {
+    const publisher = transformPublisher(
+      publisherResponse({
+        integration_type: "mcp",
+        mcp_discovery: {
+          error: `bad\u0001\u001b[31mred\u001b[0m\u202e${"x".repeat(600)}`,
+        },
+      }),
+    );
+
+    expect(publisher.mcp_discovery?.error).toHaveLength(500);
+    expect(publisher.mcp_discovery?.error).not.toContain("\u0001");
+    expect(publisher.mcp_discovery?.error).not.toContain("\u001b");
+    expect(publisher.mcp_discovery?.error).not.toContain("[31m");
+    expect(publisher.mcp_discovery?.error).not.toContain("[0m");
+    expect(publisher.mcp_discovery?.error).not.toContain("\u202e");
+  });
+
   it("omits discovery copy when the publisher has no discovery error", () => {
     const publisher = transformPublisher(
       publisherResponse({

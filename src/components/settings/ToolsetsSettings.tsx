@@ -263,6 +263,9 @@ export const ToolsetsSettings: Component = () => {
                         {(slug) => {
                           const pub = getPublisherBySlug(slug);
                           const status = getConnectionStatus(slug);
+                          const discoveryStatus = pub
+                            ? formatMcpDiscoveryStatus(pub)
+                            : null;
                           const statusColor =
                             status === "connected"
                               ? "bg-success/20 border-success/30"
@@ -281,6 +284,16 @@ export const ToolsetsSettings: Component = () => {
                               }
                             >
                               {pub?.name || slug}
+                              <Show when={discoveryStatus}>
+                                {(status) => (
+                                  <span
+                                    class="shrink-0 text-[10px] px-1.5 py-0.5 bg-warning/20 text-warning/85 rounded"
+                                    title={status()}
+                                  >
+                                    MCP issue
+                                  </span>
+                                )}
+                              </Show>
                               <button
                                 type="button"
                                 class="ml-0.5 text-muted-foreground hover:text-destructive transition-colors"

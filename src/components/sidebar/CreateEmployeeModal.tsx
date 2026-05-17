@@ -16,6 +16,7 @@ import type { AgentAssetFile } from "@/api/seren-agent";
 import { deriveSlug, gradientFor, initialFor } from "@/lib/employees/avatar";
 import { buildEmployeeFilesPatch } from "@/lib/employees/bundle-patch";
 import {
+  hasHiddenPathSegment,
   type ImportFileEntry,
   type InstructionSlot,
   importPathForFile,
@@ -106,6 +107,7 @@ const DEFAULT_LIMITS = {
 const MAX_AGENT_INSTRUCTION_BYTES = 1024 * 1024;
 const MAX_AGENT_ASSET_BYTES = 8 * 1024 * 1024;
 const MAX_AGENT_BUNDLE_TOTAL_BYTES = 16 * 1024 * 1024;
+const MAX_AGENT_BUNDLE_FILES = 256;
 
 function sameStringSet(left: readonly string[], right: readonly string[]) {
   if (left.length !== right.length) return false;
@@ -282,6 +284,18 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     else if (slot === "eval") setEvalInstructions(body);
   };
 
+  const sectionBody = (slot: InstructionSlot) => {
+    if (slot === "skill") return skillInstructions();
+    if (slot === "identity") return identity();
+    if (slot === "soul") return soul();
+    if (slot === "agents") return agents();
+    if (slot === "user") return user();
+    if (slot === "memory") return memory();
+    if (slot === "tools") return tools();
+    if (slot === "heartbeat") return heartbeat();
+    return evalInstructions();
+  };
+
   const readFileBytes = (file: File): Promise<Uint8Array> =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -401,7 +415,25 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       }
     }
 
-    for (const { file, path } of files) {
+    const visibleFiles: BrowserFileEntry[] = [];
+    for (const fileEntry of files) {
+      if (hasHiddenPathSegment(fileEntry.path)) {
+        skipped.push(`${fileEntry.path} (hidden file)`);
+      } else {
+        visibleFiles.push(fileEntry);
+      }
+    }
+    const selectedFiles = visibleFiles.slice(0, MAX_AGENT_BUNDLE_FILES);
+    const overFileLimit = visibleFiles.length - selectedFiles.length;
+    if (overFileLimit > 0) {
+      skipped.push(
+        `${overFileLimit} additional file${
+          overFileLimit === 1 ? "" : "s"
+        } (file limit)`,
+      );
+    }
+
+    for (const { file, path } of selectedFiles) {
       const name = path;
       const slot = slotForFilename(name);
       const maxBytes = slot
@@ -470,8 +502,14 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
 
     const result = routeFiles(entries);
 
+    let replacedSections = 0;
     for (const [slot, body] of Object.entries(result.sections)) {
-      if (typeof body === "string") setSection(slot as InstructionSlot, body);
+      if (typeof body === "string") {
+        if (sectionBody(slot as InstructionSlot).trim().length > 0) {
+          replacedSections += 1;
+        }
+        setSection(slot as InstructionSlot, body);
+      }
     }
     const replacedResources = mergeAssets(result.resources);
     clearError();
@@ -495,6 +533,20 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
         `Replaced ${replacedResources} existing resource${
           replacedResources === 1 ? "" : "s"
         }`,
+      );
+    }
+    if (replacedSections > 0) {
+      parts.push(
+        `Replaced ${replacedSections} section${
+          replacedSections === 1 ? "" : "s"
+        }`,
+      );
+    }
+    if (result.collided.length > 0) {
+      parts.push(
+        `${result.collided.length} instruction collision${
+          result.collided.length === 1 ? "" : "s"
+        }: ${summarizeNames(result.collided)}`,
       );
     }
     if (result.ignored.length > 0) {

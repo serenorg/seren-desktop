@@ -85,9 +85,25 @@ function normalizeNullableString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+// biome-ignore lint/complexity/useRegexLiterals: Constructor form keeps control escapes lint-clean.
+const ANSI_ESCAPE_PATTERN = new RegExp(
+  String.raw`(?:\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)|\u001B\[[0-?]*[ -/]*[@-~]|\u009B[0-?]*[ -/]*[@-~])`,
+  "g",
+);
+// biome-ignore lint/complexity/useRegexLiterals: Constructor form keeps control escapes lint-clean.
+const INVISIBLE_CONTROL_PATTERN = new RegExp(
+  String.raw`[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]`,
+  "g",
+);
+
 export function normalizeDiscoveryError(error: unknown): string | null {
   if (typeof error !== "string") return null;
-  const normalized = error.replace(/\s+/g, " ").trim();
+  const normalized = error
+    .replace(ANSI_ESCAPE_PATTERN, " ")
+    .replace(INVISIBLE_CONTROL_PATTERN, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
   return normalized ? normalized : null;
 }
 

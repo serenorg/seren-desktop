@@ -140,6 +140,9 @@ export function remoteHttpToolRefDraftError(input: {
     ) {
       return "Remote HTTP endpoint must be an HTTP(S) URL.";
     }
+    if (url.protocol === "http:") {
+      return "Remote HTTP endpoint must use HTTPS.";
+    }
     if (url.username || url.password) {
       return "Remote HTTP endpoint must not include credentials.";
     }
@@ -225,15 +228,30 @@ function remoteHttpEndpointIdentityKey(
 function isBlockedRemoteHttpHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "localhost" || host === "localhost.") return true;
-  if (host === "::1" || host.startsWith("fe80:")) {
-    return true;
-  }
-  if (host.includes(":") && (host.startsWith("fc") || host.startsWith("fd"))) {
-    return true;
-  }
 
+  const ipv4 = parseIpv4Literal(host);
+  if (ipv4) return isBlockedIpv4(ipv4);
+
+  const ipv6 = parseIpv6Literal(host);
+  if (!ipv6) return false;
+
+  if (ipv6.every((segment) => segment === 0)) return true;
+  if (ipv6.slice(0, 7).every((segment) => segment === 0) && ipv6[7] === 1) {
+    return true;
+  }
+  if ((ipv6[0] & 0xfe00) === 0xfc00) return true;
+  if ((ipv6[0] & 0xffc0) === 0xfe80) return true;
+  if (ipv6[0] === 0x2001 && ipv6[1] === 0x0db8) return true;
+
+  const mappedIpv4 = ipv4FromIpv6(ipv6);
+  return mappedIpv4 ? isBlockedIpv4(mappedIpv4) : false;
+}
+
+function parseIpv4Literal(
+  host: string,
+): [number, number, number, number] | null {
   const parts = host.split(".");
-  if (parts.length !== 4) return false;
+  if (parts.length !== 4) return null;
   const octets = parts.map((part) => Number(part));
   if (
     octets.some(
@@ -244,17 +262,77 @@ function isBlockedRemoteHttpHost(hostname: string): boolean {
         String(octet) !== parts[index],
     )
   ) {
-    return false;
+    return null;
   }
-  const [a, b] = octets;
-  return (
-    a === 10 ||
-    a === 127 ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    a === 0
-  );
+  return [octets[0], octets[1], octets[2], octets[3]];
+}
+
+function isBlockedIpv4([a, b, c, d]: [
+  number,
+  number,
+  number,
+  number,
+]): boolean {
+  if (a === 10 || a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 0 && b === 0 && c === 0 && d === 0) return true;
+  if (a === 255 && b === 255 && c === 255 && d === 255) return true;
+  if (a === 192 && b === 0 && c === 2) return true;
+  if (a === 198 && b === 51 && c === 100) return true;
+  if (a === 203 && b === 0 && c === 113) return true;
+  return false;
+}
+
+function parseIpv6Literal(host: string): number[] | null {
+  if (!host.includes(":")) return null;
+  const pieces = host.split("::");
+  if (pieces.length > 2) return null;
+
+  const left = parseIpv6Side(pieces[0]);
+  const right = pieces.length === 2 ? parseIpv6Side(pieces[1]) : [];
+  if (!left || !right) return null;
+
+  if (pieces.length === 1) {
+    return left.length === 8 ? left : null;
+  }
+
+  const zeroCount = 8 - left.length - right.length;
+  if (zeroCount < 1) return null;
+  return [...left, ...Array(zeroCount).fill(0), ...right];
+}
+
+function parseIpv6Side(value: string): number[] | null {
+  if (value.length === 0) return [];
+  return value
+    .split(":")
+    .map((part) => {
+      if (!/^[0-9a-f]{1,4}$/.test(part)) return Number.NaN;
+      return Number.parseInt(part, 16);
+    })
+    .every(
+      (segment) =>
+        Number.isInteger(segment) && segment >= 0 && segment <= 0xffff,
+    )
+    ? value.split(":").map((part) => Number.parseInt(part, 16))
+    : null;
+}
+
+function ipv4FromIpv6(
+  segments: number[],
+): [number, number, number, number] | null {
+  const isCompatible = segments.slice(0, 6).every((segment) => segment === 0);
+  const isMapped =
+    segments.slice(0, 5).every((segment) => segment === 0) &&
+    segments[5] === 0xffff;
+  if (!isCompatible && !isMapped) return null;
+  return [
+    segments[6] >> 8,
+    segments[6] & 0xff,
+    segments[7] >> 8,
+    segments[7] & 0xff,
+  ];
 }
 
 // Compare two tool-ref lists element-wise with a structural equality check

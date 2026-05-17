@@ -60,6 +60,47 @@ describe("formatToolAuditEvent", () => {
     );
   });
 
+  it("keeps markdown control characters readable in plain audit text", () => {
+    expect(
+      formatToolAuditEvent({
+        id: "call_6",
+        tool: "`webhook`",
+        reason: "> invoked *now*",
+        toolRefKind: "remote_http",
+        action: "lookup_customer",
+        leaseRef: null,
+        status: "success",
+        inputBytes: null,
+        outputBytes: null,
+        latencyMs: null,
+      }),
+    ).toBe(
+      "`webhook`: > invoked *now* (remote_http - action lookup_customer - success)",
+    );
+  });
+
+  it("escapes markdown control characters for blockquote audit text", () => {
+    expect(
+      formatToolAuditEvent(
+        {
+          id: "call_6",
+          tool: "`webhook`",
+          reason: "> invoked *now*",
+          toolRefKind: "remote_http",
+          action: "lookup_customer",
+          leaseRef: null,
+          status: "success",
+          inputBytes: null,
+          outputBytes: null,
+          latencyMs: null,
+        },
+        { escapeMarkdown: true },
+      ),
+    ).toBe(
+      "\\`webhook\\`: \\> invoked \\*now\\* (remote_http - action lookup_customer - success)",
+    );
+  });
+
   it("keeps zero-byte and zero-latency audit details", () => {
     expect(
       formatToolAuditEvent({

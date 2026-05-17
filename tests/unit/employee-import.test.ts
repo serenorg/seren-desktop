@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  hasHiddenPathSegment,
   importPathForFile,
   normalizeResourcePath,
   routeFiles,
@@ -51,6 +52,19 @@ describe("normalizeResourcePath", () => {
     expect(normalizeResourcePath("")).toBeNull();
     expect(normalizeResourcePath("../secret.txt")).toBeNull();
     expect(normalizeResourcePath("refs/\0secret.txt")).toBeNull();
+  });
+
+  it("rejects dotfile resource paths", () => {
+    expect(normalizeResourcePath(".env")).toBeNull();
+    expect(normalizeResourcePath("refs/.secret")).toBeNull();
+  });
+});
+
+describe("hasHiddenPathSegment", () => {
+  it("detects hidden files and folders in dropped paths", () => {
+    expect(hasHiddenPathSegment(".DS_Store")).toBe(true);
+    expect(hasHiddenPathSegment("agent/.git/config")).toBe(true);
+    expect(hasHiddenPathSegment("agent/refs/data.json")).toBe(false);
   });
 });
 
@@ -124,7 +138,8 @@ describe("routeFiles", () => {
     ]);
 
     expect(result.sections).toEqual({ skill: "First." });
-    expect(result.routed).toEqual(["SKILL.md", "skill.md"]);
+    expect(result.routed).toEqual(["SKILL.md"]);
+    expect(result.collided).toEqual(["skill.md"]);
   });
 
   it("strips directory prefixes when matching filenames", () => {
@@ -167,6 +182,7 @@ describe("routeFiles", () => {
         purpose: "resource",
       },
     ]);
+    expect(result.collided).toEqual([]);
     expect(result.ignored).toEqual([]);
   });
 
