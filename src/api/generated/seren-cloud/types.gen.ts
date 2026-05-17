@@ -1045,7 +1045,7 @@ export type CloudRunToolAuditStatus = 'success' | 'failure';
 /**
  * Kind of underlying tool_ref a `tool_audit` event applies to. Mirrors the
  * `AgentToolRef` variants so operators can distinguish publisher calls from
- * MCP, connector, remote-agent, or preset-group invocations.
+ * MCP, connector, remote-agent, remote-HTTP, or preset-group invocations.
  */
 export type CloudRunToolRefKind = 'publisher' | 'mcp' | 'connector' | 'remote_agent' | 'remote_http' | 'preset_group' | 'builtin' | 'unknown';
 

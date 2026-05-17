@@ -400,6 +400,11 @@ export const conversationStore = {
     setState("streamingThinking", conversationId, (prev = "") => prev + text);
   },
 
+  clearStreamingContent(conversationId = state.activeConversationId) {
+    if (!conversationId) return;
+    setState("streamingContent", conversationId, "");
+  },
+
   finalizeStreaming(conversationId = state.activeConversationId) {
     if (!conversationId) return;
     setState("streamingContent", conversationId, "");

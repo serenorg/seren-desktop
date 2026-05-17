@@ -47,6 +47,10 @@ export async function cancelEmployeeRun(conversationId: string): Promise<void> {
 const POLL_INTERVAL_MS = 600;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 const STREAM_MAX_RETRY_ATTEMPTS = 1;
+const STARTUP_RETRY_INTERVAL_MS = 2_000;
+const STARTUP_RETRY_TIMEOUT_MS = 2 * 60 * 1000;
+
+const STARTUP_NOT_READY_MARKERS = ["deployment is still starting"];
 
 const TERMINAL_STATUSES = new Set([
   "completed",
@@ -213,6 +217,14 @@ export interface RunCallbacks {
   onToolResult?: (event: ToolResultEvent) => void;
   /** Fired when a tool invocation is audited (approved/skipped/etc.). */
   onToolAudit?: (event: ToolAuditEvent) => void;
+  /** Fired before retrying a run trigger while the runtime is still starting. */
+  onStartupWait?: (event: StartupWaitEvent) => void;
+}
+
+export interface StartupWaitEvent {
+  attempt: number;
+  elapsedMs: number;
+  message: string;
 }
 
 export interface RunOptions extends RunCallbacks {
@@ -232,6 +244,15 @@ export interface RunOptions extends RunCallbacks {
    * and the runtime should not see them as the same conversation.
    */
   runKey?: string;
+  startupRetryDelayMs?: number;
+  startupRetryTimeoutMs?: number;
+}
+
+function isStartupNotReadyError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return STARTUP_NOT_READY_MARKERS.some((marker) =>
+    normalized.includes(marker),
+  );
 }
 
 function applyEnvelope(
@@ -422,6 +443,7 @@ export async function runEmployeeMessage(
     onToolCall,
     onToolResult,
     onToolAudit,
+    onStartupWait,
     conversationId,
   } = options;
   const callbacks: RunCallbacks = {
@@ -430,6 +452,7 @@ export async function runEmployeeMessage(
     onToolCall,
     onToolResult,
     onToolAudit,
+    onStartupWait,
   };
   const registryKey = options.runKey ?? conversationId;
   options.signal?.throwIfAborted();
@@ -481,19 +504,37 @@ export async function runEmployeeMessage(
       ...(conversationId ? { conversation_id: conversationId } : {}),
     } as unknown as Parameters<typeof serenCloudRun>[0]["body"];
 
-    const created = await serenCloudRun({
-      path: { id: deploymentId },
-      body,
-      throwOnError: false,
-    });
-    if (created.error) {
-      throw new Error(
-        `Failed to start employee run: ${formatApiError(
-          created.error,
-          created.response,
-          "the cloud trigger returned an error with no message",
-        )}`,
+    const retryDelayMs =
+      options.startupRetryDelayMs ?? STARTUP_RETRY_INTERVAL_MS;
+    const retryTimeoutMs =
+      options.startupRetryTimeoutMs ?? STARTUP_RETRY_TIMEOUT_MS;
+    const startupStartedAt = Date.now();
+    let startupAttempt = 0;
+    let created: Awaited<ReturnType<typeof serenCloudRun>>;
+    while (true) {
+      created = await serenCloudRun({
+        path: { id: deploymentId },
+        body,
+        throwOnError: false,
+      });
+      if (!created.error) break;
+      const startError = formatApiError(
+        created.error,
+        created.response,
+        "the cloud trigger returned an error with no message",
       );
+      const elapsedMs = Date.now() - startupStartedAt;
+      if (!isStartupNotReadyError(startError) || elapsedMs >= retryTimeoutMs) {
+        throw new Error(`Failed to start employee run: ${startError}`);
+      }
+      startupAttempt += 1;
+      callbacks.onStartupWait?.({
+        attempt: startupAttempt,
+        elapsedMs,
+        message: startError,
+      });
+      await abortableDelay(retryDelayMs, signal);
+      signal.throwIfAborted();
     }
     if (!created.data?.data) {
       throw new Error(

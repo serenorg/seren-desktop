@@ -390,15 +390,26 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     const id = props.employeeId;
     if (manualRun()?.kind === "running") return;
     setManualRun({ kind: "running", partial: "" });
+    let startupNoticeShown = false;
     try {
       const result = await runEmployeeMessage(id, "", {
         runKey: manualRunKey(id),
+        onStartupWait: () => {
+          if (startupNoticeShown) return;
+          startupNoticeShown = true;
+          setManualRun({
+            kind: "running",
+            partial:
+              "Starting employee runtime. The run will begin once it is ready.",
+          });
+        },
         onText: (chunk) => {
-          setManualRun((prev) =>
-            prev?.kind === "running"
-              ? { kind: "running", partial: prev.partial + chunk }
-              : prev,
-          );
+          setManualRun((prev) => {
+            if (prev?.kind !== "running") return prev;
+            const base = startupNoticeShown ? "" : prev.partial;
+            startupNoticeShown = false;
+            return { kind: "running", partial: base + chunk };
+          });
         },
       });
       if (result.status === "awaiting_approval") {

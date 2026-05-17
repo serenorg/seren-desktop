@@ -797,16 +797,34 @@ async function runEmployeeTurn(
     lastProgressAt = Date.now();
     conversationStore.setStreamingStalled(false, conversationId);
   };
+  let startupNoticeShown = false;
 
   try {
     const result = await runEmployeeMessage(deploymentId, prompt, {
       conversationId,
+      onStartupWait: () => {
+        markProgress();
+        if (startupNoticeShown) return;
+        startupNoticeShown = true;
+        conversationStore.appendStreamingContent(
+          "Starting employee runtime. I'll send your message once it is ready.",
+          conversationId,
+        );
+      },
       onText: (chunk) => {
         markProgress();
+        if (startupNoticeShown) {
+          startupNoticeShown = false;
+          conversationStore.clearStreamingContent(conversationId);
+        }
         conversationStore.appendStreamingContent(chunk, conversationId);
       },
       onThinking: (chunk) => {
         markProgress();
+        if (startupNoticeShown) {
+          startupNoticeShown = false;
+          conversationStore.clearStreamingContent(conversationId);
+        }
         conversationStore.appendStreamingThinking(chunk, conversationId);
       },
       onToolCall: (event) => {
