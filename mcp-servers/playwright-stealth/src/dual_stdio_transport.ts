@@ -5,8 +5,8 @@ import process from "node:process";
 import type { Readable, Writable } from "node:stream";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
-  JSONRPCMessageSchema,
   type JSONRPCMessage,
+  JSONRPCMessageSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
 type FramingMode = "line" | "content-length";
@@ -21,7 +21,24 @@ type ParsedMessage = {
   framing: FramingMode;
 };
 
+type TransportOptions = {
+  idleTimeoutMs?: number;
+};
+
 const CONTENT_LENGTH_PREFIX = "content-length:";
+const PLAYWRIGHT_MCP_PING_TIMEOUT_ENV = "PLAYWRIGHT_MCP_PING_TIMEOUT_MS";
+
+export function pingTimeoutMsFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): number | undefined {
+  const raw = env[PLAYWRIGHT_MCP_PING_TIMEOUT_ENV]?.trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
 
 function parseMessage(json: string): JSONRPCMessage {
   return JSONRPCMessageSchema.parse(JSON.parse(json));
@@ -43,7 +60,9 @@ function findHeaderBoundary(buffer: Buffer): HeaderBoundary | null {
 }
 
 function extractContentLength(headers: string): number | null {
-  const match = headers.match(/(?:^|\r?\n)content-length:\s*(\d+)\s*(?:\r?\n|$)/i);
+  const match = headers.match(
+    /(?:^|\r?\n)content-length:\s*(\d+)\s*(?:\r?\n|$)/i,
+  );
   if (!match) {
     return null;
   }
@@ -86,10 +105,13 @@ export class DualStdioServerTransport implements Transport {
   onmessage?: (message: JSONRPCMessage) => void;
 
   private buffer?: Buffer;
+  private idleTimeout?: ReturnType<typeof setTimeout>;
   private responseFraming: FramingMode = "line";
+  private closed = false;
   private started = false;
 
   private readonly onData = (chunk: Buffer) => {
+    this.resetIdleTimeout();
     this.buffer = this.buffer ? Buffer.concat([this.buffer, chunk]) : chunk;
     this.processReadBuffer();
   };
@@ -101,6 +123,7 @@ export class DualStdioServerTransport implements Transport {
   constructor(
     private readonly stdin: Readable = process.stdin,
     private readonly stdout: Writable = process.stdout,
+    private readonly options: TransportOptions = {},
   ) {}
 
   async start(): Promise<void> {
@@ -113,9 +136,19 @@ export class DualStdioServerTransport implements Transport {
     this.started = true;
     this.stdin.on("data", this.onData);
     this.stdin.on("error", this.onError);
+    this.resetIdleTimeout();
   }
 
   async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+
+    this.closed = true;
+    if (this.idleTimeout) {
+      clearTimeout(this.idleTimeout);
+      this.idleTimeout = undefined;
+    }
     this.stdin.off("data", this.onData);
     this.stdin.off("error", this.onError);
     this.buffer = undefined;
@@ -123,6 +156,8 @@ export class DualStdioServerTransport implements Transport {
   }
 
   send(message: JSONRPCMessage): Promise<void> {
+    this.resetIdleTimeout();
+
     return new Promise((resolve) => {
       const payload =
         this.responseFraming === "content-length"
@@ -137,6 +172,24 @@ export class DualStdioServerTransport implements Transport {
     });
   }
 
+  private resetIdleTimeout(): void {
+    if (this.idleTimeout) {
+      clearTimeout(this.idleTimeout);
+      this.idleTimeout = undefined;
+    }
+
+    const idleTimeoutMs = this.options.idleTimeoutMs;
+    if (!this.started || this.closed || idleTimeoutMs === undefined) {
+      return;
+    }
+
+    this.idleTimeout = setTimeout(() => {
+      this.idleTimeout = undefined;
+      void this.close();
+    }, idleTimeoutMs);
+    this.idleTimeout.unref?.();
+  }
+
   private processReadBuffer(): void {
     while (true) {
       try {
@@ -148,7 +201,9 @@ export class DualStdioServerTransport implements Transport {
         this.responseFraming = parsed.framing;
         this.onmessage?.(parsed.message);
       } catch (error) {
-        this.onerror?.(error instanceof Error ? error : new Error(String(error)));
+        this.onerror?.(
+          error instanceof Error ? error : new Error(String(error)),
+        );
       }
     }
   }
@@ -179,7 +234,9 @@ export class DualStdioServerTransport implements Transport {
     const contentLength = extractContentLength(headers);
     if (contentLength === null) {
       this.buffer = this.buffer.subarray(boundary.index + boundary.length);
-      throw new Error("Invalid MCP stdio frame: missing valid Content-Length header");
+      throw new Error(
+        "Invalid MCP stdio frame: missing valid Content-Length header",
+      );
     }
 
     const bodyStart = boundary.index + boundary.length;
