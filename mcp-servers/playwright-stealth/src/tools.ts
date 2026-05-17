@@ -1,14 +1,21 @@
 // ABOUTME: MCP tool implementations for stealth browser automation.
 // ABOUTME: Includes browser discovery and runtime switching tools.
 
+import type { BrowserContext, Page } from "playwright";
 import {
   closeBrowser,
   getActiveBrowserType,
+  getContext,
   getPage,
   listInstalledBrowsers,
   resetPage,
   setBrowser,
 } from "./browser.js";
+
+type CookieInput = Parameters<BrowserContext["addCookies"]>[0][number];
+type WaitForSelectorOptions = NonNullable<
+  Parameters<Page["waitForSelector"]>[1]
+>;
 
 export async function navigate(url: string): Promise<string> {
   const page = await getPage();
@@ -50,6 +57,30 @@ export async function getCookie(
   const cookies = await page.context().cookies(page.url());
   const match = cookies.find((c) => c.name === name);
   return { value: match ? match.value : null };
+}
+
+export async function addCookies(cookies: CookieInput[]): Promise<string> {
+  const ctx = await getContext();
+  await ctx.addCookies(cookies);
+  return `Added ${cookies.length} cookie(s)`;
+}
+
+// Registers a script that runs before any page script on every navigation
+// in the active context. Used to restore tokens into localStorage/sessionStorage
+// before the SPA's bootstrap code runs.
+export async function addInitScript(script: string): Promise<string> {
+  const ctx = await getContext();
+  await ctx.addInitScript(script);
+  return "Init script registered";
+}
+
+export async function waitForSelector(
+  selector: string,
+  options?: WaitForSelectorOptions,
+): Promise<string> {
+  const page = await getPage();
+  await page.waitForSelector(selector, options ?? {});
+  return `Selector ready: ${selector}`;
 }
 
 export async function extractContent(selector?: string): Promise<string> {

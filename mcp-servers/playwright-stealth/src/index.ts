@@ -236,6 +236,79 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["name"],
         },
       },
+      {
+        name: "playwright_add_cookies",
+        description:
+          "Write cookies to the current browser context. Supports HttpOnly and Secure cookies that playwright_evaluate cannot set. Each cookie requires either (domain + path) or url. Used to restore cached authentication sessions before navigation.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            cookies: {
+              type: "array",
+              description: "Cookies to add to the browser context.",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  value: { type: "string" },
+                  url: { type: "string" },
+                  domain: { type: "string" },
+                  path: { type: "string" },
+                  expires: { type: "number" },
+                  httpOnly: { type: "boolean" },
+                  secure: { type: "boolean" },
+                  sameSite: {
+                    type: "string",
+                    enum: ["Strict", "Lax", "None"],
+                  },
+                },
+                required: ["name", "value"],
+              },
+            },
+          },
+          required: ["cookies"],
+        },
+      },
+      {
+        name: "playwright_add_init_script",
+        description:
+          "Register a JavaScript snippet to run before any page script on every navigation in the active context. Used to seed window.localStorage / window.sessionStorage with cached tokens before the page's SPA bootstrap code runs.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            script: {
+              type: "string",
+              description:
+                "JavaScript source to execute in page context before the page's own scripts.",
+            },
+          },
+          required: ["script"],
+        },
+      },
+      {
+        name: "playwright_wait_for_selector",
+        description:
+          "Wait for a selector to reach the requested state before continuing. Returns once the element matches; rejects with a Playwright TimeoutError if it does not appear in time. Default state is 'visible', default timeout is 30000ms.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            selector: {
+              type: "string",
+              description: "CSS selector to wait for.",
+            },
+            state: {
+              type: "string",
+              enum: ["attached", "detached", "visible", "hidden"],
+              description: "Selector state to wait for. Defaults to 'visible'.",
+            },
+            timeout: {
+              type: "number",
+              description: "Timeout in milliseconds. Defaults to 30000.",
+            },
+          },
+          required: ["selector"],
+        },
+      },
     ],
   };
 });
@@ -306,6 +379,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "playwright_get_cookie":
         result = await tools.getCookie(args.name as string);
+        break;
+      case "playwright_add_cookies":
+        result = await tools.addCookies(
+          args.cookies as Parameters<typeof tools.addCookies>[0],
+        );
+        break;
+      case "playwright_add_init_script":
+        result = await tools.addInitScript(args.script as string);
+        break;
+      case "playwright_wait_for_selector":
+        result = await tools.waitForSelector(args.selector as string, {
+          state: args.state as
+            | "attached"
+            | "detached"
+            | "visible"
+            | "hidden"
+            | undefined,
+          timeout: args.timeout as number | undefined,
+        });
         break;
       case "playwright_set_browser": {
         const browserArg =
