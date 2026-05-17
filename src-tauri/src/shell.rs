@@ -420,8 +420,16 @@ mod tests {
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app builds");
 
+        // Open the store and ALWAYS reset the key — `tauri-plugin-store`
+        // persists `auth.json` to the mock runtime's data dir, which is
+        // shared across sibling test invocations on the same host. Without
+        // an explicit delete, a prior `mock_app_with_api_key(Some("..."))`
+        // call leaves the key on disk; the next `Some(None)` call inherits
+        // it and the "logged out" assertion fails. Per-test self-containment
+        // is the only safe contract here. #1945.
+        let store = app.store(AUTH_STORE).expect("auth store opens");
+        store.delete(SEREN_API_KEY_KEY);
         if let Some(api_key) = api_key {
-            let store = app.store(AUTH_STORE).expect("auth store opens");
             store.set(SEREN_API_KEY_KEY, json!(api_key));
         }
 
