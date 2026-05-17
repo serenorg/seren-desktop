@@ -527,11 +527,35 @@ pub fn run() {
             // skills spawned by those agents) inherits these vars and can
             // detect that it's running under Seren Desktop.
             // Spec: serenorg/seren-desktop#1496
+            //
+            // SEREN_PLAYWRIGHT_MCP_COMMAND lets skill subprocesses
+            // (prophet-arb-bot's automated browser flows) spawn the bundled
+            // playwright-stealth MCP server without hardcoding the macOS
+            // path. Resolved once here from the resource_dir so Windows and
+            // Linux inherit a working absolute command too. #1945.
+            //
             // SAFETY: set_var is unsafe in Rust 2024. Called exactly once
             // during app setup before any threads spawn child processes.
             unsafe {
                 std::env::set_var("SEREN_HOST", "seren-desktop");
                 std::env::set_var("SEREN_DESKTOP", "1");
+
+                let resource_dir = app.path().resource_dir().ok();
+                if let Some(script) =
+                    mcp::resolve_playwright_mcp_script_path_from(resource_dir.as_deref())
+                {
+                    let node = mcp::resolve_command_in_embedded_path("node");
+                    let cmd = mcp::format_playwright_mcp_command(&node, &script);
+                    log::info!("[MCP] SEREN_PLAYWRIGHT_MCP_COMMAND={}", cmd);
+                    std::env::set_var("SEREN_PLAYWRIGHT_MCP_COMMAND", cmd);
+                } else {
+                    log::warn!(
+                        "[MCP] playwright-stealth script not found on disk; \
+                         SEREN_PLAYWRIGHT_MCP_COMMAND not exported. Skill \
+                         subprocesses that need it will fail with a clear \
+                         setup error."
+                    );
+                }
             }
 
             // Build native menu bar for all platforms

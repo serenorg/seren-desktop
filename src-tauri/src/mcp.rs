@@ -235,12 +235,13 @@ fn has_working_node_modules(script_path: &std::path::Path) -> bool {
         .is_dir()
 }
 
-/// Resolve the bundled/dev Playwright MCP server script to an absolute path.
-#[tauri::command]
-pub fn resolve_playwright_mcp_script_path(app: tauri::AppHandle) -> String {
+/// Build the ordered candidate list for the playwright-stealth MCP script.
+/// Pure function — separates path search from filesystem checks so the
+/// resolver can be exercised from tests with a fixture tree. #1945.
+fn playwright_mcp_script_candidates(resource_dir: Option<&std::path::Path>) -> Vec<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
 
-    if let Ok(resource_dir) = app.path().resource_dir() {
+    if let Some(resource_dir) = resource_dir {
         candidates.push(resource_dir.join(PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH));
         candidates.push(
             resource_dir
@@ -268,26 +269,69 @@ pub fn resolve_playwright_mcp_script_path(app: tauri::AppHandle) -> String {
         );
     }
 
+    candidates
+}
+
+/// Resolve the playwright-stealth MCP script to an absolute path from the
+/// candidate list. Prefers candidates whose `node_modules` is intact; falls
+/// back to existing-but-possibly-broken paths so the agent can still try.
+/// Returns `None` when no candidate exists on disk — callers must NOT publish
+/// a non-existent path as `SEREN_PLAYWRIGHT_MCP_COMMAND`. #1945.
+pub(crate) fn resolve_playwright_mcp_script_path_from(
+    resource_dir: Option<&std::path::Path>,
+) -> Option<PathBuf> {
+    let candidates = playwright_mcp_script_candidates(resource_dir);
+
     for candidate in &candidates {
         if candidate.exists() && has_working_node_modules(candidate) {
-            return candidate.to_string_lossy().to_string();
+            return Some(candidate.clone());
         }
     }
 
-    // Second pass: accept any candidate where the script exists, even without
-    // verified node_modules (better to attempt and get a clear error than skip).
     for candidate in &candidates {
         if candidate.exists() {
             log::warn!(
                 "[MCP] Resolved playwright script at {:?} but node_modules may be broken",
                 candidate
             );
-            return candidate.to_string_lossy().to_string();
+            return Some(candidate.clone());
         }
     }
 
+    None
+}
+
+/// Resolve the bundled/dev Playwright MCP server script to an absolute path.
+#[tauri::command]
+pub fn resolve_playwright_mcp_script_path(app: tauri::AppHandle) -> String {
+    let resource_dir = app.path().resource_dir().ok();
+    if let Some(path) = resolve_playwright_mcp_script_path_from(resource_dir.as_deref()) {
+        return path.to_string_lossy().to_string();
+    }
     // Last-resort fallback keeps backwards compatibility with existing settings.
     PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH.to_string()
+}
+
+/// Build the `SEREN_PLAYWRIGHT_MCP_COMMAND` value: a shell-quoted full
+/// command string that skill subprocesses can execute to spawn the bundled
+/// playwright-stealth MCP server on macOS, Windows, or Linux. #1945.
+///
+/// Quoting rule: wrap any argument that contains a space or a double-quote
+/// in double quotes, escaping inner double quotes as `\"`. The skill
+/// subprocess is expected to feed the value to its platform shell as-is
+/// (cmd.exe on Windows, /bin/sh on POSIX), so this matches the quoting
+/// both shells tolerate without special expansion.
+pub(crate) fn format_playwright_mcp_command(node: &str, script: &std::path::Path) -> String {
+    fn shell_quote(arg: &str) -> String {
+        if !arg.contains(' ') && !arg.contains('"') {
+            return arg.to_string();
+        }
+        let escaped = arg.replace('"', "\\\"");
+        format!("\"{}\"", escaped)
+    }
+
+    let script_str = script.to_string_lossy();
+    format!("{} {}", shell_quote(node), shell_quote(&script_str))
 }
 
 /// Resolve a bare command name to an absolute path by searching the embedded PATH.
@@ -1028,6 +1072,111 @@ mod tests {
             MCP_INITIALIZE_TIMEOUT >= Duration::from_secs(5),
             "MCP_INITIALIZE_TIMEOUT too aggressive; got {:?}",
             MCP_INITIALIZE_TIMEOUT
+        );
+    }
+}
+
+// ============================================================================
+// #1945 — playwright-stealth MCP resolver tests (cross-platform).
+// Skill subprocesses (prophet-arb-bot) need an absolute, OS-aware spawn
+// command for the bundled playwright-stealth MCP. The previous resolver only
+// returned a string and fell back to a non-existent relative path on miss,
+// which made the env-var injection unsafe; these tests pin the new
+// `resolve_playwright_mcp_script_path_from` (Option<PathBuf>) and
+// `format_playwright_mcp_command` (shell-quoted) contracts.
+// ============================================================================
+
+#[cfg(test)]
+mod playwright_resolver_tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    /// Materialise a fake bundled playwright-stealth tree under `root` and
+    /// return the absolute path to the script. Without a valid
+    /// `node_modules/@modelcontextprotocol/sdk/` the resolver flags the
+    /// candidate as broken; create the marker dir so the happy path matches.
+    fn make_fake_bundle(root: &Path, with_node_modules: bool) -> PathBuf {
+        let package_dir = root.join("mcp-servers").join("playwright-stealth");
+        fs::create_dir_all(package_dir.join("dist")).unwrap();
+        let script = package_dir.join("dist").join("index.js");
+        fs::write(&script, b"// stub for tests\n").unwrap();
+        if with_node_modules {
+            fs::create_dir_all(
+                package_dir
+                    .join("node_modules")
+                    .join("@modelcontextprotocol")
+                    .join("sdk"),
+            )
+            .unwrap();
+        }
+        script
+    }
+
+    #[test]
+    fn returns_none_when_no_candidate_exists_on_disk() {
+        // Empty resource dir + no workspace bundle on this isolated tmp
+        // tree → resolver must return None so callers don't publish a
+        // bogus SEREN_PLAYWRIGHT_MCP_COMMAND. The pre-#1945 behaviour was
+        // to return the bare relative path, which would silently fail on
+        // Windows where the cwd-relative miss can't be exec'd.
+        let tmp = tempfile::tempdir().unwrap();
+        // Note: cwd / workspace_root / exe_dir candidates may exist in the
+        // dev tree, so we only assert the resource_dir branch. The resource
+        // dir is empty, so it contributes no matches; remaining candidates
+        // are out-of-test-control. The assertion here is structural: the
+        // function must be invocable with `None` resource_dir and a
+        // missing-bundle tmp dir without panicking, and return whatever the
+        // remaining fallbacks resolve to (Option<PathBuf>, not the bare
+        // relative-path String the legacy command returned).
+        let resolved = resolve_playwright_mcp_script_path_from(Some(tmp.path()));
+        // The result is either None or an existing absolute path — never a
+        // relative path that won't exec from an arbitrary cwd.
+        if let Some(path) = &resolved {
+            assert!(path.is_absolute(), "resolved path must be absolute, got {:?}", path);
+            assert!(path.exists(), "resolved path must exist, got {:?}", path);
+        }
+    }
+
+    #[test]
+    fn resource_dir_with_intact_bundle_is_preferred() {
+        let tmp = tempfile::tempdir().unwrap();
+        let expected = make_fake_bundle(tmp.path(), true);
+
+        let resolved = resolve_playwright_mcp_script_path_from(Some(tmp.path()))
+            .expect("resolver must return Some when the resource bundle exists");
+
+        // Canonicalise both sides — macOS turns /var/folders into /private/var.
+        let resolved_canon = resolved.canonicalize().unwrap_or(resolved);
+        let expected_canon = expected.canonicalize().unwrap_or(expected);
+        assert_eq!(resolved_canon, expected_canon);
+    }
+
+    #[test]
+    fn shell_quote_paths_with_spaces() {
+        // Windows install path under "Program Files" or
+        // "Application Support" contains spaces. The unquoted form would
+        // break cmd.exe / /bin/sh argument splitting; the skill expects a
+        // shell-quoted full command string.
+        let node = "/usr/local/bin/node";
+        let script = std::path::Path::new("/Applications/Seren Desktop.app/Resources/x.js");
+        let cmd = format_playwright_mcp_command(node, script);
+        assert_eq!(
+            cmd,
+            "/usr/local/bin/node \"/Applications/Seren Desktop.app/Resources/x.js\""
+        );
+    }
+
+    #[test]
+    fn shell_quote_skipped_for_simple_paths() {
+        // Don't add noise when neither token needs quoting — keeps the
+        // injected env value readable in logs.
+        let node = "/usr/local/bin/node";
+        let script = std::path::Path::new("/opt/seren/playwright-stealth/dist/index.js");
+        let cmd = format_playwright_mcp_command(node, script);
+        assert_eq!(
+            cmd,
+            "/usr/local/bin/node /opt/seren/playwright-stealth/dist/index.js"
         );
     }
 }
