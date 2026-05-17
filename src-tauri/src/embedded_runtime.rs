@@ -16,6 +16,31 @@ pub struct EmbeddedRuntimePaths {
     pub node_dir: Option<PathBuf>,
     pub git_dir: Option<PathBuf>,
     pub bin_dir: Option<PathBuf>,
+    /// Bundled CPython directory (Windows only). When set, contains
+    /// `python.exe` and `pythonw.exe` from the official Windows embeddable
+    /// distribution. macOS and Linux ship a usable Python in the base OS,
+    /// so this field is always `None` there.
+    pub python_dir: Option<PathBuf>,
+}
+
+/// Check whether `runtime_dir/python/` contains the Windows embeddable
+/// CPython distribution staged by `prepare:python:win32-*`. Returns the
+/// directory path (the one PATH should be pointed at — `python.exe`'s
+/// parent) if the layout looks valid; `None` otherwise.
+///
+/// Extracted as a small pure helper so the discovery contract is unit-
+/// testable on every CI runner, not only Windows hosts. The Windows
+/// embeddable package always ships `python.exe` at the top of the zip;
+/// using its presence as the validity probe keeps the check tight enough
+/// to avoid false positives if some unrelated `python/` directory ever
+/// landed under `embedded-runtime/`.
+fn embedded_python_dir(runtime_dir: &std::path::Path) -> Option<PathBuf> {
+    let python_path = runtime_dir.join("python");
+    if python_path.join("python.exe").exists() {
+        Some(python_path)
+    } else {
+        None
+    }
 }
 
 /// Returns the platform-specific subdirectory name (e.g., "darwin-arm64", "win32-x64").
@@ -102,12 +127,23 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
                 node_dir: None,
                 git_dir: None,
                 bin_dir: None,
+                python_dir: None,
             };
         }
     };
 
     let mut node_dir: Option<PathBuf> = None;
     let mut git_dir: Option<PathBuf> = None;
+
+    // Bundled CPython is Windows-only — macOS and Linux ship a usable
+    // system Python (issue #1947). The probe is platform-agnostic: it
+    // just checks for `python/python.exe` under the runtime dir, so we
+    // could call it on every OS, but skipping it on Unix saves a syscall.
+    let python_dir: Option<PathBuf> = if cfg!(target_os = "windows") {
+        embedded_python_dir(&runtime_dir)
+    } else {
+        None
+    };
 
     #[cfg(target_os = "windows")]
     {
@@ -169,6 +205,7 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
         node_dir,
         git_dir,
         bin_dir,
+        python_dir,
     }
 }
 
@@ -187,6 +224,9 @@ pub fn configure_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
     }
     if let Some(ref bin_dir) = paths.bin_dir {
         paths_to_add.push(bin_dir.to_string_lossy().to_string());
+    }
+    if let Some(ref python_dir) = paths.python_dir {
+        paths_to_add.push(python_dir.to_string_lossy().to_string());
     }
 
     // Compute the new PATH but store it instead of modifying global env
@@ -491,6 +531,46 @@ mod tests {
         }
     }
 
+    /// Critical test for serenorg/seren-desktop#1947.
+    ///
+    /// Confirms the Windows-only Python bundle discovery contract: the
+    /// helper returns the bundled directory only when `python/python.exe`
+    /// is actually present. Three scenarios cover the failure modes that
+    /// would silently break Python skills on Windows if regressed:
+    ///
+    /// 1. No `python/` subdirectory at all → must return `None` (this is
+    ///    the macOS / Linux state and the state on a Windows build where
+    ///    `prepare:python:win32-*` was not run).
+    /// 2. Empty `python/` subdirectory → must return `None`. Without the
+    ///    executable probe, a stray empty directory would be PATH-added
+    ///    and `python` invocations would silently miss.
+    /// 3. `python/python.exe` exists → must return the `python/` dir.
+    ///    This is the path PATH gets prepended with, so the contract is
+    ///    that we point at the directory, not the executable.
+    ///
+    /// Runs on every CI host because the helper is platform-agnostic;
+    /// the cfg gating in `discover_embedded_runtime` is just an
+    /// optimization to skip a syscall on Unix.
+    #[test]
+    fn embedded_python_dir_requires_python_exe() {
+        use std::fs;
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let runtime_dir = tmp.path();
+
+        // 1. No python/ subdir → None.
+        assert_eq!(embedded_python_dir(runtime_dir), None);
+
+        // 2. Empty python/ subdir → None.
+        fs::create_dir_all(runtime_dir.join("python")).expect("create python dir");
+        assert_eq!(embedded_python_dir(runtime_dir), None);
+
+        // 3. python/python.exe exists → returns the python/ dir.
+        fs::write(runtime_dir.join("python").join("python.exe"), b"stub")
+            .expect("write python.exe stub");
+        let found = embedded_python_dir(runtime_dir).expect("python_dir discovered");
+        assert_eq!(found, runtime_dir.join("python"));
+    }
+
     #[test]
     fn sanitize_spawn_env_is_idempotent() {
         // Calling the helper twice should produce the same effect as
@@ -527,7 +607,9 @@ pub fn get_embedded_runtime_info(app: AppHandle) -> Result<serde_json::Value, St
     Ok(serde_json::json!({
         "node_dir": paths.node_dir.as_ref().map(|p| p.to_string_lossy().to_string()),
         "git_dir": paths.git_dir.as_ref().map(|p| p.to_string_lossy().to_string()),
+        "python_dir": paths.python_dir.as_ref().map(|p| p.to_string_lossy().to_string()),
         "node_available": paths.node_dir.is_some(),
         "git_available": paths.git_dir.is_some(),
+        "python_available": paths.python_dir.is_some(),
     }))
 }

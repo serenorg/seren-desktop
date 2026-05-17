@@ -159,6 +159,15 @@ async fn execute_shell_command_inner(
     // separate `py` launcher that always finds a real interpreter. When we
     // see both conditions — stub stderr and a rewritable `python` token —
     // retry once via the launcher.
+    //
+    // GH #1947: once `prepare:python:win32-*` has staged the embeddable
+    // CPython under `embedded-runtime/win32-*/python/`, that directory is
+    // prepended to the child PATH by `get_embedded_path()`, so `python`
+    // resolves to the bundled interpreter BEFORE the WindowsApps stub
+    // can intercept and this retry never fires. The block stays as the
+    // safety net for builds where the Python bundle is missing (e.g. dev
+    // hosts that have not run `pnpm prepare:python:win32-x64`) and the
+    // user does happen to have the python.org `py` launcher installed.
     #[cfg(target_os = "windows")]
     {
         if looks_like_windows_apps_python_stub(&result.stderr) {
