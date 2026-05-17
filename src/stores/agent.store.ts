@@ -3404,6 +3404,13 @@ Structured summary:`;
       // and the user had to re-supply them. Tighter cap on tool results
       // because they can be huge file contents / JSON dumps; user and
       // assistant text gets the original 2000-char ceiling. #1858.
+      //
+      // Items are wrapped in XML-style tags rather than `USER: ` /
+      // `TOOL_RESULT (…): ` prefixes. Raw transcript prefixes match Claude
+      // Code's own stream-json output verbatim — Opus 4.7 then continues
+      // the transcript inside its assistant content instead of treating
+      // the block as quoted context, bleeding the prepend into the chat
+      // and starving the Thinking budget. #1941.
       const MAX_MSG_CHARS = 2000;
       const MAX_TOOL_CHARS = 500;
       const preservedContext = toPreserve
@@ -3413,23 +3420,26 @@ Structured summary:`;
               m.content.length > MAX_MSG_CHARS
                 ? `${m.content.slice(0, MAX_MSG_CHARS)}... [truncated]`
                 : m.content;
-            return `${m.type.toUpperCase()}: ${content}`;
+            if (m.type === "user") {
+              return `<prior_user>${content}</prior_user>`;
+            }
+            return `<prior_assistant>${content}</prior_assistant>`;
           }
           if (m.type === "tool" && m.toolCall?.result) {
-            const title = m.toolCall.title || "tool";
+            const title = (m.toolCall.title || "tool").replace(/"/g, "'");
             const result = m.toolCall.result;
             const trimmed =
               result.length > MAX_TOOL_CHARS
                 ? `${result.slice(0, MAX_TOOL_CHARS)}... [truncated]`
                 : result;
-            return `TOOL_RESULT (${title}): ${trimmed}`;
+            return `<prior_tool name="${title}">${trimmed}</prior_tool>`;
           }
           return null;
         })
         .filter((s): s is string => s !== null)
         .join("\n\n");
       const prependText = preservedContext
-        ? `Prior work summary:\n${summary}\n\nRecent messages:\n${preservedContext}`
+        ? `Prior work summary:\n${summary}\n\n<prior_messages>\n${preservedContext}\n</prior_messages>`
         : `Prior work summary:\n${summary}`;
 
       const userTurnCount = Math.max(1, Math.ceil(toPreserve.length / 2));
