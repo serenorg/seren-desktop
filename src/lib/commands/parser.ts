@@ -93,6 +93,25 @@ export function matchSkillCommand(
 }
 
 /**
+ * Resolve a skill slash command, refreshing the installed inventory once when
+ * the in-memory store has not caught up with disk yet. This closes the fresh
+ * startup path where a valid `/skill-slug` could fall through to the agent as
+ * plain text before `skillsStore.refresh()` completed.
+ */
+export async function resolveSkillCommand(
+  input: string,
+): Promise<{ skill: InstalledSkill; args: string } | null> {
+  const immediateMatch = matchSkillCommand(input);
+  if (immediateMatch) return immediateMatch;
+
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("/")) return null;
+
+  await skillsStore.refreshInstalled();
+  return matchSkillCommand(input);
+}
+
+/**
  * Search installed skills whose slug or display name match a partial input.
  * Returns SlashCommand entries for the autocomplete popup.
  */
