@@ -12,15 +12,13 @@ import type {
   AgentToolRef,
   CloudDeploymentMode,
   CloudDeploymentStatus,
+  EvalGate,
   ManagedAgentApprovalPolicy,
   ManagedAgentModelPolicy,
   ManagedAgentTemplate,
   ManagedAgentToolPreset,
   ManagedDeploymentCondition,
 } from "@/api/seren-agent";
-import type { EvalGateWithSchedule } from "@/services/eval-gate";
-
-export type { EvalGateWithSchedule } from "@/services/eval-gate";
 
 export type EmployeeMode = CloudDeploymentMode;
 export type EmployeeStatus = CloudDeploymentStatus;
@@ -76,7 +74,7 @@ export type EmployeeDetail = EmployeeSummary & {
   /// Typed tool refs alongside the coarse tool_presets.
   toolRefs: AgentToolRef[];
   /// Eval gate (set + max age + block_on_failure + optional schedule) when one is attached.
-  evalGate: EvalGateWithSchedule | null;
+  evalGate: EvalGate | null;
 };
 
 export type NewEmployeeInput = {
@@ -92,6 +90,7 @@ export type NewEmployeeInput = {
   modelId?: string;
   template?: EmployeeTemplate;
   toolPresets?: EmployeeToolPreset[];
+  toolRefs?: AgentToolRef[];
   approvalPolicy?: EmployeeApprovalPolicy;
   visibility?: "open" | "opaque";
   limits?: {

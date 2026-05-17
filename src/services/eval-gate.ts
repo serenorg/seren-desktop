@@ -3,12 +3,9 @@
 import {
   type AgentSpecUpdate,
   type EvalGateSchedule,
-  type EvalGate as GeneratedEvalGate,
   serenAgentUpdateManagedDeployment,
 } from "@/api/seren-agent";
 import { formatApiError } from "@/lib/api-errors";
-
-export type EvalGateWithSchedule = GeneratedEvalGate;
 
 export interface EvalGateInput {
   set_id: string;

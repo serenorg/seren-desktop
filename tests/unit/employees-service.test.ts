@@ -4,10 +4,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type AgentBundle,
+  type AgentToolRef,
   type CloudDeploymentSummary,
   type ManagedAgentDeploymentDetail,
+  serenAgentDeploy,
   serenAgentGetManagedDeployment,
   serenAgentListDeployments,
+  serenAgentPatchManagedDeploymentFiles,
   serenAgentUpdateManagedDeployment,
 } from "@/api/seren-agent";
 import { employees } from "@/services/employees";
@@ -114,6 +117,122 @@ describe("employees service", () => {
         throwOnError: false,
       }),
     );
+  });
+
+  it("sends typed tool refs on deploy and update", async () => {
+    const toolRefs: AgentToolRef[] = [
+      {
+        kind: "connector",
+        connector_ref: "gmail:primary",
+        capability: "messaging",
+        scopes: ["read", "send"],
+        require_approval: true,
+        permitted_actions: [
+          {
+            action: "send",
+            capability: { kind: "specific", actions: ["email"] },
+            use_budget: 3,
+          },
+        ],
+      },
+    ];
+    vi.mocked(serenAgentDeploy).mockResolvedValueOnce({
+      data: { data: cloudSummary() },
+      error: undefined,
+    } as never);
+    vi.mocked(serenAgentUpdateManagedDeployment).mockResolvedValueOnce({
+      data: { data: cloudSummary() },
+      error: undefined,
+    } as never);
+
+    await employees.deploy({
+      name: "Atlas",
+      slug: "atlas",
+      mode: "always_on",
+      instructions: [{ kind: "skill", path: "SKILL.md", content: "Run." }],
+      modelChoice: "standard",
+      toolRefs,
+    });
+    await employees.update("dep_1", { toolRefs });
+
+    expect(serenAgentDeploy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          tool_refs: toolRefs,
+        }),
+        throwOnError: false,
+      }),
+    );
+    expect(serenAgentUpdateManagedDeployment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          tool_refs: toolRefs,
+        }),
+        path: { id: "dep_1" },
+        throwOnError: false,
+      }),
+    );
+  });
+
+  it("omits empty tool refs on deploy and uses the clear flag on update", async () => {
+    vi.mocked(serenAgentDeploy).mockResolvedValueOnce({
+      data: { data: cloudSummary() },
+      error: undefined,
+    } as never);
+    vi.mocked(serenAgentUpdateManagedDeployment).mockResolvedValueOnce({
+      data: { data: cloudSummary() },
+      error: undefined,
+    } as never);
+
+    await employees.deploy({
+      name: "Atlas",
+      slug: "atlas",
+      mode: "always_on",
+      instructions: [{ kind: "skill", path: "SKILL.md", content: "Run." }],
+      modelChoice: "standard",
+      toolRefs: [],
+    });
+    await employees.update("dep_1", { toolRefs: [] });
+
+    const deployBody = vi.mocked(serenAgentDeploy).mock.calls[0]?.[0].body;
+    expect(deployBody).not.toHaveProperty("tool_refs");
+    expect(serenAgentUpdateManagedDeployment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          clear_tool_refs: true,
+        }),
+        path: { id: "dep_1" },
+        throwOnError: false,
+      }),
+    );
+    const updateBody = vi.mocked(serenAgentUpdateManagedDeployment).mock
+      .calls[0]?.[0].body;
+    expect(updateBody).not.toHaveProperty("tool_refs");
+  });
+
+  it("patches managed deployment files through the narrow files endpoint", async () => {
+    vi.mocked(serenAgentPatchManagedDeploymentFiles).mockResolvedValueOnce({
+      data: { data: cloudSummary() },
+      error: undefined,
+    } as never);
+
+    await employees.patchFiles("dep_1", {
+      upsert_instructions: [
+        { kind: "skill", path: "SKILL.md", content: "Updated." },
+      ],
+      remove_assets: ["old.json"],
+    });
+
+    expect(serenAgentPatchManagedDeploymentFiles).toHaveBeenCalledWith({
+      path: { id: "dep_1" },
+      body: {
+        upsert_instructions: [
+          { kind: "skill", path: "SKILL.md", content: "Updated." },
+        ],
+        remove_assets: ["old.json"],
+      },
+      throwOnError: false,
+    });
   });
 
   it("maps typed governance fields onto EmployeeDetail when present", async () => {

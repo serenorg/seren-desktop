@@ -14,6 +14,7 @@ import {
 } from "solid-js";
 import type { AgentAssetFile } from "@/api/seren-agent";
 import { deriveSlug, gradientFor, initialFor } from "@/lib/employees/avatar";
+import { buildEmployeeFilesPatch } from "@/lib/employees/bundle-patch";
 import {
   type ImportFileEntry,
   type InstructionSlot,
@@ -25,6 +26,17 @@ import {
   buildEmployeeInstructionFiles,
   extractInstructionSections,
 } from "@/lib/employees/instructions";
+import {
+  buildEmployeePolicyReviewSummary,
+  type EmployeePolicyReviewSummary,
+} from "@/lib/employees/review-summary";
+import {
+  CONNECTOR_ACCESS_OPTIONS,
+  type ConnectorAccessMode,
+  connectorAccessModeFromToolRefs,
+  mergeConnectorAccessToolRefs,
+  sameToolRefs,
+} from "@/lib/employees/tool-refs";
 import type {
   EmployeeApprovalPolicy,
   EmployeeDetail,
@@ -73,6 +85,13 @@ const DEFAULT_LIMITS = {
 const MAX_AGENT_INSTRUCTION_BYTES = 1024 * 1024;
 const MAX_AGENT_ASSET_BYTES = 8 * 1024 * 1024;
 const MAX_AGENT_BUNDLE_TOTAL_BYTES = 16 * 1024 * 1024;
+
+function sameStringSet(left: readonly string[], right: readonly string[]) {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((value, index) => value === sortedRight[index]);
+}
 
 interface CreateEmployeeModalProps {
   onClose: () => void;
@@ -176,6 +195,10 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       ? initial.toolPresets
       : ["live_data"],
   );
+  const [connectorAccess, setConnectorAccess] =
+    createSignal<ConnectorAccessMode>(
+      connectorAccessModeFromToolRefs(initial?.toolRefs ?? []),
+    );
   const [maxIterations, setMaxIterations] = createSignal(
     initial?.maxIterations ?? DEFAULT_LIMITS.maxIterations,
   );
@@ -575,6 +598,70 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     assets: assets(),
   });
 
+  const currentToolRefs = createMemo(() =>
+    mergeConnectorAccessToolRefs(
+      props.employee?.toolRefs ?? [],
+      connectorAccess(),
+    ),
+  );
+
+  const policyReview = createMemo(() =>
+    buildEmployeePolicyReviewSummary({
+      approvalPolicy: approvalPolicy(),
+      toolPresets: toolPresets(),
+      runtimePolicy: props.employee?.runtimePolicy ?? null,
+      toolRefs: currentToolRefs(),
+      guardrails: props.employee?.guardrails ?? [],
+    }),
+  );
+
+  const hasNonFileEditChanges = () => {
+    const employee = props.employee;
+    if (!employee) return true;
+    if (name().trim() !== employee.name) return true;
+    if (employee.mode === "cron") {
+      if (cronSchedule().trim() !== (employee.cronSchedule ?? "")) return true;
+      if (cronTimezone().trim() !== (employee.cronTimezone ?? "UTC"))
+        return true;
+    }
+    if (modelChoice() !== employee.modelChoice) return true;
+    if (modelChoice() === "standard") {
+      if (modelPolicy() !== (employee.modelPolicy ?? "balanced")) return true;
+    }
+    if (modelChoice() === "private") {
+      if (modelId().trim() !== (employee.modelId ?? "")) return true;
+    }
+    if (!sameStringSet(toolPresets(), employee.toolPresets)) return true;
+    if (!sameToolRefs(currentToolRefs(), employee.toolRefs)) return true;
+    if (approvalPolicy() !== employee.approvalPolicy) return true;
+    if (
+      maxIterations() !==
+      (employee.maxIterations ?? DEFAULT_LIMITS.maxIterations)
+    )
+      return true;
+    if (
+      maxToolCalls() !==
+      (employee.maxToolCallsPerRun ?? DEFAULT_LIMITS.maxToolCallsPerRun)
+    )
+      return true;
+    if (
+      maxTimeout() !==
+      (employee.maxTimeoutSeconds ?? DEFAULT_LIMITS.maxTimeoutSeconds)
+    )
+      return true;
+    if (
+      maxToolOutput() !==
+      (employee.maxToolOutputChars ?? DEFAULT_LIMITS.maxToolOutputChars)
+    )
+      return true;
+    if (
+      contextBudget() !==
+      (employee.contextBudgetTokens ?? DEFAULT_LIMITS.contextBudgetTokens)
+    )
+      return true;
+    return false;
+  };
+
   const toggleToolPreset = (preset: EmployeeToolPreset) => {
     setToolPresets((prev) =>
       prev.includes(preset)
@@ -598,25 +685,45 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       let summary: Awaited<ReturnType<typeof svc.deploy>>;
       if (props.employee) {
         const bundle = buildExistingBundle();
-        const patch: EmployeePatch = {
-          name: name().trim(),
-          // Mode is immutable on update; cron fields only flow when the
-          // existing mode is cron.
-          mode: props.employee.mode,
-          cronSchedule:
-            props.employee.mode === "cron" ? cronSchedule().trim() : undefined,
-          cronTimezone:
-            props.employee.mode === "cron" ? cronTimezone().trim() : undefined,
-          instructions: bundle.instructions ?? [],
+        const filesPatch = buildEmployeeFilesPatch(
+          props.employee.bundle,
           bundle,
-          modelChoice: modelChoice(),
-          modelPolicy: modelChoice() === "standard" ? modelPolicy() : undefined,
-          modelId: modelChoice() === "private" ? modelId().trim() : undefined,
-          toolPresets: toolPresets(),
-          approvalPolicy: approvalPolicy(),
-          limits,
-        };
-        summary = await svc.update(props.employee.id, patch);
+        );
+        if (hasNonFileEditChanges()) {
+          const toolRefsChanged = !sameToolRefs(
+            currentToolRefs(),
+            props.employee.toolRefs,
+          );
+          const patch: EmployeePatch = {
+            name: name().trim(),
+            // Mode is immutable on update; cron fields only flow when the
+            // existing mode is cron.
+            mode: props.employee.mode,
+            cronSchedule:
+              props.employee.mode === "cron"
+                ? cronSchedule().trim()
+                : undefined,
+            cronTimezone:
+              props.employee.mode === "cron"
+                ? cronTimezone().trim()
+                : undefined,
+            instructions: bundle.instructions ?? [],
+            bundle,
+            modelChoice: modelChoice(),
+            modelPolicy:
+              modelChoice() === "standard" ? modelPolicy() : undefined,
+            modelId: modelChoice() === "private" ? modelId().trim() : undefined,
+            toolPresets: toolPresets(),
+            toolRefs: toolRefsChanged ? currentToolRefs() : undefined,
+            approvalPolicy: approvalPolicy(),
+            limits,
+          };
+          summary = await svc.update(props.employee.id, patch);
+        } else if (filesPatch) {
+          summary = await svc.patchFiles(props.employee.id, filesPatch);
+        } else {
+          summary = props.employee;
+        }
       } else {
         const instructions = buildInstructions();
         const input: NewEmployeeInput = {
@@ -634,6 +741,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
           modelPolicy: modelChoice() === "standard" ? modelPolicy() : undefined,
           modelId: modelChoice() === "private" ? modelId().trim() : undefined,
           toolPresets: toolPresets(),
+          toolRefs: currentToolRefs(),
           approvalPolicy: approvalPolicy(),
           limits,
         };
@@ -1159,6 +1267,43 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
 
                 <div class="col-span-2">
                   <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 mb-1.5">
+                    Connector access
+                  </div>
+                  <div
+                    class="grid grid-cols-3 gap-2"
+                    role="radiogroup"
+                    aria-label="Connector access"
+                  >
+                    <For each={CONNECTOR_ACCESS_OPTIONS}>
+                      {(option) => (
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={connectorAccess() === option.value}
+                          class="text-left p-2.5 rounded-md border bg-card transition-all duration-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          classList={{
+                            "border-primary bg-primary/[0.08]":
+                              connectorAccess() === option.value,
+                            "border-border hover:border-border/90 hover:bg-surface-2":
+                              connectorAccess() !== option.value,
+                          }}
+                          onClick={() => setConnectorAccess(option.value)}
+                          disabled={submitting()}
+                        >
+                          <div class="text-[12.5px] font-semibold text-foreground">
+                            {option.title}
+                          </div>
+                          <div class="text-[10.5px] text-muted-foreground leading-tight mt-0.5">
+                            {option.sub}
+                          </div>
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </div>
+
+                <div class="col-span-2">
+                  <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 mb-1.5">
                     Approval policy
                   </div>
                   <div
@@ -1253,7 +1398,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                       setIdentity(e.currentTarget.value);
                       clearError();
                     }}
-                    placeholder="Personality, voice, professional background."
+                    placeholder="Identity, voice, professional background."
                     disabled={submitting()}
                   />
                 </div>
@@ -1422,6 +1567,8 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
               </div>
             </Show>
           </div>
+
+          <PolicyReviewPanel summary={policyReview()} />
         </div>
 
         <div class="sticky bottom-0 border-t border-border bg-popover py-4 px-5">
@@ -1471,6 +1618,51 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
         </div>
       </div>
     </div>
+  );
+};
+
+const PolicyReviewPanel: Component<{
+  summary: EmployeePolicyReviewSummary;
+}> = (props) => {
+  const groups = () => [
+    { title: "Runtime policy", lines: props.summary.runtimePolicy },
+    { title: "Tool access", lines: props.summary.toolAccess },
+    { title: "Typed tool details", lines: props.summary.toolRefDetails },
+    { title: "Approval rules", lines: props.summary.approvalRules },
+  ];
+
+  return (
+    <section
+      class="mt-4 border-t border-border pt-3"
+      aria-labelledby="employee-policy-review-title"
+    >
+      <h3
+        id="employee-policy-review-title"
+        class="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+      >
+        Deployment review
+      </h3>
+      <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <For each={groups()}>
+          {(group) => (
+            <div class="rounded-md border border-border bg-card p-3">
+              <div class="mb-1.5 text-[12px] font-semibold text-foreground">
+                {group.title}
+              </div>
+              <ul class="m-0 list-none space-y-1 p-0">
+                <For each={group.lines}>
+                  {(line) => (
+                    <li class="text-[11.5px] leading-snug text-muted-foreground">
+                      {line}
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </div>
+          )}
+        </For>
+      </div>
+    </section>
   );
 };
 

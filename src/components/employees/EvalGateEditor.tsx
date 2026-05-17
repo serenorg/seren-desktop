@@ -2,7 +2,7 @@
 // ABOUTME: Operators can attach, edit, or clear the gate; schedule is optional and additive.
 
 import { type Component, createSignal, Match, Show, Switch } from "solid-js";
-import type { EvalGateWithSchedule } from "@/lib/employees/types";
+import type { EvalGate } from "@/api/seren-agent";
 import {
   clearEvalGate,
   type EvalGateInput,
@@ -12,7 +12,7 @@ import {
 
 interface EvalGateEditorProps {
   deploymentId: string;
-  initial: EvalGateWithSchedule | null;
+  initial: EvalGate | null;
   onSaved: () => void;
   onCancel?: () => void;
 }

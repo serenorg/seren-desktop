@@ -6,6 +6,7 @@ import {
   type AgentBundlePatch,
   type AgentSpec,
   type AgentSpecUpdate,
+  type AgentToolRef,
   type CloudDeploymentSummary,
   type ManagedAgentDeploymentDetail,
   type ManagedAgentDeploymentRevisionSummary,
@@ -53,6 +54,12 @@ function bundleFromInstructions(
   instructions: AgentBundle["instructions"],
 ): AgentBundle {
   return { instructions, assets: [] };
+}
+
+function nonEmptyToolRefs(
+  refs: readonly AgentToolRef[] | undefined,
+): AgentToolRef[] | undefined {
+  return refs && refs.length > 0 ? [...refs] : undefined;
 }
 
 function deriveModelChoice(row: CloudDeploymentSummary): ModelChoice {
@@ -202,6 +209,7 @@ function artifactFromCloud(
 
 function specFromInput(input: NewEmployeeInput): AgentSpec {
   const bundle = input.bundle ?? bundleFromInstructions(input.instructions);
+  const toolRefs = nonEmptyToolRefs(input.toolRefs);
   return {
     name: input.name,
     agent_slug: input.slug,
@@ -210,6 +218,7 @@ function specFromInput(input: NewEmployeeInput): AgentSpec {
     cron_timezone: input.mode === "cron" ? (input.cronTimezone ?? "UTC") : null,
     template: input.template ?? "research_monitor",
     tool_presets: input.toolPresets ?? ["live_data"],
+    ...(toolRefs ? { tool_refs: toolRefs } : {}),
     approval_policy: input.approvalPolicy ?? "read_only",
     model_policy: input.modelPolicy ?? "balanced",
     private_output_policy: "control_plane",
@@ -245,6 +254,13 @@ function updateSpecFromPatch(patch: EmployeePatch): AgentSpecUpdate {
   }
   if (patch.template !== undefined) update.template = patch.template;
   if (patch.toolPresets !== undefined) update.tool_presets = patch.toolPresets;
+  if (patch.toolRefs !== undefined) {
+    if (patch.toolRefs.length === 0) {
+      update.clear_tool_refs = true;
+    } else {
+      update.tool_refs = patch.toolRefs;
+    }
+  }
   if (patch.approvalPolicy !== undefined)
     update.approval_policy = patch.approvalPolicy;
   if (patch.visibility !== undefined) update.visibility = patch.visibility;
