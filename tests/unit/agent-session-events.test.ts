@@ -79,5 +79,17 @@ describe("spawn context map for diagnostic logging", () => {
     expect(agentStoreSource).toContain("spawnCtx?.agentType");
     expect(agentStoreSource).toContain("spawnCtx?.conversationId");
   });
-});
 
+  it("gates the global event logger behind the runtime event debug toggle", () => {
+    const logIndex = agentStoreSource.indexOf(
+      '"[AgentRuntime] Event received - type:"',
+    );
+    expect(logIndex).toBeGreaterThan(-1);
+
+    const gateIndex = agentStoreSource.lastIndexOf(
+      "shouldLogAgentRuntimeEvent(event.type)",
+      logIndex,
+    );
+    expect(gateIndex).toBeGreaterThan(-1);
+  });
+});

@@ -3,6 +3,7 @@
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createStore, produce } from "solid-js/store";
+import { shouldLogAgentRuntimeEvent } from "@/lib/agent-runtime-debug";
 import {
   isLocalProviderRuntime,
   onRuntimeEvent,
@@ -2173,15 +2174,14 @@ export const agentStore = {
               return;
             }
 
-            // Skip logging high-frequency messageChunk events to avoid flooding
-            // DevTools. Other event types (sessionStatus, toolCall, etc.) are
-            // still logged for debugging.
-            if (event.type !== "messageChunk") {
+            // Event receipt logs are high-volume during tool-heavy agent runs,
+            // so they stay behind an explicit localStorage debug switch.
+            if (shouldLogAgentRuntimeEvent(event.type)) {
               const session = state.sessions[eventSessionId];
               const spawnCtx = session
                 ? undefined
                 : spawnContextMap.get(eventSessionId);
-              console.log(
+              console.debug(
                 "[AgentRuntime] Event received - type:",
                 event.type,
                 "agent:",
