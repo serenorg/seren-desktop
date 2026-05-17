@@ -140,6 +140,22 @@ describe("skill-install race fix (#1917)", () => {
     expect(matchSkillCommand("/legacy-skill")?.skill.slug).toBe("legacy-skill");
   });
 
+  it("resolveSkillCommand refreshes installed skills before letting a slash skill fall through", async () => {
+    const ready = installedSkill("prophet-arb-bot", { payloadStatus: "ready" });
+    mockSkillsService.listAllInstalled.mockResolvedValue([ready]);
+
+    const { matchSkillCommand, resolveSkillCommand } = await import(
+      "@/lib/commands/parser"
+    );
+
+    expect(matchSkillCommand("/prophet-arb-bot")).toBeNull();
+
+    const match = await resolveSkillCommand("/prophet-arb-bot");
+
+    expect(mockSkillsService.listAllInstalled).toHaveBeenCalledTimes(1);
+    expect(match?.skill.slug).toBe("prophet-arb-bot");
+  });
+
   it("getThreadSkills filters out skills with payloadStatus='failed' so the system prompt never sees them", async () => {
     const ready = installedSkill("ready-skill", { payloadStatus: "ready" });
     const failed = installedSkill("prophet-arb-bot", {

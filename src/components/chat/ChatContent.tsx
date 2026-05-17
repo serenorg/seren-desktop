@@ -26,8 +26,8 @@ import {
 } from "@/lib/chat-history-export";
 import {
   getCompletions,
-  matchSkillCommand,
   parseCommand,
+  resolveSkillCommand,
 } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { createDragDrop } from "@/lib/drag-drop";
@@ -686,7 +686,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       if (executeSlashCommand(trimmed)) return;
 
       // Check if the slash command matches an installed skill
-      const skillMatch = matchSkillCommand(trimmed);
+      const skillMatch = await resolveSkillCommand(trimmed);
       if (skillMatch) {
         const { skill, args } = skillMatch;
         console.log(
