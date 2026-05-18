@@ -1,8 +1,10 @@
 // ABOUTME: Unit tests for multi-browser selection, detection, and configuration.
 // ABOUTME: Validates parseBrowserType, isChromiumBased, resolveBrowserName, and listInstalledBrowsers.
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  addPageInitPatchIfEnabled,
+  applyStealthPluginIfEnabled,
   createSafeStealthPlugin,
   detectDefaultBrowser,
   isChromiumBased,
@@ -11,6 +13,29 @@ import {
   parseBrowserType,
   resolveBrowserName,
 } from "../browser.js";
+
+const CONTROLLED_ENV_KEYS = [
+  "SEREN_PLAYWRIGHT_HEADLESS",
+  "SEREN_PLAYWRIGHT_DISABLE_STEALTH",
+  "SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE",
+  "SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH",
+] as const;
+
+const ORIGINAL_ENV = new Map(
+  CONTROLLED_ENV_KEYS.map((key) => [key, process.env[key]]),
+);
+
+afterEach(() => {
+  for (const key of CONTROLLED_ENV_KEYS) {
+    const originalValue = ORIGINAL_ENV.get(key);
+    if (originalValue === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = originalValue;
+    }
+  }
+  vi.restoreAllMocks();
+});
 
 describe("detectDefaultBrowser", () => {
   it("returns a system browser name", () => {
@@ -165,6 +190,18 @@ describe("createSafeStealthPlugin", () => {
     expect(plugin.enabledEvasions.has("chrome.app")).toBe(false);
   });
 
+  it("excludes env-requested evasions in addition to chrome.app", () => {
+    process.env.SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE =
+      "iframe.contentWindow, navigator.permissions";
+
+    const plugin = createSafeStealthPlugin();
+
+    expect(plugin.enabledEvasions.has("chrome.app")).toBe(false);
+    expect(plugin.enabledEvasions.has("iframe.contentWindow")).toBe(false);
+    expect(plugin.enabledEvasions.has("navigator.permissions")).toBe(false);
+    expect(plugin.enabledEvasions.has("navigator.webdriver")).toBe(true);
+  });
+
   it("keeps other stealth evasions enabled", () => {
     const plugin = createSafeStealthPlugin();
     // These core evasions must remain active for bot detection bypass
@@ -173,6 +210,59 @@ describe("createSafeStealthPlugin", () => {
     expect(plugin.enabledEvasions.has("chrome.runtime")).toBe(true);
     expect(plugin.enabledEvasions.has("navigator.webdriver")).toBe(true);
     expect(plugin.enabledEvasions.size).toBeGreaterThan(5);
+  });
+});
+
+describe("applyStealthPluginIfEnabled", () => {
+  it("applies the safe stealth plugin to chromium by default", () => {
+    const launcher = { use: vi.fn() };
+
+    const applied = applyStealthPluginIfEnabled("chromium", launcher as never);
+
+    expect(applied).toBe(true);
+    expect(launcher.use).toHaveBeenCalledOnce();
+    expect(launcher.use).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enabledEvasions: expect.any(Set),
+      }),
+    );
+  });
+
+  it("does not apply the stealth plugin when disabled by env", () => {
+    process.env.SEREN_PLAYWRIGHT_DISABLE_STEALTH = "1";
+    const launcher = { use: vi.fn() };
+
+    const applied = applyStealthPluginIfEnabled("chromium", launcher as never);
+
+    expect(applied).toBe(false);
+    expect(launcher.use).not.toHaveBeenCalled();
+  });
+});
+
+describe("addPageInitPatchIfEnabled", () => {
+  it("adds the manual init patch to chromium pages by default", async () => {
+    const mockPage = { addInitScript: vi.fn() };
+
+    const added = await addPageInitPatchIfEnabled(
+      mockPage as never,
+      "chromium",
+    );
+
+    expect(added).toBe(true);
+    expect(mockPage.addInitScript).toHaveBeenCalledOnce();
+  });
+
+  it("skips the manual init patch when disabled by env", async () => {
+    process.env.SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH = "1";
+    const mockPage = { addInitScript: vi.fn() };
+
+    const added = await addPageInitPatchIfEnabled(
+      mockPage as never,
+      "chromium",
+    );
+
+    expect(added).toBe(false);
+    expect(mockPage.addInitScript).not.toHaveBeenCalled();
   });
 });
 
@@ -221,6 +311,7 @@ describe("launchBrowserWithFallback", () => {
       "chrome",
       "chromium",
       expect.objectContaining({
+        headless: true,
         executablePath:
           "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       }),
@@ -230,7 +321,37 @@ describe("launchBrowserWithFallback", () => {
       "moz-firefox",
       "firefox",
       expect.objectContaining({
+        headless: true,
         executablePath: "/Applications/Firefox.app/Contents/MacOS/firefox",
+      }),
+    );
+  });
+
+  it("launches headed when SEREN_PLAYWRIGHT_HEADLESS is 0", async () => {
+    process.env.SEREN_PLAYWRIGHT_HEADLESS = "0";
+    const launchedBrowser = { close: vi.fn() } as never;
+    const launchBrowser = vi.fn().mockResolvedValueOnce(launchedBrowser);
+
+    await launchBrowserWithFallback(
+      "chrome",
+      [
+        {
+          name: "chrome",
+          browserName: "chromium",
+          executablePath:
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          isChromiumBased: true,
+          stealthSupported: true,
+        },
+      ],
+      launchBrowser as never,
+    );
+
+    expect(launchBrowser).toHaveBeenCalledWith(
+      "chrome",
+      "chromium",
+      expect.objectContaining({
+        headless: false,
       }),
     );
   });
@@ -346,6 +467,6 @@ describe("listInstalledBrowsers", () => {
     // getBrowser() uses this path to launch directly via executablePath
     // instead of channel, which avoids Playwright plugin dependencies.
     expect(match).toBeDefined();
-    expect(match!.executablePath).toBeTruthy();
+    expect(match?.executablePath).toBeTruthy();
   });
 });
