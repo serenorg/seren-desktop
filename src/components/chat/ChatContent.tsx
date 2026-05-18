@@ -41,6 +41,10 @@ import {
 } from "@/lib/group-tool-calls";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
 import { isPaymentError } from "@/lib/payment-errors";
+import {
+  computeProviderBoundaries,
+  providerDisplayName,
+} from "@/lib/provider-boundaries";
 import type { Attachment, ProviderId } from "@/lib/providers/types";
 import { escapeHtmlWithSkillsAndLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
@@ -188,6 +192,15 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   // means the label and the click action describe the same operation
   // ("recall this past invocation"). The composer is the canonical surface
   // for "what's about to run if I hit Enter."
+  // Producer-boundary map for the transcript: assistant→assistant
+  // transitions where (provider, model) differ get a small marker so
+  // the user can see when a turn was produced by a different binding
+  // than the prior turn. Keyed by the id of the message that follows
+  // the boundary.
+  const providerBoundaries = createMemo(() =>
+    computeProviderBoundaries(conversationMessages()),
+  );
+
   const recentSkill = createMemo(() => {
     const messages = conversationMessages();
     const slugs = installedSkillSlugs();
@@ -1231,6 +1244,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                   );
                 }
 
+                const boundary = providerBoundaries().get(message.id);
                 return (
                   <Show
                     when={
@@ -1245,6 +1259,37 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                       )
                     }
                   >
+                    <Show when={boundary}>
+                      {(b) => (
+                        <div
+                          class="flex items-center gap-2 px-5 py-2 text-[11px] text-muted-foreground border-b border-surface-2 bg-surface-1/50"
+                          data-testid="provider-boundary"
+                          data-from-provider={b().fromProvider ?? ""}
+                          data-to-provider={b().toProvider ?? ""}
+                          aria-label={`Switched to ${providerDisplayName(
+                            b().toProvider,
+                          )}${b().toModel ? ` · ${b().toModel}` : ""}`}
+                        >
+                          <span
+                            class="inline-block h-px flex-1 bg-border-strong/40"
+                            aria-hidden="true"
+                          />
+                          <span class="font-medium">
+                            Switched to {providerDisplayName(b().toProvider)}
+                            <Show when={b().toModel}>
+                              <span class="text-muted-foreground/70">
+                                {" · "}
+                                {b().toModel}
+                              </span>
+                            </Show>
+                          </span>
+                          <span
+                            class="inline-block h-px flex-1 bg-border-strong/40"
+                            aria-hidden="true"
+                          />
+                        </div>
+                      )}
+                    </Show>
                     <article
                       class={`chat-message-row group/msg px-5 py-4 border-b border-surface-2 last:border-b-0 [contain:layout] ${message.role === "user" ? "bg-surface-1" : "bg-transparent"}`}
                     >

@@ -207,7 +207,14 @@ export const ModelSelector: Component = () => {
 
   const reportSwitchFailure = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    conversationStore.setError(`Switching provider failed: ${message}`);
+    // The Rust optimistic-currency check rejects with a stable sentinel
+    // when another window has already rewritten the runtime row. Swap
+    // the developer-flavored sentinel for plain English the user can
+    // act on. Everything else falls through to the raw message.
+    const friendly = message.includes("stale runtime binding")
+      ? "This thread's model was changed in another window. Refresh and try again."
+      : `Switching provider failed: ${message}`;
+    conversationStore.setError(friendly);
     console.warn("[ModelSelector] switch failed:", error);
   };
 
