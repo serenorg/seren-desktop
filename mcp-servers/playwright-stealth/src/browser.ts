@@ -1,9 +1,7 @@
 // ABOUTME: Stealth browser management with multi-browser support and runtime switching.
-// ABOUTME: Detects installed browsers via Playwright registry; supports Chromium, Firefox, WebKit, Chrome, Edge channels.
+// ABOUTME: Detects installed browsers without using Playwright-managed browser binaries.
 
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname } from "node:path";
 import type { Browser, BrowserContext, BrowserType, Page } from "playwright";
 import { chromium, firefox, webkit } from "playwright-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
@@ -42,6 +40,12 @@ const SYSTEM_BROWSERS = new Set([
   "moz-firefox-nightly",
 ]);
 
+const PLAYWRIGHT_BUNDLED_BROWSER_NAMES = new Set([
+  "chromium",
+  "firefox",
+  "webkit",
+]);
+
 /** Default user agents per browser engine. */
 const DEFAULT_USER_AGENTS: Record<BrowserEngine, string> = {
   chromium:
@@ -65,43 +69,178 @@ const DEFAULT_DISABLED_STEALTH_EVASIONS = [
 
 // ── Browser Detection ──────────────────────────────────────────────────────────
 
-/** Minimal shape of Playwright's internal registry executable. */
-interface RegistryExecutable {
+interface SystemBrowserCandidate {
   name: string;
-  browserName: string | undefined;
-  executablePath(): string;
+  browserName: BrowserEngine;
+  executablePaths: string[];
 }
 
-const require_ = createRequire(import.meta.url);
+function candidate(
+  name: string,
+  browserName: BrowserEngine,
+  ...executablePaths: string[]
+): SystemBrowserCandidate {
+  return { name, browserName, executablePaths };
+}
 
-/** Query Playwright's internal registry for installed browsers. */
-export function listInstalledBrowsers(): InstalledBrowser[] {
-  const coreDir = dirname(require_.resolve("playwright-core/package.json"));
-  const registryPath = `${coreDir}/lib/server/registry/index.js`;
+function chromiumCandidate(
+  name: string,
+  ...executablePaths: string[]
+): SystemBrowserCandidate {
+  return candidate(name, "chromium", ...executablePaths);
+}
 
-  let registry: { registry: { executables(): RegistryExecutable[] } };
-  try {
-    registry = require_(registryPath);
-  } catch {
-    console.error(
-      "[playwright-stealth] Failed to load Playwright registry. Browser detection unavailable.",
-    );
-    return [];
+function firefoxCandidate(
+  name: string,
+  ...executablePaths: string[]
+): SystemBrowserCandidate {
+  return candidate(name, "firefox", ...executablePaths);
+}
+
+function firstExistingPath(paths: string[]): string | null {
+  for (const candidate of paths) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function macApp(appName: string, executableName = appName): string {
+  return `/Applications/${appName}.app/Contents/MacOS/${executableName}`;
+}
+
+function windowsPaths(productPath: string, executableName: string): string[] {
+  const roots = [
+    process.env.PROGRAMFILES,
+    process.env["PROGRAMFILES(X86)"],
+    process.env.LOCALAPPDATA,
+  ].filter(Boolean) as string[];
+  return roots.map((root) => `${root}\\${productPath}\\${executableName}`);
+}
+
+function browserCandidatesForPlatform(): SystemBrowserCandidate[] {
+  if (process.platform === "darwin") {
+    return [
+      chromiumCandidate(
+        "chrome",
+        macApp("Google Chrome"),
+        macApp("Google Chrome for Testing"),
+      ),
+      chromiumCandidate("chrome-beta", macApp("Google Chrome Beta")),
+      chromiumCandidate("chrome-dev", macApp("Google Chrome Dev")),
+      chromiumCandidate("chrome-canary", macApp("Google Chrome Canary")),
+      chromiumCandidate("msedge", macApp("Microsoft Edge")),
+      chromiumCandidate("msedge-beta", macApp("Microsoft Edge Beta")),
+      chromiumCandidate("msedge-dev", macApp("Microsoft Edge Dev")),
+      chromiumCandidate("msedge-canary", macApp("Microsoft Edge Canary")),
+      firefoxCandidate("moz-firefox", macApp("Firefox", "firefox")),
+      firefoxCandidate(
+        "moz-firefox-beta",
+        macApp("Firefox Developer Edition", "firefox"),
+      ),
+      firefoxCandidate(
+        "moz-firefox-nightly",
+        macApp("Firefox Nightly", "firefox"),
+      ),
+    ];
   }
 
+  if (process.platform === "win32") {
+    return [
+      chromiumCandidate(
+        "chrome",
+        ...windowsPaths("Google\\Chrome\\Application", "chrome.exe"),
+      ),
+      chromiumCandidate(
+        "chrome-beta",
+        ...windowsPaths("Google\\Chrome Beta\\Application", "chrome.exe"),
+      ),
+      chromiumCandidate(
+        "chrome-dev",
+        ...windowsPaths("Google\\Chrome Dev\\Application", "chrome.exe"),
+      ),
+      chromiumCandidate(
+        "chrome-canary",
+        ...windowsPaths("Google\\Chrome SxS\\Application", "chrome.exe"),
+      ),
+      chromiumCandidate(
+        "msedge",
+        ...windowsPaths("Microsoft\\Edge\\Application", "msedge.exe"),
+      ),
+      chromiumCandidate(
+        "msedge-beta",
+        ...windowsPaths("Microsoft\\Edge Beta\\Application", "msedge.exe"),
+      ),
+      chromiumCandidate(
+        "msedge-dev",
+        ...windowsPaths("Microsoft\\Edge Dev\\Application", "msedge.exe"),
+      ),
+      chromiumCandidate(
+        "msedge-canary",
+        ...windowsPaths("Microsoft\\Edge SxS\\Application", "msedge.exe"),
+      ),
+      firefoxCandidate(
+        "moz-firefox",
+        ...windowsPaths("Mozilla Firefox", "firefox.exe"),
+      ),
+      firefoxCandidate(
+        "moz-firefox-beta",
+        ...windowsPaths("Mozilla Firefox Beta", "firefox.exe"),
+      ),
+      firefoxCandidate(
+        "moz-firefox-nightly",
+        ...windowsPaths("Firefox Nightly", "firefox.exe"),
+      ),
+    ];
+  }
+
+  return [
+    chromiumCandidate(
+      "chrome",
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/opt/google/chrome/chrome",
+      "/usr/bin/chromium",
+      "/snap/bin/chromium",
+    ),
+    chromiumCandidate(
+      "chrome-beta",
+      "/usr/bin/google-chrome-beta",
+      "/opt/google/chrome-beta/chrome",
+    ),
+    chromiumCandidate(
+      "chrome-dev",
+      "/usr/bin/google-chrome-unstable",
+      "/opt/google/chrome-unstable/chrome",
+    ),
+    chromiumCandidate(
+      "msedge",
+      "/usr/bin/microsoft-edge",
+      "/usr/bin/microsoft-edge-stable",
+      "/opt/microsoft/msedge/msedge",
+    ),
+    chromiumCandidate(
+      "msedge-beta",
+      "/usr/bin/microsoft-edge-beta",
+      "/opt/microsoft/msedge-beta/msedge",
+    ),
+    chromiumCandidate(
+      "msedge-dev",
+      "/usr/bin/microsoft-edge-dev",
+      "/opt/microsoft/msedge-dev/msedge",
+    ),
+    firefoxCandidate("moz-firefox", "/usr/bin/firefox", "/snap/bin/firefox"),
+    firefoxCandidate("moz-firefox-beta", "/usr/bin/firefox-beta"),
+    firefoxCandidate("moz-firefox-nightly", "/usr/bin/firefox-nightly"),
+  ];
+}
+
+/** Detect supported system browsers without consulting Playwright-managed binaries. */
+export function listInstalledBrowsers(): InstalledBrowser[] {
   const results: InstalledBrowser[] = [];
 
-  for (const exe of registry.registry.executables()) {
-    if (!exe.browserName) continue;
+  for (const exe of browserCandidatesForPlatform()) {
     if (!SYSTEM_BROWSERS.has(exe.name)) continue;
-
-    let exePath: string;
-    try {
-      exePath = exe.executablePath();
-    } catch {
-      continue;
-    }
-
+    const exePath = firstExistingPath(exe.executablePaths);
     if (!exePath || !existsSync(exePath)) continue;
 
     results.push({
@@ -138,24 +277,22 @@ const SYSTEM_BROWSER_PREFERENCE = [
 ];
 
 /** Detect the best available system browser. */
-export function detectDefaultBrowser(): string {
-  const installed = listInstalledBrowsers();
+export function detectDefaultBrowser(
+  installed: InstalledBrowser[] = listInstalledBrowsers(),
+): string {
   const installedNames = new Set(installed.map((b) => b.name));
 
   for (const name of SYSTEM_BROWSER_PREFERENCE) {
     if (installedNames.has(name)) return name;
   }
 
-  // No system browser found — log instructions and fall back to chromium
   if (installed.length > 0) return installed[0].name;
 
-  console.error(
-    "[playwright-stealth] No system browser detected. " +
-      "Install Google Chrome, Microsoft Edge, or Mozilla Firefox " +
-      "for the best stealth experience. " +
-      "Falling back to Playwright's bundled Chromium (may be flagged by bot detection).",
+  throw new Error(
+    "[playwright-stealth] No supported system browser detected. " +
+      "Install Google Chrome, Microsoft Edge, or Mozilla Firefox. " +
+      "Playwright bundled browsers (chromium, firefox, webkit) are not supported by this MCP.",
   );
-  return "chromium";
 }
 
 export function isChromiumBased(browserName: string): boolean {
@@ -185,18 +322,21 @@ const BROWSER_ALIASES: Record<string, string> = {
 };
 
 /** Validate and normalize a browser type string. Auto-detects if not set. */
-export function parseBrowserType(value: string | undefined): string {
-  if (!value) return detectDefaultBrowser();
+export function parseBrowserType(
+  value: string | undefined,
+  installed?: InstalledBrowser[],
+): string {
+  if (!value) return detectDefaultBrowser(installed);
 
   const normalized = value.toLowerCase().trim();
-  if (!normalized) return detectDefaultBrowser();
+  if (!normalized) return detectDefaultBrowser(installed);
 
   const aliased = BROWSER_ALIASES[normalized];
   if (aliased) return aliased;
 
   if (SYSTEM_BROWSERS.has(normalized)) return normalized;
 
-  const fallback = detectDefaultBrowser();
+  const fallback = detectDefaultBrowser(installed);
   console.error(
     `[playwright-stealth] Unknown or unsupported BROWSER_TYPE "${value}". Falling back to ${fallback}.`,
   );
@@ -253,6 +393,10 @@ function buildLaunchOptions(
   const match = installed.find((b) => b.name === browserName);
   if (match) {
     launchOptions.executablePath = match.executablePath;
+  } else if (PLAYWRIGHT_BUNDLED_BROWSER_NAMES.has(browserName)) {
+    throw new Error(
+      `Playwright bundled browser "${browserName}" is not supported. Install and select a system browser instead.`,
+    );
   } else if (browserName !== engine) {
     launchOptions.channel = browserName;
   }
@@ -274,9 +418,9 @@ export async function launchBrowserWithFallback(
 
   for (const browserName of candidates) {
     const engine = resolveBrowserName(browserName);
-    const launchOptions = buildLaunchOptions(browserName, engine, installed);
 
     try {
+      const launchOptions = buildLaunchOptions(browserName, engine, installed);
       const launchedBrowser = await launchBrowser(
         browserName,
         engine,
@@ -296,10 +440,9 @@ export async function launchBrowserWithFallback(
 
 // ── State ──────────────────────────────────────────────────────────────────────
 
-// Lazy: eager resolution synchronously walked Playwright's registry at module
-// load, and a slow cold-disk probe could outrun the MCP stdio `initialize`
-// handshake — leaving the prophet-arb-bot Python child stuck on
-// `blocked_auth_unexpected:TimeoutError`. Resolve on first read instead (#1921).
+// Lazy: probing installed browser paths during module load can outrun the MCP
+// stdio `initialize` handshake on slow disks. Resolve on first read instead
+// (#1921).
 let activeBrowserName: string | null = null;
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;

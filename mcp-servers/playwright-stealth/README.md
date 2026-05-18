@@ -4,7 +4,7 @@ A Model Context Protocol (MCP) server providing stealth browser automation with 
 
 ## Features
 
-- **Multi-Browser Support**: Chromium (default), Firefox, WebKit, Google Chrome, Microsoft Edge, and any installed Playwright browser
+- **Multi-Browser Support**: System-installed Google Chrome, Microsoft Edge, and Mozilla Firefox variants
 - **Runtime Browser Switching**: Discover installed browsers and switch between them via MCP tools
 - **Stealth Browser**: Uses `playwright-extra` with `puppeteer-extra-plugin-stealth` to avoid bot detection (Chromium-based browsers only)
 - **Anti-Detection Measures** (Chromium/Edge/Chrome only):
@@ -171,6 +171,9 @@ System browsers must be installed via their normal installers:
 - **Google Chrome**: [google.com/chrome](https://www.google.com/chrome/)
 - **Microsoft Edge**: [microsoft.com/edge](https://www.microsoft.com/edge)
 - **Mozilla Firefox**: [mozilla.org/firefox](https://www.mozilla.org/firefox/)
+
+If none of these system browsers is detected, the server fails closed instead
+of launching Playwright's managed `chromium`, `firefox`, or `webkit` binaries.
 
 ## How Stealth Works
 

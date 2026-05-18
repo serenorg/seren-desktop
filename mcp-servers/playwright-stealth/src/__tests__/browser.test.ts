@@ -2,6 +2,7 @@
 // ABOUTME: Validates parseBrowserType, isChromiumBased, resolveBrowserName, and listInstalledBrowsers.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { InstalledBrowser } from "../browser.js";
 import {
   addPageInitPatchIfEnabled,
   applyStealthPluginIfEnabled,
@@ -13,6 +14,30 @@ import {
   parseBrowserType,
   resolveBrowserName,
 } from "../browser.js";
+
+const TEST_INSTALLED_BROWSERS: InstalledBrowser[] = [
+  {
+    name: "chrome",
+    browserName: "chromium",
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    isChromiumBased: true,
+    stealthSupported: true,
+  },
+  {
+    name: "msedge",
+    browserName: "chromium",
+    executablePath: "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    isChromiumBased: true,
+    stealthSupported: true,
+  },
+  {
+    name: "moz-firefox",
+    browserName: "firefox",
+    executablePath: "/Applications/Firefox.app/Contents/MacOS/firefox",
+    isChromiumBased: false,
+    stealthSupported: false,
+  },
+];
 
 const CONTROLLED_ENV_KEYS = [
   "SEREN_PLAYWRIGHT_HEADLESS",
@@ -39,28 +64,38 @@ afterEach(() => {
 
 describe("detectDefaultBrowser", () => {
   it("returns a system browser name", () => {
-    const result = detectDefaultBrowser();
+    const result = detectDefaultBrowser(TEST_INSTALLED_BROWSERS);
     // Should never return a Playwright-bundled browser when system ones exist
     expect(["chromium", "firefox", "webkit"]).not.toContain(result);
   });
 
   it("returns a string", () => {
-    expect(typeof detectDefaultBrowser()).toBe("string");
+    expect(typeof detectDefaultBrowser(TEST_INSTALLED_BROWSERS)).toBe("string");
+  });
+
+  it("fails closed when no supported system browser is detected", () => {
+    expect(() => detectDefaultBrowser([])).toThrow(
+      "No supported system browser detected",
+    );
   });
 });
 
 describe("parseBrowserType", () => {
   it("auto-detects system browser for undefined", () => {
-    const result = parseBrowserType(undefined);
-    expect(result).toBe(detectDefaultBrowser());
+    const result = parseBrowserType(undefined, TEST_INSTALLED_BROWSERS);
+    expect(result).toBe(detectDefaultBrowser(TEST_INSTALLED_BROWSERS));
   });
 
   it("auto-detects system browser for empty string", () => {
-    expect(parseBrowserType("")).toBe(detectDefaultBrowser());
+    expect(parseBrowserType("", TEST_INSTALLED_BROWSERS)).toBe(
+      detectDefaultBrowser(TEST_INSTALLED_BROWSERS),
+    );
   });
 
   it("auto-detects system browser for whitespace-only string", () => {
-    expect(parseBrowserType("   ")).toBe(detectDefaultBrowser());
+    expect(parseBrowserType("   ", TEST_INSTALLED_BROWSERS)).toBe(
+      detectDefaultBrowser(TEST_INSTALLED_BROWSERS),
+    );
   });
 
   it("returns 'chrome' for 'chrome'", () => {
@@ -112,8 +147,8 @@ describe("parseBrowserType", () => {
 
   it("falls back with stderr warning for unknown value", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const result = parseBrowserType("safari");
-    expect(result).toBe(detectDefaultBrowser());
+    const result = parseBrowserType("safari", TEST_INSTALLED_BROWSERS);
+    expect(result).toBe(detectDefaultBrowser(TEST_INSTALLED_BROWSERS));
     expect(spy).toHaveBeenCalledWith(
       expect.stringContaining('Unknown or unsupported BROWSER_TYPE "safari"'),
     );
@@ -415,6 +450,16 @@ describe("launchBrowserWithFallback", () => {
       "Failed to launch any supported browser. Tried 3 candidate(s): chrome: chrome failed; msedge: edge failed; moz-firefox: firefox failed.",
     );
   });
+
+  it("never bare-launches a Playwright-bundled Chromium candidate", async () => {
+    const launchBrowser = vi.fn().mockResolvedValueOnce({ close: vi.fn() });
+
+    await expect(
+      launchBrowserWithFallback("chromium", [], launchBrowser as never),
+    ).rejects.toThrow("Playwright bundled browser");
+
+    expect(launchBrowser).not.toHaveBeenCalled();
+  });
 });
 
 describe("listInstalledBrowsers", () => {
@@ -471,13 +516,19 @@ describe("listInstalledBrowsers", () => {
     }
   });
 
-  it("default browser has a valid executablePath in the registry", () => {
+  it("default browser has a valid executablePath when browsers are detected", () => {
     const browsers = listInstalledBrowsers();
-    const defaultName = detectDefaultBrowser();
+    if (browsers.length === 0) {
+      expect(() => detectDefaultBrowser(browsers)).toThrow(
+        "No supported system browser detected",
+      );
+      return;
+    }
+
+    const defaultName = detectDefaultBrowser(browsers);
     const match = browsers.find((b) => b.name === defaultName);
-    // The default browser must exist in the registry with a real path —
     // getBrowser() uses this path to launch directly via executablePath
-    // instead of channel, which avoids Playwright plugin dependencies.
+    // instead of a bare Playwright-managed engine.
     expect(match).toBeDefined();
     expect(match?.executablePath).toBeTruthy();
   });
