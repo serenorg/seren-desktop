@@ -281,29 +281,13 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     return { kind: thread.kind, projectRoot, threadId: thread.id };
   };
 
-  const activeThreadHasSkill = (skill: InstalledSkill): boolean => {
-    const context = activeThreadContext();
-    // Terminal pastes are one-shot, so we never mark a skill as already added.
-    if (!context || context.kind === "terminal") return false;
-    const activeSkills = skillsStore.getThreadSkills(
-      context.projectRoot,
-      context.threadId,
-    );
-    return activeSkills.some((activeSkill) => activeSkill.path === skill.path);
-  };
-
-  const addActionTitle = (installed: boolean): string => {
-    const context = activeThreadContext();
-    if (!context) return "Select a chat, agent, or terminal thread first";
-    if (context.kind === "terminal") {
-      return installed
-        ? "Paste into active terminal"
-        : "Install and paste into active terminal";
-    }
-    return installed
-      ? "Add to active thread"
-      : "Install and add to active thread";
-  };
+  // Existing thread-skill attachments still load via `skillsStore` and the
+  // agent-side context injection still respects them. We removed the UI for
+  // creating new attachments because skills are tools-on-demand, not personas
+  // that should sit in the system prompt on every turn. The slash palette, the
+  // chip in the chat scrollback, and the composer Skills button are the new
+  // invocation surfaces; thread-attach is a separate concept that may or may
+  // not come back as an explicit "persona" affordance later.
 
   const setSyncLoadingFor = (path: string, isLoading: boolean) => {
     setSyncLoading((current) => ({ ...current, [path]: isLoading }));
@@ -562,29 +546,16 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     }
   };
 
-  const attachInstalledToActiveThread = async (
-    skill: InstalledSkill,
-  ): Promise<void> => {
-    const context = activeThreadContext();
-    if (!context) return;
-    if (context.kind === "terminal") {
-      await pasteSkillIntoTerminal(context.threadId, skill);
-      return;
-    }
-    await skillsStore.attachSkillToThread(
-      context.projectRoot,
-      context.threadId,
-      skill.path,
-    );
-  };
-
   const runActionTitle = (): string => {
     const context = activeThreadContext();
     if (!context) return "Select a chat, agent, or terminal thread first";
     if (context.kind === "terminal") {
       return "Paste the SKILL.md prompt into the active terminal";
     }
-    return "Run the skill in the active chat";
+    // Run in a chat/agent context fills the composer with `/slug `; the user
+    // hits Enter to send. Consistent with the chip, recall, and palette
+    // gestures — every skill surface drafts, none auto-submit.
+    return "Insert /slug into the active chat composer";
   };
 
   const handleRunSkill = async (skill: InstalledSkill) => {
@@ -618,34 +589,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     }
   };
 
-  const handleAddInstalledSkill = async (skill: InstalledSkill) => {
-    const context = activeThreadContext();
-    if (!context) return;
-    if (context.kind !== "terminal" && activeThreadHasSkill(skill)) return;
-
-    setActionInProgress(skill.id);
-    setInstallError(null);
-    try {
-      if (context.kind === "terminal") {
-        await pasteSkillIntoTerminal(context.threadId, skill);
-      } else {
-        await skillsStore.attachSkillToThread(
-          context.projectRoot,
-          context.threadId,
-          skill.path,
-        );
-      }
-    } catch (err) {
-      console.error("[SkillsExplorer] Failed to add skill:", err);
-      setInstallError({
-        slug: skill.slug,
-        message: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setActionInProgress(null);
-    }
-  };
-
   const handleAddCatalogSkill = async (
     skill: Skill,
     scope: SkillScope = "seren",
@@ -660,7 +603,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       }
       const installed = await skillsStore.install(skill, content, scope);
       await loadSyncStatus(installed);
-      await attachInstalledToActiveThread(installed);
+      // Catalog install used to auto-attach the skill to the active thread
+      // here. We removed that side effect: skills are tools-on-demand, not
+      // personas. The user invokes via the Run button, the slash palette, or
+      // the composer Skills button.
 
       // Validate payload after install
       const missingFiles = await skillsService.validatePayload(
@@ -1359,40 +1305,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                           <SettingsIcon />
                         </button>
                       </Show>
-                      <Show
-                        when={!activeThreadHasSkill(skill)}
-                        fallback={
-                          <span class="ml-1 px-2 py-1 text-[11px] text-success bg-success/10 rounded">
-                            Installed
-                          </span>
-                        }
-                      >
-                        <button
-                          type="button"
-                          class="ml-1 px-2.5 py-1 bg-primary text-primary-foreground rounded-md text-[11px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40 disabled:cursor-default"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleAddInstalledSkill(skill);
-                          }}
-                          disabled={
-                            actionInProgress() === skill.id ||
-                            !activeThreadContext()
-                          }
-                          title={
-                            activeThreadContext()
-                              ? addActionTitle(true)
-                              : "Select a chat, agent, or terminal thread first"
-                          }
-                        >
-                          {actionInProgress() === skill.id
-                            ? activeThreadContext()?.kind === "terminal"
-                              ? "Pasting..."
-                              : "Adding..."
-                            : activeThreadContext()?.kind === "terminal"
-                              ? "Paste"
-                              : "Add"}
-                        </button>
-                      </Show>
                     </div>
                   </div>
 
@@ -1683,11 +1595,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             handleAddCatalogSkill(skill);
                           }}
                           disabled={installing()}
-                          title={
-                            activeThreadContext()
-                              ? addActionTitle(false)
-                              : "Install this skill locally"
-                          }
+                          title="Install this skill locally"
                         >
                           {installing() ? "Installing..." : "Install"}
                         </button>
@@ -1742,19 +1650,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                               class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-[12px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40 disabled:cursor-default"
                               onClick={() => handleAddCatalogSkill(skill)}
                               disabled={installing()}
-                              title={
-                                activeThreadContext()
-                                  ? addActionTitle(false)
-                                  : "Install this skill locally"
-                              }
+                              title="Install this skill locally"
                             >
-                              {installing()
-                                ? "Installing..."
-                                : activeThreadContext()?.kind === "terminal"
-                                  ? "Install and Paste"
-                                  : activeThreadContext()
-                                    ? "Install and Add"
-                                    : "Install"}
+                              {installing() ? "Installing..." : "Install"}
                             </button>
                             <Show when={ownsSkill(skill)}>
                               <button

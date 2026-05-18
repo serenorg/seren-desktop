@@ -8,8 +8,8 @@ import { EditorContent } from "@/components/editor/EditorContent";
 import { TerminalBuffer } from "@/components/terminal/TerminalBuffer";
 import { openFolder } from "@/lib/files/service";
 import {
-  attachSkillFromDrag,
   canAcceptSkillDrop,
+  draftSkillInvocationFromDrag,
   setCurrentSkillDragPayload,
   skillDragPayload,
 } from "@/lib/skill-drag";
@@ -370,6 +370,16 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
       : null;
   };
 
+  const skillDropKindFor = (
+    window: WorkspaceWindow,
+  ): "chat" | "agent" | null => {
+    const target = activeTargetFor(window);
+    if (!target?.threadId) return null;
+    return target.kind === "chat" || target.kind === "agent"
+      ? target.kind
+      : null;
+  };
+
   const handlePaneDragOver = (event: DragEvent, window: WorkspaceWindow) => {
     const skillThreadId = skillDropThreadIdFor(window);
     if (skillThreadId && canAcceptSkillDrop(event)) {
@@ -400,20 +410,21 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
   const handlePaneDrop = async (event: DragEvent, window: WorkspaceWindow) => {
     if (event.defaultPrevented) return;
 
+    const skillKind = skillDropKindFor(window);
     const skillThreadId = skillDropThreadIdFor(window);
-    const skillPayload = skillThreadId ? skillDragPayload(event) : null;
-    if (skillPayload && skillThreadId) {
+    const skillPayload =
+      skillKind && skillThreadId ? skillDragPayload(event) : null;
+    if (skillPayload && skillKind && skillThreadId) {
       event.preventDefault();
       setDragTargetWindowId(null);
       setCurrentSkillDragPayload(null);
       try {
-        await attachSkillFromDrag(
-          skillPayload,
-          fileTreeState.rootPath,
-          skillThreadId,
-        );
+        await draftSkillInvocationFromDrag(skillPayload, {
+          kind: skillKind,
+          threadId: skillThreadId,
+        });
       } catch (err) {
-        console.error("[ThreadContent] Failed to attach skill:", err);
+        console.error("[ThreadContent] Failed to draft skill invocation:", err);
       }
       return;
     }

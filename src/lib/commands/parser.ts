@@ -7,6 +7,10 @@ import { registry } from "./registry";
 import { bestScore, scoreCandidate } from "./score";
 import type { ParsedCommand, SlashCommand } from "./types";
 
+export function isInvokableSkill(skill: InstalledSkill): boolean {
+  return skill.enabled && skill.payloadStatus !== "failed";
+}
+
 /**
  * Parse input text to see if it starts with a slash command.
  * Returns the matched command and remaining args, or null.
@@ -78,7 +82,7 @@ export function matchSkillCommand(
   const installed = skillsStore.installed;
 
   for (const skill of installed) {
-    if (!skill.enabled) continue;
+    if (!isInvokableSkill(skill)) continue;
     // Issue #1917 — block invocation of skills whose payload didn't fully
     // land on disk. Letting the slash command through here would inject the
     // SKILL.md into the agent's system prompt with the absolute runtime
@@ -126,11 +130,9 @@ function searchInstalledSkills(partial: string): SlashCommand[] {
 
   const ranked: Array<{ cmd: SlashCommand; score: number }> = [];
   for (const skill of installed) {
-    if (!skill.enabled) continue;
+    if (!isInvokableSkill(skill)) continue;
     // Hide failed-payload skills from autocomplete so the user can't
     // accidentally tab-complete into a skill we know we'd block (#1917).
-    if (skill.payloadStatus === "failed") continue;
-
     const score = bestScore(
       scoreCandidate(skill.slug, partial),
       scoreCandidate(skill.name, partial),

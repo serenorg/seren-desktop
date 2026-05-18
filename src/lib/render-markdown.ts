@@ -276,11 +276,11 @@ export function escapeHtmlWithLinks(text: string): string {
 }
 
 // Matches a slash-prefixed token at the start of the message or after a
-// whitespace character. Captures the slug; the rest of the line up to a
-// newline is treated as args. The slug grammar tracks
+// whitespace character. Captures the slug; when the slug is known, the rest
+// of that line is treated as args. The slug grammar tracks
 // `buildSkillInvocationDisplay` in lib/skills/invoke.ts — alphanumerics with
 // hyphen, underscore, and colon separators.
-const SKILL_TOKEN_REGEX = /(^|\s)\/([a-zA-Z][a-zA-Z0-9:_-]*)([^\n]*)/g;
+const SKILL_TOKEN_REGEX = /(^|\s)\/([a-zA-Z][a-zA-Z0-9:_-]*)/g;
 
 function buildSkillChipHtml(slug: string, args: string): string {
   const safeSlug = escapeHtml(slug);
@@ -322,10 +322,14 @@ export function escapeHtmlWithSkillsAndLinks(
   for (const match of text.matchAll(SKILL_TOKEN_REGEX)) {
     const prefix = match[1] ?? "";
     const slug = match[2] ?? "";
-    const tail = match[3] ?? "";
     if (!knownSlugs.has(slug)) continue;
     const matchStart = match.index ?? 0;
     const tokenStart = matchStart + prefix.length;
+    if (tokenStart < cursor) continue;
+    const tokenEnd = tokenStart + 1 + slug.length;
+    const newlineIndex = text.indexOf("\n", tokenEnd);
+    const lineEnd = newlineIndex === -1 ? text.length : newlineIndex;
+    const tail = text.slice(tokenEnd, lineEnd);
     if (tokenStart > cursor) {
       parts.push(escapeHtmlWithLinks(text.slice(cursor, tokenStart)));
     }
@@ -333,7 +337,7 @@ export function escapeHtmlWithSkillsAndLinks(
     // visually (`chip args`, not `chip  args`). Anything else stays.
     const argsText = tail.startsWith(" ") ? tail.slice(1) : tail;
     parts.push(buildSkillChipHtml(slug, argsText));
-    cursor = tokenStart + 1 + slug.length;
+    cursor = tokenEnd;
     if (tail.length > 0) {
       if (argsText.length > 0) {
         parts.push(' <span class="skill-chip-args">');

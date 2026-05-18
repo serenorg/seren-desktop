@@ -126,6 +126,22 @@ describe("skill-install race fix (#1917)", () => {
     expect(match).toBeNull();
   });
 
+  it("isInvokableSkill keeps UI recall surfaces aligned with slash execution", async () => {
+    const ready = installedSkill("ready-skill", { payloadStatus: "ready" });
+    const legacy = installedSkill("legacy-skill");
+    const failed = installedSkill("failed-skill", {
+      payloadStatus: "failed",
+    });
+    const disabled = installedSkill("disabled-skill", { enabled: false });
+
+    const { isInvokableSkill } = await import("@/lib/commands/parser");
+
+    expect(isInvokableSkill(ready)).toBe(true);
+    expect(isInvokableSkill(legacy)).toBe(true);
+    expect(isInvokableSkill(failed)).toBe(false);
+    expect(isInvokableSkill(disabled)).toBe(false);
+  });
+
   it("matchSkillCommand returns the skill normally when payloadStatus is 'ready' or absent", async () => {
     const ready = installedSkill("prophet-arb-bot", { payloadStatus: "ready" });
     const legacy = installedSkill("legacy-skill"); // payloadStatus undefined — back-compat

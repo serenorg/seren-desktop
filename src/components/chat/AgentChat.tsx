@@ -24,6 +24,7 @@ import { isAuthError, isLikelyAuthError } from "@/lib/auth-errors";
 import { collapseBuildOutput } from "@/lib/build-output";
 import {
   getCompletions,
+  isInvokableSkill,
   parseCommand,
   resolveSkillCommand,
 } from "@/lib/commands/parser";
@@ -46,8 +47,8 @@ import {
 import { escapeHtmlWithSkillsAndLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
-  attachSkillFromDrag,
   canAcceptSkillDrop,
+  draftSkillInvocationFromDrag,
   setCurrentSkillDragPayload,
   skillDragPayload,
 } from "@/lib/skill-drag";
@@ -135,7 +136,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // decide which leading `/token` user messages should chip; random `/words`
   // in prose stay as plain text.
   const installedSkillSlugs = createMemo(
-    () => new Set(skillsStore.installed.map((skill) => skill.slug)),
+    () =>
+      new Set(
+        skillsStore.installed
+          .filter(isInvokableSkill)
+          .map((skill) => skill.slug),
+      ),
   );
 
   const handleSkillChipClick = (event: MouseEvent) => {
@@ -255,7 +261,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       if (!match) continue;
       const slug = match[1];
       if (!slug || !slugs.has(slug)) continue;
-      const installed = skillsStore.installed.find((s) => s.slug === slug);
+      const installed = skillsStore.installed.find(
+        (s) => s.slug === slug && isInvokableSkill(s),
+      );
       if (installed) return installed;
     }
     return null;
@@ -345,13 +353,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     // textarea never falls back to inserting the raw `seren-skill:{...}` text.
     event.preventDefault();
     setCurrentSkillDragPayload(null);
-    const projectRoot = fileTreeState.rootPath;
     const threadId = activeAgentThread()?.id ?? null;
-    if (!projectRoot || !threadId) return;
+    if (!threadId) return;
     try {
-      await attachSkillFromDrag(payload, projectRoot, threadId);
+      await draftSkillInvocationFromDrag(payload, {
+        kind: "agent",
+        threadId,
+      });
     } catch (err) {
-      console.error("[AgentChat] Failed to attach skill:", err);
+      console.error("[AgentChat] Failed to draft skill invocation:", err);
     }
   };
   const onSetChatInput = (event: Event) => {
@@ -1024,31 +1034,22 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
   };
 
-  const handleRunSkillEvent = async (event: Event) => {
+  const handleRunSkillEvent = (event: Event) => {
     const detail = (event as CustomEvent<RunSkillEventDetail>).detail;
     if (!detail || detail.kind !== "agent") return;
     const thread = activeAgentThread();
     if (!thread || thread.id !== detail.threadId) return;
 
-    let skillContent: string | null = null;
-    try {
-      skillContent = await skills.readContent(detail.skill);
-    } catch (err) {
-      console.warn("[AgentChat] Run skill: failed to load skill content:", err);
-    }
-
-    const directive = buildSkillInvocationDirective({
-      slug: detail.skill.slug,
-      content: skillContent,
-    });
-    const displayContent = buildSkillInvocationDisplay(detail.skill.slug);
-
-    await agentStore.sendPrompt(
-      directive,
-      undefined,
-      { displayContent },
-      threadSessionId() ?? undefined,
-    );
+    // Run from the panel fills the composer with `/slug ` (cursor at end)
+    // rather than auto-sending. Every skill surface (chip, recall button,
+    // palette select, panel Run) behaves the same way — the user adds any
+    // args and presses Enter to send. The `<skill-invocation>` directive
+    // gets constructed at send time via resolveSkillCommand.
+    setInput(`${buildSkillInvocationDisplay(detail.skill.slug)} `);
+    setCommandPopupIndex(0);
+    inputRef?.focus();
+    const len = inputRef?.value.length ?? 0;
+    inputRef?.setSelectionRange(len, len);
   };
 
   onMount(() => {

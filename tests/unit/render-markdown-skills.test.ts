@@ -36,6 +36,16 @@ describe("escapeHtmlWithSkillsAndLinks", () => {
     expect(html).toContain("/unknown-thing please run");
   });
 
+  it("can chip a known slug after an unknown slash word on the same line", () => {
+    const html = escapeHtmlWithSkillsAndLinks(
+      "ignore /unknown then use /prophet-arb-bot please",
+      KNOWN,
+    );
+    expect(html).toContain('data-skill-slug="prophet-arb-bot"');
+    expect(html).toContain("ignore /unknown then use ");
+    expect(html).toContain('data-skill-args="please"');
+  });
+
   it("chips a known slug that appears mid-sentence after whitespace", () => {
     const html = escapeHtmlWithSkillsAndLinks(
       "remember to use /prophet-arb-bot for this",
@@ -140,5 +150,18 @@ describe("escapeHtmlWithSkillsAndLinks", () => {
     expect(
       (html.match(/data-skill-slug=/g) ?? []).length,
     ).toBe(2);
+  });
+
+  it("treats a second known slug on the same line as args to the first invocation", () => {
+    const html = escapeHtmlWithSkillsAndLinks(
+      "/prophet-arb-bot then /browser-automation",
+      KNOWN,
+    );
+    expect(
+      (html.match(/data-skill-slug=/g) ?? []).length,
+    ).toBe(1);
+    expect(html).toContain(
+      'data-skill-args="then /browser-automation"',
+    );
   });
 });

@@ -2,6 +2,7 @@
 // ABOUTME: Lets browse cards carry a SKILL.md reference without embedding content in drag data.
 
 import type { InstalledSkill, Skill } from "@/lib/skills";
+import { RUN_SKILL_EVENT, type RunSkillEventDetail } from "@/lib/skills/invoke";
 import { skills } from "@/services/skills";
 import { skillsStore } from "@/stores/skills.store";
 
@@ -142,18 +143,16 @@ async function ensureInstalled(
   return skillsStore.install(skill, content, "seren");
 }
 
-export interface AttachSkillResult {
+export interface DraftSkillInvocationResult {
   skill: InstalledSkill;
   installed: boolean;
-  alreadyAttached: boolean;
 }
 
-export async function attachSkillFromDrag(
+export async function draftSkillInvocationFromDrag(
   payload: SkillDragPayload,
-  projectRoot: string | null,
-  threadId: string | null,
-): Promise<AttachSkillResult | null> {
-  if (!projectRoot || !threadId) return null;
+  context: { kind: "chat" | "agent"; threadId: string | null },
+): Promise<DraftSkillInvocationResult | null> {
+  if (!context.threadId) return null;
 
   const resolved = resolveSkill(payload);
   if (!resolved) return null;
@@ -162,20 +161,19 @@ export async function attachSkillFromDrag(
   const installed = await ensureInstalled(resolved);
   if (!installed) return null;
 
-  const before = skillsStore.getThreadSkills(projectRoot, threadId);
-  const alreadyAttached = before.some((s) => s.path === installed.path);
-  if (!alreadyAttached) {
-    await skillsStore.attachSkillToThread(
-      projectRoot,
-      threadId,
-      installed.path,
-    );
-  }
+  window.dispatchEvent(
+    new CustomEvent<RunSkillEventDetail>(RUN_SKILL_EVENT, {
+      detail: {
+        kind: context.kind,
+        threadId: context.threadId,
+        skill: installed,
+      },
+    }),
+  );
 
   return {
     skill: installed,
     installed: !wasInstalled,
-    alreadyAttached,
   };
 }
 

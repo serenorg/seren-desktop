@@ -1,7 +1,7 @@
 // ABOUTME: Tests for skill drag payload encoding/decoding and prompt wrapping.
 // ABOUTME: Guards against false-positive text matches and nested fence corruption.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockReadContent = vi.hoisted(() => vi.fn());
 const mockFetchContent = vi.hoisted(() => vi.fn());
@@ -41,6 +41,10 @@ function resetSkillStoreMocks(): void {
   mockAttachSkillToThread.mockReset();
   mockGetThreadSkills.mockReset();
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("decodeSkillDragPayload", () => {
   beforeEach(() => {
@@ -253,13 +257,13 @@ describe("canAcceptSkillDrop", () => {
   });
 });
 
-describe("attachSkillFromDrag", () => {
+describe("draftSkillInvocationFromDrag", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetSkillStoreMocks();
   });
 
-  it("installs a catalog skill before attaching it to a thread", async () => {
+  it("installs a catalog skill before drafting it into a thread composer", async () => {
     const skill = {
       id: "seren:demo",
       slug: "demo",
@@ -284,22 +288,37 @@ describe("attachSkillFromDrag", () => {
     mockSkillsState.available = [skill];
     mockFetchContent.mockResolvedValueOnce("# Demo");
     mockInstall.mockResolvedValueOnce(installed);
-    mockGetThreadSkills.mockReturnValueOnce([]);
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent });
+    vi.stubGlobal(
+      "CustomEvent",
+      class TestCustomEvent<T = unknown> extends Event {
+        detail: T;
 
-    const { attachSkillFromDrag } = await import("@/lib/skill-drag");
-    const result = await attachSkillFromDrag(
+        constructor(type: string, init?: CustomEventInit<T>) {
+          super(type);
+          this.detail = init?.detail as T;
+        }
+      },
+    );
+
+    const { draftSkillInvocationFromDrag } = await import("@/lib/skill-drag");
+    const result = await draftSkillInvocationFromDrag(
       { id: "seren:demo", slug: "demo", sourceUrl: "seren-skills:demo" },
-      "/project",
-      "thread-1",
+      { kind: "chat", threadId: "thread-1" },
     );
 
     expect(mockFetchContent).toHaveBeenCalledWith(skill);
     expect(mockInstall).toHaveBeenCalledWith(skill, "# Demo", "seren");
-    expect(mockAttachSkillToThread).toHaveBeenCalledWith(
-      "/project",
-      "thread-1",
-      "/skills/demo/SKILL.md",
-    );
-    expect(result).toMatchObject({ installed: true, alreadyAttached: false });
+    expect(mockAttachSkillToThread).not.toHaveBeenCalled();
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    const event = dispatchEvent.mock.calls[0]?.[0] as CustomEvent;
+    expect(event.type).toBe("seren:run-skill");
+    expect(event.detail).toMatchObject({
+      kind: "chat",
+      threadId: "thread-1",
+      skill: { slug: "demo", path: "/skills/demo/SKILL.md" },
+    });
+    expect(result).toMatchObject({ installed: true });
   });
 });
