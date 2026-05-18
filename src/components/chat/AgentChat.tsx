@@ -43,7 +43,7 @@ import {
   getModelDisplayName,
   mapAgentModelToChat,
 } from "@/lib/rate-limit-fallback";
-import { escapeHtmlWithLinks } from "@/lib/render-markdown";
+import { escapeHtmlWithSkillsAndLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
   attachSkillFromDrag,
@@ -75,6 +75,7 @@ import { skills } from "@/services/skills";
 import { type AgentMessage, agentStore } from "@/stores/agent.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
+import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
 import { workspaceStore } from "@/stores/workspace.store";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
@@ -129,6 +130,26 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // Web Worker so renderMarkdown (marked + hljs) never blocks the main thread.
   const markdownWorker = new RenderMarkdownWorker();
   const [htmlCache, setHtmlCache] = createStore<Record<string, string>>({});
+  // Slugs of currently-installed skills. Used by the transcript renderer to
+  // decide which leading `/token` user messages should chip; random `/words`
+  // in prose stay as plain text.
+  const installedSkillSlugs = createMemo(
+    () => new Set(skillsStore.installed.map((skill) => skill.slug)),
+  );
+
+  const handleSkillChipClick = (event: MouseEvent) => {
+    const target = event.target as HTMLElement | null;
+    const chip = target?.closest<HTMLElement>("[data-skill-slug]");
+    if (!chip) return;
+    event.preventDefault();
+    const slug = chip.dataset.skillSlug ?? "";
+    if (!slug) return;
+    const args = chip.dataset.skillArgs ?? "";
+    setInput(buildSkillInvocationDisplay(slug, args || undefined));
+    inputRef?.focus();
+    const len = inputRef?.value.length ?? 0;
+    inputRef?.setSelectionRange(len, len);
+  };
   markdownWorker.onmessage = (
     e: MessageEvent<{ id: string; html: string; error?: boolean }>,
   ) => {
@@ -1188,7 +1209,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             </Show>
             <div
               class="chat-message-content leading-relaxed text-foreground whitespace-pre-wrap"
-              innerHTML={escapeHtmlWithLinks(message.content)}
+              innerHTML={escapeHtmlWithSkillsAndLinks(
+                message.content,
+                installedSkillSlugs(),
+              )}
             />
             <Show when={forkSupported()}>
               <button
@@ -1389,7 +1413,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   return (
-    <div class="chat-surface relative flex-1 flex flex-col min-h-0">
+    <div
+      class="chat-surface relative flex-1 flex flex-col min-h-0"
+      onClick={handleSkillChipClick}
+    >
       <Show when={isDragging() && isPaneActive()}>
         <div class="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary/50 rounded-sm z-50 pointer-events-none flex items-center justify-center">
           <span class="text-primary text-sm font-medium bg-background/90 px-3 py-1.5 rounded-md shadow-sm">

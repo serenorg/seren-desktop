@@ -689,3 +689,52 @@ footer.status-bar {
   --density-chat-input-y: 0.9375rem;
   --density-chat-gap: 0.625rem;
 }
+
+/* Skill invocation chip rendered in chat transcripts when a user message
+   begins with /<installed-skill-slug>. Theme-aware via the existing primary
+   tokens. Click is handled by event delegation on the chat surface. */
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  padding: 0.0625rem 0.4375rem 0.0625rem 0.375rem;
+  margin: 0;
+  background: var(--primary-muted);
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+  border-radius: 0.375rem;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  vertical-align: baseline;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.skill-chip:hover,
+.skill-chip:focus-visible {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 50%, transparent);
+  outline: none;
+}
+
+.skill-chip-icon {
+  width: 0.875em;
+  height: 0.875em;
+  flex-shrink: 0;
+}
+
+.skill-chip-label {
+  font-weight: 500;
+}
+
+.skill-chip-args {
+  margin-left: 0.125rem;
+  color: var(--muted-foreground);
+  font-style: italic;
+}

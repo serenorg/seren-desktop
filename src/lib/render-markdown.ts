@@ -274,3 +274,78 @@ export function escapeHtmlWithLinks(text: string): string {
     return `<a href="${safeUrl}" class="external-link" data-external-url="${safeUrl}">${safeUrl}</a>`;
   });
 }
+
+// Matches a slash-prefixed token at the start of the message or after a
+// whitespace character. Captures the slug; the rest of the line up to a
+// newline is treated as args. The slug grammar tracks
+// `buildSkillInvocationDisplay` in lib/skills/invoke.ts — alphanumerics with
+// hyphen, underscore, and colon separators.
+const SKILL_TOKEN_REGEX = /(^|\s)\/([a-zA-Z][a-zA-Z0-9:_-]*)([^\n]*)/g;
+
+function buildSkillChipHtml(slug: string, args: string): string {
+  const safeSlug = escapeHtml(slug);
+  const safeArgs = escapeHtml(args);
+  return [
+    `<button type="button" class="skill-chip" data-skill-slug="${safeSlug}"`,
+    ` data-skill-args="${safeArgs}"`,
+    ` title="Click to fill the composer with this skill">`,
+    `<svg class="skill-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"`,
+    ` stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`,
+    `<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>`,
+    `<path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>`,
+    `</svg>`,
+    `<span class="skill-chip-label">${safeSlug}</span>`,
+    `</button>`,
+  ].join("");
+}
+
+/**
+ * Like {@link escapeHtmlWithLinks} but additionally rewrites recognized
+ * `/slug` invocation tokens into a styled skill-chip button. Only slugs in
+ * `knownSlugs` chip — random `/words` in prose pass through as plain text.
+ * Args (the trailing text on the same line) are preserved next to the chip
+ * so the transcript still reads as `chip[slug] · args`; click delegation in
+ * the chat surface reads the slug back off `data-skill-slug` and fills the
+ * composer with the full invocation.
+ */
+export function escapeHtmlWithSkillsAndLinks(
+  text: string,
+  knownSlugs: ReadonlySet<string>,
+): string {
+  if (knownSlugs.size === 0) return escapeHtmlWithLinks(text);
+
+  const parts: string[] = [];
+  let cursor = 0;
+  // Reset regex state since the literal /g flag carries `lastIndex` across
+  // calls when reused.
+  SKILL_TOKEN_REGEX.lastIndex = 0;
+  for (const match of text.matchAll(SKILL_TOKEN_REGEX)) {
+    const prefix = match[1] ?? "";
+    const slug = match[2] ?? "";
+    const tail = match[3] ?? "";
+    if (!knownSlugs.has(slug)) continue;
+    const matchStart = match.index ?? 0;
+    const tokenStart = matchStart + prefix.length;
+    if (tokenStart > cursor) {
+      parts.push(escapeHtmlWithLinks(text.slice(cursor, tokenStart)));
+    }
+    // Trim a single leading space so the chip nests against its args
+    // visually (`chip args`, not `chip  args`). Anything else stays.
+    const argsText = tail.startsWith(" ") ? tail.slice(1) : tail;
+    parts.push(buildSkillChipHtml(slug, argsText));
+    cursor = tokenStart + 1 + slug.length;
+    if (tail.length > 0) {
+      if (argsText.length > 0) {
+        parts.push(' <span class="skill-chip-args">');
+        parts.push(escapeHtmlWithLinks(argsText));
+        parts.push("</span>");
+      }
+      cursor += tail.length;
+    }
+  }
+  if (cursor === 0) return escapeHtmlWithLinks(text);
+  if (cursor < text.length) {
+    parts.push(escapeHtmlWithLinks(text.slice(cursor)));
+  }
+  return parts.join("");
+}

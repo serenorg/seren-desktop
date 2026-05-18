@@ -41,7 +41,7 @@ import {
 import { pickAndReadAttachments } from "@/lib/images/attachments";
 import { isPaymentError } from "@/lib/payment-errors";
 import type { Attachment } from "@/lib/providers/types";
-import { escapeHtmlWithLinks } from "@/lib/render-markdown";
+import { escapeHtmlWithSkillsAndLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
   attachSkillFromDrag,
@@ -79,6 +79,7 @@ import { editorStore } from "@/stores/editor.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
+import { skillsStore } from "@/stores/skills.store";
 import { workspaceStore } from "@/stores/workspace.store";
 import { isRetryableWorker, type UnifiedMessage } from "@/types/conversation";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
@@ -159,6 +160,12 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   // DOM update. Mirrors the same pattern used in AgentChat.tsx.
   const markdownWorker = new RenderMarkdownWorker();
   const [htmlCache, setHtmlCache] = createStore<Record<string, string>>({});
+  // Slugs of currently-installed skills. Used by the transcript renderer to
+  // decide which leading `/token` user messages should chip; random `/words`
+  // in prose stay as plain text.
+  const installedSkillSlugs = createMemo(
+    () => new Set(skillsStore.installed.map((skill) => skill.slug)),
+  );
   const conversationId = () =>
     props.threadId ?? conversationStore.activeConversationId;
   const conversationMessages = createMemo(() => {
@@ -970,8 +977,25 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     }
   };
 
+  const handleSkillChipClick = (event: MouseEvent) => {
+    const target = event.target as HTMLElement | null;
+    const chip = target?.closest<HTMLElement>("[data-skill-slug]");
+    if (!chip) return;
+    event.preventDefault();
+    const slug = chip.dataset.skillSlug ?? "";
+    if (!slug) return;
+    const args = chip.dataset.skillArgs ?? "";
+    setInput(buildSkillInvocationDisplay(slug, args || undefined));
+    inputRef?.focus();
+    const len = inputRef?.value.length ?? 0;
+    inputRef?.setSelectionRange(len, len);
+  };
+
   return (
-    <section class="chat-surface relative flex flex-col h-full bg-background text-foreground">
+    <section
+      class="chat-surface relative flex flex-col h-full bg-background text-foreground"
+      onClick={handleSkillChipClick}
+    >
       <Show when={isDragging() && isPaneActive()}>
         <div class="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary/50 rounded-sm z-50 pointer-events-none flex items-center justify-center">
           <span class="text-primary text-sm font-medium bg-background/90 px-3 py-1.5 rounded-md shadow-sm">
@@ -1195,7 +1219,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                         innerHTML={
                           message.role === "assistant"
                             ? (htmlCache[message.id] ?? "")
-                            : escapeHtmlWithLinks(message.content)
+                            : escapeHtmlWithSkillsAndLinks(
+                                message.content,
+                                installedSkillSlugs(),
+                              )
                         }
                       />
                       <Show
