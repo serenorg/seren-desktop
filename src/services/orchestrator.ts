@@ -137,7 +137,12 @@ interface ToolExecutionRequest {
 
 const activeStreams = new Map<
   string,
-  { messageId: string; startTime: number }
+  {
+    messageId: string;
+    startTime: number;
+    provider?: ProviderId;
+    modelId?: string | null;
+  }
 >();
 const activeToolRequests = new Set<string>();
 
@@ -234,6 +239,8 @@ export async function orchestrate(
   activeStreams.set(conversationId, {
     messageId: crypto.randomUUID(),
     startTime: Date.now(),
+    provider: threadProvider,
+    modelId: threadModel,
   });
 
   // 4. Listen for events
@@ -584,6 +591,8 @@ function handleComplete(
     timestamp: Date.now(),
     status: "complete",
     workerType: "orchestrator",
+    provider: stream.provider,
+    modelId: stream.modelId ?? undefined,
     duration,
     cost,
     rlmSteps,
@@ -595,7 +604,7 @@ function handleComplete(
   conversationStore.persistMessage(assistantMessage, conversationId);
 
   // Store conversation to memory if enabled
-  const model = providerStore.activeModel || "unknown";
+  const model = stream.modelId || providerStore.activeModel || "unknown";
   storeAssistantResponse(content, { model }).catch((err) => {
     console.warn("[orchestrator] Failed to store memory:", err);
   });
@@ -974,10 +983,18 @@ function handleReroute(
   // Flush any partial streaming content from the failed model
   flushStreamingToMessage(conversationId);
 
+  const reroutedConv = conversationStore.conversations.find(
+    (c) => c.id === conversationId,
+  );
+  const reroutedProvider =
+    reroutedConv?.selectedProvider ?? providerStore.activeProvider;
+
   // Reset streaming state for the new model attempt
   activeStreams.set(conversationId, {
     messageId: crypto.randomUUID(),
     startTime: Date.now(),
+    provider: reroutedProvider as ProviderId,
+    modelId: event.to_model,
   });
 
   // Update UI to reflect the actual model being used after automatic fallback.
@@ -987,11 +1004,6 @@ function handleReroute(
   // B's selected model. Persist the rerouted thread's own selectedProvider so
   // the runtime row stays paired with the new model instead of inheriting the
   // global picker's provider.
-  const reroutedConv = conversationStore.conversations.find(
-    (c) => c.id === conversationId,
-  );
-  const reroutedProvider =
-    reroutedConv?.selectedProvider ?? providerStore.activeProvider;
   if (conversationId === chatStore.activeConversationId) {
     providerStore.setActiveModel(event.to_model);
     chatStore.setModel(event.to_model);
@@ -1044,6 +1056,8 @@ function flushStreamingToMessage(conversationId: string): void {
       timestamp: Date.now(),
       status: "complete",
       workerType: "orchestrator",
+      provider: stream.provider,
+      modelId: stream.modelId ?? undefined,
     };
     conversationStore.addMessage(flushedMessage, conversationId);
     conversationStore.persistMessage(flushedMessage, conversationId);
@@ -1053,6 +1067,8 @@ function flushStreamingToMessage(conversationId: string): void {
     activeStreams.set(conversationId, {
       messageId: crypto.randomUUID(),
       startTime: Date.now(),
+      provider: stream.provider,
+      modelId: stream.modelId,
     });
   }
 }

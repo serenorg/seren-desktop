@@ -42,6 +42,7 @@ const mockConversations = {
     selectedProvider: string | null;
     projectRoot: string | null;
     isArchived: boolean;
+    employeeId?: string | null;
   }>,
   activeConversationId: null as string | null,
   streamingContent: {} as Record<string, string>,
@@ -69,6 +70,7 @@ vi.mock("@/stores/conversation.store", () => ({
         selectedModel: string,
         projectRoot?: string,
         selectedProvider?: string | null,
+        employeeId?: string | null,
       ) => {
         const convo = {
           id: `chat-${mockConversations.conversations.length + 1}`,
@@ -78,6 +80,7 @@ vi.mock("@/stores/conversation.store", () => ({
           selectedProvider: selectedProvider ?? null,
           projectRoot: projectRoot ?? null,
           isArchived: false,
+          employeeId: employeeId ?? null,
         };
         mockConversations.conversations.unshift(convo);
         return convo;
@@ -92,6 +95,7 @@ vi.mock("@/stores/conversation.store", () => ({
         selectedProvider: null,
         projectRoot: _projectRoot ?? null,
         isArchived: false,
+        employeeId: null,
       };
       mockConversations.conversations.unshift(convo);
       return convo;
@@ -406,6 +410,49 @@ describe("threadStore", () => {
       const threads = threadStore.threads;
       expect(threads[0].status).toBe("running");
       expect(threads[0].isLive).toBe(true);
+    });
+
+    it("carries chat provider provenance without leaking onto agent threads", () => {
+      mockConversations.conversations = [
+        {
+          id: "chat-public",
+          title: "Public chat",
+          createdAt: 3000,
+          selectedModel: "test",
+          selectedProvider: "seren",
+          projectRoot: null,
+          isArchived: false,
+        },
+        {
+          id: "chat-private",
+          title: "Private chat",
+          createdAt: 2000,
+          selectedModel: "organization/private-model",
+          selectedProvider: "seren-private",
+          projectRoot: null,
+          isArchived: false,
+        },
+      ];
+      mockAgentConversations.push({
+        id: "agent-codex",
+        title: "Codex agent",
+        created_at: 1000,
+        agent_type: "codex",
+        agent_session_id: null,
+        agent_cwd: "/dev",
+        agent_model_id: null,
+        project_id: null,
+        project_root: "/dev",
+        is_archived: false,
+      });
+
+      const byId = new Map(
+        threadStore.threads.map((thread) => [thread.id, thread]),
+      );
+      expect(byId.get("chat-public")?.provider).toBe("seren");
+      expect(byId.get("chat-private")?.provider).toBe("seren-private");
+      expect(byId.get("agent-codex")?.provider).toBeUndefined();
+      expect(byId.get("agent-codex")?.agentType).toBe("codex");
     });
 
     // #1915 — Seren chat and Private chat threads must surface the same
@@ -726,6 +773,24 @@ describe("threadStore", () => {
         "auto",
         "/Users/dev/project-a",
         "seren",
+        null,
+      );
+      expect(id).toBe("chat-1");
+      expect(threadStore.activeThreadId).toBe("chat-1");
+      expect(threadStore.activeThreadKind).toBe("chat");
+    });
+
+    it("creates private chat with the private provider binding", async () => {
+      const id = await threadStore.createChatThreadWithOptions("Private", {
+        provider: "seren-private",
+        model: "organization/private-model",
+      });
+
+      expect(conversationStore.createConversationWithModel).toHaveBeenCalledWith(
+        "Private",
+        "organization/private-model",
+        "/Users/dev/project-a",
+        "seren-private",
         null,
       );
       expect(id).toBe("chat-1");

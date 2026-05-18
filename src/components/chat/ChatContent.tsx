@@ -148,9 +148,6 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const [isAttaching, setIsAttaching] = createSignal(false);
   const isPaneActive = () => props.active ?? true;
-  const privateChatLocked = () =>
-    providerStore.activeProvider === "seren-private" &&
-    !!authStore.privateChatPolicy?.hide_model_picker;
   const { isDragging } = createDragDrop((files) => {
     if (!isPaneActive()) return;
     setAttachedImages((prev) => [...prev, ...files]);
@@ -179,6 +176,26 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   );
   const conversationId = () =>
     props.threadId ?? conversationStore.activeConversationId;
+  const activeThreadProvider = (): ProviderId => {
+    const id = conversationId();
+    const selectedProvider = id
+      ? (conversationStore.conversations.find((c) => c.id === id)
+          ?.selectedProvider ??
+        chatStore.conversations.find((c) => c.id === id)?.selectedProvider)
+      : null;
+    if (
+      selectedProvider === "seren" ||
+      selectedProvider === "seren-private" ||
+      selectedProvider === "anthropic" ||
+      selectedProvider === "openai"
+    ) {
+      return selectedProvider;
+    }
+    return providerStore.activeProvider;
+  };
+  const privateChatLocked = () =>
+    activeThreadProvider() === "seren-private" &&
+    !!authStore.privateChatPolicy?.hide_model_picker;
   const conversationMessages = createMemo(() => {
     const id = conversationId();
     return id ? conversationStore.getMessagesFor(id) : [];
@@ -779,8 +796,9 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       return;
     }
 
+    const provider = activeThreadProvider();
     if (
-      providerStore.activeProvider === "seren" &&
+      provider === "seren" &&
       !allowsSerenPublicModels(authStore.privateChatPolicy)
     ) {
       conversationStore.setError(
@@ -790,7 +808,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     }
 
     if (
-      providerStore.activeProvider === "seren-private" &&
+      provider === "seren-private" &&
       !allowsSerenPrivateAgent(authStore.privateChatPolicy)
     ) {
       conversationStore.setError(
@@ -1712,7 +1730,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
             <div class="flex justify-between items-center">
               <div class="flex items-center gap-3">
                 <Show when={!privateChatLocked()}>
-                  <ModelSelector />
+                  <ModelSelector threadId={conversationId()} />
                   <ToolsetSelector />
                   <ReasoningEffortSelector />
                   <SkillsButton

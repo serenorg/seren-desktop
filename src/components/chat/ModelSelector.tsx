@@ -32,11 +32,28 @@ import {
 import type { AgentType } from "@/services/providers";
 import { agentDisplayName, agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
+import type { Conversation as ChatConversation } from "@/stores/chat.store";
 import { chatStore } from "@/stores/chat.store";
+import type { Conversation as StoreConversation } from "@/stores/conversation.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 
-export const ModelSelector: Component = () => {
+interface ModelSelectorProps {
+  threadId?: string | null;
+}
+
+function isProviderId(provider: unknown): provider is ProviderId {
+  return (
+    provider === "seren" ||
+    provider === "seren-private" ||
+    provider === "anthropic" ||
+    provider === "openai"
+  );
+}
+
+type PickerConversation = ChatConversation | StoreConversation;
+
+export const ModelSelector: Component<ModelSelectorProps> = (props) => {
   const [isOpen, setIsOpen] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal("");
   const [draftProvider, setDraftProvider] = createSignal<ProviderId | null>(
@@ -48,13 +65,30 @@ export const ModelSelector: Component = () => {
   let containerRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
 
-  const committedProvider = () => providerStore.activeProvider;
+  const activeThreadId = () =>
+    props.threadId ??
+    conversationStore.activeConversationId ??
+    chatStore.activeConversationId;
+  const activeConversation = (): PickerConversation | null => {
+    const id = activeThreadId();
+    if (!id) return null;
+    return (
+      conversationStore.conversations.find((c) => c.id === id) ??
+      chatStore.conversations.find((c) => c.id === id) ??
+      null
+    );
+  };
+  const committedProvider = () => {
+    const provider = activeConversation()?.selectedProvider;
+    return isProviderId(provider) ? provider : providerStore.activeProvider;
+  };
   const currentProvider = () => draftProvider() ?? committedProvider();
   const isPrivateChat = createMemo(() => currentProvider() === "seren-private");
   const committedModel = () =>
-    conversationStore.activeConversation?.selectedModel ??
+    activeConversation()?.selectedModel ??
     providerStore.activeModel ??
     chatStore.selectedModel;
+  const committedAutoModel = () => committedModel() === AUTO_MODEL_ID;
 
   // Composite provider list for the chip rail. `seren-private` is gated
   // by org policy and never appears in `providerStore.configuredProviders`
@@ -104,9 +138,7 @@ export const ModelSelector: Component = () => {
                 models.find((model) => model.id === policyDefault)?.id) ||
               models[0]?.id;
             if (fallback) {
-              const conversationId = untrack(
-                () => conversationStore.activeConversationId,
-              );
+              const conversationId = untrack(() => activeThreadId());
               if (conversationId && !evaluateChatSwitchGuard(conversationId)) {
                 void switchChatProvider(
                   conversationId,
@@ -197,7 +229,7 @@ export const ModelSelector: Component = () => {
       );
     }
 
-    const activeModel = providerStore.activeModel;
+    const activeModel = committedModel();
     if (activeModel === AUTO_MODEL_ID) {
       return { id: AUTO_MODEL_ID, name: "Auto", contextWindow: 0 };
     }
@@ -263,7 +295,7 @@ export const ModelSelector: Component = () => {
    * (used by the welcome screen before any thread exists).
    */
   const selectModel = (modelId: string) => {
-    const conversationId = conversationStore.activeConversationId;
+    const conversationId = activeThreadId();
     const targetProvider = currentProvider();
     if (!conversationId) {
       providerStore.setActiveProvider(targetProvider);
@@ -311,7 +343,7 @@ export const ModelSelector: Component = () => {
    * session spawn with the persisted bootstrap, and shell remount.
    */
   const selectAgentProvider = (agentType: AgentType) => {
-    const conversationId = conversationStore.activeConversationId;
+    const conversationId = activeThreadId();
     if (!conversationId) {
       conversationStore.setError(
         "Open a thread before switching to an external agent.",
@@ -376,7 +408,7 @@ export const ModelSelector: Component = () => {
           const opening = !isOpen();
           setIsOpen(opening);
           if (opening) {
-            setDraftProvider(providerStore.activeProvider);
+            setDraftProvider(committedProvider());
             setSearchQuery("");
             // Focus search input after dropdown opens
             setTimeout(() => searchInputRef?.focus(), 0);
@@ -387,9 +419,7 @@ export const ModelSelector: Component = () => {
         }}
       >
         <ProviderIcon provider={currentProvider()} size={14} />
-        <span
-          class={providerStore.isAutoModel ? "text-success" : "text-foreground"}
-        >
+        <span class={committedAutoModel() ? "text-success" : "text-foreground"}>
           {currentModel()?.name || "Select model"}
         </span>
         <span class="text-[10px] text-muted-foreground">
@@ -500,7 +530,7 @@ export const ModelSelector: Component = () => {
             <Show when={!isPrivateChat() && !searchQuery()}>
               <button
                 type="button"
-                class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-border border-b border-b-surface-3 ${providerStore.isAutoModel ? "bg-success/15" : ""}`}
+                class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-border border-b border-b-surface-3 ${committedAutoModel() ? "bg-success/15" : ""}`}
                 onClick={() => selectModel(AUTO_MODEL_ID)}
               >
                 <div class="flex flex-col gap-0.5 min-w-0 flex-1">
@@ -509,7 +539,7 @@ export const ModelSelector: Component = () => {
                     Best model for each task
                   </span>
                 </div>
-                <Show when={providerStore.isAutoModel}>
+                <Show when={committedAutoModel()}>
                   <span class="text-success text-sm font-semibold">
                     &#10003;
                   </span>
@@ -534,7 +564,7 @@ export const ModelSelector: Component = () => {
                 {(model) => (
                   <button
                     type="button"
-                    class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-border ${model.id === providerStore.activeModel ? "bg-primary/[0.12]" : ""}`}
+                    class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-border ${model.id === committedModel() ? "bg-primary/[0.12]" : ""}`}
                     onClick={() => selectModel(model.id)}
                   >
                     <div class="flex flex-col gap-0.5 min-w-0 flex-1">
@@ -548,13 +578,7 @@ export const ModelSelector: Component = () => {
                       </Show>
                     </div>
                     <div class="flex items-center gap-2">
-                      <Show
-                        when={
-                          isPrivateChat()
-                            ? model.id === committedModel()
-                            : model.id === providerStore.activeModel
-                        }
-                      >
+                      <Show when={model.id === committedModel()}>
                         <span class="text-success text-sm font-semibold">
                           &#10003;
                         </span>

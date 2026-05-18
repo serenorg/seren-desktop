@@ -25,6 +25,13 @@ type TestMessage = {
   timestamp: number;
   provider?: string;
 };
+type TestAgentMessage = {
+  id: string;
+  type: "user" | "assistant" | "thought" | "tool" | "diff" | "error";
+  content: string;
+  timestamp: number;
+  provider?: string;
+};
 const conversationStoreMock = vi.hoisted(() => ({
   activeConversationId: null as string | null,
   conversations: [] as Array<{
@@ -83,6 +90,9 @@ const agentStoreMock = vi.hoisted(() => ({
     Object.values(agentStoreMock.sessions).find(
       (session) => session.conversationId === conversationId,
     ),
+  ),
+  getMessagesForConversation: vi.fn(
+    (_conversationId: string) => [] as TestAgentMessage[],
   ),
   isTurnInFlight: vi.fn(() => false),
   hasPendingApprovals: vi.fn(() => false),
@@ -190,6 +200,7 @@ beforeEach(() => {
         (session) => session.conversationId === conversationId,
       ),
   );
+  agentStoreMock.getMessagesForConversation.mockReturnValue([]);
   agentStoreMock.isTurnInFlight.mockReturnValue(false);
   agentStoreMock.hasPendingApprovals.mockReturnValue(false);
   fileTreeStateMock.rootPath = null;
@@ -663,6 +674,113 @@ describe("switchChatProvider", () => {
     // No spawn on agent→chat — chat threads route through the
     // orchestrator, not a native session.
     expect(agentStoreMock.spawnSession).not.toHaveBeenCalled();
+  });
+
+  it("tears down and respawns on same-category agent provider switches", async () => {
+    const bridge = await import("@/lib/tauri-bridge");
+    agentStoreMock.recentAgentConversations = [
+      {
+        id: "t1",
+        title: "My agent",
+        created_at: 100,
+        agent_type: "codex",
+        agent_session_id: "codex-remote",
+        agent_cwd: "/Users/dev/my-project",
+        agent_model_id: "gpt-5.1-codex",
+        project_id: null,
+        project_root: "/Users/dev/my-project",
+        is_archived: false,
+      },
+    ];
+    agentStoreMock.sessions = {
+      "live-codex": {
+        info: { id: "live-codex" },
+        conversationId: "t1",
+      },
+    };
+    agentStoreMock.getMessagesForConversation.mockReturnValue([
+      {
+        id: "a1",
+        type: "user",
+        content: "continue this work",
+        timestamp: 1000,
+      },
+      {
+        id: "tool-1",
+        type: "tool",
+        content: "tool internals",
+        timestamp: 1001,
+      },
+      {
+        id: "a2",
+        type: "assistant",
+        content: "prior agent answer",
+        timestamp: 1002,
+        provider: "codex",
+      },
+    ]);
+    switchThreadProviderBridge.mockResolvedValueOnce({
+      thread_id: "t1",
+      provider: "claude-code",
+      model: null,
+      native_session_id: null,
+      resume_cursor_json: null,
+      status: "active",
+      bootstrap_context: "agent transcript here",
+      updated_at: 7000,
+    });
+    vi.mocked(bridge.getAgentConversation).mockResolvedValueOnce({
+      id: "t1",
+      title: "My agent",
+      created_at: 100,
+      agent_type: "claude-code",
+      agent_session_id: null,
+      agent_cwd: "/Users/dev/my-project",
+      agent_model_id: "gpt-5.1-codex",
+      agent_permission_mode: null,
+      agent_metadata: null,
+      project_id: null,
+      project_root: "/Users/dev/my-project",
+      is_archived: false,
+    });
+
+    await switchChatProvider("t1", "claude-code", null);
+
+    const [, , , bootstrap] = switchThreadProviderBridge.mock.calls[0];
+    expect(bootstrap).toContain("[USER]: continue this work");
+    expect(bootstrap).toContain("[ASSISTANT]: prior agent answer");
+    expect(agentStoreMock.terminateSession).toHaveBeenCalledWith(
+      "live-codex",
+      expect.objectContaining({ nextActiveSessionId: null }),
+    );
+    expect(agentStoreMock.upsertAgentConversationFromDb).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(agentStoreMock.spawnSession).toHaveBeenCalledWith(
+      "/Users/dev/my-project",
+      "claude-code",
+      expect.objectContaining({
+        bootstrapPromptContext: "agent transcript here",
+        conversationTitle: "My agent",
+        localSessionId: "t1",
+        restoredMessages: [
+          {
+            id: "a1",
+            type: "user",
+            content: "continue this work",
+            timestamp: 1000,
+            provider: undefined,
+          },
+          {
+            id: "a2",
+            type: "assistant",
+            content: "prior agent answer",
+            timestamp: 1002,
+            provider: "codex",
+          },
+        ],
+      }),
+    );
   });
 
   it("does not move caches on a same-category (chat→chat) switch", async () => {

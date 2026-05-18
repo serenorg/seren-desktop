@@ -13,6 +13,10 @@ const threadProviderSwitcherSource = readFileSync(
   resolve("src/components/chat/ThreadProviderSwitcher.tsx"),
   "utf-8",
 );
+const chatContentSource = readFileSync(
+  resolve("src/components/chat/ChatContent.tsx"),
+  "utf-8",
+);
 
 function sourceBetween(source: string, startNeedle: string, endNeedle: string) {
   const start = source.indexOf(startNeedle);
@@ -38,16 +42,29 @@ describe("provider picker switch contract", () => {
       "/**\n   * Toggle which provider's models are visible",
     );
     expect(selectModel).toContain("const targetProvider = currentProvider()");
+    expect(selectModel).toContain("const conversationId = activeThreadId()");
     expect(selectModel).toContain(
       "switchChatProvider(conversationId, targetProvider, modelId)",
     );
   });
 
-  it("does not drive private-model selection from chatStore.selectedModel", () => {
-    expect(modelSelectorSource).toContain("const committedModel = () =>");
-    expect(modelSelectorSource).toContain(
-      "conversationStore.activeConversation?.selectedModel",
+  it("scopes ModelSelector selection state to the owning pane thread", () => {
+    expect(chatContentSource).toContain(
+      "<ModelSelector threadId={conversationId()} />",
     );
+    expect(modelSelectorSource).toContain(
+      "export const ModelSelector: Component<ModelSelectorProps>",
+    );
+    expect(modelSelectorSource).toContain("props.threadId ??");
+    expect(modelSelectorSource).toContain("const activeConversation = ()");
+    expect(modelSelectorSource).not.toContain(
+      "const conversationId = conversationStore.activeConversationId;",
+    );
+  });
+
+  it("does not drive private-model selection from a global chat model", () => {
+    expect(modelSelectorSource).toContain("const committedModel = () =>");
+    expect(modelSelectorSource).toContain("activeConversation()?.selectedModel");
     expect(modelSelectorSource).not.toContain(
       "const current = untrack(() => chatStore.selectedModel?.trim())",
     );

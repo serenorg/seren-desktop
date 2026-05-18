@@ -21,7 +21,7 @@ import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
-import { threadStore } from "@/stores/thread.store";
+import { threadStore, type UnifiedConversation } from "@/stores/thread.store";
 
 type RuntimeProviderId = ProviderId | AgentType;
 
@@ -138,6 +138,10 @@ export async function switchChatProvider(
   const targetKind: "chat" | "agent" = isPickerProvider(targetProvider)
     ? "chat"
     : "agent";
+  const isAgentProviderChange =
+    currentKind === "agent" &&
+    targetKind === "agent" &&
+    beforeRow?.provider !== targetProvider;
 
   const runtime = await switchThreadProviderBridge(
     threadId,
@@ -177,6 +181,13 @@ export async function switchChatProvider(
     } else {
       await transitionAgentToChat(threadId);
     }
+  } else if (isAgentProviderChange) {
+    await transitionAgentToAgent(
+      threadId,
+      targetProvider as AgentType,
+      runtime,
+      beforeRow,
+    );
   }
 
   // The picker UI mirrors the active thread. Keep providerStore aligned
@@ -269,21 +280,7 @@ async function transitionChatToAgent(
  * session get dismissed cleanly.
  */
 async function transitionAgentToChat(threadId: string): Promise<void> {
-  const liveSession = Object.values(agentStore.sessions).find(
-    (s) => s.conversationId === threadId,
-  );
-  if (liveSession) {
-    try {
-      await agentStore.terminateSession(liveSession.info.id, {
-        nextActiveSessionId: null,
-      });
-    } catch (error) {
-      console.warn(
-        "[provider-bindings] Failed to terminate agent session on agent→chat switch:",
-        error,
-      );
-    }
-  }
+  await terminateLiveAgentSession(threadId, "agent-to-chat");
 
   agentStore.dropAgentConversationFromCache(threadId);
 
@@ -295,6 +292,80 @@ async function transitionAgentToChat(threadId: string): Promise<void> {
   } catch (error) {
     console.warn(
       "[provider-bindings] Failed to load chat row after agent→chat switch:",
+      error,
+    );
+  }
+}
+
+/**
+ * Same-category native-agent switches still need a runtime handoff.
+ * The DB command clears the native session id and updates agent_type,
+ * but the in-memory agent cache and live provider process are owned by
+ * the old agent until we terminate and respawn them here.
+ */
+async function transitionAgentToAgent(
+  threadId: string,
+  targetAgentType: AgentType,
+  runtime: ProviderSessionRuntime,
+  beforeRow: UnifiedConversation | undefined,
+): Promise<void> {
+  const restoredMessages = collectRestoredAgentMessages(threadId);
+
+  await terminateLiveAgentSession(threadId, "agent-to-agent");
+
+  let agentRow: Awaited<ReturnType<typeof getAgentConversation>> = null;
+  try {
+    agentRow = await getAgentConversation(threadId);
+  } catch (error) {
+    console.warn(
+      "[provider-bindings] Failed to load agent row after agent-to-agent switch:",
+      error,
+    );
+  }
+  if (agentRow) {
+    agentStore.upsertAgentConversationFromDb(agentRow);
+  }
+
+  const cwd = beforeRow?.projectRoot ?? fileTreeState.rootPath ?? null;
+  if (!cwd) {
+    console.warn(
+      "[provider-bindings] Agent provider switch without a cwd; spawn deferred until project root is set",
+    );
+    return;
+  }
+
+  try {
+    await agentStore.spawnSession(cwd, targetAgentType, {
+      localSessionId: threadId,
+      conversationTitle: beforeRow?.title,
+      restoredMessages:
+        restoredMessages.length > 0 ? restoredMessages : undefined,
+      bootstrapPromptContext: runtime.bootstrap_context ?? undefined,
+    });
+  } catch (error) {
+    console.warn(
+      "[provider-bindings] Spawn after agent-to-agent switch failed:",
+      error,
+    );
+  }
+}
+
+async function terminateLiveAgentSession(
+  threadId: string,
+  transitionName: string,
+): Promise<void> {
+  const liveSession = Object.values(agentStore.sessions).find(
+    (s) => s.conversationId === threadId,
+  );
+  if (!liveSession) return;
+
+  try {
+    await agentStore.terminateSession(liveSession.info.id, {
+      nextActiveSessionId: null,
+    });
+  } catch (error) {
+    console.warn(
+      `[provider-bindings] Failed to terminate agent session on ${transitionName} switch:`,
       error,
     );
   }
@@ -351,6 +422,7 @@ function isTranscriptTurn(
 function collectTranscriptEntries(threadId: string): TranscriptTurn[] {
   const fromConversation = conversationStore.getMessagesFor(threadId);
   const fromChat = chatStore.getMessagesFor(threadId);
+  const fromAgent = agentStore.getMessagesForConversation(threadId);
   const merged = new Map<string, TranscriptTurn>();
 
   for (const m of fromConversation) {
@@ -368,6 +440,17 @@ function collectTranscriptEntries(threadId: string): TranscriptTurn[] {
       merged.set(m.id, {
         id: m.id,
         role: m.role,
+        content: m.content,
+        timestamp: m.timestamp,
+        provider: m.provider,
+      });
+    }
+  }
+  for (const m of fromAgent) {
+    if ((m.type === "user" || m.type === "assistant") && !merged.has(m.id)) {
+      merged.set(m.id, {
+        id: m.id,
+        role: m.type,
         content: m.content,
         timestamp: m.timestamp,
         provider: m.provider,
