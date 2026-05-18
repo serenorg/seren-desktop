@@ -586,7 +586,7 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
 
 const PlaceholderPane: Component<{ focused: boolean }> = (props) => (
   <div
-    class="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground/70 select-none"
+    class="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground select-none"
     classList={{
       "bg-surface-1/40": props.focused,
     }}
@@ -598,7 +598,7 @@ const PlaceholderPane: Component<{ focused: boolean }> = (props) => (
       fill="none"
       role="img"
       aria-label="Empty pane"
-      class="opacity-30"
+      class="opacity-65"
     >
       <rect
         x="3"
@@ -617,7 +617,7 @@ const PlaceholderPane: Component<{ focused: boolean }> = (props) => (
         stroke-linecap="round"
       />
     </svg>
-    <p class="text-[12px] leading-tight max-w-[220px] text-center">
+    <p class="m-0 text-[13px] leading-normal max-w-[240px] text-center">
       Empty pane. Pick a thread from the sidebar or open a new one.
     </p>
   </div>
@@ -630,7 +630,7 @@ function EmptyState() {
 
   return (
     <div class="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-      <div class="opacity-40">
+      <div class="opacity-65">
         <svg
           width="48"
           height="48"
@@ -647,21 +647,21 @@ function EmptyState() {
             rx="4"
             stroke="currentColor"
             stroke-width="1.5"
-            opacity="0.3"
+            opacity="0.55"
           />
           <path
             d="M16 20h16M16 26h10"
             stroke="currentColor"
             stroke-width="1.5"
             stroke-linecap="round"
-            opacity="0.3"
+            opacity="0.55"
           />
         </svg>
       </div>
-      <h2 class="text-base font-medium text-foreground opacity-70 m-0">
+      <h2 class="text-base font-medium text-foreground m-0">
         No thread selected
       </h2>
-      <p class="text-[13px] opacity-50 m-0 max-w-[280px] text-center leading-relaxed">
+      <p class="text-[13px] m-0 max-w-[280px] text-center leading-relaxed">
         Create a new chat or agent thread from the sidebar to get started.
       </p>
 

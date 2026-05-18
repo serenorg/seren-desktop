@@ -126,6 +126,7 @@ const COLOR_BG = "#090b0f";
 const COLOR_FG = "#d7dde8";
 const COLOR_CURSOR = "#d7dde8";
 const COLOR_CURSOR_FG = "#090b0f";
+const DIM_ALPHA = 0.82;
 
 // Color packing matches src-tauri/src/terminal.rs:
 //   0xFFFFFFFF       = default (renderer falls back to theme)
@@ -164,14 +165,34 @@ const ANSI_16 = [
   "#ffffff",
 ];
 
+const ANSI_16_FG = [
+  "#7c8798",
+  "#f14c4c",
+  "#23d18b",
+  "#f5f543",
+  "#4da3ff",
+  "#d670d6",
+  "#29b8db",
+  "#e5e5e5",
+  "#8b95a5",
+  "#ff6b6b",
+  "#32e39a",
+  "#ffff66",
+  "#69b7ff",
+  "#e58be5",
+  "#4fd7f3",
+  "#ffffff",
+];
+
 /**
  * Resolve a 256-color extended palette index (16..255) to a CSS color.
  * 16-231 are a 6x6x6 RGB cube; 232-255 are a 24-step grayscale ramp.
  */
-function palette256(idx: number): string {
-  if (idx < 16) return ANSI_16[idx];
+function palette256(idx: number, role: "fg" | "bg"): string {
+  if (idx < 16) return role === "fg" ? ANSI_16_FG[idx] : ANSI_16[idx];
   if (idx >= 232) {
-    const v = 8 + (idx - 232) * 10;
+    const raw = 8 + (idx - 232) * 10;
+    const v = role === "fg" ? Math.max(132, raw) : raw;
     return `rgb(${v},${v},${v})`;
   }
   const i = idx - 16;
@@ -197,10 +218,11 @@ function palette256(idx: number): string {
 function resolveColor(
   packed: number | undefined,
   defaultColor: string,
+  role: "fg" | "bg" = "fg",
 ): string {
   if (packed === undefined || packed === COLOR_DEFAULT) return defaultColor;
   if ((packed & 0xff000000) >>> 0 === COLOR_PALETTE_TAG) {
-    return palette256(packed & 0xff);
+    return palette256(packed & 0xff, role);
   }
   // 24-bit RGB in the low 24 bits. Truecolor packs always have the high
   // byte as 0x00, so the signed-shift quirk above doesn't apply here.
@@ -1299,7 +1321,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
         } else {
           const bgPacked = cell.bg;
           if (bgPacked === undefined || bgPacked === COLOR_DEFAULT) continue;
-          ctx.fillStyle = resolveColor(bgPacked, COLOR_BG);
+          ctx.fillStyle = resolveColor(bgPacked, COLOR_BG, "bg");
           ctx.fillRect(c * w, y, w, h);
         }
       }
@@ -1328,7 +1350,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
         const defaultFill = reverse ? COLOR_BG : COLOR_FG;
         const fill = resolveColor(fgPacked, defaultFill);
         if ((attrs & ATTR_DIM) !== 0) {
-          ctx.globalAlpha = 0.6;
+          ctx.globalAlpha = DIM_ALPHA;
         }
         const drawGlyph = cell.ch !== 0 && cell.width !== 0;
         if (drawGlyph) {
