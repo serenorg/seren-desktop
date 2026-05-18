@@ -57,4 +57,26 @@ describe("agent skill context priming", () => {
     expect(retrySend).toBeGreaterThan(0);
     expect(retryMark).toBeGreaterThan(retrySend);
   });
+
+  it("#1960 budgets full skill priming before dispatch and falls back to a compact manifest", () => {
+    const body = methodBody("async buildPromptContext");
+
+    expect(body).toContain("estimatePromptContextTokens");
+    expect(body).toContain("PROMPT_PRIMING_CONTEXT_BUDGET_FRACTION");
+    expect(body).toContain("projectedFullPrimingTokens");
+    expect(body).toContain('mode: "compact"');
+    expect(body).toContain("deliveredSkillsContent");
+  });
+
+  it("#1960 keeps full skill content in the signature even when compact content is delivered", () => {
+    const body = methodBody("async buildPromptContext");
+
+    const signatureIdx = body.indexOf("const currentSignature");
+    const compactIdx = body.indexOf('mode: "compact"');
+    const returnIdx = body.indexOf("newSignature: alreadyPrimed ? null : currentSignature");
+
+    expect(signatureIdx).toBeGreaterThan(0);
+    expect(compactIdx).toBeGreaterThan(signatureIdx);
+    expect(returnIdx).toBeGreaterThan(compactIdx);
+  });
 });
