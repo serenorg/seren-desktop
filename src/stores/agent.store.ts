@@ -1060,19 +1060,20 @@ function serializeAgentConversationMetadata(
  * Only user and assistant messages are stored — tool calls, diffs, and
  * internal events are transient and replayed by the provider.
  */
-function persistAgentMessage(conversationId: string, msg: AgentMessage): void {
+function persistAgentMessage(
+  conversationId: string,
+  msg: AgentMessage,
+  sessionAgentType: string | null,
+): void {
   if (msg.type !== "user" && msg.type !== "assistant") return;
   // Producer provenance: prefer an explicit value on the message, otherwise
-  // fall back to the agent type of whichever live session owns this thread.
-  let provider = msg.provider ?? null;
-  if (!provider) {
-    for (const session of Object.values(state.sessions)) {
-      if (session.conversationId === conversationId) {
-        provider = session.info.agentType;
-        break;
-      }
-    }
-  }
+  // fall back to the agent type of the session that produced this turn —
+  // which the caller passes in explicitly so we never walk `state.sessions`
+  // and risk picking a stale session that briefly shares a conversationId
+  // (e.g. during compaction-driven session swaps). User-authored rows are
+  // never stamped with producer provenance.
+  const provider =
+    msg.type === "user" ? null : (msg.provider ?? sessionAgentType);
   saveMessage(
     msg.id,
     conversationId,
@@ -4682,7 +4683,8 @@ Structured summary:`;
       userMessage,
     ]);
     const convoId = state.sessions[sessionId]?.conversationId;
-    if (convoId) persistAgentMessage(convoId, userMessage);
+    const userAgentType = state.sessions[sessionId]?.info.agentType ?? null;
+    if (convoId) persistAgentMessage(convoId, userMessage, userAgentType);
     // Discard any buffered chunks from the previous response
     clearChunkBuf(sessionId);
     setState("sessions", sessionId, "streamingContent", "");
@@ -5617,7 +5619,10 @@ Structured summary:`;
             cancelMsg,
           ]);
           const cancelConvoId = state.sessions[sessionId]?.conversationId;
-          if (cancelConvoId) persistAgentMessage(cancelConvoId, cancelMsg);
+          const cancelAgentType =
+            state.sessions[sessionId]?.info.agentType ?? null;
+          if (cancelConvoId)
+            persistAgentMessage(cancelConvoId, cancelMsg, cancelAgentType);
 
           // Transition back to "ready" so the UI unfreezes and the send
           // button reappears.  Without this the session stays stuck in
@@ -5682,7 +5687,10 @@ Structured summary:`;
               timeoutMsg,
             ]);
             const toConvoId = state.sessions[sessionId]?.conversationId;
-            if (toConvoId) persistAgentMessage(toConvoId, timeoutMsg);
+            const toAgentType =
+              state.sessions[sessionId]?.info.agentType ?? null;
+            if (toConvoId)
+              persistAgentMessage(toConvoId, timeoutMsg, toAgentType);
           }
         } else if (isTimeoutError(String(event.data.error))) {
           // Other timeout errors are often spurious race conditions where the error
@@ -5879,7 +5887,11 @@ Structured summary:`;
     };
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, userMsg]);
     if (session.conversationId)
-      persistAgentMessage(session.conversationId, userMsg);
+      persistAgentMessage(
+        session.conversationId,
+        userMsg,
+        session.info.agentType,
+      );
     setState("sessions", sessionId, "pendingUserMessage", "");
     setState("sessions", sessionId, "pendingUserMessageId", undefined);
     setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
@@ -6078,7 +6090,11 @@ Structured summary:`;
         thinkingMsg,
       ]);
       if (session.conversationId)
-        persistAgentMessage(session.conversationId, thinkingMsg);
+        persistAgentMessage(
+          session.conversationId,
+          thinkingMsg,
+          session.info.agentType,
+        );
       setState("sessions", sessionId, "streamingThinking", "");
       setState("sessions", sessionId, "streamingThinkingTimestamp", undefined);
     }
@@ -6125,7 +6141,11 @@ Structured summary:`;
 
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
     if (session.conversationId)
-      persistAgentMessage(session.conversationId, message);
+      persistAgentMessage(
+        session.conversationId,
+        message,
+        session.info.agentType,
+      );
   },
 
   handleToolResult(
@@ -6163,7 +6183,11 @@ Structured summary:`;
       (m: AgentMessage) => m.toolCallId === toolCallId,
     );
     if (updatedToolMsg && session.conversationId) {
-      persistAgentMessage(session.conversationId, updatedToolMsg);
+      persistAgentMessage(
+        session.conversationId,
+        updatedToolMsg,
+        session.info.agentType,
+      );
     }
 
     // Remove from pending
@@ -6205,7 +6229,11 @@ Structured summary:`;
     if (session.conversationId) {
       for (const msg of state.sessions[sessionId]?.messages ?? []) {
         if (msg.toolCall && msg.toolCall.status === "completed") {
-          persistAgentMessage(session.conversationId, msg);
+          persistAgentMessage(
+            session.conversationId,
+            msg,
+            session.info.agentType,
+          );
         }
       }
     }
@@ -6263,7 +6291,11 @@ Structured summary:`;
         m.diff?.path === diff.path,
     );
     if (storedDiff && session.conversationId) {
-      persistAgentMessage(session.conversationId, storedDiff);
+      persistAgentMessage(
+        session.conversationId,
+        storedDiff,
+        session.info.agentType,
+      );
     }
   },
 
@@ -6407,7 +6439,11 @@ Structured summary:`;
         thinkingMessage,
       ]);
       if (session.conversationId)
-        persistAgentMessage(session.conversationId, thinkingMessage);
+        persistAgentMessage(
+          session.conversationId,
+          thinkingMessage,
+          session.info.agentType,
+        );
       setState("sessions", sessionId, "streamingThinking", "");
       setState("sessions", sessionId, "streamingThinkingTimestamp", undefined);
     }
@@ -6472,7 +6508,11 @@ Structured summary:`;
       );
       setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
       if (session.conversationId)
-        persistAgentMessage(session.conversationId, message);
+        persistAgentMessage(
+          session.conversationId,
+          message,
+          session.info.agentType,
+        );
 
       // Persist the assistant turn to Seren memory so future sessions (agent
       // or chat) can recall this conversation via memory_bootstrap. Gated by
@@ -6675,7 +6715,8 @@ Structured summary:`;
 
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
     const errConvoId = session?.conversationId;
-    if (errConvoId) persistAgentMessage(errConvoId, message);
+    const errAgentType = session?.info.agentType ?? null;
+    if (errConvoId) persistAgentMessage(errConvoId, message, errAgentType);
     // Set session-specific error instead of global error
     setState("sessions", sessionId, "error", prefixedError);
   },

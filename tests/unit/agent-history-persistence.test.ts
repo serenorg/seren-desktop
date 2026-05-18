@@ -15,10 +15,55 @@ describe("agent message persistence guards", () => {
     const fnStart = agentStoreSource.indexOf(
       "function persistAgentMessage(",
     );
-    const fnBody = agentStoreSource.slice(fnStart, fnStart + 300);
+    const fnBody = agentStoreSource.slice(fnStart, fnStart + 600);
     expect(fnBody).toContain(
       'if (msg.type !== "user" && msg.type !== "assistant") return',
     );
+  });
+
+  it("persistAgentMessage takes an explicit session agent type, not a state lookup", () => {
+    // Walking `state.sessions` to discover a session's agent type from a
+    // bare conversationId is racy when two sessions briefly coexist on
+    // one thread (e.g. compaction-driven session swaps). The function
+    // must accept the producer agent type as an argument so callers pass
+    // their own `session.info.agentType` and there is no ambiguity.
+    const fnStart = agentStoreSource.indexOf(
+      "function persistAgentMessage(",
+    );
+    const fnEnd = agentStoreSource.indexOf(
+      "\n}\n",
+      agentStoreSource.indexOf("saveMessage(", fnStart),
+    );
+    const fnSource = agentStoreSource.slice(fnStart, fnEnd);
+
+    expect(fnSource).toMatch(/sessionAgentType:\s*string\s*\|\s*null/);
+    expect(fnSource).not.toContain("for (const session of Object.values");
+    expect(fnSource).not.toContain(
+      "session.conversationId === conversationId",
+    );
+  });
+
+  it("every persistAgentMessage call site passes a producer agent type", () => {
+    // Each call must include an `agentType` value within the call so the
+    // refactor that removed the in-function `state.sessions` walk cannot
+    // be partially reintroduced by adding a new call site that omits the
+    // producer arg.
+    const matches = Array.from(
+      agentStoreSource.matchAll(/persistAgentMessage\(/g),
+    );
+    const defOffset = agentStoreSource.indexOf("function persistAgentMessage(");
+    const callOffsets = matches
+      .map((m) => m.index ?? -1)
+      .filter((idx) => idx !== defOffset && idx >= 0);
+
+    expect(callOffsets.length).toBeGreaterThan(0);
+    for (const offset of callOffsets) {
+      const callWindow = agentStoreSource.slice(offset, offset + 300);
+      expect(
+        /agentType|AgentType/.test(callWindow),
+        `call at offset ${offset} does not pass an agent type within 300 chars: ${callWindow.slice(0, 120)}…`,
+      ).toBe(true);
+    }
   });
 
   it("handleToolCall does NOT persist intermediate streaming flush", () => {

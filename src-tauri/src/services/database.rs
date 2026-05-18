@@ -275,8 +275,6 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     )
     .ok();
 
-    setup_provider_runtime_schema(conn)?;
-
     // Helpful indexes for agent history lookups (safe to run repeatedly).
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_conversations_kind_created_at ON conversations(kind, created_at DESC)",
@@ -499,6 +497,8 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     // Migration: Create default conversation for orphan messages
     migrate_orphan_messages(conn)?;
 
+    setup_provider_runtime_schema(conn)?;
+
     Ok(())
 }
 
@@ -525,8 +525,9 @@ fn setup_provider_runtime_schema(conn: &Connection) -> Result<()> {
             conn.execute("ALTER TABLE messages ADD COLUMN provider TEXT", [])?;
             // Backfill best-effort from the owning conversation. Chat threads
             // use the conversation's currently selected provider; agent
-            // threads use their agent type. Historical accuracy is not
-            // claimed; the column is producer provenance for new rows.
+            // threads use their agent type. `provider` is producer provenance
+            // so user-authored rows stay NULL; only assistant/system/tool
+            // rows get a producer attribution.
             conn.execute(
                 "UPDATE messages
                  SET provider = (
@@ -537,7 +538,9 @@ fn setup_provider_runtime_schema(conn: &Connection) -> Result<()> {
                      FROM conversations c
                      WHERE c.id = messages.conversation_id
                  )
-                 WHERE provider IS NULL",
+                 WHERE provider IS NULL
+                   AND role <> 'user'
+                   AND conversation_id IS NOT NULL",
                 [],
             )?;
         }
@@ -613,6 +616,7 @@ fn migrate_orphan_messages(conn: &Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
 
     #[test]
     fn schema_creates_metadata_column() {
@@ -915,6 +919,189 @@ mod tests {
             )
             .unwrap();
         assert_eq!(agent_provider, Some("codex".to_string()));
+    }
+
+    #[test]
+    fn provenance_backfill_skips_user_authored_rows() {
+        // Producer provenance only: backfill should never attribute a user
+        // message to a provider, because the user did not produce it.
+        let conn = Connection::open_in_memory().unwrap();
+
+        conn.execute(
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                selected_model TEXT,
+                selected_provider TEXT,
+                is_archived INTEGER DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'chat',
+                agent_type TEXT
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                model TEXT,
+                timestamp INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, selected_provider)
+             VALUES ('c1', 'Chat', 1000, 'chat', 'seren')",
+            [],
+        )
+        .unwrap();
+        // One user row, one assistant row, one tool row, one system row.
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp) VALUES
+             ('u1', 'c1', 'user', 'hi', 1001),
+             ('a1', 'c1', 'assistant', 'hello', 1002),
+             ('t1', 'c1', 'tool', 'result', 1003),
+             ('s1', 'c1', 'system', 'note', 1004)",
+            [],
+        )
+        .unwrap();
+
+        setup_schema(&conn).unwrap();
+
+        let user_provider: Option<String> = conn
+            .query_row(
+                "SELECT provider FROM messages WHERE id = 'u1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            user_provider, None,
+            "user-authored rows must not receive producer provenance"
+        );
+
+        for id in ["a1", "t1", "s1"] {
+            let p: Option<String> = conn
+                .query_row(
+                    "SELECT provider FROM messages WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                p,
+                Some("seren".to_string()),
+                "row {id} should have backfilled provider"
+            );
+        }
+    }
+
+    #[test]
+    fn provenance_backfill_skips_orphan_messages_without_conversation_id() {
+        // Orphan rows (no conversation_id) cannot be attributed to a
+        // provider — the backfill must leave them NULL rather than blindly
+        // running a correlated subquery that returns NULL anyway.
+        let conn = Connection::open_in_memory().unwrap();
+
+        conn.execute(
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                selected_model TEXT,
+                selected_provider TEXT,
+                is_archived INTEGER DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'chat',
+                agent_type TEXT
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                model TEXT,
+                timestamp INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp)
+             VALUES ('orphan', NULL, 'assistant', 'hi', 1000)",
+            [],
+        )
+        .unwrap();
+
+        setup_schema(&conn).unwrap();
+
+        // migrate_orphan_messages reassigns the orphan to 'default-conversation',
+        // but that synthetic conversation has no selected_provider. The
+        // producer is unknown, so the backfill must leave provider NULL.
+        let provider: Option<String> = conn
+            .query_row(
+                "SELECT provider FROM messages WHERE id = 'orphan'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(provider, None);
+    }
+
+    #[test]
+    fn provenance_migration_handles_pre_conversation_id_message_table() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        conn.execute(
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                selected_model TEXT,
+                selected_provider TEXT,
+                is_archived INTEGER DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'chat',
+                agent_type TEXT
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                model TEXT,
+                timestamp INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (id, role, content, timestamp)
+             VALUES ('legacy', 'assistant', 'hi', 1000)",
+            [],
+        )
+        .unwrap();
+
+        setup_schema(&conn).unwrap();
+
+        let (conversation_id, provider): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT conversation_id, provider FROM messages WHERE id = 'legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(conversation_id, Some("default-conversation".to_string()));
+        assert_eq!(provider, None);
     }
 
     #[test]

@@ -2,7 +2,7 @@
 // ABOUTME: Stores conversations, messages, and provides persistence via Tauri.
 
 import { createStore } from "solid-js/store";
-import type { ProviderId } from "@/lib/providers/types";
+import { PROVIDER_CONFIGS, type ProviderId } from "@/lib/providers/types";
 import {
   archiveConversation as archiveConversationDb,
   clearAllHistory as clearAllHistoryDb,
@@ -12,6 +12,7 @@ import {
   getConversations as getConversationsDb,
   getMessages as getMessagesDb,
   saveMessage as saveMessageDb,
+  switchThreadProvider as switchThreadProviderBridge,
   updateConversation as updateConversationDb,
 } from "@/lib/tauri-bridge";
 import {
@@ -21,10 +22,17 @@ import {
 } from "@/lib/token-counter";
 import type { Message } from "@/services/chat";
 import { sendMessage } from "@/services/chat";
+import type { AgentType } from "@/services/providers";
 import { providerStore } from "@/stores/provider.store";
 
 const DEFAULT_MODEL = "arcee-ai/trinity-large-thinking";
 const MAX_MESSAGES_PER_CONVERSATION = 1000;
+
+function isChatProvider(
+  provider: ProviderId | AgentType | null,
+): provider is ProviderId {
+  return !!provider && provider in PROVIDER_CONFIGS;
+}
 
 /**
  * A pre-compaction user/assistant message preserved under the summary card so
@@ -56,7 +64,7 @@ export interface Conversation {
   title: string;
   createdAt: number;
   selectedModel: string;
-  selectedProvider: ProviderId | null;
+  selectedProvider: ProviderId | AgentType | null;
   isArchived: boolean;
   compactedSummary?: CompactedSummary;
   /** Reasoning effort level: "minimal" | "low" | "medium" | "high" | "xhigh". */
@@ -113,7 +121,7 @@ function dbToConversation(db: DbConversation): Conversation {
     title: db.title,
     createdAt: db.created_at,
     selectedModel: db.selected_model ?? DEFAULT_MODEL,
-    selectedProvider: (db.selected_provider as ProviderId) ?? null,
+    selectedProvider: (db.selected_provider as ProviderId | AgentType) ?? null,
     isArchived: db.is_archived,
   };
 }
@@ -317,17 +325,33 @@ export const chatStore = {
   },
 
   /**
-   * Update conversation's selected model.
+   * Update conversation's selected model. When the conversation has (or
+   * the caller supplies) a bound provider, write through
+   * `switch_thread_provider` so the runtime row and the compatibility
+   * columns stay in lockstep. Legacy threads with no provider binding fall
+   * back to the direct `conversations` update so we do not invent a
+   * provider value just to satisfy the runtime row.
    */
   async updateConversationModel(
     id: string,
     model: string,
-    provider?: ProviderId,
+    provider?: ProviderId | AgentType,
   ) {
+    const existing = state.conversations.find((c) => c.id === id);
+    const effectiveProvider = provider ?? existing?.selectedProvider ?? null;
+
     try {
-      await updateConversationDb(id, undefined, model, provider);
+      if (effectiveProvider) {
+        await switchThreadProviderBridge(id, effectiveProvider, model);
+      } else {
+        await updateConversationDb(id, undefined, model, undefined);
+      }
     } catch (error) {
+      // Persist failed (e.g. stale runtime binding, thread not found).
+      // Leave the in-memory row alone so the cached binding keeps matching
+      // the persisted row instead of silently diverging.
       console.warn("Failed to update conversation model", error);
+      return;
     }
 
     setState("conversations", (convos) =>
@@ -349,7 +373,7 @@ export const chatStore = {
    */
   applyRuntimeBindingSync(
     id: string,
-    selectedProvider: ProviderId,
+    selectedProvider: ProviderId | AgentType,
     selectedModel: string,
   ) {
     setState("conversations", (convos) =>
@@ -464,7 +488,10 @@ export const chatStore = {
     // can attribute the row even before Phase 2 plumbs runtime state through
     // every send path.
     const convo = state.conversations.find((c) => c.id === conversationId);
-    const provider = message.provider ?? convo?.selectedProvider ?? null;
+    const provider =
+      message.role === "user"
+        ? null
+        : (message.provider ?? convo?.selectedProvider ?? null);
 
     try {
       await saveMessageDb(
@@ -625,8 +652,10 @@ Structured summary:`;
       const activeConvo = state.conversations.find(
         (c) => c.id === conversationId,
       );
-      const compactionProvider =
-        activeConvo?.selectedProvider ?? providerStore.activeProvider;
+      const selectedProvider = activeConvo?.selectedProvider ?? null;
+      const compactionProvider: ProviderId = isChatProvider(selectedProvider)
+        ? selectedProvider
+        : providerStore.activeProvider;
       const summary = await sendMessage(
         summaryPrompt,
         activeConvo?.selectedModel ?? this.selectedModel,

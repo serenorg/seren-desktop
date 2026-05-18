@@ -980,13 +980,26 @@ function handleReroute(
     startTime: Date.now(),
   });
 
-  // Update UI to reflect the actual model being used after automatic fallback
-  providerStore.setActiveModel(event.to_model);
-  chatStore.setModel(event.to_model);
+  // Update UI to reflect the actual model being used after automatic fallback.
+  // chatStore.setModel and providerStore are picker mirrors keyed to whichever
+  // thread the user has visible; only sync them when the rerouting thread is
+  // the active one so a background reroute on thread A cannot rewrite thread
+  // B's selected model. Persist the rerouted thread's own selectedProvider so
+  // the runtime row stays paired with the new model instead of inheriting the
+  // global picker's provider.
+  const reroutedConv = conversationStore.conversations.find(
+    (c) => c.id === conversationId,
+  );
+  const reroutedProvider =
+    reroutedConv?.selectedProvider ?? providerStore.activeProvider;
+  if (conversationId === chatStore.activeConversationId) {
+    providerStore.setActiveModel(event.to_model);
+    chatStore.setModel(event.to_model);
+  }
   void conversationStore.updateConversationSelection(
     conversationId,
     event.to_model,
-    providerStore.activeProvider,
+    reroutedProvider,
   );
 
   // Add a reroute announcement message to the conversation
@@ -1081,7 +1094,11 @@ function buildCapabilities(
       : null,
     selected_model: forcePrivateChat
       ? (() => {
-          const selected = chatStore.selectedModel?.trim();
+          // Read the model bound to THIS thread (passed in by the caller),
+          // not the chatStore's globally-active conversation. Otherwise a
+          // background orchestration on thread A would pick up thread B's
+          // model whenever the user has B selected.
+          const selected = model?.trim();
           if (
             !selected ||
             selected === AUTO_MODEL_ID ||

@@ -23,6 +23,7 @@ import { allowsSerenPublicModels } from "@/services/organization-policy";
 import { privateModelsService } from "@/services/private-models";
 import {
   evaluateChatSwitchGuard,
+  type SwitchBlockedReason,
   switchChatProvider,
 } from "@/services/provider-bindings";
 import { authStore } from "@/stores/auth.store";
@@ -68,7 +69,24 @@ export const ModelSelector: Component = () => {
                 models.find((model) => model.id === policyDefault)?.id) ||
               models[0]?.id;
             if (fallback) {
-              chatStore.setModel(fallback);
+              const conversationId = untrack(
+                () => conversationStore.activeConversationId,
+              );
+              if (conversationId && !evaluateChatSwitchGuard(conversationId)) {
+                void switchChatProvider(
+                  conversationId,
+                  "seren-private",
+                  fallback,
+                ).catch((error) => {
+                  console.warn(
+                    "[ModelSelector] private model fallback switch failed:",
+                    error,
+                  );
+                });
+              } else if (!conversationId) {
+                providerStore.setActiveModel(fallback);
+                chatStore.setModel(fallback);
+              }
             }
           }
           return;
@@ -170,6 +188,29 @@ export const ModelSelector: Component = () => {
     return models[0];
   };
 
+  const describeSwitchBlock = (reason: SwitchBlockedReason): string => {
+    switch (reason.kind) {
+      case "streaming":
+        return "Cannot switch model while a response is streaming.";
+      case "loading":
+        return "Cannot switch model while a turn is in flight.";
+      case "rlm-processing":
+        return "Cannot switch model while the router is processing.";
+      case "compacting":
+        return "Cannot switch model while the thread is compacting.";
+      case "retrying":
+        return "Cannot switch model while a message is retrying.";
+      case "no-active-thread":
+        return "No active conversation to switch.";
+    }
+  };
+
+  const reportSwitchFailure = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    conversationStore.setError(`Switching provider failed: ${message}`);
+    console.warn("[ModelSelector] switch failed:", error);
+  };
+
   /**
    * Switch the active thread to a new model on its current provider. If
    * no chat thread is active, fall back to mutating the global picker
@@ -184,7 +225,9 @@ export const ModelSelector: Component = () => {
       return;
     }
 
-    if (evaluateChatSwitchGuard(conversationId)) {
+    const blocked = evaluateChatSwitchGuard(conversationId);
+    if (blocked) {
+      conversationStore.setError(describeSwitchBlock(blocked));
       setIsOpen(false);
       return;
     }
@@ -193,9 +236,7 @@ export const ModelSelector: Component = () => {
       conversationId,
       providerStore.activeProvider,
       modelId,
-    ).catch((error) =>
-      console.warn("[ModelSelector] Failed to switch model:", error),
-    );
+    ).catch(reportSwitchFailure);
     setIsOpen(false);
   };
 
@@ -207,7 +248,6 @@ export const ModelSelector: Component = () => {
    */
   const selectProvider = (providerId: ProviderId) => {
     const models = providerStore.getModels(providerId);
-    const fallbackModel = models[0]?.id ?? providerStore.activeModel;
 
     const conversationId = conversationStore.activeConversationId;
     if (!conversationId) {
@@ -219,13 +259,26 @@ export const ModelSelector: Component = () => {
       return;
     }
 
-    if (evaluateChatSwitchGuard(conversationId)) {
+    const blocked = evaluateChatSwitchGuard(conversationId);
+    if (blocked) {
+      conversationStore.setError(describeSwitchBlock(blocked));
+      return;
+    }
+
+    // The runtime row pairs provider+model atomically; refusing to switch
+    // when the target provider has no curated models keeps us from
+    // persisting the previous provider's model id against the new
+    // provider, which would render the row meaningless.
+    const fallbackModel = models[0]?.id;
+    if (!fallbackModel) {
+      conversationStore.setError(
+        `No models available for ${PROVIDER_CONFIGS[providerId].name}.`,
+      );
       return;
     }
 
     void switchChatProvider(conversationId, providerId, fallbackModel).catch(
-      (error) =>
-        console.warn("[ModelSelector] Failed to switch provider:", error),
+      reportSwitchFailure,
     );
   };
 
@@ -253,14 +306,6 @@ export const ModelSelector: Component = () => {
 
   onCleanup(() => {
     document.removeEventListener("click", handleDocumentClick);
-  });
-
-  // Sync chat store model with provider store
-  createEffect(() => {
-    const model = providerStore.activeModel;
-    if (model && model !== chatStore.selectedModel) {
-      chatStore.setModel(model);
-    }
   });
 
   if (isPrivateChat() && authStore.privateChatPolicy?.hide_model_picker) {

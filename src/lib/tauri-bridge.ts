@@ -1232,6 +1232,7 @@ export async function switchThreadProvider(
   targetProvider: string,
   targetModel?: string | null,
   bootstrapContext?: string | null,
+  expectedUpdatedAt?: number | null,
 ): Promise<ProviderSessionRuntime> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -1242,5 +1243,6 @@ export async function switchThreadProvider(
     targetProvider,
     targetModel: targetModel ?? null,
     bootstrapContext: bootstrapContext ?? null,
+    expectedUpdatedAt: expectedUpdatedAt ?? null,
   });
 }

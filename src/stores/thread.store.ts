@@ -2,7 +2,7 @@
 // ABOUTME: Presents chats and agent sessions as a single sorted thread list filtered by project.
 
 import { createStore } from "solid-js/store";
-import type { ProviderId } from "@/lib/providers/types";
+import { PROVIDER_CONFIGS, type ProviderId } from "@/lib/providers/types";
 import { type InstalledSkill, parseSkillMd } from "@/lib/skills";
 import { archiveAgentConversation } from "@/lib/tauri-bridge";
 import {
@@ -29,6 +29,10 @@ const LAST_ACTIVE_THREAD_KEY = "seren:lastActiveThread";
 const PROJECT_ORDER_KEY = "seren:projectOrder";
 
 export type ThreadKind = "chat" | "agent" | "terminal" | "editor";
+
+function isChatProvider(provider: string | null): provider is ProviderId {
+  return !!provider && provider in PROVIDER_CONFIGS;
+}
 
 function persistLastActiveThread(id: string, kind: ThreadKind): void {
   try {
@@ -501,7 +505,9 @@ export const threadStore = {
       );
       if (conversation) {
         providerStore.setActiveProvider(
-          conversation.selectedProvider ?? "seren",
+          isChatProvider(conversation.selectedProvider)
+            ? conversation.selectedProvider
+            : "seren",
         );
         providerStore.setActiveModel(
           conversation.selectedModel || AUTO_MODEL_ID,

@@ -10,6 +10,16 @@ vi.mock("@/lib/tauri-bridge", () => ({
   getMessages: vi.fn().mockResolvedValue([]),
   saveMessage: vi.fn().mockResolvedValue(undefined),
   updateConversation: vi.fn().mockResolvedValue(undefined),
+  switchThreadProvider: vi.fn().mockResolvedValue({
+    thread_id: "stub",
+    provider: "seren",
+    model: null,
+    native_session_id: null,
+    resume_cursor_json: null,
+    status: "active",
+    bootstrap_context: null,
+    updated_at: 0,
+  }),
   archiveConversation: vi.fn().mockResolvedValue(undefined),
   clearConversationHistory: vi.fn().mockResolvedValue(undefined),
   clearAllHistory: vi.fn().mockResolvedValue(undefined),
@@ -308,6 +318,148 @@ describe("conversationStore", () => {
         "gemini",
       );
     });
+
+    it("does not stamp user-authored rows with producer provenance", async () => {
+      const { saveMessage } = await import("@/lib/tauri-bridge");
+      const convo = await conversationStore.createConversationWithModel(
+        "User row",
+        "claude-sonnet-4",
+        undefined,
+        "seren-private",
+      );
+
+      const msg = makeMessage({
+        type: "user",
+        role: "user",
+        content: "hello",
+      });
+      conversationStore.addMessage(msg, convo.id);
+      await conversationStore.persistMessage(msg, convo.id);
+
+      expect(saveMessage).toHaveBeenCalledWith(
+        msg.id,
+        convo.id,
+        "user",
+        msg.content,
+        null,
+        msg.timestamp,
+        null,
+        null,
+      );
+    });
+  });
+
+  describe("updateConversationSelection", () => {
+    it("routes through switch_thread_provider when a provider is supplied", async () => {
+      const bridge = await import("@/lib/tauri-bridge");
+      const convo = await conversationStore.createConversationWithModel(
+        "Rerouted",
+        "claude-sonnet-4",
+        undefined,
+        "seren",
+      );
+
+      await conversationStore.updateConversationSelection(
+        convo.id,
+        "anthropic/claude-opus-4-7",
+        "seren-private",
+      );
+
+      expect(bridge.switchThreadProvider).toHaveBeenCalledWith(
+        convo.id,
+        "seren-private",
+        "anthropic/claude-opus-4-7",
+      );
+      expect(bridge.updateConversation).not.toHaveBeenCalled();
+    });
+
+    it("falls back to direct conversation update when provider is null", async () => {
+      const bridge = await import("@/lib/tauri-bridge");
+      const convo = await conversationStore.createConversation("Legacy");
+
+      await conversationStore.updateConversationSelection(
+        convo.id,
+        "claude-sonnet-4",
+        null,
+      );
+
+      expect(bridge.switchThreadProvider).not.toHaveBeenCalled();
+      expect(bridge.updateConversation).toHaveBeenCalledWith(
+        convo.id,
+        undefined,
+        "claude-sonnet-4",
+        undefined,
+      );
+    });
+
+    it("updates in-memory state so subsequent reads see the new binding", async () => {
+      const convo = await conversationStore.createConversationWithModel(
+        "Reread",
+        "claude-sonnet-4",
+        undefined,
+        "seren",
+      );
+
+      await conversationStore.updateConversationSelection(
+        convo.id,
+        "anthropic/claude-opus-4-7",
+        "seren-private",
+      );
+
+      const updated = conversationStore.conversations.find(
+        (c) => c.id === convo.id,
+      );
+      expect(updated?.selectedProvider).toBe("seren-private");
+      expect(updated?.selectedModel).toBe("anthropic/claude-opus-4-7");
+    });
+
+    it("leaves the in-memory row unchanged when the bridge rejects", async () => {
+      const bridge = await import("@/lib/tauri-bridge");
+      const convo = await conversationStore.createConversationWithModel(
+        "Stale",
+        "claude-sonnet-4",
+        undefined,
+        "seren",
+      );
+      vi.mocked(bridge.switchThreadProvider).mockRejectedValueOnce(
+        new Error("stale runtime binding"),
+      );
+
+      await conversationStore.updateConversationSelection(
+        convo.id,
+        "anthropic/claude-opus-4-7",
+        "seren-private",
+      );
+
+      const after = conversationStore.conversations.find(
+        (c) => c.id === convo.id,
+      );
+      expect(after?.selectedProvider).toBe("seren");
+      expect(after?.selectedModel).toBe("claude-sonnet-4");
+    });
+
+    it("leaves the in-memory row unchanged when the direct update rejects", async () => {
+      const bridge = await import("@/lib/tauri-bridge");
+      const convo = await conversationStore.createConversationWithModel(
+        "LegacyStale",
+        "claude-sonnet-4",
+      );
+      vi.mocked(bridge.updateConversation).mockRejectedValueOnce(
+        new Error("db unavailable"),
+      );
+
+      await conversationStore.updateConversationSelection(
+        convo.id,
+        "anthropic/claude-opus-4-7",
+        null,
+      );
+
+      const after = conversationStore.conversations.find(
+        (c) => c.id === convo.id,
+      );
+      expect(after?.selectedModel).toBe("claude-sonnet-4");
+      expect(after?.selectedProvider).toBeNull();
+    });
   });
 
   describe("loadHistory", () => {
@@ -334,6 +486,7 @@ describe("conversationStore", () => {
           model: "claude-sonnet-4",
           timestamp: 2000,
           metadata: null,
+          provider: null,
         },
       ]);
 
@@ -373,6 +526,7 @@ describe("conversationStore", () => {
             model_id: "gemini-2.5-flash",
             task_type: "code_generation",
           }),
+          provider: null,
         },
       ]);
 
@@ -417,6 +571,7 @@ describe("conversationStore", () => {
               arguments: "{}",
             },
           }),
+          provider: null,
         },
         {
           id: "msg-result",
@@ -434,6 +589,7 @@ describe("conversationStore", () => {
               name: "list_projects",
             },
           }),
+          provider: null,
         },
       ]);
 

@@ -12,8 +12,10 @@ import {
   getConversations as getConversationsDb,
   getMessages as getMessagesDb,
   saveMessage as saveMessageDb,
+  switchThreadProvider as switchThreadProviderBridge,
   updateConversation as updateConversationDb,
 } from "@/lib/tauri-bridge";
+import type { AgentType } from "@/services/providers";
 import type { UnifiedMessage } from "@/types/conversation";
 import { deserializeMetadata, serializeMetadata } from "@/types/conversation";
 
@@ -25,7 +27,7 @@ export interface Conversation {
   title: string;
   createdAt: number;
   selectedModel: string;
-  selectedProvider: ProviderId | null;
+  selectedProvider: ProviderId | AgentType | null;
   projectRoot: string | null;
   isArchived: boolean;
   employeeId: string | null;
@@ -61,7 +63,7 @@ function dbToConversation(db: DbConversation): Conversation {
     title: db.title,
     createdAt: db.created_at,
     selectedModel: db.selected_model ?? DEFAULT_MODEL,
-    selectedProvider: (db.selected_provider as ProviderId) ?? null,
+    selectedProvider: (db.selected_provider as ProviderId | AgentType) ?? null,
     projectRoot: db.project_root ?? null,
     isArchived: db.is_archived,
     employeeId: db.employee_id ?? null,
@@ -186,7 +188,7 @@ export const conversationStore = {
     title: string,
     model: string,
     projectRoot?: string,
-    selectedProvider?: ProviderId | null,
+    selectedProvider?: ProviderId | AgentType | null,
     employeeId?: string | null,
   ): Promise<Conversation> {
     const id = crypto.randomUUID();
@@ -302,17 +304,26 @@ export const conversationStore = {
   async updateConversationSelection(
     id: string,
     selectedModel: string,
-    selectedProvider: ProviderId | null,
+    selectedProvider: ProviderId | AgentType | null,
   ) {
+    // Auto-reroute and other programmatic writers land here mid-stream;
+    // the bridge command is unguarded by design (the TS-side guard lives
+    // in the user-initiated `switchChatProvider` service). Route through
+    // the atomic switch when we have a provider so the runtime row and
+    // compatibility columns stay paired. Threads with no recorded
+    // provider fall back to the legacy direct update.
     try {
-      await updateConversationDb(
-        id,
-        undefined,
-        selectedModel,
-        selectedProvider ?? undefined,
-      );
+      if (selectedProvider) {
+        await switchThreadProviderBridge(id, selectedProvider, selectedModel);
+      } else {
+        await updateConversationDb(id, undefined, selectedModel, undefined);
+      }
     } catch (error) {
+      // Persist failed (e.g. stale runtime binding, thread not found).
+      // Leave the in-memory row alone so the cached binding keeps matching
+      // the persisted row instead of silently diverging.
       console.warn("Failed to update conversation selection", error);
+      return;
     }
 
     setState("conversations", (convos) =>
@@ -336,7 +347,7 @@ export const conversationStore = {
    */
   applyRuntimeBindingSync(
     id: string,
-    selectedProvider: ProviderId,
+    selectedProvider: ProviderId | AgentType,
     selectedModel: string,
   ) {
     setState("conversations", (convos) =>
@@ -450,7 +461,10 @@ export const conversationStore = {
     if (!conversationId) return;
 
     const convo = state.conversations.find((c) => c.id === conversationId);
-    const provider = message.provider ?? convo?.selectedProvider ?? null;
+    const provider =
+      message.role === "user"
+        ? null
+        : (message.provider ?? convo?.selectedProvider ?? null);
 
     try {
       const metadata = serializeMetadata(message);

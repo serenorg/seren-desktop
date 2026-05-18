@@ -68,20 +68,52 @@ describe("buildProviderBootstrapContext", () => {
     expect(recap).not.toContain("m44");
   });
 
-  it("stops at the overall byte budget even when room remains in maxMessages", () => {
-    const messages = Array.from({ length: 30 }, (_, i) => ({
+  it("enforces the overall byte budget end-to-end", () => {
+    const messages = Array.from({ length: 30 }, () => ({
       role: "user" as const,
       content: "x".repeat(200),
     }));
     const recap = buildProviderBootstrapContext(messages, {
       perMessageChars: 200,
       maxMessages: 30,
-      overallBudget: 500,
+      overallBudgetBytes: 1500,
     });
-    // Budget is small enough that very few of the 30 entries can fit.
-    const lines = recap
-      .split("\n")
-      .filter((l) => l.startsWith("[USER]:"));
-    expect(lines.length).toBeLessThan(5);
+    // The full recap (header + entries + footer) must not exceed the
+    // configured byte budget; the test pins actual enforcement, not just
+    // that the loop eventually stops.
+    expect(new TextEncoder().encode(recap).length).toBeLessThanOrEqual(1500);
+  });
+
+  it("counts UTF-8 bytes for multi-byte content, not UTF-16 code units", () => {
+    // Each four-byte UTF-8 emoji is two UTF-16 code units; a string-length
+    // check would let roughly 2x as many through and silently bust the
+    // budget the caller specified.
+    const emoji = "\u{1F600}"; // four UTF-8 bytes
+    const messages = Array.from({ length: 50 }, () => ({
+      role: "user" as const,
+      content: emoji.repeat(20),
+    }));
+    const recap = buildProviderBootstrapContext(messages, {
+      perMessageChars: 200,
+      maxMessages: 50,
+      overallBudgetBytes: 600,
+    });
+    expect(new TextEncoder().encode(recap).length).toBeLessThanOrEqual(600);
+  });
+
+  it("keeps the most recent entries when the byte budget forces elision", () => {
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      role: "user" as const,
+      content: `msg-${i}-${"x".repeat(80)}`,
+    }));
+    const recap = buildProviderBootstrapContext(messages, {
+      perMessageChars: 200,
+      maxMessages: 20,
+      overallBudgetBytes: 600,
+    });
+    // The newest entry must survive even when the budget cannot fit them
+    // all; older ones get elided first.
+    expect(recap).toContain("msg-19-");
+    expect(recap).not.toContain("msg-0-");
   });
 });
