@@ -26,6 +26,7 @@ type TestMessage = {
   provider?: string;
 };
 const conversationStoreMock = vi.hoisted(() => ({
+  activeConversationId: null as string | null,
   conversations: [] as Array<{
     id: string;
     title: string;
@@ -171,6 +172,7 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  conversationStoreMock.activeConversationId = null;
   conversationStoreMock.conversations = [];
   conversationStoreMock.getLoadingFor.mockReturnValue(false);
   conversationStoreMock.getStreamingContentFor.mockReturnValue("");
@@ -306,6 +308,7 @@ describe("switchChatProvider", () => {
 
   it("does not mutate the global picker when switching a non-active thread", async () => {
     chatStoreMock.activeConversationId = "t-other";
+    conversationStoreMock.activeConversationId = "t-other";
     switchThreadProviderBridge.mockResolvedValueOnce({
       thread_id: "t1",
       provider: "seren-private",
@@ -321,6 +324,30 @@ describe("switchChatProvider", () => {
 
     expect(providerStoreMock.setActiveProvider).not.toHaveBeenCalled();
     expect(providerStoreMock.setActiveModel).not.toHaveBeenCalled();
+  });
+
+  it("syncs the visible picker when only conversationStore marks the thread active", async () => {
+    conversationStoreMock.activeConversationId = "t1";
+    chatStoreMock.activeConversationId = null;
+    switchThreadProviderBridge.mockResolvedValueOnce({
+      thread_id: "t1",
+      provider: "seren-private",
+      model: "private-mid",
+      native_session_id: null,
+      resume_cursor_json: null,
+      status: "active",
+      bootstrap_context: null,
+      updated_at: 1000,
+    });
+
+    await switchChatProvider("t1", "seren-private", "private-mid");
+
+    expect(providerStoreMock.setActiveProvider).toHaveBeenCalledWith(
+      "seren-private",
+    );
+    expect(providerStoreMock.setActiveModel).toHaveBeenCalledWith(
+      "private-mid",
+    );
   });
 
   it("refuses to switch while the thread is busy", async () => {

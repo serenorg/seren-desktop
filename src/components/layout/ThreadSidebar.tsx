@@ -12,6 +12,7 @@ import {
   Show,
   Switch,
 } from "solid-js";
+import { providerGlyph } from "@/components/chat/ProviderIcon";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import {
   type EmployeeDetailEventDetail,
@@ -899,7 +900,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                                       when={thread.kind === "editor"}
                                       fallback={
                                         <span class="text-xs">
-                                          {"\u{1F4AC}"}
+                                          {providerGlyph(
+                                            thread.provider ?? "seren",
+                                          )}
                                         </span>
                                       }
                                     >

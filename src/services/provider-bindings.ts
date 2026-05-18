@@ -29,6 +29,13 @@ function isPickerProvider(provider: RuntimeProviderId): provider is ProviderId {
   return provider in PROVIDER_CONFIGS;
 }
 
+function isActivePickerThread(threadId: string): boolean {
+  return (
+    threadId === conversationStore.activeConversationId ||
+    threadId === chatStore.activeConversationId
+  );
+}
+
 export interface SwitchBlockedReason {
   kind:
     | "streaming"
@@ -176,10 +183,7 @@ export async function switchChatProvider(
   // only for the active thread and only for picker-backed chat providers;
   // non-active pane switches and native-agent bindings must not mutate
   // global defaults.
-  if (
-    threadId === chatStore.activeConversationId &&
-    isPickerProvider(targetProvider)
-  ) {
+  if (isActivePickerThread(threadId) && isPickerProvider(targetProvider)) {
     providerStore.setActiveProvider(targetProvider);
     if (targetModel !== null) {
       providerStore.setActiveModel(targetModel);

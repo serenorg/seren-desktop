@@ -97,6 +97,7 @@ export interface Thread {
   id: string;
   title: string;
   kind: ThreadKind;
+  provider?: string | null;
   agentType?: AgentType;
   status: ThreadStatus;
   projectRoot: string | null;
@@ -399,6 +400,7 @@ export const threadStore = {
           id: c.id,
           title: c.title,
           kind: "chat" as const,
+          provider: c.selectedProvider ?? null,
           status: (isActive ? "running" : "idle") as ThreadStatus,
           projectRoot: c.projectRoot,
           employeeId: c.employeeId,

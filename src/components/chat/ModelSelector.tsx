@@ -12,14 +12,17 @@ import {
   Show,
   untrack,
 } from "solid-js";
+import { ProviderIcon } from "@/components/chat/ProviderIcon";
 import {
-  getProviderIcon,
   PROVIDER_CONFIGS,
   type ProviderId,
   type ProviderModel,
 } from "@/lib/providers";
 import { type Model, modelsService } from "@/services/models";
-import { allowsSerenPublicModels } from "@/services/organization-policy";
+import {
+  allowsSerenPrivateAgent,
+  allowsSerenPublicModels,
+} from "@/services/organization-policy";
 import { privateModelsService } from "@/services/private-models";
 import {
   evaluateChatSwitchGuard,
@@ -36,16 +39,41 @@ import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 export const ModelSelector: Component = () => {
   const [isOpen, setIsOpen] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal("");
+  const [draftProvider, setDraftProvider] = createSignal<ProviderId | null>(
+    null,
+  );
   const [openRouterModels, setOpenRouterModels] = createSignal<Model[]>([]);
   const [isLoadingModels, setIsLoadingModels] = createSignal(false);
   const [privateModels, setPrivateModels] = createSignal<ProviderModel[]>([]);
   let containerRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
 
-  const isPrivateChat = createMemo(
-    () => providerStore.activeProvider === "seren-private",
-  );
-  const currentProvider = () => providerStore.activeProvider;
+  const committedProvider = () => providerStore.activeProvider;
+  const currentProvider = () => draftProvider() ?? committedProvider();
+  const isPrivateChat = createMemo(() => currentProvider() === "seren-private");
+  const committedModel = () =>
+    conversationStore.activeConversation?.selectedModel ??
+    providerStore.activeModel ??
+    chatStore.selectedModel;
+
+  // Composite provider list for the chip rail. `seren-private` is gated
+  // by org policy and never appears in `providerStore.configuredProviders`
+  // (no API key / no OAuth — auth is via the user's session). Inject it
+  // explicitly after `seren` when the policy allows so the rail shows
+  // both Seren Models and Seren Private Models as peer options.
+  const railProviders = createMemo<ProviderId[]>(() => {
+    const policy = authStore.privateChatPolicy;
+    const includePrivate = allowsSerenPrivateAgent(policy);
+    const out: ProviderId[] = [];
+    for (const id of providerStore.configuredProviders) {
+      out.push(id);
+      if (id === "seren" && includePrivate) out.push("seren-private");
+    }
+    if (includePrivate && !out.includes("seren-private")) {
+      out.unshift("seren-private");
+    }
+    return out;
+  });
 
   // Default models from provider store (curated list)
   const defaultModels = () => providerStore.getModels(currentProvider());
@@ -54,6 +82,7 @@ export const ModelSelector: Component = () => {
   createEffect(() => {
     const privatePolicy = authStore.privateChatPolicy;
     const privateEnabled = isPrivateChat();
+    const committedPrivate = committedProvider() === "seren-private";
     void (async () => {
       setIsLoadingModels(true);
       try {
@@ -61,7 +90,11 @@ export const ModelSelector: Component = () => {
           const models = await privateModelsService.listAvailable();
           setPrivateModels(models);
 
-          const current = untrack(() => chatStore.selectedModel?.trim());
+          if (!committedPrivate) {
+            return;
+          }
+
+          const current = untrack(() => committedModel()?.trim());
           const policyDefault = privatePolicy?.model_id?.trim();
           const hasCurrent =
             !!current && models.some((model) => model.id === current);
@@ -150,7 +183,7 @@ export const ModelSelector: Component = () => {
 
   const currentModel = () => {
     if (isPrivateChat()) {
-      const selected = chatStore.selectedModel;
+      const selected = committedModel();
       return (
         privateModels().find((model) => model.id === selected) ?? {
           id: selected,
@@ -231,10 +264,13 @@ export const ModelSelector: Component = () => {
    */
   const selectModel = (modelId: string) => {
     const conversationId = conversationStore.activeConversationId;
+    const targetProvider = currentProvider();
     if (!conversationId) {
+      providerStore.setActiveProvider(targetProvider);
       providerStore.setActiveModel(modelId);
       chatStore.setModel(modelId);
       setIsOpen(false);
+      setDraftProvider(null);
       return;
     }
 
@@ -245,54 +281,25 @@ export const ModelSelector: Component = () => {
       return;
     }
 
-    void switchChatProvider(
-      conversationId,
-      providerStore.activeProvider,
-      modelId,
-    ).catch(reportSwitchFailure);
+    void switchChatProvider(conversationId, targetProvider, modelId).catch(
+      reportSwitchFailure,
+    );
     setIsOpen(false);
+    setDraftProvider(null);
   };
 
   /**
-   * Switch the active thread to a new provider. Picks the first
-   * default model of the target provider so the runtime row is always
-   * paired. Falls back to mutating the global picker when no thread is
-   * selected.
+   * Toggle which provider's models are visible in the list below.
+   * Does NOT commit a thread switch — that happens only when the user
+   * actually picks a model. This decouples "show me this provider's
+   * models" from the destructive act of switching the thread's bound
+   * runtime, which keeps clicking through the chips browsable and
+   * lets the seren-private case work even when its model list is
+   * fetched asynchronously (clicking the chip triggers the load).
    */
   const selectProvider = (providerId: ProviderId) => {
-    const models = providerStore.getModels(providerId);
-
-    const conversationId = conversationStore.activeConversationId;
-    if (!conversationId) {
-      providerStore.setActiveProvider(providerId);
-      if (models.length > 0) {
-        providerStore.setActiveModel(models[0].id);
-        chatStore.setModel(models[0].id);
-      }
-      return;
-    }
-
-    const blocked = evaluateChatSwitchGuard(conversationId);
-    if (blocked) {
-      conversationStore.setError(describeSwitchBlock(blocked));
-      return;
-    }
-
-    // The runtime row pairs provider+model atomically; refusing to switch
-    // when the target provider has no curated models keeps us from
-    // persisting the previous provider's model id against the new
-    // provider, which would render the row meaningless.
-    const fallbackModel = models[0]?.id;
-    if (!fallbackModel) {
-      conversationStore.setError(
-        `No models available for ${PROVIDER_CONFIGS[providerId].name}.`,
-      );
-      return;
-    }
-
-    void switchChatProvider(conversationId, providerId, fallbackModel).catch(
-      reportSwitchFailure,
-    );
+    setDraftProvider(providerId);
+    setSearchQuery("");
   };
 
   /**
@@ -322,6 +329,13 @@ export const ModelSelector: Component = () => {
       reportSwitchFailure,
     );
     setIsOpen(false);
+    setDraftProvider(null);
+  };
+
+  const closeDropdown = () => {
+    setIsOpen(false);
+    setDraftProvider(null);
+    setSearchQuery("");
   };
 
   const handleDocumentClick = (event: MouseEvent) => {
@@ -331,7 +345,7 @@ export const ModelSelector: Component = () => {
       event.target instanceof Node &&
       !containerRef.contains(event.target)
     ) {
-      setIsOpen(false);
+      closeDropdown();
     }
   };
 
@@ -362,24 +376,17 @@ export const ModelSelector: Component = () => {
           const opening = !isOpen();
           setIsOpen(opening);
           if (opening) {
+            setDraftProvider(providerStore.activeProvider);
             setSearchQuery("");
             // Focus search input after dropdown opens
             setTimeout(() => searchInputRef?.focus(), 0);
+          } else {
+            setDraftProvider(null);
+            setSearchQuery("");
           }
         }}
       >
-        <Show
-          when={!isPrivateChat() && providerStore.isAutoModel}
-          fallback={
-            <span class="inline-flex items-center justify-center w-[18px] h-[18px] bg-accent text-white rounded text-[11px] font-semibold">
-              {getProviderIcon(currentProvider())}
-            </span>
-          }
-        >
-          <span class="inline-flex items-center justify-center w-[18px] h-[18px] bg-success/70 text-white rounded text-[11px] font-semibold">
-            A
-          </span>
-        </Show>
+        <ProviderIcon provider={currentProvider()} size={14} />
         <span
           class={providerStore.isAutoModel ? "text-success" : "text-foreground"}
         >
@@ -403,78 +410,51 @@ export const ModelSelector: Component = () => {
               onInput={(e) => setSearchQuery(e.currentTarget.value)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
-                  setIsOpen(false);
+                  closeDropdown();
                 }
               }}
             />
           </div>
 
-          <Show
-            when={!isPrivateChat()}
-            fallback={
-              <div class="flex items-center gap-2 p-2 bg-surface-3 border-b border-surface-3">
-                <span class="inline-flex items-center justify-center w-4 h-4 bg-accent text-white rounded-sm text-[10px] font-semibold">
-                  {getProviderIcon("seren")}
-                </span>
-                <span class="text-xs text-muted-foreground">
-                  Organization private models
-                </span>
-              </div>
-            }
-          >
-            <div class="flex gap-0.5 p-2 bg-surface-3 border-b border-surface-3 flex-wrap">
-              <For each={providerStore.configuredProviders}>
-                {(providerId) => (
-                  <Show
-                    when={
+          <div class="flex gap-0.5 p-2 bg-surface-3 border-b border-surface-3 flex-wrap">
+            <For each={railProviders()}>
+              {(providerId) => (
+                <Show
+                  when={
+                    !(
+                      providerId === "seren" &&
+                      !allowsSerenPublicModels(authStore.privateChatPolicy)
+                    ) &&
+                    !(
+                      providerId !== "seren" &&
                       providerId !== "seren-private" &&
-                      !(
-                        providerId === "seren" &&
-                        !allowsSerenPublicModels(authStore.privateChatPolicy)
-                      ) &&
-                      !(
-                        providerId !== "seren" &&
-                        authStore.privateChatPolicy
-                          ?.disable_external_model_providers
-                      )
-                    }
-                  >
-                    <button
-                      type="button"
-                      class={`flex items-center gap-1 px-2.5 py-1.5 bg-transparent border border-transparent rounded text-xs text-muted-foreground cursor-pointer transition-all no-underline hover:bg-border hover:text-foreground ${providerId === currentProvider() ? "bg-primary/15 border-primary/40 text-accent" : ""}`}
-                      onClick={() => {
-                        selectProvider(providerId);
-                        setSearchQuery("");
-                      }}
-                      title={PROVIDER_CONFIGS[providerId].name}
-                    >
-                      <span
-                        class={`w-4 h-4 inline-flex items-center justify-center bg-surface-3 rounded-sm text-[10px] font-semibold ${providerId === currentProvider() ? "bg-accent text-white" : ""}`}
-                      >
-                        {getProviderIcon(providerId)}
-                      </span>
-                      <span class="max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap">
-                        {PROVIDER_CONFIGS[providerId].name}
-                      </span>
-                    </button>
-                  </Show>
-                )}
-              </For>
-              <Show when={providerStore.getUnconfiguredProviders().length > 0}>
-                <a
-                  href="#"
-                  class="flex items-center gap-1 px-2.5 py-1.5 bg-transparent border border-transparent rounded text-sm font-medium text-muted-foreground cursor-pointer transition-all no-underline hover:bg-primary/15 hover:text-accent"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setIsOpen(false);
-                  }}
-                  title="Add provider"
+                      authStore.privateChatPolicy
+                        ?.disable_external_model_providers
+                    )
+                  }
                 >
-                  +
-                </a>
-              </Show>
-            </div>
-          </Show>
+                  <button
+                    type="button"
+                    aria-pressed={providerId === currentProvider()}
+                    class="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs cursor-pointer transition-colors no-underline border"
+                    classList={{
+                      "bg-primary text-primary-foreground border-primary font-medium":
+                        providerId === currentProvider(),
+                      "bg-transparent text-muted-foreground border-transparent hover:bg-border hover:text-foreground":
+                        providerId !== currentProvider(),
+                    }}
+                    onClick={() => selectProvider(providerId)}
+                    title={PROVIDER_CONFIGS[providerId].name}
+                  >
+                    <ProviderIcon provider={providerId} size={14} />
+                    <span class="whitespace-nowrap">
+                      {PROVIDER_CONFIGS[providerId].name}
+                    </span>
+                  </button>
+                </Show>
+              )}
+            </For>
+          </div>
 
           {/* External-agent rail: clicking switches the active thread to a
               native-agent provider. The cross-category machinery in
@@ -486,7 +466,6 @@ export const ModelSelector: Component = () => {
               spawn — the agent's runtime is the source of truth there. */}
           <Show
             when={
-              !isPrivateChat() &&
               !searchQuery() &&
               agentStore.availableAgents.some((a) => a.available)
             }
@@ -504,9 +483,7 @@ export const ModelSelector: Component = () => {
                       onClick={() => selectAgentProvider(agent.type)}
                       title={`Switch to ${agentDisplayName(agent.type)} — opens an external agent session for this thread`}
                     >
-                      <span class="w-4 h-4 inline-flex items-center justify-center bg-surface-3 rounded-sm text-[10px] font-semibold">
-                        {agentDisplayName(agent.type).slice(0, 1)}
-                      </span>
+                      <ProviderIcon provider={agent.type} size={14} />
                       <span class="max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">
                         {agentDisplayName(agent.type)}
                       </span>
@@ -574,7 +551,7 @@ export const ModelSelector: Component = () => {
                       <Show
                         when={
                           isPrivateChat()
-                            ? model.id === chatStore.selectedModel
+                            ? model.id === committedModel()
                             : model.id === providerStore.activeModel
                         }
                       >

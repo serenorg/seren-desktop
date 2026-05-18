@@ -9,6 +9,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { providerGlyph } from "@/components/chat/ProviderIcon";
 import {
   allowsClaudeAgent,
   allowsCodexAgent,
@@ -97,7 +98,8 @@ export const ThreadTabBar: Component = () => {
   };
 
   const threadIcon = (thread: Thread) => {
-    if (thread.kind === "chat") return "💬";
+    if (thread.kind === "chat")
+      return providerGlyph(thread.provider ?? "seren");
     if (thread.agentType === "codex") return "⚡";
     if (thread.agentType === "gemini") return "✨";
     return "🤖";

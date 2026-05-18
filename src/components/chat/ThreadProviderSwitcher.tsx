@@ -11,8 +11,13 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { ProviderIcon } from "@/components/chat/ProviderIcon";
 import { PROVIDER_CONFIGS, type ProviderId } from "@/lib/providers";
-import { allowsSerenPublicModels } from "@/services/organization-policy";
+import {
+  allowsSerenPrivateAgent,
+  allowsSerenPublicModels,
+} from "@/services/organization-policy";
+import { privateModelsService } from "@/services/private-models";
 import {
   evaluateChatSwitchGuard,
   type SwitchBlockedReason,
@@ -80,13 +85,29 @@ export const ThreadProviderSwitcher: Component<Props> = (props) => {
 
   // Chat-side providers visible in the dropdown. Mirrors the gating in
   // ModelSelector's chat rail so the two pickers agree on availability.
+  // `seren-private` is gated by org policy and never appears in
+  // `providerStore.configuredProviders` (no API key / no OAuth — auth
+  // is via the user's session), so we inject it explicitly after
+  // `seren` when the policy allows.
   const chatProviders = createMemo<ProviderId[]>(() => {
     const policy = authStore.privateChatPolicy;
     const publicAllowed = allowsSerenPublicModels(policy);
-    return providerStore.configuredProviders.filter((id) => {
-      if (id === "seren-private") return false;
+    const privateAllowed = allowsSerenPrivateAgent(policy);
+    const composite: ProviderId[] = [];
+    for (const id of providerStore.configuredProviders) {
+      composite.push(id);
+      if (id === "seren" && privateAllowed) composite.push("seren-private");
+    }
+    if (privateAllowed && !composite.includes("seren-private")) {
+      composite.unshift("seren-private");
+    }
+    return composite.filter((id) => {
       if (id === "seren" && !publicAllowed) return false;
-      if (id !== "seren" && policy?.disable_external_model_providers)
+      if (
+        id !== "seren" &&
+        id !== "seren-private" &&
+        policy?.disable_external_model_providers
+      )
         return false;
       return true;
     });
@@ -114,7 +135,7 @@ export const ThreadProviderSwitcher: Component<Props> = (props) => {
     document.removeEventListener("click", handleDocumentClick);
   });
 
-  const selectChatProvider = (providerId: ProviderId) => {
+  const selectChatProvider = async (providerId: ProviderId) => {
     if (current()?.kind === "chat" && current()?.provider === providerId) {
       setIsOpen(false);
       return;
@@ -124,12 +145,32 @@ export const ThreadProviderSwitcher: Component<Props> = (props) => {
       conversationStore.setError(describeSwitchBlock(blocked));
       return;
     }
-    const models = providerStore.getModels(providerId);
-    const fallbackModel = models[0]?.id;
+    let fallbackModel: string | undefined;
+    if (providerId === "seren-private") {
+      try {
+        const models = await privateModelsService.listAvailable();
+        const policyDefault = authStore.privateChatPolicy?.model_id?.trim();
+        fallbackModel =
+          (policyDefault &&
+            models.find((model) => model.id === policyDefault)?.id) ||
+          models[0]?.id;
+      } catch (error) {
+        reportSwitchFailure(error);
+        return;
+      }
+    } else {
+      const models = providerStore.getModels(providerId);
+      fallbackModel = models[0]?.id;
+    }
     if (!fallbackModel) {
       conversationStore.setError(
         `No models available for ${PROVIDER_CONFIGS[providerId].name}.`,
       );
+      return;
+    }
+    const stillBlocked = evaluateChatSwitchGuard(props.threadId);
+    if (stillBlocked) {
+      conversationStore.setError(describeSwitchBlock(stillBlocked));
       return;
     }
     setIsOpen(false);
@@ -162,6 +203,9 @@ export const ThreadProviderSwitcher: Component<Props> = (props) => {
         onClick={() => setIsOpen(!isOpen())}
         title="Switch provider"
       >
+        <Show when={current()?.provider}>
+          {(provider) => <ProviderIcon provider={provider()} size={14} />}
+        </Show>
         <span class="font-medium max-w-[160px] truncate">{currentLabel()}</span>
         <span class="text-[10px] text-muted-foreground">
           {isOpen() ? "▲" : "▼"}
@@ -182,11 +226,14 @@ export const ThreadProviderSwitcher: Component<Props> = (props) => {
                 return (
                   <button
                     type="button"
-                    class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 ${
+                    class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 flex items-center gap-2 ${
                       isCurrent() ? "bg-surface-2" : ""
                     }`}
-                    onClick={() => selectChatProvider(providerId)}
+                    onClick={() => {
+                      void selectChatProvider(providerId);
+                    }}
                   >
+                    <ProviderIcon provider={providerId} size={14} />
                     <span class="text-sm text-foreground">
                       {PROVIDER_CONFIGS[providerId].name}
                     </span>
@@ -207,11 +254,12 @@ export const ThreadProviderSwitcher: Component<Props> = (props) => {
                 return (
                   <button
                     type="button"
-                    class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 ${
+                    class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 flex items-center gap-2 ${
                       isCurrent() ? "bg-surface-2" : ""
                     }`}
                     onClick={() => selectAgent(agent.type)}
                   >
+                    <ProviderIcon provider={agent.type} size={14} />
                     <span class="text-sm text-foreground">
                       {agentDisplayName(agent.type)}
                     </span>
