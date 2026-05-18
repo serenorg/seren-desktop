@@ -92,6 +92,7 @@ import { ReasoningEffortSelector } from "./ReasoningEffortSelector";
 import { RerouteAnnouncement } from "./RerouteAnnouncement";
 import { RLMStepsBlock } from "./RLMStepsBlock";
 import { SatisfactionSignal } from "./SatisfactionSignal";
+import { SkillsButton } from "./SkillsButton";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ToolCallCard } from "./ToolCallCard";
@@ -171,6 +172,31 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   const conversationMessages = createMemo(() => {
     const id = conversationId();
     return id ? conversationStore.getMessagesFor(id) : [];
+  });
+  // Resolve the skill the composer's recent-skill button should label —
+  // strictly "last actually invoked in this thread," derived from the
+  // transcript. We deliberately do NOT track the composer's current draft
+  // here: the button's body click recalls the labeled skill into the
+  // composer, and if the label tracked the draft, an accidental click would
+  // wipe any args the user had typed. Keeping the label transcript-anchored
+  // means the label and the click action describe the same operation
+  // ("recall this past invocation"). The composer is the canonical surface
+  // for "what's about to run if I hit Enter."
+  const recentSkill = createMemo(() => {
+    const messages = conversationMessages();
+    const slugs = installedSkillSlugs();
+    if (slugs.size === 0) return null;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (!message || message.role !== "user") continue;
+      const match = message.content.match(/^\/([a-zA-Z][a-zA-Z0-9:_-]*)/);
+      if (!match) continue;
+      const slug = match[1];
+      if (!slug || !slugs.has(slug)) continue;
+      const installed = skillsStore.installed.find((s) => s.slug === slug);
+      if (installed) return installed;
+    }
+    return null;
   });
   const conversationIsLoading = () => {
     const id = conversationId();
@@ -1633,6 +1659,26 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                   <ModelSelector />
                   <ToolsetSelector />
                   <ReasoningEffortSelector />
+                  <SkillsButton
+                    recentSkill={recentSkill()}
+                    onLaunch={() => {
+                      setInput("/");
+                      setCommandPopupIndex(0);
+                      inputRef?.focus();
+                      const len = inputRef?.value.length ?? 0;
+                      inputRef?.setSelectionRange(len, len);
+                    }}
+                    onRecall={(skill) => {
+                      // Same shape as the transcript chip click: fill the
+                      // composer with `/slug ` and let the user add args or
+                      // hit Enter to send. No auto-submit.
+                      setInput(`${buildSkillInvocationDisplay(skill.slug)} `);
+                      setCommandPopupIndex(0);
+                      inputRef?.focus();
+                      const len = inputRef?.value.length ?? 0;
+                      inputRef?.setSelectionRange(len, len);
+                    }}
+                  />
                 </Show>
                 <Show when={conversationIsLoading()}>
                   <ThinkingStatus />

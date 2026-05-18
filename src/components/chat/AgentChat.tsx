@@ -85,6 +85,7 @@ import { AgentModeSelector } from "./AgentModeSelector";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { PlanHeader } from "./PlanHeader";
+import { SkillsButton } from "./SkillsButton";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingStatus } from "./ThinkingStatus";
@@ -234,6 +235,30 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     const thread = activeAgentThread();
     if (!thread) return [];
     return agentStore.getMessagesForConversation(thread.id);
+  });
+
+  // Resolve the skill the composer's recent-skill button should label —
+  // strictly "last actually invoked in this thread," derived from the
+  // transcript. We deliberately do NOT track the composer's current draft:
+  // the button body click recalls the labeled skill, and a drift between the
+  // label and the click action makes an accidental click wipe whatever the
+  // user had typed. The composer itself is the canonical surface for "what's
+  // about to run if I hit Enter."
+  const recentSkill = createMemo(() => {
+    const messages = threadMessages();
+    const slugs = installedSkillSlugs();
+    if (slugs.size === 0) return null;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (!message || message.type !== "user") continue;
+      const match = message.content.match(/^\/([a-zA-Z][a-zA-Z0-9:_-]*)/);
+      if (!match) continue;
+      const slug = match[1];
+      if (!slug || !slugs.has(slug)) continue;
+      const installed = skillsStore.installed.find((s) => s.slug === slug);
+      if (installed) return installed;
+    }
+    return null;
   });
 
   // Get streaming content for THIS thread's conversation ID
@@ -1938,6 +1963,27 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <AgentModelSelector session={threadSession()} />
                 <AgentModeSelector session={threadSession()} />
                 <AgentEffortSelector session={threadSession()} />
+                <SkillsButton
+                  recentSkill={recentSkill()}
+                  onLaunch={() => {
+                    setInput("/");
+                    setCommandPopupIndex(0);
+                    inputRef?.focus();
+                    const len = inputRef?.value.length ?? 0;
+                    inputRef?.setSelectionRange(len, len);
+                  }}
+                  onRecall={(skill) => {
+                    // Same shape as the transcript chip click: fill the
+                    // composer with `/slug ` and let the user add args or
+                    // hit Enter to send. No auto-submit.
+                    setInput(`${buildSkillInvocationDisplay(skill.slug)} `);
+                    setCommandPopupIndex(0);
+                    inputRef?.focus();
+                    const len = inputRef?.value.length ?? 0;
+                    inputRef?.setSelectionRange(len, len);
+                  }}
+                />
+
                 <Show when={isPrompting()}>
                   <ThinkingStatus startTime={promptStartTime} />
                 </Show>
