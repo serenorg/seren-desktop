@@ -70,28 +70,33 @@ BROWSER_TYPE=moz-firefox node dist/index.js
 
 ### Profile Compatibility Controls
 
-The default profile preserves existing behavior: headless launch, the safe
-stealth plugin for Chromium-based browsers, and the manual page init patch for
-Chromium pages. For sites that are sensitive to those signals, such as embedded
-wallet provisioning flows, set only the controls needed for that workflow:
+The default profile is Privy-compatible: headed launch, the safe stealth plugin
+for Chromium-based browsers, `iframe.contentWindow` and
+`navigator.permissions` evasions disabled, and the manual page init patch off.
+This supports embedded-wallet provisioning flows while preserving the remaining
+Chromium stealth evasions. Set only the controls needed when a workflow needs
+the older full-stealth/headless profile or a custom profile:
 
 ```bash
-# Launch a visible browser window instead of headless mode.
-SEREN_PLAYWRIGHT_HEADLESS=0 node dist/index.js
+# Opt back into headless mode.
+SEREN_PLAYWRIGHT_HEADLESS=1 node dist/index.js
 
 # Skip the puppeteer-extra stealth plugin entirely.
 SEREN_PLAYWRIGHT_DISABLE_STEALTH=1 node dist/index.js
 
 # Keep stealth enabled but remove specific evasions by name.
-SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE=iframe.contentWindow,navigator.permissions node dist/index.js
+SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE=navigator.webdriver node dist/index.js
 
-# Skip the hand-written addInitScript patch applied to new Chromium pages.
-SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH=1 node dist/index.js
+# Opt back into the hand-written addInitScript patch for new Chromium pages.
+SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH=0 node dist/index.js
 ```
 
 The `SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE` value is a comma-separated list
-of evasion names. `chrome.app` is always disabled for macOS notarization
-compatibility.
+of evasion names. When the variable is unset, `iframe.contentWindow` and
+`navigator.permissions` are disabled by default. When it is set, the provided
+list replaces the default disabled set; set it to an empty string to opt back
+into all stealth evasions except `chrome.app`, which is always disabled for
+macOS notarization compatibility.
 
 ### In Seren Desktop
 
