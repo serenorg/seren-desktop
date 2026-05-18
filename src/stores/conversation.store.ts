@@ -357,6 +357,49 @@ export const conversationStore = {
     );
   },
 
+  /**
+   * Drop a conversation from the in-memory cache. Used when a thread
+   * crosses out of chat-kind on a cross-category provider switch — the
+   * DB row's `kind` has just flipped to `agent`, so a subsequent
+   * `getConversations` filter (`kind = 'chat'`) would not return it
+   * anyway. Removes the per-thread message bucket, loading flag, and
+   * streaming state so the chat shell does not leak stale state into
+   * the next thread that takes its place.
+   */
+  dropFromCache(id: string) {
+    setState("conversations", (convos) => convos.filter((c) => c.id !== id));
+    for (const key of [
+      "messages",
+      "loading",
+      "rlmProcessing",
+      "streamingContent",
+      "streamingThinking",
+      "streamingStalled",
+    ] as const) {
+      setState(key, id, undefined as never);
+    }
+    if (state.activeConversationId === id) {
+      setState("activeConversationId", null);
+    }
+  },
+
+  /**
+   * Insert (or replace) a conversation in the in-memory cache from a
+   * freshly-read DB row. Used when a thread crosses INTO chat-kind on a
+   * cross-category switch; the row was previously rendered through the
+   * agent shell and needs to surface in the chat sidebar now.
+   */
+  upsertFromDb(row: DbConversation) {
+    const conv = dbToConversation(row);
+    setState("conversations", (convos) => {
+      const without = convos.filter((c) => c.id !== conv.id);
+      return [conv, ...without];
+    });
+    if (!state.messages[conv.id]) {
+      setState("messages", conv.id, []);
+    }
+  },
+
   // === Message management ===
 
   addMessage(

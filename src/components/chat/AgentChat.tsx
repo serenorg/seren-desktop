@@ -83,6 +83,7 @@ import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { AgentEffortSelector } from "./AgentEffortSelector";
 import { AgentModelSelector } from "./AgentModelSelector";
 import { AgentModeSelector } from "./AgentModeSelector";
+import { ThreadProviderSwitcher } from "./ThreadProviderSwitcher";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { PlanHeader } from "./PlanHeader";
@@ -1958,9 +1959,18 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             </Show>
             <div class="flex justify-between items-center">
               <div class="flex items-center gap-3">
-                <span class="px-2 py-1 bg-surface-2 border border-surface-3 rounded-md text-xs text-foreground font-medium">
-                  {lockedAgentName()}
-                </span>
+                <Show
+                  when={props.threadId}
+                  fallback={
+                    <span class="px-2 py-1 bg-surface-2 border border-surface-3 rounded-md text-xs text-foreground font-medium">
+                      {lockedAgentName()}
+                    </span>
+                  }
+                >
+                  {(threadId) => (
+                    <ThreadProviderSwitcher threadId={threadId()} />
+                  )}
+                </Show>
                 <AgentModelSelector session={threadSession()} />
                 <AgentModeSelector session={threadSession()} />
                 <AgentEffortSelector session={threadSession()} />

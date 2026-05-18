@@ -180,6 +180,142 @@ describe("threadStore", () => {
     vi.clearAllMocks();
   });
 
+  describe("allConversations getter", () => {
+    it("merges both stores into a single sorted list with explicit kind", () => {
+      mockConversations.conversations = [
+        {
+          id: "chat-1",
+          title: "Chat One",
+          createdAt: 1000,
+          selectedModel: "gpt-4",
+          selectedProvider: "openai",
+          projectRoot: "/Users/dev/project-a",
+          isArchived: false,
+        },
+      ];
+      mockAgentConversations.push({
+        id: "agent-1",
+        title: "Agent One",
+        created_at: 2000,
+        agent_type: "claude-code",
+        agent_session_id: "live-sess",
+        agent_cwd: "/Users/dev/project-a",
+        agent_model_id: "claude-sonnet-4",
+        project_id: null,
+        project_root: "/Users/dev/project-a",
+        is_archived: false,
+      });
+
+      const all = threadStore.allConversations;
+      expect(all).toHaveLength(2);
+      // Most recent first.
+      expect(all[0].id).toBe("agent-1");
+      expect(all[1].id).toBe("chat-1");
+
+      // Discriminator carries through.
+      expect(all[0].kind).toBe("agent");
+      expect(all[1].kind).toBe("chat");
+
+      // Agent-side fields carry across.
+      expect(all[0].agentType).toBe("claude-code");
+      expect(all[0].agentSessionId).toBe("live-sess");
+      expect(all[0].agentCwd).toBe("/Users/dev/project-a");
+      expect(all[0].agentModelId).toBe("claude-sonnet-4");
+      expect(all[0].provider).toBe("claude-code");
+      expect(all[0].model).toBe("claude-sonnet-4");
+
+      // Chat-side fields carry across; agent-only fields are null.
+      expect(all[1].provider).toBe("openai");
+      expect(all[1].model).toBe("gpt-4");
+      expect(all[1].agentType).toBeNull();
+      expect(all[1].agentSessionId).toBeNull();
+    });
+
+    it("preserves archived rows so callers can apply their own filters", () => {
+      // The `threads` getter filters archives out for the sidebar; the
+      // raw `allConversations` view must keep them so other surfaces
+      // (history, recovery, audit) can opt in.
+      mockConversations.conversations = [
+        {
+          id: "chat-archived",
+          title: "Old",
+          createdAt: 100,
+          selectedModel: "x",
+          selectedProvider: null,
+          projectRoot: null,
+          isArchived: true,
+        },
+      ];
+      mockAgentConversations.push({
+        id: "agent-archived",
+        title: "Old agent",
+        created_at: 50,
+        agent_type: "codex",
+        agent_session_id: null,
+        agent_cwd: null,
+        agent_model_id: null,
+        project_id: null,
+        project_root: null,
+        is_archived: true,
+      });
+
+      const all = threadStore.allConversations;
+      expect(all.map((c) => c.id).sort()).toEqual([
+        "agent-archived",
+        "chat-archived",
+      ]);
+      expect(all.every((c) => c.isArchived)).toBe(true);
+    });
+
+    it("findConversation locates rows from either store by id", () => {
+      mockConversations.conversations = [
+        {
+          id: "chat-1",
+          title: "Chat",
+          createdAt: 1000,
+          selectedModel: "m",
+          selectedProvider: "seren",
+          projectRoot: null,
+          isArchived: false,
+        },
+      ];
+      mockAgentConversations.push({
+        id: "agent-1",
+        title: "Agent",
+        created_at: 2000,
+        agent_type: "claude-code",
+        agent_session_id: null,
+        agent_cwd: null,
+        agent_model_id: null,
+        project_id: null,
+        project_root: null,
+        is_archived: false,
+      });
+
+      expect(threadStore.findConversation("chat-1")?.kind).toBe("chat");
+      expect(threadStore.findConversation("agent-1")?.kind).toBe("agent");
+      expect(threadStore.findConversation("missing")).toBeUndefined();
+    });
+
+    it("falls back agent projectRoot to agent_cwd when project_root is null", () => {
+      mockAgentConversations.push({
+        id: "agent-1",
+        title: "A",
+        created_at: 100,
+        agent_type: "codex",
+        agent_session_id: null,
+        agent_cwd: "/Users/dev/from-cwd",
+        agent_model_id: null,
+        project_id: null,
+        project_root: null,
+        is_archived: false,
+      });
+
+      const all = threadStore.allConversations;
+      expect(all[0].projectRoot).toBe("/Users/dev/from-cwd");
+    });
+  });
+
   describe("threads getter", () => {
     it("merges chat and agent conversations sorted by timestamp desc", () => {
       mockConversations.conversations = [

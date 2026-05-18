@@ -26,6 +26,8 @@ import {
   type SwitchBlockedReason,
   switchChatProvider,
 } from "@/services/provider-bindings";
+import type { AgentType } from "@/services/providers";
+import { agentDisplayName, agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -289,6 +291,35 @@ export const ModelSelector: Component = () => {
     );
   };
 
+  /**
+   * Switch the active thread INTO a native-agent provider (claude-code /
+   * codex / gemini). Passes a null model so the agent's runtime decides
+   * which model to spawn with; the user can refine via AgentChat's
+   * AgentModelSelector after the session is live. The cross-category
+   * machinery in `switchChatProvider` handles the cache move, native
+   * session spawn with the persisted bootstrap, and shell remount.
+   */
+  const selectAgentProvider = (agentType: AgentType) => {
+    const conversationId = conversationStore.activeConversationId;
+    if (!conversationId) {
+      conversationStore.setError(
+        "Open a thread before switching to an external agent.",
+      );
+      return;
+    }
+
+    const blocked = evaluateChatSwitchGuard(conversationId);
+    if (blocked) {
+      conversationStore.setError(describeSwitchBlock(blocked));
+      return;
+    }
+
+    void switchChatProvider(conversationId, agentType, null).catch(
+      reportSwitchFailure,
+    );
+    setIsOpen(false);
+  };
+
   const handleDocumentClick = (event: MouseEvent) => {
     if (!isOpen()) return;
     if (
@@ -438,6 +469,47 @@ export const ModelSelector: Component = () => {
                   +
                 </a>
               </Show>
+            </div>
+          </Show>
+
+          {/* External-agent rail: clicking switches the active thread to a
+              native-agent provider. The cross-category machinery in
+              switchChatProvider flips conversations.kind, moves the row
+              between caches, and spawns the native session with the
+              persisted bootstrap context. The thread's UI shell remounts
+              from ChatContent to AgentChat in place. Models within the
+              agent are picked from AgentChat's AgentModelSelector after
+              spawn — the agent's runtime is the source of truth there. */}
+          <Show
+            when={
+              !isPrivateChat() &&
+              !searchQuery() &&
+              agentStore.availableAgents.some((a) => a.available)
+            }
+          >
+            <div class="flex flex-wrap gap-0.5 p-2 bg-surface-3 border-b border-surface-3">
+              <span class="w-full text-[10px] uppercase tracking-wider text-muted-foreground/80 font-medium pb-1">
+                External agents
+              </span>
+              <For each={agentStore.availableAgents}>
+                {(agent) => (
+                  <Show when={agent.available}>
+                    <button
+                      type="button"
+                      class="flex items-center gap-1 px-2.5 py-1.5 bg-transparent border border-transparent rounded text-xs text-muted-foreground cursor-pointer transition-all no-underline hover:bg-border hover:text-foreground"
+                      onClick={() => selectAgentProvider(agent.type)}
+                      title={`Switch to ${agentDisplayName(agent.type)} — opens an external agent session for this thread`}
+                    >
+                      <span class="w-4 h-4 inline-flex items-center justify-center bg-surface-3 rounded-sm text-[10px] font-semibold">
+                        {agentDisplayName(agent.type).slice(0, 1)}
+                      </span>
+                      <span class="max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">
+                        {agentDisplayName(agent.type)}
+                      </span>
+                    </button>
+                  </Show>
+                )}
+              </For>
             </div>
           </Show>
 

@@ -2172,6 +2172,31 @@ export const agentStore = {
       console.error("Failed to load agent conversation history:", error);
     }
   },
+
+  /**
+   * Drop an agent conversation from the in-memory cache. Used when a
+   * thread crosses out of agent-kind on a cross-category provider
+   * switch — the DB row's `kind` has just flipped to `chat`, and a
+   * subsequent `getAgentConversations` filter (`kind = 'agent'`) would
+   * not return it anyway.
+   */
+  dropAgentConversationFromCache(id: string) {
+    setState("recentAgentConversations", (rows) =>
+      rows.filter((r) => r.id !== id),
+    );
+  },
+
+  /**
+   * Insert (or replace) an agent conversation row in the in-memory
+   * cache from a freshly-read DB row. Used when a thread crosses INTO
+   * agent-kind on a cross-category switch.
+   */
+  upsertAgentConversationFromDb(row: DbAgentConversation) {
+    setState("recentAgentConversations", (rows) => {
+      const without = rows.filter((r) => r.id !== row.id);
+      return [row, ...without];
+    });
+  },
   /**
    * List remote sessions from the selected agent's underlying store.
    */

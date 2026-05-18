@@ -20,6 +20,7 @@ import {
   THREAD_DRAG_MIME,
 } from "@/lib/thread-drag";
 import { fileTreeState } from "@/stores/fileTree";
+import { threadStore } from "@/stores/thread.store";
 import {
   type SplitDirection,
   type WorkspaceLayout,
@@ -495,30 +496,54 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
                   "pointer-events-none": hidden(),
                 }}
               >
+                {/*
+                  Shell selection for conversation panes is driven by the
+                  LIVE conversation row's kind, not the pane's static
+                  `window.kind`. A cross-category provider switch flips
+                  `conversations.kind` in DB; once the unified view
+                  reflects that, this Show re-resolves and the shell
+                  remounts from ChatContent to AgentChat (or vice versa)
+                  in place. The pane's own `kind` is used only as the
+                  initial-mount hint and as the fallback when the live
+                  row hasn't loaded yet (so a freshly-restored pane
+                  doesn't flash empty before the conversation list
+                  hydrates).
+                */}
                 <Show
                   when={
-                    entry.window.kind === "chat" ? entry.window.threadId : null
+                    (entry.window.kind === "chat" ||
+                      entry.window.kind === "agent") &&
+                    entry.window.threadId
+                      ? entry.window.threadId
+                      : null
                   }
                 >
-                  {(threadId) => (
-                    <ChatContent
-                      threadId={threadId()}
-                      active={!hidden() && focused()}
-                      onSignInClick={props.onSignInClick}
-                    />
-                  )}
-                </Show>
-                <Show
-                  when={
-                    entry.window.kind === "agent" ? entry.window.threadId : null
-                  }
-                >
-                  {(threadId) => (
-                    <AgentChat
-                      threadId={threadId()}
-                      active={!hidden() && focused()}
-                    />
-                  )}
+                  {(threadId) => {
+                    const liveKind = createMemo(() => {
+                      const row = threadStore.findConversation(threadId());
+                      if (row) return row.kind;
+                      // Fall back to the pane's static kind until the
+                      // unified view has the row.
+                      return entry.window.kind === "agent" ? "agent" : "chat";
+                    });
+                    return (
+                      <Show
+                        when={liveKind() === "chat"}
+                        fallback={
+                          <AgentChat
+                            threadId={threadId()}
+                            active={!hidden() && focused()}
+                          />
+                        }
+                      >
+                        <ChatContent
+                          threadId={threadId()}
+                          active={!hidden() && focused()}
+                          onSignInClick={props.onSignInClick}
+                        />
+                      </Show>
+                    );
+                  }}
                 </Show>
                 <Show
                   when={

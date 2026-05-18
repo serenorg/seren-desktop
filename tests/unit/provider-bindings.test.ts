@@ -24,11 +24,23 @@ type TestMessage = {
   timestamp: number;
 };
 const conversationStoreMock = vi.hoisted(() => ({
+  conversations: [] as Array<{
+    id: string;
+    title: string;
+    createdAt: number;
+    selectedModel: string;
+    selectedProvider: string | null;
+    projectRoot: string | null;
+    isArchived: boolean;
+    employeeId: string | null;
+  }>,
   getLoadingFor: vi.fn(() => false),
   getStreamingContentFor: vi.fn(() => ""),
   getRLMProcessingFor: vi.fn(() => false),
   getMessagesFor: vi.fn(() => [] as TestMessage[]),
   applyRuntimeBindingSync: vi.fn(),
+  dropFromCache: vi.fn(),
+  upsertFromDb: vi.fn(),
 }));
 const chatStoreMock = vi.hoisted(() => ({
   messages: [] as TestMessage[],
@@ -42,10 +54,34 @@ const providerStoreMock = vi.hoisted(() => ({
   setActiveProvider: vi.fn(),
   setActiveModel: vi.fn(),
 }));
+const agentStoreMock = vi.hoisted(() => ({
+  recentAgentConversations: [] as Array<{
+    id: string;
+    title: string;
+    created_at: number;
+    agent_type: string;
+    agent_session_id: string | null;
+    agent_cwd: string | null;
+    agent_model_id: string | null;
+    project_id: string | null;
+    project_root: string | null;
+    is_archived: boolean;
+  }>,
+  sessions: {} as Record<string, { info: { id: string }; conversationId: string }>,
+  spawnSession: vi.fn(async () => "new-session-id"),
+  terminateSession: vi.fn(async () => {}),
+  dropAgentConversationFromCache: vi.fn(),
+  upsertAgentConversationFromDb: vi.fn(),
+}));
+const fileTreeStateMock = vi.hoisted(() => ({
+  rootPath: null as string | null,
+}));
 
 vi.mock("@/lib/tauri-bridge", () => ({
   switchThreadProvider: switchThreadProviderBridge,
   getProviderSessionRuntime: getProviderSessionRuntimeBridge,
+  getAgentConversation: vi.fn(async () => null),
+  getConversation: vi.fn(async () => null),
 }));
 vi.mock("@/stores/conversation.store", () => ({
   conversationStore: conversationStoreMock,
@@ -56,6 +92,60 @@ vi.mock("@/stores/chat.store", () => ({
 vi.mock("@/stores/provider.store", () => ({
   providerStore: providerStoreMock,
 }));
+vi.mock("@/stores/agent.store", () => ({
+  agentStore: agentStoreMock,
+}));
+vi.mock("@/stores/fileTree", () => ({
+  fileTreeState: fileTreeStateMock,
+}));
+// threadStore.findConversation re-collects from the two underlying
+// stores. The real merge logic is tested separately in
+// thread-store.test.ts; here we just need a working surface.
+vi.mock("@/stores/thread.store", () => ({
+  threadStore: {
+    findConversation: vi.fn((id: string) => {
+      const chat = conversationStoreMock.conversations.find((c) => c.id === id);
+      if (chat) {
+        return {
+          id: chat.id,
+          title: chat.title,
+          createdAt: chat.createdAt,
+          kind: "chat" as const,
+          projectRoot: chat.projectRoot,
+          isArchived: chat.isArchived,
+          provider: chat.selectedProvider,
+          model: chat.selectedModel,
+          employeeId: chat.employeeId,
+          agentType: null,
+          agentSessionId: null,
+          agentCwd: null,
+          agentModelId: null,
+        };
+      }
+      const agent = agentStoreMock.recentAgentConversations.find(
+        (a) => a.id === id,
+      );
+      if (agent) {
+        return {
+          id: agent.id,
+          title: agent.title,
+          createdAt: agent.created_at,
+          kind: "agent" as const,
+          projectRoot: agent.project_root ?? agent.agent_cwd ?? null,
+          isArchived: agent.is_archived,
+          provider: agent.agent_type,
+          model: agent.agent_model_id,
+          employeeId: null,
+          agentType: agent.agent_type,
+          agentSessionId: agent.agent_session_id,
+          agentCwd: agent.agent_cwd,
+          agentModelId: agent.agent_model_id,
+        };
+      }
+      return undefined;
+    }),
+  },
+}));
 
 import {
   evaluateChatSwitchGuard,
@@ -64,6 +154,7 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  conversationStoreMock.conversations = [];
   conversationStoreMock.getLoadingFor.mockReturnValue(false);
   conversationStoreMock.getStreamingContentFor.mockReturnValue("");
   conversationStoreMock.getRLMProcessingFor.mockReturnValue(false);
@@ -71,6 +162,9 @@ beforeEach(() => {
   chatStoreMock.retryingMessageId = null;
   chatStoreMock.activeConversationId = null;
   chatStoreMock.getMessagesFor.mockReturnValue([]);
+  agentStoreMock.recentAgentConversations = [];
+  agentStoreMock.sessions = {};
+  fileTreeStateMock.rootPath = null;
   getProviderSessionRuntimeBridge.mockResolvedValue(null);
 });
 
@@ -337,6 +431,154 @@ describe("switchChatProvider", () => {
       null,
       null,
     );
+  });
+
+  it("moves the row from the chat cache and spawns an agent session on chat→agent", async () => {
+    const bridge = await import("@/lib/tauri-bridge");
+    conversationStoreMock.conversations = [
+      {
+        id: "t1",
+        title: "My thread",
+        createdAt: 100,
+        selectedModel: "claude-sonnet-4",
+        selectedProvider: "seren",
+        projectRoot: "/Users/dev/my-project",
+        isArchived: false,
+        employeeId: null,
+      },
+    ];
+    fileTreeStateMock.rootPath = "/Users/dev/fallback";
+    switchThreadProviderBridge.mockResolvedValueOnce({
+      thread_id: "t1",
+      provider: "claude-code",
+      model: "claude-sonnet-4",
+      native_session_id: null,
+      resume_cursor_json: null,
+      status: "active",
+      bootstrap_context: "previous transcript here",
+      updated_at: 5000,
+    });
+    vi.mocked(bridge.getAgentConversation).mockResolvedValueOnce({
+      id: "t1",
+      title: "My thread",
+      created_at: 100,
+      agent_type: "claude-code",
+      agent_session_id: null,
+      agent_cwd: "/Users/dev/my-project",
+      agent_model_id: "claude-sonnet-4",
+      agent_permission_mode: null,
+      agent_metadata: null,
+      project_id: null,
+      project_root: "/Users/dev/my-project",
+      is_archived: false,
+    });
+
+    await switchChatProvider("t1", "claude-code", "claude-sonnet-4");
+
+    // Chat cache dropped the row so the unified view can re-resolve.
+    expect(conversationStoreMock.dropFromCache).toHaveBeenCalledWith("t1");
+    // Agent cache picked up the fresh DB row.
+    expect(agentStoreMock.upsertAgentConversationFromDb).toHaveBeenCalledTimes(1);
+    // Spawn fired with the prior chat thread's projectRoot as cwd and
+    // the persisted bootstrap context.
+    expect(agentStoreMock.spawnSession).toHaveBeenCalledWith(
+      "/Users/dev/my-project",
+      "claude-code",
+      expect.objectContaining({
+        bootstrapPromptContext: "previous transcript here",
+        conversationTitle: "My thread",
+      }),
+    );
+  });
+
+  it("tears down the live native session and surfaces the chat row on agent→chat", async () => {
+    const bridge = await import("@/lib/tauri-bridge");
+    agentStoreMock.recentAgentConversations = [
+      {
+        id: "t1",
+        title: "My agent",
+        created_at: 100,
+        agent_type: "claude-code",
+        agent_session_id: "remote-sess",
+        agent_cwd: "/Users/dev/my-project",
+        agent_model_id: "claude-sonnet-4",
+        project_id: null,
+        project_root: "/Users/dev/my-project",
+        is_archived: false,
+      },
+    ];
+    agentStoreMock.sessions = {
+      "live-1": {
+        info: { id: "live-1" },
+        conversationId: "t1",
+      },
+    };
+    switchThreadProviderBridge.mockResolvedValueOnce({
+      thread_id: "t1",
+      provider: "seren",
+      model: "claude-sonnet-4",
+      native_session_id: null,
+      resume_cursor_json: null,
+      status: "active",
+      bootstrap_context: null,
+      updated_at: 6000,
+    });
+    vi.mocked(bridge.getConversation).mockResolvedValueOnce({
+      id: "t1",
+      title: "My agent",
+      created_at: 100,
+      selected_model: "claude-sonnet-4",
+      selected_provider: "seren",
+      project_root: "/Users/dev/my-project",
+      is_archived: false,
+      employee_id: null,
+    });
+
+    await switchChatProvider("t1", "seren", "claude-sonnet-4");
+
+    expect(agentStoreMock.terminateSession).toHaveBeenCalledWith(
+      "live-1",
+      expect.objectContaining({ nextActiveSessionId: null }),
+    );
+    expect(agentStoreMock.dropAgentConversationFromCache).toHaveBeenCalledWith(
+      "t1",
+    );
+    expect(conversationStoreMock.upsertFromDb).toHaveBeenCalledTimes(1);
+    // No spawn on agent→chat — chat threads route through the
+    // orchestrator, not a native session.
+    expect(agentStoreMock.spawnSession).not.toHaveBeenCalled();
+  });
+
+  it("does not move caches on a same-category (chat→chat) switch", async () => {
+    conversationStoreMock.conversations = [
+      {
+        id: "t1",
+        title: "T",
+        createdAt: 100,
+        selectedModel: "m",
+        selectedProvider: "seren",
+        projectRoot: null,
+        isArchived: false,
+        employeeId: null,
+      },
+    ];
+    switchThreadProviderBridge.mockResolvedValueOnce({
+      thread_id: "t1",
+      provider: "seren-private",
+      model: "private-mid",
+      native_session_id: null,
+      resume_cursor_json: null,
+      status: "active",
+      bootstrap_context: null,
+      updated_at: 5000,
+    });
+
+    await switchChatProvider("t1", "seren-private", "private-mid");
+
+    expect(conversationStoreMock.dropFromCache).not.toHaveBeenCalled();
+    expect(agentStoreMock.upsertAgentConversationFromDb).not.toHaveBeenCalled();
+    expect(agentStoreMock.spawnSession).not.toHaveBeenCalled();
+    expect(agentStoreMock.terminateSession).not.toHaveBeenCalled();
   });
 
   it("propagates the stale-binding error from the Rust command so the UI can surface it", async () => {

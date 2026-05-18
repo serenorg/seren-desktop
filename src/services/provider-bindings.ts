@@ -9,14 +9,19 @@ import {
 import type { ProviderId } from "@/lib/providers/types";
 import { PROVIDER_CONFIGS } from "@/lib/providers/types";
 import {
+  getAgentConversation,
+  getConversation,
   getProviderSessionRuntime,
   type ProviderSessionRuntime,
   switchThreadProvider as switchThreadProviderBridge,
 } from "@/lib/tauri-bridge";
 import type { AgentType } from "@/services/providers";
+import { agentStore } from "@/stores/agent.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
+import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
+import { threadStore } from "@/stores/thread.store";
 
 type RuntimeProviderId = ProviderId | AgentType;
 
@@ -78,7 +83,7 @@ export interface SwitchChatProviderResult {
 export async function switchChatProvider(
   threadId: string,
   targetProvider: RuntimeProviderId,
-  targetModel: string,
+  targetModel: string | null,
 ): Promise<SwitchChatProviderResult> {
   const blocked = evaluateChatSwitchGuard(threadId);
   if (blocked) {
@@ -105,6 +110,15 @@ export async function switchChatProvider(
   const existing = await getProviderSessionRuntime(threadId);
   const expectedUpdatedAt = existing?.updated_at ?? null;
 
+  // Snapshot the pre-switch row so a cross-category transition can
+  // move the in-memory row between the chat and agent caches after the
+  // bridge call commits.
+  const beforeRow = threadStore.findConversation(threadId);
+  const currentKind = beforeRow?.kind ?? null;
+  const targetKind: "chat" | "agent" = isPickerProvider(targetProvider)
+    ? "chat"
+    : "agent";
+
   const runtime = await switchThreadProviderBridge(
     threadId,
     targetProvider,
@@ -114,13 +128,36 @@ export async function switchChatProvider(
   );
 
   // Sync frontend caches so reads (orchestrator, transcript, picker)
-  // reflect the new binding before the next turn fires.
+  // reflect the new binding before the next turn fires. A null
+  // targetModel means "the agent's runtime decides on spawn" and the
+  // Rust mirror keeps the previous selected_model in the compat
+  // column (COALESCE); mirror that here so the in-memory row does not
+  // get cleared during a chat→agent switch.
+  const effectiveModel = targetModel ?? beforeRow?.model ?? "";
   conversationStore.applyRuntimeBindingSync(
     threadId,
     targetProvider,
-    targetModel,
+    effectiveModel,
   );
-  chatStore.applyRuntimeBindingSync(threadId, targetProvider, targetModel);
+  chatStore.applyRuntimeBindingSync(threadId, targetProvider, effectiveModel);
+
+  // Cross-category move. The Rust mirror has already flipped
+  // `conversations.kind` and stamped/cleared `agent_type`; the in-memory
+  // stores still hold the row in its OLD category until we move it.
+  // Without this, the unified view returns the stale row and the
+  // binding-driven shell selection in ThreadContent renders the wrong
+  // shell.
+  if (currentKind && currentKind !== targetKind) {
+    if (targetKind === "agent") {
+      await transitionChatToAgent(
+        threadId,
+        targetProvider as AgentType,
+        runtime,
+      );
+    } else {
+      await transitionAgentToChat(threadId);
+    }
+  }
 
   // The picker UI mirrors the active thread. Keep providerStore aligned
   // only for the active thread and only for picker-backed chat providers;
@@ -131,10 +168,106 @@ export async function switchChatProvider(
     isPickerProvider(targetProvider)
   ) {
     providerStore.setActiveProvider(targetProvider);
-    providerStore.setActiveModel(targetModel);
+    if (targetModel !== null) {
+      providerStore.setActiveModel(targetModel);
+    }
   }
 
   return { runtime };
+}
+
+/**
+ * Drop the row from the chat cache, fetch the new agent row from DB,
+ * insert into the agent cache, then spawn a native session seeded with
+ * the persisted bootstrap context so the new provider sees a usable
+ * recap of the prior chat transcript. Ordering matters: the cache move
+ * has to complete before the spawn so `threadStore.findConversation`
+ * resolves to the agent row when ThreadContent re-renders.
+ */
+async function transitionChatToAgent(
+  threadId: string,
+  targetAgentType: AgentType,
+  runtime: ProviderSessionRuntime,
+): Promise<void> {
+  // Capture the chat row BEFORE dropping it so we know which project
+  // root to spawn against.
+  const chatRow = threadStore.findConversation(threadId);
+  conversationStore.dropFromCache(threadId);
+
+  try {
+    const agentRow = await getAgentConversation(threadId);
+    if (agentRow) {
+      agentStore.upsertAgentConversationFromDb(agentRow);
+    }
+  } catch (error) {
+    console.warn(
+      "[provider-bindings] Failed to load agent row after chat→agent switch:",
+      error,
+    );
+  }
+
+  const cwd = chatRow?.projectRoot ?? fileTreeState.rootPath ?? null;
+  if (!cwd) {
+    // Without a cwd we can't spawn the native session; the user will
+    // need to pick a project root before sending the next turn. The
+    // bootstrap stays persisted on the runtime row and will be
+    // consumed by the next spawn.
+    console.warn(
+      "[provider-bindings] Cross-category switch into agent without a cwd; spawn deferred until project root is set",
+    );
+    return;
+  }
+
+  try {
+    await agentStore.spawnSession(cwd, targetAgentType, {
+      conversationTitle: chatRow?.title,
+      bootstrapPromptContext: runtime.bootstrap_context ?? undefined,
+    });
+  } catch (error) {
+    console.warn(
+      "[provider-bindings] Spawn after chat→agent switch failed:",
+      error,
+    );
+  }
+}
+
+/**
+ * Tear down any live native session for this thread, drop the agent
+ * row from the agent cache, then fetch and insert the freshly-flipped
+ * chat row so the chat shell takes over. Tear-down has to happen
+ * before the cache move so pending approvals/diffs keyed to the old
+ * session get dismissed cleanly.
+ */
+async function transitionAgentToChat(threadId: string): Promise<void> {
+  const liveSession = Object.values(agentStore.sessions).find(
+    (s) => s.conversationId === threadId,
+  );
+  if (liveSession) {
+    try {
+      await agentStore.terminateSession(liveSession.info.id, {
+        nextActiveSessionId: null,
+      });
+    } catch (error) {
+      console.warn(
+        "[provider-bindings] Failed to terminate agent session on agent→chat switch:",
+        error,
+      );
+    }
+  }
+
+  agentStore.dropAgentConversationFromCache(threadId);
+
+  try {
+    const chatRow = await getConversation(threadId);
+    if (chatRow) {
+      conversationStore.upsertFromDb(chatRow);
+    }
+  } catch (error) {
+    console.warn(
+      "[provider-bindings] Failed to load chat row after agent→chat switch:",
+      error,
+    );
+  }
 }
 
 /**

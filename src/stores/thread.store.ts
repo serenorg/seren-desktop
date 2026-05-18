@@ -209,6 +209,80 @@ function getBestAgent():
   return { kind: "chat" };
 }
 
+/**
+ * Cross-store conversation row used by `threadStore.allConversations`.
+ * Captures every field today's read sites consult on either side of the
+ * chat/agent partition, plus an explicit `kind` discriminator so callers
+ * can branch without inspecting which underlying store the row came
+ * from. When the dual-store partition retires, this becomes the
+ * authoritative in-memory conversation shape.
+ *
+ * `provider` is the same value `switch_thread_provider` writes to the
+ * runtime row and mirrors to `conversations.selected_provider`. For
+ * legacy agent rows that pre-date the binding migration it falls back
+ * to `agent_type` so the discriminator stays accurate.
+ */
+export interface UnifiedConversation {
+  id: string;
+  title: string;
+  createdAt: number;
+  kind: "chat" | "agent";
+  projectRoot: string | null;
+  isArchived: boolean;
+  provider: string | null;
+  model: string | null;
+  /** Chat-side: the linked virtual employee, if any. Null on agent rows. */
+  employeeId: string | null;
+  /** Agent-side: the bound external agent runtime. Null on chat rows. */
+  agentType: AgentType | null;
+  /** Agent-side: the live or last-known native session id. Null on chat rows. */
+  agentSessionId: string | null;
+  /** Agent-side: the spawn cwd. Null on chat rows. */
+  agentCwd: string | null;
+  /** Agent-side: the explicit per-thread model override (distinct from `model`
+   *  during the dual-column transition). Null on chat rows. */
+  agentModelId: string | null;
+}
+
+function collectUnifiedConversations(): UnifiedConversation[] {
+  const out: UnifiedConversation[] = [];
+  for (const c of conversationStore.conversations) {
+    out.push({
+      id: c.id,
+      title: c.title,
+      createdAt: c.createdAt,
+      kind: "chat",
+      projectRoot: c.projectRoot,
+      isArchived: c.isArchived,
+      provider: c.selectedProvider ?? null,
+      model: c.selectedModel ?? null,
+      employeeId: c.employeeId,
+      agentType: null,
+      agentSessionId: null,
+      agentCwd: null,
+      agentModelId: null,
+    });
+  }
+  for (const a of agentStore.recentAgentConversations) {
+    out.push({
+      id: a.id,
+      title: a.title,
+      createdAt: a.created_at,
+      kind: "agent",
+      projectRoot: a.project_root ?? a.agent_cwd ?? null,
+      isArchived: a.is_archived,
+      provider: (a.agent_type as string | null) ?? null,
+      model: a.agent_model_id ?? null,
+      employeeId: null,
+      agentType: (a.agent_type as AgentType | null) ?? null,
+      agentSessionId: a.agent_session_id ?? null,
+      agentCwd: a.agent_cwd ?? null,
+      agentModelId: a.agent_model_id ?? null,
+    });
+  }
+  return out.sort((x, y) => y.createdAt - x.createdAt);
+}
+
 function skillRef(skill: Pick<InstalledSkill, "scope" | "slug">): string {
   return `${skill.scope}:${skill.slug}`;
 }
@@ -275,6 +349,33 @@ export const threadStore = {
 
     setState("projectOrder", next);
     persistProjectOrder(next);
+  },
+
+  /**
+   * Unified conversation view across the chat and agent stores. Includes
+   * archived rows so downstream callers can apply their own filters; the
+   * canonical `threads` getter below filters them out for the sidebar.
+   *
+   * This is the single read surface that the rest of the app should use
+   * for "what conversations exist" — the partition between
+   * `conversationStore.conversations` and `agentStore.recentAgentConversations`
+   * is bookkeeping detail of the current dual-store model and goes away
+   * once kind stops being a stored attribute. Consumers should not key
+   * behavior on which underlying store a row came from; key on the
+   * `kind` field of the unified row instead.
+   */
+  get allConversations(): UnifiedConversation[] {
+    return collectUnifiedConversations();
+  },
+
+  /**
+   * Look up a single conversation by id across both stores. Returns
+   * undefined when no row is found in either side. Callers should
+   * branch on the returned row's `kind` rather than trying to guess
+   * which store owns the id.
+   */
+  findConversation(id: string): UnifiedConversation | undefined {
+    return collectUnifiedConversations().find((c) => c.id === id);
   },
 
   /**
@@ -500,19 +601,21 @@ export const threadStore = {
 
     if (kind === "chat") {
       conversationStore.setActiveConversation(id);
-      const conversation = conversationStore.conversations.find(
-        (c) => c.id === id,
-      );
+      // Look up through the unified view so the source of truth is the
+      // same regardless of which underlying store the row lives in.
+      // Once shell selection becomes binding-driven (Option C-3) the
+      // `kind` argument here is informational and may disagree with the
+      // row's actual kind; treat the row as authoritative for the
+      // provider/model picker mirror.
+      const conversation = this.findConversation(id);
       if (conversation) {
         providerStore.setActiveProvider(
-          isChatProvider(conversation.selectedProvider)
-            ? conversation.selectedProvider
+          isChatProvider(conversation.provider)
+            ? conversation.provider
             : "seren",
         );
-        providerStore.setActiveModel(
-          conversation.selectedModel || AUTO_MODEL_ID,
-        );
-        chatStore.setModel(conversation.selectedModel || AUTO_MODEL_ID);
+        providerStore.setActiveModel(conversation.model || AUTO_MODEL_ID);
+        chatStore.setModel(conversation.model || AUTO_MODEL_ID);
       }
     } else if (kind === "agent") {
       if (

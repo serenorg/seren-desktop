@@ -142,12 +142,45 @@ pub async fn switch_thread_provider(
                 params![thread_id, target_provider, target_model, bootstrap_context, now],
             )?;
 
+            // Mirror compatibility columns so existing read paths that have
+            // not migrated to the runtime table still see the right values.
+            // A cross-category switch flips `kind` and stamps `agent_type`
+            // accordingly so `thread.store::selectThread` routes to the
+            // right shell, and clears `agent_session_id` so the TS spawn
+            // path creates a fresh native session (the prior session
+            // belonged to a different agent type and is no longer valid).
+            // The `selected_model` mirror uses COALESCE so a switch that
+            // does not name a new model keeps the conversation's current
+            // model in the compatibility column; the runtime row itself
+            // stores the explicit value (NULL if unbound).
+            let target_kind = if is_native_agent_provider(&target_provider) {
+                "agent"
+            } else {
+                "chat"
+            };
+            let target_agent_type: Option<&str> = if target_kind == "agent" {
+                Some(target_provider.as_str())
+            } else {
+                None
+            };
             conn.execute(
                 "UPDATE conversations
-                 SET selected_provider = ?1,
-                     selected_model = COALESCE(?2, selected_model)
-                 WHERE id = ?3",
-                params![target_provider, target_model, thread_id],
+                 SET kind = ?1,
+                     agent_type = ?2,
+                     agent_session_id = NULL,
+                     agent_model_id = CASE WHEN ?1 = 'agent'
+                         THEN COALESCE(?3, agent_model_id)
+                         ELSE agent_model_id END,
+                     selected_provider = ?4,
+                     selected_model = COALESCE(?3, selected_model)
+                 WHERE id = ?5",
+                params![
+                    target_kind,
+                    target_agent_type,
+                    target_model,
+                    target_provider,
+                    thread_id
+                ],
             )?;
 
             conn.query_row(
@@ -199,6 +232,20 @@ pub async fn switch_thread_provider(
         )),
         Err(msg) => Err(msg),
     }
+}
+
+/// Whether the given provider id is one of the external-agent runtimes
+/// (claude-code / codex / gemini) that owns its own native session and
+/// renders through `AgentChat`, vs a chat-routed provider (seren /
+/// seren-private / anthropic / openai) that renders through `ChatContent`.
+///
+/// The frontend `@/services/providers` module is the single source of
+/// truth for this categorization; we mirror the list here because the
+/// switch command needs to flip `conversations.kind` accordingly. Adding
+/// a new external agent on either side without updating the other will
+/// cause threads bound to that agent to route to the wrong shell.
+pub(crate) fn is_native_agent_provider(provider: &str) -> bool {
+    matches!(provider, "claude-code" | "codex" | "gemini")
 }
 
 async fn run_db<T>(
@@ -296,12 +343,32 @@ mod tests {
                     updated_at = excluded.updated_at",
                 params![thread_id, target_provider, target_model, bootstrap_context, now],
             )?;
+            // Mirror compat columns. See production path for the rationale.
+            let target_kind = if super::is_native_agent_provider(target_provider) {
+                "agent"
+            } else {
+                "chat"
+            };
+            let target_agent_type: Option<&str> =
+                if target_kind == "agent" { Some(target_provider) } else { None };
             conn.execute(
                 "UPDATE conversations
-                 SET selected_provider = ?1,
-                     selected_model = COALESCE(?2, selected_model)
-                 WHERE id = ?3",
-                params![target_provider, target_model, thread_id],
+                 SET kind = ?1,
+                     agent_type = ?2,
+                     agent_session_id = NULL,
+                     agent_model_id = CASE WHEN ?1 = 'agent'
+                         THEN COALESCE(?3, agent_model_id)
+                         ELSE agent_model_id END,
+                     selected_provider = ?4,
+                     selected_model = COALESCE(?3, selected_model)
+                 WHERE id = ?5",
+                params![
+                    target_kind,
+                    target_agent_type,
+                    target_model,
+                    target_provider,
+                    thread_id
+                ],
             )?;
             Ok(())
         })();
@@ -721,5 +788,151 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    fn read_conv_compat(
+        conn: &Connection,
+        thread_id: &str,
+    ) -> (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>) {
+        conn.query_row(
+            "SELECT kind, agent_type, agent_session_id, agent_model_id,
+                    selected_provider, selected_model
+             FROM conversations WHERE id = ?1",
+            params![thread_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn switch_into_native_agent_flips_kind_and_stamps_agent_type() {
+        let conn = open();
+        seed_chat_thread(&conn, "t1", "seren", "claude-sonnet-4");
+        // Simulate a stale agent_session_id left over from a prior bind so
+        // we can verify the switch clears it (TS spawn must start fresh).
+        conn.execute(
+            "UPDATE conversations SET agent_session_id = 'stale-session' WHERE id = 't1'",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(
+            &conn,
+            "t1",
+            "claude-code",
+            Some("claude-sonnet-4"),
+            Some("recap"),
+            None,
+            2000,
+        )
+        .unwrap();
+
+        let (kind, agent_type, agent_session_id, agent_model_id, selected_provider, selected_model) =
+            read_conv_compat(&conn, "t1");
+        assert_eq!(kind, "agent");
+        assert_eq!(agent_type, Some("claude-code".to_string()));
+        // The stale native session id must be cleared so the TS spawn path
+        // creates a fresh session rather than trying to resume a session
+        // that belonged to a different agent type.
+        assert_eq!(agent_session_id, None);
+        // agent_model_id mirrors the model on agent threads.
+        assert_eq!(agent_model_id, Some("claude-sonnet-4".to_string()));
+        // Chat-side compat columns still carry the latest values so
+        // historical readers don't see a sudden NULL.
+        assert_eq!(selected_provider, Some("claude-code".to_string()));
+        assert_eq!(selected_model, Some("claude-sonnet-4".to_string()));
+    }
+
+    #[test]
+    fn switch_back_to_chat_clears_agent_type_and_session() {
+        let conn = open();
+        // Seed an agent thread directly so the reverse switch is exercised.
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        agent_session_id, agent_model_id,
+                                        selected_provider, selected_model)
+             VALUES ('t1', 'Thread', 1000, 'agent', 'claude-code',
+                     'live-session', 'claude-sonnet-4', 'claude-code', 'claude-sonnet-4')",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(
+            &conn,
+            "t1",
+            "seren",
+            Some("anthropic/claude-sonnet-4"),
+            None,
+            None,
+            2000,
+        )
+        .unwrap();
+
+        let (kind, agent_type, agent_session_id, _, selected_provider, selected_model) =
+            read_conv_compat(&conn, "t1");
+        assert_eq!(kind, "chat");
+        // agent_type cleared so the chat shell does not see a stale agent
+        // hint that could route it into AgentChat.
+        assert_eq!(agent_type, None);
+        // Native session id cleared so the prior CLI session is not picked
+        // up by a future agent switch on the same thread.
+        assert_eq!(agent_session_id, None);
+        assert_eq!(selected_provider, Some("seren".to_string()));
+        assert_eq!(selected_model, Some("anthropic/claude-sonnet-4".to_string()));
+    }
+
+    #[test]
+    fn intra_category_switch_preserves_kind() {
+        // Seren -> seren-private must NOT flip kind to agent, and an
+        // agent->agent switch must NOT flip kind to chat.
+        let conn = open();
+        seed_chat_thread(&conn, "chat1", "seren", "claude-sonnet-4");
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        selected_provider, selected_model)
+             VALUES ('agent1', 'Agent', 1000, 'agent', 'codex', 'codex', 'codex-mid')",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(
+            &conn,
+            "chat1",
+            "seren-private",
+            Some("private-mid"),
+            None,
+            None,
+            2000,
+        )
+        .unwrap();
+        try_perform_switch(
+            &conn,
+            "agent1",
+            "claude-code",
+            Some("claude-sonnet-4"),
+            Some("recap"),
+            None,
+            3000,
+        )
+        .unwrap();
+
+        let chat = read_conv_compat(&conn, "chat1");
+        assert_eq!(chat.0, "chat");
+        assert_eq!(chat.1, None);
+        assert_eq!(chat.4, Some("seren-private".to_string()));
+
+        let agent = read_conv_compat(&conn, "agent1");
+        assert_eq!(agent.0, "agent");
+        assert_eq!(agent.1, Some("claude-code".to_string()));
+        assert_eq!(agent.4, Some("claude-code".to_string()));
     }
 }
