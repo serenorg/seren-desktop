@@ -3,6 +3,7 @@
 
 import {
   type Component,
+  createEffect,
   createSignal,
   For,
   onCleanup,
@@ -17,6 +18,17 @@ import {
   stopClaudeMemoryInterceptor,
 } from "@/services/claudeMemory";
 import { allowsSerenPublicModels } from "@/services/organization-policy";
+import {
+  appearanceState,
+  appearanceStore,
+  CHAT_FONT_SIZE_PX,
+  type Density,
+  type FontSizeStep,
+  TERMINAL_FONT_SIZE_MAX,
+  TERMINAL_FONT_SIZE_MIN,
+  THREAD_LIST_FONT_SIZE_PX,
+  type Theme,
+} from "@/stores/appearance.store";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
@@ -52,6 +64,8 @@ type SettingsSection =
   | "general"
   | "mcp";
 
+let lastSettingsSection: SettingsSection = "chat";
+
 interface SettingsPanelProps {
   onSignInClick?: () => void;
   onLogout?: () => void;
@@ -59,7 +73,7 @@ interface SettingsPanelProps {
 
 export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   const [activeSection, setActiveSection] =
-    createSignal<SettingsSection>("chat");
+    createSignal<SettingsSection>(lastSettingsSection);
   const [showResetConfirm, setShowResetConfirm] = createSignal(false);
   const [showClearConfirm, setShowClearConfirm] = createSignal(false);
 
@@ -145,10 +159,91 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     settingsStore.set(key, checked as Settings[typeof key]);
   };
 
-  const handleThemeChange = (value: string) => {
-    if (value === "dark" || value === "light" || value === "system") {
-      settingsStore.set("theme", value);
+  const handleThemeChange = (value: Theme) => {
+    appearanceStore.set("theme", value);
+  };
+
+  const handleFontSizeStepChange = (
+    key: "chatFontSize" | "threadListFontSize",
+    value: FontSizeStep,
+  ) => {
+    appearanceStore.set(key, value);
+  };
+
+  const handleDensityChange = (value: Density) => {
+    appearanceStore.set("density", value);
+  };
+
+  const stepTerminalFontSize = (direction: -1 | 1) => {
+    const current = appearanceState.appearance.terminalFontSize;
+    const next = Math.max(
+      TERMINAL_FONT_SIZE_MIN,
+      Math.min(TERMINAL_FONT_SIZE_MAX, current + direction),
+    );
+    if (next === current) return;
+    appearanceStore.set("terminalFontSize", next);
+  };
+
+  // Step the font-size axis by one in the ordered scale. Used by the
+  // smaller/larger Aa stepper buttons; clamps at the ends.
+  const FONT_SIZE_ORDER: readonly FontSizeStep[] = ["s", "m", "l", "xl"];
+  const stepFontSize = (
+    key: "chatFontSize" | "threadListFontSize",
+    direction: -1 | 1,
+  ) => {
+    const current = appearanceState.appearance[key];
+    const idx = FONT_SIZE_ORDER.indexOf(current);
+    const next = idx + direction;
+    if (next < 0 || next >= FONT_SIZE_ORDER.length) return;
+    handleFontSizeStepChange(key, FONT_SIZE_ORDER[next]);
+  };
+
+  const fontSizePxFor = (
+    key: "chatFontSize" | "threadListFontSize",
+    step: FontSizeStep,
+  ) =>
+    key === "chatFontSize"
+      ? CHAT_FONT_SIZE_PX[step]
+      : THREAD_LIST_FONT_SIZE_PX[step];
+
+  // Roving-focus arrow-key handler for the appearance radiogroups. Tab moves
+  // into the group, then Left/Right (and Home/End) cycle the selection and
+  // shift focus to the newly-checked button, matching the WAI-ARIA radiogroup
+  // pattern.
+  const handleRadioGroupKeydown = <T extends string>(
+    e: KeyboardEvent & { currentTarget: HTMLElement },
+    options: readonly T[],
+    current: T,
+    onChange: (next: T) => void,
+  ) => {
+    const key = e.key;
+    if (
+      key !== "ArrowRight" &&
+      key !== "ArrowLeft" &&
+      key !== "ArrowDown" &&
+      key !== "ArrowUp" &&
+      key !== "Home" &&
+      key !== "End"
+    ) {
+      return;
     }
+    e.preventDefault();
+    const idx = options.indexOf(current);
+    const lastIdx = options.length - 1;
+    let nextIdx: number;
+    if (key === "Home") nextIdx = 0;
+    else if (key === "End") nextIdx = lastIdx;
+    else if (key === "ArrowRight" || key === "ArrowDown") {
+      nextIdx = idx < 0 || idx === lastIdx ? 0 : idx + 1;
+    } else {
+      nextIdx = idx <= 0 ? lastIdx : idx - 1;
+    }
+    const next = options[nextIdx];
+    onChange(next);
+    const buttons = e.currentTarget.querySelectorAll<HTMLButtonElement>(
+      'button[role="radio"]',
+    );
+    buttons[nextIdx]?.focus();
   };
 
   const handleStringChange = (key: keyof Settings, value: string) => {
@@ -165,6 +260,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
   const handleResetAll = () => {
     settingsStore.reset();
+    appearanceStore.reset();
     setShowResetConfirm(false);
   };
 
@@ -221,11 +317,23 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
       return true;
     });
 
+  const selectSection = (section: SettingsSection) => {
+    lastSettingsSection = section;
+    setActiveSection(section);
+  };
+
+  createEffect(() => {
+    const visible = visibleSections();
+    if (visible.some((section) => section.id === activeSection())) return;
+    const firstVisible = visible[0];
+    if (firstVisible) selectSection(firstVisible.id);
+  });
+
   const handleOpenSection = (event: Event) => {
     const custom = event as CustomEvent<SettingsSection>;
     const section = custom.detail;
     if (visibleSections().some((s) => s.id === section)) {
-      setActiveSection(section);
+      selectSection(section);
     }
   };
 
@@ -260,7 +368,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                     ? "bg-accent text-white"
                     : "bg-transparent text-muted-foreground hover:bg-border hover:text-foreground"
                 }`}
-                onClick={() => setActiveSection(section.id)}
+                onClick={() => selectSection(section.id)}
               >
                 <span class="text-[1.1rem]">{section.icon}</span>
                 {section.label}
@@ -1283,31 +1391,51 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
           <section>
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Appearance</h3>
             <p class="m-0 mb-6 text-muted-foreground leading-normal">
-              Customize how Seren Desktop looks.
+              Customize how Seren Desktop looks. Changes apply immediately.
             </p>
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
-              <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">
+              <div class="flex flex-col gap-0.5 flex-1">
+                <span
+                  id="appearance-theme-label"
+                  class="text-[0.95rem] font-medium text-foreground"
+                >
                   Theme
                 </span>
                 <span class="text-[0.8rem] text-muted-foreground">
                   Choose your preferred color scheme
                 </span>
-              </label>
-              <div class="flex gap-3">
+              </div>
+              <div
+                class="flex gap-3"
+                role="radiogroup"
+                aria-labelledby="appearance-theme-label"
+                onKeyDown={(e) =>
+                  handleRadioGroupKeydown(
+                    e,
+                    ["dark", "light", "system"] as const,
+                    appearanceState.appearance.theme,
+                    (next) => handleThemeChange(next),
+                  )
+                }
+              >
                 <For each={["dark", "light", "system"] as const}>
                   {(theme) => (
                     <button
                       type="button"
+                      role="radio"
+                      aria-checked={appearanceState.appearance.theme === theme}
+                      tabIndex={
+                        appearanceState.appearance.theme === theme ? 0 : -1
+                      }
                       class={`flex flex-col items-center gap-2 px-6 py-4 bg-surface-3/60 border-2 rounded-lg cursor-pointer transition-all duration-150 ${
-                        settingsState.app.theme === theme
+                        appearanceState.appearance.theme === theme
                           ? "border-accent bg-primary/10"
                           : "border-border-hover hover:border-muted-foreground/40"
-                      }`}
+                      } focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset`}
                       onClick={() => handleThemeChange(theme)}
                     >
-                      <span class="text-2xl">
+                      <span class="text-2xl" aria-hidden="true">
                         {theme === "dark"
                           ? "🌙"
                           : theme === "light"
@@ -1315,13 +1443,317 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                             : "💻"}
                       </span>
                       <span
-                        class={`text-[0.85rem] ${settingsState.app.theme === theme ? "text-foreground" : "text-muted-foreground"}`}
+                        class={`text-[0.85rem] ${appearanceState.appearance.theme === theme ? "text-foreground" : "text-muted-foreground"}`}
                       >
                         {theme.charAt(0).toUpperCase() + theme.slice(1)}
                       </span>
                     </button>
                   )}
                 </For>
+              </div>
+            </div>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
+              <div class="flex flex-col gap-0.5 flex-1">
+                <span
+                  id="appearance-density-label"
+                  class="text-[0.95rem] font-medium text-foreground"
+                >
+                  Density
+                </span>
+                <span class="text-[0.8rem] text-muted-foreground">
+                  How much breathing room rows get across the app
+                </span>
+              </div>
+              <div
+                id="appearance-density"
+                class="inline-flex items-stretch rounded-md border border-border bg-surface-2/40 overflow-hidden"
+                role="radiogroup"
+                aria-labelledby="appearance-density-label"
+                onKeyDown={(e) =>
+                  handleRadioGroupKeydown(
+                    e,
+                    ["compact", "comfortable", "spacious"] as const,
+                    appearanceState.appearance.density,
+                    (next) => handleDensityChange(next),
+                  )
+                }
+              >
+                <For each={["compact", "comfortable", "spacious"] as const}>
+                  {(density) => (
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={
+                        appearanceState.appearance.density === density
+                      }
+                      tabIndex={
+                        appearanceState.appearance.density === density ? 0 : -1
+                      }
+                      class={`px-3 py-1.5 text-[0.8rem] capitalize cursor-pointer border-l border-border first:border-l-0 transition-colors duration-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
+                        appearanceState.appearance.density === density
+                          ? "bg-primary/15 text-foreground"
+                          : "text-muted-foreground hover:bg-surface-3/40 hover:text-foreground"
+                      }`}
+                      onClick={() => handleDensityChange(density)}
+                    >
+                      {density}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </div>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
+              <div class="flex flex-col gap-0.5 flex-1">
+                <span
+                  id="appearance-chat-font-size-label"
+                  class="text-[0.95rem] font-medium text-foreground"
+                >
+                  Chat font size
+                </span>
+                <span class="text-[0.8rem] text-muted-foreground">
+                  Reading size for messages in the conversation view
+                </span>
+              </div>
+              <div
+                id="appearance-chat-font-size"
+                class="inline-flex items-stretch rounded-md border border-border bg-surface-2/40 overflow-hidden"
+                role="group"
+                aria-labelledby="appearance-chat-font-size-label"
+              >
+                <button
+                  type="button"
+                  aria-label="Smaller chat font"
+                  disabled={appearanceState.appearance.chatFontSize === "s"}
+                  class="flex items-center justify-center w-11 h-9 cursor-pointer transition-colors duration-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset text-muted-foreground hover:bg-surface-3/40 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  style={{ "font-size": "0.75rem" }}
+                  onClick={() => stepFontSize("chatFontSize", -1)}
+                >
+                  <span aria-hidden="true" class="leading-none">
+                    Aa
+                  </span>
+                </button>
+                <div
+                  class="flex items-center justify-center min-w-[4.5rem] px-3 text-[0.85rem] text-foreground border-l border-r border-border select-none tabular-nums"
+                  aria-live="polite"
+                >
+                  {`${fontSizePxFor(
+                    "chatFontSize",
+                    appearanceState.appearance.chatFontSize,
+                  )} px`}
+                </div>
+                <button
+                  type="button"
+                  aria-label="Larger chat font"
+                  disabled={appearanceState.appearance.chatFontSize === "xl"}
+                  class="flex items-center justify-center w-11 h-9 cursor-pointer transition-colors duration-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset text-muted-foreground hover:bg-surface-3/40 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  style={{ "font-size": "1.1875rem" }}
+                  onClick={() => stepFontSize("chatFontSize", 1)}
+                >
+                  <span aria-hidden="true" class="leading-none">
+                    Aa
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
+              <div class="flex flex-col gap-0.5 flex-1">
+                <span
+                  id="appearance-thread-list-font-size-label"
+                  class="text-[0.95rem] font-medium text-foreground"
+                >
+                  Thread list font size
+                </span>
+                <span class="text-[0.8rem] text-muted-foreground">
+                  Size of titles and previews in the left thread sidebar
+                </span>
+              </div>
+              <div
+                id="appearance-thread-list-font-size"
+                class="inline-flex items-stretch rounded-md border border-border bg-surface-2/40 overflow-hidden"
+                role="group"
+                aria-labelledby="appearance-thread-list-font-size-label"
+              >
+                <button
+                  type="button"
+                  aria-label="Smaller thread-list font"
+                  disabled={
+                    appearanceState.appearance.threadListFontSize === "s"
+                  }
+                  class="flex items-center justify-center w-11 h-9 cursor-pointer transition-colors duration-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset text-muted-foreground hover:bg-surface-3/40 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  style={{ "font-size": "0.75rem" }}
+                  onClick={() => stepFontSize("threadListFontSize", -1)}
+                >
+                  <span aria-hidden="true" class="leading-none">
+                    Aa
+                  </span>
+                </button>
+                <div
+                  class="flex items-center justify-center min-w-[4.5rem] px-3 text-[0.85rem] text-foreground border-l border-r border-border select-none tabular-nums"
+                  aria-live="polite"
+                >
+                  {`${fontSizePxFor(
+                    "threadListFontSize",
+                    appearanceState.appearance.threadListFontSize,
+                  )} px`}
+                </div>
+                <button
+                  type="button"
+                  aria-label="Larger thread-list font"
+                  disabled={
+                    appearanceState.appearance.threadListFontSize === "xl"
+                  }
+                  class="flex items-center justify-center w-11 h-9 cursor-pointer transition-colors duration-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset text-muted-foreground hover:bg-surface-3/40 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  style={{ "font-size": "1.1875rem" }}
+                  onClick={() => stepFontSize("threadListFontSize", 1)}
+                >
+                  <span aria-hidden="true" class="leading-none">
+                    Aa
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
+              <div class="flex flex-col gap-0.5 flex-1">
+                <span
+                  id="appearance-terminal-font-size-label"
+                  class="text-[0.95rem] font-medium text-foreground"
+                >
+                  Terminal font size
+                </span>
+                <span class="text-[0.8rem] text-muted-foreground">
+                  Monospace cell size for terminal panes
+                </span>
+              </div>
+              <div
+                id="appearance-terminal-font-size"
+                class="inline-flex items-stretch rounded-md border border-border bg-surface-2/40 overflow-hidden"
+                role="group"
+                aria-labelledby="appearance-terminal-font-size-label"
+              >
+                <button
+                  type="button"
+                  aria-label="Smaller terminal font"
+                  disabled={
+                    appearanceState.appearance.terminalFontSize <=
+                    TERMINAL_FONT_SIZE_MIN
+                  }
+                  class="flex items-center justify-center w-11 h-9 cursor-pointer transition-colors duration-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset text-muted-foreground hover:bg-surface-3/40 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  style={{ "font-size": "0.75rem" }}
+                  onClick={() => stepTerminalFontSize(-1)}
+                >
+                  <span aria-hidden="true" class="leading-none">
+                    Aa
+                  </span>
+                </button>
+                <div
+                  class="flex items-center justify-center min-w-[4.5rem] px-3 text-[0.85rem] text-foreground border-l border-r border-border select-none tabular-nums font-mono"
+                  aria-live="polite"
+                >
+                  {`${appearanceState.appearance.terminalFontSize} px`}
+                </div>
+                <button
+                  type="button"
+                  aria-label="Larger terminal font"
+                  disabled={
+                    appearanceState.appearance.terminalFontSize >=
+                    TERMINAL_FONT_SIZE_MAX
+                  }
+                  class="flex items-center justify-center w-11 h-9 cursor-pointer transition-colors duration-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset text-muted-foreground hover:bg-surface-3/40 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  style={{ "font-size": "1.1875rem" }}
+                  onClick={() => stepTerminalFontSize(1)}
+                >
+                  <span aria-hidden="true" class="leading-none">
+                    Aa
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div class="py-3 border-b border-border">
+              <div
+                id="appearance-preview-label"
+                class="mb-2 text-[0.95rem] font-medium text-foreground"
+              >
+                Preview
+              </div>
+              <div
+                class="grid gap-2"
+                role="group"
+                aria-labelledby="appearance-preview-label"
+              >
+                <div class="chat-surface rounded-md border border-border bg-surface-1 overflow-hidden">
+                  <div class="px-3 pt-2 pb-1 text-[0.72rem] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                    Conversation
+                  </div>
+                  <div class="chat-message-row border-t border-border/60 bg-surface-0/35">
+                    <p
+                      class="chat-message-content m-0 leading-relaxed text-foreground"
+                      style={{
+                        "font-size": `${fontSizePxFor(
+                          "chatFontSize",
+                          appearanceState.appearance.chatFontSize,
+                        )}px`,
+                      }}
+                    >
+                      This message uses the current chat size and density.
+                    </p>
+                  </div>
+                  <div class="chat-tool-row border-t border-border/60">
+                    <span class="text-[0.72rem] text-muted-foreground">
+                      Tool rows tighten and relax with the same setting.
+                    </span>
+                  </div>
+                </div>
+
+                <div class="thread-list-surface rounded-md border border-border bg-surface-1 overflow-hidden">
+                  <div class="px-3 pt-2 pb-1 text-[0.72rem] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                    Thread list
+                  </div>
+                  <div class="thread-list-row flex items-center gap-2 border-t border-border/60">
+                    <span
+                      class="thread-list-title flex-1 min-w-0 truncate text-foreground"
+                      style={{
+                        "font-size": `${fontSizePxFor(
+                          "threadListFontSize",
+                          appearanceState.appearance.threadListFontSize,
+                        )}px`,
+                      }}
+                    >
+                      Plan tomorrow's launch
+                    </span>
+                    <span class="thread-list-meta text-muted-foreground">
+                      Today
+                    </span>
+                  </div>
+                  <div class="thread-list-row flex items-center gap-2 border-t border-border/60 bg-surface-0/25">
+                    <span class="thread-list-title flex-1 min-w-0 truncate text-foreground">
+                      Summarize client notes
+                    </span>
+                    <span class="thread-list-meta text-muted-foreground">
+                      9:41
+                    </span>
+                  </div>
+                </div>
+
+                <div class="rounded-md border border-border bg-[#090b0f] px-3 py-2">
+                  <div class="mb-1 text-[0.72rem] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                    Terminal
+                  </div>
+                  <pre
+                    class="m-0 overflow-hidden whitespace-pre text-[#d7dde8]"
+                    style={{
+                      "font-family": "var(--font-mono)",
+                      "font-size": `${appearanceState.appearance.terminalFontSize}px`,
+                      "line-height": "1.4",
+                    }}
+                  >
+                    $ pnpm test --filter appearance
+                  </pre>
+                </div>
               </div>
             </div>
           </section>

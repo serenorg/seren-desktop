@@ -418,7 +418,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   return (
     <aside
       data-testid="thread-sidebar"
-      class="flex flex-col bg-card border-r border-border overflow-hidden transition-[width] duration-200"
+      class="thread-list-surface flex flex-col bg-card border-r border-border overflow-hidden transition-[width] duration-200"
       classList={{
         "w-[var(--sidebar-width)] min-w-[var(--sidebar-width)]":
           !props.collapsed,
@@ -879,7 +879,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           data-thread-id={thread.id}
                           data-thread-kind={thread.kind}
                           draggable={true}
-                          class="group flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none border-l-2 border-l-transparent rounded-lg cursor-pointer mb-0.5 text-left transition-all duration-150 hover:bg-surface-2/60 active:cursor-grabbing"
+                          class="thread-list-row group flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none border-l-2 border-l-transparent rounded-lg cursor-pointer mb-0.5 text-left transition-all duration-150 hover:bg-surface-2/60 active:cursor-grabbing"
                           classList={{
                             "!bg-surface-2/80 border-l-2 !border-l-primary !pl-2":
                               thread.id === threadStore.activeThreadId,
@@ -921,13 +921,13 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                             </Show>
                           </div>
 
-                          <span class="flex-1 min-w-0 text-[13px] text-foreground whitespace-nowrap overflow-hidden text-ellipsis">
+                          <span class="thread-list-title flex-1 min-w-0 text-foreground whitespace-nowrap overflow-hidden text-ellipsis">
                             {thread.title}
                           </span>
                           <Show
                             when={thread.kind === "editor"}
                             fallback={
-                              <span class="text-[11px] text-muted-foreground shrink-0">
+                              <span class="thread-list-meta text-muted-foreground shrink-0">
                                 {formatTime(thread.timestamp)}
                               </span>
                             }
@@ -938,7 +938,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                               }
                             >
                               <span
-                                class="text-warning text-[11px] -mr-0.5"
+                                class="thread-list-meta text-warning -mr-0.5"
                                 title="Unsaved changes"
                               >
                                 ●

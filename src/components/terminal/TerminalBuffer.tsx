@@ -19,6 +19,7 @@ import {
   skillDragPayload,
   skillPromptTextFromDrag,
 } from "@/lib/skill-drag";
+import { appearanceState } from "@/stores/appearance.store";
 import { terminalStore } from "@/stores/terminal.store";
 import { threadStore } from "@/stores/thread.store";
 
@@ -120,11 +121,6 @@ interface ScrollbackWindow {
 
 const CELL_FONT_FAMILY =
   '"JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace';
-const CELL_FONT_SIZE = 13;
-const CELL_FONT = `${CELL_FONT_SIZE}px ${CELL_FONT_FAMILY}`;
-const CELL_FONT_BOLD = `bold ${CELL_FONT_SIZE}px ${CELL_FONT_FAMILY}`;
-const CELL_FONT_ITALIC = `italic ${CELL_FONT_SIZE}px ${CELL_FONT_FAMILY}`;
-const CELL_FONT_BOLD_ITALIC = `bold italic ${CELL_FONT_SIZE}px ${CELL_FONT_FAMILY}`;
 
 const COLOR_BG = "#090b0f";
 const COLOR_FG = "#d7dde8";
@@ -219,13 +215,12 @@ function resolveColor(
  * Dim's font effect is not used; we render Dim by halving the
  * foreground alpha at draw time instead of using a thin font weight.
  */
-function fontForAttrs(attrs: number): string {
+function fontForAttrs(attrs: number, fontSize: number): string {
   const bold = (attrs & ATTR_BOLD) !== 0;
   const italic = (attrs & ATTR_ITALIC) !== 0;
-  if (bold && italic) return CELL_FONT_BOLD_ITALIC;
-  if (bold) return CELL_FONT_BOLD;
-  if (italic) return CELL_FONT_ITALIC;
-  return CELL_FONT;
+  const style = italic ? "italic " : "";
+  const weight = bold ? "bold " : "";
+  return `${style}${weight}${fontSize}px ${CELL_FONT_FAMILY}`;
 }
 
 interface CellPos {
@@ -330,6 +325,9 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
   const [gridSeq, setGridSeq] = createSignal(0);
   const [cellW, setCellW] = createSignal(0);
   const [cellH, setCellH] = createSignal(0);
+  const terminalFontSize = createMemo(
+    () => appearanceState.appearance.terminalFontSize,
+  );
   const [selection, setSelection] = createSignal<SelectionRange | null>(null);
 
   let unlistenDiff: UnlistenFn | null = null;
@@ -988,7 +986,8 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     if (!canvasRef) return;
     const ctx = canvasRef.getContext("2d");
     if (!ctx) return;
-    ctx.font = CELL_FONT;
+    const fontSize = terminalFontSize();
+    ctx.font = fontForAttrs(0, fontSize);
     const m = ctx.measureText("M");
     // Cell width: the FONT's ideographic width if exposed, else "M"'s
     // bounding box. Both are stable for monospace.
@@ -1007,7 +1006,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     const h =
       fbAscent !== undefined && fbDescent !== undefined
         ? Math.ceil(fbAscent + fbDescent)
-        : Math.ceil(CELL_FONT_SIZE * 1.4);
+        : Math.ceil(fontSize * 1.4);
     setCellW(w);
     setCellH(h);
   };
@@ -1189,6 +1188,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     // assume a 1:1 visible<->live mapping.
     const offset = viewportOffset();
     const inScrollback = offset > 0;
+    const fontSize = terminalFontSize();
     if (inScrollback) {
       pendingCanvasScrolls = [];
       pendingRepaintRows.clear();
@@ -1320,7 +1320,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
         const fgPacked = reverse ? cell.bg : cell.fg;
         const x = c * w;
 
-        const font = fontForAttrs(attrs);
+        const font = fontForAttrs(attrs, fontSize);
         if (font !== lastFont) {
           ctx.font = font;
           lastFont = font;
@@ -1391,7 +1391,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       ctx.fillRect(cx, cy, cursorWidth, h);
       if (cell && cell.ch !== 0 && cell.width > 0) {
         ctx.fillStyle = COLOR_CURSOR_FG;
-        ctx.font = fontForAttrs(cell.attrs ?? 0);
+        ctx.font = fontForAttrs(cell.attrs ?? 0, fontSize);
         ctx.fillText(String.fromCodePoint(cell.ch), cx, cy);
       }
     }
@@ -1410,8 +1410,15 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     void selection();
     void cellW();
     void cellH();
+    void terminalFontSize();
     needsFullRepaint = true;
     scheduleFrame();
+  });
+
+  createEffect(() => {
+    void terminalFontSize();
+    measureCell();
+    pushResize();
   });
 
   // Refetch immediately when the active buffer changes (thread switch),

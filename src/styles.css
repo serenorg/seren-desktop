@@ -1,9 +1,12 @@
 /* ABOUTME: Global Tailwind CSS styles for seren-desktop. */
-/* ABOUTME: Deep navy dark theme with teal-blue accent. */
+/* ABOUTME: Deep navy dark theme with teal-blue accent; paper-stone light theme on :root.light. */
 
 @import "tailwindcss";
 
-/* Custom dark variant for desktop app (always dark theme) */
+/* The appearance store toggles a `dark` or `light` class on the documentElement
+   so Tailwind's `dark:` variant resolves correctly under either palette. The
+   default palette below is the dark one; the light palette overrides on
+   :root.light. */
 @custom-variant dark (&:is(.dark *));
 
 /* Base styles */
@@ -53,7 +56,7 @@ code {
   --secondary: var(--surface-2);
   --secondary-foreground: #cbd5e1;
   --muted: var(--surface-1);
-  --muted-foreground: #64748b;
+  --muted-foreground: #94a3b8;
   --accent: #38bdf8;
   --accent-foreground: #0a0e17;
 
@@ -67,7 +70,7 @@ code {
   --status-running: #34d399;
   --status-waiting: #fbbf24;
   --status-error: #f87171;
-  --status-idle: #475569;
+  --status-idle: #7c8798;
 
   /* Border and input */
   --border: rgba(148, 163, 184, 0.1);
@@ -116,6 +119,97 @@ code {
 
   /* Fonts */
   --font-mono: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  /* Appearance: font sizes (set per-surface, components opt in via .chat-surface
+     and .thread-list-surface so base behaviour is unchanged). */
+  --chat-font-size: 0.9375rem;
+  --thread-list-font-size: 0.8125rem;
+
+  /* Appearance: density. Padding scales on the surfaces below. */
+  --density-row-y: 0.5rem;
+  --density-row-x: 0.75rem;
+  --density-gap: 0.5rem;
+  --density-chat-row-y: 1rem;
+  --density-chat-row-x: 1.25rem;
+  --density-chat-tool-row-y: 0.5rem;
+  --density-chat-composer-y: 0.875rem;
+  --density-chat-composer-x: 1rem;
+  --density-chat-input-y: 0.75rem;
+  --density-chat-gap: 0.5rem;
+}
+
+/* Paper-stone light theme. Deliberately warm-neutral (off-white background,
+   slate text) with a slightly desaturated cyan accent so the same primary
+   doesn't glow on a light surface. Twin of the :root block above; everything
+   else inherits. */
+:root.light {
+  --background: #f4f1ea;
+  --background-gradient-start: #fbf8f1;
+  --background-gradient-mid: #f4f1ea;
+  --background-gradient-end: #ece8df;
+  --foreground: #1d2433;
+
+  --surface-0: #fbf8f1;
+  --surface-1: #f0ece2;
+  --surface-2: #e3ddcf;
+  --surface-3: #d4ccba;
+
+  --card: var(--surface-1);
+  --card-foreground: var(--foreground);
+  --popover: var(--surface-0);
+  --popover-foreground: var(--foreground);
+
+  /* sky-700/sky-800 instead of sky-600/sky-700: sky-600 lands at 3.6:1 on
+     the paper-stone background which fails WCAG AA for body text (links,
+     button labels). Darkening the primary one stop fixes link contrast and
+     primary-foreground-on-primary contrast in one move. */
+  --primary: #0369a1;
+  --primary-foreground: #fbf8f1;
+  --primary-hover: #075985;
+  --primary-muted: rgba(3, 105, 161, 0.1);
+  --secondary: var(--surface-2);
+  --secondary-foreground: #1d2433;
+  --muted: var(--surface-1);
+  --muted-foreground: #5b6577;
+  --accent: #0369a1;
+  --accent-foreground: #fbf8f1;
+
+  --destructive: #be123c;
+  --destructive-foreground: #fbf8f1;
+  --success: #047857;
+  --warning: #92400e;
+
+  --status-running: #047857;
+  --status-waiting: #92400e;
+  --status-error: #be123c;
+  --status-idle: #5b6577;
+
+  --border: rgba(29, 36, 51, 0.12);
+  --border-hover: rgba(29, 36, 51, 0.2);
+  --border-subtle: rgba(29, 36, 51, 0.06);
+  --border-medium: rgba(29, 36, 51, 0.16);
+  --border-strong: rgba(29, 36, 51, 0.26);
+  --input: var(--surface-0);
+  --ring: #0369a1;
+  --input-focus-glow:
+    0 0 0 3px rgba(3, 105, 161, 0.14), 0 0 16px rgba(3, 105, 161, 0.08);
+
+  --sidebar: var(--surface-1);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-accent: var(--primary-muted);
+  --sidebar-accent-foreground: var(--primary);
+
+  --scrollbar-track: var(--surface-1);
+  --scrollbar-thumb: rgba(29, 36, 51, 0.18);
+  --scrollbar-thumb-hover: rgba(29, 36, 51, 0.3);
+
+  --shadow-sm: 0 1px 2px rgba(29, 36, 51, 0.08);
+  --shadow-md: 0 4px 12px rgba(29, 36, 51, 0.12);
+  --shadow-lg: 0 8px 32px rgba(29, 36, 51, 0.18);
+
+  --glow-primary: 0 0 18px rgba(3, 105, 161, 0.18);
+  --glow-primary-intense: 0 0 28px rgba(3, 105, 161, 0.28);
 }
 
 /* Tailwind theme configuration */
@@ -519,4 +613,79 @@ footer.status-bar {
 
 .external-link:hover {
   @apply underline;
+}
+
+/* Appearance: surface-scoped font sizes. Components opt in by adding the
+   marker class to the outer wrapper; descendants inherit. */
+.chat-surface {
+  font-size: var(--chat-font-size);
+}
+
+.chat-surface .chat-message-content,
+.chat-surface textarea {
+  font-size: var(--chat-font-size);
+}
+
+.chat-surface .chat-message-row {
+  padding: var(--density-chat-row-y) var(--density-chat-row-x);
+}
+
+.chat-surface .chat-tool-row {
+  padding: var(--density-chat-tool-row-y) var(--density-chat-row-x);
+}
+
+.chat-surface .chat-composer-form {
+  gap: var(--density-chat-gap);
+  padding: calc(var(--density-chat-composer-y) * 0.45)
+    var(--density-chat-composer-x) var(--density-chat-composer-y);
+}
+
+.chat-surface textarea {
+  padding-top: var(--density-chat-input-y);
+  padding-bottom: var(--density-chat-input-y);
+}
+
+.thread-list-surface {
+  font-size: var(--thread-list-font-size);
+}
+
+.thread-list-surface .thread-list-row {
+  gap: var(--density-gap);
+  padding: var(--density-row-y) var(--density-row-x);
+}
+
+.thread-list-surface .thread-list-title {
+  font-size: var(--thread-list-font-size);
+}
+
+.thread-list-surface .thread-list-meta {
+  font-size: max(0.6875rem, calc(var(--thread-list-font-size) - 0.125rem));
+}
+
+/* Appearance: density. The `density-*` class is set on documentElement by the
+   appearance effect; surfaces opt in to spacing via the row vars. */
+:root.density-compact {
+  --density-row-y: 0.3125rem;
+  --density-row-x: 0.625rem;
+  --density-gap: 0.375rem;
+  --density-chat-row-y: 0.625rem;
+  --density-chat-row-x: 1rem;
+  --density-chat-tool-row-y: 0.375rem;
+  --density-chat-composer-y: 0.625rem;
+  --density-chat-composer-x: 0.75rem;
+  --density-chat-input-y: 0.5625rem;
+  --density-chat-gap: 0.375rem;
+}
+
+:root.density-spacious {
+  --density-row-y: 0.6875rem;
+  --density-row-x: 0.875rem;
+  --density-gap: 0.625rem;
+  --density-chat-row-y: 1.25rem;
+  --density-chat-row-x: 1.5rem;
+  --density-chat-tool-row-y: 0.75rem;
+  --density-chat-composer-y: 1.125rem;
+  --density-chat-composer-x: 1.25rem;
+  --density-chat-input-y: 0.9375rem;
+  --density-chat-gap: 0.625rem;
 }

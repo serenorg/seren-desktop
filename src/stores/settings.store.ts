@@ -100,9 +100,6 @@ export interface Settings {
   preferredPaymentMethod: "serenbucks" | "crypto";
   enablePaymentFallback: boolean;
 
-  // Theme settings
-  theme: "dark" | "light" | "system";
-
   // Semantic indexing settings
   semanticIndexingEnabled: boolean;
 
@@ -227,8 +224,6 @@ const DEFAULT_SETTINGS: Settings = {
   // Payment method
   preferredPaymentMethod: "serenbucks",
   enablePaymentFallback: true,
-  // Theme
-  theme: "dark",
   // Semantic indexing
   semanticIndexingEnabled: false,
   // Memory

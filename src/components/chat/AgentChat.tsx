@@ -1162,7 +1162,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         };
         return (
           <article
-            class="group/msg relative px-5 py-4 bg-surface-1 border-b border-surface-2 [contain:layout]"
+            class="chat-message-row group/msg relative px-5 py-4 bg-surface-1 border-b border-surface-2 [contain:layout]"
             classList={{ "border-l-2 border-l-destructive": showTurnError() }}
           >
             <Show when={message.docNames?.length}>
@@ -1187,7 +1187,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               </div>
             </Show>
             <div
-              class="text-sm leading-relaxed text-foreground whitespace-pre-wrap"
+              class="chat-message-content leading-relaxed text-foreground whitespace-pre-wrap"
               innerHTML={escapeHtmlWithLinks(message.content)}
             />
             <Show when={forkSupported()}>
@@ -1234,7 +1234,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         const normalized = extractAgentThinkingMarkup(message.content);
         const visibleContent = normalized.content;
         return (
-          <article class="group/msg relative px-5 py-4 border-b border-surface-2 [contain:layout]">
+          <article class="chat-message-row group/msg relative px-5 py-4 border-b border-surface-2 [contain:layout]">
             <Show when={normalized.thinking}>
               <div class={visibleContent ? "mb-3" : ""}>
                 <ThinkingBlock thinking={normalized.thinking} />
@@ -1245,7 +1245,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               fallback={
                 <Show when={visibleContent}>
                   <div
-                    class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-sm [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
+                    class="chat-message-content leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-[1.15em] [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-[1em] [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.92em] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[0.92em] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
                     innerHTML={collapseBuildOutput(
                       collapseDirectoryListings(
                         htmlCache[message.id] ??
@@ -1322,28 +1322,28 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       case "thought":
         return (
-          <article class="px-5 py-3 border-b border-surface-2">
+          <article class="chat-message-row px-5 py-3 border-b border-surface-2">
             <ThinkingBlock thinking={message.content} />
           </article>
         );
 
       case "tool":
         return message.toolCall ? (
-          <div class="px-5 py-2">
+          <div class="chat-tool-row px-5 py-2">
             <ToolCallCard toolCall={message.toolCall} />
           </div>
         ) : null;
 
       case "diff":
         return message.diff ? (
-          <div class="px-5 py-2">
+          <div class="chat-tool-row px-5 py-2">
             <DiffCard diff={message.diff} onViewInEditor={props.onViewDiff} />
           </div>
         ) : null;
 
       case "error":
         return (
-          <article class="px-5 py-3 border-b border-surface-2">
+          <article class="chat-message-row px-5 py-3 border-b border-surface-2">
             <div
               class={`px-3 py-2 border rounded-md text-sm ${
                 isAuthError(message.content)
@@ -1389,7 +1389,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   return (
-    <div class="relative flex-1 flex flex-col min-h-0">
+    <div class="chat-surface relative flex-1 flex flex-col min-h-0">
       <Show when={isDragging() && isPaneActive()}>
         <div class="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary/50 rounded-sm z-50 pointer-events-none flex items-center justify-center">
           <span class="text-primary text-sm font-medium bg-background/90 px-3 py-1.5 rounded-md shadow-sm">
@@ -1588,14 +1588,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               );
             })()}
           >
-            <article class="px-5 py-4 border-b border-surface-2">
+            <article class="chat-message-row px-5 py-4 border-b border-surface-2">
               <ThinkingStatus startTime={promptStartTime} />
             </article>
           </Show>
 
           {/* Streaming Thinking */}
           <Show when={threadStreamingThinking()}>
-            <article class="px-5 py-3 border-b border-surface-2">
+            <article class="chat-message-row px-5 py-3 border-b border-surface-2">
               <ThinkingBlock
                 thinking={threadStreamingThinking()}
                 isStreaming={true}
@@ -1605,9 +1605,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
           {/* Streaming Content */}
           <Show when={threadStreamingContent()}>
-            <article class="px-5 py-4 border-b border-surface-2">
+            <article class="chat-message-row px-5 py-4 border-b border-surface-2">
               <div
-                class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-sm [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
+                class="chat-message-content leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-[1.15em] [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-[1em] [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.92em] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[0.92em] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
                 textContent={threadStreamingContent()}
               />
               <span class="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" />
@@ -1637,7 +1637,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             )}
           >
             {(proposal) => (
-              <div class="px-5 py-2">
+              <div class="chat-tool-row px-5 py-2">
                 <DiffProposalDialog proposal={proposal} />
               </div>
             )}
@@ -1648,7 +1648,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             )}
           >
             {(perm) => (
-              <div class="px-5 py-2">
+              <div class="chat-tool-row px-5 py-2">
                 <AgentPermissionDialog permission={perm} />
               </div>
             )}
@@ -1849,7 +1849,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       <Show when={hasSession()}>
         <div class="shrink-0 border-t border-surface-2 bg-surface-1">
           <form
-            class="flex flex-col gap-2 px-4 pb-4 pt-1.5"
+            class="chat-composer-form flex flex-col gap-2 px-4 pb-4 pt-1.5"
             onSubmit={(e) => {
               e.preventDefault();
               sendMessage();

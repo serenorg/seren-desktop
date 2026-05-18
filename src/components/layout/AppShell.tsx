@@ -39,6 +39,11 @@ import { AgentTasksPanel } from "@/components/tasks/AgentTasksPanel";
 import { shortcuts } from "@/lib/shortcuts";
 import type { InstalledSkill } from "@/lib/skills";
 import {
+  appearanceState,
+  applyAppearanceToDocument,
+  loadAppearance,
+} from "@/stores/appearance.store";
+import {
   initEditorSessionPersistence,
   pickEditorSessionForContext,
   restoreEditorSessions,
@@ -209,6 +214,29 @@ export const AppShell: Component<AppShellProps> = (props) => {
     window.addEventListener(CLOSE_CATALOG_EVENT, handleCloseCatalog);
     window.addEventListener(OPEN_INBOX_EVENT, handleOpenInbox);
     window.addEventListener(CLOSE_INBOX_EVENT, handleCloseInbox);
+
+    // Reconcile the synchronously-hydrated appearance with the canonical
+    // Tauri store; runs the one-shot migration from settings.app.theme on
+    // first boot of this build.
+    void loadAppearance();
+
+    // When the appearance is set to "system" we follow the OS-level
+    // preference. Re-apply on change so the user sees the switch live.
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSystemThemeChange = () => {
+      if (appearanceState.appearance.theme === "system") {
+        applyAppearanceToDocument(appearanceState.appearance);
+      }
+    };
+    media.addEventListener("change", onSystemThemeChange);
+    onCleanup(() => media.removeEventListener("change", onSystemThemeChange));
+  });
+
+  // Mirror every appearance mutation to the document. Keep DOM side effects
+  // centralized here so load, reset, and future programmatic changes all flow
+  // through one path.
+  createEffect(() => {
+    applyAppearanceToDocument(appearanceState.appearance);
   });
 
   onCleanup(() => {

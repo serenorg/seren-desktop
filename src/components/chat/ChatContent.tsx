@@ -971,7 +971,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   };
 
   return (
-    <section class="relative flex flex-col h-full bg-background text-foreground">
+    <section class="chat-surface relative flex flex-col h-full bg-background text-foreground">
       <Show when={isDragging() && isPaneActive()}>
         <div class="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary/50 rounded-sm z-50 pointer-events-none flex items-center justify-center">
           <span class="text-primary text-sm font-medium bg-background/90 px-3 py-1.5 rounded-md shadow-sm">
@@ -1162,7 +1162,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 // Render individual tool call card (for 1-2 tool calls)
                 if (message.type === "tool_call" && message.toolCall) {
                   return (
-                    <div class="px-5 py-2">
+                    <div class="chat-tool-row px-5 py-2">
                       <ToolCallCard
                         toolCall={toToolCallEvent(message.toolCall)}
                       />
@@ -1185,7 +1185,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                     }
                   >
                     <article
-                      class={`group/msg px-5 py-4 border-b border-surface-2 last:border-b-0 [contain:layout] ${message.role === "user" ? "bg-surface-1" : "bg-transparent"}`}
+                      class={`chat-message-row group/msg px-5 py-4 border-b border-surface-2 last:border-b-0 [contain:layout] ${message.role === "user" ? "bg-surface-1" : "bg-transparent"}`}
                     >
                       <Show when={message.images && message.images.length > 0}>
                         <MessageImages images={message.images ?? []} />
@@ -1346,7 +1346,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
           </Show>
 
           <Show when={conversationIsLoading() && !streamingContent()}>
-            <article class="px-5 py-4 border-b border-surface-2">
+            <article class="chat-message-row px-5 py-4 border-b border-surface-2">
               <Show
                 when={conversationIsRLMProcessing()}
                 fallback={<ThinkingStatus />}
@@ -1364,7 +1364,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
           </Show>
 
           <Show when={streamingThinking()}>
-            <article class="px-5 py-4 border-b border-surface-2">
+            <article class="chat-message-row px-5 py-4 border-b border-surface-2">
               <details open class="text-xs text-muted-foreground">
                 <summary class="cursor-pointer select-none mb-1">
                   Thinking…
@@ -1377,7 +1377,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
           </Show>
 
           <Show when={streamingContent()}>
-            <article class="px-5 py-4 border-b border-surface-2">
+            <article class="chat-message-row px-5 py-4 border-b border-surface-2">
               <div class="chat-message-content text-[14px] leading-[1.7] text-foreground break-words whitespace-pre-wrap">
                 {streamingContent()}
                 <Show when={conversationIsLoading()}>
@@ -1419,7 +1419,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
 
         <div class="shrink-0 border-t border-surface-2 bg-surface-1">
           <form
-            class="flex flex-col gap-2 px-4 pb-3.5 pt-1.5"
+            class="chat-composer-form flex flex-col gap-2 px-4 pb-3.5 pt-1.5"
             onSubmit={(event) => {
               event.preventDefault();
               sendMessage();

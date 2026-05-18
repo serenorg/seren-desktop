@@ -5,7 +5,13 @@ import { installExternalLinkInterceptor } from "@/lib/external-link";
 import { queryClient } from "@/lib/query-client";
 import { installSupportReporting } from "@/lib/support/hook";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
+import { hydrateAppearanceSync } from "@/stores/appearance.store";
 import App from "./App";
+
+// Apply theme + appearance vars BEFORE mounting so the first paint matches
+// the user's saved choice. The Tauri store (canonical) is read async in
+// AppShell.onMount and reconciles if it disagrees with this hot cache.
+hydrateAppearanceSync();
 
 document.documentElement.dataset.buildCommit = __SEREN_BUILD_COMMIT__;
 document.documentElement.dataset.buildTimestamp = __SEREN_BUILD_TIMESTAMP__;
