@@ -68,6 +68,31 @@ BROWSER_TYPE=moz-firefox node dist/index.js
 
 "edge" is accepted as an alias for "msedge".
 
+### Profile Compatibility Controls
+
+The default profile preserves existing behavior: headless launch, the safe
+stealth plugin for Chromium-based browsers, and the manual page init patch for
+Chromium pages. For sites that are sensitive to those signals, such as embedded
+wallet provisioning flows, set only the controls needed for that workflow:
+
+```bash
+# Launch a visible browser window instead of headless mode.
+SEREN_PLAYWRIGHT_HEADLESS=0 node dist/index.js
+
+# Skip the puppeteer-extra stealth plugin entirely.
+SEREN_PLAYWRIGHT_DISABLE_STEALTH=1 node dist/index.js
+
+# Keep stealth enabled but remove specific evasions by name.
+SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE=iframe.contentWindow,navigator.permissions node dist/index.js
+
+# Skip the hand-written addInitScript patch applied to new Chromium pages.
+SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH=1 node dist/index.js
+```
+
+The `SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE` value is a comma-separated list
+of evasion names. `chrome.app` is always disabled for macOS notarization
+compatibility.
+
 ### In Seren Desktop
 
 Configure the browser in MCP server settings by adding to the server's environment:
@@ -75,7 +100,8 @@ Configure the browser in MCP server settings by adding to the server's environme
 ```json
 {
   "env": {
-    "BROWSER_TYPE": "moz-firefox"
+    "BROWSER_TYPE": "moz-firefox",
+    "SEREN_PLAYWRIGHT_HEADLESS": "0"
   }
 }
 ```

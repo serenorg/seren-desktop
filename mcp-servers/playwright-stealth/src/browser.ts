@@ -23,7 +23,7 @@ export interface InstalledBrowser {
   stealthSupported: boolean;
 }
 
-type BrowserEngine = "chromium" | "firefox" | "webkit";
+export type BrowserEngine = "chromium" | "firefox" | "webkit";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +51,13 @@ const DEFAULT_USER_AGENTS: Record<BrowserEngine, string> = {
   webkit:
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15",
 };
+
+export const PLAYWRIGHT_HEADLESS_ENV = "SEREN_PLAYWRIGHT_HEADLESS";
+export const DISABLE_STEALTH_ENV = "SEREN_PLAYWRIGHT_DISABLE_STEALTH";
+export const STEALTH_EVASIONS_DISABLE_ENV =
+  "SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE";
+export const DISABLE_PAGE_INIT_PATCH_ENV =
+  "SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH";
 
 // ── Browser Detection ──────────────────────────────────────────────────────────
 
@@ -228,7 +235,7 @@ function buildLaunchOptions(
   installed: InstalledBrowser[],
 ): Record<string, unknown> {
   const launchOptions: Record<string, unknown> = {
-    headless: true,
+    headless: shouldLaunchHeadless(),
   };
 
   if (isChromiumBased(engine)) {
@@ -341,10 +348,88 @@ export async function setBrowser(
  * dependency error at runtime while keeping all other stealth evasions
  * intact.  See: https://github.com/serenorg/seren-desktop/issues/1276
  */
-export function createSafeStealthPlugin(): ReturnType<typeof StealthPlugin> {
+export function createSafeStealthPlugin(
+  env: NodeJS.ProcessEnv = process.env,
+): ReturnType<typeof StealthPlugin> {
   const stealth = StealthPlugin();
   stealth.enabledEvasions.delete("chrome.app");
+  for (const evasion of getDisabledStealthEvasions(env)) {
+    stealth.enabledEvasions.delete(evasion);
+  }
   return stealth;
+}
+
+export function shouldLaunchHeadless(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env[PLAYWRIGHT_HEADLESS_ENV] !== "0";
+}
+
+export function shouldApplyStealthPlugin(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env[DISABLE_STEALTH_ENV] !== "1";
+}
+
+export function getDisabledStealthEvasions(
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  return (env[STEALTH_EVASIONS_DISABLE_ENV] ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+export function applyStealthPluginIfEnabled(
+  engine: BrowserEngine,
+  launcher: BrowserType & { use(plugin: unknown): void },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!isChromiumBased(engine) || !shouldApplyStealthPlugin(env)) {
+    return false;
+  }
+
+  launcher.use(createSafeStealthPlugin(env));
+  return true;
+}
+
+export function shouldApplyPageInitPatch(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env[DISABLE_PAGE_INIT_PATCH_ENV] !== "1";
+}
+
+export async function addPageInitPatchIfEnabled(
+  targetPage: Page,
+  engine: BrowserEngine,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<boolean> {
+  if (!isChromiumBased(engine) || !shouldApplyPageInitPatch(env)) {
+    return false;
+  }
+
+  await targetPage.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", {
+      get: () => false,
+    });
+
+    Object.defineProperty(navigator, "plugins", {
+      get: () => [1, 2, 3, 4, 5],
+    });
+
+    Object.defineProperty(navigator, "languages", {
+      get: () => ["en-US", "en"],
+    });
+
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters: PermissionDescriptor) =>
+      parameters.name === "notifications"
+        ? Promise.resolve({
+            state: Notification.permission,
+          } as PermissionStatus)
+        : originalQuery(parameters);
+  });
+  return true;
 }
 
 export async function getBrowser(): Promise<Browser> {
@@ -355,11 +440,14 @@ export async function getBrowser(): Promise<Browser> {
       const launched = await launchBrowserWithFallback(
         getActiveBrowserType(),
         installed,
-        async (browserName, engine, launchOptions) => {
-          if (isChromiumBased(engine) && !stealthApplied) {
-            (chromium as BrowserType & { use(plugin: unknown): void }).use(
-              createSafeStealthPlugin(),
-            );
+        async (_browserName, engine, launchOptions) => {
+          if (
+            !stealthApplied &&
+            applyStealthPluginIfEnabled(
+              engine,
+              chromium as BrowserType & { use(plugin: unknown): void },
+            )
+          ) {
             stealthApplied = true;
           }
 
@@ -399,31 +487,7 @@ export async function getPage(): Promise<Page> {
     page = await ctx.newPage();
 
     const engine = resolveBrowserName(getActiveBrowserType());
-    if (isChromiumBased(engine)) {
-      await page.addInitScript(() => {
-        Object.defineProperty(navigator, "webdriver", {
-          get: () => false,
-        });
-
-        Object.defineProperty(navigator, "plugins", {
-          get: () => [1, 2, 3, 4, 5],
-        });
-
-        Object.defineProperty(navigator, "languages", {
-          get: () => ["en-US", "en"],
-        });
-
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (
-          parameters: PermissionDescriptor,
-        ) =>
-          parameters.name === "notifications"
-            ? Promise.resolve({
-                state: Notification.permission,
-              } as PermissionStatus)
-            : originalQuery(parameters);
-      });
-    }
+    await addPageInitPatchIfEnabled(page, engine);
   }
   return page;
 }
