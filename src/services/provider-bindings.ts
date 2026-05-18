@@ -16,7 +16,7 @@ import {
   switchThreadProvider as switchThreadProviderBridge,
 } from "@/lib/tauri-bridge";
 import type { AgentType } from "@/services/providers";
-import { agentStore } from "@/stores/agent.store";
+import { type AgentMessage, agentStore } from "@/stores/agent.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState } from "@/stores/fileTree";
@@ -36,6 +36,8 @@ export interface SwitchBlockedReason {
     | "rlm-processing"
     | "compacting"
     | "retrying"
+    | "agent-turn"
+    | "agent-approval"
     | "no-active-thread";
 }
 
@@ -63,6 +65,17 @@ export function evaluateChatSwitchGuard(
   if (threadId === chatStore.activeConversationId) {
     if (chatStore.isCompacting) return { kind: "compacting" };
     if (chatStore.retryingMessageId) return { kind: "retrying" };
+  }
+  const agentSession = agentStore.getSessionForConversation(threadId);
+  if (
+    agentStore.isTurnInFlight(threadId) ||
+    agentSession?.streamingContent ||
+    agentSession?.streamingThinking
+  ) {
+    return { kind: "agent-turn" };
+  }
+  if (agentStore.hasPendingApprovals(threadId)) {
+    return { kind: "agent-approval" };
   }
   return null;
 }
@@ -192,18 +205,28 @@ async function transitionChatToAgent(
   // Capture the chat row BEFORE dropping it so we know which project
   // root to spawn against.
   const chatRow = threadStore.findConversation(threadId);
-  conversationStore.dropFromCache(threadId);
+  const restoredMessages = collectRestoredAgentMessages(threadId);
 
+  // Fetch the agent row BEFORE dropping the chat row so the unified
+  // view can flip kinds without an empty window in between. With the
+  // drop-first ordering, `threadStore.findConversation(threadId)`
+  // returns undefined for the duration of the DB round-trip and
+  // ThreadContent's binding-driven shell falls back to the pane's
+  // static `chat` kind, briefly mounting an empty ChatContent before
+  // the agent row arrives.
+  let agentRow: Awaited<ReturnType<typeof getAgentConversation>> = null;
   try {
-    const agentRow = await getAgentConversation(threadId);
-    if (agentRow) {
-      agentStore.upsertAgentConversationFromDb(agentRow);
-    }
+    agentRow = await getAgentConversation(threadId);
   } catch (error) {
     console.warn(
       "[provider-bindings] Failed to load agent row after chat→agent switch:",
       error,
     );
+  }
+
+  conversationStore.dropFromCache(threadId);
+  if (agentRow) {
+    agentStore.upsertAgentConversationFromDb(agentRow);
   }
 
   const cwd = chatRow?.projectRoot ?? fileTreeState.rootPath ?? null;
@@ -220,7 +243,10 @@ async function transitionChatToAgent(
 
   try {
     await agentStore.spawnSession(cwd, targetAgentType, {
+      localSessionId: threadId,
       conversationTitle: chatRow?.title,
+      restoredMessages:
+        restoredMessages.length > 0 ? restoredMessages : undefined,
       bootstrapPromptContext: runtime.bootstrap_context ?? undefined,
     });
   } catch (error) {
@@ -279,29 +305,71 @@ async function transitionAgentToChat(threadId: string): Promise<void> {
  * chat-side messages.
  */
 function collectTranscriptForBootstrap(threadId: string): BootstrapMessage[] {
+  return collectTranscriptEntries(threadId).map(({ role, content }) => ({
+    role,
+    content,
+  }));
+}
+
+function collectRestoredAgentMessages(threadId: string): AgentMessage[] {
+  return collectTranscriptEntries(threadId).map((message) => ({
+    id: message.id,
+    type: message.role,
+    content: message.content,
+    timestamp: message.timestamp,
+    provider: message.provider,
+  }));
+}
+
+type TranscriptSourceMessage = {
+  id: string;
+  role: string;
+  type?: string;
+  content: string;
+  timestamp: number;
+  provider?: string;
+};
+type TranscriptTurn = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+  provider?: string;
+};
+
+function isTranscriptTurn(
+  message: TranscriptSourceMessage,
+): message is TranscriptSourceMessage & { role: "user" | "assistant" } {
+  if (message.role !== "user" && message.role !== "assistant") return false;
+  return message.type === undefined || message.type === message.role;
+}
+
+function collectTranscriptEntries(threadId: string): TranscriptTurn[] {
   const fromConversation = conversationStore.getMessagesFor(threadId);
   const fromChat = chatStore.getMessagesFor(threadId);
-  const merged = new Map<string, BootstrapMessage & { timestamp: number }>();
+  const merged = new Map<string, TranscriptTurn>();
 
   for (const m of fromConversation) {
-    if (m.role !== "user" && m.role !== "assistant") continue;
+    if (!isTranscriptTurn(m)) continue;
     merged.set(m.id, {
+      id: m.id,
       role: m.role,
       content: m.content,
       timestamp: m.timestamp,
+      provider: m.provider,
     });
   }
   for (const m of fromChat) {
-    if ((m.role === "user" || m.role === "assistant") && !merged.has(m.id)) {
+    if (isTranscriptTurn(m) && !merged.has(m.id)) {
       merged.set(m.id, {
+        id: m.id,
         role: m.role,
         content: m.content,
         timestamp: m.timestamp,
+        provider: m.provider,
       });
     }
   }
 
-  return Array.from(merged.values())
-    .sort((a, b) => a.timestamp - b.timestamp)
-    .map(({ role, content }) => ({ role, content }));
+  return Array.from(merged.values()).sort((a, b) => a.timestamp - b.timestamp);
 }

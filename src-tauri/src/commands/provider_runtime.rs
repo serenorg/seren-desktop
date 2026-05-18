@@ -55,11 +55,9 @@ pub async fn get_provider_session_runtime(
 /// paths that have not migrated to the runtime table yet still see the right
 /// values during rollout.
 ///
-/// The Phase-3 surface only handles chat-side providers — it intentionally
-/// does not park or tear down a native-agent session, and it does not stamp
-/// `agent_type` / `agent_session_id` on the conversation. Native-agent
-/// switching (with its own resume cursor and bootstrap context handling)
-/// lands in a later phase.
+/// Cross-category switches also mirror `kind`, `agent_type`, and
+/// `agent_model_id`; the frontend owns native session spawn/tear-down after
+/// this transaction commits.
 #[tauri::command]
 pub async fn switch_thread_provider(
     app: AppHandle,
@@ -149,6 +147,10 @@ pub async fn switch_thread_provider(
             // right shell, and clears `agent_session_id` so the TS spawn
             // path creates a fresh native session (the prior session
             // belonged to a different agent type and is no longer valid).
+            // `agent_model_id` is mirrored on the agent branch and cleared
+            // on the chat branch so the row's agent-* columns are coherent
+            // with `kind` rather than leaving a stale agent model id on a
+            // now-chat row.
             // The `selected_model` mirror uses COALESCE so a switch that
             // does not name a new model keeps the conversation's current
             // model in the compatibility column; the runtime row itself
@@ -170,7 +172,7 @@ pub async fn switch_thread_provider(
                      agent_session_id = NULL,
                      agent_model_id = CASE WHEN ?1 = 'agent'
                          THEN COALESCE(?3, agent_model_id)
-                         ELSE agent_model_id END,
+                         ELSE NULL END,
                      selected_provider = ?4,
                      selected_model = COALESCE(?3, selected_model)
                  WHERE id = ?5",
@@ -358,7 +360,7 @@ mod tests {
                      agent_session_id = NULL,
                      agent_model_id = CASE WHEN ?1 = 'agent'
                          THEN COALESCE(?3, agent_model_id)
-                         ELSE agent_model_id END,
+                         ELSE NULL END,
                      selected_provider = ?4,
                      selected_model = COALESCE(?3, selected_model)
                  WHERE id = ?5",
@@ -877,8 +879,14 @@ mod tests {
         )
         .unwrap();
 
-        let (kind, agent_type, agent_session_id, _, selected_provider, selected_model) =
-            read_conv_compat(&conn, "t1");
+        let (
+            kind,
+            agent_type,
+            agent_session_id,
+            agent_model_id,
+            selected_provider,
+            selected_model,
+        ) = read_conv_compat(&conn, "t1");
         assert_eq!(kind, "chat");
         // agent_type cleared so the chat shell does not see a stale agent
         // hint that could route it into AgentChat.
@@ -886,8 +894,74 @@ mod tests {
         // Native session id cleared so the prior CLI session is not picked
         // up by a future agent switch on the same thread.
         assert_eq!(agent_session_id, None);
+        // agent_model_id cleared to keep the agent-* columns coherent with
+        // the new kind. A future query that joins on agent_model_id will
+        // not pick up a stale value from a now-chat row.
+        assert_eq!(agent_model_id, None);
         assert_eq!(selected_provider, Some("seren".to_string()));
         assert_eq!(selected_model, Some("anthropic/claude-sonnet-4".to_string()));
+    }
+
+    #[test]
+    fn agent_to_agent_type_change_updates_agent_type_and_clears_session() {
+        // claude-code -> codex: the agent_type stamp must follow the new
+        // provider and the prior native session id must be cleared so a
+        // codex spawn does not try to resume a claude-code session.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        agent_session_id, agent_model_id,
+                                        selected_provider, selected_model)
+             VALUES ('t1', 'Thread', 1000, 'agent', 'claude-code',
+                     'claude-session', 'claude-sonnet-4', 'claude-code', 'claude-sonnet-4')",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(&conn, "t1", "codex", Some("codex-mid"), None, None, 2000).unwrap();
+
+        let (kind, agent_type, agent_session_id, agent_model_id, _, _) =
+            read_conv_compat(&conn, "t1");
+        assert_eq!(kind, "agent");
+        assert_eq!(agent_type, Some("codex".to_string()));
+        assert_eq!(agent_session_id, None);
+        assert_eq!(agent_model_id, Some("codex-mid".to_string()));
+    }
+
+    #[test]
+    fn agent_to_same_agent_type_still_clears_native_session() {
+        // Pin down the contract: every switch through this command resets
+        // the native session id, even when the agent type is unchanged.
+        // The runtime row already drops native_session_id unconditionally,
+        // so the compat column must do the same to stay in sync.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        agent_session_id, agent_model_id,
+                                        selected_provider, selected_model)
+             VALUES ('t1', 'Thread', 1000, 'agent', 'claude-code',
+                     'live-session', 'claude-sonnet-4', 'claude-code', 'claude-sonnet-4')",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(
+            &conn,
+            "t1",
+            "claude-code",
+            Some("claude-haiku-4"),
+            None,
+            None,
+            2000,
+        )
+        .unwrap();
+
+        let (kind, agent_type, agent_session_id, agent_model_id, _, _) =
+            read_conv_compat(&conn, "t1");
+        assert_eq!(kind, "agent");
+        assert_eq!(agent_type, Some("claude-code".to_string()));
+        assert_eq!(agent_session_id, None);
+        assert_eq!(agent_model_id, Some("claude-haiku-4".to_string()));
     }
 
     #[test]

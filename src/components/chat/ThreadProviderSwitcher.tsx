@@ -41,6 +41,10 @@ function describeSwitchBlock(reason: SwitchBlockedReason): string {
       return "Cannot switch provider while the thread is compacting.";
     case "retrying":
       return "Cannot switch provider while a message is retrying.";
+    case "agent-turn":
+      return "Cannot switch provider while an agent turn is in flight.";
+    case "agent-approval":
+      return "Cannot switch provider while an agent approval is pending.";
     case "no-active-thread":
       return "No active conversation to switch.";
   }
@@ -111,6 +115,10 @@ export const ThreadProviderSwitcher: Component<Props> = (props) => {
   });
 
   const selectChatProvider = (providerId: ProviderId) => {
+    if (current()?.kind === "chat" && current()?.provider === providerId) {
+      setIsOpen(false);
+      return;
+    }
     const blocked = evaluateChatSwitchGuard(props.threadId);
     if (blocked) {
       conversationStore.setError(describeSwitchBlock(blocked));
@@ -131,6 +139,10 @@ export const ThreadProviderSwitcher: Component<Props> = (props) => {
   };
 
   const selectAgent = (agentType: AgentType) => {
+    if (current()?.kind === "agent" && current()?.agentType === agentType) {
+      setIsOpen(false);
+      return;
+    }
     const blocked = evaluateChatSwitchGuard(props.threadId);
     if (blocked) {
       conversationStore.setError(describeSwitchBlock(blocked));

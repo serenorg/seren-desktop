@@ -38,6 +38,18 @@ function user(id: string): UnifiedMessage {
   };
 }
 
+function assistantToolRow(id: string): UnifiedMessage {
+  return {
+    id,
+    type: "tool_call",
+    role: "assistant",
+    content: "tool",
+    timestamp: Number(id),
+    status: "complete",
+    workerType: "chat_model",
+  };
+}
+
 describe("providerDisplayName", () => {
   it("renders chat-provider ids with their PROVIDER_CONFIGS name", () => {
     expect(providerDisplayName("seren")).toBe("Seren Models");
@@ -55,6 +67,17 @@ describe("providerDisplayName", () => {
   it("falls back to a title-cased label for unknown ids", () => {
     expect(providerDisplayName("future_provider")).toBe("Future Provider");
     expect(providerDisplayName("future-provider")).toBe("Future Provider");
+  });
+
+  it("trims empty segments from malformed separator runs", () => {
+    expect(providerDisplayName("-future-provider")).toBe("Future Provider");
+    expect(providerDisplayName("future-provider-")).toBe("Future Provider");
+    expect(providerDisplayName("future--provider")).toBe("Future Provider");
+    expect(providerDisplayName("__foo")).toBe("Foo");
+  });
+
+  it("returns Unknown when the id has no usable segments", () => {
+    expect(providerDisplayName("---")).toBe("Unknown");
   });
 
   it("handles null/undefined input without throwing", () => {
@@ -115,6 +138,17 @@ describe("computeProviderBoundaries", () => {
     const messages = [
       assistant("1", "seren", "model-a"),
       user("2"),
+      assistantToolRow("3"),
+      user("4"),
+      assistant("5", "seren", "model-a"),
+    ];
+    expect(computeProviderBoundaries(messages).size).toBe(0);
+  });
+
+  it("does not let assistant-role tool rows reset the previous producer", () => {
+    const messages = [
+      assistant("1", "seren", "model-a"),
+      assistantToolRow("2"),
       user("3"),
       assistant("4", "seren", "model-a"),
     ];

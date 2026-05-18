@@ -202,6 +202,10 @@ export const ModelSelector: Component = () => {
         return "Cannot switch model while the thread is compacting.";
       case "retrying":
         return "Cannot switch model while a message is retrying.";
+      case "agent-turn":
+        return "Cannot switch model while an agent turn is in flight.";
+      case "agent-approval":
+        return "Cannot switch model while an agent approval is pending.";
       case "no-active-thread":
         return "No active conversation to switch.";
     }

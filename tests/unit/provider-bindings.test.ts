@@ -20,8 +20,10 @@ const getProviderSessionRuntimeBridge = vi.hoisted(() =>
 type TestMessage = {
   id: string;
   role: "user" | "assistant";
+  type?: string;
   content: string;
   timestamp: number;
+  provider?: string;
 };
 const conversationStoreMock = vi.hoisted(() => ({
   conversations: [] as Array<{
@@ -67,7 +69,22 @@ const agentStoreMock = vi.hoisted(() => ({
     project_root: string | null;
     is_archived: boolean;
   }>,
-  sessions: {} as Record<string, { info: { id: string }; conversationId: string }>,
+  sessions: {} as Record<
+    string,
+    {
+      info: { id: string };
+      conversationId: string;
+      streamingContent?: string;
+      streamingThinking?: string;
+    }
+  >,
+  getSessionForConversation: vi.fn((conversationId: string) =>
+    Object.values(agentStoreMock.sessions).find(
+      (session) => session.conversationId === conversationId,
+    ),
+  ),
+  isTurnInFlight: vi.fn(() => false),
+  hasPendingApprovals: vi.fn(() => false),
   spawnSession: vi.fn(async () => "new-session-id"),
   terminateSession: vi.fn(async () => {}),
   dropAgentConversationFromCache: vi.fn(),
@@ -158,12 +175,21 @@ beforeEach(() => {
   conversationStoreMock.getLoadingFor.mockReturnValue(false);
   conversationStoreMock.getStreamingContentFor.mockReturnValue("");
   conversationStoreMock.getRLMProcessingFor.mockReturnValue(false);
+  conversationStoreMock.getMessagesFor.mockReturnValue([]);
   chatStoreMock.isCompacting = false;
   chatStoreMock.retryingMessageId = null;
   chatStoreMock.activeConversationId = null;
   chatStoreMock.getMessagesFor.mockReturnValue([]);
   agentStoreMock.recentAgentConversations = [];
   agentStoreMock.sessions = {};
+  agentStoreMock.getSessionForConversation.mockImplementation(
+    (conversationId: string) =>
+      Object.values(agentStoreMock.sessions).find(
+        (session) => session.conversationId === conversationId,
+      ),
+  );
+  agentStoreMock.isTurnInFlight.mockReturnValue(false);
+  agentStoreMock.hasPendingApprovals.mockReturnValue(false);
   fileTreeStateMock.rootPath = null;
   getProviderSessionRuntimeBridge.mockResolvedValue(null);
 });
@@ -209,6 +235,29 @@ describe("evaluateChatSwitchGuard", () => {
     chatStoreMock.isCompacting = true;
     chatStoreMock.retryingMessageId = "m1";
     expect(evaluateChatSwitchGuard("t1")).toBeNull();
+  });
+
+  it("blocks while a native-agent turn is in flight", () => {
+    agentStoreMock.isTurnInFlight.mockReturnValueOnce(true);
+    expect(evaluateChatSwitchGuard("t1")).toEqual({ kind: "agent-turn" });
+  });
+
+  it("blocks while a native-agent stream buffer is non-empty", () => {
+    agentStoreMock.sessions = {
+      "agent-session": {
+        info: { id: "agent-session" },
+        conversationId: "t1",
+        streamingContent: "partial",
+      },
+    };
+    expect(evaluateChatSwitchGuard("t1")).toEqual({ kind: "agent-turn" });
+  });
+
+  it("blocks while native-agent approvals are pending", () => {
+    agentStoreMock.hasPendingApprovals.mockReturnValueOnce(true);
+    expect(evaluateChatSwitchGuard("t1")).toEqual({
+      kind: "agent-approval",
+    });
   });
 });
 
@@ -284,7 +333,7 @@ describe("switchChatProvider", () => {
   });
 
   it("builds and forwards a deterministic bootstrap when switching to a native agent", async () => {
-    conversationStoreMock.getMessagesFor.mockReturnValueOnce([
+    conversationStoreMock.getMessagesFor.mockReturnValue([
       {
         id: "m1",
         role: "user",
@@ -352,7 +401,7 @@ describe("switchChatProvider", () => {
   });
 
   it("does not send a bootstrap when the new binding is another chat provider", async () => {
-    conversationStoreMock.getMessagesFor.mockReturnValueOnce([
+    conversationStoreMock.getMessagesFor.mockReturnValue([
       { id: "m1", role: "user", content: "hi", timestamp: 1000 },
     ]);
     switchThreadProviderBridge.mockResolvedValueOnce({
@@ -435,6 +484,29 @@ describe("switchChatProvider", () => {
 
   it("moves the row from the chat cache and spawns an agent session on chat→agent", async () => {
     const bridge = await import("@/lib/tauri-bridge");
+    conversationStoreMock.getMessagesFor.mockReturnValue([
+      {
+        id: "m1",
+        role: "user",
+        content: "start here",
+        timestamp: 1000,
+      },
+      {
+        id: "tool-1",
+        role: "assistant",
+        type: "tool_call",
+        content: "tool internals",
+        timestamp: 1001,
+      },
+      {
+        id: "m2",
+        role: "assistant",
+        type: "assistant",
+        content: "prior answer",
+        timestamp: 1002,
+        provider: "seren",
+      },
+    ]);
     conversationStoreMock.conversations = [
       {
         id: "t1",
@@ -487,6 +559,23 @@ describe("switchChatProvider", () => {
       expect.objectContaining({
         bootstrapPromptContext: "previous transcript here",
         conversationTitle: "My thread",
+        localSessionId: "t1",
+        restoredMessages: [
+          {
+            id: "m1",
+            type: "user",
+            content: "start here",
+            timestamp: 1000,
+            provider: undefined,
+          },
+          {
+            id: "m2",
+            type: "assistant",
+            content: "prior answer",
+            timestamp: 1002,
+            provider: "seren",
+          },
+        ],
       }),
     );
   });

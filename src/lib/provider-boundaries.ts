@@ -25,14 +25,17 @@ export function providerDisplayName(
       return "Codex";
     case "gemini":
       return "Gemini";
-    default:
+    default: {
       // Title-case the raw id so unknown providers still render legibly.
-      return provider
+      // Drop empty segments so a leading, trailing, or repeated separator
+      // does not introduce extra whitespace in the label.
+      const titled = provider
         .split(/[-_]/)
-        .map((part) =>
-          part.length === 0 ? part : part[0].toUpperCase() + part.slice(1),
-        )
+        .filter((part) => part.length > 0)
+        .map((part) => part[0].toUpperCase() + part.slice(1))
         .join(" ");
+      return titled.length > 0 ? titled : "Unknown";
+    }
   }
 }
 
@@ -65,7 +68,7 @@ export function computeProviderBoundaries(
   let seenAnyAssistant = false;
 
   for (const msg of messages) {
-    if (msg.role !== "assistant") continue;
+    if (msg.type !== "assistant") continue;
     const provider = msg.provider ?? null;
     const model = msg.modelId ?? null;
 
