@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Mock Tauri bridge before importing the store
 vi.mock("@/lib/tauri-bridge", () => ({
   createConversation: vi.fn().mockResolvedValue(undefined),
-  getConversations: vi.fn().mockResolvedValue([]),
+  listConversations: vi.fn().mockResolvedValue([]),
   getMessages: vi.fn().mockResolvedValue([]),
   saveMessage: vi.fn().mockResolvedValue(undefined),
   updateConversation: vi.fn().mockResolvedValue(undefined),
@@ -465,16 +465,24 @@ describe("conversationStore", () => {
   describe("loadHistory", () => {
     it("defaults workerType to chat_model for null metadata", async () => {
       const bridge = await import("@/lib/tauri-bridge");
-      vi.mocked(bridge.getConversations).mockResolvedValueOnce([
+      vi.mocked(bridge.listConversations).mockResolvedValueOnce([
         {
           id: "conv-1",
           title: "Old Chat",
           created_at: 1000,
+          kind: "chat",
           selected_model: null,
           selected_provider: null,
           project_root: null,
           is_archived: false,
           employee_id: null,
+          agent_type: null,
+          agent_session_id: null,
+          agent_cwd: null,
+          agent_model_id: null,
+          agent_permission_mode: null,
+          agent_metadata: null,
+          project_id: null,
         },
       ]);
       vi.mocked(bridge.getMessages).mockResolvedValueOnce([
@@ -500,16 +508,24 @@ describe("conversationStore", () => {
 
     it("deserializes metadata from database", async () => {
       const bridge = await import("@/lib/tauri-bridge");
-      vi.mocked(bridge.getConversations).mockResolvedValueOnce([
+      vi.mocked(bridge.listConversations).mockResolvedValueOnce([
         {
           id: "conv-2",
           title: "Agent Chat",
           created_at: 1000,
+          kind: "chat",
           selected_model: null,
           selected_provider: null,
           project_root: null,
           is_archived: false,
           employee_id: null,
+          agent_type: null,
+          agent_session_id: null,
+          agent_cwd: null,
+          agent_model_id: null,
+          agent_permission_mode: null,
+          agent_metadata: null,
+          project_id: null,
         },
       ]);
       vi.mocked(bridge.getMessages).mockResolvedValueOnce([
@@ -541,16 +557,24 @@ describe("conversationStore", () => {
 
     it("restores tool_call and tool_result types from persisted metadata", async () => {
       const bridge = await import("@/lib/tauri-bridge");
-      vi.mocked(bridge.getConversations).mockResolvedValueOnce([
+      vi.mocked(bridge.listConversations).mockResolvedValueOnce([
         {
           id: "conv-tools",
           title: "Tool Chat",
           created_at: 1000,
+          kind: "chat",
           selected_model: null,
           selected_provider: null,
           project_root: null,
           is_archived: false,
           employee_id: null,
+          agent_type: null,
+          agent_session_id: null,
+          agent_cwd: null,
+          agent_model_id: null,
+          agent_permission_mode: null,
+          agent_metadata: null,
+          project_id: null,
         },
       ]);
       vi.mocked(bridge.getMessages).mockResolvedValueOnce([

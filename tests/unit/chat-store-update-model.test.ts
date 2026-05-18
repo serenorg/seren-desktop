@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/tauri-bridge", () => ({
   createConversation: vi.fn(async () => {}),
-  getConversations: vi.fn(async () => []),
+  listConversations: vi.fn(async () => []),
   getMessages: vi.fn(async () => []),
   saveMessage: vi.fn(async () => {}),
   updateConversation: vi.fn(async () => {}),

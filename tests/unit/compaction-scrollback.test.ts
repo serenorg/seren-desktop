@@ -9,7 +9,7 @@ const { sendMessageMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/tauri-bridge", () => ({
   createConversation: vi.fn(async () => {}),
-  getConversations: vi.fn(async () => []),
+  listConversations: vi.fn(async () => []),
   getMessages: vi.fn(async () => []),
   saveMessage: vi.fn(async () => {}),
   updateConversation: vi.fn(async () => {}),

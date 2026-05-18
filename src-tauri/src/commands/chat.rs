@@ -112,6 +112,32 @@ pub struct AgentConversation {
     pub is_archived: bool,
 }
 
+/// Wire-format row for the unified `list_conversations` command. Carries
+/// every column either kind of thread needs so the chat and agent stores
+/// can both project from a single read, and exposes a `kind` field that
+/// is derived from `provider_session_runtime.provider` (falling back to
+/// the stored `conversations.kind` only when no binding row exists).
+/// Callers should treat `kind` here as authoritative for routing.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UnifiedConversationRow {
+    pub id: String,
+    pub title: String,
+    pub created_at: i64,
+    pub kind: String,
+    pub project_root: Option<String>,
+    pub is_archived: bool,
+    pub selected_provider: Option<String>,
+    pub selected_model: Option<String>,
+    pub employee_id: Option<String>,
+    pub agent_type: Option<String>,
+    pub agent_session_id: Option<String>,
+    pub agent_cwd: Option<String>,
+    pub agent_model_id: Option<String>,
+    pub agent_permission_mode: Option<String>,
+    pub agent_metadata: Option<String>,
+    pub project_id: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StoredMessage {
     pub id: String,
@@ -169,56 +195,99 @@ pub async fn create_conversation(
     Ok(conversation)
 }
 
+/// Unified list reader for both chat and agent conversations.
+///
+/// The `kind` column in the returned rows is derived from
+/// `provider_session_runtime.provider` via the same native-agent set the
+/// switch command uses; the stored `conversations.kind` is only the
+/// fallback for threads that pre-date the runtime binding. Callers
+/// should treat the returned `kind` as authoritative and stop reading
+/// `conversations.kind` directly.
+///
+/// `kind` parameter filters the result; pass `None` to receive both
+/// chat and agent rows in one call. `project_root` matches a thread if
+/// any of its chat-side `project_root`, agent-side `project_id`, or
+/// agent-side `agent_cwd` equals the raw or canonicalized form — that
+/// preserves the prior asymmetric behavior of the two separate commands.
+/// Chat-kind rows with a NULL `project_root` are always included so the
+/// default sidebar bucket keeps surfacing them.
 #[tauri::command]
-pub async fn get_conversations(
+pub async fn list_conversations(
     app: AppHandle,
+    kind: Option<String>,
     project_root: Option<String>,
-) -> Result<Vec<Conversation>, String> {
+    limit: Option<i32>,
+) -> Result<Vec<UnifiedConversationRow>, String> {
+    if let Some(ref k) = kind {
+        if k != "chat" && k != "agent" {
+            return Err(format!("invalid kind filter: {k}"));
+        }
+    }
+
+    let raw = project_root.clone();
     let normalized = project_root.as_deref().and_then(normalize_project_root);
+    // SQLite treats `LIMIT -1` as no limit, matching the old behavior of
+    // the unlimited chat read.
+    let effective_limit = limit.unwrap_or(-1);
 
     run_db(app, move |conn| {
-        let rows = if let Some(ref root) = normalized {
-            let mut stmt = conn.prepare(
-                "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived, employee_id
-                 FROM conversations
-                 WHERE kind = 'chat' AND is_archived = 0
-                   AND (project_root = ?1 OR project_root IS NULL)
-                 ORDER BY created_at DESC",
-            )?;
-            stmt.query_map(params![root], |row| {
-                Ok(Conversation {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    created_at: row.get(2)?,
-                    selected_model: row.get(3)?,
-                    selected_provider: row.get(4)?,
-                    project_root: row.get(5)?,
-                    is_archived: row.get::<_, i32>(6)? != 0,
-                    employee_id: row.get(7)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?
-        } else {
-            let mut stmt = conn.prepare(
-                "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived, employee_id
-                 FROM conversations
-                 WHERE kind = 'chat' AND is_archived = 0
-                 ORDER BY created_at DESC",
-            )?;
-            stmt.query_map([], |row| {
-                Ok(Conversation {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    created_at: row.get(2)?,
-                    selected_model: row.get(3)?,
-                    selected_provider: row.get(4)?,
-                    project_root: row.get(5)?,
-                    is_archived: row.get::<_, i32>(6)? != 0,
-                    employee_id: row.get(7)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?
-        };
+        let mut stmt = conn.prepare(
+            "WITH derived AS (
+                SELECT c.id, c.title, c.created_at, c.is_archived,
+                       c.project_root, c.selected_provider, c.selected_model,
+                       c.employee_id, c.agent_type, c.agent_session_id,
+                       c.agent_cwd, c.agent_model_id, c.agent_permission_mode,
+                       c.agent_metadata, c.project_id,
+                       CASE
+                           WHEN psr.provider IS NULL THEN c.kind
+                           WHEN psr.provider IN ('claude-code', 'codex', 'gemini') THEN 'agent'
+                           ELSE 'chat'
+                       END AS derived_kind
+                FROM conversations c
+                LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+            )
+            SELECT id, title, created_at, derived_kind, project_root, is_archived,
+                   selected_provider, selected_model, employee_id,
+                   agent_type, agent_session_id, agent_cwd, agent_model_id,
+                   agent_permission_mode, agent_metadata, project_id
+            FROM derived
+            WHERE is_archived = 0
+              AND (?1 IS NULL OR derived_kind = ?1)
+              AND (
+                (?2 IS NULL AND ?3 IS NULL)
+                OR project_root = ?2 OR project_id = ?2 OR agent_cwd = ?2
+                OR project_root = ?3 OR project_id = ?3 OR agent_cwd = ?3
+                OR (derived_kind = 'chat' AND project_root IS NULL)
+              )
+            ORDER BY created_at DESC
+            LIMIT ?4",
+        )?;
+
+        let rows = stmt
+            .query_map(
+                params![kind, raw, normalized, effective_limit],
+                |row| {
+                    Ok(UnifiedConversationRow {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        created_at: row.get(2)?,
+                        kind: row.get(3)?,
+                        project_root: row.get(4)?,
+                        is_archived: row.get::<_, i32>(5)? != 0,
+                        selected_provider: row.get(6)?,
+                        selected_model: row.get(7)?,
+                        employee_id: row.get(8)?,
+                        agent_type: row.get(9)?,
+                        agent_session_id: row.get(10)?,
+                        agent_cwd: row.get(11)?,
+                        agent_model_id: row.get(12)?,
+                        agent_permission_mode: row.get(13)?,
+                        agent_metadata: row.get(14)?,
+                        project_id: row.get(15)?,
+                    })
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(rows)
     })
@@ -228,10 +297,22 @@ pub async fn get_conversations(
 #[tauri::command]
 pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conversation>, String> {
     run_db(app, move |conn| {
+        // Filter by the derived kind so the reader stays correct if the
+        // stored `conversations.kind` ever drifts from the live provider
+        // binding (e.g. a mirror update raced a switch).
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived, employee_id
-             FROM conversations
-             WHERE id = ?1 AND kind = 'chat'",
+            "SELECT c.id, c.title, c.created_at, c.selected_model, c.selected_provider,
+                    c.project_root, c.is_archived, c.employee_id
+             FROM conversations c
+             LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+             WHERE c.id = ?1
+               AND (
+                 CASE
+                     WHEN psr.provider IS NULL THEN c.kind
+                     WHEN psr.provider IN ('claude-code', 'codex', 'gemini') THEN 'agent'
+                     ELSE 'chat'
+                 END
+               ) = 'chat'",
         )?;
 
         let result = stmt
@@ -408,64 +489,28 @@ pub async fn create_agent_conversation(
 }
 
 #[tauri::command]
-pub async fn get_agent_conversations(
-    app: AppHandle,
-    limit: i32,
-    project_root: Option<String>,
-) -> Result<Vec<AgentConversation>, String> {
-    let normalized_project_root = project_root.as_deref().and_then(normalize_project_root);
-    let raw_project_root = project_root;
-
-    run_db(app, move |conn| {
-        let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, agent_permission_mode, agent_metadata, project_id, project_root, is_archived
-             FROM conversations
-             WHERE kind = 'agent' AND is_archived = 0
-               AND ((?1 IS NULL AND ?2 IS NULL)
-                    OR project_id = ?1
-                    OR project_root = ?1
-                    OR agent_cwd = ?1
-                    OR project_id = ?2
-                    OR project_root = ?2
-                    OR agent_cwd = ?2)
-             ORDER BY created_at DESC
-             LIMIT ?3",
-        )?;
-
-        let rows = stmt
-            .query_map(params![normalized_project_root, raw_project_root, limit], |row| {
-                Ok(AgentConversation {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    created_at: row.get(2)?,
-                    agent_type: row.get(3)?,
-                    agent_session_id: row.get(4)?,
-                    agent_cwd: row.get(5)?,
-                    agent_model_id: row.get(6)?,
-                    agent_permission_mode: row.get(7)?,
-                    agent_metadata: row.get(8)?,
-                    project_id: row.get(9)?,
-                    project_root: row.get(10)?,
-                    is_archived: row.get::<_, i32>(11)? != 0,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(rows)
-    })
-    .await
-}
-
-#[tauri::command]
 pub async fn get_agent_conversation(
     app: AppHandle,
     id: String,
 ) -> Result<Option<AgentConversation>, String> {
     run_db(app, move |conn| {
+        // Filter by the derived kind so the reader stays correct if the
+        // stored `conversations.kind` ever drifts from the live provider
+        // binding.
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, agent_permission_mode, agent_metadata, project_id, project_root, is_archived
-             FROM conversations
-             WHERE id = ?1 AND kind = 'agent'",
+            "SELECT c.id, c.title, c.created_at, c.agent_type, c.agent_session_id,
+                    c.agent_cwd, c.agent_model_id, c.agent_permission_mode,
+                    c.agent_metadata, c.project_id, c.project_root, c.is_archived
+             FROM conversations c
+             LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+             WHERE c.id = ?1
+               AND (
+                 CASE
+                     WHEN psr.provider IS NULL THEN c.kind
+                     WHEN psr.provider IN ('claude-code', 'codex', 'gemini') THEN 'agent'
+                     ELSE 'chat'
+                 END
+               ) = 'agent'",
         )?;
 
         let result = stmt
@@ -808,4 +853,138 @@ where
     })
     .await
     .map_err(|err| err.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::services::database::setup_schema;
+    use rusqlite::{Connection, params};
+
+    fn open() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        conn
+    }
+
+    /// Mirror of the production `list_conversations` SQL so tests can
+    /// drive the derived-kind filter without an AppHandle. Returns the
+    /// (id, kind, agent_type) triplet for each row in created_at DESC.
+    fn list_for_test(
+        conn: &Connection,
+        kind: Option<&str>,
+    ) -> Vec<(String, String, Option<String>)> {
+        let mut stmt = conn
+            .prepare(
+                "WITH derived AS (
+                    SELECT c.id, c.created_at, c.kind, c.agent_type, c.is_archived,
+                           CASE
+                               WHEN psr.provider IS NULL THEN c.kind
+                               WHEN psr.provider IN ('claude-code', 'codex', 'gemini') THEN 'agent'
+                               ELSE 'chat'
+                           END AS derived_kind
+                    FROM conversations c
+                    LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+                )
+                SELECT id, derived_kind, agent_type FROM derived
+                WHERE is_archived = 0
+                  AND (?1 IS NULL OR derived_kind = ?1)
+                ORDER BY created_at DESC",
+            )
+            .unwrap();
+        stmt.query_map(params![kind], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
+    #[test]
+    fn derived_kind_follows_provider_binding_over_stored_kind() {
+        // A row whose stored kind disagrees with the binding (e.g. a
+        // mid-flight mirror write that hasn't landed yet) must report
+        // the binding's kind, not the stored one.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type)
+             VALUES ('t1', 'Thread', 1000, 'chat', NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO provider_session_runtime
+                (thread_id, provider, status, updated_at)
+             VALUES ('t1', 'claude-code', 'active', 2000)",
+            [],
+        )
+        .unwrap();
+
+        let rows = list_for_test(&conn, None);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, "agent");
+    }
+
+    #[test]
+    fn derived_kind_falls_back_to_stored_kind_without_a_binding() {
+        // Legacy rows with no runtime binding row still need a kind for
+        // routing - fall back to the stored column.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type)
+             VALUES ('legacy', 'Legacy', 1000, 'agent', 'claude-code')",
+            [],
+        )
+        .unwrap();
+
+        let rows = list_for_test(&conn, None);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, "agent");
+    }
+
+    #[test]
+    fn kind_filter_drops_other_partition() {
+        // The reader is the canonical list endpoint for both stores;
+        // filtering by kind must give each store only its own rows.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type)
+             VALUES ('c1', 'Chat', 1000, 'chat', NULL),
+                    ('a1', 'Agent', 2000, 'agent', 'codex')",
+            [],
+        )
+        .unwrap();
+
+        let chat_only = list_for_test(&conn, Some("chat"));
+        assert_eq!(chat_only.len(), 1);
+        assert_eq!(chat_only[0].0, "c1");
+
+        let agent_only = list_for_test(&conn, Some("agent"));
+        assert_eq!(agent_only.len(), 1);
+        assert_eq!(agent_only[0].0, "a1");
+    }
+
+    #[test]
+    fn binding_to_chat_provider_yields_chat_kind() {
+        // A native-agent thread that was switched to a chat provider:
+        // stored kind may have already been mirrored, but even if it
+        // hasn't, the binding wins.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type)
+             VALUES ('t1', 'Thread', 1000, 'agent', 'claude-code')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO provider_session_runtime
+                (thread_id, provider, status, updated_at)
+             VALUES ('t1', 'seren', 'active', 2000)",
+            [],
+        )
+        .unwrap();
+
+        let rows = list_for_test(&conn, Some("chat"));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "t1");
+    }
 }

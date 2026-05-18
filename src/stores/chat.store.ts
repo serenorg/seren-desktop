@@ -8,11 +8,11 @@ import {
   clearAllHistory as clearAllHistoryDb,
   clearConversationHistory as clearConversationHistoryDb,
   createConversation as createConversationDb,
-  type Conversation as DbConversation,
-  getConversations as getConversationsDb,
   getMessages as getMessagesDb,
+  listConversations,
   saveMessage as saveMessageDb,
   switchThreadProvider as switchThreadProviderBridge,
+  type UnifiedConversationRow,
   updateConversation as updateConversationDb,
 } from "@/lib/tauri-bridge";
 import {
@@ -113,16 +113,16 @@ const [state, setState] = createStore<ChatState>({
 });
 
 /**
- * Convert database conversation to frontend format.
+ * Convert a unified-row read into the frontend chat conversation shape.
  */
-function dbToConversation(db: DbConversation): Conversation {
+function unifiedRowToConversation(row: UnifiedConversationRow): Conversation {
   return {
-    id: db.id,
-    title: db.title,
-    createdAt: db.created_at,
-    selectedModel: db.selected_model ?? DEFAULT_MODEL,
-    selectedProvider: (db.selected_provider as ProviderId | AgentType) ?? null,
-    isArchived: db.is_archived,
+    id: row.id,
+    title: row.title,
+    createdAt: row.created_at,
+    selectedModel: row.selected_model ?? DEFAULT_MODEL,
+    selectedProvider: (row.selected_provider as ProviderId | AgentType) ?? null,
+    isArchived: row.is_archived,
   };
 }
 
@@ -519,8 +519,8 @@ export const chatStore = {
   async loadHistory() {
     try {
       // Load conversations
-      const dbConversations = await getConversationsDb();
-      const conversations = dbConversations.map(dbToConversation);
+      const rows = await listConversations({ kind: "chat" });
+      const conversations = rows.map(unifiedRowToConversation);
 
       setState("conversations", conversations);
 

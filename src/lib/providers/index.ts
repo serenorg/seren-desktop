@@ -262,16 +262,3 @@ export function getProviderDisplayName(providerId: ProviderId): string {
   };
   return names[providerId] || providerId;
 }
-
-/**
- * Get an icon/emoji for a provider.
- */
-export function getProviderIcon(providerId: ProviderId): string {
-  const icons: Record<ProviderId, string> = {
-    seren: "S",
-    "seren-private": "P",
-    anthropic: "A",
-    openai: "O",
-  };
-  return icons[providerId] || "?";
-}

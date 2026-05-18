@@ -51,6 +51,7 @@ const conversationStoreMock = vi.hoisted(() => ({
   applyRuntimeBindingSync: vi.fn(),
   dropFromCache: vi.fn(),
   upsertFromDb: vi.fn(),
+  loadMessagesFor: vi.fn(async (_id: string) => {}),
 }));
 const chatStoreMock = vi.hoisted(() => ({
   messages: [] as TestMessage[],
@@ -297,6 +298,7 @@ describe("switchChatProvider", () => {
       "private-mid",
       null,
       null,
+      null,
     );
     expect(conversationStoreMock.applyRuntimeBindingSync).toHaveBeenCalledWith(
       "t1",
@@ -398,7 +400,7 @@ describe("switchChatProvider", () => {
 
     await switchChatProvider("t1", "claude-code", "claude-sonnet-4");
 
-    const [, , , bootstrap] = switchThreadProviderBridge.mock.calls[0];
+    const [, , , , bootstrap] = switchThreadProviderBridge.mock.calls[0];
     expect(typeof bootstrap).toBe("string");
     expect(bootstrap).toContain("[USER]: what is the eu capital");
     expect(bootstrap).toContain("[ASSISTANT]: Brussels for the EU institutions.");
@@ -434,7 +436,7 @@ describe("switchChatProvider", () => {
 
     await switchChatProvider("t1", "claude-code", "claude-sonnet-4");
 
-    const [, , , bootstrap] = switchThreadProviderBridge.mock.calls[0];
+    const [, , , , bootstrap] = switchThreadProviderBridge.mock.calls[0];
     expect(bootstrap).toContain("[USER]: only-in-chat-store");
   });
 
@@ -455,7 +457,7 @@ describe("switchChatProvider", () => {
 
     await switchChatProvider("t1", "seren-private", "private-mid");
 
-    const [, , , bootstrap] = switchThreadProviderBridge.mock.calls[0];
+    const [, , , , bootstrap] = switchThreadProviderBridge.mock.calls[0];
     expect(bootstrap).toBeNull();
   });
 
@@ -492,6 +494,7 @@ describe("switchChatProvider", () => {
       "seren-private",
       "private-mid",
       null,
+      null,
       4242,
     );
   });
@@ -515,6 +518,7 @@ describe("switchChatProvider", () => {
       "t1",
       "seren-private",
       "private-mid",
+      null,
       null,
       null,
     );
@@ -584,6 +588,11 @@ describe("switchChatProvider", () => {
     });
 
     await switchChatProvider("t1", "claude-code", "claude-sonnet-4");
+
+    // Bridge received the resolved cwd so the Rust mirror could stamp
+    // `conversations.agent_cwd` atomically with the kind flip.
+    const [, , , targetCwd] = switchThreadProviderBridge.mock.calls[0];
+    expect(targetCwd).toBe("/Users/dev/my-project");
 
     // Chat cache dropped the row so the unified view can re-resolve.
     expect(conversationStoreMock.dropFromCache).toHaveBeenCalledWith("t1");
@@ -671,6 +680,9 @@ describe("switchChatProvider", () => {
       "t1",
     );
     expect(conversationStoreMock.upsertFromDb).toHaveBeenCalledTimes(1);
+    // Pre-hydrate the chat shell so the prior agent transcript is
+    // visible immediately instead of an empty pane.
+    expect(conversationStoreMock.loadMessagesFor).toHaveBeenCalledWith("t1");
     // No spawn on agent→chat — chat threads route through the
     // orchestrator, not a native session.
     expect(agentStoreMock.spawnSession).not.toHaveBeenCalled();
@@ -746,7 +758,7 @@ describe("switchChatProvider", () => {
 
     await switchChatProvider("t1", "claude-code", null);
 
-    const [, , , bootstrap] = switchThreadProviderBridge.mock.calls[0];
+    const [, , , , bootstrap] = switchThreadProviderBridge.mock.calls[0];
     expect(bootstrap).toContain("[USER]: continue this work");
     expect(bootstrap).toContain("[ASSISTANT]: prior agent answer");
     expect(agentStoreMock.terminateSession).toHaveBeenCalledWith(

@@ -775,7 +775,7 @@ pub fn run() {
             commands::gateway_http::gateway_http_cancel,
             // Conversation commands
             commands::chat::create_conversation,
-            commands::chat::get_conversations,
+            commands::chat::list_conversations,
             commands::chat::get_conversation,
             commands::chat::update_conversation,
             commands::chat::archive_conversation,
@@ -786,7 +786,6 @@ pub fn run() {
             commands::employees_archive::delete_archived_employee,
             // Agent conversation commands
             commands::chat::create_agent_conversation,
-            commands::chat::get_agent_conversations,
             commands::chat::get_agent_conversation,
             commands::chat::set_agent_conversation_session_id,
             commands::chat::set_agent_conversation_title,

@@ -13,6 +13,12 @@ import { runtimeHasCapability } from "@/lib/runtime";
 // Types
 // ============================================================================
 
+// Adding a new agent here REQUIRES a matching entry in the Rust
+// `is_native_agent_provider` helper at
+// `src-tauri/src/commands/provider_runtime.rs` — that helper drives the
+// `kind` flip and `agent_type` mirror in `switch_thread_provider`. The
+// two lists drift silently otherwise: a thread bound to the new agent
+// stays `kind='chat'` in the DB and routes to the chat shell.
 export type AgentType = "claude-code" | "codex" | "gemini";
 export type UnlistenFn = () => void;
 

@@ -245,43 +245,71 @@ export interface UnifiedConversation {
   agentModelId: string | null;
 }
 
+function projectChatRow(
+  c: (typeof conversationStore.conversations)[number],
+): UnifiedConversation {
+  return {
+    id: c.id,
+    title: c.title,
+    createdAt: c.createdAt,
+    kind: "chat",
+    projectRoot: c.projectRoot,
+    isArchived: c.isArchived,
+    provider: c.selectedProvider ?? null,
+    model: c.selectedModel ?? null,
+    employeeId: c.employeeId,
+    agentType: null,
+    agentSessionId: null,
+    agentCwd: null,
+    agentModelId: null,
+  };
+}
+
+function projectAgentRow(
+  a: (typeof agentStore.recentAgentConversations)[number],
+): UnifiedConversation {
+  return {
+    id: a.id,
+    title: a.title,
+    createdAt: a.created_at,
+    kind: "agent",
+    projectRoot: a.project_root ?? a.agent_cwd ?? null,
+    isArchived: a.is_archived,
+    provider: (a.agent_type as string | null) ?? null,
+    model: a.agent_model_id ?? null,
+    employeeId: null,
+    agentType: (a.agent_type as AgentType | null) ?? null,
+    agentSessionId: a.agent_session_id ?? null,
+    agentCwd: a.agent_cwd ?? null,
+    agentModelId: a.agent_model_id ?? null,
+  };
+}
+
 function collectUnifiedConversations(): UnifiedConversation[] {
   const out: UnifiedConversation[] = [];
-  for (const c of conversationStore.conversations) {
-    out.push({
-      id: c.id,
-      title: c.title,
-      createdAt: c.createdAt,
-      kind: "chat",
-      projectRoot: c.projectRoot,
-      isArchived: c.isArchived,
-      provider: c.selectedProvider ?? null,
-      model: c.selectedModel ?? null,
-      employeeId: c.employeeId,
-      agentType: null,
-      agentSessionId: null,
-      agentCwd: null,
-      agentModelId: null,
-    });
-  }
-  for (const a of agentStore.recentAgentConversations) {
-    out.push({
-      id: a.id,
-      title: a.title,
-      createdAt: a.created_at,
-      kind: "agent",
-      projectRoot: a.project_root ?? a.agent_cwd ?? null,
-      isArchived: a.is_archived,
-      provider: (a.agent_type as string | null) ?? null,
-      model: a.agent_model_id ?? null,
-      employeeId: null,
-      agentType: (a.agent_type as AgentType | null) ?? null,
-      agentSessionId: a.agent_session_id ?? null,
-      agentCwd: a.agent_cwd ?? null,
-      agentModelId: a.agent_model_id ?? null,
-    });
-  }
+  for (const c of conversationStore.conversations) out.push(projectChatRow(c));
+  for (const a of agentStore.recentAgentConversations)
+    out.push(projectAgentRow(a));
   return out.sort((x, y) => y.createdAt - x.createdAt);
+}
+
+/**
+ * Lookup-only variant of {@link collectUnifiedConversations}. Avoids the
+ * sort + full-array allocation that the unified getter pays — important
+ * because `ThreadContent`'s shell-selection memo re-evaluates this per
+ * open pane on every reactive update. Walks at most one row per store
+ * via native `.find()` and projects lazily, so the hot path is
+ * proportional to the matching row's position rather than the full
+ * cross-store list size.
+ */
+function findUnifiedConversationById(
+  id: string,
+): UnifiedConversation | undefined {
+  const chat = conversationStore.conversations.find((c) => c.id === id);
+  if (chat) return projectChatRow(chat);
+  const agent = agentStore.recentAgentConversations.find((a) => a.id === id);
+  if (agent) return projectAgentRow(agent);
+  return undefined;
 }
 
 function skillRef(skill: Pick<InstalledSkill, "scope" | "slug">): string {
@@ -376,7 +404,7 @@ export const threadStore = {
    * which store owns the id.
    */
   findConversation(id: string): UnifiedConversation | undefined {
-    return collectUnifiedConversations().find((c) => c.id === id);
+    return findUnifiedConversationById(id);
   },
 
   /**

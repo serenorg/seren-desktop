@@ -64,6 +64,7 @@ pub async fn switch_thread_provider(
     thread_id: String,
     target_provider: String,
     target_model: Option<String>,
+    target_cwd: Option<String>,
     bootstrap_context: Option<String>,
     expected_updated_at: Option<i64>,
 ) -> Result<ProviderSessionRuntime, String> {
@@ -147,10 +148,12 @@ pub async fn switch_thread_provider(
             // right shell, and clears `agent_session_id` so the TS spawn
             // path creates a fresh native session (the prior session
             // belonged to a different agent type and is no longer valid).
-            // `agent_model_id` is mirrored on the agent branch and cleared
-            // on the chat branch so the row's agent-* columns are coherent
-            // with `kind` rather than leaving a stale agent model id on a
-            // now-chat row.
+            // `agent_model_id` and `agent_cwd` are mirrored on the agent
+            // branch and cleared on the chat branch so the row's agent-*
+            // columns are coherent with `kind` rather than leaving stale
+            // agent metadata on a now-chat row. `agent_cwd` lets the
+            // sidebar group the freshly-flipped agent row by the right
+            // project before the native spawn callback fires.
             // The `selected_model` mirror uses COALESCE so a switch that
             // does not name a new model keeps the conversation's current
             // model in the compatibility column; the runtime row itself
@@ -173,6 +176,9 @@ pub async fn switch_thread_provider(
                      agent_model_id = CASE WHEN ?1 = 'agent'
                          THEN COALESCE(?3, agent_model_id)
                          ELSE NULL END,
+                     agent_cwd = CASE WHEN ?1 = 'agent'
+                         THEN COALESCE(?6, agent_cwd)
+                         ELSE NULL END,
                      selected_provider = ?4,
                      selected_model = COALESCE(?3, selected_model)
                  WHERE id = ?5",
@@ -181,7 +187,8 @@ pub async fn switch_thread_provider(
                     target_agent_type,
                     target_model,
                     target_provider,
-                    thread_id
+                    thread_id,
+                    target_cwd,
                 ],
             )?;
 
@@ -299,6 +306,7 @@ mod tests {
         thread_id: &str,
         target_provider: &str,
         target_model: Option<&str>,
+        target_cwd: Option<&str>,
         bootstrap_context: Option<&str>,
         expected_updated_at: Option<i64>,
         now: i64,
@@ -361,6 +369,9 @@ mod tests {
                      agent_model_id = CASE WHEN ?1 = 'agent'
                          THEN COALESCE(?3, agent_model_id)
                          ELSE NULL END,
+                     agent_cwd = CASE WHEN ?1 = 'agent'
+                         THEN COALESCE(?6, agent_cwd)
+                         ELSE NULL END,
                      selected_provider = ?4,
                      selected_model = COALESCE(?3, selected_model)
                  WHERE id = ?5",
@@ -369,7 +380,8 @@ mod tests {
                     target_agent_type,
                     target_model,
                     target_provider,
-                    thread_id
+                    thread_id,
+                    target_cwd,
                 ],
             )?;
             Ok(())
@@ -411,6 +423,7 @@ mod tests {
             thread_id,
             target_provider,
             target_model,
+            None,
             bootstrap_context,
             None,
             now,
@@ -593,6 +606,7 @@ mod tests {
             Some("m"),
             None,
             None,
+            None,
             2000,
         )
         .unwrap_err();
@@ -623,6 +637,7 @@ mod tests {
             "t1",
             "seren-private",
             Some("m1"),
+            None,
             Some("a"),
             None,
             2000,
@@ -633,6 +648,7 @@ mod tests {
             "t1",
             "claude-code",
             Some("m2"),
+            None,
             None,
             None,
             3000,
@@ -674,6 +690,7 @@ mod tests {
             Some("m1"),
             None,
             None,
+            None,
             2000,
         )
         .unwrap();
@@ -685,6 +702,7 @@ mod tests {
             "t1",
             "claude-code",
             Some("m2"),
+            None,
             None,
             Some(2000),
             3000,
@@ -718,6 +736,7 @@ mod tests {
             Some("m1"),
             None,
             None,
+            None,
             2000,
         )
         .unwrap();
@@ -727,6 +746,7 @@ mod tests {
             "t1",
             "claude-code",
             Some("m2"),
+            None,
             None,
             Some(2000),
             3000,
@@ -739,6 +759,7 @@ mod tests {
             "t1",
             "codex",
             Some("m3"),
+            None,
             None,
             Some(2000),
             4000,
@@ -775,6 +796,7 @@ mod tests {
             "t1",
             "seren-private",
             Some("m1"),
+            None,
             None,
             Some(1234),
             2000,
@@ -815,6 +837,15 @@ mod tests {
         .unwrap()
     }
 
+    fn read_agent_cwd(conn: &Connection, thread_id: &str) -> Option<String> {
+        conn.query_row(
+            "SELECT agent_cwd FROM conversations WHERE id = ?1",
+            params![thread_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn switch_into_native_agent_flips_kind_and_stamps_agent_type() {
         let conn = open();
@@ -832,6 +863,7 @@ mod tests {
             "t1",
             "claude-code",
             Some("claude-sonnet-4"),
+            Some("/tmp/proj"),
             Some("recap"),
             None,
             2000,
@@ -852,6 +884,10 @@ mod tests {
         // historical readers don't see a sudden NULL.
         assert_eq!(selected_provider, Some("claude-code".to_string()));
         assert_eq!(selected_model, Some("claude-sonnet-4".to_string()));
+        // agent_cwd is stamped at switch time so the sidebar can group the
+        // freshly-flipped row by project before the native spawn callback
+        // populates the rest of the agent metadata.
+        assert_eq!(read_agent_cwd(&conn, "t1"), Some("/tmp/proj".to_string()));
     }
 
     #[test]
@@ -860,10 +896,11 @@ mod tests {
         // Seed an agent thread directly so the reverse switch is exercised.
         conn.execute(
             "INSERT INTO conversations (id, title, created_at, kind, agent_type,
-                                        agent_session_id, agent_model_id,
+                                        agent_session_id, agent_model_id, agent_cwd,
                                         selected_provider, selected_model)
              VALUES ('t1', 'Thread', 1000, 'agent', 'claude-code',
-                     'live-session', 'claude-sonnet-4', 'claude-code', 'claude-sonnet-4')",
+                     'live-session', 'claude-sonnet-4', '/tmp/proj',
+                     'claude-code', 'claude-sonnet-4')",
             [],
         )
         .unwrap();
@@ -873,6 +910,7 @@ mod tests {
             "t1",
             "seren",
             Some("anthropic/claude-sonnet-4"),
+            None,
             None,
             None,
             2000,
@@ -900,6 +938,41 @@ mod tests {
         assert_eq!(agent_model_id, None);
         assert_eq!(selected_provider, Some("seren".to_string()));
         assert_eq!(selected_model, Some("anthropic/claude-sonnet-4".to_string()));
+        // agent_cwd cleared on the chat branch for the same coherence reason.
+        assert_eq!(read_agent_cwd(&conn, "t1"), None);
+    }
+
+    #[test]
+    fn switch_with_null_cwd_preserves_existing_agent_cwd() {
+        // The mirror uses COALESCE on the agent branch so a switch that
+        // does not name a new cwd keeps the existing value. This matters
+        // for agent->agent switches where the cwd is already correct and
+        // the caller does not need to re-stamp it.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        agent_session_id, agent_model_id, agent_cwd,
+                                        selected_provider, selected_model)
+             VALUES ('t1', 'Thread', 1000, 'agent', 'claude-code',
+                     'live-session', 'claude-sonnet-4', '/tmp/proj',
+                     'claude-code', 'claude-sonnet-4')",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(
+            &conn,
+            "t1",
+            "codex",
+            Some("codex-mid"),
+            None,
+            None,
+            None,
+            2000,
+        )
+        .unwrap();
+
+        assert_eq!(read_agent_cwd(&conn, "t1"), Some("/tmp/proj".to_string()));
     }
 
     #[test]
@@ -918,7 +991,8 @@ mod tests {
         )
         .unwrap();
 
-        try_perform_switch(&conn, "t1", "codex", Some("codex-mid"), None, None, 2000).unwrap();
+        try_perform_switch(&conn, "t1", "codex", Some("codex-mid"), None, None, None, 2000)
+            .unwrap();
 
         let (kind, agent_type, agent_session_id, agent_model_id, _, _) =
             read_conv_compat(&conn, "t1");
@@ -950,6 +1024,7 @@ mod tests {
             "t1",
             "claude-code",
             Some("claude-haiku-4"),
+            None,
             None,
             None,
             2000,
@@ -985,6 +1060,7 @@ mod tests {
             Some("private-mid"),
             None,
             None,
+            None,
             2000,
         )
         .unwrap();
@@ -993,6 +1069,7 @@ mod tests {
             "agent1",
             "claude-code",
             Some("claude-sonnet-4"),
+            None,
             Some("recap"),
             None,
             3000,

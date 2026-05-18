@@ -143,10 +143,24 @@ export async function switchChatProvider(
     targetKind === "agent" &&
     beforeRow?.provider !== targetProvider;
 
+  // Resolve the cwd up front when the target binds an agent so the Rust
+  // mirror stamps `conversations.agent_cwd` atomically. Without this the
+  // freshly-flipped agent row carries a NULL cwd until the native spawn
+  // callback fires, and any sidebar grouping or recap UI that runs in
+  // that gap sees the row in the "No project" bucket.
+  const targetCwd =
+    targetKind === "agent"
+      ? (beforeRow?.projectRoot ??
+        beforeRow?.agentCwd ??
+        fileTreeState.rootPath ??
+        null)
+      : null;
+
   const runtime = await switchThreadProviderBridge(
     threadId,
     targetProvider,
     targetModel,
+    targetCwd,
     bootstrap,
     expectedUpdatedAt,
   );
@@ -288,6 +302,12 @@ async function transitionAgentToChat(threadId: string): Promise<void> {
     const chatRow = await getConversation(threadId);
     if (chatRow) {
       conversationStore.upsertFromDb(chatRow);
+      // Pre-hydrate the chat shell with the prior agent transcript so
+      // the user sees the conversation history immediately instead of
+      // an empty pane that only fills as new turns land. The messages
+      // table is shared across kinds, so a re-read picks up everything
+      // the agent had persisted before the switch.
+      await conversationStore.loadMessagesFor(threadId);
     }
   } catch (error) {
     console.warn(

@@ -9,10 +9,11 @@ import {
   clearConversationHistory as clearConversationHistoryDb,
   createConversation as createConversationDb,
   type Conversation as DbConversation,
-  getConversations as getConversationsDb,
   getMessages as getMessagesDb,
+  listConversations,
   saveMessage as saveMessageDb,
   switchThreadProvider as switchThreadProviderBridge,
+  type UnifiedConversationRow,
   updateConversation as updateConversationDb,
 } from "@/lib/tauri-bridge";
 import type { AgentType } from "@/services/providers";
@@ -57,6 +58,34 @@ const [state, setState] = createStore<ConversationState>({
   streamingStalled: {},
 });
 
+type DbMessage = Awaited<ReturnType<typeof getMessagesDb>>[number];
+
+function dbToUnifiedMessage(m: DbMessage): UnifiedMessage {
+  const metaFields = deserializeMetadata(m.metadata);
+  return {
+    id: m.id,
+    type: (metaFields.type
+      ? metaFields.type
+      : metaFields.workerType
+        ? "assistant"
+        : m.role === "user"
+          ? "user"
+          : "assistant") as UnifiedMessage["type"],
+    role: m.role as UnifiedMessage["role"],
+    content: m.content,
+    timestamp: m.timestamp,
+    status: "complete" as const,
+    workerType: metaFields.workerType ?? "chat_model",
+    modelId: metaFields.modelId ?? m.model ?? undefined,
+    provider: m.provider ?? undefined,
+    taskType: metaFields.taskType,
+    duration: metaFields.duration,
+    cost: metaFields.cost,
+    toolCall: metaFields.toolCall,
+    diff: metaFields.diff,
+  };
+}
+
 function dbToConversation(db: DbConversation): Conversation {
   return {
     id: db.id,
@@ -67,6 +96,19 @@ function dbToConversation(db: DbConversation): Conversation {
     projectRoot: db.project_root ?? null,
     isArchived: db.is_archived,
     employeeId: db.employee_id ?? null,
+  };
+}
+
+function unifiedRowToConversation(row: UnifiedConversationRow): Conversation {
+  return {
+    id: row.id,
+    title: row.title,
+    createdAt: row.created_at,
+    selectedModel: row.selected_model ?? DEFAULT_MODEL,
+    selectedProvider: (row.selected_provider as ProviderId | AgentType) ?? null,
+    projectRoot: row.project_root,
+    isArchived: row.is_archived,
+    employeeId: row.employee_id,
   };
 }
 
@@ -359,9 +401,9 @@ export const conversationStore = {
 
   /**
    * Drop a conversation from the in-memory cache. Used when a thread
-   * crosses out of chat-kind on a cross-category provider switch — the
+   * crosses out of chat-kind on a cross-category provider switch - the
    * DB row's `kind` has just flipped to `agent`, so a subsequent
-   * `getConversations` filter (`kind = 'chat'`) would not return it
+   * `listConversations({ kind: 'chat' })` read would not return it
    * anyway. Removes the per-thread message bucket, loading flag, and
    * streaming state so the chat shell does not leak stale state into
    * the next thread that takes its place.
@@ -397,6 +439,23 @@ export const conversationStore = {
     });
     if (!state.messages[conv.id]) {
       setState("messages", conv.id, []);
+    }
+  },
+
+  /**
+   * Read this thread's messages from the DB and replace the in-memory
+   * bucket. Used by `loadHistory` to populate caches on app start and by
+   * the agent-to-chat transition to pre-hydrate the chat shell with the
+   * prior agent transcript - the messages table is shared across kinds,
+   * so the agent's saved turns become the chat shell's recap the moment
+   * the binding flips.
+   */
+  async loadMessagesFor(id: string): Promise<void> {
+    try {
+      const dbMessages = await getMessagesDb(id, MAX_MESSAGES_PER_CONVERSATION);
+      setState("messages", id, dbMessages.map(dbToUnifiedMessage));
+    } catch (error) {
+      console.warn(`Failed to load messages for conversation ${id}`, error);
     }
   },
 
@@ -532,49 +591,13 @@ export const conversationStore = {
 
   async loadHistory() {
     try {
-      const dbConversations = await getConversationsDb();
-      const conversations = dbConversations.map(dbToConversation);
+      const rows = await listConversations({ kind: "chat" });
+      const conversations = rows.map(unifiedRowToConversation);
 
       setState("conversations", conversations);
 
       for (const convo of conversations) {
-        try {
-          const dbMessages = await getMessagesDb(
-            convo.id,
-            MAX_MESSAGES_PER_CONVERSATION,
-          );
-          const messages: UnifiedMessage[] = dbMessages.map((m) => {
-            const metaFields = deserializeMetadata(m.metadata);
-            return {
-              id: m.id,
-              type: (metaFields.type
-                ? metaFields.type
-                : metaFields.workerType
-                  ? "assistant"
-                  : m.role === "user"
-                    ? "user"
-                    : "assistant") as UnifiedMessage["type"],
-              role: m.role as UnifiedMessage["role"],
-              content: m.content,
-              timestamp: m.timestamp,
-              status: "complete" as const,
-              workerType: metaFields.workerType ?? "chat_model",
-              modelId: metaFields.modelId ?? m.model ?? undefined,
-              provider: m.provider ?? undefined,
-              taskType: metaFields.taskType,
-              duration: metaFields.duration,
-              cost: metaFields.cost,
-              toolCall: metaFields.toolCall,
-              diff: metaFields.diff,
-            };
-          });
-          setState("messages", convo.id, messages);
-        } catch (error) {
-          console.warn(
-            `Failed to load messages for conversation ${convo.id}`,
-            error,
-          );
-        }
+        await this.loadMessagesFor(convo.id);
       }
 
       // Only set active conversation if none is currently selected

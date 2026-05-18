@@ -499,15 +499,15 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
                 {/*
                   Shell selection for conversation panes is driven by the
                   LIVE conversation row's kind, not the pane's static
-                  `window.kind`. A cross-category provider switch flips
-                  `conversations.kind` in DB; once the unified view
-                  reflects that, this Show re-resolves and the shell
-                  remounts from ChatContent to AgentChat (or vice versa)
-                  in place. The pane's own `kind` is used only as the
-                  initial-mount hint and as the fallback when the live
-                  row hasn't loaded yet (so a freshly-restored pane
-                  doesn't flash empty before the conversation list
-                  hydrates).
+                  `window.kind`. The kind here ultimately comes from the
+                  unified `list_conversations` read, which derives it
+                  from `provider_session_runtime.provider` rather than
+                  trusting the stored `conversations.kind` column - so a
+                  cross-category switch is reflected as soon as the
+                  binding row updates, even if the kind mirror in the
+                  conversations table lags by a tick. The pane's own
+                  `kind` is used only as the initial-mount hint and as
+                  the fallback when the live row hasn't loaded yet.
                 */}
                 <Show
                   when={

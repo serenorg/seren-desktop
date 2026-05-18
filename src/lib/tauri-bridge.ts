@@ -638,8 +638,11 @@ export interface Conversation {
 /**
  * An agent conversation stored in SQLite.
  *
- * Note: These are persisted separately from normal chat conversations
- * and are filtered out of `getConversations()`.
+ * Note: chat and agent conversations live in the same `conversations`
+ * table, partitioned by the `kind` column. The unified `listConversations`
+ * reader returns both kinds in one call and is the preferred way to
+ * load the sidebar; this typed shape is what each store projects to
+ * after filtering.
  */
 export interface AgentConversation {
   id: string;
@@ -654,6 +657,31 @@ export interface AgentConversation {
   project_id: string | null;
   project_root: string | null;
   is_archived: boolean;
+}
+
+/**
+ * Wire-format row returned by the unified `list_conversations` reader.
+ * `kind` here is derived from `provider_session_runtime.provider` and
+ * is authoritative for shell selection - prefer it over any cached
+ * `conversations.kind` column read.
+ */
+export interface UnifiedConversationRow {
+  id: string;
+  title: string;
+  created_at: number;
+  kind: "chat" | "agent";
+  project_root: string | null;
+  is_archived: boolean;
+  selected_provider: string | null;
+  selected_model: string | null;
+  employee_id: string | null;
+  agent_type: string | null;
+  agent_session_id: string | null;
+  agent_cwd: string | null;
+  agent_model_id: string | null;
+  agent_permission_mode: string | null;
+  agent_metadata: string | null;
+  project_id: string | null;
 }
 
 /**
@@ -696,17 +724,29 @@ export async function createConversation(
 }
 
 /**
- * Get all non-archived conversations.
+ * Read both chat and agent conversations in one call, filtered by kind
+ * and/or project root. The `kind` field on each returned row reflects
+ * the live provider binding via `provider_session_runtime.provider`,
+ * not the stored `conversations.kind` column - that mirror is only the
+ * fallback for legacy rows with no binding row yet.
+ *
+ * Pass `kind: undefined` to fetch both kinds; pass `"chat"` or
+ * `"agent"` to filter. The `limit` is shared across kinds and is
+ * unbounded when omitted (mirrors the prior unlimited chat read).
  */
-export async function getConversations(
-  projectRoot?: string,
-): Promise<Conversation[]> {
+export async function listConversations(options?: {
+  kind?: "chat" | "agent";
+  projectRoot?: string;
+  limit?: number;
+}): Promise<UnifiedConversationRow[]> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("Conversation operations require Tauri runtime");
   }
-  return await invoke<Conversation[]>("get_conversations", {
-    projectRoot: projectRoot ?? null,
+  return await invoke<UnifiedConversationRow[]>("list_conversations", {
+    kind: options?.kind ?? null,
+    projectRoot: options?.projectRoot ?? null,
+    limit: options?.limit ?? null,
   });
 }
 
@@ -768,23 +808,6 @@ export async function createAgentConversation(
     projectRoot,
     agentSessionId,
     agentMetadata: agentMetadata ?? null,
-  });
-}
-
-/**
- * List recent persisted agent conversations.
- */
-export async function getAgentConversations(
-  limit = 20,
-  projectRoot?: string,
-): Promise<AgentConversation[]> {
-  const invoke = await getInvoke();
-  if (!invoke) {
-    throw new Error("Conversation operations require Tauri runtime");
-  }
-  return await invoke<AgentConversation[]>("get_agent_conversations", {
-    limit,
-    projectRoot,
   });
 }
 
@@ -1231,6 +1254,7 @@ export async function switchThreadProvider(
   threadId: string,
   targetProvider: string,
   targetModel?: string | null,
+  targetCwd?: string | null,
   bootstrapContext?: string | null,
   expectedUpdatedAt?: number | null,
 ): Promise<ProviderSessionRuntime> {
@@ -1242,6 +1266,7 @@ export async function switchThreadProvider(
     threadId,
     targetProvider,
     targetModel: targetModel ?? null,
+    targetCwd: targetCwd ?? null,
     bootstrapContext: bootstrapContext ?? null,
     expectedUpdatedAt: expectedUpdatedAt ?? null,
   });

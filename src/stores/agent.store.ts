@@ -366,15 +366,16 @@ import {
   createAgentConversation,
   type AgentConversation as DbAgentConversation,
   getAgentConversation,
-  getAgentConversations,
   getMessages,
   getSerenApiKey,
+  listConversations,
   saveMessage,
   setAgentConversationMetadata as setAgentConversationMetadataDb,
   setAgentConversationModelId as setAgentConversationModelIdDb,
   setAgentConversationPermissionMode as setAgentConversationPermissionModeDb,
   setAgentConversationSessionId as setAgentConversationSessionIdDb,
   setAgentConversationTitle as setAgentConversationTitleDb,
+  type UnifiedConversationRow,
 } from "@/lib/tauri-bridge";
 import { refreshAccessToken } from "@/services/auth";
 import { claudeSessionExists } from "@/services/claudeMemory";
@@ -1214,6 +1215,29 @@ interface AgentState {
   pendingDiffProposals: DiffProposalEvent[];
   /** Whether agent mode is active (vs chat mode) */
   agentModeEnabled: boolean;
+}
+
+/**
+ * Project a unified-row read into the agent-typed row this store
+ * caches. Drops fields that only apply to chat threads (employee_id,
+ * selected_*); the `kind` filter on `listConversations({ kind: 'agent' })`
+ * guarantees `agent_type` is non-null for rows that reach this path.
+ */
+function unifiedRowToAgent(row: UnifiedConversationRow): DbAgentConversation {
+  return {
+    id: row.id,
+    title: row.title,
+    created_at: row.created_at,
+    agent_type: row.agent_type ?? "",
+    agent_session_id: row.agent_session_id,
+    agent_cwd: row.agent_cwd,
+    agent_model_id: row.agent_model_id,
+    agent_permission_mode: row.agent_permission_mode,
+    agent_metadata: row.agent_metadata,
+    project_id: row.project_id,
+    project_root: row.project_root,
+    is_archived: row.is_archived,
+  };
 }
 
 const [state, setState] = createStore<AgentState>({
@@ -2166,8 +2190,12 @@ export const agentStore = {
    */
   async refreshRecentAgentConversations(limit = 10, cwd?: string) {
     try {
-      const rows = await getAgentConversations(limit, cwd);
-      setState("recentAgentConversations", rows);
+      const rows = await listConversations({
+        kind: "agent",
+        projectRoot: cwd,
+        limit,
+      });
+      setState("recentAgentConversations", rows.map(unifiedRowToAgent));
     } catch (error) {
       console.error("Failed to load agent conversation history:", error);
     }
@@ -2176,9 +2204,9 @@ export const agentStore = {
   /**
    * Drop an agent conversation from the in-memory cache. Used when a
    * thread crosses out of agent-kind on a cross-category provider
-   * switch — the DB row's `kind` has just flipped to `chat`, and a
-   * subsequent `getAgentConversations` filter (`kind = 'agent'`) would
-   * not return it anyway.
+   * switch - the DB row's `kind` has just flipped to `chat`, and a
+   * subsequent `listConversations({ kind: 'agent' })` read would not
+   * return it anyway.
    */
   dropAgentConversationFromCache(id: string) {
     setState("recentAgentConversations", (rows) =>
@@ -2208,10 +2236,11 @@ export const agentStore = {
     setState("remoteSessionsLoading", true);
     setState("remoteSessionsError", null);
     try {
-      const [page, localRows] = await Promise.all([
+      const [page, rawLocalRows] = await Promise.all([
         providerService.listRemoteSessions(resolvedAgentType, cwd),
-        getAgentConversations(200),
+        listConversations({ kind: "agent", limit: 200 }),
       ]);
+      const localRows = rawLocalRows.map(unifiedRowToAgent);
 
       setState("recentAgentConversations", localRows);
       const titleOverrides = new Map(
