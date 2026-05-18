@@ -9,6 +9,7 @@ import {
   onRuntimeEvent,
 } from "@/lib/browser-local-runtime";
 import { runtimeHasCapability } from "@/lib/runtime";
+import { estimateTokens } from "@/lib/token-counter";
 import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 
@@ -146,6 +147,26 @@ export const PUBLISHER_LIVE_QUERY_INSTRUCTION =
  * priming block on sessions that received it.
  */
 const REPRIME_AFTER_MESSAGES = 30;
+
+/**
+ * First-turn skill priming must leave real room for the user's prompt, tool
+ * schemas, and the model's response. If a large active-skill set would exceed
+ * this safe input budget, buildPromptContext sends a compact manifest instead
+ * of every full SKILL.md body. #1960.
+ */
+export const PROMPT_PRIMING_CONTEXT_BUDGET_FRACTION = 0.8;
+export const PROMPT_PRIMING_RESERVED_OUTPUT_TOKENS = 8_000;
+
+function estimatePromptContextTokens(
+  prompt: string | undefined,
+  context: Array<Record<string, string>>,
+): number {
+  const contextText = context
+    .flatMap((entry) => Object.values(entry))
+    .filter((value) => typeof value === "string" && value.length > 0)
+    .join("\n\n");
+  return estimateTokens(`${prompt ?? ""}\n\n${contextText}`);
+}
 
 /** Await a session ready promise with a timeout to prevent infinite hangs */
 function waitForSessionReady(sessionId: string): Promise<void> {
@@ -1845,7 +1866,11 @@ export const agentStore = {
 
       try {
         const { merged: retryContext, newSignature } =
-          await this.buildPromptContext(newSessionId, promptContext);
+          await this.buildPromptContext(
+            newSessionId,
+            promptContext,
+            promptText as string,
+          );
         await providerService.sendPrompt(
           newSessionId,
           promptText as string,
@@ -3262,6 +3287,7 @@ export const agentStore = {
   async buildPromptContext(
     sessionId: string,
     context?: Array<Record<string, string>>,
+    promptForBudget?: string,
   ): Promise<{
     merged: Array<Record<string, string>> | undefined;
     newSignature: string | null;
@@ -3306,9 +3332,40 @@ export const agentStore = {
     }
 
     if (!alreadyPrimed) {
+      let deliveredSkillsContent = skillsContent;
       if (skillsContent) {
+        const maxSafeInputTokens = Math.max(
+          0,
+          Math.floor(
+            session.contextWindowSize * PROMPT_PRIMING_CONTEXT_BUDGET_FRACTION,
+          ) - PROMPT_PRIMING_RESERVED_OUTPUT_TOKENS,
+        );
+        const projectedFullPrimingTokens =
+          estimatePromptContextTokens(promptForBudget, mergedContext) +
+          estimateTokens(PUBLISHER_LIVE_QUERY_INSTRUCTION) +
+          estimateTokens(skillsContent);
+
+        if (projectedFullPrimingTokens > maxSafeInputTokens) {
+          console.warn(
+            `[AgentStore] Active skill primer exceeds safe input budget (${projectedFullPrimingTokens.toLocaleString()} > ${maxSafeInputTokens.toLocaleString()} tokens); using compact skill manifest (#1960)`,
+          );
+          try {
+            deliveredSkillsContent =
+              (await skillsStore.getThreadSkillsContent(
+                session.cwd,
+                session.conversationId,
+                { mode: "compact" },
+              )) || skillsContent;
+          } catch (error) {
+            console.warn(
+              "[AgentStore] Failed to load compact skill manifest; using full skill content:",
+              error,
+            );
+          }
+        }
+
         mergedContext = [
-          { type: "text", text: skillsContent },
+          { type: "text", text: deliveredSkillsContent },
           ...mergedContext,
         ];
       }
@@ -4649,6 +4706,7 @@ Structured summary:`;
       const { merged, newSignature } = await this.buildPromptContext(
         sessionId,
         context,
+        prompt,
       );
       // Apply the post-compaction prepend (one-shot) AFTER the user message
       // is rendered in the UI but BEFORE the IPC dispatch — the user's chat

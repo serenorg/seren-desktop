@@ -84,6 +84,10 @@ export interface ProjectSkillsConfig {
   };
 }
 
+export interface EnabledSkillsContentOptions {
+  mode?: "full" | "compact";
+}
+
 /**
  * Transform an index entry to a Skill.
  *
@@ -549,6 +553,52 @@ function skillSlugFromSourceUrl(sourceUrl: string): string | null {
 
 function skillSourceUrlFromSlug(slug: string): string {
   return `seren-skills:${slug}`;
+}
+
+function extractMarkdownSectionPreview(
+  content: string,
+  heading: string,
+  maxChars: number,
+): string | null {
+  const lines = content.split(/\r?\n/);
+  const headingPattern = new RegExp(`^#{2,3}\\s+${heading}\\s*$`, "i");
+  const start = lines.findIndex((line) => headingPattern.test(line.trim()));
+  if (start < 0) return null;
+
+  const collected: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^#{1,3}\s+/.test(line.trim())) break;
+    collected.push(line);
+  }
+
+  const preview = collected.join("\n").trim();
+  if (!preview) return null;
+  return preview.length > maxChars
+    ? `${preview.slice(0, maxChars).trimEnd()}...`
+    : preview;
+}
+
+function buildCompactSkillPrompt(args: {
+  skill: InstalledSkill;
+  runtimeDir: string;
+  sep: string;
+  runtimeNote: string;
+  parsedContent: string;
+}): string {
+  const { skill, runtimeDir, sep, runtimeNote, parsedContent } = args;
+  const description = skill.description?.trim();
+  const whenToUse = extractMarkdownSectionPreview(
+    parsedContent,
+    "When to Use",
+    700,
+  );
+  const details = [
+    description ? `Description: ${description}` : null,
+    whenToUse ? `When to use:\n${whenToUse}` : null,
+    `Before using this skill, open \`${runtimeDir}${sep}SKILL.md\` and follow its full instructions.`,
+  ].filter((line): line is string => line !== null);
+
+  return `## Skill: ${skill.name}\n\n${runtimeNote}${details.join("\n\n")}`;
 }
 
 function isSerenUpstreamSource(value: string | undefined): boolean {
@@ -1574,6 +1624,7 @@ export const skills = {
    */
   async getEnabledSkillsContent(
     installedSkills: InstalledSkill[],
+    opts?: EnabledSkillsContentOptions,
   ): Promise<string> {
     const enabled = installedSkills.filter((s) => s.enabled);
 
@@ -1600,9 +1651,21 @@ export const skills = {
           ? `\n> **Platform:** Windows. Python (\`python\` and \`python3\`) is bundled with Seren Desktop — no install needed. Skill docs commonly reference \`~/.config/seren/skills/<name>\` and forward-slash paths; on this machine:\n> - Replace any \`~/.config/seren/skills/<name>\` reference with the absolute runtime directory above.\n> - Use backslashes inside paths.\n> Always \`cd\` into the absolute runtime directory above before invoking skill scripts.`
           : "";
         const runtimeNote = `> **Skill runtime directory:** \`${runtimeDir}\`\n> Use this absolute path to reference skill files. Do not create local copies or fallback scaffolds.${platformNote}${depsNote}\n\n`;
-        contents.push(
-          `## Skill: ${skill.name}\n\n${runtimeNote}${parsed.content}`,
-        );
+        if (opts?.mode === "compact") {
+          contents.push(
+            buildCompactSkillPrompt({
+              skill,
+              runtimeDir,
+              sep,
+              runtimeNote,
+              parsedContent: parsed.content,
+            }),
+          );
+        } else {
+          contents.push(
+            `## Skill: ${skill.name}\n\n${runtimeNote}${parsed.content}`,
+          );
+        }
       }
     }
 

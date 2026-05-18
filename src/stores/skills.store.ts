@@ -15,6 +15,7 @@ import {
   type SkillsState,
 } from "@/lib/skills";
 import {
+  type EnabledSkillsContentOptions,
   isAuthStatus,
   isUpstreamManagedSkill,
   type ProjectSkillsConfig,
@@ -673,10 +674,12 @@ export const skillsStore = {
   async getThreadSkillsContent(
     projectRoot: string | null,
     threadId: string | null,
+    opts?: EnabledSkillsContentOptions,
   ): Promise<string> {
     await this.ensureContextLoaded(projectRoot, threadId);
     return skills.getEnabledSkillsContent(
       this.getThreadSkills(projectRoot, threadId),
+      opts,
     );
   },
 
