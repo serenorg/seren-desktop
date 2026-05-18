@@ -185,21 +185,33 @@ describe("resolveBrowserName", () => {
 });
 
 describe("createSafeStealthPlugin", () => {
-  it("excludes chrome.app evasion for macOS notarization compatibility", () => {
+  it("excludes chrome.app and Privy-incompatible evasions by default", () => {
     const plugin = createSafeStealthPlugin();
-    expect(plugin.enabledEvasions.has("chrome.app")).toBe(false);
-  });
-
-  it("excludes env-requested evasions in addition to chrome.app", () => {
-    process.env.SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE =
-      "iframe.contentWindow, navigator.permissions";
-
-    const plugin = createSafeStealthPlugin();
-
     expect(plugin.enabledEvasions.has("chrome.app")).toBe(false);
     expect(plugin.enabledEvasions.has("iframe.contentWindow")).toBe(false);
     expect(plugin.enabledEvasions.has("navigator.permissions")).toBe(false);
-    expect(plugin.enabledEvasions.has("navigator.webdriver")).toBe(true);
+  });
+
+  it("lets an empty env value opt back into the full stealth evasion set", () => {
+    process.env.SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE = "";
+
+    const plugin = createSafeStealthPlugin();
+
+    expect(plugin.enabledEvasions.has("chrome.app")).toBe(false);
+    expect(plugin.enabledEvasions.has("iframe.contentWindow")).toBe(true);
+    expect(plugin.enabledEvasions.has("navigator.permissions")).toBe(true);
+  });
+
+  it("uses env-requested evasions instead of the default disabled set", () => {
+    process.env.SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE =
+      "navigator.webdriver";
+
+    const plugin = createSafeStealthPlugin();
+
+    expect(plugin.enabledEvasions.has("chrome.app")).toBe(false);
+    expect(plugin.enabledEvasions.has("iframe.contentWindow")).toBe(true);
+    expect(plugin.enabledEvasions.has("navigator.permissions")).toBe(true);
+    expect(plugin.enabledEvasions.has("navigator.webdriver")).toBe(false);
   });
 
   it("keeps other stealth evasions enabled", () => {
@@ -240,20 +252,7 @@ describe("applyStealthPluginIfEnabled", () => {
 });
 
 describe("addPageInitPatchIfEnabled", () => {
-  it("adds the manual init patch to chromium pages by default", async () => {
-    const mockPage = { addInitScript: vi.fn() };
-
-    const added = await addPageInitPatchIfEnabled(
-      mockPage as never,
-      "chromium",
-    );
-
-    expect(added).toBe(true);
-    expect(mockPage.addInitScript).toHaveBeenCalledOnce();
-  });
-
-  it("skips the manual init patch when disabled by env", async () => {
-    process.env.SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH = "1";
+  it("skips the manual init patch by default", async () => {
     const mockPage = { addInitScript: vi.fn() };
 
     const added = await addPageInitPatchIfEnabled(
@@ -263,6 +262,19 @@ describe("addPageInitPatchIfEnabled", () => {
 
     expect(added).toBe(false);
     expect(mockPage.addInitScript).not.toHaveBeenCalled();
+  });
+
+  it("adds the manual init patch when opted back in by env", async () => {
+    process.env.SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH = "0";
+    const mockPage = { addInitScript: vi.fn() };
+
+    const added = await addPageInitPatchIfEnabled(
+      mockPage as never,
+      "chromium",
+    );
+
+    expect(added).toBe(true);
+    expect(mockPage.addInitScript).toHaveBeenCalledOnce();
   });
 });
 
@@ -311,7 +323,7 @@ describe("launchBrowserWithFallback", () => {
       "chrome",
       "chromium",
       expect.objectContaining({
-        headless: true,
+        headless: false,
         executablePath:
           "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       }),
@@ -321,14 +333,14 @@ describe("launchBrowserWithFallback", () => {
       "moz-firefox",
       "firefox",
       expect.objectContaining({
-        headless: true,
+        headless: false,
         executablePath: "/Applications/Firefox.app/Contents/MacOS/firefox",
       }),
     );
   });
 
-  it("launches headed when SEREN_PLAYWRIGHT_HEADLESS is 0", async () => {
-    process.env.SEREN_PLAYWRIGHT_HEADLESS = "0";
+  it("launches headless when SEREN_PLAYWRIGHT_HEADLESS is 1", async () => {
+    process.env.SEREN_PLAYWRIGHT_HEADLESS = "1";
     const launchedBrowser = { close: vi.fn() } as never;
     const launchBrowser = vi.fn().mockResolvedValueOnce(launchedBrowser);
 
@@ -351,7 +363,7 @@ describe("launchBrowserWithFallback", () => {
       "chrome",
       "chromium",
       expect.objectContaining({
-        headless: false,
+        headless: true,
       }),
     );
   });

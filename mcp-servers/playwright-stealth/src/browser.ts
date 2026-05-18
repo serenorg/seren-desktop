@@ -58,6 +58,10 @@ export const STEALTH_EVASIONS_DISABLE_ENV =
   "SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE";
 export const DISABLE_PAGE_INIT_PATCH_ENV =
   "SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH";
+const DEFAULT_DISABLED_STEALTH_EVASIONS = [
+  "iframe.contentWindow",
+  "navigator.permissions",
+];
 
 // ── Browser Detection ──────────────────────────────────────────────────────────
 
@@ -362,7 +366,7 @@ export function createSafeStealthPlugin(
 export function shouldLaunchHeadless(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return env[PLAYWRIGHT_HEADLESS_ENV] !== "0";
+  return env[PLAYWRIGHT_HEADLESS_ENV] === "1";
 }
 
 export function shouldApplyStealthPlugin(
@@ -374,7 +378,10 @@ export function shouldApplyStealthPlugin(
 export function getDisabledStealthEvasions(
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
-  return (env[STEALTH_EVASIONS_DISABLE_ENV] ?? "")
+  const raw = env[STEALTH_EVASIONS_DISABLE_ENV];
+  if (raw === undefined) return [...DEFAULT_DISABLED_STEALTH_EVASIONS];
+
+  return raw
     .split(",")
     .map((name) => name.trim())
     .filter(Boolean);
@@ -396,7 +403,7 @@ export function applyStealthPluginIfEnabled(
 export function shouldApplyPageInitPatch(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return env[DISABLE_PAGE_INIT_PATCH_ENV] !== "1";
+  return env[DISABLE_PAGE_INIT_PATCH_ENV] === "0";
 }
 
 export async function addPageInitPatchIfEnabled(
