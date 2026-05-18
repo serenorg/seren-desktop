@@ -4,6 +4,7 @@
 import type { InstalledSkill } from "@/lib/skills";
 import { skillsStore } from "@/stores/skills.store";
 import { registry } from "./registry";
+import { bestScore, scoreCandidate } from "./score";
 import type { ParsedCommand, SlashCommand } from "./types";
 
 /**
@@ -31,9 +32,11 @@ export function parseCommand(
 }
 
 /**
- * Get commands matching a partial input for autocomplete.
- * Input should start with "/" but the slash is stripped for matching.
- * Searches built-in commands first, then installed skills as fallback.
+ * Get commands matching a partial input for autocomplete. Input should start
+ * with "/" but the slash is stripped for matching. Skills appear first
+ * because they are where the platform's value lives; built-in commands
+ * follow. Duplicate names are resolved in favour of the built-in so a skill
+ * cannot shadow `/clear` or `/new`.
  */
 export function getCompletions(
   input: string,
@@ -46,14 +49,13 @@ export function getCompletions(
   if (trimmed.includes(" ")) return [];
 
   const partial = trimmed.slice(1).toLowerCase();
+  const skills = searchInstalledSkills(partial);
   const builtins = registry.search(partial, panel);
-  const skillResults = searchInstalledSkills(partial);
 
-  // Deduplicate: built-in commands win over skills with the same name
   const builtinNames = new Set(builtins.map((c) => c.name));
-  const uniqueSkills = skillResults.filter((s) => !builtinNames.has(s.name));
+  const uniqueSkills = skills.filter((s) => !builtinNames.has(s.name));
 
-  return [...builtins, ...uniqueSkills];
+  return [...uniqueSkills, ...builtins];
 }
 
 /**
@@ -113,32 +115,43 @@ export async function resolveSkillCommand(
 
 /**
  * Search installed skills whose slug or display name match a partial input.
- * Returns SlashCommand entries for the autocomplete popup.
+ * Returns SlashCommand entries for the autocomplete popup, ranked by
+ * {@link scoreCandidate} (lower score = better match). Boundary and initials
+ * matches let `arb` or `pab` find `prophet-arb-bot` — the old prefix-only
+ * pass required typing the leading word.
  */
 function searchInstalledSkills(partial: string): SlashCommand[] {
   const installed = skillsStore.installed;
   if (installed.length === 0) return [];
 
-  const results: SlashCommand[] = [];
+  const ranked: Array<{ cmd: SlashCommand; score: number }> = [];
   for (const skill of installed) {
     if (!skill.enabled) continue;
     // Hide failed-payload skills from autocomplete so the user can't
     // accidentally tab-complete into a skill we know we'd block (#1917).
     if (skill.payloadStatus === "failed") continue;
 
-    const slugMatch = skill.slug.toLowerCase().startsWith(partial);
-    const nameMatch = skill.name.toLowerCase().startsWith(partial);
-    if (!slugMatch && !nameMatch) continue;
+    const score = bestScore(
+      scoreCandidate(skill.slug, partial),
+      scoreCandidate(skill.name, partial),
+    );
+    if (score === null) continue;
 
-    results.push({
-      name: skill.slug,
-      description: skill.name !== skill.slug ? skill.name : skill.description,
-      argHint: "<prompt>",
-      panels: ["chat", "agent"],
-      isSkill: true,
-      execute: () => false, // Skills are sent as regular messages, not intercepted
+    ranked.push({
+      cmd: {
+        name: skill.slug,
+        description: skill.name !== skill.slug ? skill.name : skill.description,
+        argHint: "<prompt>",
+        panels: ["chat", "agent"],
+        isSkill: true,
+        execute: () => false, // Skills are sent as regular messages, not intercepted
+      },
+      score,
     });
   }
 
-  return results.sort((a, b) => a.name.localeCompare(b.name));
+  ranked.sort(
+    (a, b) => a.score - b.score || a.cmd.name.localeCompare(b.cmd.name),
+  );
+  return ranked.map(({ cmd }) => cmd);
 }
