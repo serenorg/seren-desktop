@@ -16,6 +16,7 @@ pub mod commands {
     pub mod memory;
     pub mod model_context_cache;
     pub mod orchestrator;
+    pub mod provider_runtime;
     pub mod session;
     pub mod web;
 }
@@ -806,6 +807,9 @@ pub fn run() {
             // Model context-window cache
             commands::model_context_cache::get_model_context_window,
             commands::model_context_cache::record_model_context_window,
+            // Per-thread provider runtime binding
+            commands::provider_runtime::get_provider_session_runtime,
+            commands::provider_runtime::switch_thread_provider,
             sync::start_watching,
             sync::stop_watching,
             sync::get_sync_status,

@@ -328,6 +328,24 @@ export const conversationStore = {
     );
   },
 
+  /**
+   * Synchronize the in-memory conversation entry after a per-thread
+   * provider runtime switch. The DB row was already mutated atomically by
+   * `switch_thread_provider`; this just keeps the SolidJS cache in step
+   * so the next orchestrator turn reads the new binding without a reload.
+   */
+  applyRuntimeBindingSync(
+    id: string,
+    selectedProvider: ProviderId,
+    selectedModel: string,
+  ) {
+    setState("conversations", (convos) =>
+      convos.map((c) =>
+        c.id === id ? { ...c, selectedProvider, selectedModel } : c,
+      ),
+    );
+  },
+
   // === Message management ===
 
   addMessage(
@@ -431,6 +449,9 @@ export const conversationStore = {
   ) {
     if (!conversationId) return;
 
+    const convo = state.conversations.find((c) => c.id === conversationId);
+    const provider = message.provider ?? convo?.selectedProvider ?? null;
+
     try {
       const metadata = serializeMetadata(message);
       await saveMessageDb(
@@ -441,6 +462,7 @@ export const conversationStore = {
         message.modelId ?? null,
         message.timestamp,
         metadata,
+        provider,
       );
     } catch (error) {
       console.error("[conversationStore] Failed to persist message:", error);
@@ -481,6 +503,7 @@ export const conversationStore = {
               status: "complete" as const,
               workerType: metaFields.workerType ?? "chat_model",
               modelId: metaFields.modelId ?? m.model ?? undefined,
+              provider: m.provider ?? undefined,
               taskType: metaFields.taskType,
               duration: metaFields.duration,
               cost: metaFields.cost,

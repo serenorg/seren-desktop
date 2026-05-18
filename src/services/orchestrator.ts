@@ -3,7 +3,11 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Attachment, ToolDefinition } from "@/lib/providers/types";
+import type {
+  Attachment,
+  ProviderId,
+  ToolDefinition,
+} from "@/lib/providers/types";
 import { getAllTools } from "@/lib/tools";
 import { executeTool } from "@/lib/tools/executor";
 import {
@@ -211,9 +215,20 @@ export async function orchestrate(
     }
   }
 
-  // 2. Build capabilities (thread-aware skills: thread -> project -> global)
+  // 2. Build capabilities (thread-aware skills: thread -> project -> global).
+  // Provider/model come from the active thread's runtime binding so a
+  // user switching providers on one thread cannot leak into orchestration
+  // on another. Threads with no recorded selection fall back to the
+  // user's globally-active default.
   await skillsStore.ensureContextLoaded(fileTreeState.rootPath, conversationId);
-  const capabilities = buildCapabilities(conversationId);
+  const threadProvider = ((conv?.selectedProvider as ProviderId | undefined) ??
+    providerStore.activeProvider) as ProviderId;
+  const threadModel = conv?.selectedModel ?? providerStore.activeModel;
+  const capabilities = buildCapabilities(
+    conversationId,
+    threadProvider,
+    threadModel,
+  );
 
   // 3. Prepare streaming state (message added on completion)
   activeStreams.set(conversationId, {
@@ -1030,22 +1045,28 @@ function flushStreamingToMessage(conversationId: string): void {
 }
 
 /**
- * Build the capabilities object from current frontend state.
- * Passes lightweight skill metadata — the Rust side reads actual content from disk.
+ * Build the capabilities object from the thread's runtime binding plus
+ * frontend state. Provider and model come from the active thread so
+ * switching providers on one thread does not leak into orchestration on
+ * another. The global provider store is only consulted as a fallback for
+ * threads that have not yet recorded a selection.
  */
-function buildCapabilities(threadId: string | null): UserCapabilities {
+function buildCapabilities(
+  threadId: string | null,
+  provider: ProviderId,
+  model: string | null,
+): UserCapabilities {
   const privateChatPolicy = authStore.privateChatPolicy;
   const publicSerenAllowed = allowsSerenPublicModels(privateChatPolicy);
   const forcePrivateChat =
     allowsSerenPrivateAgent(privateChatPolicy) &&
-    (providerStore.activeProvider === "seren-private" ||
-      (providerStore.activeProvider === "seren" && !publicSerenAllowed));
+    (provider === "seren-private" ||
+      (provider === "seren" && !publicSerenAllowed));
   const enabledSkills = skillsStore.getThreadSkills(
     fileTreeState.rootPath,
     threadId,
   );
-  const activeModels =
-    providerStore.getModels(providerStore.activeProvider) ?? [];
+  const activeModels = providerStore.getModels(provider) ?? [];
   const tools = getAllTools();
 
   return {
@@ -1070,9 +1091,9 @@ function buildCapabilities(threadId: string | null): UserCapabilities {
           }
           return selected;
         })()
-      : providerStore.activeModel === AUTO_MODEL_ID
+      : model === AUTO_MODEL_ID
         ? null
-        : providerStore.activeModel,
+        : model,
     force_private_chat: forcePrivateChat,
     private_chat_deployment_id: privateChatPolicy?.deployment_id ?? null,
     available_models: forcePrivateChat ? [] : activeModels.map((m) => m.id),

@@ -231,6 +231,7 @@ describe("conversationStore", () => {
         "claude-opus-4-6",
         msg.timestamp,
         expect.stringContaining('"worker_type":"local_agent"'),
+        null,
       );
     });
 
@@ -250,6 +251,61 @@ describe("conversationStore", () => {
         null,
         msg.timestamp,
         null,
+        null,
+      );
+    });
+
+    it("inherits the conversation's selected provider as producer provenance", async () => {
+      const { saveMessage } = await import("@/lib/tauri-bridge");
+      const convo = await conversationStore.createConversationWithModel(
+        "Provenance",
+        "claude-sonnet-4",
+        undefined,
+        "seren-private",
+      );
+
+      const msg = makeMessage({ type: "assistant", role: "assistant" });
+      conversationStore.addMessage(msg, convo.id);
+      await conversationStore.persistMessage(msg, convo.id);
+
+      expect(saveMessage).toHaveBeenCalledWith(
+        msg.id,
+        convo.id,
+        "assistant",
+        msg.content,
+        null,
+        msg.timestamp,
+        null,
+        "seren-private",
+      );
+    });
+
+    it("prefers an explicit message.provider over the conversation default", async () => {
+      const { saveMessage } = await import("@/lib/tauri-bridge");
+      const convo = await conversationStore.createConversationWithModel(
+        "Switched",
+        "claude-sonnet-4",
+        undefined,
+        "seren",
+      );
+
+      const msg = makeMessage({
+        type: "assistant",
+        role: "assistant",
+        provider: "gemini",
+      });
+      conversationStore.addMessage(msg, convo.id);
+      await conversationStore.persistMessage(msg, convo.id);
+
+      expect(saveMessage).toHaveBeenCalledWith(
+        msg.id,
+        convo.id,
+        "assistant",
+        msg.content,
+        null,
+        msg.timestamp,
+        null,
+        "gemini",
       );
     });
   });

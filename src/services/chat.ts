@@ -15,6 +15,7 @@ import type {
   ChatMessageWithTools,
   ChatResponse,
   ContentBlock,
+  ProviderId,
   ToolCall,
   ToolResult,
 } from "@/lib/providers/types";
@@ -58,6 +59,8 @@ export interface Message {
   images?: Attachment[];
   thinking?: string;
   model?: string;
+  /** Producer provenance — the provider that emitted this message. */
+  provider?: string;
   timestamp: number;
   status?: "pending" | "streaming" | "complete" | "error";
   error?: string | null;
@@ -147,35 +150,37 @@ async function sendWithToolsRetry(
 }
 
 /**
- * Send a non-streaming message using the active provider.
+ * Send a non-streaming message through the given provider.
+ *
+ * The provider is the per-thread runtime binding, passed explicitly by
+ * callers so they cannot silently inherit the user's globally-selected
+ * provider when a thread has its own setting.
  */
 export async function sendMessage(
   content: string,
   model: string,
+  provider: ProviderId,
   context?: ChatContext,
   history?: Message[],
 ): Promise<string> {
   const request = buildChatRequest(content, model, context, history);
-  const providerId = providerStore.activeProvider;
-
-  return sendProviderMessage(providerId, request);
+  return sendProviderMessage(provider, request);
 }
 
 /**
- * Stream a message using the active provider.
- * Includes conversation history for multi-turn context.
+ * Stream a message through the given provider. The provider is the
+ * per-thread runtime binding, passed explicitly by callers.
  */
 export async function* streamMessage(
   content: string,
   model: string,
+  provider: ProviderId,
   context?: ChatContext,
   history?: Message[],
 ): AsyncGenerator<string> {
   const request = buildChatRequest(content, model, context, history);
   request.stream = true;
-  const providerId = providerStore.activeProvider;
-
-  yield* streamProviderMessage(providerId, request);
+  yield* streamProviderMessage(provider, request);
 }
 
 /**
@@ -184,6 +189,7 @@ export async function* streamMessage(
 export async function sendMessageWithRetry(
   content: string,
   model: string,
+  provider: ProviderId,
   context: ChatContext | undefined,
   onRetry?: (attempt: number) => void,
   history?: Message[],
@@ -192,7 +198,7 @@ export async function sendMessageWithRetry(
 
   for (let attempt = 1; attempt <= CHAT_MAX_RETRIES; attempt++) {
     try {
-      return await sendMessage(content, model, context, history);
+      return await sendMessage(content, model, provider, context, history);
     } catch (error) {
       lastError = error as Error;
 

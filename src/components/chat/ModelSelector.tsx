@@ -21,6 +21,10 @@ import {
 import { type Model, modelsService } from "@/services/models";
 import { allowsSerenPublicModels } from "@/services/organization-policy";
 import { privateModelsService } from "@/services/private-models";
+import {
+  evaluateChatSwitchGuard,
+  switchChatProvider,
+} from "@/services/provider-bindings";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -166,36 +170,63 @@ export const ModelSelector: Component = () => {
     return models[0];
   };
 
+  /**
+   * Switch the active thread to a new model on its current provider. If
+   * no chat thread is active, fall back to mutating the global picker
+   * (used by the welcome screen before any thread exists).
+   */
   const selectModel = (modelId: string) => {
-    providerStore.setActiveModel(modelId);
-    chatStore.setModel(modelId);
     const conversationId = conversationStore.activeConversationId;
-    if (conversationId) {
-      void conversationStore.updateConversationSelection(
-        conversationId,
-        modelId,
-        providerStore.activeProvider,
-      );
+    if (!conversationId) {
+      providerStore.setActiveModel(modelId);
+      chatStore.setModel(modelId);
+      setIsOpen(false);
+      return;
     }
+
+    if (evaluateChatSwitchGuard(conversationId)) {
+      setIsOpen(false);
+      return;
+    }
+
+    void switchChatProvider(
+      conversationId,
+      providerStore.activeProvider,
+      modelId,
+    ).catch((error) =>
+      console.warn("[ModelSelector] Failed to switch model:", error),
+    );
     setIsOpen(false);
   };
 
+  /**
+   * Switch the active thread to a new provider. Picks the first
+   * default model of the target provider so the runtime row is always
+   * paired. Falls back to mutating the global picker when no thread is
+   * selected.
+   */
   const selectProvider = (providerId: ProviderId) => {
-    providerStore.setActiveProvider(providerId);
-    // Update chat store with the first model of the new provider
     const models = providerStore.getModels(providerId);
-    if (models.length > 0) {
-      providerStore.setActiveModel(models[0].id);
-      chatStore.setModel(models[0].id);
-      const conversationId = conversationStore.activeConversationId;
-      if (conversationId) {
-        void conversationStore.updateConversationSelection(
-          conversationId,
-          models[0].id,
-          providerId,
-        );
+    const fallbackModel = models[0]?.id ?? providerStore.activeModel;
+
+    const conversationId = conversationStore.activeConversationId;
+    if (!conversationId) {
+      providerStore.setActiveProvider(providerId);
+      if (models.length > 0) {
+        providerStore.setActiveModel(models[0].id);
+        chatStore.setModel(models[0].id);
       }
+      return;
     }
+
+    if (evaluateChatSwitchGuard(conversationId)) {
+      return;
+    }
+
+    void switchChatProvider(conversationId, providerId, fallbackModel).catch(
+      (error) =>
+        console.warn("[ModelSelector] Failed to switch provider:", error),
+    );
   };
 
   const handleDocumentClick = (event: MouseEvent) => {

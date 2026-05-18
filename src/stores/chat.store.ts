@@ -21,6 +21,7 @@ import {
 } from "@/lib/token-counter";
 import type { Message } from "@/services/chat";
 import { sendMessage } from "@/services/chat";
+import { providerStore } from "@/stores/provider.store";
 
 const DEFAULT_MODEL = "arcee-ai/trinity-large-thinking";
 const MAX_MESSAGES_PER_CONVERSATION = 1000;
@@ -342,6 +343,22 @@ export const chatStore = {
     );
   },
 
+  /**
+   * Sync the in-memory chat conversation after the per-thread runtime
+   * binding has been rewritten atomically by the Rust side.
+   */
+  applyRuntimeBindingSync(
+    id: string,
+    selectedProvider: ProviderId,
+    selectedModel: string,
+  ) {
+    setState("conversations", (convos) =>
+      convos.map((c) =>
+        c.id === id ? { ...c, selectedProvider, selectedModel } : c,
+      ),
+    );
+  },
+
   // ============================================================================
   // Message Management
   // ============================================================================
@@ -442,6 +459,13 @@ export const chatStore = {
     const conversationId = state.activeConversationId;
     if (!conversationId) return;
 
+    // Producer provenance: prefer an explicit value on the message, otherwise
+    // fall back to the conversation's selected provider so historical reads
+    // can attribute the row even before Phase 2 plumbs runtime state through
+    // every send path.
+    const convo = state.conversations.find((c) => c.id === conversationId);
+    const provider = message.provider ?? convo?.selectedProvider ?? null;
+
     try {
       await saveMessageDb(
         message.id,
@@ -450,6 +474,8 @@ export const chatStore = {
         message.content,
         message.model ?? null,
         message.timestamp,
+        undefined,
+        provider,
       );
     } catch (error) {
       console.error("[chatStore] Failed to persist message:", error);
@@ -483,6 +509,7 @@ export const chatStore = {
             role: m.role as "user" | "assistant",
             content: m.content,
             model: m.model ?? undefined,
+            provider: m.provider ?? undefined,
             timestamp: m.timestamp,
             status: "complete" as const,
           }));
@@ -592,10 +619,18 @@ ${toCompact.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n")}
 
 Structured summary:`;
 
-      // Use the current model to generate summary
+      // Use the active conversation's bound provider/model to compact so
+      // the thread's selected runtime — not a global default — produces
+      // the summary.
+      const activeConvo = state.conversations.find(
+        (c) => c.id === conversationId,
+      );
+      const compactionProvider =
+        activeConvo?.selectedProvider ?? providerStore.activeProvider;
       const summary = await sendMessage(
         summaryPrompt,
-        this.selectedModel,
+        activeConvo?.selectedModel ?? this.selectedModel,
+        compactionProvider,
         undefined,
       );
 

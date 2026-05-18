@@ -275,6 +275,8 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     )
     .ok();
 
+    setup_provider_runtime_schema(conn)?;
+
     // Helpful indexes for agent history lookups (safe to run repeatedly).
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_conversations_kind_created_at ON conversations(kind, created_at DESC)",
@@ -500,6 +502,81 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Add `messages.provider` and the `provider_session_runtime` table.
+///
+/// Wrapped in an explicit transaction so a crash mid-migration cannot leave
+/// the new column present without its backfill, or the runtime table without
+/// its index. Errors propagate up rather than being swallowed by `.ok()`.
+fn setup_provider_runtime_schema(conn: &Connection) -> Result<()> {
+    let has_provider: bool = conn
+        .prepare("SELECT provider FROM messages LIMIT 1")
+        .is_ok();
+    let has_runtime_table: bool = conn
+        .prepare("SELECT 1 FROM provider_session_runtime LIMIT 1")
+        .is_ok();
+
+    if has_provider && has_runtime_table {
+        return Ok(());
+    }
+
+    conn.execute_batch("BEGIN")?;
+    let outcome = (|| -> Result<()> {
+        if !has_provider {
+            conn.execute("ALTER TABLE messages ADD COLUMN provider TEXT", [])?;
+            // Backfill best-effort from the owning conversation. Chat threads
+            // use the conversation's currently selected provider; agent
+            // threads use their agent type. Historical accuracy is not
+            // claimed; the column is producer provenance for new rows.
+            conn.execute(
+                "UPDATE messages
+                 SET provider = (
+                     SELECT CASE c.kind
+                         WHEN 'agent' THEN c.agent_type
+                         ELSE c.selected_provider
+                     END
+                     FROM conversations c
+                     WHERE c.id = messages.conversation_id
+                 )
+                 WHERE provider IS NULL",
+                [],
+            )?;
+        }
+
+        if !has_runtime_table {
+            conn.execute(
+                "CREATE TABLE provider_session_runtime (
+                    thread_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL,
+                    model TEXT,
+                    native_session_id TEXT,
+                    resume_cursor_json TEXT,
+                    status TEXT NOT NULL,
+                    bootstrap_context TEXT,
+                    updated_at INTEGER NOT NULL
+                )",
+                [],
+            )?;
+            conn.execute(
+                "CREATE INDEX idx_provider_session_runtime_provider
+                 ON provider_session_runtime(provider)",
+                [],
+            )?;
+        }
+        Ok(())
+    })();
+
+    match outcome {
+        Ok(()) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
 /// Migrate messages without a conversation_id to a default conversation
 fn migrate_orphan_messages(conn: &Connection) -> Result<()> {
     // Check if there are orphan messages
@@ -720,6 +797,154 @@ mod tests {
         setup_schema(&conn).unwrap();
         // Running setup again should not error
         setup_schema(&conn).unwrap();
+    }
+
+    #[test]
+    fn provenance_migration_adds_provider_column_and_runtime_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        // messages.provider exists and accepts writes.
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Test', 1000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp, provider)
+             VALUES ('m1', 'c1', 'assistant', 'hi', 1000, 'seren')",
+            [],
+        )
+        .unwrap();
+
+        let provider: Option<String> = conn
+            .query_row("SELECT provider FROM messages WHERE id = 'm1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(provider, Some("seren".to_string()));
+
+        // provider_session_runtime table exists and accepts writes.
+        conn.execute(
+            "INSERT INTO provider_session_runtime
+                (thread_id, provider, model, native_session_id, status, updated_at)
+             VALUES ('c1', 'claude-code', 'claude-sonnet-4', 'session-abc', 'idle', 1234)",
+            [],
+        )
+        .unwrap();
+
+        let bound_provider: String = conn
+            .query_row(
+                "SELECT provider FROM provider_session_runtime WHERE thread_id = 'c1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(bound_provider, "claude-code");
+    }
+
+    #[test]
+    fn provenance_backfill_uses_chat_provider_and_agent_type() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Start from the legacy shape: no provider column, no runtime table.
+        conn.execute(
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                selected_model TEXT,
+                selected_provider TEXT,
+                is_archived INTEGER DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'chat',
+                agent_type TEXT
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                model TEXT,
+                timestamp INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, selected_provider)
+             VALUES ('chat1', 'Chat', 1000, 'chat', 'seren-private')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type)
+             VALUES ('agent1', 'Agent', 1000, 'agent', 'codex')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp)
+             VALUES ('m_chat', 'chat1', 'assistant', 'hi', 1001),
+                    ('m_agent', 'agent1', 'assistant', 'hi', 1002)",
+            [],
+        )
+        .unwrap();
+
+        setup_schema(&conn).unwrap();
+
+        let chat_provider: Option<String> = conn
+            .query_row(
+                "SELECT provider FROM messages WHERE id = 'm_chat'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(chat_provider, Some("seren-private".to_string()));
+
+        let agent_provider: Option<String> = conn
+            .query_row(
+                "SELECT provider FROM messages WHERE id = 'm_agent'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(agent_provider, Some("codex".to_string()));
+    }
+
+    #[test]
+    fn provenance_migration_preserves_existing_provider_values() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, selected_provider)
+             VALUES ('c1', 'Test', 1000, 'chat', 'seren')",
+            [],
+        )
+        .unwrap();
+        // Insert a message that already has a producer value; a second pass
+        // through setup_schema must not overwrite it.
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp, provider)
+             VALUES ('m1', 'c1', 'assistant', 'hi', 1000, 'gemini')",
+            [],
+        )
+        .unwrap();
+
+        setup_schema(&conn).unwrap();
+
+        let provider: Option<String> = conn
+            .query_row("SELECT provider FROM messages WHERE id = 'm1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(provider, Some("gemini".to_string()));
     }
 
     #[test]

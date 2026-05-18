@@ -667,6 +667,7 @@ export interface StoredMessage {
   model: string | null;
   timestamp: number;
   metadata: string | null;
+  provider: string | null;
 }
 
 /**
@@ -975,6 +976,7 @@ export async function saveMessage(
   model: string | null,
   timestamp: number,
   metadata?: string | null,
+  provider?: string | null,
 ): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -988,6 +990,7 @@ export async function saveMessage(
     model,
     timestamp,
     metadata: metadata ?? null,
+    provider: provider ?? null,
   });
 }
 
@@ -1196,4 +1199,48 @@ export async function updateSessionEventStatus(
     throw new Error("Session operations require Tauri runtime");
   }
   await invoke("update_session_event_status", { id, status });
+}
+
+/**
+ * Per-thread provider runtime binding. Mirrors the Rust
+ * `ProviderSessionRuntime` struct shipped by `commands::provider_runtime`.
+ */
+export interface ProviderSessionRuntime {
+  thread_id: string;
+  provider: string;
+  model: string | null;
+  native_session_id: string | null;
+  resume_cursor_json: string | null;
+  status: string;
+  bootstrap_context: string | null;
+  updated_at: number;
+}
+
+export async function getProviderSessionRuntime(
+  threadId: string,
+): Promise<ProviderSessionRuntime | null> {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return await invoke<ProviderSessionRuntime | null>(
+    "get_provider_session_runtime",
+    { threadId },
+  );
+}
+
+export async function switchThreadProvider(
+  threadId: string,
+  targetProvider: string,
+  targetModel?: string | null,
+  bootstrapContext?: string | null,
+): Promise<ProviderSessionRuntime> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Provider switching requires Tauri runtime");
+  }
+  return await invoke<ProviderSessionRuntime>("switch_thread_provider", {
+    threadId,
+    targetProvider,
+    targetModel: targetModel ?? null,
+    bootstrapContext: bootstrapContext ?? null,
+  });
 }

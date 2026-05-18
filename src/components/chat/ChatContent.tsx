@@ -41,7 +41,7 @@ import {
 } from "@/lib/group-tool-calls";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
 import { isPaymentError } from "@/lib/payment-errors";
-import type { Attachment } from "@/lib/providers/types";
+import type { Attachment, ProviderId } from "@/lib/providers/types";
 import { escapeHtmlWithSkillsAndLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
@@ -905,9 +905,16 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       const historyBeforeRetry =
         messageIndex > 0 ? messages.slice(0, messageIndex) : undefined;
 
+      const activeConvo = conversationStore.conversations.find(
+        (c) => c.id === id,
+      );
+      const retryProvider =
+        (activeConvo?.selectedProvider as ProviderId | undefined) ??
+        providerStore.activeProvider;
       const content = await sendMessageWithRetry(
         message.request.prompt,
         message.modelId ?? chatStore.selectedModel,
+        retryProvider,
         message.request.context,
         (attempt) => {
           conversationStore.updateMessage(

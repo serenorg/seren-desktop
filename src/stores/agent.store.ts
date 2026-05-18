@@ -661,6 +661,8 @@ export interface AgentMessage {
   cost?: number;
   /** Names of documents processed via DocReader for this message. */
   docNames?: string[];
+  /** Producer provenance — the agent type that emitted this message. */
+  provider?: string;
 }
 
 export interface AgentModelInfo {
@@ -1060,6 +1062,17 @@ function serializeAgentConversationMetadata(
  */
 function persistAgentMessage(conversationId: string, msg: AgentMessage): void {
   if (msg.type !== "user" && msg.type !== "assistant") return;
+  // Producer provenance: prefer an explicit value on the message, otherwise
+  // fall back to the agent type of whichever live session owns this thread.
+  let provider = msg.provider ?? null;
+  if (!provider) {
+    for (const session of Object.values(state.sessions)) {
+      if (session.conversationId === conversationId) {
+        provider = session.info.agentType;
+        break;
+      }
+    }
+  }
   saveMessage(
     msg.id,
     conversationId,
@@ -1068,6 +1081,7 @@ function persistAgentMessage(conversationId: string, msg: AgentMessage): void {
     null,
     msg.timestamp,
     null,
+    provider,
   ).catch((error) =>
     console.warn("[AgentStore] Failed to persist agent message:", error),
   );
@@ -1092,6 +1106,7 @@ async function loadPersistedAgentHistory(
       type: m.role === "user" ? ("user" as const) : ("assistant" as const),
       content: m.content,
       timestamp: m.timestamp,
+      provider: m.provider ?? undefined,
     }));
 
     // Build a concise conversation summary for the agent's context

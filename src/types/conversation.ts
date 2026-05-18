@@ -53,6 +53,8 @@ export interface UnifiedMessage {
   workerId?: string;
   workerType?: WorkerType;
   modelId?: string;
+  /** Producer provenance — the provider that emitted this message. */
+  provider?: string;
   taskType?: string;
 
   // Optional fields depending on type
