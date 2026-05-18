@@ -1,6 +1,7 @@
 // ABOUTME: Tauri commands for chat persistence and conversation management.
 // ABOUTME: Handles CRUD operations for conversations and messages in SQLite.
 
+use crate::commands::provider_runtime::DERIVED_KIND_CASE_SQL;
 use crate::services::database::{DbPool, init_db};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -224,31 +225,42 @@ pub async fn list_conversations(
         }
     }
 
-    let raw = project_root.clone();
-    let normalized = project_root.as_deref().and_then(normalize_project_root);
+    // Treat a whitespace-only project_root the same as `None` so the
+    // filter does not fall through to literal-equality on the empty
+    // string. The prior chat-only read also routed empty input to its
+    // "no filter" branch via `normalize_project_root` returning `None`;
+    // preserve that behavior here for the raw form too.
+    let raw = project_root
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let normalized = raw.as_deref().and_then(normalize_project_root);
     // SQLite treats `LIMIT -1` as no limit, matching the old behavior of
     // the unlimited chat read.
     let effective_limit = limit.unwrap_or(-1);
 
     run_db(app, move |conn| {
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "WITH derived AS (
                 SELECT c.id, c.title, c.created_at, c.is_archived,
                        c.project_root, c.selected_provider, c.selected_model,
                        c.employee_id, c.agent_type, c.agent_session_id,
                        c.agent_cwd, c.agent_model_id, c.agent_permission_mode,
-                       c.agent_metadata, c.project_id,
-                       CASE
-                           WHEN psr.provider IS NULL THEN c.kind
-                           WHEN psr.provider IN ('claude-code', 'codex', 'gemini') THEN 'agent'
-                           ELSE 'chat'
-                       END AS derived_kind
+                       c.agent_metadata, c.project_id, psr.provider AS runtime_provider,
+                       {case} AS derived_kind
                 FROM conversations c
                 LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
             )
             SELECT id, title, created_at, derived_kind, project_root, is_archived,
-                   selected_provider, selected_model, employee_id,
-                   agent_type, agent_session_id, agent_cwd, agent_model_id,
+                   CASE WHEN derived_kind = 'chat'
+                        THEN COALESCE(selected_provider, runtime_provider)
+                        ELSE selected_provider END AS selected_provider,
+                   selected_model, employee_id,
+                   CASE WHEN derived_kind = 'agent'
+                        THEN COALESCE(agent_type, runtime_provider)
+                        ELSE agent_type END AS agent_type,
+                   agent_session_id, agent_cwd, agent_model_id,
                    agent_permission_mode, agent_metadata, project_id
             FROM derived
             WHERE is_archived = 0
@@ -261,7 +273,9 @@ pub async fn list_conversations(
               )
             ORDER BY created_at DESC
             LIMIT ?4",
-        )?;
+            case = DERIVED_KIND_CASE_SQL,
+        );
+        let mut stmt = conn.prepare(&sql)?;
 
         let rows = stmt
             .query_map(
@@ -300,20 +314,19 @@ pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conve
         // Filter by the derived kind so the reader stays correct if the
         // stored `conversations.kind` ever drifts from the live provider
         // binding (e.g. a mirror update raced a switch).
-        let mut stmt = conn.prepare(
-            "SELECT c.id, c.title, c.created_at, c.selected_model, c.selected_provider,
+        let sql = format!(
+            "SELECT c.id, c.title, c.created_at, c.selected_model,
+                    CASE WHEN ({case}) = 'chat'
+                         THEN COALESCE(c.selected_provider, psr.provider)
+                         ELSE c.selected_provider END AS selected_provider,
                     c.project_root, c.is_archived, c.employee_id
              FROM conversations c
              LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
              WHERE c.id = ?1
-               AND (
-                 CASE
-                     WHEN psr.provider IS NULL THEN c.kind
-                     WHEN psr.provider IN ('claude-code', 'codex', 'gemini') THEN 'agent'
-                     ELSE 'chat'
-                 END
-               ) = 'chat'",
-        )?;
+               AND ({case}) = 'chat'",
+            case = DERIVED_KIND_CASE_SQL,
+        );
+        let mut stmt = conn.prepare(&sql)?;
 
         let result = stmt
             .query_row(params![id], |row| {
@@ -497,21 +510,21 @@ pub async fn get_agent_conversation(
         // Filter by the derived kind so the reader stays correct if the
         // stored `conversations.kind` ever drifts from the live provider
         // binding.
-        let mut stmt = conn.prepare(
-            "SELECT c.id, c.title, c.created_at, c.agent_type, c.agent_session_id,
+        let sql = format!(
+            "SELECT c.id, c.title, c.created_at,
+                    CASE WHEN ({case}) = 'agent'
+                         THEN COALESCE(c.agent_type, psr.provider)
+                         ELSE c.agent_type END AS agent_type,
+                    c.agent_session_id,
                     c.agent_cwd, c.agent_model_id, c.agent_permission_mode,
                     c.agent_metadata, c.project_id, c.project_root, c.is_archived
              FROM conversations c
              LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
              WHERE c.id = ?1
-               AND (
-                 CASE
-                     WHEN psr.provider IS NULL THEN c.kind
-                     WHEN psr.provider IN ('claude-code', 'codex', 'gemini') THEN 'agent'
-                     ELSE 'chat'
-                 END
-               ) = 'agent'",
-        )?;
+               AND ({case}) = 'agent'",
+            case = DERIVED_KIND_CASE_SQL,
+        );
+        let mut stmt = conn.prepare(&sql)?;
 
         let result = stmt
             .query_row(params![id], |row| {
@@ -857,6 +870,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::DERIVED_KIND_CASE_SQL;
     use crate::services::database::setup_schema;
     use rusqlite::{Connection, params};
 
@@ -867,33 +881,67 @@ mod tests {
     }
 
     /// Mirror of the production `list_conversations` SQL so tests can
-    /// drive the derived-kind filter without an AppHandle. Returns the
-    /// (id, kind, agent_type) triplet for each row in created_at DESC.
+    /// drive every filter (derived kind, project_root, limit) without an
+    /// AppHandle. Returns the (id, kind, agent_type) triplet for each
+    /// row in created_at DESC.
+    ///
+    /// `project_root` here stands in for both the raw and normalized
+    /// bindings - tests that care about raw-vs-normalized matching can
+    /// drive the corresponding params directly via `list_for_test_full`.
     fn list_for_test(
         conn: &Connection,
         kind: Option<&str>,
-    ) -> Vec<(String, String, Option<String>)> {
-        let mut stmt = conn
-            .prepare(
-                "WITH derived AS (
-                    SELECT c.id, c.created_at, c.kind, c.agent_type, c.is_archived,
-                           CASE
-                               WHEN psr.provider IS NULL THEN c.kind
-                               WHEN psr.provider IN ('claude-code', 'codex', 'gemini') THEN 'agent'
-                               ELSE 'chat'
-                           END AS derived_kind
-                    FROM conversations c
-                    LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
-                )
-                SELECT id, derived_kind, agent_type FROM derived
-                WHERE is_archived = 0
-                  AND (?1 IS NULL OR derived_kind = ?1)
-                ORDER BY created_at DESC",
+    ) -> Vec<(String, String, Option<String>, Option<String>)> {
+        list_for_test_full(conn, kind, None, None, None)
+    }
+
+    fn list_for_test_full(
+        conn: &Connection,
+        kind: Option<&str>,
+        raw_project_root: Option<&str>,
+        normalized_project_root: Option<&str>,
+        limit: Option<i32>,
+    ) -> Vec<(String, String, Option<String>, Option<String>)> {
+        // Keep this SQL in lock-step with the production
+        // `list_conversations` query so the test exercises the same
+        // filter shape (kind + project_root + limit), not a relaxed
+        // subset.
+        let sql = format!(
+            "WITH derived AS (
+                SELECT c.id, c.created_at, c.kind, c.agent_type,
+                       c.selected_provider, c.is_archived,
+                       c.project_root, c.project_id, c.agent_cwd,
+                       psr.provider AS runtime_provider,
+                       {case} AS derived_kind
+                FROM conversations c
+                LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
             )
-            .unwrap();
-        stmt.query_map(params![kind], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })
+            SELECT id, derived_kind,
+                   CASE WHEN derived_kind = 'agent'
+                        THEN COALESCE(agent_type, runtime_provider)
+                        ELSE agent_type END AS agent_type,
+                   CASE WHEN derived_kind = 'chat'
+                        THEN COALESCE(selected_provider, runtime_provider)
+                        ELSE selected_provider END AS selected_provider
+            FROM derived
+            WHERE is_archived = 0
+              AND (?1 IS NULL OR derived_kind = ?1)
+              AND (
+                (?2 IS NULL AND ?3 IS NULL)
+                OR project_root = ?2 OR project_id = ?2 OR agent_cwd = ?2
+                OR project_root = ?3 OR project_id = ?3 OR agent_cwd = ?3
+                OR (derived_kind = 'chat' AND project_root IS NULL)
+              )
+            ORDER BY created_at DESC
+            LIMIT ?4",
+            case = DERIVED_KIND_CASE_SQL,
+        );
+        let effective_limit = limit.unwrap_or(-1);
+        let mut stmt = conn.prepare(&sql).unwrap();
+        stmt.query_map(
+            params![kind, raw_project_root, normalized_project_root, effective_limit],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap()
@@ -922,6 +970,7 @@ mod tests {
         let rows = list_for_test(&conn, None);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].1, "agent");
+        assert_eq!(rows[0].2.as_deref(), Some("claude-code"));
     }
 
     #[test]
@@ -964,6 +1013,113 @@ mod tests {
     }
 
     #[test]
+    fn project_root_matches_chat_project_root_and_agent_cwd_and_project_id() {
+        // The unified reader is supposed to union the prior chat behavior
+        // (match on `project_root`) with the prior agent behavior (match
+        // on `project_id` OR `agent_cwd`). All three columns should pull
+        // a row into the result for the same target project.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        project_root, project_id, agent_cwd)
+             VALUES ('chat-pr', 'Chat by project_root', 1000, 'chat', NULL,
+                     '/tmp/proj', NULL, NULL),
+                    ('agent-pid', 'Agent by project_id', 2000, 'agent', 'codex',
+                     NULL, '/tmp/proj', NULL),
+                    ('agent-cwd', 'Agent by agent_cwd', 3000, 'agent', 'codex',
+                     NULL, NULL, '/tmp/proj'),
+                    ('chat-null', 'Chat with NULL project', 4000, 'chat', NULL,
+                     NULL, NULL, NULL),
+                    ('chat-other', 'Chat in other project', 5000, 'chat', NULL,
+                     '/tmp/other', NULL, NULL)",
+            [],
+        )
+        .unwrap();
+
+        let rows = list_for_test_full(&conn, None, Some("/tmp/proj"), None, None);
+        let ids: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+        // chat-pr, agent-pid, agent-cwd match by the requested project.
+        assert!(ids.contains(&"chat-pr"), "chat-pr should match by project_root");
+        assert!(ids.contains(&"agent-pid"), "agent-pid should match by project_id");
+        assert!(ids.contains(&"agent-cwd"), "agent-cwd should match by agent_cwd");
+        // chat-null is included because the chat bucket always surfaces
+        // unscoped chat rows.
+        assert!(ids.contains(&"chat-null"), "chat with NULL project_root should surface");
+        // chat-other is in a different project and must be excluded.
+        assert!(!ids.contains(&"chat-other"), "chat in other project must be filtered out");
+    }
+
+    #[test]
+    fn project_root_filter_unions_raw_and_normalized_forms() {
+        // The reader gets both the raw caller-supplied project_root and
+        // a canonicalized form. A row that stored only the canonical
+        // path must still match a caller that passed the raw form, and
+        // vice versa.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, project_root)
+             VALUES ('raw-row', 'Stored raw', 1000, 'chat', '~/projects/app'),
+                    ('canon-row', 'Stored canon', 2000, 'chat', '/Users/me/projects/app')",
+            [],
+        )
+        .unwrap();
+
+        let rows = list_for_test_full(
+            &conn,
+            Some("chat"),
+            Some("~/projects/app"),
+            Some("/Users/me/projects/app"),
+            None,
+        );
+        let ids: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+        // Both rows must surface: one matches via the raw param, the other
+        // via the normalized param.
+        assert!(ids.contains(&"raw-row"));
+        assert!(ids.contains(&"canon-row"));
+    }
+
+    #[test]
+    fn limit_negative_one_returns_all_rows() {
+        // SQLite documents that a negative LIMIT means no upper bound.
+        // The Rust command relies on that to map `Option::None` to "no
+        // limit"; if the SQLite behavior ever changes, this test fails
+        // loudly.
+        let conn = open();
+        for i in 0..5 {
+            conn.execute(
+                "INSERT INTO conversations (id, title, created_at, kind)
+                 VALUES (?1, 'Thread', ?2, 'chat')",
+                params![format!("t{i}"), 1000 + i],
+            )
+            .unwrap();
+        }
+
+        let rows = list_for_test_full(&conn, None, None, None, Some(-1));
+        assert_eq!(rows.len(), 5);
+    }
+
+    #[test]
+    fn limit_caps_returned_rows_in_created_at_desc_order() {
+        // Pin the order-then-limit behavior: with `limit = 2`, we want
+        // the two most recent rows, not an arbitrary pair.
+        let conn = open();
+        for i in 0..5 {
+            conn.execute(
+                "INSERT INTO conversations (id, title, created_at, kind)
+                 VALUES (?1, 'Thread', ?2, 'chat')",
+                params![format!("t{i}"), 1000 + i],
+            )
+            .unwrap();
+        }
+
+        let rows = list_for_test_full(&conn, None, None, None, Some(2));
+        assert_eq!(rows.len(), 2);
+        // t4 (created_at = 1004) and t3 (1003) - newest first.
+        assert_eq!(rows[0].0, "t4");
+        assert_eq!(rows[1].0, "t3");
+    }
+
+    #[test]
     fn binding_to_chat_provider_yields_chat_kind() {
         // A native-agent thread that was switched to a chat provider:
         // stored kind may have already been mirrored, but even if it
@@ -986,5 +1142,43 @@ mod tests {
         let rows = list_for_test(&conn, Some("chat"));
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].0, "t1");
+        assert_eq!(rows[0].3.as_deref(), Some("seren"));
+    }
+
+    #[test]
+    fn archived_rows_are_excluded_regardless_of_derived_kind() {
+        // The reader is the canonical sidebar source; archived rows must
+        // never reach the sidebar even when their derived kind matches the
+        // requested filter, and that applies to BOTH the binding-derived
+        // path and the stored-kind fallback.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type, is_archived)
+             VALUES ('chat-arch', 'Old Chat', 1000, 'chat', NULL, 1),
+                    ('agent-arch-legacy', 'Old Agent', 1100, 'agent', 'codex', 1),
+                    ('agent-arch-bound', 'Bound Agent', 1200, 'chat', NULL, 1),
+                    ('chat-live', 'Live Chat', 1300, 'chat', NULL, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO provider_session_runtime
+                (thread_id, provider, status, updated_at)
+             VALUES ('agent-arch-bound', 'claude-code', 'active', 2000)",
+            [],
+        )
+        .unwrap();
+
+        let all_rows = list_for_test(&conn, None);
+        let ids: Vec<&str> = all_rows.iter().map(|r| r.0.as_str()).collect();
+        assert_eq!(ids, vec!["chat-live"]);
+
+        // Filtered reads honor is_archived = 0 too, so neither store sees
+        // archived rows in its kind-scoped read.
+        let agent_only = list_for_test(&conn, Some("agent"));
+        assert!(agent_only.is_empty());
+        let chat_only = list_for_test(&conn, Some("chat"));
+        let chat_ids: Vec<&str> = chat_only.iter().map(|r| r.0.as_str()).collect();
+        assert_eq!(chat_ids, vec!["chat-live"]);
     }
 }

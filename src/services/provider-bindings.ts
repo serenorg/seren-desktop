@@ -236,13 +236,8 @@ async function transitionChatToAgent(
   const chatRow = threadStore.findConversation(threadId);
   const restoredMessages = collectRestoredAgentMessages(threadId);
 
-  // Fetch the agent row BEFORE dropping the chat row so the unified
-  // view can flip kinds without an empty window in between. With the
-  // drop-first ordering, `threadStore.findConversation(threadId)`
-  // returns undefined for the duration of the DB round-trip and
-  // ThreadContent's binding-driven shell falls back to the pane's
-  // static `chat` kind, briefly mounting an empty ChatContent before
-  // the agent row arrives.
+  // Fetch the target row before dropping the old cache entry so the
+  // unified view never loses the thread during the shell handoff.
   let agentRow: Awaited<ReturnType<typeof getAgentConversation>> = null;
   try {
     agentRow = await getAgentConversation(threadId);
@@ -252,11 +247,10 @@ async function transitionChatToAgent(
       error,
     );
   }
+  if (!agentRow) return;
 
   conversationStore.dropFromCache(threadId);
-  if (agentRow) {
-    agentStore.upsertAgentConversationFromDb(agentRow);
-  }
+  agentStore.upsertAgentConversationFromDb(agentRow);
 
   const cwd = chatRow?.projectRoot ?? fileTreeState.rootPath ?? null;
   if (!cwd) {
@@ -287,34 +281,30 @@ async function transitionChatToAgent(
 }
 
 /**
- * Tear down any live native session for this thread, drop the agent
- * row from the agent cache, then fetch and insert the freshly-flipped
- * chat row so the chat shell takes over. Tear-down has to happen
- * before the cache move so pending approvals/diffs keyed to the old
- * session get dismissed cleanly.
+ * Move the visible cache row only after the freshly-flipped chat row
+ * has been loaded. If the read fails, keep the old row visible so the
+ * unified view does not lose the thread.
  */
 async function transitionAgentToChat(threadId: string): Promise<void> {
+  let chatRow: Awaited<ReturnType<typeof getConversation>> = null;
+  try {
+    chatRow = await getConversation(threadId);
+  } catch (error) {
+    console.warn(
+      "[provider-bindings] Failed to load chat row after agent->chat switch:",
+      error,
+    );
+  }
+  if (!chatRow) return;
+
   await terminateLiveAgentSession(threadId, "agent-to-chat");
 
   agentStore.dropAgentConversationFromCache(threadId);
 
-  try {
-    const chatRow = await getConversation(threadId);
-    if (chatRow) {
-      conversationStore.upsertFromDb(chatRow);
-      // Pre-hydrate the chat shell with the prior agent transcript so
-      // the user sees the conversation history immediately instead of
-      // an empty pane that only fills as new turns land. The messages
-      // table is shared across kinds, so a re-read picks up everything
-      // the agent had persisted before the switch.
-      await conversationStore.loadMessagesFor(threadId);
-    }
-  } catch (error) {
-    console.warn(
-      "[provider-bindings] Failed to load chat row after agent→chat switch:",
-      error,
-    );
-  }
+  conversationStore.upsertFromDb(chatRow);
+  // The messages table is shared across kinds, so the chat shell can
+  // show the prior agent transcript immediately after the cache move.
+  await conversationStore.loadMessagesFor(threadId);
 }
 
 /**

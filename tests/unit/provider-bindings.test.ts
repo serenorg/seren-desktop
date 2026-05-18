@@ -627,6 +627,41 @@ describe("switchChatProvider", () => {
     );
   });
 
+  it("keeps the chat cache intact when the agent row cannot be prefetched", async () => {
+    const bridge = await import("@/lib/tauri-bridge");
+    conversationStoreMock.conversations = [
+      {
+        id: "t1",
+        title: "My thread",
+        createdAt: 100,
+        selectedModel: "claude-sonnet-4",
+        selectedProvider: "seren",
+        projectRoot: "/Users/dev/my-project",
+        isArchived: false,
+        employeeId: null,
+      },
+    ];
+    switchThreadProviderBridge.mockResolvedValueOnce({
+      thread_id: "t1",
+      provider: "claude-code",
+      model: "claude-sonnet-4",
+      native_session_id: null,
+      resume_cursor_json: null,
+      status: "active",
+      bootstrap_context: "previous transcript here",
+      updated_at: 5000,
+    });
+    vi.mocked(bridge.getAgentConversation).mockRejectedValueOnce(
+      new Error("DB unreachable"),
+    );
+
+    await switchChatProvider("t1", "claude-code", "claude-sonnet-4");
+
+    expect(conversationStoreMock.dropFromCache).not.toHaveBeenCalled();
+    expect(agentStoreMock.upsertAgentConversationFromDb).not.toHaveBeenCalled();
+    expect(agentStoreMock.spawnSession).not.toHaveBeenCalled();
+  });
+
   it("tears down the live native session and surfaces the chat row on agent→chat", async () => {
     const bridge = await import("@/lib/tauri-bridge");
     agentStoreMock.recentAgentConversations = [
@@ -686,6 +721,52 @@ describe("switchChatProvider", () => {
     // No spawn on agent→chat — chat threads route through the
     // orchestrator, not a native session.
     expect(agentStoreMock.spawnSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps the agent cache intact when the chat row cannot be prefetched", async () => {
+    const bridge = await import("@/lib/tauri-bridge");
+    agentStoreMock.recentAgentConversations = [
+      {
+        id: "t1",
+        title: "My agent",
+        created_at: 100,
+        agent_type: "claude-code",
+        agent_session_id: "remote-sess",
+        agent_cwd: "/Users/dev/my-project",
+        agent_model_id: "claude-sonnet-4",
+        project_id: null,
+        project_root: "/Users/dev/my-project",
+        is_archived: false,
+      },
+    ];
+    agentStoreMock.sessions = {
+      "live-1": {
+        info: { id: "live-1" },
+        conversationId: "t1",
+      },
+    };
+    switchThreadProviderBridge.mockResolvedValueOnce({
+      thread_id: "t1",
+      provider: "seren",
+      model: "claude-sonnet-4",
+      native_session_id: null,
+      resume_cursor_json: null,
+      status: "active",
+      bootstrap_context: null,
+      updated_at: 6000,
+    });
+    vi.mocked(bridge.getConversation).mockRejectedValueOnce(
+      new Error("DB unreachable"),
+    );
+
+    await expect(
+      switchChatProvider("t1", "seren", "claude-sonnet-4"),
+    ).resolves.toBeDefined();
+
+    expect(agentStoreMock.terminateSession).not.toHaveBeenCalled();
+    expect(agentStoreMock.dropAgentConversationFromCache).not.toHaveBeenCalled();
+    expect(conversationStoreMock.upsertFromDb).not.toHaveBeenCalled();
+    expect(conversationStoreMock.loadMessagesFor).not.toHaveBeenCalled();
   });
 
   it("tears down and respawns on same-category agent provider switches", async () => {

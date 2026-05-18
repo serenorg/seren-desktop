@@ -243,18 +243,36 @@ pub async fn switch_thread_provider(
     }
 }
 
-/// Whether the given provider id is one of the external-agent runtimes
-/// (claude-code / codex / gemini) that owns its own native session and
-/// renders through `AgentChat`, vs a chat-routed provider (seren /
-/// seren-private / anthropic / openai) that renders through `ChatContent`.
+/// The external-agent runtimes (claude-code / codex / gemini) that own
+/// their own native session and render through `AgentChat`, vs a
+/// chat-routed provider (seren / seren-private / anthropic / openai)
+/// that renders through `ChatContent`.
 ///
 /// The frontend `@/services/providers` module is the single source of
 /// truth for this categorization; we mirror the list here because the
-/// switch command needs to flip `conversations.kind` accordingly. Adding
-/// a new external agent on either side without updating the other will
-/// cause threads bound to that agent to route to the wrong shell.
+/// switch command needs to flip `conversations.kind` accordingly, and
+/// the unified conversation reader needs to derive `kind` from the live
+/// runtime binding. Adding a new external agent on either side without
+/// updating the other will cause threads bound to that agent to route
+/// to the wrong shell.
+pub(crate) const NATIVE_AGENT_PROVIDERS: &[&str] = &["claude-code", "codex", "gemini"];
+
+/// SQL CASE expression that derives a thread's effective `kind` from
+/// `provider_session_runtime.provider`, falling back to the stored
+/// `conversations.kind` column when no binding row exists. Embedded as
+/// a literal so SQLite's planner sees real string constants in the
+/// IN-list rather than parameter bind values.
+///
+/// The IN-list must match [`NATIVE_AGENT_PROVIDERS`]. A drift-guard
+/// test in this module asserts that invariant.
+pub(crate) const DERIVED_KIND_CASE_SQL: &str = "CASE \
+     WHEN psr.provider IS NULL THEN c.kind \
+     WHEN psr.provider IN ('claude-code', 'codex', 'gemini') THEN 'agent' \
+     ELSE 'chat' \
+     END";
+
 pub(crate) fn is_native_agent_provider(provider: &str) -> bool {
-    matches!(provider, "claude-code" | "codex" | "gemini")
+    NATIVE_AGENT_PROVIDERS.contains(&provider)
 }
 
 async fn run_db<T>(
@@ -429,6 +447,42 @@ mod tests {
             now,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn derived_kind_sql_in_list_matches_native_agent_providers() {
+        // The SQL CASE expression embeds the native-agent provider IDs as a
+        // literal IN-list so the planner sees real string constants. Pin the
+        // invariant that the SQL fragment and the Rust array list the same
+        // providers so a one-sided edit fails loudly instead of silently
+        // misclassifying threads.
+        for provider in super::NATIVE_AGENT_PROVIDERS {
+            let needle = format!("'{provider}'");
+            assert!(
+                super::DERIVED_KIND_CASE_SQL.contains(&needle),
+                "DERIVED_KIND_CASE_SQL missing provider {provider}",
+            );
+        }
+        // Also assert the IN-list does not name a provider that is not in
+        // the array - prevents a typo from drifting the other direction.
+        let in_open = super::DERIVED_KIND_CASE_SQL.find("IN (").unwrap();
+        let in_close = super::DERIVED_KIND_CASE_SQL[in_open..].find(')').unwrap();
+        let in_body = &super::DERIVED_KIND_CASE_SQL[in_open + 4..in_open + in_close];
+        let listed: Vec<&str> = in_body
+            .split(',')
+            .map(|s| s.trim().trim_matches('\''))
+            .collect();
+        assert_eq!(
+            listed.len(),
+            super::NATIVE_AGENT_PROVIDERS.len(),
+            "DERIVED_KIND_CASE_SQL IN-list arity mismatch with NATIVE_AGENT_PROVIDERS",
+        );
+        for p in &listed {
+            assert!(
+                super::NATIVE_AGENT_PROVIDERS.contains(p),
+                "DERIVED_KIND_CASE_SQL lists provider {p} not in NATIVE_AGENT_PROVIDERS",
+            );
+        }
     }
 
     #[test]
@@ -973,6 +1027,71 @@ mod tests {
         .unwrap();
 
         assert_eq!(read_agent_cwd(&conn, "t1"), Some("/tmp/proj".to_string()));
+    }
+
+    #[test]
+    fn agent_to_agent_switch_with_new_cwd_overwrites_existing_value() {
+        // COALESCE on the agent branch lets a fresh cwd land on top of the
+        // prior one. This is the path a TS caller takes when an
+        // agent->agent switch picks up a different project root than the
+        // current row carries.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        agent_session_id, agent_model_id, agent_cwd,
+                                        selected_provider, selected_model)
+             VALUES ('t1', 'Thread', 1000, 'agent', 'claude-code',
+                     'live-session', 'claude-sonnet-4', '/tmp/old-proj',
+                     'claude-code', 'claude-sonnet-4')",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(
+            &conn,
+            "t1",
+            "codex",
+            Some("codex-mid"),
+            Some("/tmp/new-proj"),
+            None,
+            None,
+            2000,
+        )
+        .unwrap();
+
+        assert_eq!(read_agent_cwd(&conn, "t1"), Some("/tmp/new-proj".to_string()));
+    }
+
+    #[test]
+    fn chat_branch_clears_agent_cwd_even_when_target_cwd_supplied() {
+        // The chat branch of the agent_cwd mirror is `ELSE NULL`, so even a
+        // misbehaving caller passing target_cwd on a chat-bound switch
+        // cannot leave a stale agent_cwd on the now-chat row.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        agent_session_id, agent_model_id, agent_cwd,
+                                        selected_provider, selected_model)
+             VALUES ('t1', 'Thread', 1000, 'agent', 'claude-code',
+                     'live-session', 'claude-sonnet-4', '/tmp/proj',
+                     'claude-code', 'claude-sonnet-4')",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(
+            &conn,
+            "t1",
+            "seren",
+            Some("anthropic/claude-sonnet-4"),
+            Some("/tmp/should-be-ignored"),
+            None,
+            None,
+            2000,
+        )
+        .unwrap();
+
+        assert_eq!(read_agent_cwd(&conn, "t1"), None);
     }
 
     #[test]
