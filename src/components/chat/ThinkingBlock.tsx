@@ -35,7 +35,7 @@ export const ThinkingBlock: Component<ThinkingBlockProps> = (props) => {
     <div class="mb-3 border border-surface-3 rounded-lg overflow-hidden bg-surface-0">
       <button
         type="button"
-        class="w-full flex items-center gap-2 px-3 py-2 bg-surface-2 text-muted-foreground text-xs font-medium cursor-pointer hover:bg-surface-3 transition-colors border-none text-left"
+        class="w-full flex items-center gap-2 px-3 py-2 bg-surface-2 text-muted-foreground text-[0.8em] font-medium cursor-pointer hover:bg-surface-3 transition-colors border-none text-left"
         onClick={handleToggle}
       >
         <svg
@@ -52,7 +52,7 @@ export const ThinkingBlock: Component<ThinkingBlockProps> = (props) => {
         </Show>
       </button>
       <Show when={isExpanded()}>
-        <div class="px-3 py-2 text-[13px] text-foreground/65 leading-relaxed whitespace-pre-wrap max-h-[300px] overflow-y-auto font-mono">
+        <div class="px-3 py-2 text-[0.92em] text-foreground/65 leading-relaxed whitespace-pre-wrap max-h-[300px] overflow-y-auto font-mono">
           {props.thinking}
           <Show when={props.isStreaming}>
             <span class="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-text-bottom animate-[blink_1s_step-end_infinite]" />

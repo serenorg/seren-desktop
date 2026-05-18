@@ -1191,7 +1191,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                         <MessageImages images={message.images ?? []} />
                       </Show>
                       <div
-                        class="chat-message-content text-[14px] leading-[1.7] text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-foreground [&_h1]:border-b [&_h1]:border-surface-2 [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-foreground [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-foreground [&_code]:bg-surface-1 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-foreground [&_strong]:font-semibold"
+                        class="chat-message-content leading-[1.7] text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-foreground [&_h1]:border-b [&_h1]:border-surface-2 [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-foreground [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-foreground [&_code]:bg-surface-1 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.92em] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[0.92em] [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-foreground [&_strong]:font-semibold"
                         innerHTML={
                           message.role === "assistant"
                             ? (htmlCache[message.id] ?? "")
@@ -1351,7 +1351,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 when={conversationIsRLMProcessing()}
                 fallback={<ThinkingStatus />}
               >
-                <span class="inline-flex items-center gap-2 text-sm text-foreground">
+                <span class="inline-flex items-center gap-2 text-[0.93em] text-foreground">
                   <span class="inline-flex items-center gap-[3px]">
                     <span class="inline-block w-[6px] h-[6px] rounded-full bg-primary thinking-dot thinking-dot-1" />
                     <span class="inline-block w-[6px] h-[6px] rounded-full bg-primary thinking-dot thinking-dot-2" />
@@ -1365,7 +1365,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
 
           <Show when={streamingThinking()}>
             <article class="chat-message-row px-5 py-4 border-b border-surface-2">
-              <details open class="text-xs text-muted-foreground">
+              <details open class="text-[0.8em] text-muted-foreground">
                 <summary class="cursor-pointer select-none mb-1">
                   Thinking…
                 </summary>
@@ -1378,7 +1378,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
 
           <Show when={streamingContent()}>
             <article class="chat-message-row px-5 py-4 border-b border-surface-2">
-              <div class="chat-message-content text-[14px] leading-[1.7] text-foreground break-words whitespace-pre-wrap">
+              <div class="chat-message-content leading-[1.7] text-foreground break-words whitespace-pre-wrap">
                 {streamingContent()}
                 <Show when={conversationIsLoading()}>
                   <span class="inline-block w-[6px] h-[14px] bg-primary ml-0.5 animate-pulse" />

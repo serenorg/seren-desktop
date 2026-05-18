@@ -62,7 +62,7 @@ export function ThinkingStatus(props: {
   });
 
   return (
-    <span class="inline-flex items-center gap-2 text-sm text-foreground">
+    <span class="inline-flex items-center gap-2 text-[0.93em] text-foreground">
       <span class="inline-flex items-center gap-[3px]">
         <span class="inline-block w-[6px] h-[6px] rounded-full bg-primary thinking-dot thinking-dot-1" />
         <span class="inline-block w-[6px] h-[6px] rounded-full bg-primary thinking-dot thinking-dot-2" />
