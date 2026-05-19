@@ -27,6 +27,10 @@ export interface AuthError {
   code?: string;
 }
 
+interface RefreshAccessTokenOptions {
+  promptOnFailure?: boolean;
+}
+
 // Client-side login rate limiting (exponential backoff)
 const loginRateLimit = {
   attempts: 0,
@@ -126,11 +130,16 @@ export async function logout(): Promise<void> {
  * Refresh the access token using the stored refresh token.
  * @returns true if refresh succeeded, false if refresh token is missing or invalid
  */
-export async function refreshAccessToken(): Promise<boolean> {
+export async function refreshAccessToken(
+  options: RefreshAccessTokenOptions = {},
+): Promise<boolean> {
+  const { promptOnFailure = true } = options;
   const refreshToken = await getRefreshToken();
   if (!refreshToken) {
     clearAuthState();
-    requestSignInModal();
+    if (promptOnFailure) {
+      requestSignInModal();
+    }
     return false;
   }
 
@@ -146,7 +155,9 @@ export async function refreshAccessToken(): Promise<boolean> {
         await clearToken();
         await clearRefreshToken();
         clearAuthState();
-        requestSignInModal();
+        if (promptOnFailure) {
+          requestSignInModal();
+        }
       }
       return false;
     }
@@ -183,10 +194,24 @@ export async function isLoggedIn(): Promise<boolean> {
   }
 
   try {
-    const { data, error } = await getCurrentUser({ throwOnError: false });
+    const { data, error, response } = await getCurrentUser({
+      throwOnError: false,
+    });
 
     if (data?.data) {
       return true;
+    }
+
+    if (response?.status === 401 && (await getRefreshToken())) {
+      const refreshed = await refreshAccessToken({ promptOnFailure: false });
+      if (refreshed) {
+        const { data: retryData } = await getCurrentUser({
+          throwOnError: false,
+        });
+        if (retryData?.data) {
+          return true;
+        }
+      }
     }
 
     if (error) {
