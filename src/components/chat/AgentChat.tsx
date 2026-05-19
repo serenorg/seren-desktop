@@ -84,6 +84,11 @@ import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { AgentEffortSelector } from "./AgentEffortSelector";
 import { AgentModelSelector } from "./AgentModelSelector";
 import { AgentModeSelector } from "./AgentModeSelector";
+import {
+  COMPOSER_TOOLBAR_LEFT_GROUP_CLASSES,
+  COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES,
+  COMPOSER_TOOLBAR_ROOT_CLASSES,
+} from "./composerToolbarClasses";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { PlanHeader } from "./PlanHeader";
@@ -1958,8 +1963,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 {commandStatus()}
               </div>
             </Show>
-            <div class="flex justify-between items-center">
-              <div class="flex items-center gap-3">
+            <div class={COMPOSER_TOOLBAR_ROOT_CLASSES}>
+              <div class={COMPOSER_TOOLBAR_LEFT_GROUP_CLASSES}>
                 <Show
                   when={props.threadId}
                   fallback={
@@ -1996,9 +2001,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   }}
                 />
 
-                <Show when={isPrompting()}>
-                  <ThinkingStatus startTime={promptStartTime} />
-                </Show>
                 <Show when={messageQueue().length > 0}>
                   <span class="flex items-center gap-2 px-2 py-1 bg-surface-2 border border-border rounded text-xs text-muted-foreground">
                     {messageQueue().length} message
@@ -2016,7 +2018,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   </span>
                 </Show>
               </div>
-              <div class="flex items-center gap-2">
+              <div class={COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES}>
                 <VoiceInputButton
                   mode="agent"
                   onTranscript={(text) => {
