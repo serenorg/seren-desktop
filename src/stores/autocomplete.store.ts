@@ -2,7 +2,8 @@
 // ABOUTME: Tracks autocomplete status (active/loading/disabled/error) and error messages.
 
 import { createStore } from "solid-js/store";
-import type { AutocompleteState } from "@/components/common/AutocompleteStatus";
+
+export type AutocompleteState = "active" | "loading" | "disabled" | "error";
 
 interface AutocompleteStore {
   state: AutocompleteState;

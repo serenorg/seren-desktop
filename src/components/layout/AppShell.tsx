@@ -15,7 +15,6 @@ import {
 import { SessionExpiredModal } from "@/components/auth/SessionExpiredModal";
 import { SignIn } from "@/components/auth/SignIn";
 import { CatalogList } from "@/components/catalog/CatalogList";
-import { StatusBar } from "@/components/common/StatusBar";
 import { ArchivedEmployeeDetail } from "@/components/employees/ArchivedEmployeeDetail";
 import { EmployeeDetail } from "@/components/employees/EmployeeDetail";
 import { InboxList } from "@/components/inbox/InboxList";
@@ -624,8 +623,6 @@ export const AppShell: Component<AppShellProps> = (props) => {
           </Switch>
         </SlidePanel>
       </div>
-
-      <StatusBar />
 
       <Show when={skillPublishStore.firstPublishPath}>
         {(path) => {
