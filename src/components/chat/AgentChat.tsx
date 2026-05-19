@@ -52,6 +52,7 @@ import {
   setCurrentSkillDragPayload,
   skillDragPayload,
 } from "@/lib/skill-drag";
+import { skillCommandAliases, skillMatchesCommandAlias } from "@/lib/skills";
 import {
   buildSkillInvocationDirective,
   buildSkillInvocationDisplay,
@@ -83,7 +84,6 @@ import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { AgentEffortSelector } from "./AgentEffortSelector";
 import { AgentModelSelector } from "./AgentModelSelector";
 import { AgentModeSelector } from "./AgentModeSelector";
-import { ThreadProviderSwitcher } from "./ThreadProviderSwitcher";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { PlanHeader } from "./PlanHeader";
@@ -91,6 +91,7 @@ import { SkillsButton } from "./SkillsButton";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingStatus } from "./ThinkingStatus";
+import { ThreadProviderSwitcher } from "./ThreadProviderSwitcher";
 import { ToolCallCard } from "./ToolCallCard";
 import { ToolCallGroup } from "./ToolCallGroup";
 
@@ -141,7 +142,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       new Set(
         skillsStore.installed
           .filter(isInvokableSkill)
-          .map((skill) => skill.slug),
+          .flatMap((skill) => skillCommandAliases(skill)),
       ),
   );
 
@@ -263,7 +264,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       const slug = match[1];
       if (!slug || !slugs.has(slug)) continue;
       const installed = skillsStore.installed.find(
-        (s) => s.slug === slug && isInvokableSkill(s),
+        (s) => isInvokableSkill(s) && skillMatchesCommandAlias(s, slug),
       );
       if (installed) return installed;
     }

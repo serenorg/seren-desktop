@@ -2,6 +2,12 @@
 // ABOUTME: Also searches installed skills for autocomplete and skill invocation dispatch.
 
 import type { InstalledSkill } from "@/lib/skills";
+import {
+  primarySkillCommandSlug,
+  skillCommandAliases,
+  skillDisplayName,
+  skillMatchesCommandAlias,
+} from "@/lib/skills";
 import { skillsStore } from "@/stores/skills.store";
 import { registry } from "./registry";
 import { bestScore, scoreCandidate } from "./score";
@@ -90,7 +96,7 @@ export function matchSkillCommand(
     // scaffold from scratch. Treat failed-payload skills as if they don't
     // exist; the user sees them in the sidebar with their failure marker.
     if (skill.payloadStatus === "failed") continue;
-    if (skill.slug.toLowerCase() === lower) {
+    if (skillMatchesCommandAlias(skill, lower)) {
       return { skill, args };
     }
   }
@@ -133,16 +139,22 @@ function searchInstalledSkills(partial: string): SlashCommand[] {
     if (!isInvokableSkill(skill)) continue;
     // Hide failed-payload skills from autocomplete so the user can't
     // accidentally tab-complete into a skill we know we'd block (#1917).
-    const score = bestScore(
-      scoreCandidate(skill.slug, partial),
-      scoreCandidate(skill.name, partial),
+    const aliases = skillCommandAliases(skill);
+    const score = [
+      ...aliases.map((alias) => scoreCandidate(alias, partial)),
+      scoreCandidate(skillDisplayName(skill), partial),
+    ].reduce<number | null>(
+      (best, candidate) => bestScore(best, candidate),
+      null,
     );
     if (score === null) continue;
 
+    const name = primarySkillCommandSlug(skill);
+    const displayName = skillDisplayName(skill);
     ranked.push({
       cmd: {
-        name: skill.slug,
-        description: skill.name !== skill.slug ? skill.name : skill.description,
+        name,
+        description: displayName !== name ? displayName : skill.description,
         argHint: "<prompt>",
         panels: ["chat", "agent"],
         isSkill: true,

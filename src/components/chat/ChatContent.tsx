@@ -54,6 +54,7 @@ import {
   setCurrentSkillDragPayload,
   skillDragPayload,
 } from "@/lib/skill-drag";
+import { skillCommandAliases, skillMatchesCommandAlias } from "@/lib/skills";
 import {
   buildSkillInvocationDirective,
   buildSkillInvocationDisplay,
@@ -171,7 +172,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       new Set(
         skillsStore.installed
           .filter(isInvokableSkill)
-          .map((skill) => skill.slug),
+          .flatMap((skill) => skillCommandAliases(skill)),
       ),
   );
   const conversationId = () =>
@@ -230,7 +231,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       const slug = match[1];
       if (!slug || !slugs.has(slug)) continue;
       const installed = skillsStore.installed.find(
-        (s) => s.slug === slug && isInvokableSkill(s),
+        (s) => isInvokableSkill(s) && skillMatchesCommandAlias(s, slug),
       );
       if (installed) return installed;
     }

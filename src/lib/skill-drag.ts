@@ -2,6 +2,7 @@
 // ABOUTME: Lets browse cards carry a SKILL.md reference without embedding content in drag data.
 
 import type { InstalledSkill, Skill } from "@/lib/skills";
+import { skillsShareCommandAlias } from "@/lib/skills";
 import { RUN_SKILL_EVENT, type RunSkillEventDetail } from "@/lib/skills/invoke";
 import { skills } from "@/services/skills";
 import { skillsStore } from "@/stores/skills.store";
@@ -135,7 +136,9 @@ async function ensureInstalled(
 ): Promise<InstalledSkill | null> {
   if ("path" in skill) return skill;
 
-  const existing = skillsStore.installed.find((s) => s.slug === skill.slug);
+  const existing = skillsStore.installed.find((s) =>
+    skillsShareCommandAlias(s, skill),
+  );
   if (existing) return existing;
 
   const content = await skills.fetchContent(skill);

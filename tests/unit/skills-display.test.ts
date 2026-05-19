@@ -4,7 +4,11 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveSkillListDisplayName,
+  primarySkillCommandSlug,
+  skillCommandAliases,
   skillDisplayName,
+  skillMatchesCommandAlias,
+  skillsShareCommandAlias,
 } from "@/lib/skills/display";
 import type { InstalledSkill, Skill } from "@/lib/skills/types";
 
@@ -76,5 +80,33 @@ describe("skill display helpers", () => {
     expect(skillDisplayName(catalogSkill({ name: "", slug: "grid-trader" }))).toBe(
       "grid-trader",
     );
+  });
+
+  it("prefers the catalog slug for command identity", () => {
+    const installed = installedSkill({
+      slug: "coinbase-grid-trader",
+      dirName: "grid-trader",
+      upstreamSourceUrl: "seren-skills:grid-trader",
+    });
+
+    expect(skillCommandAliases(installed)).toEqual([
+      "grid-trader",
+      "coinbase-grid-trader",
+    ]);
+    expect(primarySkillCommandSlug(installed)).toBe("grid-trader");
+    expect(skillMatchesCommandAlias(installed, "coinbase-grid-trader")).toBe(
+      true,
+    );
+    expect(skillMatchesCommandAlias(installed, "grid-trader")).toBe(true);
+  });
+
+  it("matches an installed skill to a catalog payload by shared command alias", () => {
+    const installed = installedSkill({
+      slug: "coinbase-grid-trader",
+      dirName: "grid-trader",
+      upstreamSourceUrl: "seren-skills:grid-trader",
+    });
+
+    expect(skillsShareCommandAlias(installed, catalogSkill())).toBe(true);
   });
 });

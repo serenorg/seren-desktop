@@ -143,6 +143,31 @@ describe("slash command palette ordering and fuzzy ranking", () => {
     expect(results.map((r) => r.name)).toContain("prophet-arb-bot");
   });
 
+  it("uses the Seren catalog slug for managed installed skills with local slug drift", async () => {
+    mockSkillsService.listAllInstalled.mockResolvedValue([
+      installedSkill("skill-creator", {
+        name: "Skill Creator",
+        dirName: "seren-skill-creator",
+        upstreamSource: "seren",
+        upstreamSourceUrl: "seren-skills:seren-skill-creator",
+      }),
+    ]);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.refreshInstalled();
+
+    const { getCompletions, matchSkillCommand } = await import(
+      "@/lib/commands/parser"
+    );
+
+    expect(matchSkillCommand("/seren-skill-creator make a skill")?.skill.slug).toBe(
+      "skill-creator",
+    );
+    expect(getCompletions("/seren-skill", "chat").map((r) => r.name)).toContain(
+      "seren-skill-creator",
+    );
+  });
+
   it("places skills before built-in commands in the completion list", async () => {
     mockSkillsService.listAllInstalled.mockResolvedValue([
       installedSkill("model-arbitrage"),
