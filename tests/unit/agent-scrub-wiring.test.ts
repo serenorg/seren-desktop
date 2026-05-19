@@ -1,5 +1,5 @@
 // ABOUTME: Source-string wiring assertions for #1807 — the scrubber must run
-// ABOUTME: at every assistant-message construction site and at the memory call.
+// ABOUTME: before validation, assistant-message construction, and memory.
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -17,19 +17,26 @@ describe("#1807 — scrubAgentMarkup is wired into agent.store.ts", () => {
     );
   });
 
-  it("finalizeStreamingContent scrubs streamingContent before constructing the assistant message", () => {
+  it("finalizeStreamingContent scrubs streamingContent before validation and assistant persistence", () => {
     const fnStart = agentStoreSource.indexOf(
       "finalizeStreamingContent(sessionId: string",
     );
     expect(fnStart, "finalizeStreamingContent must exist").toBeGreaterThan(0);
     const fnSlice = agentStoreSource.slice(fnStart, fnStart + 6000);
     expect(fnSlice).toContain("scrubAgentMarkup(session.streamingContent)");
-    // The persisted message must be built from the scrubbed value.
+    expect(fnSlice.indexOf("scrubAgentMarkup(session.streamingContent)")).toBeLessThan(
+      fnSlice.indexOf("validateFinalOutput({"),
+    );
+    expect(fnSlice).toContain("finalText: scrubbed,");
+    expect(fnSlice).toContain(
+      "const safeContent = finalOutputValidation.safeDisplayText;",
+    );
+    // The persisted message must be built from validated scrubbed text.
     const messageBlock = fnSlice.slice(
       fnSlice.indexOf("const message: AgentMessage = {"),
       fnSlice.indexOf("setState(\"sessions\", sessionId, \"messages\", (msgs) => [...msgs, message]);"),
     );
-    expect(messageBlock).toContain("content: scrubbed,");
+    expect(messageBlock).toContain("content: safeContent,");
     expect(messageBlock).not.toContain("content: session.streamingContent,");
   });
 
@@ -43,7 +50,7 @@ describe("#1807 — scrubAgentMarkup is wired into agent.store.ts", () => {
     expect(fnSlice).toMatch(/scrubbed\.length\s*===\s*0/);
   });
 
-  it("storeAssistantResponse is called with the scrubbed content, not the raw streamingContent", () => {
+  it("storeAssistantResponse is called with validated scrubbed content, not raw streamingContent", () => {
     const fnStart = agentStoreSource.indexOf(
       "finalizeStreamingContent(sessionId: string",
     );
@@ -51,7 +58,9 @@ describe("#1807 — scrubAgentMarkup is wired into agent.store.ts", () => {
     const memoryCallStart = fnSlice.indexOf("storeAssistantResponse(");
     expect(memoryCallStart).toBeGreaterThan(0);
     const memoryCall = fnSlice.slice(memoryCallStart, memoryCallStart + 200);
-    expect(memoryCall).toContain("storeAssistantResponse(scrubbed,");
+    expect(memoryCall).toContain("storeAssistantResponse(safeContent,");
+    expect(memoryCall).not.toContain("session.streamingContent");
+    expect(fnSlice).toContain("finalOutputValidation.canStoreMemory");
   });
 
   it("handleToolCall intermediate flush scrubs streamingContent before constructing the visible message", () => {
