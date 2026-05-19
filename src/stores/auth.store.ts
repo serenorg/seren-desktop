@@ -124,6 +124,28 @@ async function loadPrivateChatPolicy(): Promise<void> {
   }
 }
 
+async function activateAuthenticatedSession(user?: User): Promise<void> {
+  await loadPrivateChatPolicy();
+
+  const hasApiKey = await ensureApiKey();
+  if (!hasApiKey) {
+    console.warn("[Auth Store] Could not ensure API key - MCP may not work");
+  }
+
+  setState({
+    ...(user !== undefined ? { user } : {}),
+    isAuthenticated: true,
+    signInModalRequested: false,
+  });
+
+  // Initialize MCP Gateway in background (non-blocking)
+  void initializeMcpInBackground();
+}
+
+export async function restoreAuthenticatedSession(): Promise<void> {
+  await activateAuthenticatedSession();
+}
+
 async function resetSkillsCatalog(): Promise<void> {
   try {
     const { skillsStore } = await import("@/stores/skills.store");
@@ -149,17 +171,7 @@ export async function checkAuth(): Promise<void> {
       return;
     }
 
-    await loadPrivateChatPolicy();
-
-    const hasApiKey = await ensureApiKey();
-    if (!hasApiKey) {
-      console.warn("[Auth Store] Could not ensure API key - MCP may not work");
-    }
-
-    setState("isAuthenticated", true);
-
-    // Initialize MCP Gateway in background (non-blocking)
-    void initializeMcpInBackground();
+    await activateAuthenticatedSession();
   } finally {
     setState("isLoading", false);
   }
@@ -176,22 +188,7 @@ export async function checkAuth(): Promise<void> {
 export async function setAuthenticated(user: User): Promise<void> {
   setState("isLoading", true);
   try {
-    await loadPrivateChatPolicy();
-
-    const hasApiKey = await ensureApiKey();
-    if (!hasApiKey) {
-      console.warn(
-        "[Auth Store] Could not ensure API key after login - MCP may not work",
-      );
-    }
-
-    setState({
-      user,
-      isAuthenticated: true,
-    });
-
-    // Initialize MCP Gateway in background (non-blocking)
-    void initializeMcpInBackground();
+    await activateAuthenticatedSession(user);
   } finally {
     setState("isLoading", false);
   }
@@ -278,6 +275,17 @@ export async function initAuthRuntimeBindings(): Promise<void> {
     console.warn("[Auth Store] Session expired event from backend");
     clearAuthState();
     requestSignInModal();
+  });
+  await listen("auth:token-refreshed", async () => {
+    console.info("[Auth Store] Token refreshed event from backend");
+    try {
+      await restoreAuthenticatedSession();
+    } catch (error) {
+      console.warn(
+        "[Auth Store] Failed to restore auth state after backend refresh:",
+        error,
+      );
+    }
   });
 }
 

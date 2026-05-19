@@ -136,6 +136,7 @@ pub async fn refresh_access_token(app: &tauri::AppHandle) -> Result<String, Stri
     let new_refresh_token = data.get("refresh_token").and_then(|v| v.as_str());
 
     store_tokens(app, new_access_token, new_refresh_token)?;
+    let _ = app.emit("auth:token-refreshed", ());
 
     log::info!("[auth] Token refreshed successfully");
     Ok(new_access_token.to_string())

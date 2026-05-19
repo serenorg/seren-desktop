@@ -18,8 +18,11 @@ const {
   runtimeHasCapabilityMock,
   getPolicyMock,
   storedKeyRef,
+  listenMock,
+  eventListeners,
 } = vi.hoisted(() => {
   const storedKey: { value: string | null } = { value: null };
+  const listeners = new Map<string, (event?: unknown) => unknown>();
   return {
     storedKeyRef: storedKey,
     getSerenApiKeyMock: vi.fn(async () => storedKey.value),
@@ -39,6 +42,11 @@ const {
     removeSerenDbServerMock: vi.fn(async () => {}),
     runtimeHasCapabilityMock: vi.fn(() => false),
     getPolicyMock: vi.fn(async () => null),
+    eventListeners: listeners,
+    listenMock: vi.fn(async (event: string, handler: (event?: unknown) => unknown) => {
+      listeners.set(event, handler);
+      return vi.fn();
+    }),
   };
 });
 
@@ -73,7 +81,18 @@ vi.mock("@/services/organization-policy", () => ({
   getDefaultOrganizationPrivateChatPolicy: getPolicyMock,
 }));
 
-import { authStore, checkAuth, setAuthenticated } from "@/stores/auth.store";
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: listenMock,
+}));
+
+import {
+  authStore,
+  checkAuth,
+  clearAuthState,
+  initAuthRuntimeBindings,
+  requestSignInModal,
+  setAuthenticated,
+} from "@/stores/auth.store";
 
 function resetAuthStore() {
   // Drop internal state by calling logout(): resets user, isAuthenticated,
@@ -85,11 +104,20 @@ function resetAuthStore() {
     false;
   (authStore as unknown as { isLoading: boolean }).isLoading = true;
   (authStore as unknown as { user: unknown }).user = null;
+  (authStore as unknown as { mcpConnected: boolean }).mcpConnected = false;
+  (authStore as unknown as { privateChatPolicy: unknown }).privateChatPolicy =
+    null;
+  (
+    authStore as unknown as { signInModalRequested: boolean }
+  ).signInModalRequested = false;
 }
 
 describe("auth.store #1613 — API key before isAuthenticated flips", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    eventListeners.clear();
+    isTauriRuntimeMock.mockReturnValue(false);
+    runtimeHasCapabilityMock.mockReturnValue(false);
     resetAuthStore();
   });
 
@@ -159,5 +187,38 @@ describe("auth.store #1613 — API key before isAuthenticated flips", () => {
     expect(storeSerenApiKeyMock).not.toHaveBeenCalled();
     expect(authAtGetTime).toBe(false);
     expect(authStore.isAuthenticated).toBe(true);
+  });
+
+  it("backend token refresh event restores auth after provisioning key and dismisses stale modal", async () => {
+    isTauriRuntimeMock.mockReturnValue(true);
+    storedKeyRef.value = null;
+
+    let authAtStoreTime: boolean | null = null;
+    storeSerenApiKeyMock.mockImplementationOnce(async (key: string) => {
+      authAtStoreTime = authStore.isAuthenticated;
+      storedKeyRef.value = key;
+    });
+
+    requestSignInModal();
+    clearAuthState();
+    expect(authStore.isAuthenticated).toBe(false);
+    expect(authStore.signInModalRequested).toBe(true);
+
+    await initAuthRuntimeBindings();
+
+    expect(listenMock).toHaveBeenCalledWith(
+      "auth:token-refreshed",
+      expect.any(Function),
+    );
+
+    const onTokenRefreshed = eventListeners.get("auth:token-refreshed");
+    expect(onTokenRefreshed).toBeTypeOf("function");
+    await onTokenRefreshed?.();
+
+    expect(storeSerenApiKeyMock).toHaveBeenCalledTimes(1);
+    expect(createApiKeyMock).toHaveBeenCalledTimes(1);
+    expect(authAtStoreTime).toBe(false);
+    expect(authStore.isAuthenticated).toBe(true);
+    expect(authStore.signInModalRequested).toBe(false);
   });
 });
