@@ -81,7 +81,7 @@ tokio-tungstenite = { version = "0.28" }
 # Messaging transport adapters (opt-in via cargo features)
 teloxide = { version = "0.14", features = ["macros"], optional = true }
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "rustls_backend"], optional = true }
-whatsapp-rust = { version = "0.5", default-features = false, features = ["tokio-transport", "tokio-runtime", "ureq-client", "signal"], optional = true }
+whatsapp-rust = { version = "0.6", default-features = false, features = ["tokio-transport", "tokio-runtime", "ureq-client", "signal"], optional = true }
 wacore = { version = "0.6", default-features = false, optional = true }
 
 
