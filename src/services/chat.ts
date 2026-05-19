@@ -2,6 +2,11 @@
 // ABOUTME: Routes requests through provider abstraction for Seren, Anthropic, OpenAI, Gemini.
 
 import { invoke } from "@tauri-apps/api/core";
+import {
+  extractEvidenceFromToolLoopMessages,
+  type FinalOutputValidationReport,
+  validateFinalOutput,
+} from "@/lib/agent-output-validation";
 import { isTextMime, toDataUrl } from "@/lib/images/attachments";
 import { retrieveCodeContext } from "@/lib/indexing/context-retrieval";
 import {
@@ -255,7 +260,12 @@ export type ToolStreamEvent =
   | { type: "thinking"; thinking: string }
   | { type: "tool_calls"; toolCalls: ToolCall[] }
   | { type: "tool_results"; results: ToolResult[] }
-  | { type: "complete"; finalContent: string; finalThinking?: string }
+  | {
+      type: "complete";
+      finalContent: string;
+      finalThinking?: string;
+      finalOutputValidation?: FinalOutputValidationReport;
+    }
   | {
       type: "iteration_limit";
       currentIteration: number;
@@ -560,6 +570,7 @@ export async function* streamMessageWithTools(
 
   // Accumulated content across all iterations
   let fullContent = "";
+  let yieldedContent = "";
   let hasExecutedTools = false;
   let hasNudged = false;
 
@@ -578,20 +589,13 @@ export async function* streamMessageWithTools(
     );
     console.log("[streamMessageWithTools] Got response:", response);
 
-    // Yield content if present
-    if (response.content) {
-      console.log(
-        "[streamMessageWithTools] Yielding content:",
-        response.content.substring(0, 100),
-      );
-      fullContent += response.content;
-      yield { type: "content", content: response.content };
-    } else {
-      console.log("[streamMessageWithTools] No content in response");
-    }
-
     // Check if model wants to call tools
     if (!response.tool_calls || response.tool_calls.length === 0) {
+      if (response.content) {
+        fullContent += response.content;
+      } else {
+        console.log("[streamMessageWithTools] No content in response");
+      }
       // Model returned no tool calls. If we executed tools but got no text
       // response, the model may have silently stopped mid-task. Nudge it once
       // to complete the task or explain what happened.
@@ -618,17 +622,49 @@ export async function* streamMessageWithTools(
         "[streamMessageWithTools] No tool_calls, completing with content length:",
         fullContent.length,
       );
+      const finalOutputValidation = validateFinalOutput({
+        finalText: fullContent,
+        evidence: extractEvidenceFromToolLoopMessages(messages),
+      });
+      fullContent = finalOutputValidation.safeDisplayText;
 
       // Store conversation to memory if enabled
-      storeAssistantResponse(fullContent, {
-        model,
-        userQuery: content,
-      }).catch((err) => {
-        console.warn("[streamMessageWithTools] Failed to store memory:", err);
-      });
+      if (finalOutputValidation.canStoreMemory) {
+        storeAssistantResponse(fullContent, {
+          model,
+          userQuery: content,
+        }).catch((err) => {
+          console.warn("[streamMessageWithTools] Failed to store memory:", err);
+        });
+      }
 
-      yield { type: "complete", finalContent: fullContent };
+      const safeDelta = fullContent.startsWith(yieldedContent)
+        ? fullContent.slice(yieldedContent.length)
+        : fullContent;
+      if (safeDelta) {
+        yieldedContent += safeDelta;
+        yield { type: "content", content: safeDelta };
+      }
+      yield {
+        type: "complete",
+        finalContent: fullContent,
+        finalOutputValidation,
+      };
       return;
+    }
+
+    // Non-final assistant text can accompany tool calls. It is not persisted as
+    // the final answer; the final turn is validated after tool execution.
+    if (response.content) {
+      console.log(
+        "[streamMessageWithTools] Yielding content:",
+        response.content.substring(0, 100),
+      );
+      fullContent += response.content;
+      yieldedContent += response.content;
+      yield { type: "content", content: response.content };
+    } else {
+      console.log("[streamMessageWithTools] No content in response");
     }
 
     // Yield tool calls for UI
@@ -708,6 +744,7 @@ export async function* continueToolIteration(
 ): AsyncGenerator<ToolStreamEvent> {
   const { messages, model, tools, fullContent: existingContent } = state;
   let fullContent = existingContent;
+  let yieldedContent = existingContent;
   let hasExecutedTools = false;
   let hasNudged = false;
 
@@ -723,7 +760,6 @@ export async function* continueToolIteration(
 
     if (response.content) {
       fullContent += response.content;
-      yield { type: "content", content: response.content };
     }
 
     if (!response.tool_calls || response.tool_calls.length === 0) {
@@ -747,14 +783,37 @@ export async function* continueToolIteration(
       }
 
       // Store conversation to memory if enabled
-      storeAssistantResponse(fullContent, {
-        model,
-      }).catch((err) => {
-        console.warn("[continueToolIteration] Failed to store memory:", err);
+      const finalOutputValidation = validateFinalOutput({
+        finalText: fullContent,
+        evidence: extractEvidenceFromToolLoopMessages(messages),
       });
+      fullContent = finalOutputValidation.safeDisplayText;
+      if (finalOutputValidation.canStoreMemory) {
+        storeAssistantResponse(fullContent, {
+          model,
+        }).catch((err) => {
+          console.warn("[continueToolIteration] Failed to store memory:", err);
+        });
+      }
 
-      yield { type: "complete", finalContent: fullContent };
+      const safeDelta = fullContent.startsWith(yieldedContent)
+        ? fullContent.slice(yieldedContent.length)
+        : fullContent;
+      if (safeDelta) {
+        yieldedContent += safeDelta;
+        yield { type: "content", content: safeDelta };
+      }
+      yield {
+        type: "complete",
+        finalContent: fullContent,
+        finalOutputValidation,
+      };
       return;
+    }
+
+    if (response.content) {
+      yieldedContent += response.content;
+      yield { type: "content", content: response.content };
     }
 
     yield { type: "tool_calls", toolCalls: response.tool_calls };

@@ -3,6 +3,10 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  extractEvidenceFromUnifiedMessages,
+  validateFinalOutput,
+} from "@/lib/agent-output-validation";
 import type {
   Attachment,
   ProviderId,
@@ -567,6 +571,13 @@ function handleComplete(
   // Use accumulated streaming content or fall back to final_content
   const content =
     conversationStore.getStreamingContentFor(conversationId) || finalContent;
+  const finalOutputValidation = validateFinalOutput({
+    finalText: content,
+    evidence: extractEvidenceFromUnifiedMessages(
+      conversationStore.getMessagesFor(conversationId),
+    ),
+  });
+  const safeContent = finalOutputValidation.safeDisplayText;
   const thinkingContent =
     conversationStore.getStreamingThinkingFor(conversationId) ||
     thinking ||
@@ -586,7 +597,7 @@ function handleComplete(
     id: stream.messageId,
     type: "assistant",
     role: "assistant",
-    content,
+    content: safeContent,
     thinking: thinkingContent,
     timestamp: Date.now(),
     status: "complete",
@@ -595,6 +606,7 @@ function handleComplete(
     modelId: stream.modelId ?? undefined,
     duration,
     cost,
+    finalOutputValidation,
     rlmSteps,
   };
 
@@ -605,9 +617,11 @@ function handleComplete(
 
   // Store conversation to memory if enabled
   const model = stream.modelId || providerStore.activeModel || "unknown";
-  storeAssistantResponse(content, { model }).catch((err) => {
-    console.warn("[orchestrator] Failed to store memory:", err);
-  });
+  if (finalOutputValidation.canStoreMemory) {
+    storeAssistantResponse(safeContent, { model }).catch((err) => {
+      console.warn("[orchestrator] Failed to store memory:", err);
+    });
+  }
 }
 
 /**
@@ -866,17 +880,24 @@ async function runEmployeeTurn(
     });
     conversationStore.finalizeStreaming(conversationId);
     const duration = Date.now() - stream.startTime;
+    const finalOutputValidation = validateFinalOutput({
+      finalText: result.text,
+      evidence: extractEvidenceFromUnifiedMessages(
+        conversationStore.getMessagesFor(conversationId),
+      ),
+    });
     const assistantMessage: UnifiedMessage = {
       id: stream.messageId,
       type: "assistant",
       role: "assistant",
-      content: result.text,
+      content: finalOutputValidation.safeDisplayText,
       timestamp: Date.now(),
       status: "complete",
       workerType: "employee",
       thinking: result.thinking ?? undefined,
       modelId: undefined,
       duration,
+      finalOutputValidation,
       request: { prompt },
     };
     conversationStore.addMessage(assistantMessage, conversationId);
