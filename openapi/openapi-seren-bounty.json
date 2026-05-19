@@ -1,0 +1,2701 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Seren Bounty",
+    "description": "Affiliate bounty protocol: customers fund a pool, verifiers accrue agent earnings on qualifying events, and a release sweep pays out.",
+    "contact": {
+      "name": "Seren",
+      "email": "hello@serendb.com"
+    },
+    "license": {
+      "name": ""
+    },
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "/publishers/seren-bounty",
+      "description": "Hosted at the Seren gateway publisher path"
+    }
+  ],
+  "paths": {
+    "/bounties": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "summary": "`GET /bounties` — public bounty listing.",
+        "description": "This is unauthenticated and lists bounties across all organizations.\nCustomer-scoped listings (the caller's own org's bounties) live at\n`GET /organizations/me/bounties` instead, so a single path never flips\nsemantics based on whether auth is present.",
+        "operationId": "list_bounties",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/BountyStatus"
+                }
+              ]
+            }
+          },
+          {
+            "name": "customer_slug",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public bounty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BountyList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      },
+      "post": {
+        "tags": [
+          "Bounties"
+        ],
+        "summary": "`POST /bounties` — create a bounty + escrow hold.",
+        "operationId": "create_bounty",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBountyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Bounty created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateBountyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/bounties/{id}": {
+      "get": {
+        "tags": [
+          "Bounties"
+        ],
+        "summary": "`GET /bounties/{id}` — full bounty state.",
+        "operationId": "get_bounty",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounty detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BountyDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Bounties"
+        ],
+        "summary": "`PATCH /bounties/{id}` — edit tiers forward-only, extend deadline, top up.",
+        "operationId": "patch_bounty",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchBountyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Bounty patched",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bounty"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/bounties/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Bounties"
+        ],
+        "summary": "`POST /bounties/{id}/cancel` — customer cancels and is refunded any\nremaining escrow balance. Only legal when no earnings are un-released.",
+        "operationId": "cancel_bounty",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounty cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bounty"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/bounties/{id}/earnings": {
+      "get": {
+        "tags": [
+          "Bounties"
+        ],
+        "summary": "`GET /bounties/{id}/earnings` — paginated earnings ledger.",
+        "operationId": "list_bounty_earnings",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/EarningStatus"
+                }
+              ]
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Earnings list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EarningsList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/bounties/{id}/earnings/{earning_id}/clawback": {
+      "post": {
+        "tags": [
+          "Bounties"
+        ],
+        "summary": "`POST /bounties/{id}/earnings/{earning_id}/clawback` — customer claws back\nan earning during the hold window. Earning flip + pool credit are atomic.",
+        "operationId": "clawback_earning",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "earning_id",
+            "in": "path",
+            "description": "Earning id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClawbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Clawback applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Earning"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/bounties/{id}/fund": {
+      "post": {
+        "tags": [
+          "Bounties"
+        ],
+        "summary": "`POST /bounties/{id}/fund` — deposit SerenBucks into escrow.",
+        "operationId": "fund_bounty",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundBountyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Funding applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundBountyResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/bounties/{id}/join": {
+      "post": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "`POST /bounties/{id}/join` — idempotent. Returns a `referral_code` the\nagent uses to attribute downstream events to themselves.",
+        "operationId": "join_bounty",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Join result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinBountyResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "`DELETE /bounties/{id}/join` — leave. Already-accrued earnings still pay.",
+        "operationId": "leave_bounty",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Left bounty"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/bounties/{id}/leaderboard": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "summary": "`GET /bounties/{id}/leaderboard` — top earners in this bounty.",
+        "operationId": "get_bounty_leaderboard",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Leaderboard entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeaderboardEntry"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/bounties/{id}/stats": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "summary": "`GET /bounties/{id}/stats` — public rollup for a single bounty.",
+        "operationId": "get_bounty_stats",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounty rollup",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BountyStats"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Bounty not found"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/bounties/{id}/submission": {
+      "get": {
+        "tags": [
+          "Submissions"
+        ],
+        "summary": "`GET /bounties/{id}/submission` — fetch the caller's submission.",
+        "operationId": "get_my_submission",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Submission detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Submission"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Submissions"
+        ],
+        "summary": "`POST /bounties/{id}/submission` — create or replace the caller's submission.",
+        "operationId": "upsert_my_submission",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertSubmissionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Submission upserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Submission"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Submissions"
+        ],
+        "summary": "`DELETE /bounties/{id}/submission` — withdraw the caller's submission.",
+        "operationId": "withdraw_my_submission",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Submission withdrawn"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/bounties/{id}/submissions": {
+      "get": {
+        "tags": [
+          "Submissions"
+        ],
+        "summary": "`GET /bounties/{id}/submissions` — owner/operator list view for a bounty.",
+        "operationId": "list_bounty_submissions",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/SubmissionStatus"
+                }
+              ]
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Submission list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/bounties/{id}/submissions/{submission_id}": {
+      "get": {
+        "tags": [
+          "Submissions"
+        ],
+        "summary": "`GET /bounties/{id}/submissions/{submission_id}` — detail for owner/operator or submitter.",
+        "operationId": "get_bounty_submission",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "submission_id",
+            "in": "path",
+            "description": "Submission id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Submission detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Submission"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/bounties/{id}/submissions/{submission_id}/attachment": {
+      "get": {
+        "tags": [
+          "Submissions"
+        ],
+        "summary": "`GET /bounties/{id}/submissions/{submission_id}/attachment` — download the submission attachment.",
+        "operationId": "download_submission_attachment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Bounty id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "submission_id",
+            "in": "path",
+            "description": "Submission id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attachment binary"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/leaderboard": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "summary": "`GET /leaderboard` — top earners across all bounties.",
+        "operationId": "get_leaderboard",
+        "parameters": [
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Leaderboard entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeaderboardEntry"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/organizations/me/bounties": {
+      "get": {
+        "tags": [
+          "Bounties"
+        ],
+        "summary": "`GET /bounties` — list bounties in the caller's organization.",
+        "operationId": "list_organization_bounties",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/BountyStatus"
+                }
+              ]
+            }
+          },
+          {
+            "name": "customer_slug",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BountyList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/overview": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "summary": "`GET /overview` — platform-wide rollup.",
+        "operationId": "get_overview",
+        "responses": {
+          "200": {
+            "description": "Platform overview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Overview"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/stats/daily": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "summary": "`GET /stats/daily` — daily accrual and payout activity.",
+        "operationId": "get_daily_activity",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Number of days to return, counting back from today. Default 30, max 365.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily activity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DailyActivity"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/users/me/earnings": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "`GET /users/me/earnings` — cross-bounty earnings ledger for the caller.",
+        "operationId": "list_my_earnings",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/EarningStatus"
+                }
+              ]
+            }
+          },
+          {
+            "name": "bounty_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Earnings list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EarningsList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/users/me/stats": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "summary": "`GET /users/me/stats` — rollup for the authenticated caller.",
+        "operationId": "get_my_user_stats",
+        "responses": {
+          "200": {
+            "description": "User rollup",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserStats"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/users/{user_id}/stats": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "summary": "`GET /users/{user_id}/stats` — public rollup for any user.",
+        "operationId": "get_user_stats",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User rollup",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserStats"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AttributePredicate": {
+        "type": "object",
+        "description": "Attribute predicates support a small, fixed set of operators.\nIntentionally kept narrow — extend only when a bounty actually needs it.",
+        "required": [
+          "path",
+          "operator",
+          "value"
+        ],
+        "properties": {
+          "operator": {
+            "$ref": "#/components/schemas/PredicateOperator"
+          },
+          "path": {
+            "type": "string",
+            "description": "JSON path into `affiliate_events.attributes` (dotted, no array syntax)."
+          },
+          "value": {}
+        }
+      },
+      "AttributionRule": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Look up a `bounty_participants.referral_code` appearing at `field`.",
+            "required": [
+              "field",
+              "kind"
+            ],
+            "properties": {
+              "field": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "referral_code"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Look up an external publisher field carrying the user's derived payment\naddress and match it against `generate_virtual_wallet(user_id)`.",
+            "required": [
+              "field",
+              "kind"
+            ],
+            "properties": {
+              "field": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "wallet_address"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "Bounty": {
+        "type": "object",
+        "description": "Full bounty row.",
+        "required": [
+          "id",
+          "organization_id",
+          "customer_slug",
+          "title",
+          "submission_mode",
+          "status",
+          "verifier_spec",
+          "tiers",
+          "hold_days",
+          "max_pool_atomic",
+          "pool_remaining_atomic",
+          "health_status",
+          "verifier_failure_count",
+          "created_by_user_id",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by_user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customer_slug": {
+            "type": "string"
+          },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "escrow_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "health_status": {
+            "$ref": "#/components/schemas/BountyHealth"
+          },
+          "hold_days": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "max_pool_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "pool_remaining_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BountyStatus"
+          },
+          "submission_instructions": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "submission_mode": {
+            "$ref": "#/components/schemas/SubmissionMode"
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tier"
+            }
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "verifier_failure_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "verifier_last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verifier_last_success_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "verifier_spec": {
+            "type": "object"
+          }
+        }
+      },
+      "BountyDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Bounty"
+          },
+          {
+            "type": "object",
+            "required": [
+              "progress",
+              "earnings_count"
+            ],
+            "properties": {
+              "earnings_count": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "progress": {
+                "$ref": "#/components/schemas/BountyProgress"
+              }
+            }
+          }
+        ],
+        "description": "`GET /bounties/{id}` full state."
+      },
+      "BountyHealth": {
+        "type": "string",
+        "description": "Runtime health flag surfaced on `GET /bounties/{id}`.",
+        "enum": [
+          "healthy",
+          "degraded",
+          "failing"
+        ]
+      },
+      "BountyList": {
+        "type": "object",
+        "required": [
+          "bounties"
+        ],
+        "properties": {
+          "bounties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BountyListItem"
+            }
+          },
+          "next_page_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "BountyListItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Bounty"
+          },
+          {
+            "type": "object",
+            "required": [
+              "cumulative_qualifying_count",
+              "current_tier_index"
+            ],
+            "properties": {
+              "cumulative_qualifying_count": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "current_tier_index": {
+                "type": "integer",
+                "format": "int32"
+              }
+            }
+          }
+        ],
+        "description": "Paginated bounty list entry (lighter than `BountyDetail`)."
+      },
+      "BountyProgress": {
+        "type": "object",
+        "description": "Progress tracker row (1:1 with bounties).",
+        "required": [
+          "bounty_id",
+          "cumulative_qualifying_count",
+          "current_tier_index",
+          "poll_cursor",
+          "updated_at"
+        ],
+        "properties": {
+          "bounty_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cumulative_qualifying_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "current_tier_index": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "last_event_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "poll_cursor": {
+            "type": "object"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BountyStats": {
+        "type": "object",
+        "description": "Per-bounty rollup.",
+        "required": [
+          "bounty_id",
+          "title",
+          "status",
+          "health_status",
+          "created_at",
+          "max_pool_atomic",
+          "pool_remaining_atomic",
+          "pool_consumed_atomic",
+          "current_tier_index",
+          "cumulative_qualifying_count",
+          "participant_count",
+          "earner_count",
+          "earning_count",
+          "earned_count",
+          "released_count",
+          "paid_count",
+          "clawed_back_count",
+          "total_earned_atomic",
+          "total_paid_atomic",
+          "total_clawed_back_atomic"
+        ],
+        "properties": {
+          "bounty_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "clawed_back_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cumulative_qualifying_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "current_tier_index": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "earned_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "earner_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "earning_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "health_status": {
+            "type": "string"
+          },
+          "max_pool_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "paid_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "participant_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pool_consumed_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pool_remaining_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "released_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "total_clawed_back_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_earned_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_paid_atomic": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "BountyStatus": {
+        "type": "string",
+        "description": "Bounty lifecycle state. See spec §3.",
+        "enum": [
+          "draft",
+          "funding",
+          "open",
+          "exhausted",
+          "expired",
+          "cancelled"
+        ]
+      },
+      "ClawbackRequest": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateBountyRequest": {
+        "type": "object",
+        "description": "Request body for `POST /bounties`.",
+        "required": [
+          "customer_slug",
+          "title",
+          "verifier_spec",
+          "tiers",
+          "hold_days",
+          "max_pool_atomic"
+        ],
+        "properties": {
+          "customer_slug": {
+            "type": "string"
+          },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hold_days": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "max_pool_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "submission_instructions": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "submission_mode": {
+            "$ref": "#/components/schemas/SubmissionMode"
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tier"
+            }
+          },
+          "title": {
+            "type": "string"
+          },
+          "verifier_spec": {
+            "$ref": "#/components/schemas/VerifierSpec"
+          }
+        }
+      },
+      "CreateBountyResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Bounty"
+          },
+          {
+            "type": "object",
+            "required": [
+              "funding_address"
+            ],
+            "properties": {
+              "funding_address": {
+                "type": "string",
+                "description": "Address / escrow handle the customer deposits into via `POST /bounties/{id}/fund`."
+              }
+            }
+          }
+        ],
+        "description": "Response for `POST /bounties`."
+      },
+      "DailyActivity": {
+        "type": "object",
+        "description": "One day of activity.",
+        "required": [
+          "date",
+          "accrued_count",
+          "accrued_amount_atomic",
+          "paid_count",
+          "paid_amount_atomic"
+        ],
+        "properties": {
+          "accrued_amount_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "accrued_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "date": {
+            "type": "string",
+            "description": "ISO-8601 date (YYYY-MM-DD), UTC."
+          },
+          "paid_amount_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "paid_count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "Earning": {
+        "type": "object",
+        "required": [
+          "id",
+          "bounty_id",
+          "user_id",
+          "event_id",
+          "tier_rate_atomic",
+          "tier_index",
+          "status",
+          "earned_at",
+          "payout_due_at"
+        ],
+        "properties": {
+          "bounty_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "clawback_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "clawed_back_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "earned_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "paid_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "payout_due_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payout_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payout_tx_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "released_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EarningStatus"
+          },
+          "tier_index": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tier_rate_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "EarningStatus": {
+        "type": "string",
+        "description": "Earning lifecycle. `earned → released → paid` on the happy path,\n`earned → clawed_back` otherwise.",
+        "enum": [
+          "earned",
+          "released",
+          "paid",
+          "clawed_back"
+        ]
+      },
+      "EarningsList": {
+        "type": "object",
+        "required": [
+          "earnings"
+        ],
+        "properties": {
+          "earnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Earning"
+            }
+          },
+          "next_page_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "EventMatch": {
+        "type": "object",
+        "description": "Filter predicates evaluated against an `affiliate_events` row.",
+        "required": [
+          "event_type"
+        ],
+        "properties": {
+          "attributes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttributePredicate"
+            }
+          },
+          "event_type": {
+            "type": "string"
+          }
+        }
+      },
+      "EventVerifierSpec": {
+        "type": "object",
+        "description": "Event-driven verifier: matches rows landing in `affiliate_events`.",
+        "required": [
+          "customer_slug",
+          "event_match"
+        ],
+        "properties": {
+          "customer_slug": {
+            "type": "string",
+            "description": "Customer namespace (must match `affiliate_events.customer_slug`)."
+          },
+          "event_match": {
+            "$ref": "#/components/schemas/EventMatch",
+            "description": "Event-match filter. `event_type` is required; `attributes` is a list\nof predicates AND-ed together."
+          }
+        }
+      },
+      "FundBountyRequest": {
+        "type": "object",
+        "description": "Request body for `POST /bounties/{id}/fund`.",
+        "required": [
+          "amount_atomic"
+        ],
+        "properties": {
+          "amount_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "FundBountyResponse": {
+        "type": "object",
+        "required": [
+          "bounty_id",
+          "status",
+          "escrow_balance_atomic",
+          "payment_request_id"
+        ],
+        "properties": {
+          "bounty_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "escrow_balance_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "payment_request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BountyStatus"
+          }
+        }
+      },
+      "JoinBountyResponse": {
+        "type": "object",
+        "required": [
+          "bounty_id",
+          "user_id",
+          "referral_code",
+          "joined_at"
+        ],
+        "properties": {
+          "bounty_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "joined_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "left_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "referral_code": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "LeaderboardEntry": {
+        "type": "object",
+        "description": "Ranking entry for the global leaderboard.",
+        "required": [
+          "user_id",
+          "total_earned_atomic",
+          "total_paid_atomic",
+          "earning_count",
+          "bounty_count"
+        ],
+        "properties": {
+          "bounty_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "earning_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_earned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "total_earned_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_paid_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "Overview": {
+        "type": "object",
+        "description": "Platform-wide rollup.",
+        "required": [
+          "total_bounties",
+          "open_bounties",
+          "exhausted_bounties",
+          "cancelled_bounties",
+          "expired_bounties",
+          "total_pool_max_atomic",
+          "total_pool_remaining_atomic",
+          "total_earned_atomic",
+          "total_paid_atomic",
+          "total_clawed_back_atomic",
+          "total_participants",
+          "total_earners",
+          "status_summary"
+        ],
+        "properties": {
+          "cancelled_bounties": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bounties that were cancelled."
+          },
+          "exhausted_bounties": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bounties that hit pool exhaustion."
+          },
+          "expired_bounties": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bounties that expired past their deadline."
+          },
+          "open_bounties": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Currently open bounties."
+          },
+          "status_summary": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatusSummary"
+            },
+            "description": "Per-status rollup."
+          },
+          "total_bounties": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total bounties across all statuses."
+          },
+          "total_clawed_back_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total earnings that were clawed back."
+          },
+          "total_earned_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total earning accruals, counted by status of `'earned' | 'released' | 'paid'`."
+          },
+          "total_earners": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Distinct users who have earned something in any bounty."
+          },
+          "total_paid_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total earnings in `'paid'` status."
+          },
+          "total_participants": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Distinct users who have ever joined any bounty."
+          },
+          "total_pool_max_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sum of `max_pool_atomic` across all bounties."
+          },
+          "total_pool_remaining_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sum of remaining pool capacity across bounties that are still open."
+          }
+        }
+      },
+      "Participant": {
+        "type": "object",
+        "required": [
+          "bounty_id",
+          "user_id",
+          "referral_code",
+          "joined_at"
+        ],
+        "properties": {
+          "bounty_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "joined_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "left_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "referral_code": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "PatchBountyRequest": {
+        "type": "object",
+        "description": "Request body for `PATCH /bounties/{id}`.",
+        "properties": {
+          "additional_max_pool_atomic": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Additional atomic SerenBucks to add to the pool. Requires separate\nescrow top-up via `POST /bounties/{id}/fund` to be credited."
+          },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "submission_instructions": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "submission_mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SubmissionMode"
+              }
+            ]
+          },
+          "tiers": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Tier"
+            }
+          }
+        }
+      },
+      "PollPredicate": {
+        "type": "object",
+        "required": [
+          "items_path"
+        ],
+        "properties": {
+          "filters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttributePredicate"
+            },
+            "description": "Per-item filters (AND-ed together)."
+          },
+          "items_path": {
+            "type": "string",
+            "description": "JSON path into the response body that yields the iterable match set."
+          }
+        }
+      },
+      "PollVerifierSpec": {
+        "type": "object",
+        "description": "Poll-driven verifier: calls a publisher every `cadence_seconds` and\nevaluates a predicate over the response body.",
+        "required": [
+          "publisher",
+          "request_template",
+          "predicate",
+          "attribution_rule",
+          "cadence_seconds"
+        ],
+        "properties": {
+          "attribution_rule": {
+            "$ref": "#/components/schemas/AttributionRule",
+            "description": "How to turn a matching response item into a bounty participant `user_id`."
+          },
+          "cadence_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Schedule cadence. Bounded to `[60, 86400]` seconds by validation."
+          },
+          "predicate": {
+            "$ref": "#/components/schemas/PollPredicate",
+            "description": "Predicate evaluated against each item in the publisher response."
+          },
+          "publisher": {
+            "type": "string",
+            "description": "Seren publisher slug (validated against a supported-publisher list)."
+          },
+          "request_template": {
+            "$ref": "#/components/schemas/RequestTemplate",
+            "description": "HTTP request template. `{{cursor}}` is the only supported\ninterpolation for this service."
+          }
+        }
+      },
+      "PredicateOperator": {
+        "type": "string",
+        "enum": [
+          "eq",
+          "not_eq",
+          "gt",
+          "gte",
+          "lt",
+          "lte",
+          "in",
+          "contains"
+        ]
+      },
+      "RequestTemplate": {
+        "type": "object",
+        "required": [
+          "method",
+          "path"
+        ],
+        "properties": {
+          "body": {},
+          "method": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "query": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "StatusSummary": {
+        "type": "object",
+        "description": "Per-status rollup entry.",
+        "required": [
+          "status",
+          "count",
+          "total_pool_max_atomic",
+          "total_pool_remaining_atomic"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string"
+          },
+          "total_pool_max_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_pool_remaining_atomic": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "Submission": {
+        "type": "object",
+        "required": [
+          "id",
+          "bounty_id",
+          "user_id",
+          "status",
+          "content_prosemirror",
+          "content_text",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "attachment": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SubmissionAttachment"
+              }
+            ]
+          },
+          "bounty_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "content_prosemirror": {
+            "type": "object"
+          },
+          "content_text": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SubmissionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "SubmissionAttachment": {
+        "type": "object",
+        "required": [
+          "id",
+          "submission_id",
+          "filename",
+          "content_type",
+          "size_bytes",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "content_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "submission_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SubmissionAttachmentInput": {
+        "type": "object",
+        "required": [
+          "filename",
+          "content_type",
+          "data_base64"
+        ],
+        "properties": {
+          "content_type": {
+            "type": "string"
+          },
+          "data_base64": {
+            "type": "string",
+            "description": "Base64-encoded attachment bytes."
+          },
+          "filename": {
+            "type": "string"
+          }
+        }
+      },
+      "SubmissionList": {
+        "type": "object",
+        "required": [
+          "submissions"
+        ],
+        "properties": {
+          "submissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Submission"
+            }
+          }
+        }
+      },
+      "SubmissionMode": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "optional",
+          "required"
+        ]
+      },
+      "SubmissionStatus": {
+        "type": "string",
+        "enum": [
+          "submitted",
+          "withdrawn"
+        ]
+      },
+      "Tier": {
+        "type": "object",
+        "description": "A reward tier: when `cumulative_qualifying_count` crosses `threshold`, any\nsubsequent earnings accrue at `rate_atomic` (frozen at accrual time onto\n`bounty_earnings.tier_rate_atomic`).",
+        "required": [
+          "threshold",
+          "rate_atomic"
+        ],
+        "properties": {
+          "rate_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "threshold": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "UpsertSubmissionRequest": {
+        "type": "object",
+        "properties": {
+          "attachment": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SubmissionAttachmentInput"
+              }
+            ]
+          },
+          "content_prosemirror": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "content_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remove_attachment": {
+            "type": "boolean"
+          }
+        }
+      },
+      "UserStats": {
+        "type": "object",
+        "description": "Per-user rollup.",
+        "required": [
+          "user_id",
+          "total_earned_atomic",
+          "total_paid_atomic",
+          "total_clawed_back_atomic",
+          "earning_count",
+          "earned_count",
+          "released_count",
+          "paid_count",
+          "clawed_back_count",
+          "bounty_count",
+          "joined_bounty_count"
+        ],
+        "properties": {
+          "bounty_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "clawed_back_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "earned_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "earning_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "first_earned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "joined_bounty_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_earned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "paid_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "released_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_clawed_back_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_earned_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_paid_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "VerifierSpec": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EventVerifierSpec"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "event"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PollVerifierSpec"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "poll"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "description": "The two verifier flavors. `event` is webhook-driven (affiliate_events);\n`poll` calls a seren publisher on a cadence."
+      }
+    },
+    "securitySchemes": {
+      "bearer_auth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearer_auth": []
+    }
+  ]
+}

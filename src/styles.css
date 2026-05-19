@@ -654,12 +654,17 @@ footer.status-bar {
   padding: var(--density-row-y) var(--density-row-x);
 }
 
+.thread-list-surface .thread-list-subrow {
+  padding: calc(var(--density-row-y) * 0.75) var(--density-row-x);
+  padding-left: calc(var(--density-row-x) + 1.75rem);
+}
+
 .thread-list-surface .thread-list-title {
   font-size: var(--thread-list-font-size);
 }
 
 .thread-list-surface .thread-list-meta {
-  font-size: max(0.6875rem, calc(var(--thread-list-font-size) - 0.125rem));
+  font-size: max(0.71875rem, calc(var(--thread-list-font-size) - 0.09375rem));
 }
 
 /* Appearance: density. The `density-*` class is set on documentElement by the

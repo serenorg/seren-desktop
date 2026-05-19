@@ -754,12 +754,15 @@ export const threadStore = {
       provider?: ProviderId | null;
       model?: string;
       employeeId?: string;
+      projectRoot?: string | null;
     },
   ): Promise<string> {
     // Employee-linked threads are not bound to a project folder.
+    const sourceProjectRoot =
+      "projectRoot" in options ? options.projectRoot : fileTreeState.rootPath;
     const projectRoot = options.employeeId
       ? undefined
-      : fileTreeState.rootPath || undefined;
+      : sourceProjectRoot || undefined;
     const provider =
       options.provider ??
       (providerStore.activeProvider === "seren-private"

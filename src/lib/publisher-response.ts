@@ -6,6 +6,13 @@ export interface PublisherEnvelope<T = unknown> {
   cost?: string;
 }
 
+export interface PublisherErrorEnvelope {
+  error: {
+    code?: number | string;
+    message?: string;
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -50,4 +57,25 @@ export function publisherStatus(value: unknown): number | undefined {
     return envelope.status;
   }
   return undefined;
+}
+
+export function isPublisherErrorEnvelope(
+  value: unknown,
+): value is PublisherErrorEnvelope {
+  if (!isRecord(value)) return false;
+  const err = value.error;
+  if (!isRecord(err)) return false;
+  return (
+    typeof err.code === "number" ||
+    typeof err.code === "string" ||
+    typeof err.message === "string"
+  );
+}
+
+export function publisherErrorMessage(value: unknown): string | null {
+  if (!isPublisherErrorEnvelope(value)) return null;
+  return typeof value.error.message === "string" &&
+    value.error.message.length > 0
+    ? value.error.message
+    : null;
 }

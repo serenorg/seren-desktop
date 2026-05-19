@@ -797,6 +797,28 @@ describe("threadStore", () => {
       expect(threadStore.activeThreadId).toBe("chat-1");
       expect(threadStore.activeThreadKind).toBe("chat");
     });
+
+    it("uses an explicit project root when creating from another thread context", async () => {
+      mockFileTreeState.rootPath = "/Users/dev/global-project";
+
+      const id = await threadStore.createChatThreadWithOptions("Bounty", {
+        provider: "seren",
+        model: "auto",
+        projectRoot: "/Users/dev/source-thread-project",
+      });
+
+      expect(conversationStore.createConversationWithModel).toHaveBeenCalledWith(
+        "Bounty",
+        "auto",
+        "/Users/dev/source-thread-project",
+        "seren",
+        null,
+      );
+      expect(mockConversations.conversations[0]?.projectRoot).toBe(
+        "/Users/dev/source-thread-project",
+      );
+      expect(id).toBe("chat-1");
+    });
   });
 
   describe("archiveThread", () => {

@@ -3,6 +3,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isPublisherErrorEnvelope,
+  publisherErrorMessage,
   publisherStatus,
   unwrapDataResponse,
   unwrapPublisherBody,
@@ -65,5 +67,17 @@ describe("publisher response helpers", () => {
     expect(unwrapPublisherBody(legacy)).toEqual({
       choices: [{ message: { content: "legacy" } }],
     });
+  });
+
+  it("detects numeric and string-coded publisher error bodies", () => {
+    const numeric = { error: { code: 404, message: "not found" } };
+    const stringCode = {
+      error: { code: "PUBLISHER_DENIED", message: "forbidden" },
+    };
+
+    expect(isPublisherErrorEnvelope(numeric)).toBe(true);
+    expect(isPublisherErrorEnvelope(stringCode)).toBe(true);
+    expect(publisherErrorMessage(stringCode)).toBe("forbidden");
+    expect(isPublisherErrorEnvelope({ error: "plain text" })).toBe(false);
   });
 });

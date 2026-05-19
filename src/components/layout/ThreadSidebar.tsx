@@ -13,6 +13,7 @@ import {
   Switch,
 } from "solid-js";
 import { providerGlyph } from "@/components/chat/ProviderIcon";
+import { BountiesSection } from "@/components/sidebar/BountiesSection";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import {
   type EmployeeDetailEventDetail,
@@ -781,6 +782,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             onOpenCatalog={props.onOpenCatalog}
             onOpenInbox={props.onOpenInbox}
           />
+          <BountiesSection />
           <Show
             when={threadStore.groupedThreads.length > 0}
             fallback={
@@ -880,12 +882,27 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           data-thread-id={thread.id}
                           data-thread-kind={thread.kind}
                           draggable={true}
-                          class="thread-list-row group flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none border-l-2 border-l-transparent rounded-lg cursor-pointer mb-0.5 text-left transition-all duration-150 hover:bg-surface-2/60 active:cursor-grabbing"
+                          class="thread-list-row group flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none border-l-2 border-l-transparent rounded-lg cursor-pointer mb-0.5 text-left transition-all duration-150 hover:bg-surface-2/60 active:cursor-grabbing focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/60"
                           classList={{
-                            "!bg-surface-2/80 border-l-2 !border-l-primary !pl-2":
+                            "!bg-surface-2/80 border-l-2 !border-l-primary":
                               thread.id === threadStore.activeThreadId,
                           }}
+                          role="button"
+                          tabIndex={0}
+                          aria-current={
+                            thread.id === threadStore.activeThreadId
+                              ? "page"
+                              : undefined
+                          }
+                          aria-label={`Open thread ${thread.title}`}
                           onClick={() => handleSelectThread(thread)}
+                          onKeyDown={(event) => {
+                            if (event.target !== event.currentTarget) return;
+                            if (event.key !== "Enter" && event.key !== " ")
+                              return;
+                            event.preventDefault();
+                            handleSelectThread(thread);
+                          }}
                           onDragStart={(e) => handleThreadDragStart(e, thread)}
                           onDragEnd={handleThreadDragEnd}
                         >
@@ -993,6 +1010,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                               );
                             }}
                             title="Close thread"
+                            aria-label={`Close thread ${thread.title}`}
                           >
                             <svg
                               width="10"
@@ -1033,7 +1051,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
           <button
             type="button"
             data-testid="sessions-button"
-            class="w-full px-3 py-2 text-left text-[12px] text-muted-foreground hover:text-foreground hover:bg-surface-1/50 transition-colors flex items-center gap-2"
+            class="hidden w-full px-3 py-2 text-left text-[12px] text-muted-foreground hover:text-foreground hover:bg-surface-1/50 transition-colors items-center gap-2"
             onClick={() =>
               window.dispatchEvent(
                 new CustomEvent("seren:open-panel", { detail: "sessions" }),
