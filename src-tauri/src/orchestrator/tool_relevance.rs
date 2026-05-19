@@ -33,7 +33,8 @@ const RECENCY_BOOST: f32 = 2.0;
 
 /// Local tools that are always included regardless of BM25 score.
 /// These are fundamental capabilities the model needs constant access to —
-/// without them it cannot read/write files or execute commands.
+/// without them it cannot read/write files or run structured skill scripts.
+/// Raw shell remains available when relevant, but is intentionally not pinned.
 const PINNED_TOOL_NAMES: &[&str] = &[
     "read_file",
     "read_file_base64",
@@ -43,7 +44,7 @@ const PINNED_TOOL_NAMES: &[&str] = &[
     "path_exists",
     "create_directory",
     "seren_web_fetch",
-    "execute_command",
+    "run_skill_script",
     // Built-in Seren tools use seren__ prefix (not gateway__) and bypass BM25
     // entirely — they're always included like file tools. Pin them here as a
     // safety net in case the tool set grows beyond the model budget.
@@ -795,8 +796,8 @@ mod tests {
             "Fetch a URL and return its content",
         ));
         tools.push(make_tool(
-            "execute_command",
-            "Execute a shell command on the user machine",
+            "run_skill_script",
+            "Run a Seren skill script with structured argv",
         ));
 
         // Add pinned gateway tools (must match gateway__{publisher}__{tool} format)
@@ -868,7 +869,7 @@ mod tests {
         // playwright tool docs. Browser automation is a fundamental capability
         // with no shell substitute — the prophet-bounty-runner skill literally
         // cannot drive the Privy OTP login without playwright_navigate. Pin all
-        // 15 playwright tools the same way file/exec/seren__ tools are pinned.
+        // 15 playwright tools the same way file/structured-skill/seren__ tools are pinned.
         //
         // Faithful reproduction: load gmail and seren__ tools whose docs DO
         // match the query so they win BM25, plus enough noise to push the

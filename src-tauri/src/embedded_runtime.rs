@@ -1,6 +1,7 @@
 // ABOUTME: Configures embedded Node.js and Git runtime paths at application startup.
 // ABOUTME: Stores bundled runtime directories for injection into child process environments.
 
+use serde::Serialize;
 use std::env;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -21,6 +22,93 @@ pub struct EmbeddedRuntimePaths {
     /// distribution. macOS and Linux ship a usable Python in the base OS,
     /// so this field is always `None` there.
     pub python_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RuntimeHealthIssue {
+    pub component: String,
+    pub message: String,
+    pub remediation: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RuntimeHealthReport {
+    pub ok: bool,
+    pub platform: String,
+    pub issues: Vec<RuntimeHealthIssue>,
+}
+
+impl RuntimeHealthReport {
+    pub fn to_error_message(&self) -> String {
+        if self.ok {
+            return "Runtime health check passed".to_string();
+        }
+
+        let details = self
+            .issues
+            .iter()
+            .map(|issue| {
+                format!(
+                    "- {}: {} Fix: {}",
+                    issue.component, issue.message, issue.remediation
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        format!(
+            "Windows bundled runtime health check failed before chat execution.\n{}",
+            details
+        )
+    }
+}
+
+/// Validate the runtime pieces that must exist before chat-mode agents start
+/// debugging from inside the user's paid turn. Windows is intentionally
+/// fail-closed because it does not have reliable system Python/Node fallback
+/// semantics for skill execution.
+pub fn runtime_health_report_for_os(
+    platform: &str,
+    paths: &EmbeddedRuntimePaths,
+    playwright_script: Option<&std::path::Path>,
+) -> RuntimeHealthReport {
+    let mut issues = Vec::new();
+
+    if platform == "windows" {
+        if paths.node_dir.is_none() {
+            issues.push(RuntimeHealthIssue {
+                component: "bundled Node.js".to_string(),
+                message: "embedded-runtime node directory was not found".to_string(),
+                remediation: format!(
+                    "run `pnpm prepare:runtime:{}` before packaging",
+                    platform_subdir()
+                ),
+            });
+        }
+        if paths.python_dir.is_none() {
+            issues.push(RuntimeHealthIssue {
+                component: "bundled Python".to_string(),
+                message: "embedded-runtime python/python.exe was not found".to_string(),
+                remediation: format!(
+                    "run `pnpm prepare:python:{}` before packaging",
+                    platform_subdir()
+                ),
+            });
+        }
+        if playwright_script.is_none() {
+            issues.push(RuntimeHealthIssue {
+                component: "Playwright MCP".to_string(),
+                message: "playwright-stealth MCP script with intact node_modules was not found".to_string(),
+                remediation: "run `pnpm prepare:mcp-servers` and include the prepared bundle in app resources".to_string(),
+            });
+        }
+    }
+
+    RuntimeHealthReport {
+        ok: issues.is_empty(),
+        platform: platform.to_string(),
+        issues,
+    }
 }
 
 /// Check whether `runtime_dir/python/` contains the Windows embeddable
@@ -569,6 +657,47 @@ mod tests {
             .expect("write python.exe stub");
         let found = embedded_python_dir(runtime_dir).expect("python_dir discovered");
         assert_eq!(found, runtime_dir.join("python"));
+    }
+
+    #[test]
+    fn windows_runtime_health_fails_closed_without_node_python_or_playwright() {
+        let paths = EmbeddedRuntimePaths {
+            node_dir: None,
+            git_dir: None,
+            bin_dir: None,
+            python_dir: None,
+        };
+
+        let report = runtime_health_report_for_os("windows", &paths, None);
+
+        assert!(!report.ok);
+        assert_eq!(report.issues.len(), 3);
+        let message = report.to_error_message();
+        assert!(message.contains("bundled Node.js"));
+        assert!(message.contains("bundled Python"));
+        assert!(message.contains("Playwright MCP"));
+    }
+
+    #[test]
+    fn windows_runtime_health_passes_with_required_runtime_paths() {
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let node_dir = tmp.path().join("node");
+        let python_dir = tmp.path().join("python");
+        let playwright = tmp
+            .path()
+            .join("mcp-servers/playwright-stealth/dist/index.js");
+
+        let paths = EmbeddedRuntimePaths {
+            node_dir: Some(node_dir),
+            git_dir: None,
+            bin_dir: None,
+            python_dir: Some(python_dir),
+        };
+
+        let report = runtime_health_report_for_os("windows", &paths, Some(&playwright));
+
+        assert!(report.ok, "unexpected issues: {:?}", report.issues);
+        assert!(report.to_error_message().contains("passed"));
     }
 
     #[test]

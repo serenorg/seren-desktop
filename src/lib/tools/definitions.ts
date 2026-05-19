@@ -373,6 +373,54 @@ export const FILE_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "run_skill_script",
+      description:
+        "Run a Seren skill script with a structured argv array and explicit cwd. " +
+        "Prefer this over execute_command for skill runtimes, especially on Windows, " +
+        "because it avoids shell quoting and starts in the requested directory. " +
+        "Always requires user approval before execution.",
+      parameters: {
+        type: "object",
+        properties: {
+          skill_slug: {
+            type: "string",
+            description:
+              "Skill folder slug, e.g. 'prophet-arb-bot'. The cwd directory name must match.",
+          },
+          cwd: {
+            type: "string",
+            description:
+              "Absolute skill runtime directory to run from, e.g. '/Users/me/.config/seren/skills/prophet-arb-bot'.",
+          },
+          argv: {
+            type: "array",
+            description:
+              "Program and arguments as separate items, e.g. ['python3','scripts/agent.py','--config','config.json'].",
+            items: { type: "string" },
+          },
+          env: {
+            type: "object",
+            description:
+              "Optional environment variables to add for this process. Do not include secrets unless the user provided them.",
+          },
+          timeout_secs: {
+            type: "number",
+            description:
+              "Timeout in seconds (default: 30, max: 300). Use longer timeouts for install or scan commands.",
+          },
+          inject_seren_credentials: {
+            type: "boolean",
+            description:
+              "Defaults to true for skill scripts so Desktop auth is available as SEREN_API_KEY and API_KEY.",
+          },
+        },
+        required: ["skill_slug", "cwd", "argv"],
+      },
+    },
+  },
 ];
 
 /**
