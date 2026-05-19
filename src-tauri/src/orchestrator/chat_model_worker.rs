@@ -24,8 +24,18 @@ const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 const DEFAULT_PUBLISHER_SLUG: &str = "seren-models";
 
 /// Maximum number of tool execution rounds before forcing completion.
-/// Context window limits and cost naturally cap long sessions.
-const MAX_TOOL_ROUNDS: usize = 100;
+/// This is a product guardrail, not a context-window fallback: when hit, the
+/// user gets a checkpoint message and must explicitly ask the agent to continue.
+const MAX_TOOL_ROUNDS: usize = 20;
+
+/// Maximum number of tool calls allowed in one chat turn before checkpointing.
+const MAX_TOOL_CALLS_PER_TURN: usize = 60;
+
+/// Maximum failed tool calls allowed in one chat turn before checkpointing.
+const MAX_TOOL_FAILURES_PER_TURN: usize = 12;
+
+/// Maximum reported Gateway spend for one chat turn before checkpointing.
+const MAX_TURN_COST_USD: f64 = 2.0;
 
 /// Connect timeout for the HTTP client (seconds).
 const CONNECT_TIMEOUT_SECS: u64 = 30;
@@ -1154,7 +1164,6 @@ created if missing.",
                 | "path_exists"
                 | "create_directory"
                 | "seren_web_fetch"
-                | "execute_command"
         )
     }
 
@@ -1199,6 +1208,96 @@ created if missing.",
                 false
             }
         }
+    }
+
+    /// Track repeated identical tool failures within a single `execute()`
+    /// invocation. Returns true after the same non-parse failure class repeats
+    /// 3 times consecutively. This catches raw diagnostic loops where the model
+    /// keeps probing the same broken runtime path or shell command after the
+    /// app has already supplied the relevant error.
+    fn track_repeated_tool_failure_loop(
+        tracker: &mut Option<(String, usize)>,
+        tool_name: &str,
+        result_content: &str,
+        is_error: bool,
+    ) -> bool {
+        if !is_error {
+            *tracker = None;
+            return false;
+        }
+
+        let first_line = result_content
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or(result_content)
+            .trim();
+        let signature = format!(
+            "{}|{}",
+            tool_name,
+            &first_line[..first_line.floor_char_boundary(first_line.len().min(160))]
+        );
+
+        match tracker {
+            Some((sig, count)) if sig == &signature => {
+                *count += 1;
+                *count >= 3
+            }
+            _ => {
+                *tracker = Some((signature, 1));
+                false
+            }
+        }
+    }
+
+    fn turn_guard_recap(
+        total_cost: f64,
+        tool_call_count: usize,
+        tool_failure_count: usize,
+    ) -> Option<String> {
+        let reason = if total_cost >= MAX_TURN_COST_USD {
+            Some(format!(
+                "reported turn cost reached ${:.2} (cap ${:.2})",
+                total_cost, MAX_TURN_COST_USD
+            ))
+        } else if tool_call_count >= MAX_TOOL_CALLS_PER_TURN {
+            Some(format!(
+                "tool-call count reached {} (cap {})",
+                tool_call_count, MAX_TOOL_CALLS_PER_TURN
+            ))
+        } else if tool_failure_count >= MAX_TOOL_FAILURES_PER_TURN {
+            Some(format!(
+                "failed tool-call count reached {} (cap {})",
+                tool_failure_count, MAX_TOOL_FAILURES_PER_TURN
+            ))
+        } else {
+            None
+        }?;
+
+        Some(format!(
+            "(Paused: {}. {} tool calls fired this turn, {} failed. Ask me to continue if you want another diagnostic pass.)",
+            reason, tool_call_count, tool_failure_count
+        ))
+    }
+
+    fn runtime_health_error_for_chat(app: &tauri::AppHandle) -> Option<String> {
+        #[cfg(target_os = "windows")]
+        {
+            let paths = crate::embedded_runtime::discover_embedded_runtime(app);
+            let resource_dir = app.path().resource_dir().ok();
+            let playwright_script =
+                crate::mcp::resolve_playwright_mcp_script_path_from(resource_dir.as_deref());
+            let report = crate::embedded_runtime::runtime_health_report_for_os(
+                "windows",
+                &paths,
+                playwright_script.as_deref(),
+            );
+            if !report.ok {
+                return Some(report.to_error_message());
+            }
+        }
+
+        let _ = app;
+        None
     }
 
     /// Execute a local tool by name with the given arguments.
@@ -1451,6 +1550,15 @@ impl Worker for ChatModelWorker {
         // Reset cancellation flag
         *self.cancelled.lock().await = false;
 
+        if let Some(message) = Self::runtime_health_error_for_chat(app) {
+            let _ = event_tx
+                .send(WorkerEvent::Error {
+                    message: message.clone(),
+                })
+                .await;
+            return Err(message);
+        }
+
         // Extract publishers whose tools were called in recent conversation turns.
         // This feeds Phase 3 (conversation-aware boosting) of tool relevance.
         let recent_publishers = extract_recent_publishers(conversation_context);
@@ -1510,6 +1618,7 @@ impl Worker for ChatModelWorker {
         // synthetic recap when the loop ends with empty content — empty
         // assistant turns wipe cross-turn context for the next user prompt.
         let mut parse_error_tracker: Option<(String, usize)> = None;
+        let mut repeated_failure_tracker: Option<(String, usize)> = None;
         let mut tool_call_count: usize = 0;
         let mut tool_failure_count: usize = 0;
 
@@ -1647,6 +1756,26 @@ impl Worker for ChatModelWorker {
                         tool_calls.len()
                     );
                     total_cost += accumulated_cost;
+
+                    if let Some(recap) =
+                        Self::turn_guard_recap(total_cost, tool_call_count, tool_failure_count)
+                    {
+                        log::warn!("[ChatModelWorker] Turn guard triggered before tool execution");
+                        event_tx
+                            .send(WorkerEvent::Complete {
+                                final_content: recap,
+                                thinking: None,
+                                cost: if total_cost > 0.0 {
+                                    Some(total_cost)
+                                } else {
+                                    None
+                                },
+                                rlm_steps: None,
+                            })
+                            .await
+                            .map_err(|e| format!("Failed to send Complete event: {}", e))?;
+                        break;
+                    }
 
                     if round == MAX_TOOL_ROUNDS {
                         log::warn!(
@@ -1810,6 +1939,58 @@ impl Worker for ChatModelWorker {
                                     final_content: recap,
                                     thinking: None,
                                     cost: total,
+                                    rlm_steps: None,
+                                })
+                                .await;
+                            return Ok(());
+                        }
+                        if !is_parse_error
+                            && Self::track_repeated_tool_failure_loop(
+                                &mut repeated_failure_tracker,
+                                &tc.name,
+                                &result_content,
+                                is_error,
+                            )
+                        {
+                            let recap = format!(
+                                "(Aborted: tool '{}' returned the same error 3 times in a row. \
+                                 Continuing would likely keep burning funds on the same failed diagnostic. \
+                                 {} tool calls fired this turn, {} failed.)",
+                                tc.name, tool_call_count, tool_failure_count
+                            );
+                            log::warn!(
+                                "[ChatModelWorker] Repeated failure loop detected for tool '{}'. Aborting with recap.",
+                                tc.name
+                            );
+                            let _ = event_tx
+                                .send(WorkerEvent::Complete {
+                                    final_content: recap,
+                                    thinking: None,
+                                    cost: if total_cost > 0.0 {
+                                        Some(total_cost)
+                                    } else {
+                                        None
+                                    },
+                                    rlm_steps: None,
+                                })
+                                .await;
+                            return Ok(());
+                        }
+                        if let Some(recap) =
+                            Self::turn_guard_recap(total_cost, tool_call_count, tool_failure_count)
+                        {
+                            log::warn!(
+                                "[ChatModelWorker] Turn guard triggered after tool execution"
+                            );
+                            let _ = event_tx
+                                .send(WorkerEvent::Complete {
+                                    final_content: recap,
+                                    thinking: None,
+                                    cost: if total_cost > 0.0 {
+                                        Some(total_cost)
+                                    } else {
+                                        None
+                                    },
                                     rlm_steps: None,
                                 })
                                 .await;
@@ -2509,6 +2690,31 @@ mod tests {
     }
 
     #[test]
+    fn execute_command_routes_to_frontend_for_shell_approval() {
+        assert!(
+            !ChatModelWorker::is_local_tool("execute_command"),
+            "execute_command must not execute directly in the Rust chat loop; \
+             it has to route through the frontend shell approval path"
+        );
+    }
+
+    #[test]
+    fn turn_guard_recap_blocks_cost_tool_and_failure_runaways() {
+        let cost_recap = ChatModelWorker::turn_guard_recap(MAX_TURN_COST_USD, 2, 0)
+            .expect("cost cap should checkpoint");
+        assert!(cost_recap.contains("reported turn cost"));
+        assert!(cost_recap.contains("Ask me to continue"));
+
+        let tool_recap = ChatModelWorker::turn_guard_recap(0.0, MAX_TOOL_CALLS_PER_TURN, 0)
+            .expect("tool cap should checkpoint");
+        assert!(tool_recap.contains("tool-call count"));
+
+        let failure_recap = ChatModelWorker::turn_guard_recap(0.0, 20, MAX_TOOL_FAILURES_PER_TURN)
+            .expect("failure cap should checkpoint");
+        assert!(failure_recap.contains("failed tool-call count"));
+    }
+
+    #[test]
     fn gateway_status_retryable_classification() {
         // 5xx — all retryable (transient upstream/server failure)
         assert!(gateway_status_is_retryable(500));
@@ -2638,6 +2844,32 @@ mod tests {
             "list_directory",
             r#"{"path":"b"}"#,
             true
+        ));
+    }
+
+    #[test]
+    fn track_repeated_tool_failure_loop_aborts_after_three_same_errors() {
+        let mut tracker: Option<(String, usize)> = None;
+        let error =
+            "stderr: Python was not found; run without arguments to install from Microsoft Store";
+
+        assert!(!ChatModelWorker::track_repeated_tool_failure_loop(
+            &mut tracker,
+            "run_skill_script",
+            error,
+            true,
+        ));
+        assert!(!ChatModelWorker::track_repeated_tool_failure_loop(
+            &mut tracker,
+            "run_skill_script",
+            error,
+            true,
+        ));
+        assert!(ChatModelWorker::track_repeated_tool_failure_loop(
+            &mut tracker,
+            "run_skill_script",
+            error,
+            true,
         ));
     }
 

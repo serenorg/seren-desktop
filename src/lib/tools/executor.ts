@@ -413,6 +413,77 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
         break;
       }
 
+      case "run_skill_script": {
+        const skillSlug = args.skill_slug as string;
+        const cwd = args.cwd as string;
+        const argv = args.argv as unknown;
+        if (!skillSlug || typeof skillSlug !== "string") {
+          throw new Error("Invalid skill_slug: must be a non-empty string");
+        }
+        if (!cwd || typeof cwd !== "string") {
+          throw new Error("Invalid cwd: must be a non-empty string");
+        }
+        if (
+          !Array.isArray(argv) ||
+          argv.length === 0 ||
+          argv.some((item) => typeof item !== "string" || item.length === 0)
+        ) {
+          throw new Error("Invalid argv: must be a non-empty string array");
+        }
+        const timeoutSecs = (args.timeout_secs as number) ?? 30;
+        const preview = `${cwd}> ${argv.map((item) => JSON.stringify(item)).join(" ")}`;
+        const approved = await requestShellApproval(preview, timeoutSecs);
+        if (!approved) {
+          return {
+            tool_call_id: toolCall.id,
+            content: "Skill script was not approved by user",
+            is_error: true,
+          };
+        }
+
+        const invokeArgs: {
+          skillSlug: string;
+          cwd: string;
+          argv: string[];
+          env?: Record<string, string>;
+          timeoutSecs: number;
+          injectSerenCredentials?: boolean;
+        } = {
+          skillSlug,
+          cwd,
+          argv,
+          timeoutSecs,
+        };
+        if (
+          args.env &&
+          typeof args.env === "object" &&
+          !Array.isArray(args.env)
+        ) {
+          invokeArgs.env = args.env as Record<string, string>;
+        }
+        if (typeof args.inject_seren_credentials === "boolean") {
+          invokeArgs.injectSerenCredentials = args.inject_seren_credentials;
+        }
+
+        const cmdResult = await invoke<{
+          stdout: string;
+          stderr: string;
+          exit_code: number | null;
+          timed_out: boolean;
+        }>("run_skill_script", invokeArgs);
+
+        if (cmdResult.timed_out) {
+          result = `Skill script timed out after ${timeoutSecs} seconds.\nstderr: ${cmdResult.stderr}`;
+        } else {
+          const parts: string[] = [];
+          if (cmdResult.stdout) parts.push(`stdout:\n${cmdResult.stdout}`);
+          if (cmdResult.stderr) parts.push(`stderr:\n${cmdResult.stderr}`);
+          parts.push(`exit_code: ${cmdResult.exit_code ?? "unknown"}`);
+          result = parts.join("\n\n");
+        }
+        break;
+      }
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }

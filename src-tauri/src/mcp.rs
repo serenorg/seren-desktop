@@ -274,7 +274,8 @@ fn playwright_mcp_script_candidates(resource_dir: Option<&std::path::Path>) -> V
 
 /// Resolve the playwright-stealth MCP script to an absolute path from the
 /// candidate list. Prefers candidates whose `node_modules` is intact; falls
-/// back to existing-but-possibly-broken paths so the agent can still try.
+/// closed when an existing candidate is incomplete so packaging drift does
+/// not turn into a paid runtime-debugging loop.
 /// Returns `None` when no candidate exists on disk — callers must NOT publish
 /// a non-existent path as `SEREN_PLAYWRIGHT_MCP_COMMAND`. #1945.
 pub(crate) fn resolve_playwright_mcp_script_path_from(
@@ -291,10 +292,9 @@ pub(crate) fn resolve_playwright_mcp_script_path_from(
     for candidate in &candidates {
         if candidate.exists() {
             log::warn!(
-                "[MCP] Resolved playwright script at {:?} but node_modules may be broken",
+                "[MCP] Ignoring playwright script at {:?} because node_modules is incomplete",
                 candidate
             );
-            return Some(candidate.clone());
         }
     }
 
@@ -1150,6 +1150,22 @@ mod playwright_resolver_tests {
         let resolved_canon = resolved.canonicalize().unwrap_or(resolved);
         let expected_canon = expected.canonicalize().unwrap_or(expected);
         assert_eq!(resolved_canon, expected_canon);
+    }
+
+    #[test]
+    fn resource_dir_with_broken_bundle_fails_closed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let broken = make_fake_bundle(tmp.path(), false);
+
+        let resolved = resolve_playwright_mcp_script_path_from(Some(tmp.path()));
+
+        assert!(
+            resolved
+                .as_ref()
+                .map(|path| path != &broken)
+                .unwrap_or(true),
+            "resolver must not return a script whose node_modules marker is missing"
+        );
     }
 
     #[test]

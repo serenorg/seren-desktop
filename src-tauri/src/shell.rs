@@ -2,6 +2,8 @@
 // ABOUTME: Runs commands with timeout and output capture, invoked via Tauri IPC.
 
 use serde::Serialize;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
@@ -137,6 +139,36 @@ pub async fn execute_shell_command_without_seren_credentials(
     execute_shell_command_inner(command, timeout_secs, None).await
 }
 
+#[tauri::command]
+pub async fn run_skill_script<R: Runtime>(
+    app: AppHandle<R>,
+    skill_slug: String,
+    cwd: String,
+    argv: Vec<String>,
+    env: Option<HashMap<String, String>>,
+    timeout_secs: Option<u64>,
+    inject_seren_credentials: Option<bool>,
+) -> Result<CommandResult, String> {
+    let cwd = validate_skill_script_cwd(&skill_slug, &cwd)?;
+    let (program, args) = validate_skill_script_argv(&argv)?;
+    let api_key = if inject_seren_credentials.unwrap_or(true) {
+        read_stored_seren_api_key(&app)?
+    } else {
+        None
+    };
+
+    spawn_argv(
+        &skill_slug,
+        &cwd,
+        &program,
+        &args,
+        env.unwrap_or_default(),
+        timeout_secs,
+        api_key.as_deref(),
+    )
+    .await
+}
+
 async fn execute_shell_command_inner(
     command: String,
     timeout_secs: Option<u64>,
@@ -181,6 +213,138 @@ async fn execute_shell_command_inner(
     }
 
     Ok(result)
+}
+
+fn validate_skill_script_cwd(skill_slug: &str, cwd: &str) -> Result<PathBuf, String> {
+    let trimmed_slug = skill_slug.trim();
+    if trimmed_slug.is_empty() {
+        return Err("skill_slug must not be empty".to_string());
+    }
+    if !trimmed_slug
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("skill_slug may contain only letters, numbers, '-' and '_'".to_string());
+    }
+
+    let cwd_path = PathBuf::from(cwd);
+    if !cwd_path.is_dir() {
+        return Err(format!("skill cwd is not a directory: {}", cwd));
+    }
+    let file_name = cwd_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if file_name != trimmed_slug {
+        return Err(format!(
+            "skill cwd must be the runtime directory for '{}', got '{}'",
+            trimmed_slug, cwd
+        ));
+    }
+
+    Ok(cwd_path)
+}
+
+fn validate_skill_script_argv(argv: &[String]) -> Result<(String, Vec<String>), String> {
+    let Some(program) = argv.first() else {
+        return Err("argv must include a program".to_string());
+    };
+    let program = program.trim();
+    if program.is_empty() {
+        return Err("argv[0] must not be empty".to_string());
+    }
+    Ok((program.to_string(), argv.iter().skip(1).cloned().collect()))
+}
+
+async fn spawn_argv(
+    skill_slug: &str,
+    cwd: &Path,
+    program: &str,
+    args: &[String],
+    env_vars: HashMap<String, String>,
+    timeout_secs: Option<u64>,
+    seren_api_key: Option<&str>,
+) -> Result<CommandResult, String> {
+    let secs = timeout_secs
+        .unwrap_or(DEFAULT_TIMEOUT_SECS)
+        .min(MAX_TIMEOUT_SECS);
+    let timeout = Duration::from_secs(secs);
+    let resolved_program = crate::mcp::resolve_command_in_embedded_path(program);
+
+    let mut cmd = Command::new(&resolved_program);
+    cmd.args(args)
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
+    if !embedded_path.is_empty() {
+        let sep = if cfg!(target_os = "windows") {
+            ";"
+        } else {
+            ":"
+        };
+        let system_path = std::env::var("PATH").unwrap_or_default();
+        let combined = if system_path.is_empty() {
+            embedded_path.to_string()
+        } else {
+            format!("{}{}{}", embedded_path, sep, system_path)
+        };
+        cmd.env("PATH", combined);
+    }
+
+    crate::embedded_runtime::sanitize_spawn_env(&mut cmd);
+
+    for (key, value) in env_vars {
+        cmd.env(key, value);
+    }
+
+    cmd.env_remove("SEREN_API_KEY");
+    cmd.env_remove("API_KEY");
+    if let Some(api_key) = seren_api_key.filter(|key| !key.is_empty()) {
+        cmd.env("SEREN_API_KEY", api_key);
+        cmd.env("API_KEY", api_key);
+    }
+
+    log::info!(
+        "[SkillScript] spawning: skill={} cwd={} timeout={}s program={} args={:?}",
+        skill_slug,
+        cwd.display(),
+        secs,
+        resolved_program,
+        args
+    );
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn skill script: {}", e))?;
+
+    match tokio::time::timeout(timeout, child.wait_with_output()).await {
+        Ok(Ok(output)) => {
+            let stdout = truncate_output(String::from_utf8_lossy(&output.stdout).to_string());
+            let stderr = truncate_output(String::from_utf8_lossy(&output.stderr).to_string());
+            Ok(CommandResult {
+                stdout,
+                stderr,
+                exit_code: output.status.code(),
+                timed_out: false,
+            })
+        }
+        Ok(Err(e)) => Err(format!("Skill script execution failed: {}", e)),
+        Err(_) => Ok(CommandResult {
+            stdout: String::new(),
+            stderr: format!("Skill script timed out after {} seconds", secs),
+            exit_code: None,
+            timed_out: true,
+        }),
+    }
 }
 
 async fn spawn_one_shot(
@@ -602,5 +766,41 @@ mod tests {
         // No-python commands return None so the retry path stays inert.
         assert!(translate_python_to_py_launcher("ls -la").is_none());
         assert!(translate_python_to_py_launcher("").is_none());
+    }
+
+    #[test]
+    fn validate_skill_script_argv_rejects_empty_program() {
+        assert!(validate_skill_script_argv(&[]).is_err());
+        assert!(validate_skill_script_argv(&["".to_string()]).is_err());
+
+        let (program, args) = validate_skill_script_argv(&[
+            "python3".to_string(),
+            "scripts/agent.py".to_string(),
+            "--config".to_string(),
+            "config.json".to_string(),
+        ])
+        .expect("valid argv");
+
+        assert_eq!(program, "python3");
+        assert_eq!(args, ["scripts/agent.py", "--config", "config.json"]);
+    }
+
+    #[test]
+    fn validate_skill_script_cwd_requires_matching_runtime_directory() {
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let skill_dir = tmp.path().join("prophet-arb-bot");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+
+        let resolved =
+            validate_skill_script_cwd("prophet-arb-bot", skill_dir.to_string_lossy().as_ref())
+                .expect("matching skill cwd should pass");
+        assert_eq!(resolved, skill_dir);
+
+        let other_dir = tmp.path().join("other-skill");
+        std::fs::create_dir_all(&other_dir).expect("create other dir");
+        let err =
+            validate_skill_script_cwd("prophet-arb-bot", other_dir.to_string_lossy().as_ref())
+                .expect_err("wrong skill cwd should fail closed");
+        assert!(err.contains("runtime directory"));
     }
 }
