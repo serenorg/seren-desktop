@@ -3,6 +3,11 @@
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createStore, produce } from "solid-js/store";
+import {
+  extractEvidenceFromAgentMessages,
+  type FinalOutputValidationReport,
+  validateFinalOutput,
+} from "@/lib/agent-output-validation";
 import { shouldLogAgentRuntimeEvent } from "@/lib/agent-runtime-debug";
 import {
   isLocalProviderRuntime,
@@ -660,6 +665,8 @@ export interface AgentMessage {
   duration?: number;
   /** Total cost in SerenBucks for this message's query, reported by Gateway. */
   cost?: number;
+  /** Verified Agent Output report for final assistant messages. */
+  finalOutputValidation?: FinalOutputValidationReport;
   /** Names of documents processed via DocReader for this message. */
   docNames?: string[];
   /** Producer provenance — the agent type that emitted this message. */
@@ -1056,6 +1063,14 @@ function serializeAgentConversationMetadata(
     : null;
 }
 
+function serializeAgentMessageMetadata(msg: AgentMessage): string | null {
+  if (!msg.finalOutputValidation) return null;
+  return JSON.stringify({
+    v: 1,
+    final_output_validation: msg.finalOutputValidation,
+  });
+}
+
 /**
  * Persist an agent message to SQLite so history survives session restarts.
  * Only user and assistant messages are stored — tool calls, diffs, and
@@ -1082,7 +1097,7 @@ function persistAgentMessage(
     msg.content,
     null,
     msg.timestamp,
-    null,
+    serializeAgentMessageMetadata(msg),
     provider,
   ).catch((error) =>
     console.warn("[AgentStore] Failed to persist agent message:", error),
@@ -6544,13 +6559,19 @@ Structured summary:`;
       const duration = session.promptStartTime
         ? Date.now() - session.promptStartTime
         : undefined;
+      const finalOutputValidation = validateFinalOutput({
+        finalText: scrubbed,
+        evidence: extractEvidenceFromAgentMessages(session.messages),
+      });
+      const safeContent = finalOutputValidation.safeDisplayText;
 
       const message: AgentMessage = {
         id: crypto.randomUUID(),
         type: "assistant",
-        content: scrubbed,
+        content: safeContent,
         timestamp: session.streamingContentTimestamp ?? Date.now(),
         duration,
+        finalOutputValidation,
       };
       console.log(
         "[AgentRuntime] Adding assistant message to session:",
@@ -6558,7 +6579,7 @@ Structured summary:`;
         "conversationId:",
         session.conversationId,
         "content:",
-        scrubbed.slice(0, 50),
+        safeContent.slice(0, 50),
       );
       setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
       if (session.conversationId)
@@ -6575,9 +6596,10 @@ Structured summary:`;
       if (
         !isReplay &&
         settingsStore.settings.memoryEnabled &&
-        !isLikelyAuthError(scrubbed)
+        !isLikelyAuthError(safeContent) &&
+        finalOutputValidation.canStoreMemory
       ) {
-        storeAssistantResponse(scrubbed, {
+        storeAssistantResponse(safeContent, {
           model: `agent:${session.info.agentType}`,
           userQuery: session.lastUserPrompt,
         }).catch((err) => {
@@ -6588,8 +6610,8 @@ Structured summary:`;
       // If the agent streamed a short auth error as text, surface it as a session error
       // so the error banner with the Login button appears. Long messages are skipped
       // to avoid false positives when the agent discusses auth topics in normal output.
-      if (isLikelyAuthError(scrubbed)) {
-        setState("sessions", sessionId, "error", scrubbed);
+      if (isLikelyAuthError(safeContent)) {
+        setState("sessions", sessionId, "error", safeContent);
       }
 
       // Prompt-too-long is detected exclusively from the CLI's structured

@@ -1,6 +1,7 @@
 // ABOUTME: Unified message and conversation types for the orchestrator.
 // ABOUTME: Replaces separate chat and local-agent message models.
 
+import type { FinalOutputValidationReport } from "@/lib/agent-output-validation";
 import type { Attachment } from "@/lib/providers/types";
 
 /** Source that produced this message */
@@ -64,6 +65,8 @@ export interface UnifiedMessage {
   duration?: number;
   /** Total cost in SerenBucks for this message's query, reported by Gateway. */
   cost?: number;
+  /** Verified Agent Output report for final assistant messages. */
+  finalOutputValidation?: FinalOutputValidationReport;
   toolCallId?: string;
   toolCall?: ToolCallData;
   diff?: DiffData;
@@ -121,6 +124,7 @@ export interface MessageMetadata {
   task_type?: string | null;
   duration?: number | null;
   cost?: number | null;
+  final_output_validation?: FinalOutputValidationReport | null;
   tool_call?: {
     id: string;
     name: string;
@@ -172,6 +176,7 @@ export function serializeMetadata(msg: UnifiedMessage): string | null {
     task_type: msg.taskType ?? null,
     duration: msg.duration ?? null,
     cost: msg.cost ?? null,
+    final_output_validation: msg.finalOutputValidation ?? null,
     tool_call: msg.toolCall
       ? {
           id: msg.toolCall.toolCallId,
@@ -217,6 +222,13 @@ export function deserializeMetadata(
     if (typeof meta.duration === "number" && meta.duration > 0)
       result.duration = meta.duration;
     if (typeof meta.cost === "number" && meta.cost > 0) result.cost = meta.cost;
+    if (
+      meta.final_output_validation &&
+      typeof meta.final_output_validation === "object"
+    ) {
+      result.finalOutputValidation =
+        meta.final_output_validation as FinalOutputValidationReport;
+    }
     if (meta.tool_call && typeof meta.tool_call === "object") {
       const tc = meta.tool_call as Record<string, string>;
       result.toolCall = {
