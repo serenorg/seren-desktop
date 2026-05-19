@@ -34,6 +34,7 @@ import {
   normalizeSkillSlug,
   parseSkillMd,
   resolveSkillDisplayName,
+  resolveSkillListDisplayName,
 } from "@/lib/skills";
 import { RUN_SKILL_EVENT } from "@/lib/skills/invoke";
 import {
@@ -167,6 +168,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const findCatalogBySlug = (slug: string): Skill | undefined =>
     skillsStore.available.find((s) => s.slug === slug);
 
+  const displayNameFor = (skill: Skill | InstalledSkill): string =>
+    resolveSkillListDisplayName(skill, skillsStore.available);
+
   const ownsSkill = (skill: Skill | InstalledSkill): boolean => {
     const userId = authStore.user?.id;
     if (!userId) return false;
@@ -205,8 +209,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   const matchesQuery = (skill: Skill | InstalledSkill, q: string): boolean => {
     if (!q) return true;
+    const displayName = displayNameFor(skill).toLowerCase();
     return (
-      (skill.displayName ?? skill.name).toLowerCase().includes(q) ||
+      displayName.includes(q) ||
       skill.name.toLowerCase().includes(q) ||
       skill.slug.toLowerCase().includes(q) ||
       (skill.description ?? "").toLowerCase().includes(q) ||
@@ -225,9 +230,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         return true;
       })
       .slice()
-      .sort((a, b) =>
-        (a.displayName ?? a.name).localeCompare(b.displayName ?? b.name),
-      );
+      .sort((a, b) => displayNameFor(a).localeCompare(displayNameFor(b)));
   };
 
   const availableRows = (): Skill[] => {
@@ -452,7 +455,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   ) => {
     const payload = {
       id: skill.id,
-      displayName: skill.displayName,
+      displayName: displayNameFor(skill),
       name: skill.name,
       slug: skill.slug,
       sourceUrl: skill.sourceUrl,
@@ -1202,7 +1205,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                     <div class="flex-1 min-w-0">
                       <div class="flex items-center gap-2">
                         <span class="text-[13px] font-medium text-foreground truncate">
-                          {skill.displayName ?? skill.name}
+                          {displayNameFor(skill)}
                         </span>
                         <span
                           class="shrink-0 px-1 py-0 text-[10px] font-semibold rounded bg-surface-3 text-muted-foreground"
@@ -1555,7 +1558,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                       <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2">
                           <span class="text-[13px] font-medium text-foreground truncate">
-                            {skill.displayName ?? skill.name}
+                            {displayNameFor(skill)}
                           </span>
                           <Show when={ownsSkill(skill)}>
                             <span
