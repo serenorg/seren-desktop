@@ -2,7 +2,8 @@
 // ABOUTME: Shows available modes reported by the active agent runtime and sends set_mode commands.
 
 import type { Component } from "solid-js";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
+import { FloatingSelectorMenu } from "@/components/chat/FloatingSelectorMenu";
 import { type ActiveSession, agentStore } from "@/stores/agent.store";
 
 interface Props {
@@ -22,20 +23,6 @@ export const AgentModeSelector: Component<Props> = (props) => {
     const mode = availableModes().find((m) => m.modeId === id);
     return mode?.name ?? id;
   };
-
-  const handleClickOutside = (event: MouseEvent) => {
-    if (dropdownRef && !dropdownRef.contains(event.target as Node)) {
-      setIsOpen(false);
-    }
-  };
-
-  onMount(() => {
-    document.addEventListener("mousedown", handleClickOutside);
-  });
-
-  onCleanup(() => {
-    document.removeEventListener("mousedown", handleClickOutside);
-  });
 
   const selectMode = (modeId: string) => {
     agentStore.setPermissionMode(modeId, props.session?.info.id);
@@ -86,50 +73,53 @@ export const AgentModeSelector: Component<Props> = (props) => {
           </svg>
         </button>
 
-        <Show when={isOpen()}>
-          <div class="absolute bottom-full left-0 mb-1 w-72 bg-surface-0 border border-surface-3 rounded-lg shadow-lg z-50 overflow-hidden">
-            <div class="px-3 py-2 border-b border-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              Permission Mode
-            </div>
-            <For each={availableModes()}>
-              {(mode) => (
-                <button
-                  type="button"
-                  class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 ${
-                    mode.modeId === currentModeId() ? "bg-surface-2" : ""
-                  }`}
-                  onClick={() => selectMode(mode.modeId)}
-                >
-                  <div class="flex items-center justify-between">
-                    <div class="flex flex-col gap-0.5">
-                      <span class="text-sm text-foreground">{mode.name}</span>
-                      <Show when={mode.description}>
-                        <span class="text-[11px] text-muted-foreground">
-                          {mode.description}
-                        </span>
-                      </Show>
-                    </div>
-                    <Show when={mode.modeId === currentModeId()}>
-                      <svg
-                        class="w-4 h-4 text-green-500 flex-shrink-0 ml-2"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                        role="img"
-                        aria-label="Selected"
-                      >
-                        <path
-                          fill-rule="evenodd"
-                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                          clip-rule="evenodd"
-                        />
-                      </svg>
+        <FloatingSelectorMenu
+          open={isOpen()}
+          anchor={() => dropdownRef}
+          onRequestClose={() => setIsOpen(false)}
+          class="w-72"
+        >
+          <div class="px-3 py-2 border-b border-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+            Permission Mode
+          </div>
+          <For each={availableModes()}>
+            {(mode) => (
+              <button
+                type="button"
+                class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 ${
+                  mode.modeId === currentModeId() ? "bg-surface-2" : ""
+                }`}
+                onClick={() => selectMode(mode.modeId)}
+              >
+                <div class="flex items-center justify-between">
+                  <div class="flex flex-col gap-0.5">
+                    <span class="text-sm text-foreground">{mode.name}</span>
+                    <Show when={mode.description}>
+                      <span class="text-[11px] text-muted-foreground">
+                        {mode.description}
+                      </span>
                     </Show>
                   </div>
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
+                  <Show when={mode.modeId === currentModeId()}>
+                    <svg
+                      class="w-4 h-4 text-green-500 flex-shrink-0 ml-2"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                      role="img"
+                      aria-label="Selected"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </Show>
+                </div>
+              </button>
+            )}
+          </For>
+        </FloatingSelectorMenu>
       </div>
     </Show>
   );

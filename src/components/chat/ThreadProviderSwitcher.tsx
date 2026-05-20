@@ -3,14 +3,8 @@
 // ABOUTME: in one click via switchChatProvider.
 
 import type { Component } from "solid-js";
-import {
-  createMemo,
-  createSignal,
-  For,
-  onCleanup,
-  onMount,
-  Show,
-} from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
+import { FloatingSelectorMenu } from "@/components/chat/FloatingSelectorMenu";
 import { ProviderIcon } from "@/components/chat/ProviderIcon";
 import { PROVIDER_CONFIGS, type ProviderId } from "@/lib/providers";
 import {
@@ -117,24 +111,6 @@ export const ThreadProviderSwitcher: Component<Props> = (props) => {
     agentStore.availableAgents.filter((a) => a.available),
   );
 
-  const handleDocumentClick = (event: MouseEvent) => {
-    if (!isOpen()) return;
-    if (
-      containerRef &&
-      event.target instanceof Node &&
-      !containerRef.contains(event.target)
-    ) {
-      setIsOpen(false);
-    }
-  };
-
-  onMount(() => {
-    document.addEventListener("click", handleDocumentClick);
-  });
-  onCleanup(() => {
-    document.removeEventListener("click", handleDocumentClick);
-  });
-
   const selectChatProvider = async (providerId: ProviderId) => {
     if (current()?.kind === "chat" && current()?.provider === providerId) {
       setIsOpen(false);
@@ -212,64 +188,67 @@ export const ThreadProviderSwitcher: Component<Props> = (props) => {
         </span>
       </button>
 
-      <Show when={isOpen()}>
-        <div class="absolute bottom-full left-0 mb-1 min-w-[220px] bg-surface-0 border border-surface-3 rounded-lg shadow-lg z-50 overflow-hidden">
-          <Show when={chatProviders().length > 0}>
-            <div class="px-3 py-1.5 bg-surface-3 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              Chat
-            </div>
-            <For each={chatProviders()}>
-              {(providerId) => {
-                const isCurrent = () =>
-                  current()?.kind === "chat" &&
-                  current()?.provider === providerId;
-                return (
-                  <button
-                    type="button"
-                    class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 flex items-center gap-2 ${
-                      isCurrent() ? "bg-surface-2" : ""
-                    }`}
-                    onClick={() => {
-                      void selectChatProvider(providerId);
-                    }}
-                  >
-                    <ProviderIcon provider={providerId} size={14} />
-                    <span class="text-sm text-foreground">
-                      {PROVIDER_CONFIGS[providerId].name}
-                    </span>
-                  </button>
-                );
-              }}
-            </For>
-          </Show>
-          <Show when={availableAgents().length > 0}>
-            <div class="px-3 py-1.5 bg-surface-3 text-[10px] uppercase tracking-wider text-muted-foreground font-medium border-t border-surface-2">
-              External agents
-            </div>
-            <For each={availableAgents()}>
-              {(agent) => {
-                const isCurrent = () =>
-                  current()?.kind === "agent" &&
-                  current()?.agentType === agent.type;
-                return (
-                  <button
-                    type="button"
-                    class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 flex items-center gap-2 ${
-                      isCurrent() ? "bg-surface-2" : ""
-                    }`}
-                    onClick={() => selectAgent(agent.type)}
-                  >
-                    <ProviderIcon provider={agent.type} size={14} />
-                    <span class="text-sm text-foreground">
-                      {agentDisplayName(agent.type)}
-                    </span>
-                  </button>
-                );
-              }}
-            </For>
-          </Show>
-        </div>
-      </Show>
+      <FloatingSelectorMenu
+        open={isOpen()}
+        anchor={() => containerRef}
+        onRequestClose={() => setIsOpen(false)}
+        class="min-w-[220px]"
+      >
+        <Show when={chatProviders().length > 0}>
+          <div class="px-3 py-1.5 bg-surface-3 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+            Chat
+          </div>
+          <For each={chatProviders()}>
+            {(providerId) => {
+              const isCurrent = () =>
+                current()?.kind === "chat" &&
+                current()?.provider === providerId;
+              return (
+                <button
+                  type="button"
+                  class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 flex items-center gap-2 ${
+                    isCurrent() ? "bg-surface-2" : ""
+                  }`}
+                  onClick={() => {
+                    void selectChatProvider(providerId);
+                  }}
+                >
+                  <ProviderIcon provider={providerId} size={14} />
+                  <span class="text-sm text-foreground">
+                    {PROVIDER_CONFIGS[providerId].name}
+                  </span>
+                </button>
+              );
+            }}
+          </For>
+        </Show>
+        <Show when={availableAgents().length > 0}>
+          <div class="px-3 py-1.5 bg-surface-3 text-[10px] uppercase tracking-wider text-muted-foreground font-medium border-t border-surface-2">
+            External agents
+          </div>
+          <For each={availableAgents()}>
+            {(agent) => {
+              const isCurrent = () =>
+                current()?.kind === "agent" &&
+                current()?.agentType === agent.type;
+              return (
+                <button
+                  type="button"
+                  class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 flex items-center gap-2 ${
+                    isCurrent() ? "bg-surface-2" : ""
+                  }`}
+                  onClick={() => selectAgent(agent.type)}
+                >
+                  <ProviderIcon provider={agent.type} size={14} />
+                  <span class="text-sm text-foreground">
+                    {agentDisplayName(agent.type)}
+                  </span>
+                </button>
+              );
+            }}
+          </For>
+        </Show>
+      </FloatingSelectorMenu>
     </div>
   );
 };

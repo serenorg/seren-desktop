@@ -2,7 +2,8 @@
 // ABOUTME: Shows available models reported by the active agent runtime and sends set_model commands.
 
 import type { Component } from "solid-js";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
+import { FloatingSelectorMenu } from "@/components/chat/FloatingSelectorMenu";
 import { type ActiveSession, agentStore } from "@/stores/agent.store";
 
 interface Props {
@@ -30,20 +31,6 @@ export const AgentModelSelector: Component<Props> = (props) => {
     const model = availableModels().find((m) => m.modelId === id);
     return model?.name ?? id;
   };
-
-  const handleClickOutside = (event: MouseEvent) => {
-    if (dropdownRef && !dropdownRef.contains(event.target as Node)) {
-      setIsOpen(false);
-    }
-  };
-
-  onMount(() => {
-    document.addEventListener("mousedown", handleClickOutside);
-  });
-
-  onCleanup(() => {
-    document.removeEventListener("mousedown", handleClickOutside);
-  });
 
   const selectModel = (modelId: string) => {
     agentStore.setModel(modelId, props.session?.info.id);
@@ -94,52 +81,55 @@ export const AgentModelSelector: Component<Props> = (props) => {
           </svg>
         </button>
 
-        <Show when={isOpen()}>
-          <div class="absolute bottom-full left-0 mb-1 w-64 bg-surface-0 border border-surface-3 rounded-lg shadow-lg z-50 overflow-hidden">
-            <div class="px-3 py-2 border-b border-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              Agent Model
-            </div>
-            <For each={availableModels()}>
-              {(model) => (
-                <button
-                  type="button"
-                  class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 ${
-                    model.modelId === displayModelId() ? "bg-surface-2" : ""
-                  }`}
-                  onClick={() => selectModel(model.modelId)}
-                >
-                  <div class="flex items-center justify-between gap-2">
-                    <div class="flex flex-col gap-0.5 min-w-0 flex-1">
-                      <span class="text-sm text-foreground font-medium">
-                        {model.name}
+        <FloatingSelectorMenu
+          open={isOpen()}
+          anchor={() => dropdownRef}
+          onRequestClose={() => setIsOpen(false)}
+          class="w-64"
+        >
+          <div class="px-3 py-2 border-b border-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+            Agent Model
+          </div>
+          <For each={availableModels()}>
+            {(model) => (
+              <button
+                type="button"
+                class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 ${
+                  model.modelId === displayModelId() ? "bg-surface-2" : ""
+                }`}
+                onClick={() => selectModel(model.modelId)}
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex flex-col gap-0.5 min-w-0 flex-1">
+                    <span class="text-sm text-foreground font-medium">
+                      {model.name}
+                    </span>
+                    <Show when={model.description}>
+                      <span class="text-[11px] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+                        {model.description}
                       </span>
-                      <Show when={model.description}>
-                        <span class="text-[11px] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
-                          {model.description}
-                        </span>
-                      </Show>
-                    </div>
-                    <Show when={model.modelId === displayModelId()}>
-                      <svg
-                        class="w-4 h-4 text-green-500 flex-shrink-0"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                        role="img"
-                        aria-label="Selected"
-                      >
-                        <path
-                          fill-rule="evenodd"
-                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                          clip-rule="evenodd"
-                        />
-                      </svg>
                     </Show>
                   </div>
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
+                  <Show when={model.modelId === displayModelId()}>
+                    <svg
+                      class="w-4 h-4 text-green-500 flex-shrink-0"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                      role="img"
+                      aria-label="Selected"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </Show>
+                </div>
+              </button>
+            )}
+          </For>
+        </FloatingSelectorMenu>
       </div>
     </Show>
   );
