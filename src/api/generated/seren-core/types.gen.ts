@@ -3695,6 +3695,84 @@ export type DataResponseLogoutResult = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseNotificationReadResponse = {
+    data: {
+        notification_id: string;
+        read_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseOAuthProviderResponse = {
     /**
      * Response type for OAuth provider (excludes sensitive fields like client_secret)
@@ -10053,6 +10131,10 @@ export type DataResponseWalletBalanceResponse = {
          */
         total_purchases_cents: number;
         total_purchases_usd: string;
+        /**
+         * Recent unread wallet transfer notifications for this account.
+         */
+        unread_received_transfers?: Array<ReceivedTransferNotificationSummary>;
         wallet_address: string;
     };
     pagination?: null | PaginationMeta;
@@ -11608,6 +11690,11 @@ export type McpToolInfo = {
     name: string;
 };
 
+export type NotificationReadResponse = {
+    notification_id: string;
+    read_at: string;
+};
+
 /**
  * Response type for OAuth provider (excludes sensitive fields like client_secret)
  */
@@ -12880,6 +12967,16 @@ export type RbacRole = {
     permissions: Array<string>;
 };
 
+export type ReceivedTransferNotificationSummary = {
+    amount_atomic: number;
+    amount_usd: string;
+    notification_id: string;
+    received_at: string;
+    sender_display_name: string;
+    sender_email: string;
+    transfer_id: string;
+};
+
 /**
  * Response for recovery setup
  */
@@ -14017,6 +14114,10 @@ export type WalletBalanceResponse = {
      */
     total_purchases_cents: number;
     total_purchases_usd: string;
+    /**
+     * Recent unread wallet transfer notifications for this account.
+     */
+    unread_received_transfers?: Array<ReceivedTransferNotificationSummary>;
     wallet_address: string;
 };
 
@@ -15531,6 +15632,38 @@ export type DeleteResourceResponses = {
 };
 
 export type DeleteResourceResponse = DeleteResourceResponses[keyof DeleteResourceResponses];
+
+export type MarkNotificationReadData = {
+    body?: never;
+    path: {
+        /**
+         * Notification ID
+         */
+        notification_id: string;
+    };
+    query?: never;
+    url: '/notifications/{notification_id}/read';
+};
+
+export type MarkNotificationReadErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Notification not found
+     */
+    404: unknown;
+};
+
+export type MarkNotificationReadResponses = {
+    /**
+     * Notification marked read
+     */
+    200: DataResponseNotificationReadResponse;
+};
+
+export type MarkNotificationReadResponse = MarkNotificationReadResponses[keyof MarkNotificationReadResponses];
 
 export type ListConnectionsData = {
     body?: never;

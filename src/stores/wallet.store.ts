@@ -8,19 +8,14 @@ import {
   type DailyClaimResponse,
   fetchDailyEligibility,
 } from "@/services/dailyClaim";
-import { fetchBalance, type WalletBalance } from "@/services/wallet";
+import {
+  fetchBalance,
+  markWalletNotificationRead,
+  type ReceivedTransferNotificationSummary,
+  type WalletBalance,
+} from "@/services/wallet";
 
-export interface LatestReceivedTransfer {
-  id: string;
-  amount_usd: string;
-  sender_display_name: string;
-  sender_email: string;
-  received_at: string;
-}
-
-type WalletBalanceWithTransfer = WalletBalance & {
-  latest_received_transfer?: LatestReceivedTransfer | null;
-};
+export type LatestReceivedTransfer = ReceivedTransferNotificationSummary;
 
 /**
  * Wallet state interface.
@@ -90,24 +85,158 @@ let consecutiveFailures = 0;
 const receivedTransferStorageKey = (walletAddress: string) =>
   `seren:last-received-transfer:${walletAddress}`;
 
+interface ReceivedTransferSentinel {
+  version: 1;
+  latestTransferId: string | null;
+  initializedAtMs: number;
+}
+
+const receivedTransferSentinels = new Map<string, ReceivedTransferSentinel>();
+
+const FIRST_SEEN_RECEIVED_TRANSFER_NOTIFY_WINDOW_MS = 24 * 60 * 60 * 1_000;
+const CLOCK_SKEW_ALLOWANCE_MS = 60_000;
+
+function isRecentReceivedTransfer(
+  transfer: LatestReceivedTransfer,
+  nowMs: number,
+): boolean {
+  const receivedAtMs = Date.parse(transfer.received_at);
+  if (!Number.isFinite(receivedAtMs)) {
+    return false;
+  }
+
+  return (
+    receivedAtMs <= nowMs + CLOCK_SKEW_ALLOWANCE_MS &&
+    nowMs - receivedAtMs <= FIRST_SEEN_RECEIVED_TRANSFER_NOTIFY_WINDOW_MS
+  );
+}
+
+function receivedTransferTimestampMs(
+  transfer: LatestReceivedTransfer,
+): number | null {
+  const receivedAtMs = Date.parse(transfer.received_at);
+  return Number.isFinite(receivedAtMs) ? receivedAtMs : null;
+}
+
+function readReceivedTransferSentinel(
+  key: string,
+): ReceivedTransferSentinel | null {
+  let raw: string | null = null;
+  let storageReadSucceeded = false;
+  try {
+    const storage = globalThis.localStorage;
+    if (storage) {
+      raw = storage.getItem(key);
+      storageReadSucceeded = true;
+    }
+  } catch {
+    raw = null;
+  }
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Partial<ReceivedTransferSentinel>;
+      if (
+        parsed.version === 1 &&
+        (typeof parsed.latestTransferId === "string" ||
+          parsed.latestTransferId === null) &&
+        typeof parsed.initializedAtMs === "number" &&
+        Number.isFinite(parsed.initializedAtMs)
+      ) {
+        const sentinel = {
+          version: 1,
+          latestTransferId: parsed.latestTransferId,
+          initializedAtMs: parsed.initializedAtMs,
+        } satisfies ReceivedTransferSentinel;
+        receivedTransferSentinels.set(key, sentinel);
+        return sentinel;
+      }
+    } catch {
+      const sentinel = {
+        version: 1,
+        latestTransferId: raw === "none" ? null : raw,
+        initializedAtMs: 0,
+      } satisfies ReceivedTransferSentinel;
+      receivedTransferSentinels.set(key, sentinel);
+      return sentinel;
+    }
+  }
+
+  if (storageReadSucceeded) {
+    return null;
+  }
+
+  return receivedTransferSentinels.get(key) ?? null;
+}
+
+function writeReceivedTransferSentinel(
+  key: string,
+  sentinel: ReceivedTransferSentinel,
+): void {
+  receivedTransferSentinels.set(key, sentinel);
+  try {
+    globalThis.localStorage?.setItem(key, JSON.stringify(sentinel));
+  } catch {
+    // In-memory state still deduplicates during the current app session.
+  }
+}
+
+function shouldNotifyReceivedTransfer(
+  previous: ReceivedTransferSentinel | null,
+  transfer: LatestReceivedTransfer,
+  nowMs: number,
+): boolean {
+  if (!previous) {
+    return isRecentReceivedTransfer(transfer, nowMs);
+  }
+
+  if (previous.latestTransferId === transfer.transfer_id) {
+    return false;
+  }
+
+  if (previous.initializedAtMs <= 0) {
+    return isRecentReceivedTransfer(transfer, nowMs);
+  }
+
+  const receivedAtMs = receivedTransferTimestampMs(transfer);
+  if (receivedAtMs === null) {
+    return false;
+  }
+
+  return (
+    receivedAtMs >= previous.initializedAtMs - CLOCK_SKEW_ALLOWANCE_MS ||
+    isRecentReceivedTransfer(transfer, nowMs)
+  );
+}
+
 export function markLatestReceivedTransferSeen(
   walletAddress: string,
   transfer: LatestReceivedTransfer | null | undefined,
+  nowMs = Date.now(),
 ): boolean {
-  try {
-    const key = receivedTransferStorageKey(walletAddress);
-    const previousId = globalThis.localStorage?.getItem(key);
-    if (!transfer) {
-      if (previousId === null) {
-        globalThis.localStorage?.setItem(key, "none");
-      }
-      return false;
+  const key = receivedTransferStorageKey(walletAddress);
+  const previous = readReceivedTransferSentinel(key);
+  if (!transfer) {
+    if (!previous) {
+      writeReceivedTransferSentinel(key, {
+        version: 1,
+        latestTransferId: null,
+        initializedAtMs: nowMs,
+      });
     }
-    globalThis.localStorage?.setItem(key, transfer.id);
-    return previousId !== null && previousId !== transfer.id;
-  } catch {
     return false;
   }
+
+  const initializedAtMs =
+    previous && previous.initializedAtMs > 0 ? previous.initializedAtMs : nowMs;
+  const shouldNotify = shouldNotifyReceivedTransfer(previous, transfer, nowMs);
+  writeReceivedTransferSentinel(key, {
+    version: 1,
+    latestTransferId: transfer.transfer_id,
+    initializedAtMs,
+  });
+
+  return shouldNotify;
 }
 
 async function notifyReceivedTransfer(
@@ -132,8 +261,39 @@ async function notifyReceivedTransfer(
         new Notification(title, { body });
       }
     }
-  } catch {
+  } catch (error) {
+    console.warn("[Wallet Store] Failed to show transfer notification:", error);
     // Notification support varies by runtime; balance refresh should not fail.
+  }
+}
+
+async function handleReceivedTransferNotification(
+  walletAddress: string,
+  transfer: LatestReceivedTransfer,
+): Promise<void> {
+  const shouldNotify = markLatestReceivedTransferSeen(walletAddress, transfer);
+  const markRead = transfer.notification_id
+    ? markWalletNotificationRead(transfer.notification_id).catch((error) => {
+        console.warn(
+          "[Wallet Store] Failed to mark transfer notification read:",
+          error,
+        );
+      })
+    : Promise.resolve();
+
+  if (shouldNotify) {
+    await notifyReceivedTransfer(transfer);
+  }
+
+  await markRead;
+}
+
+async function handleReceivedTransferNotifications(
+  walletAddress: string,
+  transfers: LatestReceivedTransfer[],
+): Promise<void> {
+  for (const transfer of [...transfers].reverse()) {
+    await handleReceivedTransferNotification(walletAddress, transfer);
   }
 }
 
@@ -150,7 +310,7 @@ async function refreshBalance(): Promise<void> {
   setWalletState("error", null);
 
   try {
-    const data: WalletBalanceWithTransfer = await fetchBalance();
+    const data: WalletBalance = await fetchBalance();
     consecutiveFailures = 0;
     setWalletState({
       balance: data.balance_atomic / 1_000_000,
@@ -159,12 +319,14 @@ async function refreshBalance(): Promise<void> {
       lastUpdated: new Date().toISOString(),
       isLoading: false,
     });
-    const shouldNotifyReceivedTransfer = markLatestReceivedTransferSeen(
-      data.wallet_address,
-      data.latest_received_transfer,
-    );
-    if (data.latest_received_transfer && shouldNotifyReceivedTransfer) {
-      void notifyReceivedTransfer(data.latest_received_transfer);
+    const unreadReceivedTransfers = data.unread_received_transfers ?? [];
+    if (unreadReceivedTransfers.length > 0) {
+      void handleReceivedTransferNotifications(
+        data.wallet_address,
+        unreadReceivedTransfers,
+      );
+    } else {
+      markLatestReceivedTransferSeen(data.wallet_address, null);
     }
   } catch (err) {
     consecutiveFailures++;
@@ -379,6 +541,7 @@ function stopDailyClaimPolling(): void {
 function resetWalletState(): void {
   stopAutoRefresh();
   stopDailyClaimPolling();
+  receivedTransferSentinels.clear();
   setWalletState(initialState);
   topUpInProgress = false;
   consecutiveFailures = 0;

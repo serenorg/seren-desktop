@@ -1768,6 +1768,49 @@
         }
       }
     },
+    "/notifications/{notification_id}/read": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "operationId": "mark_notification_read",
+        "parameters": [
+          {
+            "name": "notification_id",
+            "in": "path",
+            "description": "Notification ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notification marked read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_NotificationReadResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Notification not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/oauth/connections": {
       "get": {
         "tags": [
@@ -13361,6 +13404,43 @@
           }
         }
       },
+      "DataResponse_NotificationReadResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\nPublisher endpoints use the same wrapper for non-streaming JSON success\nresponses, including first-class publishers. Streaming endpoints such as\nSSE responses carry metering in response headers and are not wrapped.\nPayment-required and error responses are also not wrapped so clients can\nparse their existing wire contracts directly.\n\n# Response Structure\n\n```json\n{\n  \"data\": T,\n  \"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\n    id: String,\n    name: String,\n}\n\nlet project = Project {\n    id: \"123\".to_string(),\n    name: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\n    id: String,\n    name: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\n    total: 0,\n    count: 0,\n    limit: 20,\n    offset: 0,\n    has_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "notification_id",
+              "read_at"
+            ],
+            "properties": {
+              "notification_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "read_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "pagination": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PaginationMeta",
+                "description": "Optional pagination metadata"
+              }
+            ]
+          }
+        }
+      },
       "DataResponse_OAuthProviderResponse": {
         "type": "object",
         "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\nPublisher endpoints use the same wrapper for non-streaming JSON success\nresponses, including first-class publishers. Streaming endpoints such as\nSSE responses carry metering in response headers and are not wrapped.\nPayment-required and error responses are also not wrapped so clients can\nparse their existing wire contracts directly.\n\n# Response Structure\n\n```json\n{\n  \"data\": T,\n  \"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\n    id: String,\n    name: String,\n}\n\nlet project = Project {\n    id: \"123\".to_string(),\n    name: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\n    id: String,\n    name: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\n    total: 0,\n    count: 0,\n    limit: 20,\n    offset: 0,\n    has_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
@@ -19204,6 +19284,13 @@
               "total_purchases_usd": {
                 "type": "string"
               },
+              "unread_received_transfers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ReceivedTransferNotificationSummary"
+                },
+                "description": "Recent unread wallet transfer notifications for this account."
+              },
               "wallet_address": {
                 "type": "string"
               }
@@ -21243,6 +21330,23 @@
           "name": {
             "type": "string",
             "description": "Tool name"
+          }
+        }
+      },
+      "NotificationReadResponse": {
+        "type": "object",
+        "required": [
+          "notification_id",
+          "read_at"
+        ],
+        "properties": {
+          "notification_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "read_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -24774,6 +24878,45 @@
           }
         }
       },
+      "ReceivedTransferNotificationSummary": {
+        "type": "object",
+        "required": [
+          "notification_id",
+          "transfer_id",
+          "amount_atomic",
+          "amount_usd",
+          "sender_display_name",
+          "sender_email",
+          "received_at"
+        ],
+        "properties": {
+          "amount_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "amount_usd": {
+            "type": "string"
+          },
+          "notification_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sender_display_name": {
+            "type": "string"
+          },
+          "sender_email": {
+            "type": "string"
+          },
+          "transfer_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "RecoveryResponse": {
         "type": "object",
         "description": "Response for recovery setup",
@@ -27256,6 +27399,13 @@
           "total_purchases_usd": {
             "type": "string"
           },
+          "unread_received_transfers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceivedTransferNotificationSummary"
+            },
+            "description": "Recent unread wallet transfer notifications for this account."
+          },
           "wallet_address": {
             "type": "string"
           }
@@ -28087,6 +28237,10 @@
     {
       "name": "agent-wallet",
       "description": "Wallet (funded + promotional)"
+    },
+    {
+      "name": "notifications",
+      "description": "User notifications"
     },
     {
       "name": "publisher-payments",

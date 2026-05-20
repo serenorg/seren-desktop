@@ -2,6 +2,7 @@
 // ABOUTME: Uses generated hey-api SDK for type-safe API calls.
 
 import type {
+  ReceivedTransferNotificationSummary,
   DepositResponse as TopUpCheckout,
   WalletTransactionResponse as Transaction,
   WalletTransactionHistoryResponse as TransactionsResponse,
@@ -22,6 +23,7 @@ import {
   getTransactions,
   getWalletBalance,
   listWalletTransfers,
+  markNotificationRead,
   previewWalletTransfer,
   recallWalletTransfer,
 } from "@/api";
@@ -30,6 +32,7 @@ const TRANSACTIONS_TIMEOUT_MS = 15_000;
 
 // Re-export generated types directly
 export type {
+  ReceivedTransferNotificationSummary,
   TopUpCheckout,
   Transaction,
   TransactionsResponse,
@@ -115,6 +118,22 @@ export async function fetchBalance() {
   }
 
   return data.data;
+}
+
+export async function markWalletNotificationRead(
+  notificationId: string,
+): Promise<void> {
+  const { error, response } = await markNotificationRead({
+    path: { notification_id: notificationId },
+    throwOnError: false,
+  });
+
+  if (error) {
+    const status = response?.status;
+    throw new Error(
+      `Failed to mark wallet notification read: ${apiErrorDetail(error, status)}`,
+    );
+  }
 }
 
 /**
