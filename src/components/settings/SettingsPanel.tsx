@@ -42,6 +42,7 @@ import {
   toggleMcpServer,
 } from "@/stores/settings.store";
 import { claimDaily, walletState } from "@/stores/wallet.store";
+import { SendTransferModal } from "../wallet/SendTransferModal";
 import { KeysSettings } from "./KeysSettings";
 import { MessagingSettings } from "./MessagingSettings";
 import { OAuthLogins } from "./OAuthLogins";
@@ -76,6 +77,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     createSignal<SettingsSection>(lastSettingsSection);
   const [showResetConfirm, setShowResetConfirm] = createSignal(false);
   const [showClearConfirm, setShowClearConfirm] = createSignal(false);
+  const [showSendTransferModal, setShowSendTransferModal] = createSignal(false);
 
   // Claude Code auto-memory interceptor state. The watcher lives in Rust;
   // the panel only reflects its current status and exposes the controls.
@@ -787,6 +789,25 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             </p>
 
             <DailyClaimBanner />
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Send SerenBucks
+                </span>
+                <span class="text-[0.8rem] text-muted-foreground">
+                  Transfer funds to another Seren user or invite someone by
+                  email
+                </span>
+              </label>
+              <button
+                type="button"
+                class="px-4 py-2 bg-accent text-accent-foreground border border-accent rounded-md text-[0.9rem] font-medium cursor-pointer transition-colors duration-150 hover:bg-accent/90"
+                onClick={() => setShowSendTransferModal(true)}
+              >
+                Send
+              </button>
+            </div>
 
             <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
@@ -2165,6 +2186,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             </div>
           </div>
         </div>
+      </Show>
+
+      <Show when={showSendTransferModal()}>
+        <SendTransferModal onClose={() => setShowSendTransferModal(false)} />
       </Show>
     </div>
   );

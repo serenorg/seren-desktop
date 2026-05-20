@@ -10,6 +10,18 @@ import {
 } from "@/services/dailyClaim";
 import { fetchBalance, type WalletBalance } from "@/services/wallet";
 
+export interface LatestReceivedTransfer {
+  id: string;
+  amount_usd: string;
+  sender_display_name: string;
+  sender_email: string;
+  received_at: string;
+}
+
+type WalletBalanceWithTransfer = WalletBalance & {
+  latest_received_transfer?: LatestReceivedTransfer | null;
+};
+
 /**
  * Wallet state interface.
  * Uses balance_usd from API for display, balance_atomic for calculations.
@@ -75,6 +87,56 @@ let topUpInProgress = false;
 const MAX_CONSECUTIVE_FAILURES = 5;
 let consecutiveFailures = 0;
 
+const receivedTransferStorageKey = (walletAddress: string) =>
+  `seren:last-received-transfer:${walletAddress}`;
+
+export function markLatestReceivedTransferSeen(
+  walletAddress: string,
+  transfer: LatestReceivedTransfer | null | undefined,
+): boolean {
+  try {
+    const key = receivedTransferStorageKey(walletAddress);
+    const previousId = globalThis.localStorage?.getItem(key);
+    if (!transfer) {
+      if (previousId === null) {
+        globalThis.localStorage?.setItem(key, "none");
+      }
+      return false;
+    }
+    globalThis.localStorage?.setItem(key, transfer.id);
+    return previousId !== null && previousId !== transfer.id;
+  } catch {
+    return false;
+  }
+}
+
+async function notifyReceivedTransfer(
+  transfer: LatestReceivedTransfer,
+): Promise<void> {
+  try {
+    if (typeof Notification === "undefined") {
+      return;
+    }
+
+    const title = "SerenBucks received";
+    const body = `${transfer.sender_display_name || transfer.sender_email} sent ${transfer.amount_usd}`;
+
+    if (Notification.permission === "granted") {
+      new Notification(title, { body });
+      return;
+    }
+
+    if (Notification.permission !== "denied") {
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
+        new Notification(title, { body });
+      }
+    }
+  } catch {
+    // Notification support varies by runtime; balance refresh should not fail.
+  }
+}
+
 /**
  * Refresh the wallet balance from the API.
  */
@@ -88,7 +150,7 @@ async function refreshBalance(): Promise<void> {
   setWalletState("error", null);
 
   try {
-    const data: WalletBalance = await fetchBalance();
+    const data: WalletBalanceWithTransfer = await fetchBalance();
     consecutiveFailures = 0;
     setWalletState({
       balance: data.balance_atomic / 1_000_000,
@@ -97,6 +159,13 @@ async function refreshBalance(): Promise<void> {
       lastUpdated: new Date().toISOString(),
       isLoading: false,
     });
+    const shouldNotifyReceivedTransfer = markLatestReceivedTransferSeen(
+      data.wallet_address,
+      data.latest_received_transfer,
+    );
+    if (data.latest_received_transfer && shouldNotifyReceivedTransfer) {
+      void notifyReceivedTransfer(data.latest_received_transfer);
+    }
   } catch (err) {
     consecutiveFailures++;
     const message =

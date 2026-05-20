@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { acceptOrganizationInvite, addPaymentMethod, agentRegister, agentUpdate, applyReferralCode, assignRole, beginOrganizationOtpEnrollment, cancelTask, changeOrganizationPlan, changePassword, checkDailyEligibility, checkPermission, claimDaily, claimPaymentMethodBonus, claimSignupBonus, confirmOrganizationOtpEnrollment, createCatalogEntry, createCharge, createCustomSkill, createCustomSkillRevision, createDefaultOrgApiKey, createDeposit, createInvite, createOrganizationRole, createOrgApiKey, createOrgOauthProvider, createOrgPublisherPayout, createOrgVpcEndpoint, createPaymentIntent, createPayout, createPublisher, createWebhook, deleteCatalogEntry, deleteOrganizationRole, deleteOrgOauthProvider, deleteOrgVpcEndpoint, deleteOrgVpcEndpointByRegion, deletePaymentMethod, deletePublisher, deleteResource, deleteWebhook, downloadCustomSkillRevisionBundle, estimateQuery, exportTransactions, forgotPassword, generateInvoices, getAccountSecurity, getAgentBalance, getAuditLog, getBillingHealth, getCatalogEntry, getChargeStatus, getCurrentUser, getCustomSkill, getCustomSkillRevision, getCustomSkillRevisionFile, getEndpointBillingEvents, getHistoryStats, getInvoice, getMatrix, getMyPermissions, getOrganizationConsumption, getOrganizationOtpPolicy, getOrganizationOtpStatus, getOrganizationPlan, getOrgOauthProvider, getOrgPublisher, getOrgPublisherEarnings, getOrgVpcEndpoint, getOrgVpcEndpointByRegion, getPaymentHistory, getPayoutStatus, getPlan, getPrivateModelsPolicy, getPublisherTemplateAnalytics, getQuotaUsage, getReferralInfo, getResource, getRevenueByDay, getRevenueMetrics, getRole, getStats, getStorePublisher, getStorePublisherLogo, getSupported, getTask, getTemplate, getTopAgents, getTransactions, getTransactionSummary, getUsageSummary, getWalletBalance, getWebhook, handleStripeWebhook, initiateOauth, initiateOauthById, invokeTemplate, issueInvoice, listAllDatabases, listAuditLogs, listCatalogEntries, listConnections, listCustomSkillRevisions, listCustomSkills, listDefaultOrgApiKeys, listEventTypes, listHistory, listInvites, listMembers, listOrganizationRoles, listOrganizations, listOrgApiKeys, listOrgOauthProviders, listOrgPublisherPayouts, listOrgPublishers, listOrgVpcEndpoints, listOrgVpcEndpointsAlias, listOrgVpcEndpointsByRegion, listPaymentMethods, listPermissions, listPlans, listProviders, listResources, listSessions, listStorePublishers, listTaskEvents, listTasks, listTemplates, listWebhookDeliveries, listWebhooks, login, logout, oauthCallback, oauthCallbackById, onchainDeposit, type Options, postSignals, promoteCatalogTag, proxyToPublisherGet, proxyToPublisherPost, publishCustomSkillRevision, publisherRootHandler, publishTemplate, refreshToken, refundCharge, resendVerificationEmail, resetOrganizationMemberOtp, resetPassword, resolveCatalogTag, revokeAllSessions, revokeConnection, revokeConnectionById, revokeDefaultOrgApiKey, revokeOrgApiKey, revokeOtherSessions, revokeSession, rotateWebhookSecret, setRecovery, signup, slashCharge, streamTask, submitTaskInput, suggestPublishers, updateCatalogEntry, updateCustomSkill, updateOrganizationOtpPolicy, updateOrgOauthProvider, updatePrivateModelsPolicy, updatePublisher, updatePublisherPricing, updateRole, updateWebhook, uploadPublisherLogo, upsertResource, verifyEmail, verifyOrganizationOtpScope, walletRecover } from '../sdk.gen';
-import type { AcceptOrganizationInviteData, AcceptOrganizationInviteResponse, AddPaymentMethodData, AddPaymentMethodResponse, AgentRegisterData, AgentRegisterResponse2, AgentUpdateData, ApplyReferralCodeData, AssignRoleData, BeginOrganizationOtpEnrollmentData, BeginOrganizationOtpEnrollmentResponse, CancelTaskData, CancelTaskResponse, ChangeOrganizationPlanData, ChangeOrganizationPlanResponse, ChangePasswordData, ChangePasswordResponse, CheckDailyEligibilityData, CheckDailyEligibilityResponse, CheckPermissionData, CheckPermissionResponse, ClaimDailyData, ClaimDailyResponse, ClaimPaymentMethodBonusData, ClaimPaymentMethodBonusResponse, ClaimSignupBonusData, ClaimSignupBonusResponse, ConfirmOrganizationOtpEnrollmentData, ConfirmOrganizationOtpEnrollmentResponse, CreateCatalogEntryData, CreateCatalogEntryResponse, CreateChargeData, CreateChargeResponse, CreateCustomSkillData, CreateCustomSkillResponse, CreateCustomSkillRevisionData, CreateCustomSkillRevisionResponse, CreateDefaultOrgApiKeyData, CreateDefaultOrgApiKeyResponse, CreateDepositData, CreateDepositResponse, CreateInviteData, CreateInviteResponse, CreateOrganizationRoleData, CreateOrganizationRoleResponse, CreateOrgApiKeyData, CreateOrgApiKeyResponse, CreateOrgOauthProviderData, CreateOrgOauthProviderResponse, CreateOrgPublisherPayoutData, CreateOrgPublisherPayoutResponse, CreateOrgVpcEndpointData, CreateOrgVpcEndpointResponse, CreatePaymentIntentData, CreatePaymentIntentResponse, CreatePayoutData, CreatePayoutResponse, CreatePublisherData, CreatePublisherResponse, CreateWebhookData, CreateWebhookResponse, DeleteCatalogEntryData, DeleteCatalogEntryResponse, DeleteOrganizationRoleData, DeleteOrganizationRoleResponse, DeleteOrgOauthProviderData, DeleteOrgOauthProviderResponse, DeleteOrgVpcEndpointByRegionData, DeleteOrgVpcEndpointByRegionResponse, DeleteOrgVpcEndpointData, DeleteOrgVpcEndpointResponse, DeletePaymentMethodData, DeletePaymentMethodResponse, DeletePublisherData, DeleteResourceData, DeleteResourceResponse, DeleteWebhookData, DeleteWebhookResponse, DownloadCustomSkillRevisionBundleData, DownloadCustomSkillRevisionBundleResponse, EstimateQueryData, EstimateQueryResponse, ExportTransactionsData, ForgotPasswordData, ForgotPasswordResponse, GenerateInvoicesData, GenerateInvoicesResponse, GetAccountSecurityData, GetAccountSecurityResponse, GetAgentBalanceData, GetAgentBalanceResponse, GetAuditLogData, GetAuditLogResponse, GetBillingHealthData, GetBillingHealthResponse, GetCatalogEntryData, GetCatalogEntryResponse, GetChargeStatusData, GetChargeStatusResponse, GetCurrentUserData, GetCurrentUserResponse, GetCustomSkillData, GetCustomSkillResponse, GetCustomSkillRevisionData, GetCustomSkillRevisionFileData, GetCustomSkillRevisionFileResponse, GetCustomSkillRevisionResponse, GetEndpointBillingEventsData, GetEndpointBillingEventsResponse, GetHistoryStatsData, GetHistoryStatsResponse, GetInvoiceData, GetInvoiceResponse, GetMatrixData, GetMatrixResponse, GetMyPermissionsData, GetMyPermissionsResponse, GetOrganizationConsumptionData, GetOrganizationConsumptionResponse, GetOrganizationOtpPolicyData, GetOrganizationOtpPolicyResponse, GetOrganizationOtpStatusData, GetOrganizationOtpStatusResponse, GetOrganizationPlanData, GetOrganizationPlanResponse, GetOrgOauthProviderData, GetOrgOauthProviderResponse, GetOrgPublisherData, GetOrgPublisherEarningsData, GetOrgPublisherEarningsResponse, GetOrgPublisherResponse, GetOrgVpcEndpointByRegionData, GetOrgVpcEndpointByRegionResponse, GetOrgVpcEndpointData, GetOrgVpcEndpointResponse, GetPaymentHistoryData, GetPaymentHistoryResponse, GetPayoutStatusData, GetPayoutStatusResponse, GetPlanData, GetPlanResponse, GetPrivateModelsPolicyData, GetPrivateModelsPolicyResponse, GetPublisherTemplateAnalyticsData, GetPublisherTemplateAnalyticsResponse, GetQuotaUsageData, GetQuotaUsageResponse, GetReferralInfoData, GetReferralInfoResponse, GetResourceData, GetResourceResponse, GetRevenueByDayData, GetRevenueByDayResponse, GetRevenueMetricsData, GetRevenueMetricsResponse, GetRoleData, GetRoleResponse, GetStatsData, GetStatsResponse, GetStorePublisherData, GetStorePublisherLogoData, GetStorePublisherResponse, GetSupportedData, GetSupportedResponse, GetTaskData, GetTaskResponse, GetTemplateData, GetTemplateResponse, GetTopAgentsData, GetTopAgentsResponse, GetTransactionsData, GetTransactionsResponse, GetTransactionSummaryData, GetTransactionSummaryResponse, GetUsageSummaryData, GetUsageSummaryResponse, GetWalletBalanceData, GetWalletBalanceResponse, GetWebhookData, GetWebhookResponse, HandleStripeWebhookData, InitiateOauthByIdData, InitiateOauthData, InvokeTemplateData, InvokeTemplateResponse2, IssueInvoiceData, ListAllDatabasesData, ListAllDatabasesResponse, ListAuditLogsData, ListAuditLogsResponse, ListCatalogEntriesData, ListCatalogEntriesResponse, ListConnectionsData, ListConnectionsResponse, ListCustomSkillRevisionsData, ListCustomSkillRevisionsResponse, ListCustomSkillsData, ListCustomSkillsResponse, ListDefaultOrgApiKeysData, ListDefaultOrgApiKeysResponse, ListEventTypesData, ListEventTypesResponse, ListHistoryData, ListHistoryResponse, ListInvitesData, ListInvitesResponse, ListMembersData, ListMembersResponse, ListOrganizationRolesData, ListOrganizationRolesResponse, ListOrganizationsData, ListOrganizationsResponse, ListOrgApiKeysData, ListOrgApiKeysResponse, ListOrgOauthProvidersData, ListOrgOauthProvidersResponse, ListOrgPublisherPayoutsData, ListOrgPublisherPayoutsResponse, ListOrgPublishersData, ListOrgPublishersResponse, ListOrgVpcEndpointsAliasData, ListOrgVpcEndpointsAliasResponse, ListOrgVpcEndpointsByRegionData, ListOrgVpcEndpointsByRegionResponse, ListOrgVpcEndpointsData, ListOrgVpcEndpointsResponse, ListPaymentMethodsData, ListPaymentMethodsResponse, ListPermissionsData, ListPermissionsResponse, ListPlansData, ListPlansResponse, ListProvidersData, ListProvidersResponse, ListResourcesData, ListResourcesResponse, ListSessionsData, ListSessionsResponse, ListStorePublishersData, ListStorePublishersResponse, ListTaskEventsData, ListTaskEventsResponse, ListTasksData, ListTasksResponse, ListTemplatesData, ListTemplatesResponse, ListWebhookDeliveriesData, ListWebhookDeliveriesResponse, ListWebhooksData, ListWebhooksResponse, LoginData, LoginResponse, LogoutData, LogoutResponse, OauthCallbackByIdData, OauthCallbackData, OnchainDepositData, OnchainDepositError, OnchainDepositResponse2, PostSignalsData, PostSignalsResponse, PromoteCatalogTagData, PromoteCatalogTagResponse, ProxyToPublisherGetData, ProxyToPublisherGetError, ProxyToPublisherPostData, ProxyToPublisherPostError, PublishCustomSkillRevisionData, PublishCustomSkillRevisionResponse, PublisherRootHandlerData, PublishTemplateData, PublishTemplateResponse, RefreshTokenData, RefreshTokenResponse, RefundChargeData, RefundChargeResponse, ResendVerificationEmailData, ResendVerificationEmailResponse, ResetOrganizationMemberOtpData, ResetOrganizationMemberOtpResponse, ResetPasswordData, ResetPasswordResponse, ResolveCatalogTagData, ResolveCatalogTagResponse, RevokeAllSessionsData, RevokeAllSessionsResponse, RevokeConnectionByIdData, RevokeConnectionByIdResponse, RevokeConnectionData, RevokeConnectionResponse, RevokeDefaultOrgApiKeyData, RevokeOrgApiKeyData, RevokeOtherSessionsData, RevokeOtherSessionsResponse, RevokeSessionData, RevokeSessionResponse, RotateWebhookSecretData, RotateWebhookSecretResponse, SetRecoveryData, SetRecoveryResponse, SignupData, SignupResponse, SlashChargeData, SlashChargeResponse, StreamTaskData, SubmitTaskInputData, SubmitTaskInputResponse, SuggestPublishersData, SuggestPublishersResponse, UpdateCatalogEntryData, UpdateCatalogEntryResponse, UpdateCustomSkillData, UpdateCustomSkillResponse, UpdateOrganizationOtpPolicyData, UpdateOrganizationOtpPolicyResponse, UpdateOrgOauthProviderData, UpdateOrgOauthProviderResponse, UpdatePrivateModelsPolicyData, UpdatePrivateModelsPolicyResponse, UpdatePublisherData, UpdatePublisherPricingData, UpdatePublisherPricingResponse, UpdatePublisherResponse, UpdateRoleData, UpdateRoleResponse, UpdateWebhookData, UpdateWebhookResponse, UploadPublisherLogoData, UploadPublisherLogoResponse, UpsertResourceData, UpsertResourceResponse, VerifyEmailData, VerifyEmailResponse, VerifyOrganizationOtpScopeData, VerifyOrganizationOtpScopeResponse, WalletRecoverData, WalletRecoverResponse2 } from '../types.gen';
+import { acceptOrganizationInvite, addPaymentMethod, agentRegister, agentUpdate, applyReferralCode, assignRole, beginOrganizationOtpEnrollment, cancelTask, changeOrganizationPlan, changePassword, checkDailyEligibility, checkPermission, claimDaily, claimPaymentMethodBonus, claimSignupBonus, claimWalletTransfer, confirmOrganizationOtpEnrollment, createCatalogEntry, createCharge, createCustomSkill, createCustomSkillRevision, createDefaultOrgApiKey, createDeposit, createInvite, createOrganizationRole, createOrgApiKey, createOrgOauthProvider, createOrgPublisherPayout, createOrgVpcEndpoint, createPaymentIntent, createPayout, createPublisher, createWebhook, deleteAgentCredentialSecret, deleteCatalogEntry, deleteOrganizationRole, deleteOrgOauthProvider, deleteOrgVpcEndpoint, deleteOrgVpcEndpointByRegion, deletePaymentMethod, deletePublisher, deleteResource, deleteWebhook, downloadCustomSkillRevisionBundle, estimateQuery, executeWalletTransfer, exportTransactions, forgotPassword, generateInvoices, getAccountSecurity, getAgentBalance, getAuditLog, getBillingHealth, getCatalogEntry, getChargeStatus, getCurrentUser, getCustomSkill, getCustomSkillRevision, getCustomSkillRevisionFile, getEndpointBillingEvents, getHistoryStats, getInvoice, getMatrix, getMyPermissions, getOrganizationConsumption, getOrganizationOtpPolicy, getOrganizationOtpStatus, getOrganizationPlan, getOrgOauthProvider, getOrgPublisher, getOrgPublisherEarnings, getOrgVpcEndpoint, getOrgVpcEndpointByRegion, getPaymentHistory, getPayoutStatus, getPlan, getPrivateModelsPolicy, getPublisherTemplateAnalytics, getQuotaUsage, getReferralInfo, getResource, getRevenueByDay, getRevenueMetrics, getRole, getStats, getStorePublisher, getStorePublisherLogo, getSupported, getTask, getTemplate, getTopAgents, getTransactions, getTransactionSummary, getUsageSummary, getWalletBalance, getWebhook, handleStripeWebhook, initiateOauth, initiateOauthById, invokeTemplate, issueInvoice, listAgentCredentialSecrets, listAllDatabases, listAuditLogs, listCatalogEntries, listConnections, listCustomSkillRevisions, listCustomSkills, listDefaultOrgApiKeys, listEventTypes, listHistory, listInvites, listMembers, listOrganizationRoles, listOrganizations, listOrgApiKeys, listOrgOauthProviders, listOrgPublisherPayouts, listOrgPublishers, listOrgVpcEndpoints, listOrgVpcEndpointsAlias, listOrgVpcEndpointsByRegion, listPaymentMethods, listPermissions, listPlans, listProviders, listResources, listSessions, listStorePublishers, listTaskEvents, listTasks, listTemplates, listWalletTransfers, listWebhookDeliveries, listWebhooks, login, logout, oauthCallback, oauthCallbackById, onchainDeposit, type Options, postSignals, previewWalletTransfer, promoteCatalogTag, proxyToPublisherGet, proxyToPublisherPost, publishCustomSkillRevision, publisherRootHandler, publishTemplate, recallWalletTransfer, refreshToken, refundCharge, resendVerificationEmail, resetOrganizationMemberOtp, resetPassword, resolveCatalogTag, revokeAllSessions, revokeConnection, revokeConnectionById, revokeDefaultOrgApiKey, revokeOrgApiKey, revokeOtherSessions, revokeSession, rotateWebhookSecret, setRecovery, signup, slashCharge, streamTask, submitTaskInput, suggestPublishers, updateCatalogEntry, updateCustomSkill, updateOrganizationOtpPolicy, updateOrgOauthProvider, updatePrivateModelsPolicy, updatePublisher, updatePublisherPricing, updateRole, updateWebhook, uploadPublisherLogo, upsertAgentCredentialSecret, upsertResource, verifyEmail, verifyOrganizationOtpScope, walletRecover } from '../sdk.gen';
+import type { AcceptOrganizationInviteData, AcceptOrganizationInviteResponse, AddPaymentMethodData, AddPaymentMethodResponse, AgentRegisterData, AgentRegisterResponse2, AgentUpdateData, ApplyReferralCodeData, AssignRoleData, BeginOrganizationOtpEnrollmentData, BeginOrganizationOtpEnrollmentResponse, CancelTaskData, CancelTaskResponse, ChangeOrganizationPlanData, ChangeOrganizationPlanResponse, ChangePasswordData, ChangePasswordResponse, CheckDailyEligibilityData, CheckDailyEligibilityResponse, CheckPermissionData, CheckPermissionResponse, ClaimDailyData, ClaimDailyResponse, ClaimPaymentMethodBonusData, ClaimPaymentMethodBonusResponse, ClaimSignupBonusData, ClaimSignupBonusResponse, ClaimWalletTransferData, ClaimWalletTransferResponse, ConfirmOrganizationOtpEnrollmentData, ConfirmOrganizationOtpEnrollmentResponse, CreateCatalogEntryData, CreateCatalogEntryResponse, CreateChargeData, CreateChargeResponse, CreateCustomSkillData, CreateCustomSkillResponse, CreateCustomSkillRevisionData, CreateCustomSkillRevisionResponse, CreateDefaultOrgApiKeyData, CreateDefaultOrgApiKeyResponse, CreateDepositData, CreateDepositResponse, CreateInviteData, CreateInviteResponse, CreateOrganizationRoleData, CreateOrganizationRoleResponse, CreateOrgApiKeyData, CreateOrgApiKeyResponse, CreateOrgOauthProviderData, CreateOrgOauthProviderResponse, CreateOrgPublisherPayoutData, CreateOrgPublisherPayoutResponse, CreateOrgVpcEndpointData, CreateOrgVpcEndpointResponse, CreatePaymentIntentData, CreatePaymentIntentResponse, CreatePayoutData, CreatePayoutResponse, CreatePublisherData, CreatePublisherResponse, CreateWebhookData, CreateWebhookResponse, DeleteAgentCredentialSecretData, DeleteAgentCredentialSecretResponse, DeleteCatalogEntryData, DeleteCatalogEntryResponse, DeleteOrganizationRoleData, DeleteOrganizationRoleResponse, DeleteOrgOauthProviderData, DeleteOrgOauthProviderResponse, DeleteOrgVpcEndpointByRegionData, DeleteOrgVpcEndpointByRegionResponse, DeleteOrgVpcEndpointData, DeleteOrgVpcEndpointResponse, DeletePaymentMethodData, DeletePaymentMethodResponse, DeletePublisherData, DeleteResourceData, DeleteResourceResponse, DeleteWebhookData, DeleteWebhookResponse, DownloadCustomSkillRevisionBundleData, DownloadCustomSkillRevisionBundleResponse, EstimateQueryData, EstimateQueryResponse, ExecuteWalletTransferData, ExecuteWalletTransferResponse, ExportTransactionsData, ForgotPasswordData, ForgotPasswordResponse, GenerateInvoicesData, GenerateInvoicesResponse, GetAccountSecurityData, GetAccountSecurityResponse, GetAgentBalanceData, GetAgentBalanceResponse, GetAuditLogData, GetAuditLogResponse, GetBillingHealthData, GetBillingHealthResponse, GetCatalogEntryData, GetCatalogEntryResponse, GetChargeStatusData, GetChargeStatusResponse, GetCurrentUserData, GetCurrentUserResponse, GetCustomSkillData, GetCustomSkillResponse, GetCustomSkillRevisionData, GetCustomSkillRevisionFileData, GetCustomSkillRevisionFileResponse, GetCustomSkillRevisionResponse, GetEndpointBillingEventsData, GetEndpointBillingEventsResponse, GetHistoryStatsData, GetHistoryStatsResponse, GetInvoiceData, GetInvoiceResponse, GetMatrixData, GetMatrixResponse, GetMyPermissionsData, GetMyPermissionsResponse, GetOrganizationConsumptionData, GetOrganizationConsumptionResponse, GetOrganizationOtpPolicyData, GetOrganizationOtpPolicyResponse, GetOrganizationOtpStatusData, GetOrganizationOtpStatusResponse, GetOrganizationPlanData, GetOrganizationPlanResponse, GetOrgOauthProviderData, GetOrgOauthProviderResponse, GetOrgPublisherData, GetOrgPublisherEarningsData, GetOrgPublisherEarningsResponse, GetOrgPublisherResponse, GetOrgVpcEndpointByRegionData, GetOrgVpcEndpointByRegionResponse, GetOrgVpcEndpointData, GetOrgVpcEndpointResponse, GetPaymentHistoryData, GetPaymentHistoryResponse, GetPayoutStatusData, GetPayoutStatusResponse, GetPlanData, GetPlanResponse, GetPrivateModelsPolicyData, GetPrivateModelsPolicyResponse, GetPublisherTemplateAnalyticsData, GetPublisherTemplateAnalyticsResponse, GetQuotaUsageData, GetQuotaUsageResponse, GetReferralInfoData, GetReferralInfoResponse, GetResourceData, GetResourceResponse, GetRevenueByDayData, GetRevenueByDayResponse, GetRevenueMetricsData, GetRevenueMetricsResponse, GetRoleData, GetRoleResponse, GetStatsData, GetStatsResponse, GetStorePublisherData, GetStorePublisherLogoData, GetStorePublisherResponse, GetSupportedData, GetSupportedResponse, GetTaskData, GetTaskResponse, GetTemplateData, GetTemplateResponse, GetTopAgentsData, GetTopAgentsResponse, GetTransactionsData, GetTransactionsResponse, GetTransactionSummaryData, GetTransactionSummaryResponse, GetUsageSummaryData, GetUsageSummaryResponse, GetWalletBalanceData, GetWalletBalanceResponse, GetWebhookData, GetWebhookResponse, HandleStripeWebhookData, InitiateOauthByIdData, InitiateOauthData, InvokeTemplateData, InvokeTemplateResponse2, IssueInvoiceData, ListAgentCredentialSecretsData, ListAgentCredentialSecretsResponse, ListAllDatabasesData, ListAllDatabasesResponse, ListAuditLogsData, ListAuditLogsResponse, ListCatalogEntriesData, ListCatalogEntriesResponse, ListConnectionsData, ListConnectionsResponse, ListCustomSkillRevisionsData, ListCustomSkillRevisionsResponse, ListCustomSkillsData, ListCustomSkillsResponse, ListDefaultOrgApiKeysData, ListDefaultOrgApiKeysResponse, ListEventTypesData, ListEventTypesResponse, ListHistoryData, ListHistoryResponse, ListInvitesData, ListInvitesResponse, ListMembersData, ListMembersResponse, ListOrganizationRolesData, ListOrganizationRolesResponse, ListOrganizationsData, ListOrganizationsResponse, ListOrgApiKeysData, ListOrgApiKeysResponse, ListOrgOauthProvidersData, ListOrgOauthProvidersResponse, ListOrgPublisherPayoutsData, ListOrgPublisherPayoutsResponse, ListOrgPublishersData, ListOrgPublishersResponse, ListOrgVpcEndpointsAliasData, ListOrgVpcEndpointsAliasResponse, ListOrgVpcEndpointsByRegionData, ListOrgVpcEndpointsByRegionResponse, ListOrgVpcEndpointsData, ListOrgVpcEndpointsResponse, ListPaymentMethodsData, ListPaymentMethodsResponse, ListPermissionsData, ListPermissionsResponse, ListPlansData, ListPlansResponse, ListProvidersData, ListProvidersResponse, ListResourcesData, ListResourcesResponse, ListSessionsData, ListSessionsResponse, ListStorePublishersData, ListStorePublishersResponse, ListTaskEventsData, ListTaskEventsResponse, ListTasksData, ListTasksResponse, ListTemplatesData, ListTemplatesResponse, ListWalletTransfersData, ListWalletTransfersResponse, ListWebhookDeliveriesData, ListWebhookDeliveriesResponse, ListWebhooksData, ListWebhooksResponse, LoginData, LoginResponse, LogoutData, LogoutResponse, OauthCallbackByIdData, OauthCallbackData, OnchainDepositData, OnchainDepositError, OnchainDepositResponse2, PostSignalsData, PostSignalsResponse, PreviewWalletTransferData, PreviewWalletTransferResponse, PromoteCatalogTagData, PromoteCatalogTagResponse, ProxyToPublisherGetData, ProxyToPublisherGetError, ProxyToPublisherPostData, ProxyToPublisherPostError, PublishCustomSkillRevisionData, PublishCustomSkillRevisionResponse, PublisherRootHandlerData, PublishTemplateData, PublishTemplateResponse, RecallWalletTransferData, RecallWalletTransferResponse, RefreshTokenData, RefreshTokenResponse, RefundChargeData, RefundChargeResponse, ResendVerificationEmailData, ResendVerificationEmailResponse, ResetOrganizationMemberOtpData, ResetOrganizationMemberOtpResponse, ResetPasswordData, ResetPasswordResponse, ResolveCatalogTagData, ResolveCatalogTagResponse, RevokeAllSessionsData, RevokeAllSessionsResponse, RevokeConnectionByIdData, RevokeConnectionByIdResponse, RevokeConnectionData, RevokeConnectionResponse, RevokeDefaultOrgApiKeyData, RevokeOrgApiKeyData, RevokeOtherSessionsData, RevokeOtherSessionsResponse, RevokeSessionData, RevokeSessionResponse, RotateWebhookSecretData, RotateWebhookSecretResponse, SetRecoveryData, SetRecoveryResponse, SignupData, SignupResponse, SlashChargeData, SlashChargeResponse, StreamTaskData, SubmitTaskInputData, SubmitTaskInputResponse, SuggestPublishersData, SuggestPublishersResponse, UpdateCatalogEntryData, UpdateCatalogEntryResponse, UpdateCustomSkillData, UpdateCustomSkillResponse, UpdateOrganizationOtpPolicyData, UpdateOrganizationOtpPolicyResponse, UpdateOrgOauthProviderData, UpdateOrgOauthProviderResponse, UpdatePrivateModelsPolicyData, UpdatePrivateModelsPolicyResponse, UpdatePublisherData, UpdatePublisherPricingData, UpdatePublisherPricingResponse, UpdatePublisherResponse, UpdateRoleData, UpdateRoleResponse, UpdateWebhookData, UpdateWebhookResponse, UploadPublisherLogoData, UploadPublisherLogoResponse, UpsertAgentCredentialSecretData, UpsertAgentCredentialSecretResponse, UpsertResourceData, UpsertResourceResponse, VerifyEmailData, VerifyEmailResponse, VerifyOrganizationOtpScopeData, VerifyOrganizationOtpScopeResponse, WalletRecoverData, WalletRecoverResponse2 } from '../types.gen';
 
 /**
  * POST /auth/accept-invite
@@ -1096,6 +1096,58 @@ export const revokeDefaultOrgApiKeyMutation = (options?: Partial<Options<RevokeD
     const mutationOptions: MutationOptions<unknown, DefaultError, Options<RevokeDefaultOrgApiKeyData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await revokeDefaultOrgApiKey({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const listAgentCredentialSecretsQueryKey = (options: Options<ListAgentCredentialSecretsData>) => createQueryKey('listAgentCredentialSecrets', options);
+
+/**
+ * GET /organizations/{organization_id}/agent-credential-secrets
+ */
+export const listAgentCredentialSecretsOptions = (options: Options<ListAgentCredentialSecretsData>) => queryOptions<ListAgentCredentialSecretsResponse, DefaultError, ListAgentCredentialSecretsResponse, ReturnType<typeof listAgentCredentialSecretsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listAgentCredentialSecrets({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listAgentCredentialSecretsQueryKey(options)
+});
+
+/**
+ * POST /organizations/{organization_id}/agent-credential-secrets
+ */
+export const upsertAgentCredentialSecretMutation = (options?: Partial<Options<UpsertAgentCredentialSecretData>>): MutationOptions<UpsertAgentCredentialSecretResponse, DefaultError, Options<UpsertAgentCredentialSecretData>> => {
+    const mutationOptions: MutationOptions<UpsertAgentCredentialSecretResponse, DefaultError, Options<UpsertAgentCredentialSecretData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await upsertAgentCredentialSecret({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * DELETE /organizations/{organization_id}/agent-credential-secrets/{secret_id}
+ */
+export const deleteAgentCredentialSecretMutation = (options?: Partial<Options<DeleteAgentCredentialSecretData>>): MutationOptions<DeleteAgentCredentialSecretResponse, DefaultError, Options<DeleteAgentCredentialSecretData>> => {
+    const mutationOptions: MutationOptions<DeleteAgentCredentialSecretResponse, DefaultError, Options<DeleteAgentCredentialSecretData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await deleteAgentCredentialSecret({
                 ...options,
                 ...fnOptions,
                 throwOnError: true
@@ -3476,6 +3528,119 @@ export const getTransactionSummaryOptions = (options?: Options<GetTransactionSum
     },
     queryKey: getTransactionSummaryQueryKey(options)
 });
+
+export const listWalletTransfersQueryKey = (options?: Options<ListWalletTransfersData>) => createQueryKey('listWalletTransfers', options);
+
+/**
+ * List SerenBucks wallet transfers.
+ */
+export const listWalletTransfersOptions = (options?: Options<ListWalletTransfersData>) => queryOptions<ListWalletTransfersResponse, DefaultError, ListWalletTransfersResponse, ReturnType<typeof listWalletTransfersQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listWalletTransfers({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listWalletTransfersQueryKey(options)
+});
+
+export const listWalletTransfersInfiniteQueryKey = (options?: Options<ListWalletTransfersData>): QueryKey<Options<ListWalletTransfersData>> => createQueryKey('listWalletTransfers', options, true);
+
+/**
+ * List SerenBucks wallet transfers.
+ */
+export const listWalletTransfersInfiniteOptions = (options?: Options<ListWalletTransfersData>) => infiniteQueryOptions<ListWalletTransfersResponse, DefaultError, InfiniteData<ListWalletTransfersResponse>, QueryKey<Options<ListWalletTransfersData>>, string | null | Pick<QueryKey<Options<ListWalletTransfersData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+// @ts-ignore
+{
+    queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<QueryKey<Options<ListWalletTransfersData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+            query: {
+                cursor: pageParam
+            }
+        };
+        const params = createInfiniteParams(queryKey, page);
+        const { data } = await listWalletTransfers({
+            ...options,
+            ...params,
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listWalletTransfersInfiniteQueryKey(options)
+});
+
+/**
+ * Execute a SerenBucks wallet transfer.
+ */
+export const executeWalletTransferMutation = (options?: Partial<Options<ExecuteWalletTransferData>>): MutationOptions<ExecuteWalletTransferResponse, DefaultError, Options<ExecuteWalletTransferData>> => {
+    const mutationOptions: MutationOptions<ExecuteWalletTransferResponse, DefaultError, Options<ExecuteWalletTransferData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await executeWalletTransfer({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Claim a pending SerenBucks transfer invite.
+ */
+export const claimWalletTransferMutation = (options?: Partial<Options<ClaimWalletTransferData>>): MutationOptions<ClaimWalletTransferResponse, DefaultError, Options<ClaimWalletTransferData>> => {
+    const mutationOptions: MutationOptions<ClaimWalletTransferResponse, DefaultError, Options<ClaimWalletTransferData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await claimWalletTransfer({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Recall a pending SerenBucks transfer.
+ */
+export const recallWalletTransferMutation = (options?: Partial<Options<RecallWalletTransferData>>): MutationOptions<RecallWalletTransferResponse, DefaultError, Options<RecallWalletTransferData>> => {
+    const mutationOptions: MutationOptions<RecallWalletTransferResponse, DefaultError, Options<RecallWalletTransferData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await recallWalletTransfer({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Preview a SerenBucks wallet transfer.
+ */
+export const previewWalletTransferMutation = (options?: Partial<Options<PreviewWalletTransferData>>): MutationOptions<PreviewWalletTransferResponse, DefaultError, Options<PreviewWalletTransferData>> => {
+    const mutationOptions: MutationOptions<PreviewWalletTransferResponse, DefaultError, Options<PreviewWalletTransferData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await previewWalletTransfer({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
 
 export const listEventTypesQueryKey = (options?: Options<ListEventTypesData>) => createQueryKey('listEventTypes', options);
 

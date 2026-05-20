@@ -158,10 +158,29 @@ export type AgentCatalogTagPromotionRequest = {
     to_version: string;
 };
 
+export type AgentCredentialSecret = {
+    created_at: string;
+    created_by?: string | null;
+    description?: string | null;
+    id: string;
+    name: string;
+    organization_id: string;
+    owner_user_id?: string | null;
+    scope: AgentCredentialSecretScope;
+    updated_at: string;
+};
+
+export type AgentCredentialSecretDeleted = {
+    deleted: boolean;
+    id: string;
+};
+
+export type AgentCredentialSecretScope = 'organization' | 'user';
+
 /**
  * Source of an agent credit grant (fiat-only, no on-chain deposits)
  */
-export type AgentCreditSource = 'fiat_purchase' | 'signup_bonus' | 'payment_method_bonus' | 'daily_claim' | 'referral_reward' | 'admin_grant' | 'promo_code' | 'tier_bonus' | 'refund' | 'publisher_payout';
+export type AgentCreditSource = 'fiat_purchase' | 'signup_bonus' | 'payment_method_bonus' | 'daily_claim' | 'referral_reward' | 'admin_grant' | 'promo_code' | 'tier_bonus' | 'refund' | 'publisher_payout' | 'transfer_in' | 'transfer_recall' | 'transfer_refund';
 
 /**
  * Agent information returned on successful registration
@@ -1392,6 +1411,169 @@ export type DataResponseAgentCatalogListResponse = {
      */
     data: {
         data: Array<AgentCatalogEntry>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseAgentCredentialSecret = {
+    data: {
+        created_at: string;
+        created_by?: string | null;
+        description?: string | null;
+        id: string;
+        name: string;
+        organization_id: string;
+        owner_user_id?: string | null;
+        scope: AgentCredentialSecretScope;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseAgentCredentialSecretDeleted = {
+    data: {
+        deleted: boolean;
+        id: string;
     };
     pagination?: null | PaginationMeta;
 };
@@ -5839,6 +6021,7 @@ export type DataResponsePublisherResponse = {
          * Cached MCP capabilities (tools, resources, prompts)
          */
         mcp_capabilities?: unknown;
+        mcp_discovery?: null | McpDiscoveryStatus;
         /**
          * MCP server endpoint URL (for integration_type = mcp)
          */
@@ -6935,6 +7118,91 @@ export type DataResponseUserMe = {
          */
         default_organization_id: string;
     };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecAgentCredentialSecret = {
+    data: Array<{
+        created_at: string;
+        created_by?: string | null;
+        description?: string | null;
+        id: string;
+        name: string;
+        organization_id: string;
+        owner_user_id?: string | null;
+        scope: AgentCredentialSecretScope;
+        updated_at: string;
+    }>;
     pagination?: null | PaginationMeta;
 };
 
@@ -8785,6 +9053,7 @@ export type DataResponseVecPublisherResponse = {
          * Cached MCP capabilities (tools, resources, prompts)
          */
         mcp_capabilities?: unknown;
+        mcp_discovery?: null | McpDiscoveryStatus;
         /**
          * MCP server endpoint URL (for integration_type = mcp)
          */
@@ -9968,9 +10237,434 @@ export type DataResponseWalletTransactionHistoryResponse = {
      */
     data: {
         limit: number;
+        /**
+         * Opaque cursor for the next page when another page may exist.
+         */
+        next_cursor?: string | null;
         offset: number;
         total: number;
+        /**
+         * Whether `total` is an exact count. When false, `total` is a pagination
+         * lower bound kept for older offset-based clients.
+         */
+        total_is_exact: boolean;
         transactions: Array<WalletTransactionResponse>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseWalletTransferClaimResponse = {
+    data: {
+        amount_received_cents: number;
+        balance_after_cents: number;
+        pending_transfer_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseWalletTransferExecuteResponse = {
+    data: {
+        balance_after_cents: number;
+        kind: 'instant';
+        settled_at: string;
+        status: string;
+        transfer_id: string;
+    } | {
+        balance_after_cents: number;
+        expires_at: string;
+        invite_token?: string | null;
+        invite_url?: string | null;
+        kind: 'pending_invite';
+        pending_transfer_id: string;
+        status: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseWalletTransferListResponse = {
+    data: {
+        items: Array<WalletTransferListItem>;
+        next_cursor?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseWalletTransferPreviewResponse = {
+    data: {
+        amount_cents: number;
+        balance_after_cents: number;
+        daily_remaining_cents: number;
+        kind: 'instant';
+        memo?: string | null;
+        recipient: WalletTransferRecipient;
+    } | {
+        amount_cents: number;
+        balance_after_cents: number;
+        daily_remaining_cents: number;
+        expires_at_estimate: string;
+        kind: 'pending_invite';
+        memo?: string | null;
+        recipient_email: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseWalletTransferRecallResponse = {
+    data: {
+        balance_after_cents: number;
+        pending_transfer_id: string;
+        refunded_amount_cents: number;
+        status: string;
     };
     pagination?: null | PaginationMeta;
 };
@@ -10888,6 +11582,15 @@ export type ManagedAgentSessionDatabaseEngine = 'postgres' | 'aurora_postgres';
 export type ManagedAgentSessionDatabaseProvider = 'direct_url' | 'seren_organization_database';
 
 /**
+ * Discovery status for an MCP publisher.
+ */
+export type McpDiscoveryStatus = {
+    error?: string | null;
+    last_attempt_at?: string | null;
+    last_success_at?: string | null;
+};
+
+/**
  * Information about an MCP tool
  */
 export type McpToolInfo = {
@@ -11344,6 +12047,7 @@ export type PaginatedResponseVecPublisherResponse = {
          * Cached MCP capabilities (tools, resources, prompts)
          */
         mcp_capabilities?: unknown;
+        mcp_discovery?: null | McpDiscoveryStatus;
         /**
          * MCP server endpoint URL (for integration_type = mcp)
          */
@@ -11959,6 +12663,7 @@ export type PublisherResponse = {
      * Cached MCP capabilities (tools, resources, prompts)
      */
     mcp_capabilities?: unknown;
+    mcp_discovery?: null | McpDiscoveryStatus;
     /**
      * MCP server endpoint URL (for integration_type = mcp)
      */
@@ -13097,6 +13802,13 @@ export type UpdateWebhookRequest = {
     url?: string | null;
 };
 
+export type UpsertAgentCredentialSecretRequest = {
+    description?: string | null;
+    name: string;
+    scope?: AgentCredentialSecretScope;
+    value: string;
+};
+
 /**
  * Request to upsert a federated resource
  */
@@ -13371,8 +14083,17 @@ export type WalletTransactionDirection = 'credit' | 'debit';
  */
 export type WalletTransactionHistoryResponse = {
     limit: number;
+    /**
+     * Opaque cursor for the next page when another page may exist.
+     */
+    next_cursor?: string | null;
     offset: number;
     total: number;
+    /**
+     * Whether `total` is an exact count. When false, `total` is a pagination
+     * lower bound kept for older offset-based clients.
+     */
+    total_is_exact: boolean;
     transactions: Array<WalletTransactionResponse>;
 };
 
@@ -13428,6 +14149,89 @@ export type WalletTransactionResponse = {
      */
     remaining_usd?: string | null;
     source: string;
+};
+
+export type WalletTransferClaimRequest = {
+    token: string;
+};
+
+export type WalletTransferClaimResponse = {
+    amount_received_cents: number;
+    balance_after_cents: number;
+    pending_transfer_id: string;
+};
+
+export type WalletTransferDirection = 'sent' | 'received' | 'all';
+
+export type WalletTransferExecuteResponse = {
+    balance_after_cents: number;
+    kind: 'instant';
+    settled_at: string;
+    status: string;
+    transfer_id: string;
+} | {
+    balance_after_cents: number;
+    expires_at: string;
+    invite_token?: string | null;
+    invite_url?: string | null;
+    kind: 'pending_invite';
+    pending_transfer_id: string;
+    status: string;
+};
+
+export type WalletTransferListItem = {
+    amount_cents: number;
+    amount_usd: string;
+    counterparty: string;
+    counterparty_user_id?: string | null;
+    created_at: string;
+    direction: string;
+    expires_at?: string | null;
+    id: string;
+    kind: string;
+    memo?: string | null;
+    status: string;
+};
+
+export type WalletTransferListResponse = {
+    items: Array<WalletTransferListItem>;
+    next_cursor?: string | null;
+};
+
+export type WalletTransferPreviewResponse = {
+    amount_cents: number;
+    balance_after_cents: number;
+    daily_remaining_cents: number;
+    kind: 'instant';
+    memo?: string | null;
+    recipient: WalletTransferRecipient;
+} | {
+    amount_cents: number;
+    balance_after_cents: number;
+    daily_remaining_cents: number;
+    expires_at_estimate: string;
+    kind: 'pending_invite';
+    memo?: string | null;
+    recipient_email: string;
+};
+
+export type WalletTransferRecallResponse = {
+    balance_after_cents: number;
+    pending_transfer_id: string;
+    refunded_amount_cents: number;
+    status: string;
+};
+
+export type WalletTransferRecipient = {
+    avatar_url?: string | null;
+    display_name: string;
+    user_id: string;
+};
+
+export type WalletTransferRequest = {
+    amount_cents: number;
+    memo?: string | null;
+    recipient_email: string;
 };
 
 /**
@@ -15042,6 +15846,92 @@ export type RevokeDefaultOrgApiKeyResponses = {
      */
     200: unknown;
 };
+
+export type ListAgentCredentialSecretsData = {
+    body?: never;
+    path: {
+        organization_id: string;
+    };
+    query?: {
+        scope?: null | AgentCredentialSecretScope;
+    };
+    url: '/organizations/{organization_id}/agent-credential-secrets';
+};
+
+export type ListAgentCredentialSecretsErrors = {
+    /**
+     * Only organization owners or admins can list credential secrets
+     */
+    403: unknown;
+};
+
+export type ListAgentCredentialSecretsResponses = {
+    /**
+     * Managed-agent credential secrets retrieved
+     */
+    200: DataResponseVecAgentCredentialSecret;
+};
+
+export type ListAgentCredentialSecretsResponse = ListAgentCredentialSecretsResponses[keyof ListAgentCredentialSecretsResponses];
+
+export type UpsertAgentCredentialSecretData = {
+    body: UpsertAgentCredentialSecretRequest;
+    path: {
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/agent-credential-secrets';
+};
+
+export type UpsertAgentCredentialSecretErrors = {
+    /**
+     * Invalid secret name or value
+     */
+    400: unknown;
+    /**
+     * Only organization owners or admins can manage credential secrets
+     */
+    403: unknown;
+};
+
+export type UpsertAgentCredentialSecretResponses = {
+    /**
+     * Managed-agent credential secret upserted
+     */
+    200: DataResponseAgentCredentialSecret;
+};
+
+export type UpsertAgentCredentialSecretResponse = UpsertAgentCredentialSecretResponses[keyof UpsertAgentCredentialSecretResponses];
+
+export type DeleteAgentCredentialSecretData = {
+    body?: never;
+    path: {
+        organization_id: string;
+        secret_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/agent-credential-secrets/{secret_id}';
+};
+
+export type DeleteAgentCredentialSecretErrors = {
+    /**
+     * Only organization owners or admins can manage credential secrets
+     */
+    403: unknown;
+    /**
+     * Credential secret not found
+     */
+    404: unknown;
+};
+
+export type DeleteAgentCredentialSecretResponses = {
+    /**
+     * Managed-agent credential secret deleted
+     */
+    200: DataResponseAgentCredentialSecretDeleted;
+};
+
+export type DeleteAgentCredentialSecretResponse = DeleteAgentCredentialSecretResponses[keyof DeleteAgentCredentialSecretResponses];
 
 export type ListTasksData = {
     body?: never;
@@ -19316,10 +20206,19 @@ export type GetTransactionsData = {
          */
         offset?: number;
         /**
+         * Opaque cursor from the previous page. When present, offset is ignored.
+         */
+        cursor?: string | null;
+        /**
          * Include raw usage/micropayment debits (default false).
          * When false, usage debits are aggregated by day and publisher.
          */
         include_usage?: boolean;
+        /**
+         * Compute an exact total row count. Defaults to false because exact counts
+         * can require scanning large wallet histories.
+         */
+        exact_total?: boolean;
         /**
          * Filter: only transactions on or after this date (YYYY-MM-DD, interpreted as UTC midnight)
          */
@@ -19410,6 +20309,169 @@ export type GetTransactionSummaryResponses = {
 };
 
 export type GetTransactionSummaryResponse = GetTransactionSummaryResponses[keyof GetTransactionSummaryResponses];
+
+export type ListWalletTransfersData = {
+    body?: never;
+    path?: never;
+    query?: {
+        direction?: null | WalletTransferDirection;
+        status?: string | null;
+        cursor?: string | null;
+        limit?: number | null;
+    };
+    url: '/wallet/transfers';
+};
+
+export type ListWalletTransfersErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type ListWalletTransfersResponses = {
+    /**
+     * Transfers retrieved
+     */
+    200: DataResponseWalletTransferListResponse;
+};
+
+export type ListWalletTransfersResponse = ListWalletTransfersResponses[keyof ListWalletTransfersResponses];
+
+export type ExecuteWalletTransferData = {
+    body: WalletTransferRequest;
+    headers: {
+        /**
+         * Unique key for safely retrying transfer execution
+         */
+        'Idempotency-Key': string;
+    };
+    path?: never;
+    query?: never;
+    url: '/wallet/transfers';
+};
+
+export type ExecuteWalletTransferErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Idempotency conflict
+     */
+    409: unknown;
+};
+
+export type ExecuteWalletTransferResponses = {
+    /**
+     * Transfer executed
+     */
+    200: DataResponseWalletTransferExecuteResponse;
+};
+
+export type ExecuteWalletTransferResponse = ExecuteWalletTransferResponses[keyof ExecuteWalletTransferResponses];
+
+export type ClaimWalletTransferData = {
+    body: WalletTransferClaimRequest;
+    path?: never;
+    query?: never;
+    url: '/wallet/transfers/invite/claim';
+};
+
+export type ClaimWalletTransferErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Verified email required or email mismatch
+     */
+    403: unknown;
+    /**
+     * Invite not found
+     */
+    404: unknown;
+};
+
+export type ClaimWalletTransferResponses = {
+    /**
+     * Pending transfer claimed
+     */
+    200: DataResponseWalletTransferClaimResponse;
+};
+
+export type ClaimWalletTransferResponse = ClaimWalletTransferResponses[keyof ClaimWalletTransferResponses];
+
+export type RecallWalletTransferData = {
+    body?: never;
+    path: {
+        /**
+         * Pending transfer ID
+         */
+        pending_transfer_id: string;
+    };
+    query?: never;
+    url: '/wallet/transfers/pending/{pending_transfer_id}/recall';
+};
+
+export type RecallWalletTransferErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Pending transfer not found
+     */
+    404: unknown;
+};
+
+export type RecallWalletTransferResponses = {
+    /**
+     * Pending transfer recalled
+     */
+    200: DataResponseWalletTransferRecallResponse;
+};
+
+export type RecallWalletTransferResponse = RecallWalletTransferResponses[keyof RecallWalletTransferResponses];
+
+export type PreviewWalletTransferData = {
+    body: WalletTransferRequest;
+    path?: never;
+    query?: never;
+    url: '/wallet/transfers/preview';
+};
+
+export type PreviewWalletTransferErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type PreviewWalletTransferResponses = {
+    /**
+     * Transfer preview retrieved
+     */
+    200: DataResponseWalletTransferPreviewResponse;
+};
+
+export type PreviewWalletTransferResponse = PreviewWalletTransferResponses[keyof PreviewWalletTransferResponses];
 
 export type ListEventTypesData = {
     body?: never;
