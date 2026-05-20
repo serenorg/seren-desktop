@@ -501,6 +501,18 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     }
 
     const result = routeFiles(entries);
+    let appliedProfile = false;
+    const importedName = result.skillMetadata?.name?.trim();
+    if (!editing() && importedName && name().trim().length === 0) {
+      setName(importedName);
+      appliedProfile = true;
+    }
+    const importedSlug = deriveSlug(result.skillMetadata?.slug ?? "");
+    if (!editing() && importedSlug && !slugTouched()) {
+      setSlug(importedSlug);
+      setSlugTouched(true);
+      appliedProfile = true;
+    }
 
     let replacedSections = 0;
     for (const [slot, body] of Object.entries(result.sections)) {
@@ -516,6 +528,9 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
 
     const filledCount = Object.keys(result.sections).length;
     const parts: string[] = [];
+    if (appliedProfile) {
+      parts.push("Filled employee profile");
+    }
     if (filledCount > 0) {
       parts.push(
         `Filled ${filledCount} section${filledCount === 1 ? "" : "s"}`,

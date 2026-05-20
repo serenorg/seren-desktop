@@ -61,6 +61,8 @@ export function slotForFilename(name: string): InstructionSlot | null {
 export interface ImportResult {
   /** Bodies routed to each section. Empty string when no file mapped. */
   sections: Partial<Record<InstructionSlot, string>>;
+  /** Best-effort metadata parsed from SKILL.md. */
+  skillMetadata: ImportedSkillMetadata | null;
   /** Filenames the importer recognized and routed. */
   routed: string[];
   /** Recognized instruction filenames skipped because an earlier file filled the slot. */
@@ -79,6 +81,11 @@ export interface ImportFileEntry {
   sha256?: string;
 }
 
+export interface ImportedSkillMetadata {
+  slug?: string;
+  name?: string;
+}
+
 export function importPathForFile(file: {
   name: string;
   path?: string;
@@ -90,6 +97,43 @@ export function importPathForFile(file: {
   return file.name;
 }
 
+function unquoteYamlScalar(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed.replace(/\s+#.*$/, "").trim();
+}
+
+export function parseSkillMetadata(body: string): ImportedSkillMetadata | null {
+  const metadata: ImportedSkillMetadata = {};
+  const frontmatterMatch = body.match(/^---\s*\n([\s\S]*?)\n---\s*\n*/);
+  if (frontmatterMatch) {
+    const nameMatch = frontmatterMatch[1].match(/^name:\s*(.+?)\s*$/m);
+    if (nameMatch) {
+      metadata.slug = unquoteYamlScalar(nameMatch[1]);
+    }
+  }
+
+  const content = frontmatterMatch
+    ? body.slice(frontmatterMatch[0].length)
+    : body;
+  const headingMatch = content.match(/^#\s+(.+?)\s*$/m);
+  if (headingMatch) {
+    metadata.name = headingMatch[1].trim();
+  }
+
+  return metadata.slug || metadata.name ? metadata : null;
+}
+
 /**
  * Resolve a set of `{filename, body}` entries to per-slot bodies.
  *
@@ -98,6 +142,7 @@ export function importPathForFile(file: {
  */
 export function routeFiles(files: ImportFileEntry[]): ImportResult {
   const sections: Partial<Record<InstructionSlot, string>> = {};
+  let skillMetadata: ImportedSkillMetadata | null = null;
   const routed: string[] = [];
   const collided: string[] = [];
   const resources: AgentAssetFile[] = [];
@@ -131,8 +176,11 @@ export function routeFiles(files: ImportFileEntry[]): ImportResult {
       continue;
     }
     sections[slot] = body;
+    if (slot === "skill") {
+      skillMetadata = parseSkillMetadata(body);
+    }
     routed.push(name);
   }
 
-  return { sections, routed, collided, resources, ignored };
+  return { sections, skillMetadata, routed, collided, resources, ignored };
 }

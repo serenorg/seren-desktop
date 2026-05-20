@@ -6,6 +6,7 @@ import {
   hasHiddenPathSegment,
   importPathForFile,
   normalizeResourcePath,
+  parseSkillMetadata,
   routeFiles,
   slotForFilename,
 } from "@/lib/employees/import";
@@ -98,6 +99,40 @@ describe("importPathForFile", () => {
   });
 });
 
+describe("parseSkillMetadata", () => {
+  it("extracts slug from frontmatter and display name from first H1", () => {
+    expect(
+      parseSkillMetadata(`---
+name: rhea-patch-engineer
+description: Code implementation helper.
+---
+
+# Rhea Patch
+
+Body.`),
+    ).toEqual({
+      slug: "rhea-patch-engineer",
+      name: "Rhea Patch",
+    });
+  });
+
+  it("handles quoted frontmatter names", () => {
+    expect(
+      parseSkillMetadata(`---
+name: "tomas-trace-research"
+---
+# Tomas Trace`),
+    ).toEqual({
+      slug: "tomas-trace-research",
+      name: "Tomas Trace",
+    });
+  });
+
+  it("returns null when no profile metadata exists", () => {
+    expect(parseSkillMetadata("Plain instructions only.")).toBeNull();
+  });
+});
+
 describe("routeFiles", () => {
   it("routes recognized files by filename", () => {
     const result = routeFiles([
@@ -117,6 +152,7 @@ describe("routeFiles", () => {
       skill: "Plain speech.",
       identity: "Senior advisor.",
     });
+    expect(result.skillMetadata).toBeNull();
     expect(result.routed).toEqual(["SKILL.md", "IDENTITY.md"]);
     expect(result.resources).toEqual([
       {
@@ -143,9 +179,30 @@ describe("routeFiles", () => {
   });
 
   it("strips directory prefixes when matching filenames", () => {
-    const result = routeFiles([{ name: "project/SKILL.md", body: "From dir." }]);
+    const result = routeFiles([
+      {
+        name: "project/SKILL.md",
+        body: `---
+name: sol-vega-growth
+---
+# Sol Vega
 
-    expect(result.sections).toEqual({ skill: "From dir." });
+From dir.`,
+      },
+    ]);
+
+    expect(result.sections).toEqual({
+      skill: `---
+name: sol-vega-growth
+---
+# Sol Vega
+
+From dir.`,
+    });
+    expect(result.skillMetadata).toEqual({
+      slug: "sol-vega-growth",
+      name: "Sol Vega",
+    });
   });
 
   it("routes SKILL.md and USER.md independently when both are dropped", () => {
