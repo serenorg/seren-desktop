@@ -137,7 +137,7 @@ function skillForPublishPath(
 }
 
 interface AppShellProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: () => Promise<void> | void;
   onLogout: () => void;
 }
 
@@ -342,8 +342,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
     setSlidePanel(null);
   };
 
-  const handleLoginSuccess = () => {
-    props.onLoginSuccess();
+  const handleLoginSuccess = async () => {
+    await props.onLoginSuccess();
     setSlidePanel(null);
   };
 

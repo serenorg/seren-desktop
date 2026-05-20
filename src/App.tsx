@@ -28,6 +28,7 @@ import { captureUnknownError } from "@/lib/support/hook";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
 import { syncMemories } from "@/services/memory";
+import { resetUserSessionState } from "@/services/session-state";
 import { telemetry } from "@/services/telemetry";
 import { agentStore } from "@/stores/agent.store";
 import {
@@ -46,12 +47,10 @@ import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
 import {
   checkDailyClaim,
-  resetWalletState,
   startAutoRefresh,
   startDailyClaimPolling,
   stopAutoRefresh,
 } from "@/stores/wallet.store";
-import { workspaceStore } from "@/stores/workspace.store";
 import "./styles.css";
 
 // Initialize telemetry early to capture startup errors
@@ -192,6 +191,22 @@ function App() {
         startDailyClaimPolling();
         // Push any locally-cached memories that failed to reach cloud (e.g. cold start)
         void syncMemories();
+        void threadStore.refresh();
+        // Re-initialize the agent runtime side-channel listeners after a
+        // re-login: `resetUserSessionState()` disposes them on logout so
+        // stale handlers can't fire against the previous session, but
+        // the listeners are machine-local (provider-runtime ready/
+        // restarted, CLI scan rejection, synthetic schema drift) and need
+        // to be re-installed so post-login events are picked up without
+        // an app reload. `initialize()` is idempotent and skipped on the
+        // initial mount (handled in the await block on first auth).
+        if (
+          prev === false &&
+          runtime.capabilities.agents &&
+          !authStore.privateChatPolicy?.disable_local_agents
+        ) {
+          void agentStore.initialize();
+        }
       });
     } else {
       console.log("[App] User logged out, stopping services...");
@@ -202,10 +217,7 @@ function App() {
           cleanupAutoTopUp = null;
         }
         stopAutoRefresh();
-        resetWalletState();
-        threadStore.clear();
-        workspaceStore.reset();
-        autocompleteStore.disable();
+        resetUserSessionState();
       });
     }
 
@@ -327,8 +339,8 @@ function App() {
     });
   });
 
-  const handleLoginSuccess = () => {
-    setAuthenticated({ id: "", email: "", name: "" });
+  const handleLoginSuccess = async () => {
+    await setAuthenticated({ id: "", email: "", name: "" });
   };
 
   const handleLogout = async () => {

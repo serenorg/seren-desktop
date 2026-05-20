@@ -3,6 +3,7 @@
 
 import {
   type Component,
+  createEffect,
   createMemo,
   createSignal,
   For,
@@ -10,6 +11,7 @@ import {
   onCleanup,
   onMount,
   Show,
+  untrack,
 } from "solid-js";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
 import type {
@@ -22,6 +24,7 @@ import {
   employeeApprovals,
   type OrgPendingApprovalRun,
 } from "@/services/employee-approvals";
+import { authStore } from "@/stores/auth.store";
 import { employeeStore } from "@/stores/employees.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
@@ -259,10 +262,15 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
   let pendingRefreshSeq = 0;
 
   const refreshPending = async () => {
+    if (!authStore.isAuthenticated) {
+      setPendingByDeployment(new Map());
+      return;
+    }
     const seq = ++pendingRefreshSeq;
     try {
       const rows = await employeeApprovals.listOrg(100);
-      if (disposed || seq !== pendingRefreshSeq) return;
+      if (disposed || seq !== pendingRefreshSeq || !authStore.isAuthenticated)
+        return;
       const next = employeeApprovals.groupByDeployment(rows);
       setPendingByDeployment((prev) =>
         pendingMapsEqual(prev, next) ? prev : next,
@@ -308,28 +316,44 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
 
   let interval: ReturnType<typeof setInterval> | null = null;
 
+  const refreshEmployees = (options?: { background?: boolean }) => {
+    if (!authStore.isAuthenticated) {
+      setPendingByDeployment(new Map());
+      return;
+    }
+    void employeeStore.refresh(options);
+    void refreshPending();
+  };
+
   const tick = () => {
     if (
       typeof document !== "undefined" &&
       document.visibilityState !== "visible"
     )
       return;
-    void employeeStore.refresh({ background: true });
-    void refreshPending();
+    refreshEmployees({ background: true });
   };
 
   const handleVisibility = () => {
     if (document.visibilityState === "visible") {
-      void employeeStore.refresh({
+      refreshEmployees({
         background: employeeStore.lastLoadedAt !== null,
       });
-      void refreshPending();
     }
   };
 
+  createEffect(() => {
+    if (!authStore.isAuthenticated) {
+      pendingRefreshSeq += 1;
+      setPendingByDeployment(new Map());
+      return;
+    }
+    untrack(() => {
+      refreshEmployees({ background: employeeStore.lastLoadedAt !== null });
+    });
+  });
+
   onMount(() => {
-    void employeeStore.refresh();
-    void refreshPending();
     interval = setInterval(tick, STATUS_REFRESH_INTERVAL_MS);
     document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener(
@@ -377,158 +401,105 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
       </button>
       <Show when={!collapsed()}>
         <div class="flex flex-col gap-0.5 px-1">
-          <Show when={props.onOpenCatalog}>
-            <ManagementRow
-              title="Agent catalog"
-              description="Managed agent definitions"
-              onClick={handleOpenCatalog}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
+          <Show
+            when={authStore.isAuthenticated}
+            fallback={
+              <div class="px-2 py-1.5 text-[12px] leading-snug text-muted-foreground/80">
+                Sign in to see employees
+              </div>
+            }
+          >
+            <Show when={props.onOpenCatalog}>
+              <ManagementRow
+                title="Agent catalog"
+                description="Managed agent definitions"
+                onClick={handleOpenCatalog}
               >
-                <path
-                  d="M3 3.5h10v9H3z"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M5 6h6M5 8.5h4"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linecap="round"
-                />
-              </svg>
-            </ManagementRow>
-          </Show>
-          <Show when={props.onOpenInbox}>
-            <ManagementRow
-              title="Approval inbox"
-              description="Runs needing review"
-              onClick={handleOpenInbox}
-              testId="sidebar-inbox"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M3 4h10v8.5H3z"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M3 7h3l1 2h2l1-2h3"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </ManagementRow>
-          </Show>
-          <Show when={props.onOpenCatalog || props.onOpenInbox}>
-            <div
-              class="mx-2 my-1 border-t border-border/40"
-              aria-hidden="true"
-            />
-          </Show>
-          <Show when={employeeStore.error}>
-            <div
-              class="px-2 py-1 text-[11px] text-status-error opacity-80"
-              role="alert"
-            >
-              {employeeStore.error}
-            </div>
-          </Show>
-          <For each={employees()}>
-            {(employee) => {
-              const threads = (): Thread[] =>
-                threadsByEmployee()[employee.id] ?? [];
-              return (
-                <div>
-                  <EmployeeRow
-                    employee={employee}
-                    active={activeId() === employee.id}
-                    pendingCount={pendingCountFor(employee.id)}
-                    onSelect={handleSelect}
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3 3.5h10v9H3z"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    stroke-linejoin="round"
                   />
-                  <For each={threads()}>
-                    {(thread) => (
-                      <button
-                        type="button"
-                        class="thread-list-subrow flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/60"
-                        classList={{
-                          "!bg-surface-2/80 !border-l-primary":
-                            threadStore.activeThreadId === thread.id,
-                        }}
-                        aria-current={
-                          threadStore.activeThreadId === thread.id
-                            ? "page"
-                            : undefined
-                        }
-                        onClick={() => {
-                          threadStore.selectThread(thread.id, thread.kind);
-                          // Clear the active employee highlight and tell
-                          // AppShell to close the detail pane so the chat
-                          // takes over the main content area.
-                          setActiveId(null);
-                          window.dispatchEvent(
-                            new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT),
-                          );
-                        }}
-                        title={thread.title}
-                        aria-label={`Open thread ${thread.title}`}
-                      >
-                        <span
-                          class="thread-list-meta text-muted-foreground truncate"
-                          classList={{
-                            "!text-foreground":
-                              threadStore.activeThreadId === thread.id,
-                          }}
-                        >
-                          {thread.title}
-                        </span>
-                      </button>
-                    )}
-                  </For>
-                </div>
-              );
-            }}
-          </For>
-          <Show when={archivedEmployees().length > 0}>
-            <Show when={employees().length > 0}>
+                  <path
+                    d="M5 6h6M5 8.5h4"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </ManagementRow>
+            </Show>
+            <Show when={props.onOpenInbox}>
+              <ManagementRow
+                title="Approval inbox"
+                description="Runs needing review"
+                onClick={handleOpenInbox}
+                testId="sidebar-inbox"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3 4h10v8.5H3z"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M3 7h3l1 2h2l1-2h3"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </ManagementRow>
+            </Show>
+            <Show when={props.onOpenCatalog || props.onOpenInbox}>
               <div
                 class="mx-2 my-1 border-t border-border/40"
                 aria-hidden="true"
               />
             </Show>
-            <For each={archivedEmployees()}>
-              {(archived) => {
-                const archivedThreads = (): Thread[] =>
-                  threadsByEmployee()[archived.id] ?? [];
+            <Show when={employeeStore.error}>
+              <div
+                class="px-2 py-1 text-[11px] text-status-error opacity-80"
+                role="alert"
+              >
+                {employeeStore.error}
+              </div>
+            </Show>
+            <For each={employees()}>
+              {(employee) => {
+                const threads = (): Thread[] =>
+                  threadsByEmployee()[employee.id] ?? [];
                 return (
                   <div>
-                    <ArchivedEmployeeRow
-                      employee={archived}
-                      active={activeId() === archived.id}
+                    <EmployeeRow
+                      employee={employee}
+                      active={activeId() === employee.id}
+                      pendingCount={pendingCountFor(employee.id)}
                       onSelect={handleSelect}
                     />
-                    <For each={archivedThreads()}>
+                    <For each={threads()}>
                       {(thread) => (
                         <button
                           type="button"
-                          class="thread-list-subrow flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 opacity-70 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/60"
+                          class="thread-list-subrow flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/60"
                           classList={{
-                            "!bg-surface-2/80 !border-l-primary !opacity-90":
+                            "!bg-surface-2/80 !border-l-primary":
                               threadStore.activeThreadId === thread.id,
                           }}
                           aria-current={
@@ -547,7 +518,7 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
                           aria-label={`Open thread ${thread.title}`}
                         >
                           <span
-                            class="thread-list-meta text-muted-foreground/80 truncate"
+                            class="thread-list-meta text-muted-foreground truncate"
                             classList={{
                               "!text-foreground":
                                 threadStore.activeThreadId === thread.id,
@@ -562,41 +533,100 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
                 );
               }}
             </For>
-          </Show>
-          <button
-            type="button"
-            class="thread-list-row group flex items-center gap-2.5 w-full px-2 py-1.5 mt-0.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/40"
-            onClick={props.onCreateEmployee}
-            aria-label="New employee"
-          >
-            <span
-              class="flex items-center justify-center w-[22px] h-[22px] rounded-md border border-dashed border-border/80 text-muted-foreground/80 transition-colors duration-100 group-hover:border-primary/50 group-hover:text-primary"
-              aria-hidden="true"
+            <Show when={archivedEmployees().length > 0}>
+              <Show when={employees().length > 0}>
+                <div
+                  class="mx-2 my-1 border-t border-border/40"
+                  aria-hidden="true"
+                />
+              </Show>
+              <For each={archivedEmployees()}>
+                {(archived) => {
+                  const archivedThreads = (): Thread[] =>
+                    threadsByEmployee()[archived.id] ?? [];
+                  return (
+                    <div>
+                      <ArchivedEmployeeRow
+                        employee={archived}
+                        active={activeId() === archived.id}
+                        onSelect={handleSelect}
+                      />
+                      <For each={archivedThreads()}>
+                        {(thread) => (
+                          <button
+                            type="button"
+                            class="thread-list-subrow flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 opacity-70 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/60"
+                            classList={{
+                              "!bg-surface-2/80 !border-l-primary !opacity-90":
+                                threadStore.activeThreadId === thread.id,
+                            }}
+                            aria-current={
+                              threadStore.activeThreadId === thread.id
+                                ? "page"
+                                : undefined
+                            }
+                            onClick={() => {
+                              threadStore.selectThread(thread.id, thread.kind);
+                              setActiveId(null);
+                              window.dispatchEvent(
+                                new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT),
+                              );
+                            }}
+                            title={thread.title}
+                            aria-label={`Open thread ${thread.title}`}
+                          >
+                            <span
+                              class="thread-list-meta text-muted-foreground/80 truncate"
+                              classList={{
+                                "!text-foreground":
+                                  threadStore.activeThreadId === thread.id,
+                              }}
+                            >
+                              {thread.title}
+                            </span>
+                          </button>
+                        )}
+                      </For>
+                    </div>
+                  );
+                }}
+              </For>
+            </Show>
+            <button
+              type="button"
+              class="thread-list-row group flex items-center gap-2.5 w-full px-2 py-1.5 mt-0.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/40"
+              onClick={props.onCreateEmployee}
+              aria-label="New employee"
             >
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 16 16"
-                fill="none"
+              <span
+                class="flex items-center justify-center w-[22px] h-[22px] rounded-md border border-dashed border-border/80 text-muted-foreground/80 transition-colors duration-100 group-hover:border-primary/50 group-hover:text-primary"
                 aria-hidden="true"
               >
-                <path
-                  d="M8 3v10M3 8h10"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                />
-              </svg>
-            </span>
-            <div class="flex-1 min-w-0">
-              <div class="thread-list-title text-muted-foreground truncate transition-colors duration-100 group-hover:text-foreground">
-                New employee
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M8 3v10M3 8h10"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </span>
+              <div class="flex-1 min-w-0">
+                <div class="thread-list-title text-muted-foreground truncate transition-colors duration-100 group-hover:text-foreground">
+                  New employee
+                </div>
+                <div class="thread-list-meta text-muted-foreground/70 truncate">
+                  Persistent cloud worker
+                </div>
               </div>
-              <div class="thread-list-meta text-muted-foreground/70 truncate">
-                Persistent cloud worker
-              </div>
-            </div>
-          </button>
+            </button>
+          </Show>
         </div>
       </Show>
     </div>

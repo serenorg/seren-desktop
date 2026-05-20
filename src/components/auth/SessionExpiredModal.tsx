@@ -2,7 +2,11 @@
 // ABOUTME: Subscribes to authStore.signInModalRequested and renders the SignIn form.
 
 import { type Component, Show } from "solid-js";
-import { authStore, dismissSignInModal } from "@/stores/auth.store";
+import {
+  authStore,
+  dismissSignInModal,
+  restoreAuthenticatedSession,
+} from "@/stores/auth.store";
 import { SignIn } from "./SignIn";
 
 /**
@@ -15,7 +19,8 @@ import { SignIn } from "./SignIn";
  * chat thread, settings panel). See #1661.
  */
 export const SessionExpiredModal: Component = () => {
-  const handleSuccess = () => {
+  const handleSuccess = async () => {
+    await restoreAuthenticatedSession();
     dismissSignInModal();
   };
 

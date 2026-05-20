@@ -429,6 +429,36 @@ let cliScanRejectedUnsub: (() => void) | null = null;
  *  the schema is reconciled. #1829. */
 let syntheticSchemaDriftUnsub: (() => void) | null = null;
 
+let sessionResetGeneration = 0;
+
+function disposeTauriListener(
+  listener: Promise<UnlistenFn> | null,
+  label: string,
+): void {
+  if (!listener) return;
+  void listener
+    .then((unlisten) => unlisten())
+    .catch((error) => {
+      console.warn(`[AgentStore] Failed to dispose ${label} listener:`, error);
+    });
+}
+
+function disposeAgentStoreSideChannelListeners(): void {
+  const readyListener = providerRuntimeReadyListener;
+  providerRuntimeReadyListener = null;
+  disposeTauriListener(readyListener, "provider-runtime ready");
+
+  const restartedListener = providerRuntimeRestartedListener;
+  providerRuntimeRestartedListener = null;
+  disposeTauriListener(restartedListener, "provider-runtime restarted");
+
+  cliScanRejectedUnsub?.();
+  cliScanRejectedUnsub = null;
+
+  syntheticSchemaDriftUnsub?.();
+  syntheticSchemaDriftUnsub = null;
+}
+
 /** Commit an agent list into the store + settle the selected-agent fallback.
  *  Shared by `initialize()` and the `provider-runtime://ready` listener so
  *  they produce identical post-conditions. See GH #1587. */
@@ -483,6 +513,7 @@ function subscribeToProviderRuntimeRestarted(): void {
       console.info(
         "[AgentStore] provider-runtime://restarted — invalidating serving pointers",
       );
+      const restartGeneration = sessionResetGeneration;
       const snapshot = Object.entries(state.sessions).map(([id, s]) => ({
         id,
         conversationId: s.conversationId,
@@ -503,6 +534,7 @@ function subscribeToProviderRuntimeRestarted(): void {
         const ts = state.threadStates[snap.conversationId];
         if (!ts?.turnInFlight || !ts.lastPromptText) continue;
         void (async () => {
+          if (restartGeneration !== sessionResetGeneration) return;
           agentStore.armRestartTimer(
             snap.conversationId,
             BUDGET_CRASH_MS,
@@ -517,6 +549,17 @@ function subscribeToProviderRuntimeRestarted(): void {
               initialModelId: snap.currentModelId,
             },
           );
+          if (restartGeneration !== sessionResetGeneration) {
+            if (newId) {
+              await providerService.terminateSession(newId).catch((error) => {
+                console.warn(
+                  "[AgentStore] Failed to terminate stale restart session:",
+                  error,
+                );
+              });
+            }
+            return;
+          }
           if (!newId) {
             agentStore.setTurnError(snap.conversationId, "crash_ceiling");
             return;
@@ -1409,6 +1452,7 @@ function clearToolEventBuf(sessionId: string): void {
 }
 
 function disposeAgentStoreRuntimeBindings(): void {
+  disposeAgentStoreSideChannelListeners();
   if (globalUnsubscribe) {
     globalUnsubscribe();
     globalUnsubscribe = null;
@@ -5236,6 +5280,35 @@ Structured summary:`;
     }
     // Also clear global error for backwards compatibility
     setState("error", null);
+  },
+
+  resetSessionState() {
+    sessionResetGeneration += 1;
+    disposeAgentStoreRuntimeBindings();
+    spawningConversations.clear();
+    expectedTerminateSessionIds.clear();
+    restartTimers.forEach((timer) => clearTimeout(timer));
+    restartTimers.clear();
+    spawnFailureTimestamps.clear();
+    setState({
+      availableAgents: state.availableAgents,
+      sessions: {},
+      threadStates: {},
+      activeSessionId: null,
+      selectedAgentType: state.selectedAgentType,
+      recentAgentConversations: [],
+      remoteSessions: [],
+      remoteSessionsNextCursor: null,
+      remoteSessionsLoading: false,
+      remoteSessionsError: null,
+      isLoading: false,
+      error: null,
+      installStatus: null,
+      cliScanRejection: null,
+      pendingPermissions: [],
+      pendingDiffProposals: [],
+      agentModeEnabled: false,
+    });
   },
 
   // ============================================================================

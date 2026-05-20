@@ -167,6 +167,17 @@ function clearCompletedRequests(): void {
 }
 
 /**
+ * Clear all in-memory MCP chat approval state for the current user session.
+ */
+function resetMcpChatState(): void {
+  requestIdCounter = 0;
+  setMcpChatState({
+    pendingRequests: [],
+    completedRequests: [],
+  });
+}
+
+/**
  * Check if there are any pending approvals.
  */
 function hasPendingApprovals(): boolean {
@@ -216,4 +227,5 @@ export {
   getPendingRequests,
   hasPendingApprovals,
   mcpChatState,
+  resetMcpChatState,
 };

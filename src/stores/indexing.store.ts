@@ -154,6 +154,8 @@ export const indexingStore = {
       currentFile: null,
       estimatedTokens: 0,
       error: null,
+      stats: null,
+      hasIndex: false,
     });
   },
 

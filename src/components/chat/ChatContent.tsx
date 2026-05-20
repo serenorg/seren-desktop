@@ -1083,9 +1083,9 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
             </p>
           </div>
           <SignIn
-            onSuccess={() => {
+            onSuccess={async () => {
+              await checkAuth();
               setShowSignInPrompt(false);
-              checkAuth();
             }}
           />
           <button

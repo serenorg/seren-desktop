@@ -475,6 +475,19 @@ export const chatStore = {
     setState("pendingInput", input);
   },
 
+  resetSessionState() {
+    setState({
+      conversations: [],
+      activeConversationId: null,
+      messages: {},
+      isLoading: false,
+      error: null,
+      retryingMessageId: null,
+      isCompacting: false,
+      pendingInput: null,
+    });
+  },
+
   // ============================================================================
   // Persistence
   // ============================================================================

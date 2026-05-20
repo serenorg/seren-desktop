@@ -8,7 +8,7 @@ import { login } from "@/services/auth";
 type LoginPhase = "credentials" | "signing-in" | "completing";
 
 interface SignInProps {
-  onSuccess: () => void;
+  onSuccess: () => Promise<void> | void;
 }
 
 export const SignIn: Component<SignInProps> = (props) => {
@@ -45,7 +45,12 @@ export const SignIn: Component<SignInProps> = (props) => {
 
     // Phase 2: Complete
     setPhase("completing");
-    props.onSuccess();
+    try {
+      await props.onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign-in setup failed");
+      setPhase("credentials");
+    }
   };
 
   const getButtonText = () => {

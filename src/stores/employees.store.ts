@@ -31,6 +31,8 @@ const [state, setState] = createStore<EmployeesState>({
   lastLoadedAt: null,
 });
 
+let resetGeneration = 0;
+
 const ORDER_KEY = "seren:employeeOrder";
 
 function loadOrder(): string[] {
@@ -136,6 +138,7 @@ export const employeeStore = {
 
   async refresh(options?: { background?: boolean }): Promise<void> {
     const background = options?.background === true;
+    const generation = resetGeneration;
     if (!background) {
       setState("loading", true);
       setState("error", null);
@@ -148,6 +151,10 @@ export const employeeStore = {
         svc.list(),
         employeesArchiveStore.list(),
       ]);
+
+      if (generation !== resetGeneration) {
+        return;
+      }
 
       if (listResult.status === "rejected") {
         const err = listResult.reason;
@@ -192,10 +199,23 @@ export const employeeStore = {
         persistOrder(ordered.map((row) => row.id));
       }
     } finally {
-      if (!background) {
+      if (!background && generation === resetGeneration) {
         setState("loading", false);
       }
     }
+  },
+
+  clear(): void {
+    resetGeneration += 1;
+    setState({
+      employees: [],
+      archived: [],
+      details: {},
+      loading: false,
+      error: null,
+      detailErrors: {},
+      lastLoadedAt: null,
+    });
   },
 
   async loadArchived(): Promise<void> {
@@ -225,8 +245,14 @@ export const employeeStore = {
   },
 
   async loadDetail(id: string): Promise<EmployeeDetail | null> {
+    // Same guard as `refresh()`: a detail fetch in flight at logout must
+    // not repopulate `details`/`employees`/`detailErrors` after `clear()`
+    // has wiped them, or the next sign-in inherits stale rows from the
+    // previous session.
+    const generation = resetGeneration;
     try {
       const detail = await svc.get(id);
+      if (generation !== resetGeneration) return null;
       setState("details", id, detail);
       setState("employees", (rows) =>
         rows.map((row) => (row.id === id ? { ...row, ...detail } : row)),
@@ -239,6 +265,7 @@ export const employeeStore = {
       });
       return detail;
     } catch (err) {
+      if (generation !== resetGeneration) return null;
       const message = err instanceof Error ? err.message : String(err);
       setState("detailErrors", id, message);
       return null;

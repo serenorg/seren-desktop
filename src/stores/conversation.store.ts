@@ -555,6 +555,20 @@ export const conversationStore = {
     setState("error", error);
   },
 
+  resetSessionState() {
+    setState({
+      conversations: [],
+      activeConversationId: null,
+      messages: {},
+      loading: {},
+      rlmProcessing: {},
+      error: null,
+      streamingContent: {},
+      streamingThinking: {},
+      streamingStalled: {},
+    });
+  },
+
   // === Persistence ===
 
   async persistMessage(
