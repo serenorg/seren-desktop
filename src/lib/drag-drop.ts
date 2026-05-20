@@ -40,6 +40,16 @@ function bindDocumentListeners(): void {
   documentListenersBound = true;
   const [, setIsDragging] = isDraggingSignal;
 
+  const clearDragState = () => {
+    dragEnterDepth = 0;
+    setIsDragging(false);
+  };
+
+  const handleDropCapture = (event: DragEvent) => {
+    if (!dataTransferHasFiles(event.dataTransfer)) return;
+    clearDragState();
+  };
+
   document.addEventListener("dragenter", (event) => {
     if (!dataTransferHasFiles(event.dataTransfer)) return;
     dragEnterDepth += 1;
@@ -63,14 +73,17 @@ function bindDocumentListeners(): void {
   document.addEventListener("drop", (event) => {
     if (!dataTransferHasFiles(event.dataTransfer)) return;
     event.preventDefault();
-    dragEnterDepth = 0;
-    setIsDragging(false);
+    clearDragState();
     const files = Array.from(event.dataTransfer?.files ?? []).filter((file) =>
       ALL_EXTENSIONS.includes(getExtension(file.name)),
     );
     if (files.length === 0) return;
     for (const subscriber of dropSubscribers) subscriber(files);
   });
+
+  document.addEventListener("drop", handleDropCapture, true);
+  document.addEventListener("dragend", clearDragState, true);
+  window.addEventListener("blur", clearDragState);
 }
 
 /**
