@@ -2,7 +2,8 @@
 // ABOUTME: Renders whenever the active session exposes a reasoning_effort select config option (Codex, Claude Code).
 
 import type { Component } from "solid-js";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
+import { FloatingSelectorMenu } from "@/components/chat/FloatingSelectorMenu";
 import { type ActiveSession, agentStore } from "@/stores/agent.store";
 
 interface Props {
@@ -24,20 +25,6 @@ export const AgentEffortSelector: Component<Props> = (props) => {
     const current = opt.options.find((v) => v.value === opt.currentValue);
     return current?.name ?? opt.currentValue;
   };
-
-  const handleClickOutside = (event: MouseEvent) => {
-    if (dropdownRef && !dropdownRef.contains(event.target as Node)) {
-      setIsOpen(false);
-    }
-  };
-
-  onMount(() => {
-    document.addEventListener("mousedown", handleClickOutside);
-  });
-
-  onCleanup(() => {
-    document.removeEventListener("mousedown", handleClickOutside);
-  });
 
   const selectValue = (valueId: string) => {
     agentStore.setConfigOption(
@@ -92,43 +79,46 @@ export const AgentEffortSelector: Component<Props> = (props) => {
           </svg>
         </button>
 
-        <Show when={isOpen()}>
-          <div class="absolute bottom-full left-0 mb-1 w-56 bg-surface-0 border border-surface-3 rounded-lg shadow-lg z-50 overflow-hidden">
-            <div class="px-3 py-2 border-b border-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              Reasoning Effort
-            </div>
-            <For each={option()?.options ?? []}>
-              {(opt) => (
-                <button
-                  type="button"
-                  class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 ${
-                    opt.value === option()?.currentValue ? "bg-surface-2" : ""
-                  }`}
-                  onClick={() => selectValue(opt.value)}
-                >
-                  <div class="flex items-center justify-between">
-                    <span class="text-sm text-foreground">{opt.name}</span>
-                    <Show when={opt.value === option()?.currentValue}>
-                      <svg
-                        class="w-4 h-4 text-green-500"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                        role="img"
-                        aria-label="Selected"
-                      >
-                        <path
-                          fill-rule="evenodd"
-                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                          clip-rule="evenodd"
-                        />
-                      </svg>
-                    </Show>
-                  </div>
-                </button>
-              )}
-            </For>
+        <FloatingSelectorMenu
+          open={isOpen()}
+          anchor={() => dropdownRef}
+          onRequestClose={() => setIsOpen(false)}
+          class="w-56"
+        >
+          <div class="px-3 py-2 border-b border-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+            Reasoning Effort
           </div>
-        </Show>
+          <For each={option()?.options ?? []}>
+            {(opt) => (
+              <button
+                type="button"
+                class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 ${
+                  opt.value === option()?.currentValue ? "bg-surface-2" : ""
+                }`}
+                onClick={() => selectValue(opt.value)}
+              >
+                <div class="flex items-center justify-between">
+                  <span class="text-sm text-foreground">{opt.name}</span>
+                  <Show when={opt.value === option()?.currentValue}>
+                    <svg
+                      class="w-4 h-4 text-green-500"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                      role="img"
+                      aria-label="Selected"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </Show>
+                </div>
+              </button>
+            )}
+          </For>
+        </FloatingSelectorMenu>
       </div>
     </Show>
   );
