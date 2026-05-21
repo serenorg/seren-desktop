@@ -70,16 +70,16 @@ BROWSER_TYPE=moz-firefox node dist/index.js
 
 ### Profile Compatibility Controls
 
-The default profile is Privy-compatible: headed launch, the safe stealth plugin
-for Chromium-based browsers, `iframe.contentWindow` and
-`navigator.permissions` evasions disabled, and the manual page init patch off.
-This supports embedded-wallet provisioning flows while preserving the remaining
-Chromium stealth evasions. Set only the controls needed when a workflow needs
-the older full-stealth/headless profile or a custom profile:
+The default profile launches headless with the safe stealth plugin for
+Chromium-based browsers, `iframe.contentWindow` and `navigator.permissions`
+evasions disabled, and the manual page init patch off. The disabled evasions
+and the init-patch-off default keep embedded-wallet provisioning flows like
+Privy working when a caller opts into a headed launch. Set only the controls
+needed when a workflow needs a headed launch or a custom stealth profile:
 
 ```bash
-# Opt back into headless mode.
-SEREN_PLAYWRIGHT_HEADLESS=1 node dist/index.js
+# Opt into a headed launch (required for embedded-wallet flows like Privy/Prophet).
+SEREN_PLAYWRIGHT_HEADLESS=0 node dist/index.js
 
 # Skip the puppeteer-extra stealth plugin entirely.
 SEREN_PLAYWRIGHT_DISABLE_STEALTH=1 node dist/index.js
