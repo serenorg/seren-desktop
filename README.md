@@ -1,21 +1,18 @@
 # Seren Desktop
 
-Seren is an AI workspace for knowledge workers. Install skills, connect your accounts, and let agents handle repeatable work while you stay in control.
+Seren is an AI workspace for knowledge workers and engineers. Chat with top models, install skills, create reusable employees, and join open bounties. Connect your accounts and let agents handle repeatable work while you stay in control.
 
-[![CI](https://github.com/serenorg/seren-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/serenorg/seren-desktop/actions/workflows/ci.yml)
+![Seren Desktop screenshot](https://github.com/user-attachments/assets/dd9858b7-363e-4fad-a0c0-460963917e4b)
+
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/seren)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/serenorg/seren-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/serenorg/seren-desktop/actions/workflows/ci.yml)
 
 ---
 
 ## Download
 
-Get the latest release for your platform from the [Releases page](https://github.com/serenorg/seren-desktop/releases):
-
-- **macOS** — `.dmg` (Apple Silicon & Intel)
-- **Windows** — `.msi` / `.exe`
-- **Linux** — `.deb` / `.AppImage`
-
-Updates install automatically from within the app.
+Get the latest desktop build from the [Releases page](https://github.com/serenorg/seren-desktop/releases).
 
 ---
 
@@ -23,34 +20,62 @@ Updates install automatically from within the app.
 
 Seren is built for people who spend their day making decisions, not stitching together five different tools.
 
-- **Traders and investors** — run automated strategies, monitor markets, and move faster on research
-- **Analysts, operators, and finance teams** — automate reporting, reconciliation, intake, and back-office workflows
-- **Job seekers and independent professionals** — automate a full pipeline: company discovery, contact research, personalized outreach, and application tracking
-- **Finance and tax filers** — process bank statements, reconcile transactions, and prepare crypto and traditional tax filings
-- **Knowledge workers** — keep chat, files, notes, automations, and approvals in one place
+- **Traders and investors** - run automated strategies, monitor markets, and move faster on research
+- **Analysts, operators, and finance teams** - automate reporting, reconciliation, intake, and back-office workflows
+- **Job seekers and independent professionals** - automate a full pipeline: company discovery, contact research, personalized outreach, and application tracking
+- **Finance and tax filers** - process bank statements, reconcile transactions, and prepare crypto and traditional tax filings
+- **Developers and engineers** - use Codex, Claude Code, or Gemini, open terminals, and work across project files
 
 ---
 
 ## What you can do
 
-### Install AI skills for real workflows
+### Install skills for real workflows
 
-Install a skill and let an AI agent handle the work — 24/7, within the limits you set. Agents connect to your accounts, execute your strategy, and report back. You stay in control.
+Install a skill and let Seren handle the work, within the limits you set. Skills connect to your accounts, do the work, and report back. You stay in control.
 
-Under the hood, skills can call hosted publishers and services on demand, so the same workspace can mix trading actions, research tools, notes, databases, and scheduled automations.
+Under the hood, skills can call hosted publishers and services on demand, so the same workspace can mix trading actions, research tools, notes, databases, and workflow automation.
 
-- **For traders and investors** — Crypto grid trading and smart DCA on Coinbase or Kraken, stock strategies through Alpaca, delta-neutral hedged shorts, DeFi yield workflows, and Polymarket prediction market automation
-- **For job seekers** — Full-pipeline job search automation: pull your resume and LinkedIn, discover 50 target companies via AlphaGrowth, research the top 20 with Perplexity and Exa, surface 100 hiring manager contacts via Apollo, generate personalized outreach, and automate parts of the application flow when the required integrations are available.
-- **For finance and tax filers** — Wells Fargo statement processing with LLM-assisted transaction categorization, crypto tax reconciliation (CARF / Form 8949), recurring transaction tracking, and cash flow reporting
-- **For borrowers and deal-makers** — Loan qualification, commercial mortgage introductions, institutional deal workflows, and grant intake
-- **For research and business work** — Apollo prospecting, browser automation, AI governance assessments, and other publisher-backed tasks
-- **Built into Seren Desktop** — Browse and launch all of these workflows from the built-in skill catalog
+- **For traders and investors** - Crypto grid trading and DCA on Coinbase or Kraken, stock strategies on Alpaca, delta-neutral hedges, DeFi yield, and Polymarket prediction markets
+- **For job seekers** - Full-pipeline automation: company discovery via AlphaGrowth, research with Perplexity and Exa, contact lookup through Apollo, and personalized outreach
+- **For finance and tax filers** - Wells Fargo statement processing, crypto tax reconciliation (CARF / Form 8949), recurring transaction tracking, and cash flow reports
+- **For borrowers and deal-makers** - Loan qualification, commercial mortgage intros, institutional deal workflows, and grant intake
+- **For research and business work** - Apollo prospecting, browser automation, AI governance assessments, and other publisher-backed tasks
+- **Built into Seren Desktop** - Browse and launch all of these from the built-in skill catalog
 
 Browse the full catalog at [serendb.com/skills](https://serendb.com/skills) or [github.com/serenorg/seren-skills](https://github.com/serenorg/seren-skills).
 
+### Create employees
+
+Define a cloud employee once - with its own identity, instructions, skills, and tools - then launch it from the sidebar whenever you need that role. Each employee keeps a consistent operating style and memory across sessions, so recurring roles stay recognizable instead of being rebuilt from scratch.
+
+- Build custom employees for research, writing, operations, finance, support, security, or product work
+- Import employee bundles with files like `SKILL.md`, `IDENTITY.md`, `SOUL.md`, and supporting resources
+- Keep each employee's instructions and tools together so demos, handoffs, and recurring workflows are easy to reproduce
+- Run employees in Seren Cloud for longer-running work that should continue outside the desktop app
+
+### Join bounties
+
+Browse open bounties from the sidebar, review the reward pool and tiers, and join with one click. Seren creates a thread with the matching skill attached and the bounty command pre-filled - review, edit, and submit when you're ready. Earnings accrue as your work meets the bounty's verification criteria.
+
+- Browse active bounties with reward pools, customer details, and recent activity
+- Start a bounty thread with the matching skill attached and the starter command pre-filled
+- Bounty threads inherit your current chat or agent provider, so they fit into how you already work
+- Keep bounty conversations alongside the rest of your projects, employees, and skills
+
+### Work with native agents
+
+Use Codex, Claude Code, or Gemini directly inside Seren and switch providers mid-task without losing the conversation. Open a project, drop files into a thread, edit them in the built-in editor, and review diffs before they land.
+
+- Use Codex, Claude Code, or Gemini in the same workspace
+- Run terminal-based Codex or Claude Code for a CLI-feel session inside the app
+- Open a plain terminal alongside your threads for shell work and one-off commands
+- Edit files in the built-in editor while a thread is running
+- Switch the provider on any thread in place - keep the conversation, change the model
+
 ### Research faster with top AI models
 
-Ask questions, get analysis, draft notes, briefs, and reports, or talk through a strategy — using Claude, GPT, or Gemini from a single app. Seren picks the right model for your question, or you choose.
+Ask questions, get analysis, draft notes, briefs, and reports, or talk through a strategy - using Claude, GPT, or Gemini from a single app. Seren picks the right model for your question, or you choose.
 
 - Let Seren route to the right model, or choose one yourself
 - Work on multiple conversations simultaneously in separate tabs
@@ -69,35 +94,45 @@ Seren keeps track of important context across sessions so you don't have to re-e
 
 Link Seren to the services and platforms your agents need to operate.
 
-- **Exchanges, brokerages, and banks** — Coinbase, Kraken, Alpaca, Wells Fargo, and more
-- **Seren services** — SerenCloud for cloud agent hosting, SerenNotes for hosted notes and optional memory sync, SerenCron for scheduled jobs, SerenEmbed for vector embeddings, SerenCouncil for multi-model consensus, SerenWhisper for speech-to-text, and SerenSwarm for multi-agent coordination
-- **External tools and data sources** — Apollo, Perplexity, Exa, AlphaGrowth, Firecrawl, broker/data integrations, and other specialist capabilities
-- **Browser automation** — Playwright-based automation for web workflows that need form filling, scraping, or step-by-step interaction
-- **Messaging and alerts** — Slack, Discord, Telegram, or Signal for notifications and operator workflows
-- **Catalog + MCP tools** — Browse and activate from the built-in catalog with one click
+- **Exchanges, brokerages, and banks** - Coinbase, Kraken, Alpaca, Wells Fargo, and more
+- **Seren services**
+  - Seren Cloud - hosted employee runtime
+  - Seren Bounty - open bounty marketplace
+  - Seren Skills - skill catalog
+  - Seren Models - top public models, including frontier and open
+  - Seren Private Models - private model inference in a secure environment
+  - Seren DB - managed Postgres
+  - Seren Notes - hosted notes and optional memory sync
+  - Seren Cron - scheduled jobs
+  - Seren Embed - vector embeddings
+  - Seren Council - multi-model consensus
+  - Seren Whisper - speech-to-text
+- **External tools and data sources** - Apollo, Perplexity, Exa, AlphaGrowth, Firecrawl, broker/data integrations, and other specialist capabilities
+- **Browser automation** - Playwright-based automation for web workflows that need form filling, scraping, or step-by-step interaction
+- **Messaging and alerts** - Slack, Discord, Telegram, or Signal for notifications and operator workflows
+- **Catalog + MCP tools** - Browse and activate from the built-in catalog with one click
 
 ### Work with files in the same app
 
 Open the files you are already using without leaving the app. Ask AI to summarize, explain, or extract what matters from any open file.
 
 - Open PDFs, images, markdown, text, and code side by side
-- AI-assisted editing — highlight text and ask AI to rewrite, summarize, or improve it
+- AI-assisted editing - highlight text and ask AI to rewrite, summarize, or improve it
 - Save useful outputs to notes and reusable memory
 
 ### Launch agents into the cloud
 
-Seren is designed to launch agents that keep working when your laptop is closed. Run a skill as a hosted workflow, or create a custom agent from a prompt and let Seren handle the cloud runtime.
+Run any skill, employee, or custom prompt as a hosted workflow that keeps working when your laptop is closed. Status and outputs stream back to Seren Desktop while the work runs in the cloud.
 
-- Turn a trading skill into an always-on bot that can place trades or notify you when a signal appears
-- Launch scheduled or long-running agents for monitoring, reporting, intake, and follow-up workflows
-- Create prompt-based custom agents for market briefs, research monitors, ops routing, and other repeatable tasks
-- Track task status and outputs from Seren Desktop while the work runs in Seren Cloud
+- Always-on trading bots, scheduled monitors, intake pipelines, and other long-running workflows
+- Custom agents from a prompt for market briefs, research, or recurring ops tasks
+- Track status, cost, and outputs from the desktop while work runs in the cloud
 
 ### Security and control
 
-- All credentials stored with OS-level encryption — never in plain text
+- All credentials stored with OS-level encryption - never in plain text
 - All connections made over HTTPS
-- Agents operate within the limits and permissions you define — no surprises
+- Agents operate within the limits and permissions you define - no surprises
 - Option to connect directly to AI providers using your own API keys
 
 ### Pay as you go
@@ -113,15 +148,11 @@ No subscription required. Use SerenBucks credits to pay only for what you use.
 
 Seren Desktop is the **open source workspace**. Around it are three product layers:
 
-- **Desktop app** — your local workspace for chat, files, notes, approvals, and task tracking
-- **Skills, publishers, and Seren Cloud** — installable workflows from the skills catalog plus hosted agents and services for trading, browser work, research, notes, and other tasks
-- **Seren Gateway and SerenDB** — authentication, model routing, billing, wallet funding, optional memory sync, hosted notes, integrations, and the database layer behind persistent projects and structured workflows
+- **Desktop app** - your local workspace for chat, files, notes, approvals, and task tracking
+- **Skills, publishers, and hosted runtime** - installable workflows from the catalog, hosted agents that can keep running in the background, and the publishers (services and data sources) that back them
+- **Gateway and data services** - authentication, model routing, billing, hosted notes with optional memory sync, and the database layer behind persistent projects
 
-Think of it as one workspace connected to a marketplace of skills, publishers, and cloud services.
-
-In Seren, a publisher is a service or data source your agent can call when needed. That can mean a broker integration, a note store, a cron service, a consensus service, an embedding pipeline, or a database-backed workflow.
-
-Most day-to-day workspace state stays local. Some features use Seren services when you sign in, sync memories, save notes, fund your wallet, or call hosted tools.
+A **publisher** is anything a skill can call when it needs to do something - a broker integration, a note store, a cron service, an embedding pipeline, or a database-backed workflow. Most day-to-day workspace state stays local; Seren services are only involved when you sign in, save notes, sync memories, fund your wallet, or call a hosted tool.
 
 ---
 
