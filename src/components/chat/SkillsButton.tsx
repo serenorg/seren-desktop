@@ -106,7 +106,7 @@ export const SkillsButton: Component<SkillsButtonProps> = (props) => {
           <button
             type="button"
             aria-label={`Recall /${recent().slug} into the composer`}
-            title={`Recall /${recent().slug} into the composer (Enter to send)`}
+            title={`Recall /${recent().slug} into the composer`}
             class="flex items-center gap-2 pl-3 pr-2.5 py-1.5 bg-transparent border-none cursor-pointer text-sm text-foreground transition-colors hover:bg-surface-2/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
             onClick={(event) => {
               event.preventDefault();

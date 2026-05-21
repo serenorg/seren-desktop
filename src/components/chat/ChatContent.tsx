@@ -442,7 +442,9 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   // once on empty content and never again as worker responses fill in the HTML.
   createEffect(() => {
     void conversationMessages();
+    void conversationIsLoading();
     void streamingContent();
+    void streamingThinking();
     void Object.keys(htmlCache).length;
     requestAnimationFrame(scrollToBottom);
   });
@@ -1755,9 +1757,6 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                     }}
                   />
                 </Show>
-                <Show when={conversationIsLoading()}>
-                  <ThinkingStatus />
-                </Show>
                 <Show when={messageQueue().length > 0}>
                   <span class="flex items-center gap-2 px-2 py-1 bg-surface-2 border border-border rounded text-xs text-muted-foreground">
                     {messageQueue().length} message
@@ -1769,18 +1768,6 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                     >
                       Clear
                     </button>
-                  </span>
-                </Show>
-                <Show
-                  when={
-                    !conversationIsLoading() &&
-                    conversationMessages().length > 0
-                  }
-                >
-                  <span class="text-[10px] text-muted-foreground">
-                    {settingsStore.get("chatEnterToSend")
-                      ? "Enter to send"
-                      : "Ctrl+Enter"}
                   </span>
                 </Show>
               </div>

@@ -401,9 +401,9 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
   }
 
   return (
-    <div class="relative" ref={containerRef}>
+    <div class="relative min-w-0" ref={containerRef}>
       <button
-        class="flex items-center gap-2 px-3 py-1.5 bg-popover border border-muted rounded-md text-sm text-foreground cursor-pointer transition-colors hover:border-muted-foreground/40"
+        class="flex h-[38px] max-w-[170px] min-w-[136px] items-center gap-2 px-3 py-1.5 bg-popover border border-muted rounded-md text-sm text-foreground cursor-pointer transition-colors hover:border-muted-foreground/40"
         onClick={() => {
           const opening = !isOpen();
           setIsOpen(opening);
@@ -419,10 +419,13 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
         }}
       >
         <ProviderIcon provider={currentProvider()} size={14} />
-        <span class={committedAutoModel() ? "text-success" : "text-foreground"}>
+        <span
+          class={`min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left ${committedAutoModel() ? "text-success" : "text-foreground"}`}
+          title={currentModel()?.name || "Select model"}
+        >
           {currentModel()?.name || "Select model"}
         </span>
-        <span class="text-[10px] text-muted-foreground">
+        <span class="text-[10px] text-muted-foreground flex-none">
           {isOpen() ? "▲" : "▼"}
         </span>
       </button>
