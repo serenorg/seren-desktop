@@ -358,7 +358,7 @@ describe("launchBrowserWithFallback", () => {
       "chrome",
       "chromium",
       expect.objectContaining({
-        headless: false,
+        headless: true,
         executablePath:
           "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       }),
@@ -368,7 +368,7 @@ describe("launchBrowserWithFallback", () => {
       "moz-firefox",
       "firefox",
       expect.objectContaining({
-        headless: false,
+        headless: true,
         executablePath: "/Applications/Firefox.app/Contents/MacOS/firefox",
       }),
     );
@@ -399,6 +399,35 @@ describe("launchBrowserWithFallback", () => {
       "chromium",
       expect.objectContaining({
         headless: true,
+      }),
+    );
+  });
+
+  it("launches headed when SEREN_PLAYWRIGHT_HEADLESS is 0", async () => {
+    process.env.SEREN_PLAYWRIGHT_HEADLESS = "0";
+    const launchedBrowser = { close: vi.fn() } as never;
+    const launchBrowser = vi.fn().mockResolvedValueOnce(launchedBrowser);
+
+    await launchBrowserWithFallback(
+      "chrome",
+      [
+        {
+          name: "chrome",
+          browserName: "chromium",
+          executablePath:
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          isChromiumBased: true,
+          stealthSupported: true,
+        },
+      ],
+      launchBrowser as never,
+    );
+
+    expect(launchBrowser).toHaveBeenCalledWith(
+      "chrome",
+      "chromium",
+      expect.objectContaining({
+        headless: false,
       }),
     );
   });

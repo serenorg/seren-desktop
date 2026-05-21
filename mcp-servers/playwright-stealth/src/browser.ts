@@ -509,7 +509,7 @@ export function createSafeStealthPlugin(
 export function shouldLaunchHeadless(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return env[PLAYWRIGHT_HEADLESS_ENV] === "1";
+  return env[PLAYWRIGHT_HEADLESS_ENV] !== "0";
 }
 
 export function shouldApplyStealthPlugin(
