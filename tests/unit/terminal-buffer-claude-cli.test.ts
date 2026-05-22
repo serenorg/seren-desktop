@@ -30,6 +30,24 @@ describe("TerminalBuffer — Claude Code CLI billing pill (#2004)", () => {
   });
 });
 
+describe("App entry — JetBrains Mono webfont actually loads (#2010)", () => {
+  it("imports @fontsource/jetbrains-mono in src/index.tsx so the canvas font stack resolves", () => {
+    // The themed Claude Code CLI terminal (#2004) names "JetBrains Mono"
+    // as the first family in both `--font-mono` (styles.css:121) and the
+    // canvas `CELL_FONT_FAMILY` (TerminalBuffer.tsx:123). Without a real
+    // @font-face registration the browser silently falls through to SF
+    // Mono / Menlo and the signature typography never reaches the user,
+    // which is what made the post-#2007 theme still read as "the old
+    // theme". The npm package vendors the woff2 files + @font-face CSS;
+    // importing it at the app entry registers the font before first
+    // paint. Drop this import and the bug returns silently.
+    const indexTsx = readFileSync(resolve("src/index.tsx"), "utf-8");
+    expect(indexTsx).toMatch(
+      /import\s+["']@fontsource\/jetbrains-mono(?:\/[\w\-./]+)?["']/,
+    );
+  });
+});
+
 describe("TerminalBuffer — remaining #2004 scope items (#2006)", () => {
   it("declares a sky-400 cursor color constant for claude threads", () => {
     // Plain Terminal threads keep #d7dde8 (COLOR_CURSOR). Claude threads
