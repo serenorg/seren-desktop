@@ -1,10 +1,12 @@
 // ABOUTME: Trust graduation and satisfaction-driven model ranking.
 // ABOUTME: Thompson sampling selects models based on user feedback with cost weighting.
 
+use super::eval::CommunityPrior;
 use rand::{Rng, RngExt};
 use rand_distr::Beta;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Minimum number of signals before trust can be evaluated.
 const MIN_SIGNALS: u32 = 5;
@@ -87,6 +89,9 @@ const DECAY_HALF_LIFE_MS: f64 = 30.0 * 24.0 * 60.0 * 60.0 * 1000.0;
 /// Only query signals from the last 180 days.
 const SIGNAL_CUTOFF_MS: i64 = 180 * 24 * 60 * 60 * 1000;
 
+/// Community priors reach full confidence at 50 aggregate observations.
+const COMMUNITY_PRIOR_FULL_CONFIDENCE_SAMPLE_SIZE: f64 = 50.0;
+
 /// Model ranking produced by Thompson sampling.
 #[derive(Debug, Clone)]
 pub struct ModelRanking {
@@ -103,8 +108,8 @@ struct SignalRow {
 }
 
 /// Accumulated weighted stats for a single model.
-#[derive(Default)]
-struct ModelStats {
+#[derive(Clone, Default)]
+pub(crate) struct ModelStats {
     weighted_positive: f64,
     weighted_negative: f64,
     cost_sum: f64,
@@ -136,9 +141,54 @@ pub fn get_model_rankings<R: Rng>(
         .unwrap_or_default()
         .as_millis() as i64;
 
+    let stats = load_model_stats_at(conn, task_type, available_models, now);
+    sample_model_rankings(rng, available_models, &stats, None, cost_weight)
+}
+
+/// Compute Thompson sampling rankings with best-effort community priors.
+pub fn get_model_rankings_with_community_priors<R: Rng>(
+    conn: &Connection,
+    rng: &mut R,
+    task_type: &str,
+    available_models: &[String],
+    community_priors: &HashMap<String, CommunityPrior>,
+    cost_weight: f64,
+) -> Vec<ModelRanking> {
+    if available_models.is_empty() {
+        return vec![];
+    }
+
+    let stats = load_model_stats(conn, task_type, available_models);
+    sample_model_rankings(
+        rng,
+        available_models,
+        &stats,
+        Some(community_priors),
+        cost_weight,
+    )
+}
+
+/// Load time-decayed local stats from SQLite for the ranking sampler.
+pub(crate) fn load_model_stats(
+    conn: &Connection,
+    task_type: &str,
+    available_models: &[String],
+) -> HashMap<String, ModelStats> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    load_model_stats_at(conn, task_type, available_models, now)
+}
+
+fn load_model_stats_at(
+    conn: &Connection,
+    task_type: &str,
+    available_models: &[String],
+    now: i64,
+) -> HashMap<String, ModelStats> {
     let rows = query_signals(conn, task_type, available_models, now);
-    let stats = accumulate_stats(&rows, now);
-    sample_and_rank(rng, available_models, &stats, cost_weight)
+    accumulate_stats(&rows, now)
 }
 
 /// Query eval_signals for the given task_type and models within the cutoff window.
@@ -197,8 +247,8 @@ fn query_signals(
 }
 
 /// Accumulate time-decayed weighted stats per model from raw signal rows.
-fn accumulate_stats(rows: &[SignalRow], now: i64) -> std::collections::HashMap<String, ModelStats> {
-    let mut stats: std::collections::HashMap<String, ModelStats> = std::collections::HashMap::new();
+fn accumulate_stats(rows: &[SignalRow], now: i64) -> HashMap<String, ModelStats> {
+    let mut stats: HashMap<String, ModelStats> = HashMap::new();
 
     for row in rows {
         let age_ms = (now - row.created_at).max(0) as f64;
@@ -220,11 +270,30 @@ fn accumulate_stats(rows: &[SignalRow], now: i64) -> std::collections::HashMap<S
     stats
 }
 
+/// Blend a local Beta posterior with a confidence-weighted community posterior.
+pub fn blend_community_prior(
+    local_alpha: f64,
+    local_beta: f64,
+    community: &CommunityPrior,
+    confidence: f64,
+) -> (f64, f64) {
+    let confidence = confidence.clamp(0.0, 1.0);
+    (
+        local_alpha + confidence * community.alpha,
+        local_beta + confidence * community.beta,
+    )
+}
+
+fn community_prior_confidence(prior: &CommunityPrior) -> f64 {
+    (prior.sample_size as f64 / COMMUNITY_PRIOR_FULL_CONFIDENCE_SAMPLE_SIZE).min(1.0)
+}
+
 /// Sample from Beta distributions and apply cost penalty to produce final rankings.
-fn sample_and_rank<R: Rng>(
+pub(crate) fn sample_model_rankings<R: Rng>(
     rng: &mut R,
     available_models: &[String],
-    stats: &std::collections::HashMap<String, ModelStats>,
+    stats: &HashMap<String, ModelStats>,
+    community_priors: Option<&HashMap<String, CommunityPrior>>,
     cost_weight: f64,
 ) -> Vec<ModelRanking> {
     // Compute max average cost across all models (for normalization)
@@ -242,10 +311,22 @@ fn sample_and_rank<R: Rng>(
     let mut rankings: Vec<ModelRanking> = available_models
         .iter()
         .map(|model_id| {
-            let (alpha, beta_param) = match stats.get(model_id) {
+            let (local_alpha, local_beta) = match stats.get(model_id) {
                 Some(s) => (s.weighted_positive + 1.0, s.weighted_negative + 1.0),
                 None => (1.0, 1.0), // Uniform prior for unseen models
             };
+            let (alpha, beta_param) = community_priors
+                .and_then(|priors| priors.get(model_id))
+                .filter(|prior| prior.is_valid())
+                .map(|prior| {
+                    blend_community_prior(
+                        local_alpha,
+                        local_beta,
+                        prior,
+                        community_prior_confidence(prior),
+                    )
+                })
+                .unwrap_or((local_alpha, local_beta));
 
             let sample = match Beta::new(alpha, beta_param) {
                 Ok(dist) => rng.sample(dist),
@@ -295,8 +376,10 @@ fn model_cost_tier(model_id: &str) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestrator::eval::CommunityPrior;
     use crate::services::database::setup_schema;
     use rand::SeedableRng;
+    use std::collections::HashMap;
 
     fn setup_test_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -359,6 +442,14 @@ mod tests {
 
     fn seeded_rng() -> rand::rngs::StdRng {
         rand::rngs::StdRng::seed_from_u64(42)
+    }
+
+    fn prior(alpha: f64, beta: f64, sample_size: u64) -> CommunityPrior {
+        CommunityPrior {
+            alpha,
+            beta,
+            sample_size,
+        }
     }
 
     #[test]
@@ -655,6 +746,123 @@ mod tests {
             cheap_first >= 18,
             "model-cheap should rank first most of the time, but only did {cheap_first}/30"
         );
+    }
+
+    #[test]
+    fn blend_community_prior_zero_confidence_is_local_only() {
+        let community = prior(20.0, 5.0, 25);
+
+        let blended = blend_community_prior(3.0, 2.0, &community, 0.0);
+
+        assert_eq!(blended, (3.0, 2.0));
+    }
+
+    #[test]
+    fn blend_community_prior_equal_to_full_local_doubles_alpha_beta() {
+        let community = prior(3.0, 2.0, 50);
+
+        let blended = blend_community_prior(3.0, 2.0, &community, 1.0);
+
+        assert_eq!(blended, (6.0, 4.0));
+    }
+
+    #[test]
+    fn blend_community_prior_shifts_ranking_under_sparse_local_signals() {
+        let conn = setup_test_db();
+        let now = now_ms();
+
+        insert_eval_signal_at(
+            &conn,
+            "local-positive",
+            "general_chat",
+            "model-local-favorite",
+            1,
+            None,
+            now,
+        );
+        insert_eval_signal_at(
+            &conn,
+            "community-negative",
+            "general_chat",
+            "model-community-favorite",
+            0,
+            None,
+            now,
+        );
+
+        let models = vec![
+            "model-local-favorite".to_string(),
+            "model-community-favorite".to_string(),
+        ];
+        let mut community_priors = HashMap::new();
+        community_priors.insert(
+            "model-community-favorite".to_string(),
+            prior(1000.0, 1.0, 50),
+        );
+
+        let mut local_first_without_prior = 0;
+        let mut community_first_with_prior = 0;
+
+        for seed in 0..20 {
+            let mut local_rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let local_rankings =
+                get_model_rankings(&conn, &mut local_rng, "general_chat", &models, 0.0);
+            if local_rankings[0].model_id == "model-local-favorite" {
+                local_first_without_prior += 1;
+            }
+
+            let mut blended_rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let blended_rankings = get_model_rankings_with_community_priors(
+                &conn,
+                &mut blended_rng,
+                "general_chat",
+                &models,
+                &community_priors,
+                0.0,
+            );
+            if blended_rankings[0].model_id == "model-community-favorite" {
+                community_first_with_prior += 1;
+            }
+        }
+
+        assert!(
+            local_first_without_prior >= 14,
+            "sparse local signal should favor model-local-favorite before blending, got {local_first_without_prior}/20"
+        );
+        assert!(
+            community_first_with_prior >= 19,
+            "community prior should shift sparse ranking, got {community_first_with_prior}/20"
+        );
+    }
+
+    #[test]
+    fn get_model_rankings_with_community_prior_fetch_failure_falls_back_to_local() {
+        let conn = setup_test_db();
+        let now = now_ms();
+
+        insert_eval_signal_at(&conn, "good", "general_chat", "model-good", 1, None, now);
+        insert_eval_signal_at(&conn, "bad", "general_chat", "model-bad", 0, None, now);
+
+        let models = vec!["model-good".to_string(), "model-bad".to_string()];
+
+        let mut local_rng = seeded_rng();
+        let local = get_model_rankings(&conn, &mut local_rng, "general_chat", &models, 0.0);
+
+        let mut fallback_rng = seeded_rng();
+        let fallback = get_model_rankings_with_community_priors(
+            &conn,
+            &mut fallback_rng,
+            "general_chat",
+            &models,
+            &HashMap::new(),
+            0.0,
+        );
+
+        assert_eq!(fallback.len(), local.len());
+        for (fallback, local) in fallback.iter().zip(local.iter()) {
+            assert_eq!(fallback.model_id, local.model_id);
+            assert_eq!(fallback.score, local.score);
+        }
     }
 
     #[test]
