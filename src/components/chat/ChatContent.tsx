@@ -285,7 +285,17 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     }
   });
 
-  // Save/restore per-thread input drafts when switching conversations
+  // Save/restore per-thread input drafts when switching conversations.
+  // Two paths cover all the ways a thread can change:
+  //   1) In-instance transition: conversationId() flips while ChatContent
+  //      stays mounted (e.g. an internal route change). Handled by the
+  //      createEffect below.
+  //   2) Cross-mount transition (#1996): the pane wrapper in
+  //      ThreadContent.tsx keys on `thread:${threadId}`, so binding a new
+  //      thread to the pane unmounts this component before conversationId
+  //      can transition. The onCleanup captures the current draft on the
+  //      way out so the next mount can restore it from the module-scoped
+  //      `chatDrafts` Map.
   createEffect(() => {
     const currentId = conversationId();
     if (currentId !== prevConversationId) {
@@ -301,6 +311,17 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       // Restore draft for the thread we're entering (or clear)
       setInput(currentId ? (chatDrafts.get(currentId) ?? "") : "");
       prevConversationId = currentId;
+    }
+  });
+
+  onCleanup(() => {
+    const id = prevConversationId;
+    if (!id) return;
+    const currentInput = input();
+    if (currentInput) {
+      chatDrafts.set(id, currentInput);
+    } else {
+      chatDrafts.delete(id);
     }
   });
 
