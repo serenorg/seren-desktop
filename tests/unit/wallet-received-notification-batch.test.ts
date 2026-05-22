@@ -35,6 +35,10 @@ describe("wallet received-transfer notification batches", () => {
     walletMocks.markWalletNotificationRead.mockResolvedValue(undefined);
     resetWalletState();
 
+    // Pin the clock inside the 24h notify window for the fixture timestamps below.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-05-20T22:33:00Z"));
+
     class MockNotification {
       static permission = "granted";
       static requestPermission = vi.fn();
@@ -54,6 +58,7 @@ describe("wallet received-transfer notification batches", () => {
   afterEach(() => {
     resetWalletState();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("notifies unread received transfers oldest-first and marks each read", async () => {
