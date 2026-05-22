@@ -1,8 +1,9 @@
 // ABOUTME: Eval signal service for collecting satisfaction feedback.
 // ABOUTME: Queues feature vectors for batch sync to the Gateway API.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +30,119 @@ pub struct EvalSignal {
 }
 
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
+
+/// Aggregate Beta posterior for a (task_type, model_id) pair.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CommunityPrior {
+    pub alpha: f64,
+    pub beta: f64,
+    pub sample_size: u64,
+}
+
+impl CommunityPrior {
+    pub(crate) fn is_valid(&self) -> bool {
+        self.alpha.is_finite() && self.beta.is_finite() && self.alpha > 0.0 && self.beta > 0.0
+    }
+}
+
+/// Fetch the aggregate community prior for one (task_type, model_id) pair.
+///
+/// This is best-effort by design: any timeout, network failure, non-success
+/// response, or malformed payload returns `None` so routing can continue with
+/// the local posterior only.
+pub async fn fetch_community_prior(
+    auth_token: &str,
+    task_type: &str,
+    model_id: &str,
+    timeout: Duration,
+) -> Option<CommunityPrior> {
+    let client = reqwest::Client::new();
+    fetch_community_prior_with_client(&client, auth_token, task_type, model_id, timeout).await
+}
+
+/// Fetch community priors for a candidate model set in parallel.
+pub async fn fetch_community_priors(
+    auth_token: &str,
+    task_type: &str,
+    model_ids: &[String],
+    timeout: Duration,
+) -> HashMap<String, CommunityPrior> {
+    let futures = model_ids.iter().cloned().map(|model_id| {
+        let token = auth_token.to_string();
+        let task_type = task_type.to_string();
+        async move {
+            fetch_community_prior(&token, &task_type, &model_id, timeout)
+                .await
+                .map(|prior| (model_id, prior))
+        }
+    });
+
+    futures::future::join_all(futures)
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+async fn fetch_community_prior_with_client(
+    client: &reqwest::Client,
+    auth_token: &str,
+    task_type: &str,
+    model_id: &str,
+    timeout: Duration,
+) -> Option<CommunityPrior> {
+    let request = async {
+        let url = format!(
+            "{}/eval/community-prior?task_type={}&model_id={}",
+            GATEWAY_BASE_URL,
+            urlencoding::encode(task_type),
+            urlencoding::encode(model_id)
+        );
+        let response = client.get(url).bearer_auth(auth_token).send().await.ok()?;
+
+        if response.status() == reqwest::StatusCode::NO_CONTENT
+            || response.status() == reqwest::StatusCode::NOT_FOUND
+        {
+            return None;
+        }
+
+        if !response.status().is_success() {
+            log::debug!(
+                "[eval] Community prior fetch returned {} for task_type={} model_id={}",
+                response.status(),
+                task_type,
+                model_id
+            );
+            return None;
+        }
+
+        let value = response.json::<serde_json::Value>().await.ok()?;
+        parse_community_prior(value).filter(CommunityPrior::is_valid)
+    };
+
+    match tokio::time::timeout(timeout, request).await {
+        Ok(prior) => prior,
+        Err(_) => {
+            log::debug!(
+                "[eval] Community prior fetch timed out for task_type={} model_id={}",
+                task_type,
+                model_id
+            );
+            None
+        }
+    }
+}
+
+fn parse_community_prior(value: serde_json::Value) -> Option<CommunityPrior> {
+    serde_json::from_value::<CommunityPrior>(value.clone())
+        .ok()
+        .or_else(|| {
+            value
+                .get("data")
+                .cloned()
+                .and_then(|data| serde_json::from_value::<CommunityPrior>(data).ok())
+        })
+}
 
 /// Managed state for the eval signal queue.
 pub struct EvalState {

@@ -5,6 +5,7 @@ use log;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, mpsc, watch};
 use uuid::Uuid;
@@ -25,6 +26,8 @@ use super::types::{
     TransitionEvent, UserCapabilities, WorkerEvent, WorkerType,
 };
 use super::worker::Worker;
+
+const COMMUNITY_PRIOR_TIMEOUT_MS: u64 = 200;
 
 // =============================================================================
 // Orchestrator State
@@ -99,6 +102,88 @@ fn get_fallback_model(current_model: &str) -> Option<&str> {
         // Haiku has no faster fallback
         _ => None,
     }
+}
+
+async fn get_rankings_for_task(
+    app: &AppHandle,
+    task_type: &str,
+    available_models: &[String],
+    cost_weight: f64,
+) -> Vec<trust::ModelRanking> {
+    if available_models.is_empty() {
+        return vec![];
+    }
+
+    let app_for_db = app.clone();
+    let task_type_for_db = task_type.to_string();
+    let models_for_db = available_models.to_vec();
+    let models_for_fetch = available_models.to_vec();
+    let task_type_for_fetch = task_type.to_string();
+
+    let local_stats = tauri::async_runtime::spawn_blocking(move || {
+        let conn = crate::services::database::init_db(&app_for_db).ok()?;
+        Some(trust::load_model_stats(
+            &conn,
+            &task_type_for_db,
+            &models_for_db,
+        ))
+    });
+
+    let community_priors =
+        fetch_community_priors_for_rankings(app.clone(), task_type_for_fetch, models_for_fetch);
+    let (stats_result, community_priors) = tokio::join!(local_stats, community_priors);
+    let stats = match stats_result {
+        Ok(Some(stats)) => stats,
+        _ => return vec![],
+    };
+
+    if !community_priors.is_empty() {
+        log::debug!(
+            "[Orchestrator] Applying {} community prior(s) for task_type={}",
+            community_priors.len(),
+            task_type
+        );
+    }
+
+    let mut rng = rand::rng();
+    let community_priors = if community_priors.is_empty() {
+        None
+    } else {
+        Some(&community_priors)
+    };
+    trust::sample_model_rankings(
+        &mut rng,
+        available_models,
+        &stats,
+        community_priors,
+        cost_weight,
+    )
+}
+
+async fn fetch_community_priors_for_rankings(
+    app: AppHandle,
+    task_type: String,
+    available_models: Vec<String>,
+) -> HashMap<String, super::eval::CommunityPrior> {
+    let token = match crate::auth::get_access_token(&app) {
+        Ok(token) => token,
+        Err(err) => {
+            log::debug!(
+                "[Orchestrator] Skipping community prior fetch for task_type={}: {}",
+                task_type,
+                err
+            );
+            return HashMap::new();
+        }
+    };
+
+    super::eval::fetch_community_priors(
+        &token,
+        &task_type,
+        &available_models,
+        Duration::from_millis(COMMUNITY_PRIOR_TIMEOUT_MS),
+    )
+    .await
 }
 
 // =============================================================================
@@ -288,28 +373,13 @@ async fn execute_single_task(
 ) -> Result<(), String> {
     // Compute Thompson sampling rankings before routing
     let mut capabilities = capabilities.clone();
-    let app_for_db = app.clone();
-    let task_type_for_db = subtask.classification.task_type.clone();
-    let available_models = capabilities.available_models.clone();
-
-    let (rankings, _) = tauri::async_runtime::spawn_blocking(move || {
-        match crate::services::database::init_db(&app_for_db) {
-            Ok(conn) => {
-                let mut rng = rand::rng();
-                let rankings = trust::get_model_rankings(
-                    &conn,
-                    &mut rng,
-                    &task_type_for_db,
-                    &available_models,
-                    0.1,
-                );
-                (rankings, true)
-            }
-            Err(_) => (vec![], false),
-        }
-    })
-    .await
-    .unwrap_or((vec![], false));
+    let rankings = get_rankings_for_task(
+        app,
+        &subtask.classification.task_type,
+        &capabilities.available_models,
+        0.1,
+    )
+    .await;
 
     capabilities.model_rankings = rankings
         .iter()
@@ -915,27 +985,13 @@ async fn execute_multi_task(
         for subtask in layer {
             // Compute rankings for this subtask's task_type
             let mut subtask_caps = capabilities.clone();
-            let app_for_rank = app.clone();
-            let task_type_for_rank = subtask.classification.task_type.clone();
-            let models_for_rank = subtask_caps.available_models.clone();
-
-            let rankings = tauri::async_runtime::spawn_blocking(move || {
-                match crate::services::database::init_db(&app_for_rank) {
-                    Ok(conn) => {
-                        let mut rng = rand::rng();
-                        trust::get_model_rankings(
-                            &conn,
-                            &mut rng,
-                            &task_type_for_rank,
-                            &models_for_rank,
-                            0.1,
-                        )
-                    }
-                    Err(_) => vec![],
-                }
-            })
-            .await
-            .unwrap_or_default();
+            let rankings = get_rankings_for_task(
+                app,
+                &subtask.classification.task_type,
+                &subtask_caps.available_models,
+                0.1,
+            )
+            .await;
 
             subtask_caps.model_rankings = rankings
                 .iter()
