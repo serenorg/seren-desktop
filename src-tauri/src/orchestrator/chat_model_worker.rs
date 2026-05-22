@@ -799,8 +799,20 @@ created if missing.",
                 accumulated_cost: cost,
             }
         } else {
+            // Empty assistant turns destroy cross-turn context (#1812, #2002).
+            // When the stream stopped because the model hit its output cap
+            // (finish_reason="length") without producing any content, backfill
+            // a recap so the user sees what happened and the next turn has
+            // usable history. Same recap shape as the MAX_TOOL_ROUNDS path.
+            let final_content = if content.is_empty()
+                && finish_reason.as_deref() == Some("length")
+            {
+                "(No response — model hit its output length cap. Try /compact or shortening the request and ask me to continue.)".to_string()
+            } else {
+                content
+            };
             StreamOutcome::Complete {
-                final_content: content,
+                final_content,
                 thinking: if thinking.is_empty() {
                     None
                 } else {
@@ -2686,6 +2698,41 @@ mod tests {
         match outcome {
             StreamOutcome::Complete { .. } => {}
             _ => panic!("Expected Complete outcome when no pending tool calls"),
+        }
+    }
+
+    #[test]
+    fn build_stream_outcome_backfills_empty_content_when_finish_reason_length() {
+        // Regression for #2002: a stream that finishes with finish_reason="length"
+        // and no content or tool calls used to emit Complete { final_content: "" },
+        // producing a blank assistant turn. The next user message arrived with no
+        // record of the truncation, so the model self-gaslit into denying it had
+        // done any work. Backfill final_content so the user sees what happened.
+        let outcome = ChatModelWorker::build_stream_outcome(
+            &Some("length".to_string()),
+            HashMap::new(),
+            String::new(),
+            String::new(),
+            0.405,
+        );
+        match outcome {
+            StreamOutcome::Complete {
+                final_content,
+                cost,
+                ..
+            } => {
+                assert!(
+                    !final_content.is_empty(),
+                    "Empty final_content on finish_reason=length destroys cross-turn context"
+                );
+                let lowered = final_content.to_lowercase();
+                assert!(
+                    lowered.contains("length") || lowered.contains("output"),
+                    "User-facing recap should explain the model hit its output cap, got: {final_content}"
+                );
+                assert_eq!(cost, 0.405);
+            }
+            other => panic!("Expected Complete outcome with explanatory recap, got: {:?}", other),
         }
     }
 
