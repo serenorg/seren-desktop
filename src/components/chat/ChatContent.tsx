@@ -876,6 +876,13 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       return;
     }
 
+    // Set loading synchronously before any await. orchestrate() also sets
+    // this, but only after we yield on persistMessage — a window wide
+    // enough for a fast user submission to slip past `conversationIsLoading()`
+    // in sendMessage() and start a parallel dispatch concurrent with the
+    // in-flight or about-to-fire drain (#1997).
+    conversationStore.setLoading(true, id);
+
     const userMessage: UnifiedMessage = {
       id: crypto.randomUUID(),
       type: "user",
@@ -915,24 +922,28 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       settingsStore.get("autoCompactPreserveMessages"),
     );
 
-    // Process message queue if there are queued messages.
-    // Capture the conversation ID to ensure the drain targets the same
-    // conversation even if the user switched threads during orchestration.
+    // Drain the next queued message strictly serially. We await the
+    // recursive call (instead of fire-and-forget setTimeout) so each next
+    // message can only start after the current orchestrate fully completes —
+    // no overlapping turns, no loading=false gap between drains, and no
+    // chance for a fast user submission to slip past `conversationIsLoading()`
+    // and start a parallel dispatch (#1997).
+    //
+    // Capture the conversation ID so the drain targets the same conversation
+    // even if the user switched threads during orchestration.
     const drainConversationId = id;
     const queue = messageQueue();
     if (queue.length > 0) {
       const [nextMessage, ...remainingQueue] = queue;
       setMessageQueue(remainingQueue);
       console.log("[ChatContent] Processing queued message:", nextMessage);
-      setTimeout(() => {
-        if (conversationId() === drainConversationId) {
-          sendMessageImmediate(nextMessage);
-        } else {
-          console.warn(
-            "[ChatContent] Skipping queued message — conversation changed",
-          );
-        }
-      }, 100);
+      if (conversationId() === drainConversationId) {
+        await sendMessageImmediate(nextMessage);
+      } else {
+        console.warn(
+          "[ChatContent] Skipping queued message — conversation changed",
+        );
+      }
     }
   };
 
