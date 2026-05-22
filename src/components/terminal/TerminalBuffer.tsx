@@ -126,6 +126,12 @@ const COLOR_BG = "#090b0f";
 const COLOR_FG = "#d7dde8";
 const COLOR_CURSOR = "#d7dde8";
 const COLOR_CURSOR_FG = "#090b0f";
+// Claude-themed paint colors (#2006). Gated on `isClaudeCli()` so plain
+// Terminal threads keep their existing cursor/selection vocabulary.
+// Sky-400 ties the cursor + selection to the Subscription pill and the
+// ring/glow chrome rendered by the same gate.
+const COLOR_CURSOR_CLAUDE = "#38bdf8";
+const COLOR_CURSOR_FG_CLAUDE = "#090b0f";
 const DIM_ALPHA = 0.82;
 
 // Color packing matches src-tauri/src/terminal.rs:
@@ -257,6 +263,9 @@ interface SelectionRange {
 }
 
 const SELECTION_OVERLAY_FILL = "rgba(80, 130, 200, 0.4)";
+// Claude-themed selection overlay (#2006). Sky-400 alpha. Kept low so
+// selected glyphs stay readable on the dark canvas.
+const SELECTION_OVERLAY_FILL_CLAUDE = "rgba(56, 189, 248, 0.25)";
 
 /**
  * Normalize a SelectionRange so the returned [start, end] pair is in
@@ -411,6 +420,27 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
   let wheelAccumulator = 0;
 
   const buffer = createMemo(() => terminalStore.getBuffer(activeBufferId()));
+  // #2006 — trust signal used by paint code (cursor, selection, line-height)
+  // AND by the header/footer JSX. Mirrors the launcher entry at
+  // ThreadSidebar.tsx:702, which is locked by launcher-redesign.test.ts to
+  // spawn `claude` with no flags. Drift here silently loses every themed
+  // surface, so the file-string regression test in
+  // tests/unit/terminal-buffer-claude-cli.test.ts pins the predicate.
+  const isClaudeCli = () => buffer()?.command === "claude";
+  // #2006 — version pill copy. Fetches once via the cached terminalStore
+  // helper, only when the active thread is a Claude CLI thread. The pill
+  // renders behind <Show when={claudeCliVersion()}> so a null (probe
+  // failed, binary missing) gracefully omits the pill.
+  const [claudeCliVersion, setClaudeCliVersion] = createSignal<string | null>(
+    null,
+  );
+  createEffect(() => {
+    if (!isClaudeCli()) return;
+    if (claudeCliVersion()) return;
+    void terminalStore.getClaudeCliVersion().then((v) => {
+      if (v) setClaudeCliVersion(v);
+    });
+  });
 
   const pruneScrollbackCache = (base: number, len: number) => {
     const end = base + len;
@@ -1025,8 +1055,13 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     // that gives breathing room without looking double-spaced.
     const fbAscent = m.fontBoundingBoxAscent;
     const fbDescent = m.fontBoundingBoxDescent;
-    const h =
-      fbAscent !== undefined && fbDescent !== undefined
+    // #2006 — claude threads bump line-height to 1.6 for breathing room
+    // matching the rest of the app's typography. The fontBoundingBox path
+    // gives ~1.2-1.3, so override unconditionally for claude. Plain
+    // Terminal threads keep the 1.4 convention via font metrics or fallback.
+    const h = isClaudeCli()
+      ? Math.ceil(fontSize * 1.6)
+      : fbAscent !== undefined && fbDescent !== undefined
         ? Math.ceil(fbAscent + fbDescent)
         : Math.ceil(fontSize * 1.4);
     setCellW(w);
@@ -1384,7 +1419,13 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     // highlight blends with text but BEFORE the cursor block.
     if (sel) {
       const [start, end] = normalizeSelection(sel);
-      ctx.fillStyle = SELECTION_OVERLAY_FILL;
+      // #2006 — claude threads use sky-400 alpha to tie selection to the
+      // Subscription pill + ring/glow. Plain Terminal threads keep the
+      // muted blue. The createEffect at the bottom of the component tracks
+      // isClaudeCli so a thread switch triggers a full repaint.
+      ctx.fillStyle = isClaudeCli()
+        ? SELECTION_OVERLAY_FILL_CLAUDE
+        : SELECTION_OVERLAY_FILL;
       for (const r of rowsToPaint) {
         if (r < start.row || r > end.row || r >= g.rows) continue;
         const startCol = r === start.row ? start.col : 0;
@@ -1409,10 +1450,15 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       const cursorWidth = (cell?.width ?? 1) === 2 ? 2 * w : w;
       const cx = g.cursorCol * w;
       const cy = g.cursorRow * h;
-      ctx.fillStyle = COLOR_CURSOR;
+      // #2006 — claude threads use a sky-400 cursor; plain Terminal stays
+      // on the off-white default. Inverted-glyph foreground stays dark in
+      // both cases so the cell character reads against either fill.
+      ctx.fillStyle = isClaudeCli() ? COLOR_CURSOR_CLAUDE : COLOR_CURSOR;
       ctx.fillRect(cx, cy, cursorWidth, h);
       if (cell && cell.ch !== 0 && cell.width > 0) {
-        ctx.fillStyle = COLOR_CURSOR_FG;
+        ctx.fillStyle = isClaudeCli()
+          ? COLOR_CURSOR_FG_CLAUDE
+          : COLOR_CURSOR_FG;
         ctx.font = fontForAttrs(cell.attrs ?? 0, fontSize);
         ctx.fillText(String.fromCodePoint(cell.ch), cx, cy);
       }
@@ -1433,12 +1479,18 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     void cellW();
     void cellH();
     void terminalFontSize();
+    // #2006 — track isClaudeCli so cursor + selection repaint with the
+    // sky-400 vs default palette when the user switches thread types.
+    void isClaudeCli();
     needsFullRepaint = true;
     scheduleFrame();
   });
 
   createEffect(() => {
     void terminalFontSize();
+    // #2006 — track isClaudeCli so line-height (1.6 vs 1.4) recomputes when
+    // the user switches between a Claude CLI thread and a plain Terminal.
+    void isClaudeCli();
     measureCell();
     pushResize();
   });
@@ -1804,12 +1856,14 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
         }
       >
         {(current) => {
-          // Trust signal for the themed Claude Code CLI chrome (#2004).
+          // Trust signal for the themed Claude Code CLI chrome (#2004, #2006).
           // Mirrors the launcher entry at ThreadSidebar.tsx:702, which is
           // locked by launcher-redesign.test.ts to spawn `claude` with no
           // flags. Per Anthropic's June 15, 2026 split, interactive
           // `claude` in a terminal draws from the Pro/Max subscription
           // pool — the pill below makes that visible to the user.
+          // Mirrors the component-scoped `isClaudeCli` so paint code +
+          // header chrome share the exact same predicate.
           const isClaudeCli = () => current().command === "claude";
           return (
             <>
@@ -1832,6 +1886,16 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
                 </div>
                 <Show when={isClaudeCli()}>
                   <div class="flex items-center gap-2 shrink-0">
+                    <Show when={claudeCliVersion()}>
+                      {(version) => (
+                        <span
+                          data-testid="claude-cli-version-pill"
+                          class="text-[11px] font-mono tracking-tight text-secondary-foreground bg-surface-3 px-2 py-0.5 rounded-full border border-border"
+                        >
+                          {`claude ${version()}`}
+                        </span>
+                      )}
+                    </Show>
                     <span class="text-[11px] font-medium tracking-tight text-primary bg-primary-muted px-2.5 py-1 rounded-full border border-[color:rgba(56,189,248,0.22)]">
                       Subscription · Pro/Max
                     </span>
@@ -1854,6 +1918,19 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
                   "ring-1 ring-[color:var(--border-medium)] shadow-[var(--shadow-lg),var(--glow-primary)]":
                     isClaudeCli(),
                 }}
+                // #2006 — subtle sky-400 radial wash at the top of the
+                // claude CLI canvas. The wash sits on background-IMAGE so
+                // it composites over the existing background-color (the
+                // bg-[#090b0f] class), keeping the canvas readable while
+                // bonding the surface to the rest of the themed chrome.
+                style={
+                  isClaudeCli()
+                    ? {
+                        "background-image":
+                          "radial-gradient(ellipse at top, rgba(56, 189, 248, 0.08) 0%, transparent 60%)",
+                      }
+                    : undefined
+                }
                 role="application"
                 aria-label="Terminal"
                 data-workspace-default-focus={

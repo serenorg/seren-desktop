@@ -769,6 +769,7 @@ pub fn run() {
             terminal::terminal_grid_snapshot,
             terminal::terminal_grid_scrollback,
             terminal::terminal_signal,
+            terminal::terminal_claude_version,
             // Web fetch command
             commands::web::web_fetch,
             // Rust-backed Gateway API bridge

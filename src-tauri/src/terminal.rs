@@ -2630,6 +2630,33 @@ fn unix_millis() -> i64 {
         .as_millis() as i64
 }
 
+/// One-shot probe of `claude --version` for the header pill (#2006).
+///
+/// Runs the binary out-of-band from any PTY, parses the first whitespace
+/// token from stdout, returns `None` on any failure (binary missing,
+/// non-zero exit, parse miss). The header pill renders behind a
+/// `<Show when={claudeCliVersion()}>` so a `None` simply omits the pill —
+/// the Subscription pill and the rest of the themed chrome are unaffected.
+#[tauri::command]
+pub fn terminal_claude_version() -> Option<String> {
+    let output = std::process::Command::new("claude")
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    // `claude --version` prints e.g. "2.1.148 (Claude Code)". Strip to the
+    // first whitespace-delimited token so the pill stays compact.
+    let token = stdout.split_whitespace().next()?;
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
