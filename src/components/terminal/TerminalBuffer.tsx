@@ -1803,44 +1803,99 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
           </div>
         }
       >
-        {(current) => (
-          <>
-            <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-card">
-              <div class="flex-1 min-w-0">
-                <div class="text-[13px] font-medium text-foreground truncate">
-                  {current().title}
+        {(current) => {
+          // Trust signal for the themed Claude Code CLI chrome (#2004).
+          // Mirrors the launcher entry at ThreadSidebar.tsx:702, which is
+          // locked by launcher-redesign.test.ts to spawn `claude` with no
+          // flags. Per Anthropic's June 15, 2026 split, interactive
+          // `claude` in a terminal draws from the Pro/Max subscription
+          // pool — the pill below makes that visible to the user.
+          const isClaudeCli = () => current().command === "claude";
+          return (
+            <>
+              <div class="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-card">
+                <div class="flex-1 min-w-0 flex items-center gap-2.5">
+                  <Show when={isClaudeCli()}>
+                    <span
+                      aria-hidden="true"
+                      class="inline-block w-1.5 h-1.5 rounded-full bg-success shadow-[0_0_0_3px_rgba(52,211,153,0.12)]"
+                    />
+                  </Show>
+                  <div class="text-[13px] font-medium text-foreground truncate">
+                    {current().title}
+                  </div>
+                  <Show when={current().cwd}>
+                    <span class="text-[12px] font-mono text-secondary-foreground bg-surface-3 px-2 py-0.5 rounded border border-border truncate">
+                      {current().cwd}
+                    </span>
+                  </Show>
                 </div>
-                <div class="text-[11px] text-muted-foreground truncate">
-                  {current().cwd || "Current environment"} - {current().status}
-                </div>
+                <Show when={isClaudeCli()}>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <span class="text-[11px] font-medium tracking-tight text-primary bg-primary-muted px-2.5 py-1 rounded-full border border-[color:rgba(56,189,248,0.22)]">
+                      Subscription · Pro/Max
+                    </span>
+                  </div>
+                </Show>
               </div>
-            </div>
 
-            {/* Canvas surface. role="application" + tabIndex=0 lets the
-                div receive focus + keyboard events; the application role
-                tells screen readers this is a widget with its own
-                keyboard model (matches xterm.js, vscode terminal, etc.).
-                Focus on mousedown so users can type without Tab-ing in. */}
-            <div
-              ref={surfaceRef}
-              class="flex-1 min-h-0 overflow-hidden bg-[#090b0f] outline-none cursor-text"
-              role="application"
-              aria-label="Terminal"
-              data-workspace-default-focus={
-                current().status === "running" ? "true" : undefined
-              }
-              // biome-ignore lint/a11y/noNoninteractiveTabindex: terminal surfaces are interactive widgets that own their keyboard model (matches xterm.js, vscode terminal pattern)
-              tabIndex={0}
-              onKeyDown={(e) => void handleKeyDown(e)}
-              onPaste={(e) => void handlePaste(e)}
-              onMouseDown={onSurfaceMouseDown}
-              onMouseMove={onSurfaceMouseMoveTracking}
-              onWheel={onSurfaceWheel}
-            >
-              <canvas ref={canvasRef} class="block pointer-events-none" />
-            </div>
-          </>
-        )}
+              {/* Canvas surface. role="application" + tabIndex=0 lets the
+                  div receive focus + keyboard events; the application role
+                  tells screen readers this is a widget with its own
+                  keyboard model (matches xterm.js, vscode terminal, etc.).
+                  Focus on mousedown so users can type without Tab-ing in. */}
+              <div
+                ref={surfaceRef}
+                class="flex-1 min-h-0 overflow-hidden bg-[#090b0f] outline-none cursor-text"
+                classList={{
+                  // Themed frame: drop-shadow + sky-400 glow only on the
+                  // claude CLI surface so plain Terminal threads keep their
+                  // existing chrome.
+                  "ring-1 ring-[color:var(--border-medium)] shadow-[var(--shadow-lg),var(--glow-primary)]":
+                    isClaudeCli(),
+                }}
+                role="application"
+                aria-label="Terminal"
+                data-workspace-default-focus={
+                  current().status === "running" ? "true" : undefined
+                }
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: terminal surfaces are interactive widgets that own their keyboard model (matches xterm.js, vscode terminal pattern)
+                tabIndex={0}
+                onKeyDown={(e) => void handleKeyDown(e)}
+                onPaste={(e) => void handlePaste(e)}
+                onMouseDown={onSurfaceMouseDown}
+                onMouseMove={onSurfaceMouseMoveTracking}
+                onWheel={onSurfaceWheel}
+              >
+                <canvas ref={canvasRef} class="block pointer-events-none" />
+              </div>
+
+              <Show when={isClaudeCli()}>
+                <div class="flex items-center justify-end gap-3 px-4 py-2 text-[11px] text-muted-foreground border-t border-border bg-surface-0">
+                  <span>
+                    <kbd class="font-mono text-[10.5px] text-secondary-foreground bg-surface-3 border border-border rounded px-1.5 py-px">
+                      ⌃C
+                    </kbd>{" "}
+                    interrupt
+                  </span>
+                  <span>
+                    <kbd class="font-mono text-[10.5px] text-secondary-foreground bg-surface-3 border border-border rounded px-1.5 py-px">
+                      ⌃D
+                    </kbd>{" "}
+                    end session
+                  </span>
+                  <span>
+                    type{" "}
+                    <kbd class="font-mono text-[10.5px] text-secondary-foreground bg-surface-3 border border-border rounded px-1.5 py-px">
+                      /help
+                    </kbd>{" "}
+                    for slash commands
+                  </span>
+                </div>
+              </Show>
+            </>
+          );
+        }}
       </Show>
     </div>
   );
