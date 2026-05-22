@@ -181,4 +181,24 @@ export const terminalStore = {
     exitUnlisten = null;
     setState("initialized", false);
   },
+
+  /**
+   * One-shot probe of `claude --version` (#2006). Returns the version
+   * token shown by the binary (e.g. "2.1.148"), or null if the binary
+   * is unavailable / the output isn't parseable. Cached at module
+   * scope so the IPC round-trip happens at most once per session.
+   */
+  async getClaudeCliVersion(): Promise<string | null> {
+    if (cachedClaudeVersion !== UNSET) return cachedClaudeVersion;
+    try {
+      const version = await invoke<string | null>("terminal_claude_version");
+      cachedClaudeVersion = version ?? null;
+    } catch {
+      cachedClaudeVersion = null;
+    }
+    return cachedClaudeVersion;
+  },
 };
+
+const UNSET: unique symbol = Symbol("unset");
+let cachedClaudeVersion: string | null | typeof UNSET = UNSET;
