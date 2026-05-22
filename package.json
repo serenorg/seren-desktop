@@ -46,6 +46,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@monaco-editor/loader": "^1.7.0",
     "@playwright/mcp": "^0.0.75",
     "@tailwindcss/vite": "4",

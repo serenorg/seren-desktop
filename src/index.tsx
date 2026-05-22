@@ -1,4 +1,13 @@
 /* @refresh reload */
+// JetBrains Mono — register the four weight/style combinations the canvas
+// terminal cells render with (regular, italic, bold, bold-italic). Without
+// these, the `--font-mono` stack in styles.css falls through to SF Mono /
+// Menlo and the themed Claude Code CLI terminal silently loses its
+// signature typography (#2010).
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/400-italic.css";
+import "@fontsource/jetbrains-mono/700.css";
+import "@fontsource/jetbrains-mono/700-italic.css";
 import { QueryClientProvider } from "@tanstack/solid-query";
 import { render } from "solid-js/web";
 import { installExternalLinkInterceptor } from "@/lib/external-link";
