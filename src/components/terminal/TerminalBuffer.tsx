@@ -22,6 +22,7 @@ import {
 import { appearanceState } from "@/stores/appearance.store";
 import { terminalStore } from "@/stores/terminal.store";
 import { threadStore } from "@/stores/thread.store";
+import { encodeKeyEventToBytes } from "./keyEncoding";
 
 interface GridCell {
   ch: number;
@@ -1525,11 +1526,16 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
 
   /**
    * Translate a KeyboardEvent into the byte sequence the PTY expects
-   * and write it to the active buffer. Covers printable chars, Enter,
-   * Backspace, Tab, Esc, arrow keys (DECCKM-aware), Home/End/PageUp/
-   * PageDown/Delete, Ctrl+letter chords, and Ctrl+C via the signal
-   * API. Modifier-rich combinations (Shift+Arrow etc.) and the Kitty
-   * keyboard protocol are not yet handled.
+   * and write it to the active buffer. The pure encoding table lives
+   * in `./keyEncoding`; this handler only owns the two side-effecting
+   * branches the encoder can't express — the clipboard copy chord and
+   * the Ctrl+C SIGINT path — and the snapToBottom + write plumbing.
+   *
+   * Modifier+arrow combinations (Shift+Up, Ctrl+Up, etc.) still fall
+   * through to plain arrow encoding — the xterm modifyOtherKeys / CSI
+   * 1;mod sequences are not yet generated. Apps that key off
+   * modifier+arrow (tmux pane resize, some vim plugins) will see only
+   * the bare arrow.
    */
   const handleKeyDown = async (event: KeyboardEvent) => {
     const current = buffer();
@@ -1567,79 +1573,9 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       return;
     }
 
-    // Other Ctrl-letter chords map to control bytes 0x01-0x1A.
-    if (event.ctrlKey && k.length === 1 && /[a-zA-Z]/.test(k)) {
-      event.preventDefault();
-      snapToBottom();
-      const code = k.toUpperCase().charCodeAt(0) - 64;
-      await terminalStore.write(id, String.fromCharCode(code));
-      return;
-    }
-
-    // Arrow keys + Home/End honor DECSET 1 (DECCKM application cursor
-    // keys) when the backend has it on. vim sets DECCKM as part of
-    // its alt-screen entry; without this branch its cursor keys do
-    // nothing. PageUp/PageDown/Delete are xterm tilde sequences
-    // (`\x1b[5~`, `\x1b[6~`, `\x1b[3~`) and have no app-mode variants
-    // in standard xterm, so they stay constant below.
-    //
-    // Modifier+arrow (Shift+Up, Ctrl+Up, etc.) currently falls through
-    // to plain arrow encoding - the xterm modifyOtherKeys / CSI 1;mod
-    // sequences (e.g. `\x1b[1;5A` for Ctrl+Up) are not yet generated.
-    // Apps that key off modifier+arrow (tmux pane resize, some vim
-    // plugins) will see only the bare arrow.
-    const decckm = grid()?.cursorKeysApp ?? false;
-    const arrowPrefix = decckm ? "\x1bO" : "\x1b[";
-
-    let bytes: string | null = null;
-    switch (k) {
-      case "Enter":
-        bytes = "\r";
-        break;
-      case "Backspace":
-        bytes = "\x7f";
-        break;
-      case "Tab":
-        bytes = "\t";
-        break;
-      case "Escape":
-        bytes = "\x1b";
-        break;
-      case "ArrowUp":
-        bytes = `${arrowPrefix}A`;
-        break;
-      case "ArrowDown":
-        bytes = `${arrowPrefix}B`;
-        break;
-      case "ArrowRight":
-        bytes = `${arrowPrefix}C`;
-        break;
-      case "ArrowLeft":
-        bytes = `${arrowPrefix}D`;
-        break;
-      case "Home":
-        bytes = decckm ? "\x1bOH" : "\x1b[H";
-        break;
-      case "End":
-        bytes = decckm ? "\x1bOF" : "\x1b[F";
-        break;
-      case "PageUp":
-        bytes = "\x1b[5~";
-        break;
-      case "PageDown":
-        bytes = "\x1b[6~";
-        break;
-      case "Delete":
-        bytes = "\x1b[3~";
-        break;
-      default:
-        // Single printable character (may be multi-byte UTF-8 once
-        // serialized; terminal_write takes a string).
-        if (k.length === 1 && !event.metaKey && !event.altKey) {
-          bytes = k;
-        }
-        break;
-    }
+    const bytes = encodeKeyEventToBytes(event, {
+      cursorKeysApp: grid()?.cursorKeysApp ?? false,
+    });
     if (bytes !== null) {
       event.preventDefault();
       snapToBottom();
