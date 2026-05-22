@@ -1923,6 +1923,12 @@ pub fn terminal_create_buffer(
     }
     builder.env("TERM", "xterm-256color");
     builder.env("COLORTERM", "truecolor");
+    // GUI-launched Tauri processes inherit a PATH that's missing the
+    // CLI install dirs (`~/.local/bin`, `~/.claude/bin`, Homebrew),
+    // so a `claude` thread would print "Native installation exists
+    // but ~/.local/bin is not in your PATH". Hand the child the same
+    // augmented PATH provider workers get (#2008).
+    builder.env("PATH", augmented_path_for_terminal());
 
     let mut child = pair
         .slave
@@ -2586,6 +2592,22 @@ fn build_command(initial_command: Option<&str>) -> CommandBuilder {
     }
 }
 
+/// PATH for terminal child processes — the parent process PATH plus
+/// the CLI install dirs (`~/.claude/bin`, `~/.local/bin`, Homebrew,
+/// `%APPDATA%\npm`) a GUI-launched Tauri app typically misses.
+///
+/// Single source of truth for both the PTY spawn and the `claude
+/// --version` probe so a regression in one surface can't desync from
+/// the other.
+fn augmented_path_for_terminal() -> String {
+    #[cfg(target_os = "windows")]
+    let path_separator = ";";
+    #[cfg(not(target_os = "windows"))]
+    let path_separator = ":";
+    let current = env::var("PATH").unwrap_or_default();
+    crate::embedded_runtime::extend_path_with_common_bins(&current, path_separator)
+}
+
 fn default_shell() -> String {
     if cfg!(target_os = "windows") {
         env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string())
@@ -2640,6 +2662,7 @@ fn unix_millis() -> i64 {
 #[tauri::command]
 pub fn terminal_claude_version() -> Option<String> {
     let output = std::process::Command::new("claude")
+        .env("PATH", augmented_path_for_terminal())
         .arg("--version")
         .output()
         .ok()?;
@@ -2673,6 +2696,36 @@ mod tests {
     #[test]
     fn empty_cwd_is_none() {
         assert!(normalize_cwd(Some(" ".to_string())).unwrap().is_none());
+    }
+
+    /// Regression guard for #2008. Both the PTY spawn (so the in-PTY
+    /// `claude` CLI stops printing "Native installation exists but
+    /// ~/.local/bin is not in your PATH") and the `terminal_claude_version`
+    /// probe (so the header version pill from #2007 renders instead of
+    /// silently `None`-ing) rely on this helper to inject the common bin
+    /// directories a GUI-launched Tauri process is missing.
+    #[test]
+    fn augmented_path_for_terminal_includes_common_bins() {
+        let path = augmented_path_for_terminal();
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let home = std::env::var("HOME").expect("HOME must be set for this test");
+            let expected = format!("{}/.local/bin", home);
+            assert!(
+                path.split(':').any(|p| p == expected),
+                "expected {expected} to be in augmented PATH, got: {path}",
+            );
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let userprofile = std::env::var("USERPROFILE")
+                .expect("USERPROFILE must be set for this test");
+            let expected = format!(r"{}\.claude\bin", userprofile);
+            assert!(
+                path.split(';').any(|p| p == expected),
+                "expected {expected} to be in augmented PATH, got: {path}",
+            );
+        }
     }
 
     fn cell_at(snap: &GridSnapshot, row: u16, col: u16) -> char {

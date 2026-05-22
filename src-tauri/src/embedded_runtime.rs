@@ -348,7 +348,7 @@ pub fn configure_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
     paths
 }
 
-fn extend_path_with_common_bins(current_path: &str, path_separator: &str) -> String {
+pub(crate) fn extend_path_with_common_bins(current_path: &str, path_separator: &str) -> String {
     let mut entries: Vec<String> = current_path
         .split(path_separator)
         .filter(|p| !p.is_empty())
