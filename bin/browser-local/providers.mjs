@@ -104,6 +104,55 @@ function codexModes(session) {
   };
 }
 
+function getContextText(context) {
+  return Array.isArray(context)
+    ? context
+        .map((entry) => entry?.text)
+        .filter((value) => typeof value === "string" && value.length > 0)
+        .join("\n\n")
+    : "";
+}
+
+function toDataImageUrl(entry) {
+  if (!entry || entry.type !== "image") return null;
+  if (typeof entry.url === "string" && entry.url.length > 0) return entry.url;
+
+  const data = typeof entry.data === "string" ? entry.data : entry.base64;
+  const mimeType =
+    typeof entry.mimeType === "string" && entry.mimeType.length > 0
+      ? entry.mimeType
+      : typeof entry.mime_type === "string" && entry.mime_type.length > 0
+        ? entry.mime_type
+        : "image/png";
+
+  if (typeof data !== "string" || data.length === 0) return null;
+  if (data.startsWith("data:")) return data;
+  return `data:${mimeType};base64,${data}`;
+}
+
+export function buildCodexTurnInput(prompt, context) {
+  const contextText = getContextText(context);
+  const combinedPrompt = [contextText, prompt].filter(Boolean).join("\n\n");
+  const input = [];
+
+  if (combinedPrompt) {
+    input.push({
+      type: "text",
+      text: combinedPrompt,
+      text_elements: [],
+    });
+  }
+
+  if (Array.isArray(context)) {
+    for (const entry of context) {
+      const url = toDataImageUrl(entry);
+      if (url) input.push({ type: "image", url });
+    }
+  }
+
+  return input;
+}
+
 function buildInitializeParams() {
   return {
     clientInfo: {
@@ -1165,14 +1214,6 @@ export function createProviderHandlers({ emit }) {
       throw new Error("Another prompt is already active for this session.");
     }
 
-    const contextText = Array.isArray(context)
-      ? context
-          .map((entry) => entry?.text)
-          .filter((value) => typeof value === "string" && value.length > 0)
-          .join("\n\n")
-      : "";
-    const combinedPrompt = [contextText, prompt].filter(Boolean).join("\n\n");
-
     session.status = "prompting";
     session.latestTurnUsage = undefined;
     emit("provider://session-status", {
@@ -1194,13 +1235,7 @@ export function createProviderHandlers({ emit }) {
         "turn/start",
         {
           threadId: session.agentSessionId,
-          input: [
-            {
-              type: "text",
-              text: combinedPrompt,
-              text_elements: [],
-            },
-          ],
+          input: buildCodexTurnInput(prompt, context),
           ...(session.currentModelId ? { model: session.currentModelId } : {}),
           ...(session.reasoningEffort
             ? { effort: session.reasoningEffort }
