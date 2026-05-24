@@ -10,6 +10,7 @@ pub mod commands {
     pub mod chat;
     pub mod claude_memory;
     pub mod cli_installer;
+    pub mod context_intelligence;
     pub mod employees_archive;
     pub mod gateway_http;
     pub mod indexing;
@@ -23,6 +24,7 @@ pub mod commands {
 
 pub mod services {
     pub mod chunker;
+    pub mod context_intelligence;
     pub mod database;
     pub mod indexer;
     pub mod vector_store;
@@ -881,6 +883,10 @@ pub fn run() {
             commands::indexing::chunk_file,
             commands::indexing::estimate_indexing,
             commands::indexing::compute_file_hash,
+            // Local context-intelligence commands for agent-owned code inspection.
+            commands::context_intelligence::seren_index_source,
+            commands::context_intelligence::seren_index_file,
+            commands::context_intelligence::seren_batch_index_files,
             // Skills commands
             skills::get_default_project_dir,
             skills::get_seren_skill_authoring_dir,
