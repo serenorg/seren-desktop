@@ -836,32 +836,57 @@ mod tests {
     }
 
     #[test]
-    fn get_model_rankings_with_community_prior_fetch_failure_falls_back_to_local() {
-        let conn = setup_test_db();
-        let now = now_ms();
-
-        insert_eval_signal_at(&conn, "good", "general_chat", "model-good", 1, None, now);
-        insert_eval_signal_at(&conn, "bad", "general_chat", "model-bad", 0, None, now);
+    fn empty_community_priors_match_no_priors_in_sample_model_rankings() {
+        // The fallback contract: when the community-priors fetch returns no
+        // usable priors (network failure surfaced as `Some(empty_map)`, or the
+        // caller skips the fetch and passes `None`), the sampler must produce
+        // the same rankings as the local-only path given the same local stats
+        // and the same RNG state.
+        //
+        // The earlier shape of this test compared two top-level wrappers —
+        // `get_model_rankings` and `get_model_rankings_with_community_priors`
+        // — which each capture their own `SystemTime::now()` inside
+        // `load_model_stats[_at]`. The two `now` values drift by microseconds
+        // between calls; the resulting decay-weighted alpha/beta drift too,
+        // producing different Beta-distribution samples from otherwise
+        // identical seeded RNGs. That made the test flaky in CI (#2033).
+        //
+        // The fallback contract lives at the sampler, not at the wrappers, so
+        // assert it there with identical stats and identical seeded RNG state.
+        let mut stats: HashMap<String, ModelStats> = HashMap::new();
+        stats.insert(
+            "model-good".to_string(),
+            ModelStats {
+                weighted_positive: 3.0,
+                weighted_negative: 0.5,
+                cost_sum: 0.0,
+                cost_count: 0,
+            },
+        );
+        stats.insert(
+            "model-bad".to_string(),
+            ModelStats {
+                weighted_positive: 0.2,
+                weighted_negative: 4.0,
+                cost_sum: 0.0,
+                cost_count: 0,
+            },
+        );
 
         let models = vec!["model-good".to_string(), "model-bad".to_string()];
 
-        let mut local_rng = seeded_rng();
-        let local = get_model_rankings(&conn, &mut local_rng, "general_chat", &models, 0.0);
+        let mut none_rng = seeded_rng();
+        let with_none = sample_model_rankings(&mut none_rng, &models, &stats, None, 0.0);
 
-        let mut fallback_rng = seeded_rng();
-        let fallback = get_model_rankings_with_community_priors(
-            &conn,
-            &mut fallback_rng,
-            "general_chat",
-            &models,
-            &HashMap::new(),
-            0.0,
-        );
+        let empty_priors: HashMap<String, CommunityPrior> = HashMap::new();
+        let mut empty_rng = seeded_rng();
+        let with_empty =
+            sample_model_rankings(&mut empty_rng, &models, &stats, Some(&empty_priors), 0.0);
 
-        assert_eq!(fallback.len(), local.len());
-        for (fallback, local) in fallback.iter().zip(local.iter()) {
-            assert_eq!(fallback.model_id, local.model_id);
-            assert_eq!(fallback.score, local.score);
+        assert_eq!(with_empty.len(), with_none.len());
+        for (empty, none) in with_empty.iter().zip(with_none.iter()) {
+            assert_eq!(empty.model_id, none.model_id);
+            assert_eq!(empty.score, none.score);
         }
     }
 
