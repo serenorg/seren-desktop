@@ -74,6 +74,15 @@ const SESSION_READY_TIMEOUT_MS = 30_000;
 export const PREDICTIVE_COMPACT_THRESHOLD = 0.7;
 
 /**
+ * Reactive compaction's last-ditch preserve count. When the configured
+ * `autoCompactPreserveMessages` leaves nothing to summarize (short session,
+ * heavy per-message token cost), `compactAndRetry` retries with this count
+ * — keeping only the most recent user/assistant pair so the session
+ * actually shrinks below the model window. #2031.
+ */
+const AGGRESSIVE_RETRY_PRESERVE_COUNT = 2;
+
+/**
  * Global cap = 1 simultaneous predictive compaction across the whole app.
  * Prevents 3x Sonnet 4 calls and 3x Node subprocesses when multiple threads
  * cross the threshold in the same promptComplete tick. #1631.
@@ -4278,16 +4287,34 @@ Structured summary:`;
       // session. We trust that id and do the retry locally — splitting
       // dispatch across both functions, or re-deriving the id via a state
       // lookup, regressed for #1757.
-      const result = await this.compactAgentConversation(
+      let result = await this.compactAgentConversation(
         sessionId,
         settingsStore.settings.autoCompactPreserveMessages,
       );
 
-      // Propagate non-success outcomes directly. "skipped" means the message
-      // count was already under the preserve threshold (nothing to compact);
-      // "failed_catastrophic" means spawn or summary threw. Chat fallback is
-      // only correct for the latter; the former means a single prompt is too
-      // large and Chat would fail identically — show an error instead.
+      // Reactive compaction must recover from short-but-token-heavy sessions
+      // — a handful of tool turns can carry 200K+ tokens. When the configured
+      // preserve count leaves nothing to summarize, retry with a minimal
+      // preserve count (last user/assistant pair) so the session actually
+      // shrinks. Only give up when even that has nothing to act on. #2031.
+      if (result.outcome === "skipped_nothing_to_compact") {
+        const remaining = state.sessions[sessionId]?.messages.length ?? 0;
+        if (remaining > AGGRESSIVE_RETRY_PRESERVE_COUNT) {
+          console.info(
+            `[AgentStore] compactAndRetry: configured preserve count left nothing to compact (${remaining} messages); retrying with preserveCount=${AGGRESSIVE_RETRY_PRESERVE_COUNT}`,
+          );
+          result = await this.compactAgentConversation(
+            sessionId,
+            AGGRESSIVE_RETRY_PRESERVE_COUNT,
+          );
+        }
+      }
+
+      // Propagate non-success outcomes directly. "skipped" after the
+      // aggressive retry means the session is too small to compact at all
+      // (one or two messages) — Chat would fail identically, so caller
+      // surfaces an honest error. "failed_catastrophic" still routes to
+      // the Chat fallback.
       if (result.outcome !== "succeeded") {
         return result.outcome;
       }
@@ -5879,12 +5906,19 @@ Structured summary:`;
                   console.error("[AgentStore] Auto-failover failed:", err);
                 });
               } else if (outcome === "skipped_nothing_to_compact") {
+                // After #2031, this branch is only reached when the session
+                // has too few messages to compact even with the aggressive
+                // preserve count (1-2 messages). The prior banner blamed the
+                // user's last message specifically — accurate only when the
+                // session is genuinely a single huge prompt, but misleading
+                // when the user did not type a huge message. Speak to the
+                // session as a whole and tell them what will actually help.
                 console.warn(
-                  "[AgentStore] Compaction skipped (nothing to compact). Likely a single oversized prompt — surfacing error to user without Chat fallback.",
+                  "[AgentStore] Compaction skipped (nothing to compact). Session is too small to compact — surfacing error to user without Chat fallback.",
                 );
                 this.addErrorMessage(
                   sessionId,
-                  "Your last message is too large for this agent's context window. Try shortening it, attaching files instead of pasting content, or starting a new thread.",
+                  "This thread is too full for the model's context window and there is nothing left to compact. Start a new thread to continue.",
                 );
               }
               return outcome;
