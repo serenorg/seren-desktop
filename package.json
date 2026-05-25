@@ -70,7 +70,7 @@
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "4",
     "thirdweb": "^5.120.0",
-    "ws": "^8.20.1"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
