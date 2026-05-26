@@ -2,7 +2,7 @@
 // ABOUTME: Watches ~/.claude/projects/*/memory/ and INSERTs each file as a row in
 // ABOUTME: claude_agent_preferences. Storage is a separate SerenDB project from user memory.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -16,6 +16,11 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 const AUTH_STORE: &str = "auth.json";
+/// Sentinel comments wrapping the auto-rendered index inside `MEMORY.md`.
+/// Only content between these markers is replaced when SerenDB intercepts
+/// refresh the file; everything outside is hand-curated and must survive.
+const AUTO_INDEX_BEGIN: &str = "<!-- BEGIN AUTO-INDEX -->";
+const AUTO_INDEX_END: &str = "<!-- END AUTO-INDEX -->";
 /// The user's SerenDB API key. This is the credential for the SerenDB SQL
 /// data plane at `api.serendb.com/publishers/seren-db/query` — NOT the
 /// OAuth bearer token in `auth.json.token`, which is the Seren Desktop
@@ -439,55 +444,134 @@ pub fn build_select_preferences_sql(project_path: &str) -> String {
 // MEMORY.md rendering
 // ---------------------------------------------------------------------------
 
-/// Atomically write a rendered `MEMORY.md` (write tmp, then rename).
+/// Atomically refresh `MEMORY.md` so its auto-index reflects the latest
+/// SerenDB rows while preserving any hand-curated content the user wrote
+/// outside the marker block.
+///
+/// Behavior:
+/// - If `MEMORY.md` already contains `AUTO_INDEX_BEGIN`/`AUTO_INDEX_END`,
+///   only the bytes between them are replaced.
+/// - If the file exists without markers, a fresh auto-index block is
+///   appended (the existing content is preserved verbatim) — this keeps
+///   pre-existing curated indexes intact on first refresh.
+/// - If the file does not exist, a minimal MEMORY.md scaffold is written.
+///
+/// `auto_index_body` is the section-grouped bullet list produced by
+/// `render_preferences_as_markdown` — the markers and surrounding prose
+/// are added here, not by the renderer.
 pub fn write_rendered_memory_md(
     claude_project_dir: &Path,
-    rendered: &str,
+    auto_index_body: &str,
 ) -> Result<PathBuf, String> {
     fs::create_dir_all(claude_project_dir)
         .map_err(|e| format!("failed to create claude project dir: {e}"))?;
 
     let final_path = claude_project_dir.join(RENDERED_INDEX_FILENAME);
-    let tmp_path = claude_project_dir.join(format!("{RENDERED_INDEX_FILENAME}.tmp"));
+    let block = format!(
+        "{AUTO_INDEX_BEGIN}\n{}\n{AUTO_INDEX_END}",
+        auto_index_body.trim_matches('\n')
+    );
 
-    fs::write(&tmp_path, rendered).map_err(|e| format!("failed to write temp MEMORY.md: {e}"))?;
+    let merged = match fs::read_to_string(&final_path) {
+        Ok(existing) => merge_auto_index_block(&existing, &block),
+        Err(_) => format!("# Claude Memory\n\n{block}\n"),
+    };
+
+    let tmp_path = claude_project_dir.join(format!("{RENDERED_INDEX_FILENAME}.tmp"));
+    fs::write(&tmp_path, &merged)
+        .map_err(|e| format!("failed to write temp MEMORY.md: {e}"))?;
     fs::rename(&tmp_path, &final_path)
         .map_err(|e| format!("failed to finalize MEMORY.md: {e}"))?;
     Ok(final_path)
 }
 
-/// Render rows from `claude_agent_preferences` as a Markdown document Claude
-/// Code can read at session start.
+/// Splice `new_block` into `existing` at the auto-index markers, or append it
+/// if the markers are absent. Malformed marker pairs (only one present, or
+/// `END` before `BEGIN`) are treated as absent so the existing content is
+/// never silently truncated.
+fn merge_auto_index_block(existing: &str, new_block: &str) -> String {
+    if let Some(begin_idx) = existing.find(AUTO_INDEX_BEGIN) {
+        if let Some(end_rel) = existing[begin_idx..].find(AUTO_INDEX_END) {
+            let end_idx = begin_idx + end_rel + AUTO_INDEX_END.len();
+            let before = &existing[..begin_idx];
+            let after = &existing[end_idx..];
+            return format!("{before}{new_block}{after}");
+        }
+    }
+    let trimmed = existing.trim_end_matches('\n');
+    if trimmed.is_empty() {
+        format!("# Claude Memory\n\n{new_block}\n")
+    } else {
+        format!("{trimmed}\n\n{new_block}\n")
+    }
+}
+
+/// Render rows from `claude_agent_preferences` as the auto-index body that
+/// goes between MEMORY.md's marker block. Output is grouped by `pref_type`
+/// into `## <Title>` sections, with one `- [file.md](file.md) — description`
+/// bullet per row. Bodies stay in SerenDB.
 pub fn render_preferences_as_markdown(rows: &[Vec<serde_json::Value>]) -> String {
     if rows.is_empty() {
-        return "# Claude Memory\n\n_No preferences stored yet._\n".to_string();
+        return String::new();
     }
-    let mut out = String::from("# Claude Memory\n\n");
-    for row in rows {
-        // Schema: pref_key, pref_type, description, content, source_file
-        let pref_key = row.first().and_then(|v| v.as_str()).unwrap_or("");
-        let pref_type = row.get(1).and_then(|v| v.as_str()).unwrap_or("");
-        let description = row.get(2).and_then(|v| v.as_str()).unwrap_or("");
-        let content = row.get(3).and_then(|v| v.as_str()).unwrap_or("");
-        let source_file = row.get(4).and_then(|v| v.as_str()).unwrap_or("");
 
-        out.push_str("---\n");
-        out.push_str(&format!("name: {pref_key}\n"));
-        out.push_str(&format!("type: {pref_type}\n"));
-        if !description.is_empty() {
-            out.push_str(&format!("description: {description}\n"));
-        }
-        if !source_file.is_empty() {
-            out.push_str(&format!("source_file: {source_file}\n"));
-        }
-        out.push_str("---\n");
-        out.push_str(content);
-        if !content.ends_with('\n') {
+    // Schema: pref_key, pref_type, description, content, source_file
+    let mut sections: BTreeMap<String, Vec<(String, String, String)>> = BTreeMap::new();
+    for row in rows {
+        let pref_key = row.first().and_then(|v| v.as_str()).unwrap_or("");
+        let pref_type = row.get(1).and_then(|v| v.as_str()).unwrap_or("uncategorized");
+        let description = row.get(2).and_then(|v| v.as_str()).unwrap_or("");
+        let source_file = row
+            .get(4)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .unwrap_or_else(|| format!("{pref_key}.md"));
+        sections
+            .entry(pref_type.to_string())
+            .or_default()
+            .push((pref_key.to_string(), source_file, description.to_string()));
+    }
+
+    let mut out = String::new();
+    let mut first = true;
+    for (pref_type, entries) in &sections {
+        if !first {
             out.push('\n');
         }
-        out.push('\n');
+        first = false;
+        out.push_str(&format!("## {}\n", titleize(pref_type)));
+        for (_pref_key, source_file, description) in entries {
+            if description.is_empty() {
+                out.push_str(&format!("- [{source_file}]({source_file})\n"));
+            } else {
+                out.push_str(&format!("- [{source_file}]({source_file}) — {description}\n"));
+            }
+        }
     }
     out
+}
+
+/// `feedback` → `Feedback`, `active_engagement` → `Active Engagement`.
+fn titleize(s: &str) -> String {
+    s.split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().chain(chars).collect::<String>(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Derive the encoded Claude project directory for a memory file. The
+/// intercepted file lives at `<claude_project_dir>/memory/<name>.md`, so the
+/// project dir is always the file's grandparent. Returns `None` for paths
+/// that do not match that shape.
+pub fn claude_project_dir_for_memory_file(path: &Path) -> Option<PathBuf> {
+    Some(path.parent()?.parent()?.to_path_buf())
 }
 
 // ---------------------------------------------------------------------------
@@ -862,6 +946,28 @@ async fn handle_event(app: &AppHandle, path: PathBuf, config: &SerenDbConfig) {
                 "[ClaudeMemory] persisted {} to claude_agent_preferences and removed plaintext file",
                 path.display()
             );
+
+            // Refresh MEMORY.md so the agent that wrote this file can see
+            // its entry appear in the index — closing the feedback gap that
+            // caused the "memory write vanished" loop. Failures here MUST
+            // NOT mask the successful intercept (the row is already in
+            // SerenDB); we only log them.
+            if let Some(claude_project_dir) = claude_project_dir_for_memory_file(&path) {
+                if let Err(e) =
+                    render_memory_md_from_db(&client, config, &claude_project_dir).await
+                {
+                    log::warn!(
+                        "[ClaudeMemory] persisted {} but MEMORY.md refresh failed: {e}",
+                        path.display()
+                    );
+                }
+            } else {
+                log::warn!(
+                    "[ClaudeMemory] persisted {} but could not derive claude project dir for MEMORY.md refresh",
+                    path.display()
+                );
+            }
+
             let _ = app.emit(
                 "claude-memory-intercepted",
                 InterceptSuccessEvent {
@@ -1125,14 +1231,74 @@ mod tests {
     }
 
     #[test]
-    fn write_rendered_memory_md_is_atomic_overwrite() {
+    fn write_rendered_memory_md_preserves_content_outside_markers() {
+        // Re-rendering MEMORY.md after a SerenDB intercept MUST NOT clobber
+        // hand-curated content the user wrote outside the auto-index block.
+        // Only the content between AUTO_INDEX_BEGIN and AUTO_INDEX_END is
+        // refreshed; everything else (headings, notes, prose) survives.
         let tmp = TempDir::new().expect("tempdir");
         let dir = tmp.path().join("-proj");
-        let first = write_rendered_memory_md(&dir, "first render").expect("first");
-        assert_eq!(fs::read_to_string(&first).unwrap(), "first render");
-        let second = write_rendered_memory_md(&dir, "second render").expect("second");
-        assert_eq!(fs::read_to_string(&second).unwrap(), "second render");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("MEMORY.md");
+        let existing = "# Seren Desktop Memory\n\n## Critical Lessons\n\
+            - hand-written note that must survive a re-render\n\n\
+            <!-- BEGIN AUTO-INDEX -->\nstale auto content\n<!-- END AUTO-INDEX -->\n\n\
+            ## Trailing hand-written section\n- also must survive\n";
+        fs::write(&path, existing).unwrap();
+
+        let result =
+            write_rendered_memory_md(&dir, "## Feedback\n- [foo.md](foo.md) — hook\n").unwrap();
+        let merged = fs::read_to_string(&result).unwrap();
+
+        assert!(merged.contains("hand-written note that must survive a re-render"));
+        assert!(merged.contains("Trailing hand-written section"));
+        assert!(merged.contains("- also must survive"));
+        assert!(merged.contains("## Feedback"));
+        assert!(merged.contains("- [foo.md](foo.md) — hook"));
+        assert!(
+            !merged.contains("stale auto content"),
+            "stale content inside markers MUST be replaced"
+        );
         assert!(!dir.join("MEMORY.md.tmp").exists());
+    }
+
+    #[test]
+    fn write_rendered_memory_md_appends_block_when_markers_missing() {
+        // A user with a hand-curated MEMORY.md that predates the marker
+        // convention must not lose their content on first re-render. We
+        // append a fresh auto-index block to the existing file rather than
+        // overwriting it.
+        let tmp = TempDir::new().expect("tempdir");
+        let dir = tmp.path().join("-proj");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("MEMORY.md");
+        let existing = "# Seren Desktop Memory\n\n## Critical Lessons\n- must survive\n";
+        fs::write(&path, existing).unwrap();
+
+        let result =
+            write_rendered_memory_md(&dir, "## Feedback\n- [foo.md](foo.md) — hook\n").unwrap();
+        let merged = fs::read_to_string(&result).unwrap();
+
+        assert!(merged.contains("## Critical Lessons"));
+        assert!(merged.contains("- must survive"));
+        assert!(merged.contains("<!-- BEGIN AUTO-INDEX -->"));
+        assert!(merged.contains("<!-- END AUTO-INDEX -->"));
+        assert!(merged.contains("- [foo.md](foo.md) — hook"));
+    }
+
+    #[test]
+    fn claude_project_dir_for_memory_file_returns_grandparent() {
+        // The intercept handler derives the claude project dir from the
+        // intercepted file path so it can call render_memory_md_from_db
+        // without depending on outside state. The dir is always the file's
+        // grandparent (parent is the `memory/` subdir).
+        let path =
+            Path::new("/home/a/.claude/projects/-Users-x-foo/memory/feedback_test.md");
+        assert_eq!(
+            claude_project_dir_for_memory_file(path),
+            Some(PathBuf::from("/home/a/.claude/projects/-Users-x-foo"))
+        );
+        assert_eq!(claude_project_dir_for_memory_file(Path::new("/")), None);
     }
 
     // ---- SQL builder tests (the heart of the #1509 storage rebuild) ------
@@ -1204,38 +1370,43 @@ mod tests {
     }
 
     #[test]
-    fn render_preferences_as_markdown_empty_returns_placeholder() {
-        let rendered = render_preferences_as_markdown(&[]);
-        assert!(rendered.contains("# Claude Memory"));
-        assert!(rendered.contains("No preferences stored yet"));
-    }
-
-    #[test]
-    fn render_preferences_as_markdown_includes_each_row() {
+    fn render_preferences_as_markdown_groups_rows_into_section_bullets() {
+        // The auto-index body is the only thing that goes between the
+        // MEMORY.md marker block. It MUST be a section-grouped bullet
+        // index — `## <Type>` headings with `- [file.md](file.md) — desc`
+        // bullets — to match the curated MEMORY.md format. Bodies and
+        // frontmatter are NOT emitted (those live in SerenDB and would
+        // bloat the index).
         let rows = vec![
             vec![
                 serde_json::json!("feedback_one"),
                 serde_json::json!("feedback"),
                 serde_json::json!("first description"),
-                serde_json::json!("first body"),
+                serde_json::json!("first body — must NOT appear"),
                 serde_json::json!("feedback_one.md"),
             ],
             vec![
                 serde_json::json!("project_two"),
                 serde_json::json!("project"),
                 serde_json::json!(null),
-                serde_json::json!("second body"),
+                serde_json::json!("second body — must NOT appear"),
                 serde_json::json!("project_two.md"),
             ],
         ];
         let rendered = render_preferences_as_markdown(&rows);
-        assert!(rendered.contains("name: feedback_one"));
-        assert!(rendered.contains("type: feedback"));
-        assert!(rendered.contains("description: first description"));
-        assert!(rendered.contains("first body"));
-        assert!(rendered.contains("name: project_two"));
-        assert!(rendered.contains("type: project"));
-        assert!(rendered.contains("second body"));
+
+        assert!(rendered.contains("## Feedback"));
+        assert!(rendered.contains("- [feedback_one.md](feedback_one.md) — first description"));
+        assert!(rendered.contains("## Project"));
+        assert!(rendered.contains("- [project_two.md](project_two.md)"));
+        assert!(
+            !rendered.contains("must NOT appear"),
+            "bodies must not bleed into the auto-index"
+        );
+        assert!(
+            !rendered.contains("name: feedback_one"),
+            "frontmatter blocks must not appear in the auto-index"
+        );
     }
 }
 
