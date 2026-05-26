@@ -64,6 +64,29 @@ describe("skill display helpers", () => {
     );
   });
 
+  it("matches org-namespaced catalog rows via skillFolderName", () => {
+    // Org-owned skills publish under a namespaced slug (`autumn-...`)
+    // while the catalog's `skill_folder_name` matches the local install dir.
+    // The reconcile path must accept either signal.
+    const installed = installedSkill({
+      slug: "pk-lead-intelligence",
+      name: "pk-lead-intelligence",
+      dirName: "pk-lead-intelligence",
+      upstreamSourceUrl: "seren-skills:autumn-pk-lead-intelligence",
+    });
+    const catalog = catalogSkill({
+      id: "seren:autumn-pk-lead-intelligence",
+      slug: "autumn-pk-lead-intelligence",
+      name: "PK Lead Intelligence",
+      skillFolderName: "pk-lead-intelligence",
+      sourceUrl: "seren-skills:autumn-pk-lead-intelligence",
+    });
+
+    expect(resolveSkillListDisplayName(installed, [catalog])).toBe(
+      "PK Lead Intelligence",
+    );
+  });
+
   it("falls back to local metadata for non-catalog installs", () => {
     const installed = installedSkill({
       upstreamSource: undefined,

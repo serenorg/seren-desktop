@@ -87,6 +87,31 @@ export function skillsShareCommandAlias(
   );
 }
 
+/**
+ * True when `candidate` and `installed` describe the same publisher
+ * record. Accepts three reconcile signals so org-namespaced catalog
+ * slugs (`autumn-foo`) still match a local install whose dir is the
+ * bare folder name (`foo`):
+ *
+ * 1. catalog.slug === installed.slug                  (default case)
+ * 2. catalog.slug === installed.dirName               (local slug drift)
+ * 3. catalog.skillFolderName === installed.dirName    (org-namespaced)
+ */
+export function catalogSkillMatchesInstalled(
+  candidate: Skill,
+  installed: InstalledSkill,
+): boolean {
+  if (candidate.slug === installed.slug) return true;
+  if (candidate.slug === installed.dirName) return true;
+  if (
+    candidate.skillFolderName &&
+    candidate.skillFolderName === installed.dirName
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function resolveSkillListDisplayName(
   skill: Skill | InstalledSkill,
   catalog: readonly Skill[],
@@ -95,9 +120,8 @@ export function resolveSkillListDisplayName(
     return skillDisplayName(skill);
   }
 
-  const match = catalog.find(
-    (candidate) =>
-      candidate.slug === skill.slug || candidate.slug === skill.dirName,
+  const match = catalog.find((candidate) =>
+    catalogSkillMatchesInstalled(candidate, skill),
   );
   return match ? skillDisplayName(match) : skillDisplayName(skill);
 }

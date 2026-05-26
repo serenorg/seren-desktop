@@ -31,6 +31,7 @@ import type {
   SkillSyncStatus,
 } from "@/lib/skills";
 import {
+  catalogSkillMatchesInstalled,
   normalizeSkillSlug,
   parseSkillMd,
   resolveSkillDisplayName,
@@ -236,9 +237,11 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const availableRows = (): Skill[] => {
     if (activeFilter() !== "all") return [];
     const q = searchQuery().toLowerCase().trim();
-    const installedSlugs = new Set(skillsStore.installed.map((s) => s.slug));
     return skillsStore.available.filter(
-      (skill) => !installedSlugs.has(skill.slug) && matchesQuery(skill, q),
+      (skill) =>
+        !skillsStore.installed.some((installed) =>
+          catalogSkillMatchesInstalled(skill, installed),
+        ) && matchesQuery(skill, q),
     );
   };
 

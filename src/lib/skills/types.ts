@@ -85,6 +85,14 @@ export interface Skill {
   id: string;
   /** URL-friendly slug (e.g., "commit-message") */
   slug: string;
+  /**
+   * Catalog folder name when this skill is published on Seren Skills.
+   * Distinct from `slug` for org-owned skills, which carry an
+   * org-namespaced slug (e.g. "autumn-foo") but publish under the bare
+   * folder name ("foo"). Used to reconcile installed ↔ catalog rows
+   * when the slug diverges from the install directory.
+   */
+  skillFolderName?: string;
   /** Slug-based name (used for lookups) */
   name: string;
   /** Human-readable display name from frontmatter */
