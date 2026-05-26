@@ -1,5 +1,6 @@
 // ABOUTME: Critical guard for #1769 — recordModelContextWindow must refuse to
 // ABOUTME: persist sub-1M values for [1m]-suffixed models so the cache cannot poison future sessions.
+// ABOUTME: #2040 extends the same invariant to reads — a sub-1M cache entry that pre-dates #1769 must be discarded.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -97,5 +98,62 @@ describe("#1769 — recordModelContextWindow tier-downgrade guard", () => {
       contextWindow: 200_000,
     });
     expect(mockCaptureSupportError).not.toHaveBeenCalled();
+  });
+});
+
+describe("#2040 — getCachedModelContextWindow tier-read guard", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it("rejects a poisoned <1M cache read for a [1m]-suffixed model and returns null", async () => {
+    // The #1769 write guard cannot retroactively repair entries persisted
+    // before its introduction. Spawn-time falls back to the cache first
+    // (agent.store.ts:2833), and #1798's promptComplete guard refuses to
+    // overwrite a spawn-time value when the CLI later reports a smaller
+    // window. Without a read-side guard, one poisoned 200K pins the session
+    // denominator at 200K for life — exactly the SIGTERM trigger in #2040.
+    mockInvoke.mockResolvedValueOnce(200_000);
+    const { getCachedModelContextWindow } = await import(
+      "@/services/modelContextCache"
+    );
+    const result = await getCachedModelContextWindow(
+      "claude-code",
+      "claude-opus-4-7[1m]",
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns valid 1M cache reads for [1m]-suffixed models unchanged", async () => {
+    // Defense against over-correction: a legitimately-stored 1M entry must
+    // pass through. Rejecting it would force every cold-start to re-derive
+    // the window via defaultContextWindowFor, which is correct today (1M)
+    // but couples the cache layer to that assumption.
+    mockInvoke.mockResolvedValueOnce(1_000_000);
+    const { getCachedModelContextWindow } = await import(
+      "@/services/modelContextCache"
+    );
+    const result = await getCachedModelContextWindow(
+      "claude-code",
+      "claude-opus-4-7[1m]",
+    );
+    expect(result).toBe(1_000_000);
+  });
+
+  it("returns bare-tier 200K cache reads unchanged", async () => {
+    // The read guard is gated on the [1m] suffix because bare IDs genuinely
+    // sit on the 200K tier per claude-runtime-1m-tier.test.ts:20-28.
+    // Rejecting bare 200K reads would break the cache for the un-suffixed
+    // picker entries.
+    mockInvoke.mockResolvedValueOnce(200_000);
+    const { getCachedModelContextWindow } = await import(
+      "@/services/modelContextCache"
+    );
+    const result = await getCachedModelContextWindow(
+      "claude-code",
+      "claude-opus-4-7",
+    );
+    expect(result).toBe(200_000);
   });
 });
