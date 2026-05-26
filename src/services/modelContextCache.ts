@@ -26,7 +26,24 @@ export async function getCachedModelContextWindow(
       provider,
       modelId,
     });
-    return typeof result === "number" && result > 0 ? result : null;
+    if (typeof result !== "number" || result <= 0) return null;
+    // Mirror of the #1769 write guard at the read side. The write guard
+    // refuses to persist sub-1M windows for [1m]-suffixed models, but it
+    // cannot retroactively repair entries persisted before its introduction.
+    // The spawn fallback at agent.store.ts:2833 prefers cache over the
+    // defaultContextWindowFor 1M default, and #1798's promptComplete guard
+    // refuses to overwrite a spawn-time value when the CLI later reports a
+    // smaller window — so a single poisoned entry pins the session
+    // denominator at 200K until the cache is hand-cleaned. Discard the
+    // read instead, letting the spawn fall through to defaultContextWindowFor.
+    // #2040.
+    if (ONE_M_SUFFIX_RE.test(modelId) && result < ONE_M_TIER_MINIMUM) {
+      console.warn(
+        `[modelContextCache] discarding poisoned ${result.toLocaleString()} cache read for ${modelId} — [1m] tier minimum is ${ONE_M_TIER_MINIMUM.toLocaleString()}`,
+      );
+      return null;
+    }
+    return result;
   } catch (err) {
     console.warn("[modelContextCache] lookup failed", err);
     return null;
