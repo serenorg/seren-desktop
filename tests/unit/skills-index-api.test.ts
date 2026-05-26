@@ -91,6 +91,33 @@ describe("skills.fetchIndex via Seren Skills API", () => {
     });
   });
 
+  it("carries skill_folder_name through as skillFolderName", async () => {
+    // Org-namespaced catalog slugs differ from the published folder name.
+    // The desktop reconciles installed ↔ catalog by either signal, so the
+    // adapter must keep them distinct.
+    mockListSkills.mockResolvedValueOnce({
+      data: {
+        skills: [
+          {
+            ...skillSummary("pk-lead-intelligence"),
+            slug: "autumn-pk-lead-intelligence",
+            skill_folder_name: "pk-lead-intelligence",
+          },
+        ],
+        total: 1,
+      },
+    });
+
+    const { skills } = await import("@/services/skills");
+    const result = await skills.fetchIndex(true);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      slug: "autumn-pk-lead-intelligence",
+      skillFolderName: "pk-lead-intelligence",
+    });
+  });
+
   it("ignores the legacy catalog cache key", async () => {
     storage.set(
       "seren:skills_index",

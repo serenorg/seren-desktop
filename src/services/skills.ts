@@ -101,6 +101,7 @@ function skillSummaryToSkill(summary: SkillSummary): Skill {
   return {
     id: `seren:${summary.slug}`,
     slug: summary.slug,
+    skillFolderName: summary.skill_folder_name,
     name: humanizeSkillName(summary.name, summary.slug),
     description: summary.description,
     source: "seren",
@@ -127,6 +128,7 @@ function skillToCacheEntry(skill: Skill): Skill {
   return {
     id: skill.id,
     slug: skill.slug,
+    skillFolderName: skill.skillFolderName,
     name: skill.name,
     displayName: skill.displayName,
     description: skill.description,
