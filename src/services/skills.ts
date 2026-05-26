@@ -1651,7 +1651,20 @@ export const skills = {
           ? `\n> **Platform:** Windows. Python (\`python\` and \`python3\`) is bundled with Seren Desktop — no install needed. Skill docs commonly reference \`~/.config/seren/skills/<name>\` and forward-slash paths; on this machine:\n> - Replace any \`~/.config/seren/skills/<name>\` reference with the absolute runtime directory above.\n> - Use backslashes inside paths.\n> Always \`cd\` into the absolute runtime directory above before invoking skill scripts.`
           : "";
         const runtimeNote = `> **Skill runtime directory:** \`${runtimeDir}\`\n> Use this absolute path to reference skill files. Do not create local copies or fallback scaffolds.${platformNote}${depsNote}\n\n`;
-        if (opts?.mode === "compact") {
+        // #2041: compact is the default. Inlining every SKILL.md body shipped
+        // ~90K tokens of system-prompt overhead per turn at 30 active skills,
+        // pinning fresh sessions near the 200K cap before the user typed
+        // anything. Compact mode keeps the name + description + runtime path
+        // + "When to use" preview and tells the agent to open SKILL.md on
+        // demand — the agent's existing Read tool covers the fetch when a
+        // skill is actually invoked. Callers that genuinely need the full
+        // body (e.g. an explicit slash-command invocation) opt in via
+        // mode: "full".
+        if (opts?.mode === "full") {
+          contents.push(
+            `## Skill: ${skill.name}\n\n${runtimeNote}${parsed.content}`,
+          );
+        } else {
           contents.push(
             buildCompactSkillPrompt({
               skill,
@@ -1660,10 +1673,6 @@ export const skills = {
               runtimeNote,
               parsedContent: parsed.content,
             }),
-          );
-        } else {
-          contents.push(
-            `## Skill: ${skill.name}\n\n${runtimeNote}${parsed.content}`,
           );
         }
       }
