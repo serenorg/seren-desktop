@@ -1200,12 +1200,18 @@ struct ExtraFile {
 }
 
 /// Extract file paths referenced in SKILL.md content.
-/// Looks for markdown links, code references, and common file patterns.
+///
+/// Markdown links (`[text](path)`) are unambiguous, so we read them from
+/// the full document. Backticked paths (`` `scripts/agent.py` ``) only
+/// count when they appear inside fenced code blocks — prose backticks
+/// like "dispatches to `agent.py`" are documentation, not install
+/// manifests, and treating them as required payload paths produced
+/// false-positive "missing file" failures on valid skills (#2036).
 fn extract_referenced_files(content: &str) -> Vec<String> {
     let mut files = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    // Match markdown links: [text](path), only relative paths
+    // Match markdown links: [text](path), only relative paths.
     let link_re = regex::Regex::new(r"\[(?:[^\]]*)\]\(([^)]+)\)").unwrap();
     for cap in link_re.captures_iter(content) {
         let path = cap[1].trim();
@@ -1217,10 +1223,11 @@ fn extract_referenced_files(content: &str) -> Vec<String> {
         }
     }
 
-    // Match backtick code references to common payload files
+    // Match backtick code references inside fenced code blocks only.
+    let fenced = extract_fenced_block_content(content);
     let code_re =
         regex::Regex::new(r"`([a-zA-Z0-9_./-]+\.(py|sh|json|txt|toml|yaml|yml|js|ts))`").unwrap();
-    for cap in code_re.captures_iter(content) {
+    for cap in code_re.captures_iter(&fenced) {
         let path = cap[1].trim();
         if !path.contains(' ') && seen.insert(path.to_string()) {
             files.push(path.to_string());
@@ -1228,6 +1235,29 @@ fn extract_referenced_files(content: &str) -> Vec<String> {
     }
 
     files
+}
+
+/// Return the concatenated content of every fenced code block in `content`.
+///
+/// A fence line starts with three or more backticks or tildes (with optional
+/// leading whitespace and language tag). Toggle in/out on each fence line;
+/// accumulate the lines between. Mismatched fences are tolerated — SKILL.md
+/// authors don't nest fences, so a simple toggle is sufficient.
+fn extract_fenced_block_content(content: &str) -> String {
+    let mut out = String::new();
+    let mut in_fence = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 /// Remove a skill directory.
@@ -1513,14 +1543,38 @@ Also check [external](https://example.com) which should be ignored.
     }
 
     #[test]
-    fn extract_referenced_files_finds_backtick_refs() {
-        let content = r#"# My Skill
-
-Run `scripts/agent.py` with config from `requirements.txt`.
-"#;
+    fn extract_referenced_files_only_extracts_backticks_from_fenced_blocks() {
+        // Prose backticks (e.g. `agent.py` mentioned in a paragraph) used to
+        // be extracted and flagged as missing payload files. The correct
+        // contract: only backtick references inside fenced code blocks count
+        // as install manifests. Mirrors the pk-lead-intelligence regression
+        // where a parenthetical "dispatches to `agent.py`" stamped the
+        // install failed.
+        let content = "# My Skill\n\
+\n\
+Prose mention of `agent.py` in a paragraph should be ignored.\n\
+\n\
+```bash\n\
+# Run `scripts/setup.py` to bootstrap.\n\
+```\n\
+\n\
+Another prose mention of `config.json` should also be ignored.\n";
         let files = extract_referenced_files(content);
-        assert!(files.contains(&"scripts/agent.py".to_string()));
-        assert!(files.contains(&"requirements.txt".to_string()));
+        assert!(
+            files.contains(&"scripts/setup.py".to_string()),
+            "fenced-block backtick reference should be extracted, got {:?}",
+            files
+        );
+        assert!(
+            !files.contains(&"agent.py".to_string()),
+            "prose backtick mention must not be extracted, got {:?}",
+            files
+        );
+        assert!(
+            !files.contains(&"config.json".to_string()),
+            "prose backtick mention must not be extracted, got {:?}",
+            files
+        );
     }
 
     #[test]
@@ -1691,17 +1745,24 @@ See [section](#overview) and [email](mailto:test@example.com).
         let tmp = TempDir::new().unwrap();
         let skills_dir = tmp.path().to_string_lossy().to_string();
 
-        // Install skill with manifest referencing files that don't exist
-        let content = r#"---
-name: test-skill
-description: Test
----
-
-# Test Skill
-
-Run [agent](scripts/agent.py) with config `config.example.json`.
-See `requirements.txt` for dependencies.
-"#;
+        // Install skill with manifest referencing files that don't exist.
+        // Backticked paths must live inside a fenced code block to count as
+        // payload references (#2036); prose mentions are documentation.
+        let content = "---\n\
+name: test-skill\n\
+description: Test\n\
+---\n\
+\n\
+# Test Skill\n\
+\n\
+Run [agent](scripts/agent.py) with config.\n\
+\n\
+## Install\n\
+\n\
+```bash\n\
+cp `config.example.json` config.json\n\
+pip install -r `requirements.txt`\n\
+```\n";
         install_skill(
             skills_dir.clone(),
             "test-skill".to_string(),
