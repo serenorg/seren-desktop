@@ -7,7 +7,7 @@
   "build": {
     "beforeDevCommand": "pnpm prepare:mcp-servers && pnpm build:provider-runtime && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm prepare:mcp-servers && pnpm build:provider-runtime && pnpm sign:embedded-runtime && pnpm build",
+    "beforeBuildCommand": "pnpm prepare:tauri-build && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
