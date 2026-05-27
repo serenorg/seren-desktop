@@ -7,6 +7,7 @@ use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_store::StoreExt;
 
 pub mod commands {
+    pub mod auth;
     pub mod chat;
     pub mod claude_memory;
     pub mod cli_installer;
@@ -861,6 +862,7 @@ pub fn run() {
             clear_oauth_credentials,
             get_oauth_providers,
             // OAuth browser flow commands
+            commands::auth::start_social_login,
             start_oauth_browser_flow,
             get_oauth_callback_port,
             // Build info
