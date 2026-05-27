@@ -762,6 +762,11 @@ jobs:
       - name: Publish release
         uses: actions/github-script@v9
         with:
+          # uploads.github.com occasionally exceeds undici's 5min Headers
+          # Timeout on large updater archives. The upload loop is idempotent
+          # (skips assets already present on the release), so retry transient
+          # failures instead of dying mid-walk and stranding R2 mirror steps.
+          retries: 3
           script: |
             const fs = require('fs');
             const path = require('path');
