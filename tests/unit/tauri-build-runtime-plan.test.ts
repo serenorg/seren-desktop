@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildTauriPreparationCommands,
   resolveRuntimeTarget,
+  spawnOptionsForPlatform,
 } from "../../build/prepare-tauri-build";
 
 function scriptNames(commands: ReturnType<typeof buildTauriPreparationCommands>) {
@@ -47,5 +48,11 @@ describe("Tauri build runtime preparation", () => {
       "prepare:runtime:darwin-arm64",
       "sign:embedded-runtime",
     ]);
+  });
+
+  it("runs pnpm through a shell on Windows so .cmd shims can spawn", () => {
+    expect(spawnOptionsForPlatform("win32").shell).toBe(true);
+    expect(spawnOptionsForPlatform("darwin").shell).toBe(false);
+    expect(spawnOptionsForPlatform("linux").shell).toBe(false);
   });
 });

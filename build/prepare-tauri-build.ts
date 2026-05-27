@@ -2,6 +2,7 @@
 // ABOUTME: Keeps platform runtimes, Windows Python, MCP servers, and provider runtime in one build hook.
 
 import { spawnSync } from "node:child_process";
+import type { SpawnSyncOptions } from "node:child_process";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -160,10 +161,17 @@ function executableFor(command: string): string {
   return command;
 }
 
+export function spawnOptionsForPlatform(
+  platform: NodeJS.Platform | RuntimePlatform,
+): Pick<SpawnSyncOptions, "shell"> {
+  return { shell: platform === "win32" };
+}
+
 function runCommand(command: TauriPreparationCommand): void {
   console.log(`[prepare-tauri-build] ${command.label}`);
   const result = spawnSync(executableFor(command.command), command.args, {
     env: process.env,
+    ...spawnOptionsForPlatform(process.platform),
     stdio: "inherit",
   });
 
