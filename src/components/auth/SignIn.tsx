@@ -1,11 +1,29 @@
 // ABOUTME: Sign-in form component for user authentication.
-// ABOUTME: Handles email/password login.
+// ABOUTME: Handles email/password and social provider login.
 
-import { type Component, createSignal, Show } from "solid-js";
+import { type Component, createSignal, For, Show } from "solid-js";
+import githubLogo from "@/assets/oauth-logos/github.svg";
+import googleLogo from "@/assets/oauth-logos/google.svg";
+import microsoftLogo from "@/assets/oauth-logos/microsoft.svg";
 import { openExternalLink } from "@/lib/external-link";
 import { login } from "@/services/auth";
+import {
+  type SocialLoginProvider,
+  startSocialLogin,
+} from "@/services/social-login";
 
-type LoginPhase = "credentials" | "signing-in" | "completing";
+type OAuthLoginPhase = `oauth-${SocialLoginProvider}`;
+type LoginPhase = "credentials" | "signing-in" | "completing" | OAuthLoginPhase;
+
+const SOCIAL_PROVIDERS: Array<{
+  id: SocialLoginProvider;
+  label: string;
+  logo: string;
+}> = [
+  { id: "github", label: "GitHub", logo: githubLogo },
+  { id: "google", label: "Google", logo: googleLogo },
+  { id: "microsoft", label: "Microsoft", logo: microsoftLogo },
+];
 
 interface SignInProps {
   onSuccess: () => Promise<void> | void;
@@ -18,6 +36,34 @@ export const SignIn: Component<SignInProps> = (props) => {
   const [phase, setPhase] = createSignal<LoginPhase>("credentials");
 
   const isLoading = () => phase() !== "credentials";
+
+  const oauthPhaseFor = (provider: SocialLoginProvider): OAuthLoginPhase =>
+    `oauth-${provider}`;
+
+  const completeSignIn = async () => {
+    setPhase("completing");
+    try {
+      await props.onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign-in setup failed");
+      setPhase("credentials");
+    }
+  };
+
+  const handleSocialLogin = async (provider: SocialLoginProvider) => {
+    setError("");
+    setPhase(oauthPhaseFor(provider));
+
+    try {
+      await startSocialLogin(provider);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Social sign-in failed");
+      setPhase("credentials");
+      return;
+    }
+
+    await completeSignIn();
+  };
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
@@ -44,13 +90,7 @@ export const SignIn: Component<SignInProps> = (props) => {
     }
 
     // Phase 2: Complete
-    setPhase("completing");
-    try {
-      await props.onSuccess();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign-in setup failed");
-      setPhase("credentials");
-    }
+    await completeSignIn();
   };
 
   const getButtonText = () => {
@@ -76,6 +116,37 @@ export const SignIn: Component<SignInProps> = (props) => {
             {error()}
           </div>
         </Show>
+
+        <div class="flex flex-col gap-3">
+          <For each={SOCIAL_PROVIDERS}>
+            {(provider) => (
+              <button
+                type="button"
+                aria-label={`Sign in with ${provider.label}`}
+                class="w-full h-11 px-4 bg-background/70 border border-border rounded-lg text-[14px] font-medium text-foreground cursor-pointer transition-all duration-150 hover:bg-surface-2 hover:border-primary/40 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+                disabled={isLoading()}
+                onClick={() => {
+                  void handleSocialLogin(provider.id);
+                }}
+              >
+                <img src={provider.logo} alt="" class="w-5 h-5 shrink-0" />
+                <span>
+                  {phase() === oauthPhaseFor(provider.id)
+                    ? `Opening ${provider.label}...`
+                    : `Sign in with ${provider.label}`}
+                </span>
+              </button>
+            )}
+          </For>
+        </div>
+
+        <div class="my-6 flex items-center gap-3">
+          <div class="h-px flex-1 bg-border" />
+          <span class="text-[11px] font-semibold text-muted-foreground">
+            OR SIGN IN WITH EMAIL
+          </span>
+          <div class="h-px flex-1 bg-border" />
+        </div>
 
         <form class="flex flex-col gap-5" onSubmit={handleSubmit}>
           <div class="flex flex-col gap-2">
@@ -115,7 +186,8 @@ export const SignIn: Component<SignInProps> = (props) => {
             />
             <button
               type="button"
-              class="self-end mt-1 bg-transparent border-none p-0 text-[12px] text-primary/70 cursor-pointer hover:underline"
+              class="self-end mt-1 bg-transparent border-none p-0 text-[12px] text-primary/70 cursor-pointer hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isLoading()}
               onClick={() =>
                 openExternalLink("https://console.serendb.com/forgot-password")
               }
@@ -144,7 +216,8 @@ export const SignIn: Component<SignInProps> = (props) => {
           Don't have an account?{" "}
           <button
             type="button"
-            class="bg-transparent border-none p-0 text-primary cursor-pointer hover:underline"
+            class="bg-transparent border-none p-0 text-primary cursor-pointer hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isLoading()}
             onClick={() =>
               openExternalLink("https://console.serendb.com/signup")
             }
