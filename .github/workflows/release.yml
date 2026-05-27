@@ -278,25 +278,6 @@ jobs:
             seren-desktop-publishers \
             seren-desktop-mcp
 
-      - name: Prepare embedded runtime (macOS arm64)
-        if: matrix.target == 'aarch64-apple-darwin'
-        run: pnpm prepare:runtime:darwin-arm64
-      - name: Prepare embedded runtime (macOS x64)
-        if: matrix.target == 'x86_64-apple-darwin'
-        run: pnpm prepare:runtime:darwin-x64
-      - name: Prepare embedded runtime (Windows x64)
-        if: matrix.target == 'x86_64-pc-windows-msvc'
-        run: pnpm prepare:runtime:win32-x64
-      - name: Prepare embedded Python (Windows x64)
-        if: matrix.target == 'x86_64-pc-windows-msvc'
-        run: pnpm prepare:python:win32-x64
-      - name: Prepare embedded runtime (Linux x64)
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: pnpm prepare:runtime:linux-x64
-      - name: Prepare embedded runtime (Linux arm64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: pnpm prepare:runtime:linux-arm64
-
       # macOS: Import certificates and setup keychain (skip if no certificate)
       - name: Import macOS certificates
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'

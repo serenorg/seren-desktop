@@ -33,6 +33,7 @@
     "test:runtime-smoke": "node ./scripts/smoke-local-provider-runtime.mjs",
     "test:synthetic-transcript-smoke": "node ./scripts/smoke-synthetic-transcript.mjs",
     "test:runtime-e2e": "node ./scripts/e2e-local-provider-runtime.mjs",
+    "prepare:tauri-build": "tsx build/prepare-tauri-build.ts",
     "prepare:runtime": "tsx build/darwin/prepare-embedded-runtime.ts",
     "prepare:runtime:darwin-x64": "tsx build/darwin/prepare-embedded-runtime.ts x64",
     "prepare:runtime:darwin-arm64": "tsx build/darwin/prepare-embedded-runtime.ts arm64",
