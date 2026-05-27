@@ -6,6 +6,7 @@ import * as fs from "fs";
 import * as https from "https";
 import * as path from "path";
 import { pipeline } from "stream/promises";
+import { pathToFileURL } from "node:url";
 
 // Version configuration — keep this pinned. The Python freshness workflow
 // (.github/workflows/check-python-version.yml) opens a PR to bump the patch
@@ -195,10 +196,30 @@ export async function preparePythonRuntime(
 	return { pythonDir };
 }
 
+// Cross-platform check for "this module was invoked as a CLI". On Windows,
+// `import.meta.url` is `file:///D:/.../prepare-python-runtime.ts` (POSIX
+// slashes, three slashes after `file:`) while `process.argv[1]` is a
+// backslash path with a drive letter — naive string-concat comparisons miss
+// every Windows invocation and the script exits as a silent no-op, leaving
+// `embedded-runtime/win32-x64/python/` empty in every Windows installer
+// (serenorg/seren-desktop#2053). `pathToFileURL` normalises both forms.
+//
+// Exported for the regression test in `tests/unit/prepare-python-cli-detection.test.ts`.
+export function isInvokedAsCli(
+	importMetaUrl: string,
+	argv1: string | undefined,
+): boolean {
+	if (!argv1) return false;
+	try {
+		return importMetaUrl === pathToFileURL(argv1).href;
+	} catch {
+		return false;
+	}
+}
+
 // CLI entry point (ESM compatible). Mirrors prepare-embedded-runtime.ts so
 // `pnpm prepare:python:win32-<arch>` writes alongside the Node bundle.
-const isCli = import.meta.url === `file://${process.argv[1]}`;
-if (isCli) {
+if (isInvokedAsCli(import.meta.url, process.argv[1])) {
 	const arch = (process.argv[2] as "x64" | "arm64") || "x64";
 	const outputDir =
 		process.argv[3] ||
