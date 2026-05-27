@@ -572,6 +572,35 @@ export async function subscribeToEvent<T extends { sessionId: string }>(
   });
 }
 
+async function collectRuntimeSubscriptions(
+  subscriptions: Array<Promise<UnlistenFn>>,
+): Promise<UnlistenFn> {
+  const results = await Promise.allSettled(subscriptions);
+  const unlisteners: UnlistenFn[] = [];
+  const errors: unknown[] = [];
+
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      unlisteners.push(result.value);
+    } else {
+      errors.push(result.reason);
+    }
+  }
+
+  if (errors.length > 0) {
+    for (const unlisten of unlisteners) {
+      unlisten();
+    }
+    throw new AggregateError(errors, "Failed to subscribe to runtime events");
+  }
+
+  return () => {
+    for (const unlisten of unlisteners) {
+      unlisten();
+    }
+  };
+}
+
 /**
  * Subscribe to all agent runtime events for a session.
  * Returns an unlisten function to clean up all subscriptions.
@@ -580,8 +609,6 @@ export async function subscribeToSession(
   sessionId: string,
   callback: (event: AgentEvent) => void,
 ): Promise<UnlistenFn> {
-  const unlisteners: UnlistenFn[] = [];
-
   // Helper to filter events by sessionId and create properly typed events
   function createHandler<E extends AgentEvent>(
     type: E["type"],
@@ -593,105 +620,76 @@ export async function subscribeToSession(
     };
   }
 
-  unlisteners.push(
-    await subscribeToEvent<MessageChunkEvent>(
+  return collectRuntimeSubscriptions([
+    subscribeToEvent<MessageChunkEvent>(
       "messageChunk",
       createHandler<{ type: "messageChunk"; data: MessageChunkEvent }>(
         "messageChunk",
       ),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<ToolCallEvent>(
+    subscribeToEvent<ToolCallEvent>(
       "toolCall",
       createHandler<{ type: "toolCall"; data: ToolCallEvent }>("toolCall"),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<ToolResultEvent>(
+    subscribeToEvent<ToolResultEvent>(
       "toolResult",
       createHandler<{ type: "toolResult"; data: ToolResultEvent }>(
         "toolResult",
       ),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<DiffEvent>(
+    subscribeToEvent<DiffEvent>(
       "diff",
       createHandler<{ type: "diff"; data: DiffEvent }>("diff"),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<PlanUpdateEvent>(
+    subscribeToEvent<PlanUpdateEvent>(
       "planUpdate",
       createHandler<{ type: "planUpdate"; data: PlanUpdateEvent }>(
         "planUpdate",
       ),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<PromptCompleteEvent>(
+    subscribeToEvent<PromptCompleteEvent>(
       "promptComplete",
       createHandler<{ type: "promptComplete"; data: PromptCompleteEvent }>(
         "promptComplete",
       ),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<PermissionRequestEvent>(
+    subscribeToEvent<PermissionRequestEvent>(
       "permissionRequest",
       createHandler<{
         type: "permissionRequest";
         data: PermissionRequestEvent;
       }>("permissionRequest"),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<DiffProposalEvent>(
+    subscribeToEvent<DiffProposalEvent>(
       "diffProposal",
       createHandler<{ type: "diffProposal"; data: DiffProposalEvent }>(
         "diffProposal",
       ),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<SessionStatusEvent>(
+    subscribeToEvent<SessionStatusEvent>(
       "sessionStatus",
       createHandler<{ type: "sessionStatus"; data: SessionStatusEvent }>(
         "sessionStatus",
       ),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<ConfigOptionsUpdateEvent>(
+    subscribeToEvent<ConfigOptionsUpdateEvent>(
       "configOptionsUpdate",
       createHandler<{
         type: "configOptionsUpdate";
         data: ConfigOptionsUpdateEvent;
       }>("configOptionsUpdate"),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<UserMessageEvent>(
+    subscribeToEvent<UserMessageEvent>(
       "userMessage",
       createHandler<{ type: "userMessage"; data: UserMessageEvent }>(
         "userMessage",
       ),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<ErrorEvent>(
+    subscribeToEvent<ErrorEvent>(
       "error",
       createHandler<{ type: "error"; data: ErrorEvent }>("error"),
     ),
-  );
-
-  // Return a function that unsubscribes from all events
-  return () => {
-    for (const unlisten of unlisteners) {
-      unlisten();
-    }
-  };
+  ]);
 }
 
 /**
@@ -701,79 +699,45 @@ export async function subscribeToSession(
 export async function subscribeToAllEvents(
   callback: (event: AgentEvent) => void,
 ): Promise<UnlistenFn> {
-  const unlisteners: UnlistenFn[] = [];
-
-  unlisteners.push(
-    await subscribeToEvent<MessageChunkEvent>("messageChunk", (data) =>
+  return collectRuntimeSubscriptions([
+    subscribeToEvent<MessageChunkEvent>("messageChunk", (data) =>
       callback({ type: "messageChunk", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<ToolCallEvent>("toolCall", (data) =>
+    subscribeToEvent<ToolCallEvent>("toolCall", (data) =>
       callback({ type: "toolCall", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<ToolResultEvent>("toolResult", (data) =>
+    subscribeToEvent<ToolResultEvent>("toolResult", (data) =>
       callback({ type: "toolResult", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<DiffEvent>("diff", (data) =>
+    subscribeToEvent<DiffEvent>("diff", (data) =>
       callback({ type: "diff", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<PlanUpdateEvent>("planUpdate", (data) =>
+    subscribeToEvent<PlanUpdateEvent>("planUpdate", (data) =>
       callback({ type: "planUpdate", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<PromptCompleteEvent>("promptComplete", (data) =>
+    subscribeToEvent<PromptCompleteEvent>("promptComplete", (data) =>
       callback({ type: "promptComplete", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<PermissionRequestEvent>(
-      "permissionRequest",
-      (data) => callback({ type: "permissionRequest", data }),
+    subscribeToEvent<PermissionRequestEvent>("permissionRequest", (data) =>
+      callback({ type: "permissionRequest", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<DiffProposalEvent>("diffProposal", (data) =>
+    subscribeToEvent<DiffProposalEvent>("diffProposal", (data) =>
       callback({ type: "diffProposal", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<SessionStatusEvent>("sessionStatus", (data) =>
+    subscribeToEvent<SessionStatusEvent>("sessionStatus", (data) =>
       callback({ type: "sessionStatus", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<ConfigOptionsUpdateEvent>(
-      "configOptionsUpdate",
-      (data) => callback({ type: "configOptionsUpdate", data }),
+    subscribeToEvent<ConfigOptionsUpdateEvent>("configOptionsUpdate", (data) =>
+      callback({ type: "configOptionsUpdate", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<UserMessageEvent>("userMessage", (data) =>
+    subscribeToEvent<UserMessageEvent>("userMessage", (data) =>
       callback({ type: "userMessage", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<ErrorEvent>("error", (data) =>
+    subscribeToEvent<ErrorEvent>("error", (data) =>
       callback({ type: "error", data }),
     ),
-  );
-  unlisteners.push(
-    await subscribeToEvent<LoginRequiredEvent>("loginRequired", (data) =>
+    subscribeToEvent<LoginRequiredEvent>("loginRequired", (data) =>
       callback({ type: "loginRequired", data }),
     ),
-  );
-
-  return () => {
-    for (const unlisten of unlisteners) {
-      unlisten();
-    }
-  };
+  ]);
 }
