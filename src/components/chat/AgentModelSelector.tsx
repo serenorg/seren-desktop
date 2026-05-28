@@ -4,7 +4,11 @@
 import type { Component } from "solid-js";
 import { createSignal, For, Show } from "solid-js";
 import { FloatingSelectorMenu } from "@/components/chat/FloatingSelectorMenu";
-import { type ActiveSession, agentStore } from "@/stores/agent.store";
+import {
+  type ActiveSession,
+  type AgentModelInfo,
+  agentStore,
+} from "@/stores/agent.store";
 
 interface Props {
   session: ActiveSession | null;
@@ -36,6 +40,25 @@ export const AgentModelSelector: Component<Props> = (props) => {
     agentStore.setModel(modelId, props.session?.info.id);
     setIsOpen(false);
   };
+
+  const capabilityBadges = (model: AgentModelInfo) =>
+    [
+      {
+        label: "Fast",
+        title: "Supports fast mode",
+        visible: model.supportsFastMode === true,
+      },
+      {
+        label: "Auto",
+        title: "Supports auto permission mode",
+        visible: model.supportsAutoMode === true,
+      },
+      {
+        label: "Adaptive",
+        title: "Supports adaptive thinking",
+        visible: model.supportsAdaptiveThinking === true,
+      },
+    ].filter((badge) => badge.visible);
 
   return (
     <Show when={availableModels().length > 0}>
@@ -85,7 +108,7 @@ export const AgentModelSelector: Component<Props> = (props) => {
           open={isOpen()}
           anchor={() => dropdownRef}
           onRequestClose={() => setIsOpen(false)}
-          class="w-64"
+          class="w-80 max-w-[calc(100vw-2rem)]"
         >
           <div class="px-3 py-2 border-b border-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
             Agent Model
@@ -110,21 +133,33 @@ export const AgentModelSelector: Component<Props> = (props) => {
                       </span>
                     </Show>
                   </div>
-                  <Show when={model.modelId === displayModelId()}>
-                    <svg
-                      class="w-4 h-4 text-green-500 flex-shrink-0"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                      role="img"
-                      aria-label="Selected"
-                    >
-                      <path
-                        fill-rule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
-                  </Show>
+                  <div class="flex items-center justify-end gap-1 flex-shrink-0">
+                    <For each={capabilityBadges(model)}>
+                      {(badge) => (
+                        <span
+                          class="px-1.5 py-0.5 rounded border border-surface-3 bg-surface-1 text-[10px] leading-none text-muted-foreground font-medium"
+                          title={badge.title}
+                        >
+                          {badge.label}
+                        </span>
+                      )}
+                    </For>
+                    <Show when={model.modelId === displayModelId()}>
+                      <svg
+                        class="w-4 h-4 text-green-500 flex-shrink-0"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                        role="img"
+                        aria-label="Selected"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                    </Show>
+                  </div>
                 </div>
               </button>
             )}

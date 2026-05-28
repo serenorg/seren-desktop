@@ -729,6 +729,9 @@ export interface AgentModelInfo {
   modelId: string;
   name: string;
   description?: string;
+  supportsFastMode?: boolean;
+  supportsAutoMode?: boolean;
+  supportsAdaptiveThinking?: boolean;
 }
 
 export interface AgentModeInfo {

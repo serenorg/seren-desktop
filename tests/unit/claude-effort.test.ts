@@ -18,7 +18,7 @@ const {
 } = mod;
 
 describe("normalizeEffort", () => {
-  it.each(["low", "medium", "high", "xhigh"] as const)(
+  it.each(["low", "medium", "high", "xhigh", "max"] as const)(
     "accepts %s",
     (value) => {
       expect(normalizeEffort(value)).toBe(value);
@@ -31,7 +31,6 @@ describe("normalizeEffort", () => {
 
   const invalidCases: Array<{ value: unknown; note: string }> = [
     { value: "minimal", note: "rejected to avoid a confusing translation to low" },
-    { value: "max", note: "not in seren's selector set" },
     { value: "", note: "empty string" },
     { value: "garbage", note: "unknown" },
     { value: null, note: "non-string" },
@@ -57,13 +56,14 @@ describe("buildEffortArgs", () => {
 });
 
 describe("buildEffortConfigOption", () => {
-  it("exposes exactly the four values seren supports for Claude Code", () => {
+  it("exposes exactly the five values Claude Code supports", () => {
     const opt = buildEffortConfigOption("medium");
     expect(opt.options.map((o: { value: string }) => o.value)).toEqual([
       "low",
       "medium",
       "high",
       "xhigh",
+      "max",
     ]);
   });
 
@@ -84,6 +84,12 @@ describe("buildEffortConfigOption", () => {
   });
 
   it("value set matches what the CLI accepts (lock against drift)", () => {
-    expect(CLAUDE_EFFORT_VALUES).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(CLAUDE_EFFORT_VALUES).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
   });
 });
