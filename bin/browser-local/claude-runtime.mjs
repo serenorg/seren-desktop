@@ -402,7 +402,80 @@ function buildAvailableModels(session) {
     modelId: record.modelId,
     name: record.name,
     description: record.description,
+    supportsFastMode: record.supportsFastMode === true,
+    supportsAutoMode: record.supportsAutoMode === true,
+    supportsAdaptiveThinking: record.supportsAdaptiveThinking === true,
   }));
+}
+
+function getSelectedModelRecord(session) {
+  if (typeof session.currentModelId === "string" && session.currentModelId) {
+    return (
+      session.availableModelRecords.find(
+        (record) => record.modelId === session.currentModelId,
+      ) ?? null
+    );
+  }
+
+  return (
+    session.availableModelRecords.find((record) => record.isDefault) ??
+    session.availableModelRecords[0] ??
+    null
+  );
+}
+
+function selectedModelSupportsFastMode(session) {
+  return getSelectedModelRecord(session)?.supportsFastMode === true;
+}
+
+function buildFastModeConfigOption(session) {
+  if (!selectedModelSupportsFastMode(session)) {
+    return null;
+  }
+
+  return {
+    id: "fast_mode",
+    name: "Fast Mode",
+    description: "Toggles Claude Code fast mode for this session.",
+    type: "select",
+    currentValue: session.fastModeEnabled === true ? "on" : "off",
+    options: [
+      {
+        value: "on",
+        name: "On",
+        description: "Enable fast mode for future turns in this session.",
+      },
+      {
+        value: "off",
+        name: "Off",
+        description: "Use the model's standard behavior.",
+      },
+    ],
+  };
+}
+
+function buildConfigOptions(session) {
+  const options = [buildEffortConfigOption(session.reasoningEffort)];
+  const fastModeOption = buildFastModeConfigOption(session);
+  if (fastModeOption) {
+    options.push(fastModeOption);
+  }
+  return options;
+}
+
+function buildFastModeFlagSettings(valueId) {
+  switch (valueId) {
+    case "on":
+      return { fastMode: true };
+    case "off":
+      return { fastMode: null };
+    default:
+      throw new Error(`Unsupported fast mode value: ${valueId}`);
+  }
+}
+
+function isFastModeEnabledValue(valueId) {
+  return buildFastModeFlagSettings(valueId).fastMode === true;
 }
 
 function buildSessionStatus(session, status = session.status) {
@@ -426,7 +499,7 @@ function buildSessionStatus(session, status = session.status) {
         }
       : {}),
     modes: buildModeState(session.currentModeId),
-    configOptions: [buildEffortConfigOption(session.reasoningEffort)],
+    configOptions: buildConfigOptions(session),
   };
 }
 
@@ -438,6 +511,9 @@ function normalizeModelRecords(result) {
       name: record?.displayName ?? record?.value ?? "Unknown model",
       description: record?.description ?? undefined,
       supportsEffort: record?.supportsEffort === true,
+      supportsFastMode: record?.supportsFastMode === true,
+      supportsAutoMode: record?.supportsAutoMode === true,
+      supportsAdaptiveThinking: record?.supportsAdaptiveThinking === true,
       supportedEffortLevels: Array.isArray(record?.supportedEffortLevels)
         ? record.supportedEffortLevels.filter(
             (effort) => typeof effort === "string",
@@ -459,6 +535,9 @@ const LEGACY_OPUS_RECORDS = [
     name: "Opus 4.5",
     description: "Previous Opus generation — lower cost than 4.7",
     supportsEffort: false,
+    supportsFastMode: false,
+    supportsAutoMode: false,
+    supportsAdaptiveThinking: false,
     supportedEffortLevels: [],
     isDefault: false,
   },
@@ -467,6 +546,9 @@ const LEGACY_OPUS_RECORDS = [
     name: "Opus 4.6",
     description: "Opus 4.6 — mid-tier Opus",
     supportsEffort: false,
+    supportsFastMode: false,
+    supportsAutoMode: false,
+    supportsAdaptiveThinking: false,
     supportedEffortLevels: [],
     isDefault: false,
   },
@@ -484,6 +566,9 @@ function makeOneMTierRecord(baseId, displayBase) {
     name: `${displayBase} (1M context)`,
     description: `${displayBase} on the 1M-token context tier`,
     supportsEffort: false,
+    supportsFastMode: false,
+    supportsAutoMode: false,
+    supportsAdaptiveThinking: false,
     supportedEffortLevels: [],
     isDefault: false,
   };
@@ -1639,6 +1724,7 @@ export function createClaudeRuntime({ emit }) {
       currentModeId,
       mcpConfigJson,
       spawnEnv,
+      fastModeEnabled: false,
       reasoningEffort:
         normalizeEffort(reasoningEffort) ?? DEFAULT_CLAUDE_EFFORT,
       // Peak per-turn input tokens across the current prompt's tool-call
@@ -2126,17 +2212,38 @@ export function createClaudeRuntime({ emit }) {
     );
 
     session.currentModelId = targetModel?.modelId ?? modelId;
+    session.fastModeEnabled = false;
     emit("provider://session-status", buildSessionStatus(session));
   }
 
   async function setConfigOption({ sessionId, configId, valueId }) {
-    if (configId !== "reasoning_effort") {
-      return null;
-    }
     const session = sessions.get(sessionId);
     if (!session) {
       return null;
     }
+
+    if (configId === "fast_mode") {
+      if (!selectedModelSupportsFastMode(session)) {
+        throw new Error("Fast mode is not supported by the selected Claude model.");
+      }
+      const settings = buildFastModeFlagSettings(valueId);
+      await sendControlRequest(
+        session,
+        {
+          subtype: "apply_flag_settings",
+          settings,
+        },
+        10_000,
+      );
+      session.fastModeEnabled = isFastModeEnabledValue(valueId);
+      emit("provider://session-status", buildSessionStatus(session));
+      return null;
+    }
+
+    if (configId !== "reasoning_effort") {
+      return null;
+    }
+
     const normalized = normalizeEffort(valueId);
     if (!normalized) {
       throw new Error(`Unsupported reasoning effort: ${valueId}`);
@@ -2265,6 +2372,9 @@ export {
   comparePickerEntries as _comparePickerEntries,
   resolveSpawnShell as _resolveSpawnShell,
   buildClaudeArgs as _buildClaudeArgs,
+  normalizeModelRecords as _normalizeModelRecords,
+  buildSessionStatus as _buildSessionStatus,
+  buildFastModeFlagSettings as _buildFastModeFlagSettings,
   handleAssistantMessage as _handleAssistantMessage,
   handleStreamEvent as _handleStreamEvent,
 };

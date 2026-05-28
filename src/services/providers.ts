@@ -189,6 +189,9 @@ export interface SessionStatusEvent {
       modelId: string;
       name: string;
       description?: string;
+      supportsFastMode?: boolean;
+      supportsAutoMode?: boolean;
+      supportsAdaptiveThinking?: boolean;
     }>;
   };
   modes?: {

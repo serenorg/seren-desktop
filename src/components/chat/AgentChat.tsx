@@ -82,6 +82,7 @@ import { threadStore } from "@/stores/thread.store";
 import { workspaceStore } from "@/stores/workspace.store";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { AgentEffortSelector } from "./AgentEffortSelector";
+import { AgentFastModeSelector } from "./AgentFastModeSelector";
 import { AgentModelSelector } from "./AgentModelSelector";
 import { AgentModeSelector } from "./AgentModeSelector";
 import {
@@ -1979,6 +1980,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 </Show>
                 <AgentModelSelector session={threadSession()} />
                 <AgentModeSelector session={threadSession()} />
+                <AgentFastModeSelector session={threadSession()} />
                 <AgentEffortSelector session={threadSession()} />
                 <SkillsButton
                   recentSkill={recentSkill()}

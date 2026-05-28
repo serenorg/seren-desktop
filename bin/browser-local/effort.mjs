@@ -1,7 +1,7 @@
 // ABOUTME: Pure helpers for Claude Code reasoning effort.
 // ABOUTME: Extracted so buildClaudeArgs mapping can be unit-tested without spawning a process.
 
-export const CLAUDE_EFFORT_VALUES = ["low", "medium", "high", "xhigh"];
+export const CLAUDE_EFFORT_VALUES = ["low", "medium", "high", "xhigh", "max"];
 export const DEFAULT_CLAUDE_EFFORT = "medium";
 
 export function normalizeEffort(value) {
