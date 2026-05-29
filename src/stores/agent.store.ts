@@ -750,6 +750,10 @@ export interface ActiveSession {
   streamingThinking: string;
   /** Timestamp for current streaming assistant chunk buffer (ms epoch). */
   streamingContentTimestamp?: number;
+  /** True when current streaming assistant content came from history replay. */
+  streamingContentReplay?: boolean;
+  /** Stable replay assistant message id for chunk/message boundaries. */
+  streamingContentMessageId?: string;
   /** Timestamp for current streaming thinking chunk buffer (ms epoch). */
   streamingThinkingTimestamp?: number;
   /** Buffered replay user text that may arrive as multiple chunks. */
@@ -3315,12 +3319,20 @@ export const agentStore = {
       }
     }
 
+    // Codex provider replay is authoritative. A partial local SQLite cache
+    // would otherwise suppress replay and leave only the final output visible.
+    const restoredMessagesForSpawn =
+      agentType === "codex" && effectiveResumeId ? [] : restoredMessages;
+    const bootstrapPromptContextForSpawn =
+      agentType === "codex" && effectiveResumeId
+        ? undefined
+        : pendingBootstrapPromptContext;
     const sessionId = await this.spawnSession(resumeCwd, agentType, {
       localSessionId: conversationId,
       resumeAgentSessionId: effectiveResumeId,
       conversationTitle: convo.title,
-      restoredMessages,
-      bootstrapPromptContext: pendingBootstrapPromptContext,
+      restoredMessages: restoredMessagesForSpawn,
+      bootstrapPromptContext: bootstrapPromptContextForSpawn,
       initialModelId: convo.agent_model_id ?? undefined,
       initialPermissionMode: convo.agent_permission_mode ?? undefined,
     });
@@ -4833,6 +4845,8 @@ Structured summary:`;
     clearChunkBuf(sessionId);
     setState("sessions", sessionId, "streamingContent", "");
     setState("sessions", sessionId, "streamingContentTimestamp", undefined);
+    setState("sessions", sessionId, "streamingContentReplay", undefined);
+    setState("sessions", sessionId, "streamingContentMessageId", undefined);
     setState("sessions", sessionId, "streamingThinking", "");
     setState("sessions", sessionId, "streamingThinkingTimestamp", undefined);
     setState("sessions", sessionId, "pendingUserMessage", "");
@@ -5373,6 +5387,10 @@ Structured summary:`;
           event.data.text,
           event.data.isThought,
           event.data.timestamp,
+          {
+            replay: event.data.replay === true,
+            messageId: event.data.messageId,
+          },
         );
         break;
 
@@ -6060,7 +6078,7 @@ Structured summary:`;
     }
 
     const userMsg: AgentMessage = {
-      id: crypto.randomUUID(),
+      id: session.pendingUserMessageId ?? crypto.randomUUID(),
       type: "user",
       content: session.pendingUserMessage,
       timestamp: session.pendingUserMessageTimestamp ?? Date.now(),
@@ -6132,12 +6150,16 @@ Structured summary:`;
     text: string,
     isThought?: boolean,
     timestamp?: number,
+    meta?: { replay?: boolean; messageId?: string },
   ) {
-    const session = state.sessions[sessionId];
+    let session = state.sessions[sessionId];
     if (!session) return;
 
     // Skip replay assistant/thought chunks when we have restored messages.
     if (session.skipHistoryReplay) return;
+
+    const isReplayChunk = meta?.replay === true;
+    const messageId = isReplayChunk ? meta?.messageId : undefined;
 
     let buf = chunkBufs.get(sessionId);
     if (!buf) {
@@ -6157,6 +6179,34 @@ Structured summary:`;
       }
       buf.thinking += text;
     } else {
+      if (
+        isReplayChunk &&
+        messageId &&
+        session.streamingContentMessageId &&
+        session.streamingContentMessageId !== messageId
+      ) {
+        flushChunkBuf(sessionId);
+        flushThinkingMarkupStreamState(sessionId);
+        this.finalizeStreamingContent(sessionId, { isReplay: true });
+        session = state.sessions[sessionId];
+        if (!session) return;
+        buf = chunkBufs.get(sessionId);
+        if (!buf) {
+          buf = { content: "", thinking: "" };
+          chunkBufs.set(sessionId, buf);
+        }
+      }
+      if (isReplayChunk) {
+        setState("sessions", sessionId, "streamingContentReplay", true);
+        if (messageId) {
+          setState(
+            "sessions",
+            sessionId,
+            "streamingContentMessageId",
+            messageId,
+          );
+        }
+      }
       // Set timestamp on the very first content chunk (cheap — fires once)
       if (!session.streamingContent && !buf.content) {
         setState(
@@ -6282,7 +6332,7 @@ Structured summary:`;
       const scrubbed = scrubAgentMarkup(session.streamingContent);
       if (scrubbed) {
         const contentMsg: AgentMessage = {
-          id: crypto.randomUUID(),
+          id: session.streamingContentMessageId ?? crypto.randomUUID(),
           type: "assistant",
           content: scrubbed,
           timestamp: session.streamingContentTimestamp ?? Date.now(),
@@ -6291,14 +6341,21 @@ Structured summary:`;
           ...msgs,
           contentMsg,
         ]);
+        if (session.streamingContentReplay === true && session.conversationId) {
+          persistAgentMessage(
+            session.conversationId,
+            contentMsg,
+            session.info.agentType,
+          );
+        }
       }
-      // Do NOT persist this intermediate flush — it captures partial streaming
-      // text (often raw file contents from tool results) that would pollute
-      // the restored conversation history on restart. Only
-      // finalizeStreamingContent (called at promptComplete) should persist
-      // assistant messages.
+      // Live intermediate flushes capture partial streaming text and must
+      // stay UI-only. Replay-marked chunks are complete historical assistant
+      // messages, so they were persisted above before the tool card interrupts.
       setState("sessions", sessionId, "streamingContent", "");
       setState("sessions", sessionId, "streamingContentTimestamp", undefined);
+      setState("sessions", sessionId, "streamingContentReplay", undefined);
+      setState("sessions", sessionId, "streamingContentMessageId", undefined);
     }
 
     // Skip duplicate if a message with this toolCallId already exists
@@ -6598,7 +6655,9 @@ Structured summary:`;
   },
 
   finalizeStreamingContent(sessionId: string, opts?: { isReplay?: boolean }) {
-    const isReplay = opts?.isReplay ?? false;
+    const isReplay =
+      opts?.isReplay === true ||
+      state.sessions[sessionId]?.streamingContentReplay === true;
     // Flush any buffered chunks before reading store state
     flushChunkBuf(sessionId);
     flushThinkingMarkupStreamState(sessionId);
@@ -6648,6 +6707,8 @@ Structured summary:`;
         }
         setState("sessions", sessionId, "streamingContent", "");
         setState("sessions", sessionId, "streamingContentTimestamp", undefined);
+        setState("sessions", sessionId, "streamingContentReplay", undefined);
+        setState("sessions", sessionId, "streamingContentMessageId", undefined);
         setState("sessions", sessionId, "promptStartTime", undefined);
         return;
       }
@@ -6662,6 +6723,8 @@ Structured summary:`;
       if (scrubbed.length === 0) {
         setState("sessions", sessionId, "streamingContent", "");
         setState("sessions", sessionId, "streamingContentTimestamp", undefined);
+        setState("sessions", sessionId, "streamingContentReplay", undefined);
+        setState("sessions", sessionId, "streamingContentMessageId", undefined);
         setState("sessions", sessionId, "promptStartTime", undefined);
         return;
       }
@@ -6677,7 +6740,7 @@ Structured summary:`;
       const safeContent = finalOutputValidation.safeDisplayText;
 
       const message: AgentMessage = {
-        id: crypto.randomUUID(),
+        id: session.streamingContentMessageId ?? crypto.randomUUID(),
         type: "assistant",
         content: safeContent,
         timestamp: session.streamingContentTimestamp ?? Date.now(),
@@ -6734,6 +6797,8 @@ Structured summary:`;
 
       setState("sessions", sessionId, "streamingContent", "");
       setState("sessions", sessionId, "streamingContentTimestamp", undefined);
+      setState("sessions", sessionId, "streamingContentReplay", undefined);
+      setState("sessions", sessionId, "streamingContentMessageId", undefined);
       // Clear the start time
       setState("sessions", sessionId, "promptStartTime", undefined);
     }
