@@ -46,4 +46,15 @@ describe("composer toolbar layout invariants (#1982, #2062)", () => {
       expect(source).toContain("FloatingSelectorMenu");
     }
   });
+
+  it("non-agent ChatContent must reuse the protected composer toolbar classes (#2065)", () => {
+    const source = readFileSync("src/components/chat/ChatContent.tsx", "utf-8");
+
+    expect(source).toContain("COMPOSER_TOOLBAR_ROOT_CLASSES");
+    expect(source).toContain("COMPOSER_TOOLBAR_LEFT_GROUP_CLASSES");
+    expect(source).toContain("COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES");
+    expect(source).toContain("<div class={COMPOSER_TOOLBAR_ROOT_CLASSES}>");
+    expect(source).toContain("<div class={COMPOSER_TOOLBAR_LEFT_GROUP_CLASSES}>");
+    expect(source).toContain("<div class={COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES}>");
+  });
 });
