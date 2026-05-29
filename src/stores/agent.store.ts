@@ -341,6 +341,7 @@ const CLAUDE_1M_TIER_CAPABLE_MODELS = new Set([
   "claude-opus-4-5",
   "claude-opus-4-6",
   "claude-opus-4-7",
+  "claude-opus-4-8",
   "claude-sonnet-4-5",
   "claude-sonnet-4-6",
   "claude-sonnet-4-7",

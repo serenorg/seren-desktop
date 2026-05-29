@@ -1,6 +1,8 @@
 // ABOUTME: Critical guards for #1761 — Claude Code 1M context tier translation.
 // ABOUTME: Verifies bare IDs default to 200K and only [1m]-suffixed IDs unlock 1M.
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const modulePath = new URL(
@@ -16,18 +18,35 @@ const {
   _resolveSpawnShell: resolveSpawnShell,
 } = await import(/* @vite-ignore */ modulePath);
 
+const agentStoreSource = readFileSync(
+  resolve("src/stores/agent.store.ts"),
+  "utf-8",
+);
+
+function extractQuotedSetValues(source: string, constName: string): string[] {
+  const start = source.indexOf(`const ${constName} = new Set([`);
+  expect(start, `${constName} must exist`).toBeGreaterThan(0);
+  const end = source.indexOf("]);", start);
+  expect(end, `${constName} must close`).toBeGreaterThan(start);
+  return [...source.slice(start, end).matchAll(/"([^"]+)"/g)]
+    .map((match) => match[1])
+    .sort();
+}
+
 describe("inferClaudeContextWindow — tier-aware semantics", () => {
   it("returns 200K for bare 1M-capable opus IDs (no [1m] suffix)", () => {
     // Anthropic gates the 1M tier on the [1m] suffix. A bare claude-opus-4-7
     // request lands on the 200K tier upstream. The desktop's cold-start
     // default must match that reality so the gauge denominator is honest
     // when the user picks the bare entry.
+    expect(inferClaudeContextWindow("claude-opus-4-8")).toBe(200_000);
     expect(inferClaudeContextWindow("claude-opus-4-7")).toBe(200_000);
     expect(inferClaudeContextWindow("claude-opus-4-6")).toBe(200_000);
     expect(inferClaudeContextWindow("claude-sonnet-4-6")).toBe(200_000);
   });
 
   it("returns 1M only for [1m]-suffixed 1M-capable IDs", () => {
+    expect(inferClaudeContextWindow("claude-opus-4-8[1m]")).toBe(1_000_000);
     expect(inferClaudeContextWindow("claude-opus-4-7[1m]")).toBe(1_000_000);
     expect(inferClaudeContextWindow("claude-opus-4-6[1m]")).toBe(1_000_000);
     expect(inferClaudeContextWindow("claude-opus-4-5[1m]")).toBe(1_000_000);
@@ -84,9 +103,25 @@ describe("augmentWithLegacyOpus — picker exposes 1M-tier variants", () => {
 
     expect(ids).toContain("claude-opus-4-7[1m]");
     expect(ids).toContain("claude-sonnet-4-6[1m]");
+    expect(ids).not.toContain("claude-opus-4-8[1m]");
     // claude-sonnet-4-7 is not in the CLI catalog and not in LEGACY_OPUS_RECORDS
     // → its [1m] variant must NOT appear so we don't make a false promise.
     expect(ids).not.toContain("claude-sonnet-4-7[1m]");
+
+    const augmentedWithOpus48 = augmentWithLegacyOpus([
+      ...cliCatalog,
+      {
+        modelId: "claude-opus-4-8",
+        name: "Opus 4.8",
+        description: "",
+        supportsEffort: false,
+        supportedEffortLevels: [],
+        isDefault: false,
+      },
+    ]);
+    expect(
+      augmentedWithOpus48.map((r: { modelId: string }) => r.modelId),
+    ).toContain("claude-opus-4-8[1m]");
   });
 
   it("does not duplicate [1m] entries the CLI already advertises", () => {
@@ -125,14 +160,19 @@ describe("augmentWithLegacyOpus — picker exposes 1M-tier variants", () => {
         r.modelId.replace(/\[1m\]$/i, ""),
       ),
     ].sort();
-    expect(oneMBareIds).toEqual([
+    const expectedOneMBareIds = [
       "claude-opus-4-5",
       "claude-opus-4-6",
       "claude-opus-4-7",
+      "claude-opus-4-8",
       "claude-sonnet-4-5",
       "claude-sonnet-4-6",
       "claude-sonnet-4-7",
-    ]);
+    ];
+    expect(oneMBareIds).toEqual(expectedOneMBareIds);
+    expect(
+      extractQuotedSetValues(agentStoreSource, "CLAUDE_1M_TIER_CAPABLE_MODELS"),
+    ).toEqual(expectedOneMBareIds);
   });
 
   it("promotes the [1m] sibling of the CLI default and pins it to slot one (#1763)", () => {
