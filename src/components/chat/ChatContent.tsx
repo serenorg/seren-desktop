@@ -90,6 +90,11 @@ import { workspaceStore } from "@/stores/workspace.store";
 import { isRetryableWorker, type UnifiedMessage } from "@/types/conversation";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { CompactedMessage } from "./CompactedMessage";
+import {
+  COMPOSER_TOOLBAR_LEFT_GROUP_CLASSES,
+  COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES,
+  COMPOSER_TOOLBAR_ROOT_CLASSES,
+} from "./composerToolbarClasses";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
@@ -1762,8 +1767,8 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 {commandStatus()}
               </div>
             </Show>
-            <div class="flex justify-between items-center">
-              <div class="flex items-center gap-3">
+            <div class={COMPOSER_TOOLBAR_ROOT_CLASSES}>
+              <div class={COMPOSER_TOOLBAR_LEFT_GROUP_CLASSES}>
                 <Show when={!privateChatLocked()}>
                   <ModelSelector threadId={conversationId()} />
                   <ToolsetSelector />
@@ -1803,7 +1808,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                   </span>
                 </Show>
               </div>
-              <div class="flex items-center gap-2">
+              <div class={COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES}>
                 <VoiceInputButton
                   onTranscript={(text) => {
                     setInput((prev) => (prev ? `${prev} ${text}` : text));
