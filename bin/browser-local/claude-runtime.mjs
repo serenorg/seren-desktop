@@ -575,6 +575,7 @@ function makeOneMTierRecord(baseId, displayBase) {
 }
 
 const ONE_M_TIER_RECORDS = [
+  makeOneMTierRecord("claude-opus-4-8", "Opus 4.8"),
   makeOneMTierRecord("claude-opus-4-7", "Opus 4.7"),
   makeOneMTierRecord("claude-opus-4-6", "Opus 4.6"),
   makeOneMTierRecord("claude-opus-4-5", "Opus 4.5"),
@@ -911,6 +912,7 @@ const CLAUDE_1M_TIER_CAPABLE_MODELS = new Set([
   "claude-opus-4-5",
   "claude-opus-4-6",
   "claude-opus-4-7",
+  "claude-opus-4-8",
   "claude-sonnet-4-5",
   "claude-sonnet-4-6",
   "claude-sonnet-4-7",
