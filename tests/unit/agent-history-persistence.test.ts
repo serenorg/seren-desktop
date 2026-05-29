@@ -66,11 +66,63 @@ describe("agent message persistence guards", () => {
     }
   });
 
-  it("handleToolCall does NOT persist intermediate streaming flush", () => {
-    // The handleToolCall method flushes streamingContent into an assistant
-    // message for UI ordering, but must NOT persist it — these intermediate
-    // messages capture partial text (often file contents) that would pollute
-    // the restored conversation history on restart.
+  it("messageChunk forwards replay identity into handleMessageChunk", () => {
+    const caseIdx = agentStoreSource.indexOf('case "messageChunk"');
+    expect(caseIdx).toBeGreaterThan(0);
+    const caseBody = agentStoreSource.slice(
+      caseIdx,
+      agentStoreSource.indexOf('case "toolCall"', caseIdx),
+    );
+
+    expect(caseBody).toContain("replay: event.data.replay === true");
+    expect(caseBody).toContain("messageId: event.data.messageId");
+  });
+
+  it("handleMessageChunk uses replay message ids as assistant boundaries", () => {
+    const handlerIdx = agentStoreSource.indexOf("\n  handleMessageChunk(");
+    expect(handlerIdx).toBeGreaterThan(0);
+    const handlerBody = agentStoreSource.slice(
+      handlerIdx,
+      agentStoreSource.indexOf("enqueueToolEvent(", handlerIdx),
+    );
+
+    expect(handlerBody).toContain("streamingContentMessageId");
+    expect(handlerBody).toContain(
+      "this.finalizeStreamingContent(sessionId, { isReplay: true })",
+    );
+  });
+
+  it("replayed user and assistant messages reuse provider ids for SQLite upsert", () => {
+    const userHandlerIdx = agentStoreSource.indexOf(
+      "flushPendingUserMessage(sessionId: string)",
+    );
+    expect(userHandlerIdx).toBeGreaterThan(0);
+    const userHandlerBody = agentStoreSource.slice(
+      userHandlerIdx,
+      agentStoreSource.indexOf("appendReplayUserChunk(", userHandlerIdx),
+    );
+    expect(userHandlerBody).toContain(
+      "id: session.pendingUserMessageId ?? crypto.randomUUID()",
+    );
+
+    const finalizeIdx = agentStoreSource.indexOf(
+      "finalizeStreamingContent(sessionId: string",
+    );
+    expect(finalizeIdx).toBeGreaterThan(0);
+    const finalizeBody = agentStoreSource.slice(
+      finalizeIdx,
+      agentStoreSource.indexOf("async forkConversation(", finalizeIdx),
+    );
+    expect(finalizeBody).toContain(
+      "id: session.streamingContentMessageId ?? crypto.randomUUID()",
+    );
+  });
+
+  it("handleToolCall persists only replayed intermediate assistant flushes", () => {
+    // Live handleToolCall still flushes streamingContent into the UI for
+    // ordering without persisting partial text. History replay chunks are
+    // different: they are complete historical assistant messages, so the
+    // replay-marked flush must persist before the tool card interrupts it.
     const toolCallHandler = agentStoreSource.slice(
       agentStoreSource.indexOf("handleToolCall(sessionId: string, toolCall:"),
     );
@@ -86,8 +138,27 @@ describe("agent message persistence guards", () => {
     );
     expect(flushBlock.length).toBeGreaterThan(0);
 
-    // The flush block must NOT contain a persistAgentMessage call
-    expect(flushBlock).not.toContain("persistAgentMessage(");
+    expect(flushBlock).toContain("session.streamingContentReplay === true");
+    const persistIdx = flushBlock.indexOf("persistAgentMessage(");
+    const replayGuardIdx = flushBlock.indexOf(
+      "session.streamingContentReplay === true",
+    );
+    expect(persistIdx).toBeGreaterThan(replayGuardIdx);
+  });
+
+  it("Codex resume lets provider replay repair partial SQLite history", () => {
+    const resumeIdx = agentStoreSource.indexOf("async resumeAgentConversation");
+    expect(resumeIdx).toBeGreaterThan(0);
+    const resumeBody = agentStoreSource.slice(
+      resumeIdx,
+      agentStoreSource.indexOf("async resumeRemoteSession(", resumeIdx),
+    );
+
+    expect(resumeBody).toContain("const restoredMessagesForSpawn =");
+    expect(resumeBody).toContain(
+      'agentType === "codex" && effectiveResumeId ? [] : restoredMessages',
+    );
+    expect(resumeBody).toContain("restoredMessages: restoredMessagesForSpawn");
   });
 
   it("finalizeStreamingContent DOES persist assistant messages", () => {

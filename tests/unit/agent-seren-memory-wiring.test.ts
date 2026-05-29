@@ -62,7 +62,7 @@ describe("#1625 — finalizeStreamingContent writes assistant turns to memory", 
     expect(agentStoreSource).toContain(
       "finalizeStreamingContent(sessionId: string, opts?: { isReplay?: boolean })",
     );
-    expect(agentStoreSource).toContain("const isReplay = opts?.isReplay");
+    expect(agentStoreSource).toMatch(/const\s+isReplay\s*=\s*opts\?\.isReplay/);
   });
 
   it("non-replay path calls storeAssistantResponse with the agent tag", () => {
