@@ -12,7 +12,7 @@ import { pathToFileURL } from "node:url";
 // (.github/workflows/check-python-version.yml) opens a PR to bump the patch
 // version monthly; minor-version bumps (3.12 → 3.13) stay manual because
 // wheel availability for skills' transitive deps may lag a release.
-const PYTHON_VERSION = "3.12.7";
+const PYTHON_VERSION = "3.12.10";
 
 interface DownloadConfig {
 	url: string;
