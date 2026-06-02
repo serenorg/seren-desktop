@@ -458,6 +458,12 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
               const target = activeTargetFor(entry.window);
               return target !== undefined && dragTargetWindowId() === target.id;
             };
+            const closePane = (event: MouseEvent) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const target = activeTargetFor(entry.window);
+              if (target) workspaceStore.closeWindow(target.id);
+            };
             const baseStyle = () => {
               const p = placement();
               if (p.hidden) return { display: "none" };
@@ -565,6 +571,51 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
                 </Show>
                 <Show when={entry.window.kind === null}>
                   <PlaceholderPane focused={focused()} />
+                </Show>
+                <Show
+                  when={
+                    !hidden() &&
+                    workspaceStore.activeWorkspace.windows.length > 1
+                  }
+                >
+                  <button
+                    type="button"
+                    class="absolute top-2 left-2 z-20 inline-flex items-center justify-center w-6 h-6 rounded-[4px] border border-border/60 bg-surface-0/90 text-muted-foreground shadow-sm backdrop-blur-sm cursor-pointer transition-colors duration-100 hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/70"
+                    title="Close pane"
+                    aria-label="Close pane"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={closePane}
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 12 12"
+                      fill="none"
+                      aria-hidden="true"
+                    >
+                      <line
+                        x1="3"
+                        y1="3"
+                        x2="9"
+                        y2="9"
+                        stroke="currentColor"
+                        stroke-width="1.2"
+                        stroke-linecap="round"
+                      />
+                      <line
+                        x1="9"
+                        y1="3"
+                        x2="3"
+                        y2="9"
+                        stroke="currentColor"
+                        stroke-width="1.2"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                  </button>
                 </Show>
                 <Show
                   when={

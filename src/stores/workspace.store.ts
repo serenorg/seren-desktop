@@ -234,6 +234,19 @@ function focusedWindow(workspace: Workspace): WorkspaceWindow | null {
   );
 }
 
+function nearestNonEditorWindowIndex(
+  workspace: Workspace,
+  focusedIdx: number,
+): number {
+  for (let i = focusedIdx + 1; i < workspace.windows.length; i += 1) {
+    if (workspace.windows[i].kind !== "editor") return i;
+  }
+  for (let i = focusedIdx - 1; i >= 0; i -= 1) {
+    if (workspace.windows[i].kind !== "editor") return i;
+  }
+  return workspace.windows.findIndex((w) => w.kind !== "editor");
+}
+
 function windowById(windowId: string): WorkspaceWindow | null {
   for (const workspace of state.workspaces) {
     const window = workspace.windows.find((w) => w.id === windowId);
@@ -292,12 +305,29 @@ function bindThreadToWorkspace(
   const focused = focusedWindow(workspace) ?? workspace.windows[0];
 
   // Editor panes are persistent. Don't replace one with the picked thread -
-  // open the thread in a new pane next to the editor instead, mirroring
-  // bindEditorToWorkspace's behavior when a thread pane is focused.
+  // reuse a neighboring non-editor pane when one already exists. This keeps
+  // normal sidebar thread switches from accumulating extra vertical panes
+  // while preserving the editor pane.
   if (focused?.kind === "editor") {
     const focusedIdx = workspace.windows.findIndex(
       (w) => w.id === workspace.focusedWindowId,
     );
+    const reusableIdx = nearestNonEditorWindowIndex(workspace, focusedIdx);
+    if (reusableIdx >= 0) {
+      const reusableWindow = workspace.windows[reusableIdx];
+      setState("workspaces", idx, "windows", reusableIdx, {
+        id: reusableWindow.id,
+        threadId,
+        kind: thread.kind,
+        size: reusableWindow.size,
+      });
+      setState("workspaces", idx, "focusedWindowId", reusableWindow.id);
+      if (!state.workspaces[idx].hasHadContent) {
+        setState("workspaces", idx, "hasHadContent", true);
+      }
+      return;
+    }
+
     const insertAt =
       focusedIdx >= 0 ? focusedIdx + 1 : workspace.windows.length;
     const newId = newPaneId(number);
@@ -601,18 +631,18 @@ export const workspaceStore = {
    * a thread, the underlying thread is NOT deleted - it just leaves
    * this workspace. Focus moves to the previous (or next) pane.
    */
-  closeFocusedWindow(): void {
+  closeWindow(windowId: string): void {
     const wsIdx = state.workspaces.findIndex(
       (w) => w.number === state.activeNumber,
     );
     if (wsIdx < 0) return;
     const ws = state.workspaces[wsIdx];
-    const focusedIdx = ws.windows.findIndex((w) => w.id === ws.focusedWindowId);
-    if (focusedIdx < 0) return;
-    const closedWindow = ws.windows[focusedIdx];
+    const closedIdx = ws.windows.findIndex((w) => w.id === windowId);
+    if (closedIdx < 0) return;
+    const closedWindow = ws.windows[closedIdx];
     const nextWindows = [
-      ...ws.windows.slice(0, focusedIdx),
-      ...ws.windows.slice(focusedIdx + 1),
+      ...ws.windows.slice(0, closedIdx),
+      ...ws.windows.slice(closedIdx + 1),
     ];
     const closedWindowId = closedWindow.id;
     setState("workspaces", wsIdx, "windows", nextWindows);
@@ -622,7 +652,13 @@ export const workspaceStore = {
       "layout",
       removeWindowFromLayout(ws.layout, closedWindowId),
     );
-    const nextFocusIdx = Math.min(focusedIdx, nextWindows.length - 1);
+    const closedFocused = ws.focusedWindowId === closedWindowId;
+    const existingFocusIdx = nextWindows.findIndex(
+      (w) => w.id === ws.focusedWindowId,
+    );
+    const nextFocusIdx = closedFocused
+      ? Math.min(closedIdx, nextWindows.length - 1)
+      : existingFocusIdx;
     const nextFocusId = nextFocusIdx >= 0 ? nextWindows[nextFocusIdx].id : null;
     setState("workspaces", wsIdx, "focusedWindowId", nextFocusId);
 
@@ -635,6 +671,13 @@ export const workspaceStore = {
     // to switch threads.
     if (closedWindow.kind === "editor") return;
 
+    if (
+      !closedFocused &&
+      closedWindow.threadId !== threadStore.activeThreadId
+    ) {
+      return;
+    }
+
     if (nextFocusId !== null) {
       const nextThreadId = nextWindows[nextFocusIdx].threadId;
       if (nextThreadId !== threadStore.activeThreadId) {
@@ -642,6 +685,13 @@ export const workspaceStore = {
       }
     } else if (threadStore.activeThreadId !== null) {
       threadStore.setActiveThread(null);
+    }
+  },
+
+  closeFocusedWindow(): void {
+    const focusedWindowId = this.activeWorkspace.focusedWindowId;
+    if (focusedWindowId) {
+      this.closeWindow(focusedWindowId);
     }
   },
 

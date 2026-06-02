@@ -455,6 +455,27 @@ describe("workspaceStore", () => {
     expect(ws.focusedWindowId).toBe(ws.windows[0].id);
   });
 
+  it("reuses an existing non-editor pane when selecting a thread from an editor-focused workspace", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.bindEditorToWorkspace("/tmp/skill/SKILL.md");
+    expect(workspaceStore.activeWindow?.kind).toBe("editor");
+
+    threadStore.setActiveThread("thread-2");
+
+    const ws = workspaceStore.activeWorkspace;
+    const threadPanes = ws.windows.filter((w) => w.kind !== "editor");
+    expect(ws.windows).toHaveLength(2);
+    expect(ws.windows.filter((w) => w.kind === "editor")).toHaveLength(1);
+    expect(threadPanes).toHaveLength(1);
+    expect(threadPanes[0]).toMatchObject({
+      threadId: "thread-2",
+      kind: "chat",
+    });
+    expect(ws.focusedWindowId).toBe(threadPanes[0].id);
+  });
+
   it("focuses the active workspace pane when given a singleton pane id from another workspace", async () => {
     const { threadStore, workspaceStore } = await setup();
 
@@ -571,6 +592,28 @@ describe("workspaceStore", () => {
     const ws = workspaceStore.activeWorkspace;
     expect(ws.windows.map((w) => w.threadId)).toEqual(["thread-1"]);
     expect(ws.focusedWindowId).toBe(ws.windows[0].id);
+  });
+
+  it("closes a non-focused pane by id without killing the active thread", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    threadStore.setActiveThread("thread-2");
+
+    const wsBefore = workspaceStore.activeWorkspace;
+    const inactivePane = wsBefore.windows.find((w) => w.threadId === "thread-1");
+    const focusedPane = wsBefore.windows.find((w) => w.threadId === "thread-2");
+    expect(inactivePane).toBeDefined();
+    expect(focusedPane).toBeDefined();
+    expect(wsBefore.focusedWindowId).toBe(focusedPane?.id);
+
+    workspaceStore.closeWindow(inactivePane?.id ?? "");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows.map((w) => w.threadId)).toEqual(["thread-2"]);
+    expect(ws.focusedWindowId).toBe(focusedPane?.id);
+    expect(threadStore.activeThreadId).toBe("thread-2");
   });
 
   it("clears the active thread when the last pane closes", async () => {
