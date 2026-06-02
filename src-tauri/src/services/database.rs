@@ -6,6 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
+use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
@@ -23,6 +24,9 @@ pub struct PersistedMessage {
     pub provider: Option<String>,
 }
 
+pub const WAL_AUTOCHECKPOINT_PAGES: u32 = 200;
+const WAL_CHECKPOINT_INTERVAL_SECS: u64 = 10;
+
 /// Shared SQLite connection pool managed as Tauri state.
 /// Serializes all DB operations through a single connection to prevent
 /// "database is locked" errors from concurrent connection opens.
@@ -35,6 +39,11 @@ impl DbPool {
         Ok(Self(Mutex::new(conn)))
     }
 
+    #[cfg(test)]
+    pub fn from_connection_for_test(conn: Connection) -> Self {
+        Self(Mutex::new(conn))
+    }
+
     /// Run a closure with exclusive access to the shared connection.
     pub fn with_connection<T, F>(&self, f: F) -> std::result::Result<T, String>
     where
@@ -45,6 +54,90 @@ impl DbPool {
             .lock()
             .map_err(|e| format!("DB mutex poisoned: {}", e))?;
         f(&conn).map_err(|e| e.to_string())
+    }
+
+    pub fn checkpoint_wal(&self, mode: WalCheckpointMode) -> std::result::Result<(), String> {
+        self.with_connection(|conn| checkpoint_wal(conn, mode))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum WalCheckpointMode {
+    Restart,
+    Truncate,
+}
+
+impl WalCheckpointMode {
+    fn as_sql(self) -> &'static str {
+        match self {
+            Self::Restart => "RESTART",
+            Self::Truncate => "TRUNCATE",
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct WalCheckpointTask(Mutex<Option<JoinHandle<()>>>);
+
+impl WalCheckpointTask {
+    pub fn replace(&self, handle: JoinHandle<()>) {
+        let mut slot = self.0.lock().expect("WAL checkpoint task mutex poisoned");
+        if let Some(existing) = slot.take() {
+            existing.abort();
+        }
+        *slot = Some(handle);
+    }
+
+    pub fn abort(&self) {
+        let mut slot = self.0.lock().expect("WAL checkpoint task mutex poisoned");
+        if let Some(existing) = slot.take() {
+            existing.abort();
+        }
+    }
+}
+
+pub fn configure_connection(conn: &Connection) -> Result<()> {
+    conn.busy_timeout(Duration::from_millis(5000))?;
+    conn.execute_batch(&format!(
+        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA wal_autocheckpoint={};",
+        WAL_AUTOCHECKPOINT_PAGES
+    ))?;
+    Ok(())
+}
+
+pub fn checkpoint_wal(conn: &Connection, mode: WalCheckpointMode) -> Result<()> {
+    let sql = format!("PRAGMA wal_checkpoint({})", mode.as_sql());
+    conn.query_row(&sql, [], |_row| Ok(()))
+}
+
+pub fn checkpoint_managed_db(app: &AppHandle, reason: &str) {
+    if let Some(pool) = app.try_state::<DbPool>() {
+        match pool.checkpoint_wal(WalCheckpointMode::Truncate) {
+            Ok(()) => log::info!("[Database] WAL checkpoint(TRUNCATE) completed: {}", reason),
+            Err(err) => log::warn!(
+                "[Database] WAL checkpoint(TRUNCATE) failed during {}: {}",
+                reason,
+                err
+            ),
+        }
+    }
+}
+
+pub fn start_wal_checkpoint_task(app: &AppHandle) {
+    let app_handle = app.clone();
+    let handle = tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(WAL_CHECKPOINT_INTERVAL_SECS));
+        loop {
+            interval.tick().await;
+            checkpoint_managed_db(&app_handle, "periodic");
+        }
+    });
+
+    if let Some(task) = app.try_state::<WalCheckpointTask>() {
+        task.replace(handle);
+    } else {
+        handle.abort();
+        log::warn!("[Database] WAL checkpoint task state missing; periodic checkpoint disabled");
     }
 }
 
@@ -142,9 +235,10 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
     }
 
     let conn = Connection::open(path)?;
-    conn.busy_timeout(Duration::from_millis(5000))?;
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+    configure_connection(&conn)?;
     setup_schema(&conn)?;
+    checkpoint_wal(&conn, WalCheckpointMode::Restart)?;
+    checkpoint_wal(&conn, WalCheckpointMode::Truncate)?;
     Ok(conn)
 }
 
@@ -792,6 +886,52 @@ mod tests {
             )
             .unwrap();
         assert_eq!(event_count, 2);
+    }
+
+    #[test]
+    fn configure_connection_sets_bounded_wal_autocheckpoint() {
+        let conn = Connection::open_in_memory().unwrap();
+        configure_connection(&conn).unwrap();
+
+        let autocheckpoint_pages: i64 = conn
+            .query_row("PRAGMA wal_autocheckpoint", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(autocheckpoint_pages, WAL_AUTOCHECKPOINT_PAGES as i64);
+    }
+
+    #[test]
+    fn pool_checkpoint_truncates_accumulated_wal() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("chat.db");
+        let wal_path = dir.path().join("chat.db-wal");
+        let conn = Connection::open(&db_path).unwrap();
+        configure_connection(&conn).unwrap();
+        conn.execute_batch("PRAGMA wal_autocheckpoint=0").unwrap();
+        setup_schema(&conn).unwrap();
+
+        for i in 0..500 {
+            conn.execute(
+                "INSERT INTO conversations (id, title, created_at) VALUES (?1, 'Chat', ?2)",
+                params![format!("c{i}"), i],
+            )
+            .unwrap();
+        }
+
+        let before = std::fs::metadata(&wal_path).unwrap().len();
+        assert!(before > 0, "test setup should create WAL frames");
+
+        let pool = DbPool::from_connection_for_test(conn);
+        pool.checkpoint_wal(WalCheckpointMode::Truncate).unwrap();
+
+        let after = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+        assert!(
+            after < before,
+            "TRUNCATE checkpoint should shrink WAL from {before}, got {after}",
+        );
+        assert!(
+            after < 1024 * 1024,
+            "WAL should be bounded after checkpoint"
+        );
     }
 
     #[test]

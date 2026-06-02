@@ -2,7 +2,7 @@
 // ABOUTME: Contains Tauri commands and the application run function.
 
 use log::info;
-use tauri::{Emitter, Manager, RunEvent};
+use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_store::StoreExt;
 
@@ -515,6 +515,7 @@ pub fn run() {
         .manage(orchestrator::eval::EvalState::new())
         .manage(orchestrator::tool_bridge::ToolResultBridge::new())
         .manage(provider_runtime::ProviderRuntimeState::new())
+        .manage(services::database::WalCheckpointTask::default())
         .manage(messaging::MessagingState::new())
         .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
             as polymarket::commands::PolymarketWsState);
@@ -710,6 +711,7 @@ pub fn run() {
                 let pool = services::database::DbPool::new(&app.handle())
                     .expect("failed to initialize database pool");
                 app.manage(pool);
+                services::database::start_wal_checkpoint_task(&app.handle());
             }
 
             // Track Rust-bridged Gateway HTTP requests so the frontend can abort streams.
@@ -953,8 +955,18 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if let RunEvent::Exit = event {
+        .run(|app, event| match event {
+            RunEvent::WindowEvent {
+                event: WindowEvent::Focused(false),
+                ..
+            } => {
+                services::database::checkpoint_managed_db(app, "window blur");
+            }
+            RunEvent::Exit => {
+                if let Some(task) = app.try_state::<services::database::WalCheckpointTask>() {
+                    task.abort();
+                }
+                services::database::checkpoint_managed_db(app, "app exit");
                 log::info!("[App] Exit event — cleaning up child processes");
                 // Kill all MCP stdio server processes to prevent orphaned zombies
                 if let Some(mcp_state) = app.try_state::<mcp::McpState>() {
@@ -970,5 +982,6 @@ pub fn run() {
                     rt_state.kill_sync();
                 }
             }
+            _ => {}
         });
 }
