@@ -240,12 +240,13 @@ export async function orchestrate(
   );
 
   // 3. Prepare streaming state (message added on completion)
-  activeStreams.set(conversationId, {
+  const stream = {
     messageId: crypto.randomUUID(),
     startTime: Date.now(),
     provider: threadProvider,
     modelId: threadModel,
-  });
+  };
+  activeStreams.set(conversationId, stream);
 
   // 4. Listen for events
   let unlistenTransition: UnlistenFn | null = null;
@@ -284,6 +285,7 @@ export async function orchestrate(
     }));
     await invoke("orchestrate", {
       conversationId,
+      assistantMessageId: stream.messageId,
       prompt,
       history,
       capabilities,
