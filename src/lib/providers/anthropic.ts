@@ -6,8 +6,12 @@ import type {
   AuthOptions,
   ChatMessage,
   ChatRequest,
+  ContentBlock,
+  DocumentContentBlock,
+  ImageContentBlock,
   ProviderAdapter,
   ProviderModel,
+  TextContentBlock,
 } from "./types";
 
 /**
@@ -53,31 +57,108 @@ const DEFAULT_MODELS: ProviderModel[] = [
 ];
 
 /**
- * Convert messages to Anthropic format.
- * Anthropic requires system message to be separate from messages array.
+ * Anthropic native image source block.
+ * Either base64 (with media_type + data) or a remote URL.
+ */
+type AnthropicImageBlock = {
+  type: "image";
+  source:
+    | { type: "base64"; media_type: string; data: string }
+    | { type: "url"; url: string };
+};
+
+type AnthropicContentBlock =
+  | TextContentBlock
+  | AnthropicImageBlock
+  | DocumentContentBlock;
+
+/**
+ * Parse a data URL into media type + raw base64 payload.
+ * Returns null when the input is not a data URL.
+ */
+function parseDataUrl(url: string): { mediaType: string; data: string } | null {
+  if (!url.startsWith("data:")) return null;
+  const comma = url.indexOf(",");
+  if (comma < 0) return null;
+  const meta = url.slice(5, comma);
+  const data = url.slice(comma + 1);
+  const semi = meta.indexOf(";");
+  const mediaType = semi >= 0 ? meta.slice(0, semi) : meta;
+  if (!mediaType) return null;
+  return { mediaType, data };
+}
+
+/**
+ * Convert one OpenAI-format image_url block to Anthropic's image block shape.
+ * Anthropic accepts base64 sources or remote URLs; data: URLs must be split
+ * into media_type + raw base64.
+ */
+function imageUrlToAnthropic(block: ImageContentBlock): AnthropicImageBlock {
+  const url = block.image_url.url;
+  const parsed = parseDataUrl(url);
+  if (parsed) {
+    return {
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: parsed.mediaType,
+        data: parsed.data,
+      },
+    };
+  }
+  return {
+    type: "image",
+    source: { type: "url", url },
+  };
+}
+
+/**
+ * Convert a content array to Anthropic-compatible blocks. Preserves text and
+ * document blocks; rewrites image_url blocks into Anthropic's image shape.
+ */
+function toAnthropicBlocks(blocks: ContentBlock[]): AnthropicContentBlock[] {
+  return blocks.map((b) =>
+    b.type === "image_url" ? imageUrlToAnthropic(b) : b,
+  );
+}
+
+/**
+ * Flatten content to plain text for the system field, which Anthropic accepts
+ * as a string. Non-text blocks are dropped — the system prompt cannot carry
+ * attachments.
+ */
+function toSystemText(content: string | ContentBlock[]): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter((b): b is TextContentBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
+}
+
+/**
+ * Convert messages to Anthropic format. The system message is split off into
+ * its own field; user/assistant content arrays preserve text + image +
+ * document blocks (#2089 — the old path collapsed every array to text and
+ * silently dropped image attachments).
  */
 function convertToAnthropicFormat(messages: ChatMessage[]): {
   system?: string;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  messages: Array<{
+    role: "user" | "assistant";
+    content: string | AnthropicContentBlock[];
+  }>;
 } {
   const systemMessage = messages.find((m) => m.role === "system");
   const otherMessages = messages.filter((m) => m.role !== "system");
 
-  const normalizeContent = (
-    content: string | import("./types").ContentBlock[],
-  ): string => {
-    if (typeof content === "string") return content;
-    return content
-      .filter((b): b is import("./types").TextContentBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("\n");
-  };
-
   return {
-    system: systemMessage ? normalizeContent(systemMessage.content) : undefined,
+    system: systemMessage ? toSystemText(systemMessage.content) : undefined,
     messages: otherMessages.map((m) => ({
       role: m.role as "user" | "assistant",
-      content: normalizeContent(m.content),
+      content:
+        typeof m.content === "string"
+          ? m.content
+          : toAnthropicBlocks(m.content),
     })),
   };
 }
