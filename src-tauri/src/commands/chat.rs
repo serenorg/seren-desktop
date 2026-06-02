@@ -2,13 +2,11 @@
 // ABOUTME: Handles CRUD operations for conversations and messages in SQLite.
 
 use crate::commands::provider_runtime::DERIVED_KIND_CASE_SQL;
-use crate::services::database::{DbPool, init_db};
+use crate::services::database::{DbPool, PersistedMessage, init_db, save_message_record};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
-
-const MAX_MESSAGES_PER_CONVERSATION: i32 = 1000;
 
 pub(crate) fn delete_conversation_records(
     conn: &Connection,
@@ -755,27 +753,19 @@ pub async fn save_message(
     provider: Option<String>,
 ) -> Result<(), String> {
     run_db(app, move |conn| {
-        conn.execute(
-            "INSERT OR REPLACE INTO messages (id, conversation_id, role, content, model, timestamp, metadata, provider)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![id, conversation_id, role, content, model, timestamp, metadata, provider],
-        )?;
-
-        // Prune old messages only when count exceeds limit
-        let count: i32 = conn.query_row(
-            "SELECT COUNT(*) FROM messages WHERE conversation_id = ?1",
-            params![conversation_id],
-            |row| row.get(0),
-        )?;
-        if count > MAX_MESSAGES_PER_CONVERSATION {
-            conn.execute(
-                "DELETE FROM messages WHERE conversation_id = ?1 AND id NOT IN (
-                    SELECT id FROM messages WHERE conversation_id = ?1 ORDER BY timestamp DESC LIMIT ?2
-                )",
-                params![conversation_id, MAX_MESSAGES_PER_CONVERSATION],
-            )?;
-        }
-        Ok(())
+        save_message_record(
+            conn,
+            &PersistedMessage {
+                id,
+                conversation_id,
+                role,
+                content,
+                model,
+                timestamp,
+                metadata,
+                provider,
+            },
+        )
     })
     .await
 }

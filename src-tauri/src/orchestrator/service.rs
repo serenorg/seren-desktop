@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{Mutex, mpsc, watch};
 use uuid::Uuid;
 
@@ -26,6 +26,9 @@ use super::types::{
     TransitionEvent, UserCapabilities, WorkerEvent, WorkerType,
 };
 use super::worker::Worker;
+use crate::services::database::{
+    DbPool, PersistedMessage, resolve_conversation_provider, save_message_record,
+};
 
 const COMMUNITY_PRIOR_TIMEOUT_MS: u64 = 200;
 
@@ -65,6 +68,103 @@ impl Default for OrchestratorState {
 }
 
 const PRIVATE_CHAT_DEPLOYMENT_MISSING_MESSAGE: &str = "Your organization requires private chat, but no private chat deployment is configured. Please contact your organization admin.";
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+fn completion_message_record(
+    conversation_id: &str,
+    message_id: &str,
+    streamed_content: &str,
+    event: &WorkerEvent,
+    model_id: Option<&str>,
+    task_type: Option<&str>,
+    started_at: i64,
+    completed_at: i64,
+    provider: Option<&str>,
+) -> Option<PersistedMessage> {
+    let WorkerEvent::Complete {
+        final_content,
+        cost,
+        rlm_steps,
+        ..
+    } = event
+    else {
+        return None;
+    };
+
+    let content = if streamed_content.trim().is_empty() {
+        final_content.as_str()
+    } else {
+        streamed_content
+    };
+    if content.trim().is_empty() {
+        return None;
+    }
+
+    let mut metadata = serde_json::json!({
+        "v": 1,
+        "worker_type": "orchestrator",
+        "model_id": model_id,
+        "task_type": task_type,
+        "duration": (completed_at - started_at).max(0),
+        "cost": cost,
+    });
+    if let Some(rlm_steps) = rlm_steps.as_deref().filter(|steps| !steps.is_empty()) {
+        metadata["rlm_steps"] = serde_json::Value::String(rlm_steps.to_string());
+    }
+
+    Some(PersistedMessage {
+        id: message_id.to_string(),
+        conversation_id: conversation_id.to_string(),
+        role: "assistant".to_string(),
+        content: content.to_string(),
+        model: model_id.map(str::to_string),
+        timestamp: completed_at,
+        metadata: Some(metadata.to_string()),
+        provider: provider.map(str::to_string),
+    })
+}
+
+async fn persist_completion_message(app: AppHandle, mut message: PersistedMessage) {
+    let message_id = message.id.clone();
+    let conversation_id = message.conversation_id.clone();
+    let conversation_id_for_db = conversation_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        if let Some(pool) = app.try_state::<DbPool>() {
+            pool.with_connection(|conn| {
+                if message.provider.is_none() {
+                    message.provider =
+                        resolve_conversation_provider(conn, &conversation_id_for_db)?;
+                }
+                save_message_record(conn, &message)
+            })
+        } else {
+            let conn = crate::services::database::init_db(&app).map_err(|err| err.to_string())?;
+            if message.provider.is_none() {
+                message.provider = resolve_conversation_provider(&conn, &conversation_id_for_db)
+                    .map_err(|err| err.to_string())?;
+            }
+            save_message_record(&conn, &message).map_err(|err| err.to_string())
+        }
+    })
+    .await
+    .map_err(|err| err.to_string())
+    .and_then(|inner| inner);
+
+    if let Err(err) = result {
+        log::error!(
+            "[Orchestrator] Failed to persist completion message {} for conversation {}: {}",
+            message_id,
+            conversation_id,
+            err
+        );
+    }
+}
 
 /// Sleep for `duration`, returning early if the cancel flag flips to true.
 ///
@@ -200,6 +300,7 @@ pub async fn orchestrate(
     app: AppHandle,
     state: &OrchestratorState,
     conversation_id: String,
+    assistant_message_id: String,
     prompt: String,
     history: Vec<serde_json::Value>,
     capabilities: UserCapabilities,
@@ -209,6 +310,7 @@ pub async fn orchestrate(
         "[Orchestrator] Starting orchestration for conversation {}",
         conversation_id
     );
+    let started_at_ms = now_millis();
 
     // 0. RLM check: if input exceeds context window threshold, process recursively.
     //    Use the user-selected model (or a sensible default) for the limit check.
@@ -251,10 +353,13 @@ pub async fn orchestrate(
         // Create an event channel and forward events to the frontend.
         let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<WorkerEvent>(64);
         let app_clone = app.clone();
+        let assistant_message_id_for_rlm = assistant_message_id.clone();
+        let started_at_for_rlm = started_at_ms;
         let conv_id = conversation_id.clone();
 
         // Spawn the RLM processor
         let rlm_model = model_for_limit.to_string();
+        let rlm_model_for_persistence = rlm_model.clone();
         let rlm_prompt = prompt.clone();
         let rlm_history = history.clone();
         let rlm_tools = capabilities.tool_definitions.clone();
@@ -276,7 +381,26 @@ pub async fn orchestrate(
         });
 
         // Forward all events to the frontend
+        let mut streamed_content = String::new();
         while let Some(event) = event_rx.recv().await {
+            if let WorkerEvent::Content { text } = &event {
+                streamed_content.push_str(text);
+            }
+            if matches!(event, WorkerEvent::Complete { .. }) {
+                if let Some(record) = completion_message_record(
+                    &conversation_id,
+                    &assistant_message_id_for_rlm,
+                    &streamed_content,
+                    &event,
+                    Some(&rlm_model_for_persistence),
+                    None,
+                    started_at_for_rlm,
+                    now_millis(),
+                    None,
+                ) {
+                    persist_completion_message(app_clone.clone(), record).await;
+                }
+            }
             let orch_event = OrchestratorEvent {
                 conversation_id: conversation_id.clone(),
                 worker_event: event,
@@ -328,6 +452,8 @@ pub async fn orchestrate(
             &capabilities,
             &images,
             cancel_rx,
+            &assistant_message_id,
+            started_at_ms,
         )
         .await
     } else {
@@ -340,6 +466,8 @@ pub async fn orchestrate(
             &capabilities,
             &images,
             cancel_rx,
+            &assistant_message_id,
+            started_at_ms,
         )
         .await
     };
@@ -370,6 +498,8 @@ async fn execute_single_task(
     capabilities: &UserCapabilities,
     images: &[ImageAttachment],
     cancel_rx: watch::Receiver<bool>,
+    assistant_message_id: &str,
+    started_at_ms: i64,
 ) -> Result<(), String> {
     // Compute Thompson sampling rankings before routing
     let mut capabilities = capabilities.clone();
@@ -473,6 +603,10 @@ async fn execute_single_task(
         // consumed — unlike a oneshot).
         let conv_id = conversation_id.to_string();
         let app_for_events = app.clone();
+        let assistant_message_id_for_events = assistant_message_id.to_string();
+        let model_id_for_events = routing.model_id.clone();
+        let task_type_for_events = subtask.classification.task_type.clone();
+        let started_at_for_events = started_at_ms;
         let mut cancel_rx_forward = cancel_rx.clone();
 
         // Returns (was_cancelled, captured_error).
@@ -480,13 +614,32 @@ async fn execute_single_task(
         let forward_handle = tokio::spawn(async move {
             let mut captured_error: Option<String> = None;
             let mut cancelled = *cancel_rx_forward.borrow();
+            let mut streamed_content = String::new();
             while !cancelled {
                 tokio::select! {
                     event = event_rx.recv() => {
                         match event {
                             Some(worker_event) => {
+                                if let WorkerEvent::Content { text } = &worker_event {
+                                    streamed_content.push_str(text);
+                                }
                                 if let WorkerEvent::Error { ref message } = worker_event {
                                     captured_error = Some(message.clone());
+                                }
+                                if matches!(worker_event, WorkerEvent::Complete { .. }) {
+                                    if let Some(record) = completion_message_record(
+                                        &conv_id,
+                                        &assistant_message_id_for_events,
+                                        &streamed_content,
+                                        &worker_event,
+                                        Some(&model_id_for_events),
+                                        Some(&task_type_for_events),
+                                        started_at_for_events,
+                                        now_millis(),
+                                        None,
+                                    ) {
+                                        persist_completion_message(app_for_events.clone(), record).await;
+                                    }
                                 }
                                 let orchestrator_event = OrchestratorEvent {
                                     conversation_id: conv_id.clone(),
@@ -650,12 +803,7 @@ async fn execute_single_task(
                 tried_models.push(fallback_model);
 
                 let mut cancel_sleep = cancel_rx.clone();
-                if !sleep_or_cancel(
-                    std::time::Duration::from_secs(1),
-                    &mut cancel_sleep,
-                )
-                .await
-                {
+                if !sleep_or_cancel(std::time::Duration::from_secs(1), &mut cancel_sleep).await {
                     log::info!(
                         "[Orchestrator] Cancellation received during context-overflow reroute for {}",
                         conversation_id
@@ -706,11 +854,7 @@ async fn execute_single_task(
 
                     // Brief backoff before retry with new model
                     let mut cancel_sleep = cancel_rx.clone();
-                    if !sleep_or_cancel(
-                        std::time::Duration::from_secs(2),
-                        &mut cancel_sleep,
-                    )
-                    .await
+                    if !sleep_or_cancel(std::time::Duration::from_secs(2), &mut cancel_sleep).await
                     {
                         log::info!(
                             "[Orchestrator] Cancellation received during timeout fallback for {}",
@@ -744,12 +888,7 @@ async fn execute_single_task(
 
             // Brief backoff before retry
             let mut cancel_sleep = cancel_rx.clone();
-            if !sleep_or_cancel(
-                std::time::Duration::from_secs(2),
-                &mut cancel_sleep,
-            )
-            .await
-            {
+            if !sleep_or_cancel(std::time::Duration::from_secs(2), &mut cancel_sleep).await {
                 log::info!(
                     "[Orchestrator] Cancellation received during same-model retry backoff for {}",
                     conversation_id
@@ -857,6 +996,8 @@ async fn execute_multi_task(
     capabilities: &UserCapabilities,
     images: &[ImageAttachment],
     cancel_watch_rx: watch::Receiver<bool>,
+    assistant_message_id: &str,
+    started_at_ms: i64,
 ) -> Result<(), String> {
     // Persist plan to SQLite
     let plan_id = Uuid::new_v4().to_string();
@@ -927,13 +1068,42 @@ async fn execute_multi_task(
     // Spawn event forwarding task
     let conv_id = conversation_id.to_string();
     let app_for_events = app.clone();
+    let assistant_message_id_for_events = assistant_message_id.to_string();
+    let started_at_for_events = started_at_ms;
     let mut cancel_watch_for_forward = cancel_watch_rx.clone();
     let forward_handle = tokio::spawn(async move {
+        let mut streamed_by_subtask: HashMap<String, String> = HashMap::new();
         loop {
             tokio::select! {
                 event = shared_rx.recv() => {
                     match event {
                         Some((subtask_id, worker_event)) => {
+                            if let WorkerEvent::Content { text } = &worker_event {
+                                streamed_by_subtask
+                                    .entry(subtask_id.clone())
+                                    .or_default()
+                                    .push_str(text);
+                            }
+                            if matches!(worker_event, WorkerEvent::Complete { .. }) {
+                                let message_id = format!("{}:{}", assistant_message_id_for_events, subtask_id);
+                                let streamed_content = streamed_by_subtask
+                                    .get(&subtask_id)
+                                    .map(String::as_str)
+                                    .unwrap_or_default();
+                                if let Some(record) = completion_message_record(
+                                    &conv_id,
+                                    &message_id,
+                                    streamed_content,
+                                    &worker_event,
+                                    None,
+                                    None,
+                                    started_at_for_events,
+                                    now_millis(),
+                                    None,
+                                ) {
+                                    persist_completion_message(app_for_events.clone(), record).await;
+                                }
+                            }
                             let orchestrator_event = OrchestratorEvent {
                                 conversation_id: conv_id.clone(),
                                 worker_event,
@@ -947,9 +1117,11 @@ async fn execute_multi_task(
                         None => break,
                     }
                 }
-                _ = cancel_watch_for_forward.wait_for(|v| *v) => {
-                    log::info!("[Orchestrator] Cancellation received for multi-task conversation {}", conv_id);
-                    break;
+                changed = cancel_watch_for_forward.changed() => {
+                    if changed.is_ok() && *cancel_watch_for_forward.borrow() {
+                        log::info!("[Orchestrator] Cancellation received for multi-task conversation {}", conv_id);
+                        break;
+                    }
                 }
             }
         }
@@ -969,8 +1141,7 @@ async fn execute_multi_task(
 
     // Accumulates the final assistant content for each completed sub-task so
     // downstream layers can see what earlier sub-tasks produced (GH #1930).
-    let subtask_results: Arc<Mutex<HashMap<String, String>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let subtask_results: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
 
     'layers: for (layer_idx, layer) in layers.iter().enumerate() {
         log::info!(
@@ -1086,7 +1257,9 @@ async fn execute_multi_task(
                         WorkerEvent::Content { text } => {
                             streamed_content.push_str(text);
                         }
-                        WorkerEvent::Complete { final_content: fc, .. } => {
+                        WorkerEvent::Complete {
+                            final_content: fc, ..
+                        } => {
                             if !fc.is_empty() {
                                 final_content = Some(fc.clone());
                             }
@@ -1536,6 +1709,45 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[test]
+    fn completion_record_uses_shared_id_and_streamed_content() {
+        let event = WorkerEvent::Complete {
+            final_content: String::new(),
+            thinking: None,
+            cost: Some(0.25),
+            rlm_steps: None,
+        };
+        let record = completion_message_record(
+            "conv-1",
+            "assistant-1",
+            "streamed answer",
+            &event,
+            Some("anthropic/claude-sonnet-4"),
+            Some("research"),
+            1000,
+            2500,
+            Some("seren"),
+        )
+        .expect("complete event should build a persisted row");
+
+        assert_eq!(record.id, "assistant-1");
+        assert_eq!(record.conversation_id, "conv-1");
+        assert_eq!(record.role, "assistant");
+        assert_eq!(record.content, "streamed answer");
+        assert_eq!(record.model.as_deref(), Some("anthropic/claude-sonnet-4"));
+        assert_eq!(record.provider.as_deref(), Some("seren"));
+        assert_eq!(record.timestamp, 2500);
+
+        let metadata: serde_json::Value =
+            serde_json::from_str(record.metadata.as_deref().unwrap()).unwrap();
+        assert_eq!(metadata["v"], 1);
+        assert_eq!(metadata["worker_type"], "orchestrator");
+        assert_eq!(metadata["model_id"], "anthropic/claude-sonnet-4");
+        assert_eq!(metadata["task_type"], "research");
+        assert_eq!(metadata["duration"], 1500);
+        assert_eq!(metadata["cost"], 0.25);
+    }
+
     #[tokio::test]
     async fn cancel_flips_flag_and_keeps_session_entry() {
         // Contract (GH #1581): cancel() signals via the watch channel but
@@ -1606,13 +1818,15 @@ mod tests {
         // the sender has already bumped to version 1 (cancel=true).
         for iter in 0..2 {
             let mut iter_rx = rx.clone();
-            let result = tokio::time::timeout(
-                std::time::Duration::from_millis(500),
-                iter_rx.changed(),
-            )
-            .await;
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(500), iter_rx.changed())
+                    .await;
             assert!(result.is_ok(), "iter {} timed out waiting for cancel", iter);
-            assert!(*iter_rx.borrow(), "iter {} should observe cancel=true", iter);
+            assert!(
+                *iter_rx.borrow(),
+                "iter {} should observe cancel=true",
+                iter
+            );
         }
     }
 

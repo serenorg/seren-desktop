@@ -1,12 +1,27 @@
 // ABOUTME: SQLite database initialization and shared connection pool for chat persistence.
 // ABOUTME: Creates conversations and messages tables with migration support.
 
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, OptionalExtension, Result};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
+use uuid::Uuid;
+
+pub const MAX_MESSAGES_PER_CONVERSATION: i32 = 1000;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PersistedMessage {
+    pub id: String,
+    pub conversation_id: String,
+    pub role: String,
+    pub content: String,
+    pub model: Option<String>,
+    pub timestamp: i64,
+    pub metadata: Option<String>,
+    pub provider: Option<String>,
+}
 
 /// Shared SQLite connection pool managed as Tauri state.
 /// Serializes all DB operations through a single connection to prevent
@@ -31,6 +46,86 @@ impl DbPool {
             .map_err(|e| format!("DB mutex poisoned: {}", e))?;
         f(&conn).map_err(|e| e.to_string())
     }
+}
+
+pub fn save_message_record(conn: &Connection, message: &PersistedMessage) -> Result<()> {
+    if let Err(err) = conn.execute(
+        "INSERT OR REPLACE INTO messages (id, conversation_id, role, content, model, timestamp, metadata, provider)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![
+            message.id,
+            message.conversation_id,
+            message.role,
+            message.content,
+            message.model,
+            message.timestamp,
+            message.metadata,
+            message.provider
+        ],
+    ) {
+        log::error!(
+            "[Database] Failed to persist message {} for conversation {}: {}",
+            message.id,
+            message.conversation_id,
+            err
+        );
+        return Err(err);
+    }
+
+    log::info!(
+        "[Database] Persisted message {} for conversation {}",
+        message.id,
+        message.conversation_id
+    );
+
+    conn.execute(
+        "INSERT INTO message_events (id, conversation_id, message_id, event_type, status, metadata, created_at)
+         VALUES (?1, ?2, ?3, 'message_persisted', 'completed', ?4, ?5)",
+        rusqlite::params![
+            Uuid::new_v4().to_string(),
+            message.conversation_id,
+            message.id,
+            message.metadata,
+            message.timestamp
+        ],
+    )?;
+
+    let count: i32 = conn.query_row(
+        "SELECT COUNT(*) FROM messages WHERE conversation_id = ?1",
+        rusqlite::params![message.conversation_id],
+        |row| row.get(0),
+    )?;
+    if count > MAX_MESSAGES_PER_CONVERSATION {
+        conn.execute(
+            "DELETE FROM messages WHERE conversation_id = ?1 AND id NOT IN (
+                SELECT id FROM messages WHERE conversation_id = ?1 ORDER BY timestamp DESC LIMIT ?2
+            )",
+            rusqlite::params![message.conversation_id, MAX_MESSAGES_PER_CONVERSATION],
+        )?;
+    }
+
+    Ok(())
+}
+
+pub fn resolve_conversation_provider(
+    conn: &Connection,
+    conversation_id: &str,
+) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT COALESCE(
+            psr.provider,
+            CASE c.kind
+                WHEN 'agent' THEN c.agent_type
+                ELSE c.selected_provider
+            END
+         )
+         FROM conversations c
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         WHERE c.id = ?1",
+        rusqlite::params![conversation_id],
+        |row| row.get(0),
+    )
+    .optional()
 }
 
 pub fn get_db_path(app: &AppHandle) -> PathBuf {
@@ -459,6 +554,33 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     )
     .ok();
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS message_events (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'completed',
+            metadata TEXT,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+            FOREIGN KEY (message_id) REFERENCES messages(id)
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_message_events_message_id
+         ON message_events(message_id, created_at ASC)",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_message_events_conversation_id
+         ON message_events(conversation_id, created_at ASC)",
+        [],
+    )
+    .ok();
+
     // Persisted context-window observations keyed by (provider, model_id).
     // Populated from CLI prompt-completion metadata so the catalog does not
     // need to be edited every time a new model ships.
@@ -617,6 +739,60 @@ fn migrate_orphan_messages(conn: &Connection) -> Result<()> {
 mod tests {
     use super::*;
     use rusqlite::params;
+
+    #[test]
+    fn save_message_record_is_idempotent_and_audited() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Chat', 1000)",
+            [],
+        )
+        .unwrap();
+
+        let first = PersistedMessage {
+            id: "m1".to_string(),
+            conversation_id: "c1".to_string(),
+            role: "assistant".to_string(),
+            content: "draft".to_string(),
+            model: Some("model-a".to_string()),
+            timestamp: 2000,
+            metadata: None,
+            provider: Some("seren".to_string()),
+        };
+        save_message_record(&conn, &first).unwrap();
+
+        let second = PersistedMessage {
+            content: "final".to_string(),
+            timestamp: 3000,
+            ..first
+        };
+        save_message_record(&conn, &second).unwrap();
+
+        let (count, content, timestamp): (i64, String, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), content, timestamp FROM messages WHERE id = 'm1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(content, "final");
+        assert_eq!(timestamp, 3000);
+
+        let event_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM message_events
+                 WHERE conversation_id = 'c1'
+                   AND message_id = 'm1'
+                   AND event_type = 'message_persisted'
+                   AND status = 'completed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_count, 2);
+    }
 
     #[test]
     fn schema_creates_metadata_column() {
@@ -973,11 +1149,9 @@ mod tests {
         setup_schema(&conn).unwrap();
 
         let user_provider: Option<String> = conn
-            .query_row(
-                "SELECT provider FROM messages WHERE id = 'u1'",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT provider FROM messages WHERE id = 'u1'", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(
             user_provider, None,
