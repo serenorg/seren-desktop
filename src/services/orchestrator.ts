@@ -22,7 +22,10 @@ import {
   type ToolCallEvent,
   type ToolResultEvent,
 } from "@/services/employees-runtime";
-import { storeAssistantResponse } from "@/services/memory";
+import {
+  bootstrapMemoryContextDetails,
+  processAssistantResponseMemory,
+} from "@/services/memory";
 import { serializeHistory } from "@/services/orchestrator-history";
 import {
   allowsClaudeAgent,
@@ -35,7 +38,6 @@ import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState } from "@/stores/fileTree";
-import { projectStore } from "@/stores/project.store";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
@@ -146,6 +148,8 @@ const activeStreams = new Map<
     startTime: number;
     provider?: ProviderId;
     modelId?: string | null;
+    prompt?: string;
+    memory?: UnifiedMessage["memory"];
   }
 >();
 const activeToolRequests = new Set<string>();
@@ -209,15 +213,17 @@ export async function orchestrate(
     ];
   }
 
-  // Inject memory context for the default orchestrator path.
+  let answerMemory: UnifiedMessage["memory"] | undefined;
+  // Inject typed memory context for the default orchestrator path.
   if (settingsStore.get("memoryEnabled") && authStore.isAuthenticated) {
     try {
-      const projectId = projectStore.activeProject?.id ?? null;
-      const memoryContext = await invoke<string | null>("memory_bootstrap", {
-        projectId,
-      });
-      if (memoryContext) {
-        history = [{ role: "system", content: memoryContext }, ...history];
+      const memoryContext = await bootstrapMemoryContextDetails();
+      if (memoryContext?.prompt) {
+        history = [
+          { role: "system", content: memoryContext.prompt },
+          ...history,
+        ];
+        answerMemory = memoryContext.messageMemory;
       }
     } catch (error) {
       console.warn("[orchestrator] Failed to retrieve memory context:", error);
@@ -245,6 +251,8 @@ export async function orchestrate(
     startTime: Date.now(),
     provider: threadProvider,
     modelId: threadModel,
+    prompt,
+    memory: answerMemory,
   };
   activeStreams.set(conversationId, stream);
 
@@ -609,6 +617,7 @@ function handleComplete(
     duration,
     cost,
     finalOutputValidation,
+    memory: stream.memory,
     rlmSteps,
   };
 
@@ -617,12 +626,39 @@ function handleComplete(
   conversationStore.addMessage(assistantMessage, conversationId);
   conversationStore.persistMessage(assistantMessage, conversationId);
 
-  // Store conversation to memory if enabled
+  // Extract structured memories from the transcript after the answer lands.
   const model = stream.modelId || providerStore.activeModel || "unknown";
   if (finalOutputValidation.canStoreMemory) {
-    storeAssistantResponse(safeContent, { model }).catch((err) => {
-      console.warn("[orchestrator] Failed to store memory:", err);
-    });
+    processAssistantResponseMemory(safeContent, {
+      model,
+      userQuery: stream.prompt,
+      sessionId: conversationId,
+      projectContext: fileTreeState.rootPath || undefined,
+    })
+      .then((result) => {
+        if (!result?.messageMemory) return;
+        const current = conversationStore
+          .getMessagesFor(conversationId)
+          .find((msg) => msg.id === assistantMessage.id);
+        if (!current) return;
+        const updated: UnifiedMessage = {
+          ...current,
+          memory: {
+            used: current.memory?.used ?? [],
+            captured: result.messageMemory.captured,
+            captureStatus: result.messageMemory.captureStatus,
+          },
+        };
+        conversationStore.updateMessage(
+          assistantMessage.id,
+          updated,
+          conversationId,
+        );
+        void conversationStore.persistMessage(updated, conversationId);
+      })
+      .catch((err) => {
+        console.warn("[orchestrator] Failed to process memory:", err);
+      });
   }
 }
 

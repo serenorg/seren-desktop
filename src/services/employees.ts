@@ -219,6 +219,9 @@ function specFromInput(input: NewEmployeeInput): AgentSpec {
     template: input.template ?? "research_monitor",
     tool_presets: input.toolPresets ?? ["live_data"],
     ...(toolRefs ? { tool_refs: toolRefs } : {}),
+    ...(input.memoryPolicy !== undefined
+      ? { memory_policy: input.memoryPolicy }
+      : {}),
     approval_policy: input.approvalPolicy ?? "read_only",
     model_policy: input.modelPolicy ?? "balanced",
     private_output_policy: "control_plane",
@@ -265,6 +268,13 @@ function updateSpecFromPatch(patch: EmployeePatch): AgentSpecUpdate {
     update.approval_policy = patch.approvalPolicy;
   if (patch.visibility !== undefined) update.visibility = patch.visibility;
   if (patch.modelPolicy !== undefined) update.model_policy = patch.modelPolicy;
+  if (patch.memoryPolicy !== undefined) {
+    if (patch.memoryPolicy === null) {
+      update.clear_memory_policy = true;
+    } else {
+      update.memory_policy = patch.memoryPolicy;
+    }
+  }
   // AgentSpecUpdate.workload replaces the whole WorkloadSpec.
   // Only build it when the caller knows the full bundle; model-only changes
   // without bundle content would otherwise wipe it.

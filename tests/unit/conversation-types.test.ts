@@ -131,6 +131,41 @@ describe("UnifiedMessage types", () => {
     expect(msg.request?.prompt).toBe("Write a function");
     expect(msg.request?.context?.file).toBe("/src/main.rs");
   });
+
+  it("persists answer-level memory provenance metadata", () => {
+    const metadata = serializeMetadata(
+      makeMessage({
+        memory: {
+          used: [
+            {
+              id: "mem-used",
+              type: "preference",
+              summary: "Prefers concise answers.",
+              confidence: 0.9,
+              source: "conversation abc",
+            },
+          ],
+          captured: [
+            {
+              id: "mem-new",
+              type: "procedural",
+              summary: "Run focused tests before full checks.",
+            },
+          ],
+          captureStatus: "remembered",
+        },
+      }),
+    );
+
+    expect(metadata).not.toBeNull();
+    expect(deserializeMetadata(metadata)).toMatchObject({
+      memory: {
+        used: [expect.objectContaining({ id: "mem-used" })],
+        captured: [expect.objectContaining({ id: "mem-new" })],
+        captureStatus: "remembered",
+      },
+    });
+  });
 });
 
 describe("isToolMessage", () => {

@@ -1,7 +1,6 @@
 // ABOUTME: Chat service supporting streaming completions with multi-provider routing.
 // ABOUTME: Routes requests through provider abstraction for Seren, Anthropic, OpenAI, Gemini.
 
-import { invoke } from "@tauri-apps/api/core";
 import {
   extractEvidenceFromToolLoopMessages,
   type FinalOutputValidationReport,
@@ -32,11 +31,13 @@ import {
   isGatewayInitialized,
   waitForGatewayReady,
 } from "@/services/mcp-gateway";
-import { storeAssistantResponse } from "@/services/memory";
+import {
+  bootstrapMemoryContext,
+  processAssistantResponseMemory,
+} from "@/services/memory";
 import { authStore } from "@/stores/auth.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState } from "@/stores/fileTree";
-import { projectStore } from "@/stores/project.store";
 import { providerStore } from "@/stores/provider.store";
 import {
   getActiveToolsetPublishers,
@@ -537,10 +538,7 @@ export async function* streamMessageWithTools(
   // Inject memory context if enabled and authenticated
   if (settingsStore.get("memoryEnabled") && authStore.isAuthenticated) {
     try {
-      const projectId = projectStore.activeProject?.id ?? null;
-      const memoryContext = await invoke<string | null>("memory_bootstrap", {
-        projectId,
-      });
+      const memoryContext = await bootstrapMemoryContext();
       if (memoryContext) {
         systemContent += memoryContext;
       }
@@ -630,7 +628,7 @@ export async function* streamMessageWithTools(
 
       // Store conversation to memory if enabled
       if (finalOutputValidation.canStoreMemory) {
-        storeAssistantResponse(fullContent, {
+        processAssistantResponseMemory(fullContent, {
           model,
           userQuery: content,
         }).catch((err) => {
@@ -789,7 +787,7 @@ export async function* continueToolIteration(
       });
       fullContent = finalOutputValidation.safeDisplayText;
       if (finalOutputValidation.canStoreMemory) {
-        storeAssistantResponse(fullContent, {
+        processAssistantResponseMemory(fullContent, {
           model,
         }).catch((err) => {
           console.warn("[continueToolIteration] Failed to store memory:", err);

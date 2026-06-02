@@ -1855,8 +1855,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               Persistent Memory
             </h4>
             <p class="m-0 mb-4 text-[0.85rem] text-muted-foreground leading-relaxed">
-              Store and recall context across sessions. Requires a SerenDB
-              account.
+              Seren memory runs automatically across chat, agents, and employees
+              when SerenDB is connected.
             </p>
 
             <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
@@ -1874,12 +1874,12 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 />
                 <span class="flex flex-col gap-0.5">
                   <span class="text-[0.95rem] font-medium text-foreground">
-                    Enable Memory
+                    Memory Operations
                   </span>
                   <span class="text-[0.8rem] text-muted-foreground">
-                    Persist conversations, preferences, and knowledge across
-                    sessions. Memory data is stored in your SerenDB project. You
-                    must be logged in to SerenDB to use this feature.
+                    Keep this enabled for normal use. Turn it off only for
+                    troubleshooting or operator-controlled sessions where memory
+                    reads and writes should be skipped.
                   </span>
                 </span>
               </label>

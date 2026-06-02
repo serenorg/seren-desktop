@@ -50,15 +50,15 @@ describe("#1807 — scrubAgentMarkup is wired into agent.store.ts", () => {
     expect(fnSlice).toMatch(/scrubbed\.length\s*===\s*0/);
   });
 
-  it("storeAssistantResponse is called with validated scrubbed content, not raw streamingContent", () => {
+  it("processAssistantResponseMemory is called with validated scrubbed content, not raw streamingContent", () => {
     const fnStart = agentStoreSource.indexOf(
       "finalizeStreamingContent(sessionId: string",
     );
     const fnSlice = agentStoreSource.slice(fnStart, fnStart + 6000);
-    const memoryCallStart = fnSlice.indexOf("storeAssistantResponse(");
+    const memoryCallStart = fnSlice.indexOf("processAssistantResponseMemory(");
     expect(memoryCallStart).toBeGreaterThan(0);
     const memoryCall = fnSlice.slice(memoryCallStart, memoryCallStart + 200);
-    expect(memoryCall).toContain("storeAssistantResponse(safeContent,");
+    expect(memoryCall).toContain("processAssistantResponseMemory(safeContent,");
     expect(memoryCall).not.toContain("session.streamingContent");
     expect(fnSlice).toContain("finalOutputValidation.canStoreMemory");
   });

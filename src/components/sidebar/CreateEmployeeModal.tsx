@@ -12,7 +12,13 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import type { AgentAssetFile } from "@/api/seren-agent";
+import type {
+  AgentAssetFile,
+  AgentMemoryPolicy,
+  AgentSemanticMemoryReadPolicy,
+  AgentSemanticMemoryStore,
+  AgentSemanticMemoryWritePolicy,
+} from "@/api/seren-agent";
 import { deriveSlug, gradientFor, initialFor } from "@/lib/employees/avatar";
 import { buildEmployeeFilesPatch } from "@/lib/employees/bundle-patch";
 import {
@@ -57,6 +63,11 @@ import { employees as svc } from "@/services/employees";
 import { employeeStore } from "@/stores/employees.store";
 
 type ModeOption = { value: EmployeeMode; title: string; sub: string };
+type MemoryPreset =
+  | "balanced"
+  | "careful"
+  | "workflow_learning"
+  | "no_long_term_writes";
 
 const MODES: ModeOption[] = [
   {
@@ -96,6 +107,43 @@ const TOOL_PRESETS: { value: EmployeeToolPreset; label: string }[] = [
   { value: "database", label: "Database" },
 ];
 
+const MEMORY_PRESETS: {
+  value: MemoryPreset;
+  label: string;
+  readPolicy: AgentSemanticMemoryReadPolicy;
+  writePolicy: AgentSemanticMemoryWritePolicy;
+  retentionDays: number | null;
+}[] = [
+  {
+    value: "balanced",
+    label: "Balanced",
+    readPolicy: "always_on",
+    writePolicy: "on_observation",
+    retentionDays: 180,
+  },
+  {
+    value: "careful",
+    label: "Careful",
+    readPolicy: "explicit_tool",
+    writePolicy: "explicit_tool",
+    retentionDays: 90,
+  },
+  {
+    value: "workflow_learning",
+    label: "Workflow learning",
+    readPolicy: "always_on",
+    writePolicy: "on_observation",
+    retentionDays: 365,
+  },
+  {
+    value: "no_long_term_writes",
+    label: "No long-term writes",
+    readPolicy: "explicit_tool",
+    writePolicy: "none",
+    retentionDays: null,
+  },
+];
+
 const DEFAULT_LIMITS = {
   maxIterations: 4,
   maxToolCallsPerRun: 4,
@@ -114,6 +162,63 @@ function sameStringSet(left: readonly string[], right: readonly string[]) {
   const sortedLeft = [...left].sort();
   const sortedRight = [...right].sort();
   return sortedLeft.every((value, index) => value === sortedRight[index]);
+}
+
+function memoryPresetFromPolicy(
+  policy: AgentMemoryPolicy | null,
+): MemoryPreset {
+  const semantic = policy?.semantic_memory;
+  if (!semantic?.enabled || semantic.write_policy === "none") {
+    return "no_long_term_writes";
+  }
+  if (
+    semantic.read_policy === "explicit_tool" &&
+    semantic.write_policy === "explicit_tool"
+  ) {
+    return "careful";
+  }
+  if ((semantic.retention_days ?? 0) >= 365) {
+    return "workflow_learning";
+  }
+  return "balanced";
+}
+
+function presetConfig(preset: MemoryPreset) {
+  return (
+    MEMORY_PRESETS.find((option) => option.value === preset) ??
+    MEMORY_PRESETS[0]
+  );
+}
+
+function buildMemoryPolicy(input: {
+  preset: MemoryPreset;
+  semanticEnabled: boolean;
+  readPolicy: AgentSemanticMemoryReadPolicy;
+  writePolicy: AgentSemanticMemoryWritePolicy;
+  store: AgentSemanticMemoryStore;
+  retentionDays: number | null;
+  transcriptRetentionDays: number | null;
+  compactionEnabled: boolean;
+  compactionTokenThreshold: number;
+}): AgentMemoryPolicy {
+  const noWrites = input.preset === "no_long_term_writes";
+  return {
+    semantic_memory: {
+      enabled: input.semanticEnabled && !noWrites,
+      read_policy: input.readPolicy,
+      write_policy: noWrites ? "none" : input.writePolicy,
+      store: input.store,
+      retention_days: input.retentionDays,
+    },
+    transcript_retention_days: input.transcriptRetentionDays,
+    compaction: input.compactionEnabled
+      ? {
+          token_threshold: input.compactionTokenThreshold,
+          overlap_tokens: 1500,
+          event_retention_count: 24,
+        }
+      : null,
+  };
 }
 
 interface CreateEmployeeModalProps {
@@ -219,6 +324,41 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       ? initial.toolPresets
       : ["live_data"],
   );
+  const initialMemoryPolicy = initial?.memoryPolicy ?? null;
+  const initialMemoryPreset = memoryPresetFromPolicy(initialMemoryPolicy);
+  const initialMemoryConfig = presetConfig(initialMemoryPreset);
+  const [memoryPreset, setMemoryPreset] =
+    createSignal<MemoryPreset>(initialMemoryPreset);
+  const [semanticMemoryEnabled, setSemanticMemoryEnabled] = createSignal(
+    initialMemoryPolicy?.semantic_memory?.enabled ??
+      initialMemoryPreset !== "no_long_term_writes",
+  );
+  const [memoryReadPolicy, setMemoryReadPolicy] =
+    createSignal<AgentSemanticMemoryReadPolicy>(
+      initialMemoryPolicy?.semantic_memory?.read_policy ??
+        initialMemoryConfig.readPolicy,
+    );
+  const [memoryWritePolicy, setMemoryWritePolicy] =
+    createSignal<AgentSemanticMemoryWritePolicy>(
+      initialMemoryPolicy?.semantic_memory?.write_policy ??
+        initialMemoryConfig.writePolicy,
+    );
+  const [memoryStore, setMemoryStore] = createSignal<AgentSemanticMemoryStore>(
+    initialMemoryPolicy?.semantic_memory?.store ?? "org_default",
+  );
+  const [memoryRetentionDays, setMemoryRetentionDays] = createSignal(
+    initialMemoryPolicy?.semantic_memory?.retention_days ??
+      initialMemoryConfig.retentionDays ??
+      0,
+  );
+  const [transcriptRetentionDays, setTranscriptRetentionDays] = createSignal(
+    initialMemoryPolicy?.transcript_retention_days ?? 30,
+  );
+  const [memoryCompactionEnabled, setMemoryCompactionEnabled] = createSignal(
+    initialMemoryPolicy?.compaction !== null,
+  );
+  const [memoryCompactionThreshold, setMemoryCompactionThreshold] =
+    createSignal(initialMemoryPolicy?.compaction?.token_threshold ?? 120000);
   const [connectorAccess, setConnectorAccess] =
     createSignal<ConnectorAccessMode>(
       connectorAccessModeFromToolRefs(initial?.toolRefs ?? []),
@@ -774,6 +914,21 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     ),
   );
 
+  const currentMemoryPolicy = createMemo(() =>
+    buildMemoryPolicy({
+      preset: memoryPreset(),
+      semanticEnabled: semanticMemoryEnabled(),
+      readPolicy: memoryReadPolicy(),
+      writePolicy: memoryWritePolicy(),
+      store: memoryStore(),
+      retentionDays: memoryRetentionDays() > 0 ? memoryRetentionDays() : null,
+      transcriptRetentionDays:
+        transcriptRetentionDays() > 0 ? transcriptRetentionDays() : null,
+      compactionEnabled: memoryCompactionEnabled(),
+      compactionTokenThreshold: memoryCompactionThreshold(),
+    }),
+  );
+
   const policyReview = createMemo(() =>
     buildEmployeePolicyReviewSummary({
       approvalPolicy: approvalPolicy(),
@@ -802,6 +957,11 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     }
     if (!sameStringSet(toolPresets(), employee.toolPresets)) return true;
     if (!sameToolRefs(currentToolRefs(), employee.toolRefs)) return true;
+    if (
+      JSON.stringify(currentMemoryPolicy()) !==
+      JSON.stringify(employee.memoryPolicy)
+    )
+      return true;
     if (approvalPolicy() !== employee.approvalPolicy) return true;
     if (
       maxIterations() !==
@@ -837,6 +997,15 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
         ? prev.filter((p) => p !== preset)
         : [...prev, preset],
     );
+  };
+
+  const applyMemoryPreset = (preset: MemoryPreset) => {
+    const config = presetConfig(preset);
+    setMemoryPreset(preset);
+    setSemanticMemoryEnabled(preset !== "no_long_term_writes");
+    setMemoryReadPolicy(config.readPolicy);
+    setMemoryWritePolicy(config.writePolicy);
+    setMemoryRetentionDays(config.retentionDays ?? 0);
   };
 
   const handleSubmit = async () => {
@@ -884,6 +1053,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             modelId: modelChoice() === "private" ? modelId().trim() : undefined,
             toolPresets: toolPresets(),
             toolRefs: toolRefsChanged ? currentToolRefs() : undefined,
+            memoryPolicy: currentMemoryPolicy(),
             approvalPolicy: approvalPolicy(),
             limits,
           };
@@ -911,6 +1081,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
           modelId: modelChoice() === "private" ? modelId().trim() : undefined,
           toolPresets: toolPresets(),
           toolRefs: currentToolRefs(),
+          memoryPolicy: currentMemoryPolicy(),
           approvalPolicy: approvalPolicy(),
           limits,
         };
@@ -1395,6 +1566,41 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             </Show>
           </div>
 
+          <div>
+            <label class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+              Memory behavior
+            </label>
+            <div
+              class="grid grid-cols-2 gap-2"
+              role="radiogroup"
+              aria-label="Memory behavior"
+            >
+              <For each={MEMORY_PRESETS}>
+                {(option) => {
+                  const active = () => memoryPreset() === option.value;
+                  return (
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={active()}
+                      class="text-left px-3 py-2 rounded border text-[12px] transition-colors"
+                      classList={{
+                        "bg-primary/[0.10] border-primary/40 text-foreground":
+                          active(),
+                        "bg-card border-border text-muted-foreground hover:text-foreground":
+                          !active(),
+                      }}
+                      onClick={() => applyMemoryPreset(option.value)}
+                      disabled={submitting()}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                }}
+              </For>
+            </div>
+          </div>
+
           {/* Advanced */}
           <div class="border-t border-border pt-3">
             <button
@@ -1451,6 +1657,159 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                         );
                       }}
                     </For>
+                  </div>
+                </div>
+
+                <div class="col-span-2 grid grid-cols-2 gap-3 border-t border-border pt-3">
+                  <div class="col-span-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                    Memory policy
+                  </div>
+                  <label class="flex items-center gap-2 text-[12px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={semanticMemoryEnabled()}
+                      onChange={(e) =>
+                        setSemanticMemoryEnabled(e.currentTarget.checked)
+                      }
+                      disabled={
+                        submitting() || memoryPreset() === "no_long_term_writes"
+                      }
+                    />
+                    Semantic memory
+                  </label>
+                  <label class="flex items-center gap-2 text-[12px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={memoryCompactionEnabled()}
+                      onChange={(e) =>
+                        setMemoryCompactionEnabled(e.currentTarget.checked)
+                      }
+                      disabled={submitting()}
+                    />
+                    Compaction
+                  </label>
+                  <div>
+                    <label class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                      Read policy
+                    </label>
+                    <select
+                      class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm focus:outline-none focus:border-primary"
+                      value={memoryReadPolicy()}
+                      onChange={(e) =>
+                        setMemoryReadPolicy(
+                          e.currentTarget
+                            .value as AgentSemanticMemoryReadPolicy,
+                        )
+                      }
+                      disabled={submitting()}
+                    >
+                      <option value="always_on">Always on</option>
+                      <option value="explicit_tool">Explicit tool</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                      Write policy
+                    </label>
+                    <select
+                      class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm focus:outline-none focus:border-primary"
+                      value={memoryWritePolicy()}
+                      onChange={(e) =>
+                        setMemoryWritePolicy(
+                          e.currentTarget
+                            .value as AgentSemanticMemoryWritePolicy,
+                        )
+                      }
+                      disabled={
+                        submitting() || memoryPreset() === "no_long_term_writes"
+                      }
+                    >
+                      <option value="on_observation">On observation</option>
+                      <option value="explicit_tool">Explicit tool</option>
+                      <option value="none">None</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                      Store
+                    </label>
+                    <select
+                      class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm focus:outline-none focus:border-primary"
+                      value={memoryStore()}
+                      onChange={(e) =>
+                        setMemoryStore(
+                          e.currentTarget.value as AgentSemanticMemoryStore,
+                        )
+                      }
+                      disabled={submitting()}
+                    >
+                      <option value="org_default">Org default</option>
+                      <option value="external">External</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      for="employee-memory-retention"
+                      class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                    >
+                      Retention days
+                    </label>
+                    <input
+                      id="employee-memory-retention"
+                      type="number"
+                      min="0"
+                      class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm focus:outline-none focus:border-primary"
+                      value={memoryRetentionDays()}
+                      onInput={(e) =>
+                        setMemoryRetentionDays(
+                          Math.max(0, Number(e.currentTarget.value) || 0),
+                        )
+                      }
+                      disabled={submitting()}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      for="employee-transcript-retention"
+                      class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                    >
+                      Transcript days
+                    </label>
+                    <input
+                      id="employee-transcript-retention"
+                      type="number"
+                      min="0"
+                      class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm focus:outline-none focus:border-primary"
+                      value={transcriptRetentionDays()}
+                      onInput={(e) =>
+                        setTranscriptRetentionDays(
+                          Math.max(0, Number(e.currentTarget.value) || 0),
+                        )
+                      }
+                      disabled={submitting()}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      for="employee-memory-compaction-threshold"
+                      class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                    >
+                      Compaction tokens
+                    </label>
+                    <input
+                      id="employee-memory-compaction-threshold"
+                      type="number"
+                      min="1000"
+                      step="1000"
+                      class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm focus:outline-none focus:border-primary"
+                      value={memoryCompactionThreshold()}
+                      onInput={(e) =>
+                        setMemoryCompactionThreshold(
+                          Math.max(1000, Number(e.currentTarget.value) || 1000),
+                        )
+                      }
+                      disabled={submitting() || !memoryCompactionEnabled()}
+                    />
                   </div>
                 </div>
 

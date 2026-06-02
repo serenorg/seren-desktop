@@ -82,6 +82,7 @@ function dbToUnifiedMessage(m: DbMessage): UnifiedMessage {
     duration: metaFields.duration,
     cost: metaFields.cost,
     finalOutputValidation: metaFields.finalOutputValidation,
+    memory: metaFields.memory,
     toolCall: metaFields.toolCall,
     diff: metaFields.diff,
   };

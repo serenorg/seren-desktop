@@ -91,6 +91,7 @@ export type NewEmployeeInput = {
   template?: EmployeeTemplate;
   toolPresets?: EmployeeToolPreset[];
   toolRefs?: AgentToolRef[];
+  memoryPolicy?: AgentMemoryPolicy | null;
   approvalPolicy?: EmployeeApprovalPolicy;
   visibility?: "open" | "opaque";
   limits?: {
