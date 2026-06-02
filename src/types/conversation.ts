@@ -67,6 +67,8 @@ export interface UnifiedMessage {
   cost?: number;
   /** Verified Agent Output report for final assistant messages. */
   finalOutputValidation?: FinalOutputValidationReport;
+  /** Contextual memory provenance and post-answer capture state. */
+  memory?: MessageMemoryMetadata;
   toolCallId?: string;
   toolCall?: ToolCallData;
   diff?: DiffData;
@@ -115,6 +117,22 @@ export interface ChatContextData {
   range?: { startLine: number; endLine: number } | null;
 }
 
+export interface MessageMemoryDetail {
+  id?: string;
+  type: string;
+  summary: string;
+  confidence?: number;
+  recency?: string;
+  source?: string;
+}
+
+export interface MessageMemoryMetadata {
+  used: MessageMemoryDetail[];
+  captured?: MessageMemoryDetail[];
+  captureStatus?: "remembered" | "undone" | "error";
+  notice?: string;
+}
+
 /** Versioned metadata blob stored in the database `metadata` TEXT column. */
 export interface MessageMetadata {
   v: 1;
@@ -125,6 +143,7 @@ export interface MessageMetadata {
   duration?: number | null;
   cost?: number | null;
   final_output_validation?: FinalOutputValidationReport | null;
+  memory?: MessageMemoryMetadata | null;
   tool_call?: {
     id: string;
     name: string;
@@ -163,6 +182,7 @@ export function serializeMetadata(msg: UnifiedMessage): string | null {
     !msg.taskType &&
     !msg.toolCall &&
     !msg.diff &&
+    !msg.memory &&
     !msg.duration &&
     !msg.cost
   ) {
@@ -177,6 +197,7 @@ export function serializeMetadata(msg: UnifiedMessage): string | null {
     duration: msg.duration ?? null,
     cost: msg.cost ?? null,
     final_output_validation: msg.finalOutputValidation ?? null,
+    memory: msg.memory ?? null,
     tool_call: msg.toolCall
       ? {
           id: msg.toolCall.toolCallId,
@@ -229,6 +250,9 @@ export function deserializeMetadata(
       result.finalOutputValidation =
         meta.final_output_validation as FinalOutputValidationReport;
     }
+    if (isMessageMemoryMetadata(meta.memory)) {
+      result.memory = meta.memory;
+    }
     if (meta.tool_call && typeof meta.tool_call === "object") {
       const tc = meta.tool_call as Record<string, string>;
       result.toolCall = {
@@ -252,6 +276,26 @@ export function deserializeMetadata(
   } catch {
     return {};
   }
+}
+
+function isMemoryDetail(value: unknown): value is MessageMemoryDetail {
+  if (typeof value !== "object" || value === null) return false;
+  const detail = value as Partial<MessageMemoryDetail>;
+  return typeof detail.type === "string" && typeof detail.summary === "string";
+}
+
+function isMessageMemoryMetadata(
+  value: unknown,
+): value is MessageMemoryMetadata {
+  if (typeof value !== "object" || value === null) return false;
+  const metadata = value as Partial<MessageMemoryMetadata>;
+  return (
+    Array.isArray(metadata.used) &&
+    metadata.used.every(isMemoryDetail) &&
+    (metadata.captured === undefined ||
+      (Array.isArray(metadata.captured) &&
+        metadata.captured.every(isMemoryDetail)))
+  );
 }
 
 /** Type guard: is this message a tool-related message? */

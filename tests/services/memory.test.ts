@@ -52,6 +52,9 @@ settingsGetMock.mockImplementation((key: string) => {
 });
 
 import {
+  deleteMemory,
+  MEMORY_TOOL_NAMES,
+  processAssistantResponseMemory,
   recallMemories,
   rememberMemory,
   storeAssistantResponse,
@@ -102,19 +105,49 @@ describe("memory service integration path", () => {
     });
   });
 
-  it("stores assistant responses as semantic memories", async () => {
-    invokeMock.mockResolvedValue("memory-write-ok");
+  it("exposes the full live Seren Memory MCP surface", () => {
+    expect(MEMORY_TOOL_NAMES).toEqual([
+      "session_bootstrap",
+      "remember",
+      "create_memory",
+      "recall",
+      "process_conversation",
+      "learn_from_error",
+      "list_memories",
+      "get_memory",
+      "update_memory",
+      "forget",
+      "delete_memory",
+      "get_memory_graph",
+      "consolidate",
+      "configure_publishers",
+    ]);
+  });
+
+  it("processes assistant responses through structured conversation extraction", async () => {
+    invokeMock.mockResolvedValue({
+      extracted_count: 2,
+      memories: [
+        {
+          id: "mem-1",
+          memory_type: "preference",
+          summary: "Prefers narrow TDD coverage.",
+        },
+      ],
+    });
 
     await storeAssistantResponse("Answer", {
       model: "anthropic/claude-sonnet-4",
       userQuery: "Question",
     });
 
-    expect(invokeMock).toHaveBeenCalledWith("memory_remember", {
-      content:
-        "User: Question\n\nAssistant: Answer\n\nModel: anthropic/claude-sonnet-4",
-      memoryType: "semantic",
+    expect(invokeMock).toHaveBeenCalledWith("memory_process_conversation", {
+      transcript:
+        "User: Question\n\nAssistant: Answer\n\nMetadata:\nModel: anthropic/claude-sonnet-4",
       projectId: "project-1",
+      sessionId: undefined,
+      orgId: undefined,
+      projectContext: undefined,
     });
   });
 
@@ -125,5 +158,49 @@ describe("memory service integration path", () => {
     });
 
     expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("returns structured capture metadata for answer-level UI", async () => {
+    invokeMock.mockResolvedValue({
+      memories: [
+        {
+          id: "mem-1",
+          memory_type: "preference",
+          summary: "Prefers concise answers.",
+          confidence: 0.91,
+          source: { session_id: "session-1" },
+        },
+      ],
+    });
+
+    const result = await processAssistantResponseMemory("Short answer", {
+      userQuery: "Please be concise",
+    });
+
+    expect(result?.messageMemory?.captured).toEqual([
+      expect.objectContaining({
+        id: "mem-1",
+        type: "preference",
+        summary: "Prefers concise answers.",
+        confidence: 0.91,
+        source: "session-1",
+      }),
+    ]);
+  });
+
+  it("requires explicit confirmation before permanent delete", async () => {
+    await expect(
+      deleteMemory("mem-1", { confirm: false }),
+    ).rejects.toThrow("Permanent memory delete requires confirmation");
+
+    expect(invokeMock).not.toHaveBeenCalled();
+
+    invokeMock.mockResolvedValue({ deleted: true });
+    await deleteMemory("mem-1", { confirm: true });
+
+    expect(invokeMock).toHaveBeenCalledWith("memory_delete_memory", {
+      memoryId: "mem-1",
+      confirm: true,
+    });
   });
 });

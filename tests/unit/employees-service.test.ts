@@ -210,6 +210,60 @@ describe("employees service", () => {
     expect(updateBody).not.toHaveProperty("tool_refs");
   });
 
+  it("sends typed memory policy on deploy and update", async () => {
+    const memoryPolicy = {
+      semantic_memory: {
+        enabled: true,
+        read_policy: "always_on" as const,
+        write_policy: "on_observation" as const,
+        store: "org_default" as const,
+        retention_days: 90,
+      },
+      compaction: {
+        token_threshold: 120000,
+        overlap_tokens: 1500,
+        event_retention_count: 24,
+      },
+      transcript_retention_days: 30,
+    };
+    vi.mocked(serenAgentDeploy).mockResolvedValueOnce({
+      data: { data: cloudSummary() },
+      error: undefined,
+    } as never);
+    vi.mocked(serenAgentUpdateManagedDeployment).mockResolvedValueOnce({
+      data: { data: cloudSummary() },
+      error: undefined,
+    } as never);
+
+    await employees.deploy({
+      name: "Atlas",
+      slug: "atlas",
+      mode: "always_on",
+      instructions: [{ kind: "skill", path: "SKILL.md", content: "Run." }],
+      modelChoice: "standard",
+      memoryPolicy,
+    });
+    await employees.update("dep_1", { memoryPolicy });
+
+    expect(serenAgentDeploy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          memory_policy: memoryPolicy,
+        }),
+        throwOnError: false,
+      }),
+    );
+    expect(serenAgentUpdateManagedDeployment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          memory_policy: memoryPolicy,
+        }),
+        path: { id: "dep_1" },
+        throwOnError: false,
+      }),
+    );
+  });
+
   it("patches managed deployment files through the narrow files endpoint", async () => {
     vi.mocked(serenAgentPatchManagedDeploymentFiles).mockResolvedValueOnce({
       data: { data: cloudSummary() },

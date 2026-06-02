@@ -18,6 +18,7 @@ import { createStore } from "solid-js/store";
 import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
+import { SlidePanel } from "@/components/layout/SlidePanel";
 import { DepositModal } from "@/components/wallet/DepositModal";
 import { isAuthError, isContextOverflowError } from "@/lib/auth-errors";
 import {
@@ -69,6 +70,11 @@ import {
   sendMessageWithRetry,
 } from "@/services/chat";
 import {
+  correctAnswerMemory,
+  forgetMemory,
+  suppressMemoryForAnswer,
+} from "@/services/memory";
+import {
   cancelOrchestration,
   orchestrate,
   retryOrchestration,
@@ -87,7 +93,11 @@ import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 import { workspaceStore } from "@/stores/workspace.store";
-import { isRetryableWorker, type UnifiedMessage } from "@/types/conversation";
+import {
+  isRetryableWorker,
+  type MessageMemoryMetadata,
+  type UnifiedMessage,
+} from "@/types/conversation";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { CompactedMessage } from "./CompactedMessage";
 import {
@@ -151,6 +161,17 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
   const [showSignInPrompt, setShowSignInPrompt] = createSignal(false);
   const [showDepositFromError, setShowDepositFromError] = createSignal(false);
+  const [memoryPanelMessageId, setMemoryPanelMessageId] = createSignal<
+    string | null
+  >(null);
+  const [memoryActionStatus, setMemoryActionStatus] = createSignal<
+    string | null
+  >(null);
+  const [memoryActionBusy, setMemoryActionBusy] = createSignal(false);
+  const [correctionMessageId, setCorrectionMessageId] = createSignal<
+    string | null
+  >(null);
+  const [correctionDraft, setCorrectionDraft] = createSignal("");
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const [isAttaching, setIsAttaching] = createSignal(false);
   const isPaneActive = () => props.active ?? true;
@@ -206,6 +227,12 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     const id = conversationId();
     return id ? conversationStore.getMessagesFor(id) : [];
   });
+  const memoryPanelMessage = createMemo(() => {
+    const id = memoryPanelMessageId();
+    return id
+      ? conversationMessages().find((message) => message.id === id)
+      : undefined;
+  });
   // Resolve the skill the composer's recent-skill button should label —
   // strictly "last actually invoked in this thread," derived from the
   // transcript. We deliberately do NOT track the composer's current draft
@@ -223,6 +250,138 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   const providerBoundaries = createMemo(() =>
     computeProviderBoundaries(conversationMessages()),
   );
+
+  const persistMemoryUpdate = (
+    message: UnifiedMessage,
+    memory: MessageMemoryMetadata | undefined,
+  ) => {
+    const id = conversationId();
+    if (!id) return;
+    const updated: UnifiedMessage = { ...message, memory };
+    conversationStore.updateMessage(message.id, updated, id);
+    void conversationStore.persistMessage(updated, id);
+  };
+
+  const updateMemoryNotice = (
+    message: UnifiedMessage,
+    notice: string,
+    updater: (memory: MessageMemoryMetadata) => MessageMemoryMetadata,
+  ) => {
+    const current = message.memory ?? { used: [] };
+    persistMemoryUpdate(message, { ...updater(current), notice });
+    setMemoryActionStatus(notice);
+  };
+
+  const handleForgetMemoryDetail = async (
+    message: UnifiedMessage,
+    memoryId: string | undefined,
+  ) => {
+    if (!memoryId || memoryActionBusy()) return;
+    setMemoryActionBusy(true);
+    setMemoryActionStatus(null);
+    try {
+      await forgetMemory(memoryId);
+      updateMemoryNotice(
+        message,
+        "Forgot that remembered detail.",
+        (memory) => ({
+          ...memory,
+          used: memory.used.filter((detail) => detail.id !== memoryId),
+        }),
+      );
+    } catch (error) {
+      setMemoryActionStatus(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setMemoryActionBusy(false);
+    }
+  };
+
+  const handleSuppressMemoryDetail = async (
+    message: UnifiedMessage,
+    memoryId: string | undefined,
+  ) => {
+    if (!memoryId || memoryActionBusy()) return;
+    setMemoryActionBusy(true);
+    setMemoryActionStatus(null);
+    try {
+      await suppressMemoryForAnswer(memoryId, message.id);
+      updateMemoryNotice(
+        message,
+        "This answer will not use that detail.",
+        (memory) => ({
+          ...memory,
+          used: memory.used.filter((detail) => detail.id !== memoryId),
+        }),
+      );
+    } catch (error) {
+      setMemoryActionStatus(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setMemoryActionBusy(false);
+    }
+  };
+
+  const handleUndoRemember = async (message: UnifiedMessage) => {
+    const memoryId = message.memory?.captured?.find((detail) => detail.id)?.id;
+    if (!memoryId || memoryActionBusy()) return;
+    setMemoryActionBusy(true);
+    setMemoryActionStatus(null);
+    try {
+      await forgetMemory(memoryId);
+      updateMemoryNotice(
+        message,
+        "Removed the memory captured from this turn.",
+        (memory) => ({
+          ...memory,
+          captureStatus: "undone",
+        }),
+      );
+    } catch (error) {
+      setMemoryActionStatus(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setMemoryActionBusy(false);
+    }
+  };
+
+  const beginMemoryCorrection = (message: UnifiedMessage) => {
+    setMemoryPanelMessageId(message.id);
+    setCorrectionMessageId(message.id);
+    setCorrectionDraft("");
+    setMemoryActionStatus(null);
+  };
+
+  const submitMemoryCorrection = async (message: UnifiedMessage) => {
+    const correction = correctionDraft().trim();
+    if (!correction || memoryActionBusy()) return;
+    setMemoryActionBusy(true);
+    setMemoryActionStatus(null);
+    try {
+      const notice = await correctAnswerMemory({
+        messageId: message.id,
+        correction,
+        memories: [
+          ...(message.memory?.used ?? []),
+          ...(message.memory?.captured ?? []),
+        ],
+        errorContent: message.error ?? undefined,
+        fixContent: message.content,
+      });
+      updateMemoryNotice(message, notice, (memory) => memory);
+      setCorrectionMessageId(null);
+      setCorrectionDraft("");
+    } catch (error) {
+      setMemoryActionStatus(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setMemoryActionBusy(false);
+    }
+  };
 
   const recentSkill = createMemo(() => {
     const messages = conversationMessages();
@@ -1385,6 +1544,75 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                           );
                         })()}
                       </Show>
+                      <Show
+                        when={
+                          message.role === "assistant" &&
+                          message.status === "complete" &&
+                          ((message.memory?.used ?? []).length > 0 ||
+                            ((message.memory?.captured ?? []).length > 0 &&
+                              message.memory?.captureStatus !== "undone"))
+                        }
+                      >
+                        <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <Show when={(message.memory?.used ?? []).length > 0}>
+                            <button
+                              type="button"
+                              class="bg-card border border-border text-muted-foreground px-2 py-0.5 rounded cursor-pointer hover:bg-surface-2 hover:text-foreground"
+                              onClick={() => {
+                                setMemoryPanelMessageId(message.id);
+                                setCorrectionMessageId(null);
+                                setMemoryActionStatus(
+                                  message.memory?.notice ?? null,
+                                );
+                              }}
+                            >
+                              Used {(message.memory?.used ?? []).length}{" "}
+                              remembered detail
+                              {(message.memory?.used ?? []).length === 1
+                                ? ""
+                                : "s"}
+                            </button>
+                            <button
+                              type="button"
+                              class="bg-transparent border border-border text-muted-foreground px-2 py-0.5 rounded cursor-pointer hover:bg-surface-2 hover:text-foreground"
+                              onClick={() => {
+                                setMemoryPanelMessageId(message.id);
+                                setCorrectionMessageId(null);
+                                setMemoryActionStatus(
+                                  message.memory?.notice ?? null,
+                                );
+                              }}
+                            >
+                              Why?
+                            </button>
+                            <button
+                              type="button"
+                              class="bg-transparent border border-border text-muted-foreground px-2 py-0.5 rounded cursor-pointer hover:bg-surface-2 hover:text-foreground"
+                              onClick={() => beginMemoryCorrection(message)}
+                            >
+                              Something is wrong
+                            </button>
+                          </Show>
+                          <Show
+                            when={
+                              (message.memory?.captured ?? []).length > 0 &&
+                              message.memory?.captureStatus !== "undone"
+                            }
+                          >
+                            <span class="px-2 py-0.5 border border-border rounded bg-transparent">
+                              Remembered for this project
+                            </span>
+                            <button
+                              type="button"
+                              class="bg-transparent border border-border text-muted-foreground px-2 py-0.5 rounded cursor-pointer hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
+                              onClick={() => handleUndoRemember(message)}
+                              disabled={memoryActionBusy()}
+                            >
+                              Undo remember
+                            </button>
+                          </Show>
+                        </div>
+                      </Show>
                       <Show when={(message.rlmSteps ?? []).length > 0}>
                         {(_) => (
                           <RLMStepsBlock steps={message.rlmSteps ?? []} />
@@ -1849,6 +2077,162 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       <Show when={showDepositFromError()}>
         <DepositModal onClose={() => setShowDepositFromError(false)} />
       </Show>
+      <SlidePanel
+        open={memoryPanelMessage() !== undefined}
+        onClose={() => {
+          setMemoryPanelMessageId(null);
+          setCorrectionMessageId(null);
+          setCorrectionDraft("");
+          setMemoryActionStatus(null);
+        }}
+      >
+        <div class="px-5 pb-6 pt-12">
+          <h2 class="m-0 text-base font-semibold text-foreground">
+            Memory used in this answer
+          </h2>
+          <p class="mt-2 mb-4 text-[12px] leading-relaxed text-muted-foreground">
+            These are the remembered details attached to this answer. This panel
+            only covers the current response.
+          </p>
+          <Show when={memoryPanelMessage()}>
+            {(panelMessage) => (
+              <>
+                <Show
+                  when={(panelMessage().memory?.used ?? []).length > 0}
+                  fallback={
+                    <div class="rounded border border-border bg-card px-3 py-2 text-[12px] text-muted-foreground">
+                      No remembered details are attached to this answer.
+                    </div>
+                  }
+                >
+                  <div class="space-y-2">
+                    <For each={panelMessage().memory?.used ?? []}>
+                      {(detail) => (
+                        <div class="rounded border border-border bg-card px-3 py-2">
+                          <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                              <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                                {detail.type}
+                              </div>
+                              <div class="mt-1 text-[13px] leading-relaxed text-foreground">
+                                {detail.summary}
+                              </div>
+                              <div class="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                                <Show when={detail.confidence !== undefined}>
+                                  <span>
+                                    confidence{" "}
+                                    {Math.round((detail.confidence ?? 0) * 100)}
+                                    %
+                                  </span>
+                                </Show>
+                                <Show when={detail.recency}>
+                                  <span>{detail.recency}</span>
+                                </Show>
+                                <Show when={detail.source}>
+                                  <span>source {detail.source}</span>
+                                </Show>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="mt-2 flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-[11px] cursor-pointer hover:bg-surface-2 hover:text-foreground"
+                              onClick={() => {
+                                setCorrectionMessageId(panelMessage().id);
+                                setCorrectionDraft("");
+                              }}
+                            >
+                              This is wrong
+                            </button>
+                            <button
+                              type="button"
+                              class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-[11px] cursor-pointer hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
+                              onClick={() =>
+                                handleSuppressMemoryDetail(
+                                  panelMessage(),
+                                  detail.id,
+                                )
+                              }
+                              disabled={!detail.id || memoryActionBusy()}
+                            >
+                              Do not use here
+                            </button>
+                            <button
+                              type="button"
+                              class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-[11px] cursor-pointer hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
+                              onClick={() =>
+                                handleForgetMemoryDetail(
+                                  panelMessage(),
+                                  detail.id,
+                                )
+                              }
+                              disabled={!detail.id || memoryActionBusy()}
+                            >
+                              Forget this
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+
+                <Show when={correctionMessageId() === panelMessage().id}>
+                  <div class="mt-4 border-t border-border pt-4">
+                    <label
+                      for="memory-correction"
+                      class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                    >
+                      Plain-language correction
+                    </label>
+                    <textarea
+                      id="memory-correction"
+                      class="w-full min-h-[92px] bg-card border border-border rounded px-3 py-2 text-[13px] leading-relaxed text-foreground resize-y focus:outline-none focus:border-primary"
+                      value={correctionDraft()}
+                      onInput={(e) => setCorrectionDraft(e.currentTarget.value)}
+                      disabled={memoryActionBusy()}
+                    />
+                    <div class="mt-2 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        class="bg-transparent border border-border text-muted-foreground px-3 py-1.5 rounded text-[12px] cursor-pointer hover:bg-surface-2 hover:text-foreground"
+                        onClick={() => {
+                          setCorrectionMessageId(null);
+                          setCorrectionDraft("");
+                        }}
+                        disabled={memoryActionBusy()}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        class="bg-primary text-primary-foreground border border-primary px-3 py-1.5 rounded text-[12px] cursor-pointer disabled:opacity-50"
+                        onClick={() => submitMemoryCorrection(panelMessage())}
+                        disabled={
+                          memoryActionBusy() ||
+                          correctionDraft().trim().length === 0
+                        }
+                      >
+                        Save correction
+                      </button>
+                    </div>
+                  </div>
+                </Show>
+                <Show
+                  when={memoryActionStatus() ?? panelMessage().memory?.notice}
+                >
+                  {(status) => (
+                    <div class="mt-4 rounded border border-border bg-surface-2 px-3 py-2 text-[12px] text-muted-foreground">
+                      {status()}
+                    </div>
+                  )}
+                </Show>
+              </>
+            )}
+          </Show>
+        </div>
+      </SlidePanel>
     </section>
   );
 };

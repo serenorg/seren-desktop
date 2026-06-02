@@ -227,7 +227,7 @@ const DEFAULT_SETTINGS: Settings = {
   // Semantic indexing
   semanticIndexingEnabled: false,
   // Memory
-  memoryEnabled: false,
+  memoryEnabled: true,
   // Claude Code auto-memory interceptor — on by default so every Seren
   // Desktop user gets secure SerenDB-backed preference storage out of the
   // box. The interceptor auto-provisions a "claude-agent-prefs" project +

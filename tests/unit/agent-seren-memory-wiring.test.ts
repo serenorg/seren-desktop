@@ -12,12 +12,12 @@ const agentStoreSource = readFileSync(
 );
 
 describe("#1625 — agent spawnSession bootstraps Seren memory context", () => {
-  it("imports bootstrapMemoryContext + storeAssistantResponse from @/services/memory", () => {
+  it("imports bootstrapMemoryContext + processAssistantResponseMemory from @/services/memory", () => {
     expect(agentStoreSource).toContain(
       'from "@/services/memory"',
     );
     expect(agentStoreSource).toContain("bootstrapMemoryContext");
-    expect(agentStoreSource).toContain("storeAssistantResponse");
+    expect(agentStoreSource).toContain("processAssistantResponseMemory");
   });
 
   it("spawnSession calls bootstrapMemoryContext when memoryEnabled is true", () => {
@@ -56,7 +56,7 @@ describe("#1625 — agent spawnSession bootstraps Seren memory context", () => {
   });
 });
 
-describe("#1625 — finalizeStreamingContent writes assistant turns to memory", () => {
+describe("#1625 — finalizeStreamingContent extracts assistant turns to memory", () => {
   it("finalizeStreamingContent accepts an isReplay option", () => {
     // Replay emissions must NOT re-write to memory; only live turns write.
     expect(agentStoreSource).toContain(
@@ -65,11 +65,11 @@ describe("#1625 — finalizeStreamingContent writes assistant turns to memory", 
     expect(agentStoreSource).toMatch(/const\s+isReplay\s*=\s*opts\?\.isReplay/);
   });
 
-  it("non-replay path calls storeAssistantResponse with the agent tag", () => {
-    // The ONLY acceptable call of storeAssistantResponse in this file is the
+  it("non-replay path calls processAssistantResponseMemory with the agent tag", () => {
+    // The ONLY acceptable call of processAssistantResponseMemory in this file is the
     // one gated on !isReplay + memoryEnabled + non-empty + !auth-error.
     expect(agentStoreSource).toContain("!isReplay &&");
-    expect(agentStoreSource).toContain("storeAssistantResponse(");
+    expect(agentStoreSource).toContain("processAssistantResponseMemory(");
     expect(agentStoreSource).toContain("agent:${session.info.agentType}");
   });
 

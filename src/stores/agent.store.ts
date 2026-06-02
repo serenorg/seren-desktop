@@ -396,7 +396,7 @@ import { refreshAccessToken } from "@/services/auth";
 import { claudeSessionExists } from "@/services/claudeMemory";
 import {
   bootstrapMemoryContext,
-  storeAssistantResponse,
+  processAssistantResponseMemory,
 } from "@/services/memory";
 import {
   getCachedModelContextWindow,
@@ -2449,10 +2449,10 @@ export const agentStore = {
       });
 
       // Bootstrap Seren memory context so the agent starts with relevant
-      // recall from past sessions — agent transcripts (written via
-      // storeAssistantResponse below) accumulate into memory, and this
-      // pulls them back on every fresh spawn including post-compaction
-      // spawns. Best-effort; a failure here must not block the spawn (#1625).
+      // recall from past sessions. Completed turns are extracted into typed
+      // memories after the answer lands, and this pulls them back on fresh
+      // spawns including post-compaction spawns. Best-effort; a failure here
+      // must not block the spawn (#1625).
       let memoryContext: string | undefined;
       if (settingsStore.settings.memoryEnabled) {
         try {
@@ -6763,9 +6763,9 @@ Structured summary:`;
           session.info.agentType,
         );
 
-      // Persist the assistant turn to Seren memory so future sessions (agent
-      // or chat) can recall this conversation via memory_bootstrap. Gated by
-      // memoryEnabled setting, guarded against empty / replay / error turns,
+      // Extract structured memory from the completed assistant turn so future
+      // sessions can recall project preferences, procedures, and error fixes.
+      // Gated by memoryEnabled, guarded against empty / replay / error turns,
       // and best-effort — a failure must not affect the session (#1625).
       if (
         !isReplay &&
@@ -6773,11 +6773,11 @@ Structured summary:`;
         !isLikelyAuthError(safeContent) &&
         finalOutputValidation.canStoreMemory
       ) {
-        storeAssistantResponse(safeContent, {
+        processAssistantResponseMemory(safeContent, {
           model: `agent:${session.info.agentType}`,
           userQuery: session.lastUserPrompt,
         }).catch((err) => {
-          console.warn("[AgentStore] storeAssistantResponse failed:", err);
+          console.warn("[AgentStore] process memory failed:", err);
         });
       }
 
