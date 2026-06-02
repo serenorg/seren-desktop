@@ -43,7 +43,7 @@ describe("thread provider runtime contract", () => {
     const handleComplete = sourceBetween(
       orchestratorSource,
       "function handleComplete(",
-      "// Store conversation to memory if enabled",
+      "// Extract structured memories from the transcript after the answer lands.",
     );
     expect(handleComplete).toContain("provider: stream.provider");
     expect(handleComplete).toContain("modelId: stream.modelId ?? undefined");
