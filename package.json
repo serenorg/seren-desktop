@@ -74,15 +74,15 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.15",
+    "@biomejs/biome": "2.4.16",
     "@hey-api/openapi-ts": "0.97.3",
     "@playwright/test": "^1.60.0",
     "@tauri-apps/cli": "^2",
     "@types/node": "^25.9.1",
     "tsx": "^4.22.3",
     "typescript": "~6.0.3",
-    "vite": "^8.0.14",
+    "vite": "^8.0.16",
     "vite-plugin-solid": "^2.11.12",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.8"
   }
 }
