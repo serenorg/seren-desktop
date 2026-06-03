@@ -27,6 +27,7 @@ import { terminalStore } from "@/stores/terminal.store";
 
 const LAST_ACTIVE_THREAD_KEY = "seren:lastActiveThread";
 const PROJECT_ORDER_KEY = "seren:projectOrder";
+const FOLDER_LAST_ACTIVITY_KEY = "seren:folderLastActivity";
 
 export type ThreadKind = "chat" | "agent" | "terminal" | "editor";
 
@@ -59,6 +60,32 @@ function loadProjectOrder(): string[] {
 function persistProjectOrder(order: string[]): void {
   try {
     localStorage.setItem(PROJECT_ORDER_KEY, JSON.stringify(order));
+  } catch {
+    // Non-fatal
+  }
+}
+
+function loadFolderLastActivity(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(FOLDER_LAST_ACTIVITY_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const out: Record<string, number> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+      }
+      return out;
+    }
+  } catch {
+    // Ignore
+  }
+  return {};
+}
+
+function persistFolderLastActivity(map: Record<string, number>): void {
+  try {
+    localStorage.setItem(FOLDER_LAST_ACTIVITY_KEY, JSON.stringify(map));
   } catch {
     // Non-fatal
   }
@@ -129,6 +156,14 @@ interface ThreadState {
    * falls through to recency sort. Persisted across sessions.
    */
   projectOrder: string[];
+  /**
+   * Per-folder last-activity timestamp (ms since epoch). Bumped when the user
+   * selects a thread in that folder. Closing/archiving a thread does NOT
+   * touch this map, so the folder keeps its sidebar position after a close.
+   * Persisted across sessions; absent entries fall back to the folder's
+   * max thread creation time so the first-launch ordering is unchanged.
+   */
+  folderLastActivity: Record<string, number>;
 }
 
 export type SkillLaunchMode = "replace" | "add";
@@ -147,6 +182,7 @@ const [state, setState] = createStore<ThreadState>({
   activeThreadKind: null,
   preferChat: false,
   projectOrder: loadProjectOrder(),
+  folderLastActivity: loadFolderLastActivity(),
 });
 
 // Expose the user's current navigation target to agent.store's idle-reclaim
@@ -565,12 +601,35 @@ export const threadStore = {
       }
     }
 
+    // Two-tier sort: folders that contain a running thread come first so an
+    // active agent always anchors its folder to the top. Within each tier
+    // we sort by the folder's recorded last-activity timestamp, falling
+    // back to max thread creation time for folders the user has never
+    // selected into (preserves first-launch ordering for existing users).
+    //
+    // We deliberately key off `folderLastActivity` instead of recomputing
+    // max(thread.timestamp) on every read: closing a thread removes it
+    // from the filtered list and used to drop the folder's sort key to
+    // whatever older thread remained, which shoved the folder down the
+    // sidebar even though the user had just been working there.
+    const folderRunning = (root: string): boolean =>
+      (groups.get(root) ?? []).some((t) => t.status === "running");
+    const folderActivity = (root: string): number => {
+      const recorded = state.folderLastActivity[root];
+      if (typeof recorded === "number") return recorded;
+      const threads = groups.get(root) ?? [];
+      return threads.length === 0
+        ? 0
+        : Math.max(...threads.map((t) => t.timestamp));
+    };
+
     const unranked = realRoots
       .filter((root) => !seen.has(root))
       .sort((a, b) => {
-        const aMax = Math.max(...(groups.get(a) ?? []).map((t) => t.timestamp));
-        const bMax = Math.max(...(groups.get(b) ?? []).map((t) => t.timestamp));
-        return bMax - aMax;
+        const aRunning = folderRunning(a);
+        const bRunning = folderRunning(b);
+        if (aRunning !== bRunning) return aRunning ? -1 : 1;
+        return folderActivity(b) - folderActivity(a);
       });
 
     for (const root of [...ordered, ...unranked]) {
@@ -616,6 +675,30 @@ export const threadStore = {
   // --------------------------------------------------------------------------
 
   /**
+   * Record that the user is actively working in `projectRoot`. The folder's
+   * sidebar position is anchored to this timestamp, so closing a thread
+   * inside the folder no longer drops it down the list. `timestamp`
+   * defaults to `Date.now()`; tests pass an explicit value.
+   */
+  noteFolderActivity(projectRoot: string | null, timestamp?: number): void {
+    if (!projectRoot) return;
+    const next = {
+      ...state.folderLastActivity,
+      [projectRoot]: timestamp ?? Date.now(),
+    };
+    setState("folderLastActivity", next);
+    persistFolderLastActivity(next);
+  },
+
+  /**
+   * Read the recorded last-activity timestamp for a folder. Returns
+   * undefined when the folder has never been selected into.
+   */
+  getFolderLastActivity(projectRoot: string): number | undefined {
+    return state.folderLastActivity[projectRoot];
+  },
+
+  /**
    * Select a thread by ID. Updates the underlying store (conversation or agent)
    * to match.
    */
@@ -628,6 +711,7 @@ export const threadStore = {
     if (thread?.projectRoot && thread.projectRoot !== fileTreeState.rootPath) {
       setRootPath(thread.projectRoot);
     }
+    this.noteFolderActivity(thread?.projectRoot ?? null);
 
     if (kind === "chat") {
       conversationStore.setActiveConversation(id);
@@ -985,9 +1069,11 @@ export const threadStore = {
       activeThreadId: null,
       activeThreadKind: null,
       preferChat: false,
+      folderLastActivity: {},
     });
     try {
       localStorage.removeItem(LAST_ACTIVE_THREAD_KEY);
+      localStorage.removeItem(FOLDER_LAST_ACTIVITY_KEY);
     } catch {
       // Non-fatal
     }

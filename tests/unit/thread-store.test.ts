@@ -543,6 +543,113 @@ describe("threadStore", () => {
       expect(groups[2].projectRoot).toBeNull();
       expect(groups[2].folderName).toBe("No project");
     });
+
+    // #2093 — Closing a thread inside a folder must not push that folder
+    // down the sidebar. The folder's sort key is anchored by the last
+    // time the user *selected into* it, not by the max creation time of
+    // its surviving open threads.
+    it("keeps a folder in place after its newest thread is closed", () => {
+      mockConversations.conversations = [
+        {
+          id: "x-old",
+          title: "Older in X",
+          createdAt: 1000,
+          selectedModel: "test",
+          selectedProvider: null,
+          projectRoot: "/Users/dev/project-x",
+          isArchived: false,
+        },
+        {
+          id: "x-new",
+          title: "Newest in X (about to close)",
+          createdAt: 3000,
+          selectedModel: "test",
+          selectedProvider: null,
+          projectRoot: "/Users/dev/project-x",
+          isArchived: false,
+        },
+        {
+          id: "y-thread",
+          title: "Only thread in Y",
+          createdAt: 2000,
+          selectedModel: "test",
+          selectedProvider: null,
+          projectRoot: "/Users/dev/project-y",
+          isArchived: false,
+        },
+      ];
+
+      // User worked in X most recently — that activity anchors the folder.
+      threadStore.noteFolderActivity("/Users/dev/project-x", 5000);
+      threadStore.noteFolderActivity("/Users/dev/project-y", 4000);
+
+      const before = threadStore.groupedThreads.map((g) => g.projectRoot);
+      expect(before).toEqual([
+        "/Users/dev/project-x",
+        "/Users/dev/project-y",
+      ]);
+
+      // Close the newest thread in X (this is the bug repro: pre-fix the
+      // sort fell back to max(remaining createdAt) = 1000, dropping X
+      // below Y).
+      mockConversations.conversations = mockConversations.conversations.filter(
+        (c) => c.id !== "x-new",
+      );
+
+      const after = threadStore.groupedThreads.map((g) => g.projectRoot);
+      expect(after).toEqual([
+        "/Users/dev/project-x",
+        "/Users/dev/project-y",
+      ]);
+    });
+
+    // #2093 — Folders that contain a running thread are pinned above
+    // idle folders so an active agent always tells the user where their
+    // work is happening, even when an idle folder has a newer recorded
+    // activity timestamp.
+    it("pins folders with running threads above idle folders", () => {
+      mockConversations.conversations = [
+        {
+          id: "idle-recent",
+          title: "Idle but most-recent activity",
+          createdAt: 1000,
+          selectedModel: "test",
+          selectedProvider: null,
+          projectRoot: "/Users/dev/project-idle",
+          isArchived: false,
+        },
+      ];
+      mockAgentConversations.push({
+        id: "agent-running",
+        title: "Running agent in another folder",
+        created_at: 500,
+        agent_type: "claude-code",
+        agent_session_id: "sess-running",
+        agent_cwd: "/Users/dev/project-running",
+        agent_model_id: null,
+        project_id: null,
+        project_root: "/Users/dev/project-running",
+        is_archived: false,
+      });
+      mockSessions["sess-running"] = {
+        conversationId: "agent-running",
+        info: {
+          id: "sess-running",
+          status: "prompting",
+          agentType: "claude-code",
+        },
+      };
+
+      // Idle folder has the more-recent recorded activity timestamp.
+      threadStore.noteFolderActivity("/Users/dev/project-idle", 9000);
+      threadStore.noteFolderActivity("/Users/dev/project-running", 1000);
+
+      const order = threadStore.groupedThreads.map((g) => g.projectRoot);
+      expect(order).toEqual([
+        "/Users/dev/project-running",
+        "/Users/dev/project-idle",
+      ]);
+    });
   });
 
   describe("selectThread", () => {
