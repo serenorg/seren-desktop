@@ -14,6 +14,10 @@ import {
   Show,
 } from "solid-js";
 import {
+  ContextMenu,
+  type ContextMenuItem,
+} from "@/components/common/ContextMenu";
+import {
   canAcceptSkillDrop,
   setCurrentSkillDragPayload,
   skillDragPayload,
@@ -306,6 +310,18 @@ function selectionText(grid: GridSnapshot, sel: SelectionRange): string {
 }
 
 /**
+ * Build a SelectionRange that covers every cell of the visible grid.
+ * Used by the right-click context menu's "Select All" action so the
+ * user can grab the whole screen without dragging.
+ */
+function selectAllGrid(grid: GridSnapshot): SelectionRange {
+  return {
+    anchor: { row: 0, col: 0 },
+    head: { row: Math.max(0, grid.rows - 1), col: Math.max(0, grid.cols - 1) },
+  };
+}
+
+/**
  * Best-effort clipboard write. Tauri's webview generally exposes the
  * Async Clipboard API, but some platforms / configurations don't, so
  * fall back to a hidden textarea + execCommand("copy").
@@ -361,6 +377,17 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     () => appearanceState.appearance.terminalFontSize,
   );
   const [selection, setSelection] = createSignal<SelectionRange | null>(null);
+  // Right-click context menu state. null = closed; { x, y } = open at viewport coords.
+  // Reuses the shared ContextMenu primitive (src/components/common/ContextMenu.tsx).
+  const [ctxMenu, setCtxMenu] = createSignal<{ x: number; y: number } | null>(
+    null,
+  );
+  // Off-screen mirror node that holds the selected text so window.getSelection()
+  // returns a real DOM Range. Without this, the system Edit > Copy menu item
+  // (Tauri PredefinedMenuItem::copy in src-tauri/src/lib.rs) silently no-ops
+  // on the canvas surface because Chromium only fires a `copy` event when
+  // there is a DOM selection. #2091.
+  let selectionMirrorRef: HTMLSpanElement | undefined;
 
   let unlistenDiff: UnlistenFn | null = null;
   let resizeObserver: ResizeObserver | null = null;
@@ -1524,6 +1551,104 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     }),
   );
 
+  // Mirror the canvas selection into an off-screen DOM range so the system
+  // Edit > Copy menu (Tauri PredefinedMenuItem::copy) — which only fires a
+  // browser `copy` event when window.getSelection() is non-empty — copies
+  // the right text. Pointing the document selection at our hidden span has
+  // no visible effect (the span is positioned at -10000px) and the canvas
+  // owns its own selection rendering, so this purely serves the system
+  // clipboard path. Cleared when the terminal selection is empty so we
+  // never hijack a real selection in the chat or Monaco editor. #2091.
+  createEffect(() => {
+    const sel = selection();
+    const g = grid();
+    const mirror = selectionMirrorRef;
+    if (!mirror) return;
+    const docSel = window.getSelection();
+    if (!docSel) return;
+    if (!sel || !g) {
+      mirror.textContent = "";
+      if (mirror.firstChild && docSel.containsNode(mirror.firstChild, true)) {
+        docSel.removeAllRanges();
+      }
+      return;
+    }
+    const text = selectionText(g, sel);
+    if (!text) {
+      mirror.textContent = "";
+      return;
+    }
+    mirror.textContent = text;
+    const node = mirror.firstChild;
+    if (!node) return;
+    docSel.removeAllRanges();
+    docSel.setBaseAndExtent(node, 0, node, text.length);
+  });
+
+  /**
+   * Right-click handler for the terminal surface. Replaces the default
+   * Tauri webview menu (which only ships "Reload" / "Inspect Element" in
+   * dev and nothing in production) with a discoverable Copy / Paste /
+   * Select All popover. Cmd+C still owns the keyboard path; this is the
+   * mouse-driven complement. #2091.
+   */
+  const openContextMenu = (event: MouseEvent) => {
+    event.preventDefault();
+    setCtxMenu({ x: event.clientX, y: event.clientY });
+  };
+
+  const closeContextMenu = () => setCtxMenu(null);
+
+  const contextMenuItems = (): ContextMenuItem[] => {
+    const current = buffer();
+    const running = current?.status === "running";
+    const sel = selection();
+    const g = grid();
+    const hasSelection = !!sel && !!g && selectionText(g, sel).length > 0;
+    return [
+      {
+        label: "Copy",
+        shortcut: "⌘C",
+        disabled: !hasSelection,
+        onClick: () => {
+          if (!sel || !g) return;
+          void writeClipboard(selectionText(g, sel));
+        },
+      },
+      {
+        label: "Paste",
+        shortcut: "⌘V",
+        disabled: !running,
+        onClick: () => {
+          void (async () => {
+            try {
+              const text = await navigator.clipboard.readText();
+              if (text) {
+                surfaceRef?.focus();
+                await writePromptText(text);
+              }
+            } catch {
+              // Clipboard read may be denied; nothing to do.
+            }
+          })();
+        },
+      },
+      { label: "", separator: true, onClick: () => {} },
+      {
+        label: "Select All",
+        disabled: !g,
+        onClick: () => {
+          const snapshot = grid();
+          if (!snapshot) return;
+          // The selection signal is watched by the repaint createEffect
+          // above, so updating it triggers a full canvas redraw on the
+          // next animation frame — no manual repaint needed.
+          setSelection(selectAllGrid(snapshot));
+        },
+      },
+    ];
+  };
+
   /**
    * Translate a KeyboardEvent into the byte sequence the PTY expects
    * and write it to the active buffer. The pure encoding table lives
@@ -1879,8 +2004,27 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
                 onMouseDown={onSurfaceMouseDown}
                 onMouseMove={onSurfaceMouseMoveTracking}
                 onWheel={onSurfaceWheel}
+                onContextMenu={openContextMenu}
               >
                 <canvas ref={canvasRef} class="block pointer-events-none" />
+                {/* Hidden DOM mirror of the canvas selection. The system
+                    Edit > Copy menu (Tauri PredefinedMenuItem::copy) only
+                    fires a `copy` event when window.getSelection() is
+                    non-empty; pointing the document selection at this
+                    off-screen span makes that path produce the right text
+                    without changing any menu-bar wiring. #2091. */}
+                <span
+                  ref={selectionMirrorRef}
+                  data-testid="terminal-selection-mirror"
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    left: "-10000px",
+                    top: "0",
+                    "white-space": "pre",
+                    "user-select": "text",
+                  }}
+                />
               </div>
 
               <Show when={isClaudeCli()}>
@@ -1909,6 +2053,16 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
             </>
           );
         }}
+      </Show>
+      <Show when={ctxMenu()}>
+        {(pos) => (
+          <ContextMenu
+            x={pos().x}
+            y={pos().y}
+            items={contextMenuItems()}
+            onClose={closeContextMenu}
+          />
+        )}
       </Show>
     </div>
   );
