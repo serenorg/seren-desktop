@@ -653,6 +653,81 @@ describe("threadStore", () => {
   });
 
   describe("selectThread", () => {
+    // #2095 — Switching threads is navigation, not folder activity.
+    // selectThread must not write into folderLastActivity, otherwise every
+    // click reshuffles the sidebar even with zero agent activity. The bump
+    // moves to real activity sites (orchestrate + AgentChat dispatch).
+    it("does not bump folder activity on selection", () => {
+      mockConversations.conversations = [
+        {
+          id: "chat-a",
+          title: "Folder A thread",
+          createdAt: 1000,
+          selectedModel: "test",
+          selectedProvider: null,
+          projectRoot: "/Users/dev/project-a",
+          isArchived: false,
+        },
+        {
+          id: "chat-b",
+          title: "Folder B thread",
+          createdAt: 2000,
+          selectedModel: "test",
+          selectedProvider: null,
+          projectRoot: "/Users/dev/project-b",
+          isArchived: false,
+        },
+      ];
+
+      // Folder B was the user's last real activity, anchoring it on top.
+      threadStore.noteFolderActivity("/Users/dev/project-b", 5000);
+      threadStore.noteFolderActivity("/Users/dev/project-a", 3000);
+      const before = threadStore.groupedThreads.map((g) => g.projectRoot);
+      expect(before).toEqual(["/Users/dev/project-b", "/Users/dev/project-a"]);
+
+      // Click the thread in A. No message sent, nothing typed — pure nav.
+      threadStore.selectThread("chat-a", "chat");
+
+      // Folder activity must NOT have been touched.
+      expect(threadStore.getFolderLastActivity("/Users/dev/project-a")).toBe(
+        3000,
+      );
+      expect(threadStore.getFolderLastActivity("/Users/dev/project-b")).toBe(
+        5000,
+      );
+      // And the visible order must not have changed.
+      const after = threadStore.groupedThreads.map((g) => g.projectRoot);
+      expect(after).toEqual(["/Users/dev/project-b", "/Users/dev/project-a"]);
+    });
+
+    // #2095 — Real agent activity (chat send, agent dispatch) bumps the
+    // folder via noteThreadActivity. This is the production hook that
+    // replaces the selectThread-time bump.
+    it("noteThreadActivity bumps folderLastActivity for the thread's folder", () => {
+      mockConversations.conversations = [
+        {
+          id: "chat-a",
+          title: "Thread in A",
+          createdAt: 1000,
+          selectedModel: "test",
+          selectedProvider: null,
+          projectRoot: "/Users/dev/project-a",
+          isArchived: false,
+        },
+      ];
+
+      const before =
+        threadStore.getFolderLastActivity("/Users/dev/project-a");
+      expect(before).toBeUndefined();
+
+      threadStore.noteThreadActivity("chat-a");
+
+      const after =
+        threadStore.getFolderLastActivity("/Users/dev/project-a");
+      expect(typeof after).toBe("number");
+      expect(after).toBeGreaterThan(0);
+    });
+
     it("selects a chat thread and delegates to conversationStore", () => {
       threadStore.selectThread("chat-1", "chat");
 
@@ -945,6 +1020,72 @@ describe("threadStore", () => {
       await threadStore.archiveThread("chat-2", "chat");
 
       expect(threadStore.activeThreadId).toBe("chat-1");
+    });
+
+    // #2093 + #2095 — Closing the newest thread in a folder must not drop
+    // the folder. Pre-#2095 this relied on selectThread bumping
+    // folderLastActivity on every click; now that click-time bumps are
+    // gone, archiveThread itself has to anchor the folder by snapshotting
+    // the pre-close max(thread.timestamp) before the thread disappears.
+    it("anchors folder order on archive so closing the newest thread doesn't drop the folder", async () => {
+      mockConversations.conversations = [
+        {
+          id: "x-old",
+          title: "Older in X",
+          createdAt: 1000,
+          selectedModel: "test",
+          selectedProvider: null,
+          projectRoot: "/Users/dev/project-x",
+          isArchived: false,
+        },
+        {
+          id: "x-new",
+          title: "Newest in X (about to close)",
+          createdAt: 3000,
+          selectedModel: "test",
+          selectedProvider: null,
+          projectRoot: "/Users/dev/project-x",
+          isArchived: false,
+        },
+        {
+          id: "y-thread",
+          title: "Only thread in Y",
+          createdAt: 2000,
+          selectedModel: "test",
+          selectedProvider: null,
+          projectRoot: "/Users/dev/project-y",
+          isArchived: false,
+        },
+      ];
+
+      // No recorded activity — user has not sent a message yet.
+      expect(
+        threadStore.getFolderLastActivity("/Users/dev/project-x"),
+      ).toBeUndefined();
+      expect(
+        threadStore.getFolderLastActivity("/Users/dev/project-y"),
+      ).toBeUndefined();
+
+      const before = threadStore.groupedThreads.map((g) => g.projectRoot);
+      expect(before).toEqual([
+        "/Users/dev/project-x",
+        "/Users/dev/project-y",
+      ]);
+
+      // Archive the newest thread in X. The archive call must snapshot
+      // X's pre-close max(thread.timestamp) before x-new disappears.
+      await threadStore.archiveThread("x-new", "chat");
+      // Simulate the conversation store dropping the archived row from the
+      // visible list (vi.mocked archiveConversation is a no-op).
+      mockConversations.conversations = mockConversations.conversations.filter(
+        (c) => c.id !== "x-new",
+      );
+
+      const after = threadStore.groupedThreads.map((g) => g.projectRoot);
+      expect(after).toEqual([
+        "/Users/dev/project-x",
+        "/Users/dev/project-y",
+      ]);
     });
   });
 

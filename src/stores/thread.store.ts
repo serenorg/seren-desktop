@@ -603,24 +603,23 @@ export const threadStore = {
 
     // Two-tier sort: folders that contain a running thread come first so an
     // active agent always anchors its folder to the top. Within each tier
-    // we sort by the folder's recorded last-activity timestamp, falling
-    // back to max thread creation time for folders the user has never
-    // selected into (preserves first-launch ordering for existing users).
+    // we sort by max(recorded folder activity, max thread timestamp) — the
+    // recorded value acts as a floor that prevents close-drops, and the
+    // thread max lets new threads bubble the folder naturally without
+    // having to bump on every selection.
     //
-    // We deliberately key off `folderLastActivity` instead of recomputing
-    // max(thread.timestamp) on every read: closing a thread removes it
-    // from the filtered list and used to drop the folder's sort key to
-    // whatever older thread remained, which shoved the folder down the
-    // sidebar even though the user had just been working there.
+    // Switching threads is navigation, not activity (#2095). Real activity
+    // is `noteThreadActivity`, fired from chat orchestrate and agent
+    // dispatch. Closes anchor via `archiveThread` so a folder with no
+    // recorded sends still stays in place after closing its newest thread.
     const folderRunning = (root: string): boolean =>
       (groups.get(root) ?? []).some((t) => t.status === "running");
     const folderActivity = (root: string): number => {
-      const recorded = state.folderLastActivity[root];
-      if (typeof recorded === "number") return recorded;
+      const recorded = state.folderLastActivity[root] ?? 0;
       const threads = groups.get(root) ?? [];
-      return threads.length === 0
-        ? 0
-        : Math.max(...threads.map((t) => t.timestamp));
+      const fromThreads =
+        threads.length === 0 ? 0 : Math.max(...threads.map((t) => t.timestamp));
+      return Math.max(recorded, fromThreads);
     };
 
     const unranked = realRoots
@@ -692,10 +691,23 @@ export const threadStore = {
 
   /**
    * Read the recorded last-activity timestamp for a folder. Returns
-   * undefined when the folder has never been selected into.
+   * undefined when the folder has never recorded an activity bump.
    */
   getFolderLastActivity(projectRoot: string): number | undefined {
     return state.folderLastActivity[projectRoot];
+  },
+
+  /**
+   * Bump the folder containing `threadId`. This is the production hook for
+   * real agent activity — chat orchestrate and agent dispatch — and is the
+   * only path that should rewrite folder order from user-driven work.
+   * Navigation clicks intentionally do not call this. No-op when the
+   * thread is unknown or has no projectRoot.
+   */
+  noteThreadActivity(threadId: string): void {
+    const thread = this.threads.find((t) => t.id === threadId);
+    if (!thread?.projectRoot) return;
+    this.noteFolderActivity(thread.projectRoot);
   },
 
   /**
@@ -711,7 +723,9 @@ export const threadStore = {
     if (thread?.projectRoot && thread.projectRoot !== fileTreeState.rootPath) {
       setRootPath(thread.projectRoot);
     }
-    this.noteFolderActivity(thread?.projectRoot ?? null);
+    // Selection is navigation, not folder activity (#2095). Real activity
+    // bumps happen in `noteThreadActivity`, called from orchestrate and
+    // AgentChat dispatch.
 
     if (kind === "chat") {
       conversationStore.setActiveConversation(id);
@@ -986,6 +1000,21 @@ export const threadStore = {
    * Archive a thread.
    */
   async archiveThread(id: string, kind: ThreadKind) {
+    // Anchor the folder before the thread disappears (#2093, #2095).
+    // Without click-time bumps from selectThread, the only way to keep a
+    // folder in place when the user closes its newest thread is to
+    // snapshot the folder's current peak before the row is gone.
+    const closing = this.threads.find((t) => t.id === id);
+    const closingRoot = closing?.projectRoot ?? null;
+    if (closingRoot) {
+      const peers = this.threads.filter((t) => t.projectRoot === closingRoot);
+      if (peers.length > 0) {
+        const peak = Math.max(...peers.map((t) => t.timestamp));
+        const recorded = state.folderLastActivity[closingRoot] ?? 0;
+        if (peak > recorded) this.noteFolderActivity(closingRoot, peak);
+      }
+    }
+
     if (kind === "chat") {
       await conversationStore.archiveConversation(id);
     } else if (kind === "agent") {
