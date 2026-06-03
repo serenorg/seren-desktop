@@ -986,6 +986,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       "[AgentChat] Sending prompt to agent runtime, context blocks:",
       context?.length ?? 0,
     );
+    // Real agent activity in this thread bumps its folder's sidebar rank
+    // (#2095). Selection clicks intentionally do not — only sends do.
+    if (thread) threadStore.noteThreadActivity(thread.id);
     const docNames =
       docAttachments.length > 0 ? docAttachments.map((d) => d.name) : undefined;
     await agentStore.sendPrompt(

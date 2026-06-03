@@ -41,6 +41,7 @@ import { fileTreeState } from "@/stores/fileTree";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
+import { threadStore } from "@/stores/thread.store";
 import type { UnifiedMessage, WorkerType } from "@/types/conversation";
 
 // =============================================================================
@@ -179,6 +180,10 @@ export async function orchestrate(
   // Show loading indicator immediately so the user sees feedback right
   // after hitting Enter — before history, memory, and skill context load.
   conversationStore.setLoading(true, conversationId);
+
+  // Real agent activity in this thread bumps its folder's sidebar rank
+  // (#2095). Navigation clicks intentionally do not — only sends do.
+  threadStore.noteThreadActivity(conversationId);
 
   // Save params for retry support
   lastOrchestrationParams = { conversationId, prompt, images };
