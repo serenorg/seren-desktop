@@ -480,11 +480,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
   };
 
-  // Get the current working directory from file tree
-  const getCwd = () => {
-    return fileTreeState.rootPath || null;
-  };
-
   // Refresh project-scoped remote sessions (agent source-of-truth) and focus
   // any live session tied to the selected folder.
   // Skip refresh if a prompt is active to avoid backend rejection.
@@ -544,18 +539,21 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     if (hasSession()) setAwaitingLogin(null);
   });
 
-  const startSession = async (agentType: AgentType = lockedAgentType()) => {
-    const cwd = getCwd();
-    if (!cwd) {
-      console.warn("[AgentChat] No folder open, cannot start session");
+  // Restart for the currently selected thread by resuming from SQLite.
+  // The bare spawnSession(cwd, agentType) path silently dropped the
+  // thread.id ↔ conversationId binding and stranded persisted history,
+  // leaving the chat blank after Login / Restart Session. #2097.
+  const startSession = async () => {
+    const thread = activeAgentThread();
+    if (!thread) {
+      console.warn("[AgentChat] No active thread to start session");
       return;
     }
-    console.log("[AgentChat] Starting session with cwd:", cwd);
     try {
-      const sessionId = await agentStore.spawnSession(cwd, agentType);
-      console.log("[AgentChat] Session started:", sessionId);
+      const sessionId = await agentStore.resumeAgentConversation(thread.id);
+      console.log("[AgentChat] Session resumed:", sessionId);
     } catch (error) {
-      console.error("[AgentChat] Failed to start session:", error);
+      console.error("[AgentChat] Failed to resume session:", error);
     }
   };
 
@@ -1866,9 +1864,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 type="button"
                 class="px-2 py-1 text-xs font-medium bg-success text-background rounded hover:brightness-110"
                 onClick={() => {
-                  const agentType = awaitingLogin();
                   setAwaitingLogin(null);
-                  if (agentType) startSession(agentType);
+                  startSession();
                 }}
               >
                 Start Session
