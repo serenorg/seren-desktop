@@ -11,6 +11,7 @@ import {
   callSerenTool,
   type PaymentProxyInfo,
 } from "@/services/mcp-gateway";
+import { startShellProgressListener } from "@/services/shell-progress";
 import { x402Service } from "@/services/x402";
 import { getApprovalRequirement, requiresApproval } from "./approval-config";
 import { parseGatewayToolName, parseMcpToolName } from "./definitions";
@@ -380,7 +381,8 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
           command: string;
           timeoutSecs: number;
           injectSerenCredentials?: boolean;
-        } = { command, timeoutSecs };
+          toolCallId: string;
+        } = { command, timeoutSecs, toolCallId: toolCall.id };
         if (typeof args.inject_seren_credentials === "boolean") {
           invokeArgs.injectSerenCredentials = args.inject_seren_credentials;
         }
@@ -394,12 +396,18 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
           };
         }
 
+        // Backs the Tail / LIVE pane (#2100). Idempotent — first call
+        // attaches the global subscription, subsequent ones await zero
+        // work. Awaited so a chunk emitted before the bridge is up
+        // doesn't get dropped.
+        await startShellProgressListener();
+
         const cmdResult = await invoke<{
           stdout: string;
           stderr: string;
           exit_code: number | null;
           timed_out: boolean;
-        }>("execute_shell_command", invokeArgs);
+        }>("execute_shell_command_streaming", invokeArgs);
 
         if (cmdResult.timed_out) {
           result = `Command timed out after ${timeoutSecs} seconds.\nstderr: ${cmdResult.stderr}`;

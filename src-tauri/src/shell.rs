@@ -5,9 +5,17 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Emitter, Runtime};
 use tauri_plugin_store::StoreExt;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::mpsc;
+
+/// Tauri event channel for streaming Bash stdout/stderr while the command
+/// is still running (#2100). Payload: [`ShellProgressEvent`]. Subscribed
+/// by the frontend in `src/services/shell-progress.ts`.
+const SHELL_PROGRESS_EVENT: &str = "shell://progress";
+const SHELL_PROGRESS_CHANNEL_DEPTH: usize = 256;
 
 const AUTH_STORE: &str = "auth.json";
 const SEREN_API_KEY_KEY: &str = "seren_api_key";
@@ -96,6 +104,25 @@ pub struct CommandResult {
     pub timed_out: bool,
 }
 
+/// One stdout/stderr line emitted by a streaming shell tool call (#2100).
+/// Bare type so shell.rs stays unaware of WorkerEvent / orchestrator wiring.
+#[derive(Debug, Clone)]
+pub struct StreamChunk {
+    pub text: String,
+    pub is_stderr: bool,
+}
+
+/// Payload of the `shell://progress` Tauri event. Each event carries a single
+/// stdout or stderr chunk for one in-flight shell tool call (#2100).
+#[derive(Debug, Clone, Serialize)]
+struct ShellProgressEvent {
+    #[serde(rename = "toolCallId")]
+    tool_call_id: String,
+    chunk: String,
+    #[serde(rename = "isStderr")]
+    is_stderr: bool,
+}
+
 #[tauri::command]
 pub async fn execute_shell_command<R: Runtime>(
     app: AppHandle<R>,
@@ -109,7 +136,62 @@ pub async fn execute_shell_command<R: Runtime>(
         None
     };
 
-    execute_shell_command_inner(command, timeout_secs, api_key.as_deref()).await
+    execute_shell_command_inner(command, timeout_secs, api_key.as_deref(), None).await
+}
+
+/// Streaming variant of [`execute_shell_command`] used by the frontend
+/// tool executor for `execute_command` calls (#2100). Forwards every stdout
+/// and stderr line through the `shell://progress` Tauri event tagged with
+/// `tool_call_id`, then returns the same [`CommandResult`] as the
+/// buffered command. The final payload is still authoritative — chunks are
+/// for live display only and the receiver is free to drop them.
+#[tauri::command]
+pub async fn execute_shell_command_streaming<R: Runtime>(
+    app: AppHandle<R>,
+    command: String,
+    timeout_secs: Option<u64>,
+    inject_seren_credentials: Option<bool>,
+    tool_call_id: String,
+) -> Result<CommandResult, String> {
+    if tool_call_id.trim().is_empty() {
+        return Err("tool_call_id must not be empty".to_string());
+    }
+
+    let api_key = if should_inject_seren_credentials(&command, inject_seren_credentials) {
+        read_stored_seren_api_key(&app)?
+    } else {
+        None
+    };
+
+    let (chunk_tx, mut chunk_rx) = mpsc::channel::<StreamChunk>(SHELL_PROGRESS_CHANNEL_DEPTH);
+    let emit_app = app.clone();
+    let emit_id = tool_call_id.clone();
+    let forwarder = tokio::spawn(async move {
+        while let Some(chunk) = chunk_rx.recv().await {
+            let payload = ShellProgressEvent {
+                tool_call_id: emit_id.clone(),
+                chunk: chunk.text,
+                is_stderr: chunk.is_stderr,
+            };
+            if let Err(e) = emit_app.emit(SHELL_PROGRESS_EVENT, &payload) {
+                log::warn!(
+                    "[Shell] Failed to emit shell://progress for {}: {}",
+                    emit_id,
+                    e
+                );
+            }
+        }
+    });
+
+    let result =
+        execute_shell_command_inner(command, timeout_secs, api_key.as_deref(), Some(chunk_tx))
+            .await;
+
+    // Wait for the forwarder to drain the rest of the channel so the
+    // frontend has every chunk in hand before the result settles. The
+    // channel closes when execute_shell_command_inner drops the sender.
+    let _ = forwarder.await;
+    result
 }
 
 /// Execute an AI tool shell command with optional stored Seren auth injection.
@@ -129,14 +211,14 @@ pub async fn execute_shell_command_for_tool<R: Runtime>(
         None
     };
 
-    execute_shell_command_inner(command, timeout_secs, api_key.as_deref()).await
+    execute_shell_command_inner(command, timeout_secs, api_key.as_deref(), None).await
 }
 
 pub async fn execute_shell_command_without_seren_credentials(
     command: String,
     timeout_secs: Option<u64>,
 ) -> Result<CommandResult, String> {
-    execute_shell_command_inner(command, timeout_secs, None).await
+    execute_shell_command_inner(command, timeout_secs, None, None).await
 }
 
 #[tauri::command]
@@ -173,6 +255,7 @@ async fn execute_shell_command_inner(
     command: String,
     timeout_secs: Option<u64>,
     seren_api_key: Option<&str>,
+    progress: Option<mpsc::Sender<StreamChunk>>,
 ) -> Result<CommandResult, String> {
     if command.trim().is_empty() {
         return Err("Command must not be empty".to_string());
@@ -182,7 +265,7 @@ async fn execute_shell_command_inner(
         .unwrap_or(DEFAULT_TIMEOUT_SECS)
         .min(MAX_TIMEOUT_SECS);
 
-    let result = spawn_one_shot(&command, secs, seren_api_key).await?;
+    let result = spawn_one_shot(&command, secs, seren_api_key, progress.clone()).await?;
 
     // GH #1908: on Windows, when the user has no real Python on PATH but the
     // App Execution Alias for Python is still enabled, `python …` is routed
@@ -204,14 +287,13 @@ async fn execute_shell_command_inner(
     {
         if looks_like_windows_apps_python_stub(&result.stderr) {
             if let Some(retry_command) = translate_python_to_py_launcher(&command) {
-                log::info!(
-                    "[Shell] WindowsApps Python stub detected; retrying via `py` launcher"
-                );
-                return spawn_one_shot(&retry_command, secs, seren_api_key).await;
+                log::info!("[Shell] WindowsApps Python stub detected; retrying via `py` launcher");
+                return spawn_one_shot(&retry_command, secs, seren_api_key, progress).await;
             }
         }
     }
 
+    let _ = progress;
     Ok(result)
 }
 
@@ -351,6 +433,7 @@ async fn spawn_one_shot(
     command: &str,
     secs: u64,
     seren_api_key: Option<&str>,
+    progress: Option<mpsc::Sender<StreamChunk>>,
 ) -> Result<CommandResult, String> {
     let timeout = Duration::from_secs(secs);
 
@@ -426,29 +509,132 @@ async fn spawn_one_shot(
         &command[..command.len().min(500)]
     );
 
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn command: {}", e))?;
 
-    match tokio::time::timeout(timeout, child.wait_with_output()).await {
-        Ok(Ok(output)) => {
-            let stdout = truncate_output(String::from_utf8_lossy(&output.stdout).to_string());
-            let stderr = truncate_output(String::from_utf8_lossy(&output.stderr).to_string());
-            Ok(CommandResult {
-                stdout,
-                stderr,
-                exit_code: output.status.code(),
-                timed_out: false,
-            })
+    // No progress sink: keep the buffered fast path. Every existing caller
+    // (Tauri command, skill scripts, non-streaming tool execution) hits
+    // this branch and behaves bit-for-bit as before.
+    let Some(progress) = progress else {
+        return match tokio::time::timeout(timeout, child.wait_with_output()).await {
+            Ok(Ok(output)) => {
+                let stdout = truncate_output(String::from_utf8_lossy(&output.stdout).to_string());
+                let stderr = truncate_output(String::from_utf8_lossy(&output.stderr).to_string());
+                Ok(CommandResult {
+                    stdout,
+                    stderr,
+                    exit_code: output.status.code(),
+                    timed_out: false,
+                })
+            }
+            Ok(Err(e)) => Err(format!("Command execution failed: {}", e)),
+            Err(_) => Ok(CommandResult {
+                stdout: String::new(),
+                stderr: format!("Command timed out after {} seconds", secs),
+                exit_code: None,
+                timed_out: true,
+            }),
+        };
+    };
+
+    // Streaming path: read stdout and stderr line by line, forward each
+    // line through `progress` for the LIVE Tail pane (#2100), and keep
+    // accumulating the full text for the final ToolResult.
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Failed to capture stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Failed to capture stderr".to_string())?;
+
+    let stdout_tx = progress.clone();
+    let stdout_task = tokio::spawn(async move {
+        let mut acc = String::new();
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    acc.push_str(&line);
+                    // try_send drops the chunk if the receiver is full or
+                    // gone — we'd rather miss a UI tick than block the
+                    // tool's stdout pipe and stall the child process.
+                    let _ = stdout_tx.try_send(StreamChunk {
+                        text: line.clone(),
+                        is_stderr: false,
+                    });
+                }
+                Err(_) => break,
+            }
         }
-        Ok(Err(e)) => Err(format!("Command execution failed: {}", e)),
-        Err(_) => Ok(CommandResult {
-            stdout: String::new(),
-            stderr: format!("Command timed out after {} seconds", secs),
-            exit_code: None,
-            timed_out: true,
-        }),
+        acc
+    });
+
+    let stderr_tx = progress;
+    let stderr_task = tokio::spawn(async move {
+        let mut acc = String::new();
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    acc.push_str(&line);
+                    let _ = stderr_tx.try_send(StreamChunk {
+                        text: line.clone(),
+                        is_stderr: true,
+                    });
+                }
+                Err(_) => break,
+            }
+        }
+        acc
+    });
+
+    let wait_result = tokio::time::timeout(timeout, child.wait()).await;
+
+    // Whether we timed out or finished cleanly, both reader tasks have to
+    // run to EOF before we can return the accumulated output. On timeout
+    // the kill below closes the pipes, which gives the readers their EOF.
+    let timed_out = wait_result.is_err();
+    let exit_code = match &wait_result {
+        Ok(Ok(status)) => status.code(),
+        Ok(Err(_)) | Err(_) => None,
+    };
+    if timed_out {
+        let _ = child.kill().await;
     }
+
+    let stdout_text = stdout_task.await.unwrap_or_default();
+    let stderr_text = stderr_task.await.unwrap_or_default();
+
+    if let Ok(Err(e)) = wait_result {
+        return Err(format!("Command execution failed: {}", e));
+    }
+
+    let stderr_final = if timed_out {
+        let mut s = format!("Command timed out after {} seconds", secs);
+        if !stderr_text.is_empty() {
+            s.push('\n');
+            s.push_str(&stderr_text);
+        }
+        s
+    } else {
+        stderr_text
+    };
+
+    Ok(CommandResult {
+        stdout: truncate_output(stdout_text),
+        stderr: truncate_output(stderr_final),
+        exit_code,
+        timed_out,
+    })
 }
 
 fn read_stored_seren_api_key<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>, String> {
@@ -802,5 +988,68 @@ mod tests {
             validate_skill_script_cwd("prophet-arb-bot", other_dir.to_string_lossy().as_ref())
                 .expect_err("wrong skill cwd should fail closed");
         assert!(err.contains("runtime directory"));
+    }
+
+    /// Critical-path test for #2100: the streaming shell path must forward
+    /// each stdout line through the progress channel AS it arrives AND
+    /// still return the full accumulated stdout in `CommandResult`. If
+    /// either side regresses the LIVE pane goes dark or the model loses
+    /// the tool result. The test runs three `echo`s separated by `sleep`
+    /// so the lines genuinely cross the pipe one at a time.
+    #[tokio::test]
+    #[cfg(not(target_os = "windows"))]
+    async fn streaming_path_forwards_chunks_and_buffers_final_result() {
+        let (tx, mut rx) = mpsc::channel::<StreamChunk>(32);
+
+        let result = execute_shell_command_inner(
+            "echo line-one; sleep 0.05; echo line-two; sleep 0.05; echo line-three".to_string(),
+            Some(5),
+            None,
+            Some(tx),
+        )
+        .await
+        .expect("streaming command succeeds");
+
+        let mut chunks = Vec::new();
+        while let Some(chunk) = rx.recv().await {
+            chunks.push(chunk);
+        }
+
+        let stdout_lines: Vec<&str> = chunks
+            .iter()
+            .filter(|c| !c.is_stderr)
+            .map(|c| c.text.trim_end_matches('\n'))
+            .collect();
+        assert_eq!(
+            stdout_lines,
+            vec!["line-one", "line-two", "line-three"],
+            "streaming progress must emit one chunk per stdout line, in order"
+        );
+
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(
+            result.stdout, "line-one\nline-two\nline-three\n",
+            "final CommandResult.stdout must match the joined chunks so the model still sees the complete tool output"
+        );
+        assert!(!result.timed_out);
+    }
+
+    /// Critical-path regression for #2100: the non-streaming path (every
+    /// existing caller — the Tauri command, skill scripts, the chat
+    /// frontend tool when not opting into streaming) must keep returning
+    /// identical buffered output. Guards the `progress: None` branch in
+    /// `spawn_one_shot` from being broken by future refactors.
+    #[tokio::test]
+    #[cfg(not(target_os = "windows"))]
+    async fn non_streaming_path_unchanged_buffered_output() {
+        let result =
+            execute_shell_command_inner("echo alpha; echo beta".to_string(), Some(5), None, None)
+                .await
+                .expect("buffered command succeeds");
+
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(result.stdout, "alpha\nbeta\n");
+        assert_eq!(result.stderr, "");
+        assert!(!result.timed_out);
     }
 }

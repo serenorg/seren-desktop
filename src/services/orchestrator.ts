@@ -506,6 +506,10 @@ function handleToolResult(
           status: newStatus,
           result: event.content,
           isError: event.is_error,
+          // The streamed partial buffer is superseded by the final
+          // result content; drop it so the UI swaps to the result pane
+          // and we don't keep two copies of the output around (#2100).
+          partialResult: undefined,
         },
       },
       conversationId,
