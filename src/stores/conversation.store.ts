@@ -123,6 +123,23 @@ function generateTitle(content: string): string {
   return `${lastSpace > 10 ? truncated.slice(0, lastSpace) : truncated}…`;
 }
 
+function findConversationIdForToolCall(toolCallId: string): string | null {
+  for (const [conversationId, messages] of Object.entries(state.messages)) {
+    if (
+      messages.some(
+        (msg) =>
+          msg.type === "tool_call" &&
+          msg.toolCall &&
+          (msg.toolCallId === toolCallId ||
+            msg.toolCall.toolCallId === toolCallId),
+      )
+    ) {
+      return conversationId;
+    }
+  }
+  return null;
+}
+
 export const conversationStore = {
   // === Getters ===
 
@@ -543,6 +560,43 @@ export const conversationStore = {
     setState("streamingContent", conversationId, "");
     setState("streamingThinking", conversationId, "");
     setState("streamingStalled", conversationId, false);
+  },
+
+  /**
+   * Append a stdout/stderr chunk to a running tool_call message's
+   * `toolCall.partialResult` (#2100). When a caller does not provide a
+   * conversation id, locate the loaded conversation that owns the
+   * toolCallId so live shell output keeps landing even if the user
+   * switches threads mid-command. Cleared when the final `tool_result`
+   * lands (see orchestrator.handleToolResult).
+   */
+  appendToolCallPartial(
+    toolCallId: string,
+    chunk: string,
+    conversationId?: string | null,
+  ) {
+    const targetConversationId =
+      conversationId ?? findConversationIdForToolCall(toolCallId);
+    if (!targetConversationId) return;
+    setState("messages", targetConversationId, (msgs = []) =>
+      msgs.map((msg) => {
+        if (
+          msg.type !== "tool_call" ||
+          !msg.toolCall ||
+          (msg.toolCallId !== toolCallId &&
+            msg.toolCall.toolCallId !== toolCallId)
+        ) {
+          return msg;
+        }
+        return {
+          ...msg,
+          toolCall: {
+            ...msg.toolCall,
+            partialResult: (msg.toolCall.partialResult ?? "") + chunk,
+          },
+        };
+      }),
+    );
   },
 
   // === Loading/error ===

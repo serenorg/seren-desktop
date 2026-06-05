@@ -127,10 +127,12 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
   // Effective open state: parent's tail force-open OR user's local toggle.
   const isOpen = () => props.forceExpanded || isExpanded();
 
-  // Inner-card auto-scroll for Tail mode. We pin the parameters and result
-  // containers (the two scrollable surfaces inside the card) so streaming
-  // updates stay at the bottom — without ever touching the outer chat scroll.
+  // Inner-card auto-scroll for Tail mode. We pin the parameters, the live
+  // stdout/stderr pane, and the result container (the scrollable surfaces
+  // inside the card) so streaming updates stay at the bottom — without
+  // ever touching the outer chat scroll.
   let paramsRef: HTMLDivElement | undefined;
+  let liveRef: HTMLDivElement | undefined;
   let resultRef: HTMLDivElement | undefined;
 
   createEffect(() => {
@@ -138,9 +140,44 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
     // Read reactive deps so this effect refires on streaming updates.
     void props.toolCall.parameters;
     void props.toolCall.result;
+    void props.toolCall.partialResult;
     if (paramsRef) paramsRef.scrollTop = paramsRef.scrollHeight;
+    if (liveRef) liveRef.scrollTop = liveRef.scrollHeight;
     if (resultRef) resultRef.scrollTop = resultRef.scrollHeight;
   });
+
+  const isToolRunning = (): boolean => {
+    const status = props.toolCall.status.toLowerCase();
+    return status.includes("running") || status.includes("progress");
+  };
+
+  const hasLivePartial = (): boolean => {
+    const partial = props.toolCall.partialResult;
+    return Boolean(partial && partial.length > 0 && isToolRunning());
+  };
+
+  const partialByteCount = (): number => {
+    const partial = props.toolCall.partialResult;
+    if (!partial) return 0;
+    return new TextEncoder().encode(partial).length;
+  };
+
+  const partialLineCount = (): number => {
+    const partial = props.toolCall.partialResult;
+    if (!partial) return 0;
+    let n = 0;
+    for (let i = 0; i < partial.length; i++) {
+      if (partial.charCodeAt(i) === 10) n++;
+    }
+    if (!partial.endsWith("\n")) n++;
+    return n;
+  };
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
   const resultIsListing = () => {
     const result = props.toolCall.result;
@@ -452,6 +489,36 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
                     </div>
                   ),
                 )}
+              </div>
+            </div>
+          </Show>
+
+          {/* Live stdout / stderr (#2100) — only while a streaming tool
+              is still running. Replaced by the Result pane once the
+              final content lands and partialResult is cleared. */}
+          <Show when={hasLivePartial()}>
+            <div class="mb-3">
+              <div class="flex items-center justify-between mb-1">
+                <div class="flex items-center gap-2">
+                  <span class="text-muted-foreground/70 font-medium">
+                    stdout
+                  </span>
+                  <span class="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-pink-500/15 border border-pink-500/40 text-pink-300">
+                    <span class="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
+                    Live
+                  </span>
+                </div>
+                <span class="text-[10px] tabular-nums text-muted-foreground/70 font-mono">
+                  {formatBytes(partialByteCount())} · {partialLineCount()}{" "}
+                  {partialLineCount() === 1 ? "line" : "lines"}
+                </span>
+              </div>
+              <div
+                ref={liveRef}
+                class="bg-background border border-pink-500/30 rounded p-2 font-mono text-foreground/90 max-h-60 overflow-auto whitespace-pre-wrap"
+              >
+                {props.toolCall.partialResult}
+                <span class="inline-block w-1.5 h-3 ml-0.5 align-[-1px] bg-pink-400 animate-pulse" />
               </div>
             </div>
           </Show>

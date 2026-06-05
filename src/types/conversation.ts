@@ -95,6 +95,12 @@ export interface ToolCallData {
   arguments?: string;
   parameters?: Record<string, unknown>;
   result?: string;
+  /**
+   * Live stdout/stderr buffer while a streaming tool is running (#2100).
+   * Populated by the `shell://progress` listener for `execute_command`.
+   * Cleared once `result` lands. Mirrors `ToolCallEvent.partialResult`.
+   */
+  partialResult?: string;
   isError?: boolean;
 }
 

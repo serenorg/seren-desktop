@@ -40,6 +40,7 @@ export function toToolCallEvent(data: ToolCallData): ToolCallEvent {
     parameters: params,
     result: data.isError ? undefined : data.result,
     error: data.isError ? data.result : undefined,
+    partialResult: data.partialResult,
   };
 }
 

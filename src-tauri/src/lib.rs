@@ -763,6 +763,7 @@ pub fn run() {
             files::reveal_in_file_manager,
             // Shell command execution (requires frontend approval)
             shell::execute_shell_command,
+            shell::execute_shell_command_streaming,
             shell::run_skill_script,
             shell::diagnose_shell_network,
             // Interactive terminal buffers

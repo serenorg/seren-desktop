@@ -96,6 +96,14 @@ export interface ToolCallEvent {
   parameters?: Record<string, unknown>;
   result?: string;
   error?: string;
+  /**
+   * Live stdout/stderr accumulated while a streaming tool is running (#2100).
+   * Populated by the `shell://progress` listener for the in-process Bash
+   * `execute_command` tool. Cleared when the final `result` lands. UI
+   * surfaces it via the LIVE pane in `ToolCallCard` while `status` is
+   * "running"; for tools that don't stream it stays undefined.
+   */
+  partialResult?: string;
 }
 
 export interface ToolResultEvent {

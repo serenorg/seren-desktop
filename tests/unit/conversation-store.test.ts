@@ -202,6 +202,37 @@ describe("conversationStore", () => {
       expect(conversationStore.streamingContent).toBe("");
       expect(conversationStore.streamingThinking).toBe("");
     });
+
+    it("appends tool-call partial output by tool id even when another conversation is active (#2100)", async () => {
+      const source = await conversationStore.createConversation("stream source");
+      conversationStore.addMessage(
+        makeMessage({
+          id: "tool-msg-2100",
+          type: "tool_call",
+          role: "assistant",
+          content: "Bash",
+          status: "streaming",
+          toolCallId: "tc-stream-2100",
+          toolCall: {
+            toolCallId: "tc-stream-2100",
+            title: "Bash",
+            kind: "bash",
+            status: "running",
+          },
+        }),
+        source.id,
+      );
+
+      const other = await conversationStore.createConversation("active other");
+      expect(conversationStore.activeConversationId).toBe(other.id);
+
+      conversationStore.appendToolCallPartial("tc-stream-2100", "line one\n");
+      conversationStore.appendToolCallPartial("tc-stream-2100", "line two\n");
+
+      const [toolMessage] = conversationStore.getMessagesFor(source.id);
+      expect(toolMessage.toolCall?.partialResult).toBe("line one\nline two\n");
+      expect(conversationStore.getMessagesFor(other.id)).toEqual([]);
+    });
   });
 
   describe("loading and error state", () => {

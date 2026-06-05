@@ -2,12 +2,14 @@
 // ABOUTME: Reduces clutter by showing "searched 5 files, ran 3 commands" instead of 20+ individual cards.
 
 import type { Component } from "solid-js";
-import { For, Show } from "solid-js";
+import { createEffect, For, Show } from "solid-js";
 import type { ToolCallEvent } from "@/services/providers";
 import {
   getToolCallGroupState,
+  markToolCallTailed,
   setToolCallGroupExpanded,
   setToolCallGroupTailing,
+  wasToolCallTailed,
 } from "@/stores/tool-call-groups.store";
 import { ToolCallCard } from "./ToolCallCard";
 
@@ -127,6 +129,23 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
   const categories = () => categorizeToolCalls(props.toolCalls);
   const summary = () => buildSummary(categories());
   const hasRunning = () => props.toolCalls.some(isRunning);
+
+  // Sticky-expand (#2100): record each tool call that Tail force-expands
+  // while it is running, so the card stays open through completion instead
+  // of snapping shut the instant the result lands.
+  createEffect(() => {
+    if (!isTailing()) return;
+    for (const tc of props.toolCalls) {
+      if (isRunning(tc)) {
+        markToolCallTailed(props.groupId, tc.toolCallId);
+      }
+    }
+  });
+
+  const shouldForceOpen = (tc: ToolCallEvent): boolean => {
+    if (!isTailing()) return false;
+    return isRunning(tc) || wasToolCallTailed(props.groupId, tc.toolCallId);
+  };
 
   return (
     <div class="my-2 mx-5 bg-surface-0 border border-surface-3 rounded-lg overflow-hidden">
@@ -251,7 +270,7 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
             {(toolCall) => (
               <ToolCallCard
                 toolCall={toolCall}
-                forceExpanded={isTailing() && isRunning(toolCall)}
+                forceExpanded={shouldForceOpen(toolCall)}
                 tail={isTailing() && isRunning(toolCall)}
               />
             )}

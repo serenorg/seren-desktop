@@ -118,4 +118,23 @@ describe("groupConsecutiveToolCalls", () => {
       expect(out[3].toolCalls).toHaveLength(3);
     }
   });
+
+  it("preserves partialResult on grouped tool calls so Tail can render live output (#2100)", () => {
+    const a = toolCall("a", "for i in 1 2 3; do echo $i; sleep 1; done");
+    if (a.toolCall) {
+      a.toolCall.status = "running";
+      a.toolCall.partialResult = "1\n2\n";
+    }
+
+    const out = groupConsecutiveToolCalls([
+      a,
+      toolCall("b", "pwd"),
+      toolCall("c", "whoami"),
+    ]);
+
+    expect(out[0].type).toBe("tool_group");
+    if (out[0].type === "tool_group") {
+      expect(out[0].toolCalls[0].partialResult).toBe("1\n2\n");
+    }
+  });
 });
