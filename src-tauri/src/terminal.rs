@@ -2586,10 +2586,19 @@ fn build_command(initial_command: Option<&str>) -> CommandBuilder {
         builder
     } else {
         let mut builder = CommandBuilder::new(default_shell());
-        builder.arg("-lc");
-        builder.arg(format!("exec {command}"));
+        let (flag, command_arg) = unix_initial_command_shell_args(command);
+        builder.arg(flag);
+        builder.arg(command_arg);
         builder
     }
+}
+
+#[cfg(any(not(target_os = "windows"), test))]
+fn unix_initial_command_shell_args(command: &str) -> (&'static str, String) {
+    // Initial-command terminal launches already receive an augmented PATH below.
+    // Avoid login-shell startup here: profile hooks such as `pyenv rehash` can
+    // block before the CLI draws anything, leaving Codex/Claude terminals blank.
+    ("-c", format!("exec {command}"))
 }
 
 /// PATH for terminal child processes — the parent process PATH plus
@@ -2691,6 +2700,17 @@ mod tests {
             "codex"
         );
         assert_eq!(title_from_command("   "), "Terminal");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn initial_command_uses_non_login_shell() {
+        let (flag, command) = unix_initial_command_shell_args("claude");
+        assert_eq!(
+            flag, "-c",
+            "initial CLI terminal commands must not use login shell startup"
+        );
+        assert_eq!(command, "exec claude");
     }
 
     #[test]
