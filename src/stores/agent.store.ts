@@ -116,7 +116,11 @@ const AGGRESSIVE_RETRY_TAIL_RATIO = 0.15;
  * fallback. #2106.
  */
 const SUMMARY_PRIMARY_MODEL = "anthropic/claude-sonnet-4";
-const SUMMARY_FALLBACK_MODELS = ["anthropic/claude-3-5-sonnet"];
+// Fast, cheap model recognized by the seren provider catalog — ideal for a
+// fallback summarizer. A model id outside the catalog/migration map would be
+// rejected by the gateway, dead-ending the fallback tier before the
+// deterministic local summary. #2111.
+const SUMMARY_FALLBACK_MODELS = ["anthropic/claude-haiku-4.5"];
 
 /**
  * Global cap = 1 simultaneous predictive compaction across the whole app.
@@ -4093,7 +4097,18 @@ export const agentStore = {
         ? `Prior work summary:\n${summary}\n\n<prior_messages>\n${preservedContext}\n</prior_messages>`
         : `Prior work summary:\n${summary}`;
 
-      const userTurnCount = Math.max(1, Math.ceil(toPreserve.length / 2));
+      // The synthetic-transcript builder interprets this as a count of REAL
+      // user turns to keep from the parent JSONL (findCutIndex in
+      // synthetic-transcript.mjs). Now that the tail is token-budgeted (#2104),
+      // toPreserve has a variable mix of user/assistant/tool messages, so
+      // `length / 2` no longer tracks its user-turn span — overcounting in a
+      // tool-heavy tail would preserve older turns the summary already covers,
+      // duplicating context and risking re-overflow. Count the real user turns
+      // actually in the token-selected tail. #2111.
+      const userTurnCount = Math.max(
+        1,
+        toPreserve.filter((m) => m.type === "user").length,
+      );
       const syntheticEnabled =
         settingsStore.settings.compactSyntheticTranscript &&
         agentType === "claude-code";
