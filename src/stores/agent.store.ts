@@ -13,6 +13,11 @@ import {
   isLocalProviderRuntime,
   onRuntimeEvent,
 } from "@/lib/browser-local-runtime";
+import {
+  buildIterativeCompactionPrompt,
+  buildSummaryLineage,
+  type SummaryLineage,
+} from "@/lib/compaction/summary";
 import { runtimeHasCapability } from "@/lib/runtime";
 import { estimateTokens } from "@/lib/token-counter";
 import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
@@ -699,6 +704,8 @@ export interface AgentCompactedSummary {
   content: string;
   originalMessageCount: number;
   compactedAt: number;
+  /** Lineage across repeated compactions (#2103). Present from generation 1. */
+  lineage?: SummaryLineage;
 }
 
 interface AgentConversationMetadata {
@@ -3827,26 +3834,23 @@ export const agentStore = {
       // the summary under ~200 tokens, down from ~700 with freeform "500 words".
       // This reduces prompt tokens on every subsequent call by ~70%.
       //
-      // #1800 — anti-fabrication: the prior single-bucket state field and
-      // unconstrained file-mention field invited the model to collapse
-      // intent expressed during the conversation into claims about
-      // completed artifacts on disk. Replace them with explicit
-      // evidence-bucketed fields and require an explicit "none" when empty,
-      // so the model can no longer satisfy the template shape with
-      // confabulations. The `NEXT:` agent-action wording from #1733 is kept.
-      const summaryPrompt = `Summarize this AI agent conversation into EXACTLY this structured format. Each field must be 1-2 short sentences max. Total output must be under 200 tokens. If a field has nothing to report, write 'none' — DO NOT invent content to fill the shape.
-
-GOAL: <what the user is trying to accomplish>
-FILES_TOUCHED: <files actually created or modified by tool calls executed in this conversation; comma-separated paths only; write 'none' if no file-mutating tool call ran>
-DECISIONS: <key technical decisions made>
-DONE: <only items with explicit verifiable artifacts; format 'item — at <path or db.table>'; write 'none' if no artifact has been produced>
-DISCUSSED_NOT_DONE: <intent statements, plans, todos with no artifact yet; write 'none' if everything discussed has been done>
-NEXT: <what the agent should do next to continue the work>
-
-Conversation:
-${toCompact.map((m) => `${m.type.toUpperCase()}: ${m.content}`).join("\n\n")}
-
-Structured summary:`;
+      // #2103 — carry the prior compacted summary forward so a second (or
+      // later) compaction iteratively updates it instead of rebuilding from
+      // only the newest window; otherwise context summarized by an earlier
+      // compaction silently disappears. The shared builder keeps the #1800
+      // anti-fabrication language (explicit 'none', evidence-bucketed fields)
+      // and the #1733 agent-action continuation framing, and it no longer
+      // asks the model to predict the next user ask.
+      const previousSummary = session.compactedSummary?.content ?? null;
+      const newTurns = toCompact
+        .map((m) => `${m.type.toUpperCase()}: ${m.content}`)
+        .join("\n\n");
+      const summaryPrompt = buildIterativeCompactionPrompt({
+        previousSummary,
+        newTurns,
+        mode: "agent",
+        maxTokens: 200,
+      });
 
       // Always route the summary through the public Seren provider.
       // sendMessage() uses providerStore.activeProvider which may be
@@ -3877,10 +3881,22 @@ Structured summary:`;
       // on one consumer would miss the other. #1800.
       summary = `${summary.trim()}\n\nVERIFY-BEFORE-ACTING: Files, projects, and databases mentioned above may not exist on disk. Re-read the workspace, list .worktrees/, and resolve SerenDB projects/tables before acting on any claim.`;
 
+      // Track summary lineage so repeated compactions are observably
+      // iterative. The carried-forward `previousSummary` is normalized inside
+      // buildSummaryLineage, so the VERIFY-BEFORE-ACTING banner does not
+      // pollute the prior-hash or inflate the next prompt. #2103.
+      const lineage = buildSummaryLineage({
+        previousLineage: session.compactedSummary?.lineage ?? null,
+        previousSummary,
+        compactedMessageCount: toCompact.length,
+        now: Date.now(),
+      });
+
       const compactedSummary: AgentCompactedSummary = {
         content: summary,
         originalMessageCount: toCompact.length,
-        compactedAt: Date.now(),
+        compactedAt: lineage.compactedAt,
+        lineage,
       };
 
       const queuedPrompts = session.pendingPrompts ?? [];

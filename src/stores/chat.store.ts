@@ -2,6 +2,11 @@
 // ABOUTME: Stores conversations, messages, and provides persistence via Tauri.
 
 import { createStore } from "solid-js/store";
+import {
+  buildIterativeCompactionPrompt,
+  buildSummaryLineage,
+  type SummaryLineage,
+} from "@/lib/compaction/summary";
 import { PROVIDER_CONFIGS, type ProviderId } from "@/lib/providers/types";
 import {
   archiveConversation as archiveConversationDb,
@@ -54,6 +59,8 @@ export interface CompactedSummary {
   compactedAt: number;
   /** Original user/assistant text preserved for the expand-scrollback UI. */
   preCompactionMessages?: PreCompactionMessage[];
+  /** Lineage across repeated compactions (#2103). Present from generation 1. */
+  lineage?: SummaryLineage;
 }
 
 /**
@@ -644,27 +651,28 @@ export const chatStore = {
       const toCompact = messages.slice(0, messages.length - preserveCount);
       const toPreserve = messages.slice(-preserveCount);
 
-      // Generate a structured summary with a hard token cap. Each field is
-      // 1-2 sentences. Total output: 80-180 tokens vs ~700 with freeform.
-      const summaryPrompt = `Summarize this conversation into EXACTLY this structured format. Each field must be 1-2 short sentences max. Total output must be under 150 tokens.
-
-TOPIC: <main subject of the conversation>
-KEY_POINTS: <important facts, numbers, or conclusions established>
-DECISIONS: <choices made or preferences expressed>
-OPEN_QUESTIONS: <unresolved questions or pending items>
-NEXT: <what the user will likely ask next>
-
-Conversation:
-${toCompact.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n")}
-
-Structured summary:`;
-
       // Use the active conversation's bound provider/model to compact so
       // the thread's selected runtime — not a global default — produces
       // the summary.
       const activeConvo = state.conversations.find(
         (c) => c.id === conversationId,
       );
+
+      // Carry the prior compacted summary forward so a second (or later)
+      // compaction iteratively updates it instead of rebuilding from only
+      // the newest window — otherwise context summarized by an earlier
+      // compaction silently disappears. #2103.
+      const previousSummary = activeConvo?.compactedSummary?.content ?? null;
+      const newTurns = toCompact
+        .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+        .join("\n\n");
+      const summaryPrompt = buildIterativeCompactionPrompt({
+        previousSummary,
+        newTurns,
+        mode: "chat",
+        maxTokens: 200,
+      });
+
       const selectedProvider = activeConvo?.selectedProvider ?? null;
       const compactionProvider: ProviderId = isChatProvider(selectedProvider)
         ? selectedProvider
@@ -685,12 +693,22 @@ Structured summary:`;
           timestamp: m.timestamp,
         }));
 
+      // Track summary lineage so repeated compactions are observably
+      // iterative and the carried-forward summary can be verified. #2103.
+      const lineage = buildSummaryLineage({
+        previousLineage: activeConvo?.compactedSummary?.lineage ?? null,
+        previousSummary,
+        compactedMessageCount: toCompact.length,
+        now: Date.now(),
+      });
+
       // Create the compacted summary
       const compactedSummary: CompactedSummary = {
         content: summary,
         originalMessageCount: toCompact.length,
-        compactedAt: Date.now(),
+        compactedAt: lineage.compactedAt,
         preCompactionMessages,
+        lineage,
       };
 
       // Update conversation with compacted summary
