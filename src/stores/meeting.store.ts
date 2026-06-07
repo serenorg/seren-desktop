@@ -309,6 +309,10 @@ async function regenerateNotes(
   await setActiveMeeting(refreshed);
 }
 
+function clearError(): void {
+  setMeetingState("error", null);
+}
+
 export const meetingStore = {
   get state(): MeetingState {
     return meetingState;
@@ -322,4 +326,5 @@ export const meetingStore = {
   stopCapture,
   stopAndProcess,
   regenerateNotes,
+  clearError,
 };

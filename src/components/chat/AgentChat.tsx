@@ -2033,7 +2033,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     }
                   }}
                 />
-                <DictationHud getTextarea={() => inputRef} />
+                <DictationHud
+                  getTextarea={() => inputRef}
+                  active={isPaneActive()}
+                />
                 <Show
                   when={isPrompting()}
                   fallback={

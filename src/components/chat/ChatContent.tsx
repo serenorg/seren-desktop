@@ -2048,7 +2048,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                     }
                   }}
                 />
-                <DictationHud getTextarea={() => inputRef} />
+                <DictationHud
+                  getTextarea={() => inputRef}
+                  active={isPaneActive()}
+                />
                 <Show
                   when={conversationIsLoading()}
                   fallback={
