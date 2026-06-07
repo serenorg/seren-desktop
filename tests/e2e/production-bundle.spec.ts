@@ -11,7 +11,7 @@ test.describe("Production Bundle Integrity", () => {
     page.on("pageerror", (err) => errors.push(err.message));
 
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
 
     // Wait for app to fully initialize
     await page.waitForTimeout(2_000);
@@ -35,7 +35,7 @@ test.describe("Production Bundle Integrity", () => {
     page.on("pageerror", (err) => errors.push(err.message));
 
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
 
     // Interact with UI to trigger reactive store evaluations
     const sidebar = page.getByTestId("thread-sidebar");
@@ -84,7 +84,7 @@ test.describe("Production Bundle Integrity", () => {
 
     // Reload so the app picks up the persisted thread on init
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
     await page.waitForTimeout(2_000);
 
     const tdzErrors = errors.filter(
@@ -117,7 +117,7 @@ test.describe("Production Bundle Integrity", () => {
     });
 
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
     await page.waitForTimeout(2_000);
 
     const tdzErrors = errors.filter(
@@ -139,7 +139,7 @@ test.describe("Production Bundle Integrity", () => {
     page.on("pageerror", (err) => errors.push(err.message));
 
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
 
     // Create a thread, then interact with multiple panels
     const newBtn = page.getByTestId("new-thread-button");

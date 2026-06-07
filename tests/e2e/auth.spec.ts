@@ -38,7 +38,7 @@ test.describe("Authentication", () => {
 
     // Navigate to app and click on Chat tab to see sign-in form
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
 
     // Click Chat tab to show sign-in form for unauthenticated user
     await page.click("text=Chat");
@@ -63,7 +63,7 @@ test.describe("Authentication", () => {
   test("forgot password link opens external URL", async ({ page, context }) => {
     // Navigate to app and click on Chat tab to see sign-in form
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
 
     // Click Chat tab to show sign-in form for unauthenticated user
     await page.click("text=Chat");
@@ -93,7 +93,7 @@ test.describe("Authentication", () => {
   test("sign up link opens external URL", async ({ page, context }) => {
     // Navigate to app and click on Chat tab to see sign-in form
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
 
     // Click Chat tab to show sign-in form for unauthenticated user
     await page.click("text=Chat");

@@ -13,7 +13,7 @@ test.describe.skip("Session Panel", () => {
     page.on("pageerror", (err) => errors.push(err.message));
 
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
 
     (page as any).__capturedErrors = errors;
   });
