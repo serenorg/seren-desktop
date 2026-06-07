@@ -1,8 +1,7 @@
 // ABOUTME: Host compatibility helper for skill exclusion contract.
 // ABOUTME: Implements the serenorg/seren-desktop#1496 host-marker spec.
 
-import type { InstalledSkill, Skill } from "./types";
-import type { SkillMetadata } from "./types";
+import type { InstalledSkill, Skill, SkillMetadata } from "./types";
 
 /**
  * The host token injected by Seren Desktop at runtime.
@@ -53,7 +52,6 @@ export function filterHostCompatibleCatalog<
   T extends Skill & { excludeHosts?: string[] },
 >(catalog: T[], host: string = CURRENT_HOST): T[] {
   return catalog.filter(
-    (entry) =>
-      !entry.excludeHosts || !entry.excludeHosts.includes(host),
+    (entry) => !entry.excludeHosts || !entry.excludeHosts.includes(host),
   );
 }

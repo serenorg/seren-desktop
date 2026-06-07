@@ -1,15 +1,15 @@
 // ABOUTME: Settings panel for Telegram, Discord, and WhatsApp messaging transports.
 // ABOUTME: Token input for Telegram/Discord; QR code pairing for WhatsApp.
 
+import { invoke } from "@tauri-apps/api/core";
 import {
   type Component,
   createSignal,
   For,
-  Show,
   onCleanup,
   onMount,
+  Show,
 } from "solid-js";
-import { invoke } from "@tauri-apps/api/core";
 
 interface PlatformStatus {
   platform: string;
