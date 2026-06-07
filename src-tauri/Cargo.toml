@@ -105,6 +105,12 @@ tauri-plugin-single-instance = "2"
 [target.'cfg(target_os = "windows")'.dependencies]
 wasapi = "0.15"
 
+# System-audio ("Them") process-tap capture for Meeting Mode (CoreAudio + ObjC FFI).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSValue", "NSUUID"] }
+core-foundation = "0.10"
+
 [features]
 default = []
 messaging = []

@@ -135,7 +135,12 @@ fn system_audio_source() -> Option<Box<dyn AudioCaptureSource>> {
             crate::audio::capture::windows::WasapiLoopbackSource::new(),
         ));
     }
-    // The macOS Core Audio process-tap source is selected here once it lands.
+    #[cfg(target_os = "macos")]
+    {
+        return Some(Box::new(
+            crate::audio::capture::macos::CoreAudioTapSource::new(),
+        ));
+    }
     #[allow(unreachable_code)]
     {
         None

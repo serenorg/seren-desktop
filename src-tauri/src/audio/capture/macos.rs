@@ -1,0 +1,499 @@
+// ABOUTME: macOS CoreAudio process-tap capture for the system ("Them") meeting stream.
+// ABOUTME: Taps all system output via an aggregate device and normalizes to 16 kHz mono PCM.
+
+use std::ffi::c_void;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use core_foundation::array::CFArray;
+use core_foundation::base::TCFType;
+use core_foundation::boolean::CFBoolean;
+use core_foundation::dictionary::CFDictionary;
+use core_foundation::string::CFString;
+use objc2::rc::Retained;
+use objc2::runtime::{AnyObject, NSObject};
+use objc2::{AllocAnyThread, extern_class, msg_send};
+use objc2_foundation::{NSArray, NSString, NSUUID};
+
+use super::{AudioCaptureSource, CaptureError, FrameSender, PcmFrame, to_mono_16k};
+
+extern_class!(
+    // CATapDescription (CoreAudio, macOS 12+). Declared here because objc2 ships no
+    // CoreAudio bindings crate; we only use its init/UUID/name/private selectors.
+    #[unsafe(super(NSObject))]
+    struct CATapDescription;
+);
+
+// === CoreAudio C types (hand-declared; the SDK's coreaudio types are not in deps) ===
+
+type OSStatus = i32;
+type AudioObjectID = u32;
+type AudioObjectPropertySelector = u32;
+type AudioObjectPropertyScope = u32;
+type AudioObjectPropertyElement = u32;
+
+const NO_ERR: OSStatus = 0;
+const K_AUDIO_OBJECT_PROPERTY_SCOPE_GLOBAL: AudioObjectPropertyScope =
+    fourcc(b"glob");
+const K_AUDIO_OBJECT_PROPERTY_ELEMENT_MAIN: AudioObjectPropertyElement = 0;
+// 'tfmt' — kAudioTapPropertyFormat, an AudioStreamBasicDescription.
+const K_AUDIO_TAP_PROPERTY_FORMAT: AudioObjectPropertySelector = fourcc(b"tfmt");
+
+// Aggregate-device / sub-tap description dictionary keys (C string `#define`s).
+const K_AUDIO_AGGREGATE_DEVICE_UID_KEY: &str = "uid";
+const K_AUDIO_AGGREGATE_DEVICE_NAME_KEY: &str = "name";
+const K_AUDIO_AGGREGATE_DEVICE_IS_PRIVATE_KEY: &str = "private";
+const K_AUDIO_AGGREGATE_DEVICE_TAP_LIST_KEY: &str = "taps";
+const K_AUDIO_AGGREGATE_DEVICE_TAP_AUTO_START_KEY: &str = "tapautostart";
+const K_AUDIO_SUB_TAP_UID_KEY: &str = "uid";
+
+/// Build a four-char-code constant the way CoreAudio's `'glob'` literals do.
+const fn fourcc(code: &[u8; 4]) -> u32 {
+    ((code[0] as u32) << 24)
+        | ((code[1] as u32) << 16)
+        | ((code[2] as u32) << 8)
+        | (code[3] as u32)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct AudioObjectPropertyAddress {
+    selector: AudioObjectPropertySelector,
+    scope: AudioObjectPropertyScope,
+    element: AudioObjectPropertyElement,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct AudioStreamBasicDescription {
+    sample_rate: f64,
+    format_id: u32,
+    format_flags: u32,
+    bytes_per_packet: u32,
+    frames_per_packet: u32,
+    bytes_per_frame: u32,
+    channels_per_frame: u32,
+    bits_per_channel: u32,
+    reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct AudioBuffer {
+    number_channels: u32,
+    data_byte_size: u32,
+    data: *mut c_void,
+}
+
+#[repr(C)]
+struct AudioBufferList {
+    number_buffers: u32,
+    // Variable-length in C; we only ever read buffers[0] after bounds-checking
+    // number_buffers, matching how the tap delivers a single interleaved buffer.
+    buffers: [AudioBuffer; 1],
+}
+
+/// `OSStatus (*)(AudioObjectID, const AudioTimeStamp*, const AudioBufferList*,
+/// const AudioTimeStamp*, AudioBufferList*, const AudioTimeStamp*, void*)`.
+/// `AudioTimeStamp*` args are opaque here — we never dereference them.
+type AudioDeviceIOProc = extern "C" fn(
+    in_device: AudioObjectID,
+    in_now: *const c_void,
+    in_input_data: *const AudioBufferList,
+    in_input_time: *const c_void,
+    out_output_data: *mut AudioBufferList,
+    in_output_time: *const c_void,
+    in_client_data: *mut c_void,
+) -> OSStatus;
+
+type AudioDeviceIOProcID = *mut c_void;
+
+#[link(name = "CoreAudio", kind = "framework")]
+unsafe extern "C" {
+    fn AudioHardwareCreateProcessTap(
+        in_description: *mut AnyObject,
+        out_tap_id: *mut AudioObjectID,
+    ) -> OSStatus;
+    fn AudioHardwareDestroyProcessTap(in_tap_id: AudioObjectID) -> OSStatus;
+
+    fn AudioHardwareCreateAggregateDevice(
+        in_description: CFDictionaryRef,
+        out_device_id: *mut AudioObjectID,
+    ) -> OSStatus;
+    fn AudioHardwareDestroyAggregateDevice(in_device_id: AudioObjectID) -> OSStatus;
+
+    fn AudioObjectGetPropertyData(
+        in_object_id: AudioObjectID,
+        in_address: *const AudioObjectPropertyAddress,
+        in_qualifier_data_size: u32,
+        in_qualifier_data: *const c_void,
+        io_data_size: *mut u32,
+        out_data: *mut c_void,
+    ) -> OSStatus;
+
+    fn AudioDeviceCreateIOProcID(
+        in_device: AudioObjectID,
+        in_proc: AudioDeviceIOProc,
+        in_client_data: *mut c_void,
+        out_io_proc_id: *mut AudioDeviceIOProcID,
+    ) -> OSStatus;
+    fn AudioDeviceDestroyIOProcID(
+        in_device: AudioObjectID,
+        in_io_proc_id: AudioDeviceIOProcID,
+    ) -> OSStatus;
+    fn AudioDeviceStart(in_device: AudioObjectID, in_proc_id: AudioDeviceIOProcID)
+    -> OSStatus;
+    fn AudioDeviceStop(in_device: AudioObjectID, in_proc_id: AudioDeviceIOProcID)
+    -> OSStatus;
+}
+
+// core-foundation 0.10's CFDictionaryRef alias lives in its sys crate; mirror the
+// pointer type CoreAudio expects so our `extern` block stays self-contained.
+type CFDictionaryRef = *const c_void;
+
+// === Capture source ===
+
+/// Captures all system output audio through a private CoreAudio process tap fed
+/// into a private aggregate device, so the remote side of a call ("Them") becomes
+/// the meeting stream. Requires macOS 14.2+.
+pub struct CoreAudioTapSource {
+    stop_flag: Arc<AtomicBool>,
+    state: Option<Box<CaptureState>>,
+}
+
+impl CoreAudioTapSource {
+    pub fn new() -> Self {
+        Self {
+            stop_flag: Arc::new(AtomicBool::new(false)),
+            state: None,
+        }
+    }
+}
+
+impl Default for CoreAudioTapSource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Heap-pinned data the realtime IOProc reads via its `void* clientData`. The
+/// pointer handed to CoreAudio must outlive the running device, so this is owned
+/// by [`CaptureState`] and only freed after the device is stopped.
+struct IoProcContext {
+    sink: FrameSender,
+    channels: u16,
+    sample_rate: u32,
+}
+
+/// Live CoreAudio objects retained for the duration of a capture, torn down in
+/// reverse creation order on [`stop`](AudioCaptureSource::stop).
+struct CaptureState {
+    aggregate_device: AudioObjectID,
+    tap: AudioObjectID,
+    io_proc_id: AudioDeviceIOProcID,
+    // Boxed so its address is stable while handed to the C callback.
+    context: Box<IoProcContext>,
+}
+
+// The retained CoreAudio object IDs and the boxed context are owned solely by the
+// pipeline thread; nothing here is shared, so moving it across threads is sound.
+unsafe impl Send for CaptureState {}
+
+impl AudioCaptureSource for CoreAudioTapSource {
+    fn start(&mut self, sink: FrameSender) -> Result<(), CaptureError> {
+        if self.state.is_some() {
+            return Ok(());
+        }
+        self.stop_flag.store(false, Ordering::SeqCst);
+        let state = start_capture(sink)?;
+        self.state = Some(Box::new(state));
+        Ok(())
+    }
+
+    fn stop(&mut self) {
+        self.stop_flag.store(true, Ordering::SeqCst);
+        if let Some(state) = self.state.take() {
+            teardown(*state);
+        }
+    }
+}
+
+impl Drop for CoreAudioTapSource {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Create the tap + aggregate device, register the IOProc, and start IO.
+fn start_capture(sink: FrameSender) -> Result<CaptureState, CaptureError> {
+    let description = build_tap_description();
+    let tap_uuid = tap_uuid_string(&description);
+
+    // SAFETY: `description` is a valid CATapDescription; out-param is a live local.
+    let mut tap: AudioObjectID = 0;
+    let status = unsafe {
+        AudioHardwareCreateProcessTap(
+            Retained::as_ptr(&description) as *mut AnyObject,
+            &mut tap,
+        )
+    };
+    if status != NO_ERR {
+        return Err(CaptureError::Unsupported(format!(
+            "AudioHardwareCreateProcessTap failed (OSStatus {status}); needs macOS 14.2+ and audio-capture permission"
+        )));
+    }
+
+    let aggregate_uid = format!("com.serendb.meeting.tap.{tap_uuid}");
+    let dict = build_aggregate_description(&aggregate_uid, &tap_uuid);
+
+    let mut aggregate_device: AudioObjectID = 0;
+    // SAFETY: `dict` is a valid CFDictionary held alive for the call; out-param local.
+    let status = unsafe {
+        AudioHardwareCreateAggregateDevice(
+            dict.as_concrete_TypeRef() as CFDictionaryRef,
+            &mut aggregate_device,
+        )
+    };
+    if status != NO_ERR {
+        // SAFETY: `tap` was created above; destroy it before returning.
+        unsafe { AudioHardwareDestroyProcessTap(tap) };
+        return Err(CaptureError::Device(format!(
+            "AudioHardwareCreateAggregateDevice failed (OSStatus {status})"
+        )));
+    }
+
+    let (channels, sample_rate) = tap_stream_format(tap).unwrap_or((2, 48_000));
+
+    let mut context = Box::new(IoProcContext {
+        sink,
+        channels,
+        sample_rate,
+    });
+    let context_ptr = context.as_mut() as *mut IoProcContext as *mut c_void;
+
+    let mut io_proc_id: AudioDeviceIOProcID = std::ptr::null_mut();
+    // SAFETY: aggregate_device is live; io_proc is a valid `extern "C"` fn; the
+    // context pointer stays valid because `context` is owned by CaptureState and
+    // only dropped after AudioDeviceDestroyIOProcID in teardown.
+    let status = unsafe {
+        AudioDeviceCreateIOProcID(
+            aggregate_device,
+            capture_io_proc,
+            context_ptr,
+            &mut io_proc_id,
+        )
+    };
+    if status != NO_ERR || io_proc_id.is_null() {
+        // SAFETY: both objects were created above and are destroyed once.
+        unsafe {
+            AudioHardwareDestroyAggregateDevice(aggregate_device);
+            AudioHardwareDestroyProcessTap(tap);
+        }
+        return Err(CaptureError::Device(format!(
+            "AudioDeviceCreateIOProcID failed (OSStatus {status})"
+        )));
+    }
+
+    // SAFETY: device + proc id are live and paired.
+    let status = unsafe { AudioDeviceStart(aggregate_device, io_proc_id) };
+    if status != NO_ERR {
+        // SAFETY: proc/device created above; tear them down once each.
+        unsafe {
+            AudioDeviceDestroyIOProcID(aggregate_device, io_proc_id);
+            AudioHardwareDestroyAggregateDevice(aggregate_device);
+            AudioHardwareDestroyProcessTap(tap);
+        }
+        return Err(CaptureError::Device(format!(
+            "AudioDeviceStart failed (OSStatus {status})"
+        )));
+    }
+
+    Ok(CaptureState {
+        aggregate_device,
+        tap,
+        io_proc_id,
+        context,
+    })
+}
+
+/// Stop IO and destroy CoreAudio objects in reverse order. The boxed context is
+/// dropped last, after the IOProc that referenced it can no longer fire.
+fn teardown(state: CaptureState) {
+    // SAFETY: each object was created in `start_capture` and is destroyed exactly
+    // once here; AudioDeviceStop precedes DestroyIOProcID so no callback races the
+    // context drop.
+    unsafe {
+        AudioDeviceStop(state.aggregate_device, state.io_proc_id);
+        AudioDeviceDestroyIOProcID(state.aggregate_device, state.io_proc_id);
+        AudioHardwareDestroyAggregateDevice(state.aggregate_device);
+        AudioHardwareDestroyProcessTap(state.tap);
+    }
+    drop(state.context);
+}
+
+/// Allocate a `CATapDescription` tapping all system audio (excluding nothing) and
+/// configure it as a private, named tap.
+fn build_tap_description() -> Retained<CATapDescription> {
+    let exclude: Retained<NSArray<NSObject>> = NSArray::new();
+    let name = NSString::from_str("Seren Meeting Capture");
+
+    // SAFETY: CATapDescription responds to these selectors (CATapDescription.h);
+    // `init…ExcludeProcesses:` takes an NSArray<NSNumber*> — an empty array excludes
+    // nothing, i.e. taps every process. `alloc` + designated init returns a +1
+    // reference that `Retained` takes ownership of.
+    unsafe {
+        let alloc = CATapDescription::alloc();
+        let desc: Retained<CATapDescription> =
+            msg_send![alloc, initStereoGlobalTapButExcludeProcesses: &*exclude];
+        let _: () = msg_send![&*desc, setName: &*name];
+        let _: () = msg_send![&*desc, setPrivate: true];
+        desc
+    }
+}
+
+/// Read the tap's `UUID` property and render it as a UID string for the sub-tap.
+fn tap_uuid_string(description: &Retained<CATapDescription>) -> String {
+    // SAFETY: CATapDescription exposes a `UUID` (NSUUID) property; `UUIDString`
+    // returns an autoreleased NSString we copy into an owned Rust String.
+    unsafe {
+        let uuid: Retained<NSUUID> = msg_send![&**description, UUID];
+        let s: Retained<NSString> = msg_send![&*uuid, UUIDString];
+        s.to_string()
+    }
+}
+
+/// Build the private aggregate-device description: one sub-tap referencing the
+/// process tap by UID, auto-starting so IO begins immediately.
+fn build_aggregate_description(
+    aggregate_uid: &str,
+    tap_uuid: &str,
+) -> CFDictionary<CFString, core_foundation::base::CFType> {
+    use core_foundation::base::CFType;
+
+    let sub_tap = CFDictionary::from_CFType_pairs(&[(
+        CFString::new(K_AUDIO_SUB_TAP_UID_KEY),
+        CFString::new(tap_uuid).as_CFType(),
+    )]);
+    let tap_list = CFArray::from_CFTypes(&[sub_tap]);
+
+    let pairs: Vec<(CFString, CFType)> = vec![
+        (
+            CFString::new(K_AUDIO_AGGREGATE_DEVICE_NAME_KEY),
+            CFString::new("Seren Meeting Aggregate").as_CFType(),
+        ),
+        (
+            CFString::new(K_AUDIO_AGGREGATE_DEVICE_UID_KEY),
+            CFString::new(aggregate_uid).as_CFType(),
+        ),
+        (
+            CFString::new(K_AUDIO_AGGREGATE_DEVICE_IS_PRIVATE_KEY),
+            CFBoolean::true_value().as_CFType(),
+        ),
+        (
+            CFString::new(K_AUDIO_AGGREGATE_DEVICE_TAP_AUTO_START_KEY),
+            CFBoolean::true_value().as_CFType(),
+        ),
+        (
+            CFString::new(K_AUDIO_AGGREGATE_DEVICE_TAP_LIST_KEY),
+            tap_list.as_CFType(),
+        ),
+    ];
+    CFDictionary::from_CFType_pairs(&pairs)
+}
+
+/// Query the tap's stream format, returning `(channels, sample_rate)`.
+fn tap_stream_format(tap: AudioObjectID) -> Option<(u16, u32)> {
+    let address = AudioObjectPropertyAddress {
+        selector: K_AUDIO_TAP_PROPERTY_FORMAT,
+        scope: K_AUDIO_OBJECT_PROPERTY_SCOPE_GLOBAL,
+        element: K_AUDIO_OBJECT_PROPERTY_ELEMENT_MAIN,
+    };
+    let mut asbd = AudioStreamBasicDescription {
+        sample_rate: 0.0,
+        format_id: 0,
+        format_flags: 0,
+        bytes_per_packet: 0,
+        frames_per_packet: 0,
+        bytes_per_frame: 0,
+        channels_per_frame: 0,
+        bits_per_channel: 0,
+        reserved: 0,
+    };
+    let mut size = std::mem::size_of::<AudioStreamBasicDescription>() as u32;
+
+    // SAFETY: `tap` is a live AudioObjectID; `address` and `asbd` are valid locals
+    // and `size` matches the out buffer exactly.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            tap,
+            &address,
+            0,
+            std::ptr::null(),
+            &mut size,
+            &mut asbd as *mut AudioStreamBasicDescription as *mut c_void,
+        )
+    };
+    if status != NO_ERR || asbd.channels_per_frame == 0 || asbd.sample_rate <= 0.0 {
+        return None;
+    }
+    Some((asbd.channels_per_frame as u16, asbd.sample_rate as u32))
+}
+
+/// Realtime IOProc: convert the tap's interleaved Float32 input to normalized
+/// 16 kHz mono PCM and push it into the sink. Runs on a CoreAudio thread; it must
+/// not allocate-and-block beyond the bounded work here and never unwinds.
+extern "C" fn capture_io_proc(
+    _in_device: AudioObjectID,
+    _in_now: *const c_void,
+    in_input_data: *const AudioBufferList,
+    _in_input_time: *const c_void,
+    _out_output_data: *mut AudioBufferList,
+    _in_output_time: *const c_void,
+    in_client_data: *mut c_void,
+) -> OSStatus {
+    if in_input_data.is_null() || in_client_data.is_null() {
+        return NO_ERR;
+    }
+    // SAFETY: `in_client_data` is the `IoProcContext` pointer registered with
+    // AudioDeviceCreateIOProcID; it outlives the running device. We only take a
+    // shared reference and never move out of it.
+    let context = unsafe { &*(in_client_data as *const IoProcContext) };
+
+    // SAFETY: CoreAudio guarantees a valid AudioBufferList here. We read
+    // number_buffers, then access only buffer[0] (the single interleaved tap
+    // buffer) without exceeding the reported count.
+    let list = unsafe { &*in_input_data };
+    if list.number_buffers == 0 {
+        return NO_ERR;
+    }
+    let buffer = list.buffers[0];
+    if buffer.data.is_null() || buffer.data_byte_size == 0 {
+        return NO_ERR;
+    }
+
+    let sample_count = (buffer.data_byte_size as usize) / std::mem::size_of::<f32>();
+    if sample_count == 0 {
+        return NO_ERR;
+    }
+
+    // SAFETY: `buffer.data` points to `data_byte_size` bytes of Float32 PCM owned
+    // by CoreAudio for the duration of this call; we copy out before returning.
+    let floats = unsafe { std::slice::from_raw_parts(buffer.data as *const f32, sample_count) };
+
+    let mut pcm: Vec<i16> = Vec::with_capacity(sample_count);
+    for &sample in floats {
+        let clamped = sample.clamp(-1.0, 1.0);
+        pcm.push((clamped * i16::MAX as f32) as i16);
+    }
+
+    let channels = if buffer.number_channels > 0 {
+        buffer.number_channels as u16
+    } else {
+        context.channels
+    };
+    let normalized = to_mono_16k(&pcm, channels, context.sample_rate);
+    if !normalized.is_empty() {
+        let _ = context.sink.send(PcmFrame { samples: normalized });
+    }
+    NO_ERR
+}
