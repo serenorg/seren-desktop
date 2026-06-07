@@ -10,6 +10,7 @@ import {
   Show,
 } from "solid-js";
 import { MeetingDetail } from "@/components/meeting/MeetingDetail";
+import { MeetingSettings } from "@/components/meeting/MeetingSettings";
 import {
   formatDuration,
   formatTime,
@@ -60,6 +61,7 @@ export function MeetingPanel(props: MeetingPanelProps) {
   const [starting, setStarting] = createSignal(false);
   const [stopping, setStopping] = createSignal(false);
   const [title, setTitle] = createSignal("");
+  const [showSettings, setShowSettings] = createSignal(false);
 
   onMount(() => {
     void meetingStore.loadMeetings();
@@ -117,27 +119,51 @@ export function MeetingPanel(props: MeetingPanelProps) {
               {meetingStore.state.meetings.length} saved
             </div>
           </div>
-          <button
-            type="button"
-            class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground hover:text-foreground hover:bg-surface-3 transition-colors"
-            onClick={props.onClose}
-            title="Close"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="none"
-              aria-hidden="true"
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-surface-2 hover:bg-surface-3 transition-colors"
+              classList={{
+                "text-primary": showSettings(),
+                "text-muted-foreground hover:text-foreground": !showSettings(),
+              }}
+              onClick={() => setShowSettings((value) => !value)}
+              title="Meeting settings"
             >
-              <path
-                d="M4 4l8 8M12 4l-8 8"
-                stroke="currentColor"
-                stroke-width="1.4"
-                stroke-linecap="round"
-              />
-            </svg>
-          </button>
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-label="Settings"
+                role="img"
+              >
+                <path d="M8 5.5A2.5 2.5 0 1 0 8 10.5 2.5 2.5 0 0 0 8 5.5Zm0 1.2a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6Z" />
+                <path d="M7.3 1.5a.7.7 0 0 1 1.4 0l.1.9c.4.1.8.3 1.1.5l.8-.5a.7.7 0 0 1 1 1l-.5.8c.2.3.4.7.5 1.1l.9.1a.7.7 0 0 1 0 1.4l-.9.1c-.1.4-.3.8-.5 1.1l.5.8a.7.7 0 0 1-1 1l-.8-.5c-.3.2-.7.4-1.1.5l-.1.9a.7.7 0 0 1-1.4 0l-.1-.9c-.4-.1-.8-.3-1.1-.5l-.8.5a.7.7 0 0 1-1-1l.5-.8c-.2-.3-.4-.7-.5-1.1l-.9-.1a.7.7 0 0 1 0-1.4l.9-.1c.1-.4.3-.8.5-1.1l-.5-.8a.7.7 0 0 1 1-1l.8.5c.3-.2.7-.4 1.1-.5l.1-.9Z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground hover:text-foreground hover:bg-surface-3 transition-colors"
+              onClick={props.onClose}
+              title="Close"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4 4l8 8M12 4l-8 8"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -211,56 +237,60 @@ export function MeetingPanel(props: MeetingPanelProps) {
         </Show>
       </div>
 
-      <div class="min-h-0 flex-1 grid grid-cols-[220px_1fr]">
-        <aside class="min-h-0 overflow-auto border-r border-border bg-surface-0/30">
-          <Show
-            when={meetingStore.state.meetings.length > 0}
-            fallback={
-              <div class="p-4 text-[13px] text-muted-foreground">
-                No meetings saved.
-              </div>
-            }
-          >
-            <For each={meetingStore.state.meetings}>
-              {(meeting) => {
-                const selected = () => activeMeeting()?.id === meeting.id;
-                return (
-                  <button
-                    type="button"
-                    class="w-full text-left px-3 py-2.5 border-b border-border/50 bg-transparent hover:bg-surface-2 transition-colors"
-                    classList={{
-                      "bg-surface-2 text-foreground": selected(),
-                      "text-muted-foreground": !selected(),
-                    }}
-                    onClick={() => void meetingStore.setActiveMeeting(meeting)}
-                  >
-                    <div class="text-[13px] font-medium truncate">
-                      {meetingTitle(meeting)}
-                    </div>
-                    <div class="mt-1 flex items-center justify-between gap-2 text-[11px]">
-                      <span>{formatTime(meeting.startedAt)}</span>
-                      <span>{STATUS_LABELS[meeting.status]}</span>
-                    </div>
-                  </button>
-                );
-              }}
-            </For>
-          </Show>
-        </aside>
+      <Show when={!showSettings()} fallback={<MeetingSettings />}>
+        <div class="min-h-0 flex-1 grid grid-cols-[220px_1fr]">
+          <aside class="min-h-0 overflow-auto border-r border-border bg-surface-0/30">
+            <Show
+              when={meetingStore.state.meetings.length > 0}
+              fallback={
+                <div class="p-4 text-[13px] text-muted-foreground">
+                  No meetings saved.
+                </div>
+              }
+            >
+              <For each={meetingStore.state.meetings}>
+                {(meeting) => {
+                  const selected = () => activeMeeting()?.id === meeting.id;
+                  return (
+                    <button
+                      type="button"
+                      class="w-full text-left px-3 py-2.5 border-b border-border/50 bg-transparent hover:bg-surface-2 transition-colors"
+                      classList={{
+                        "bg-surface-2 text-foreground": selected(),
+                        "text-muted-foreground": !selected(),
+                      }}
+                      onClick={() =>
+                        void meetingStore.setActiveMeeting(meeting)
+                      }
+                    >
+                      <div class="text-[13px] font-medium truncate">
+                        {meetingTitle(meeting)}
+                      </div>
+                      <div class="mt-1 flex items-center justify-between gap-2 text-[11px]">
+                        <span>{formatTime(meeting.startedAt)}</span>
+                        <span>{STATUS_LABELS[meeting.status]}</span>
+                      </div>
+                    </button>
+                  );
+                }}
+              </For>
+            </Show>
+          </aside>
 
-        <main class="min-h-0 overflow-auto">
-          <Show
-            when={activeMeeting()}
-            fallback={
-              <div class="h-full flex items-center justify-center text-[13px] text-muted-foreground">
-                Select a meeting.
-              </div>
-            }
-          >
-            {(meeting) => <MeetingDetail meeting={meeting()} />}
-          </Show>
-        </main>
-      </div>
+          <main class="min-h-0 overflow-auto">
+            <Show
+              when={activeMeeting()}
+              fallback={
+                <div class="h-full flex items-center justify-center text-[13px] text-muted-foreground">
+                  Select a meeting.
+                </div>
+              }
+            >
+              {(meeting) => <MeetingDetail meeting={meeting()} />}
+            </Show>
+          </main>
+        </div>
+      </Show>
     </section>
   );
 }
