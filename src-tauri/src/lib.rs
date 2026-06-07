@@ -53,6 +53,7 @@ mod skills;
 mod support;
 mod sync;
 mod terminal;
+mod tray;
 mod wallet;
 
 const AUTH_STORE: &str = "auth.json";
@@ -640,6 +641,12 @@ pub fn run() {
                 let menu = Menu::with_items(app, &[&app_menu, &edit_menu, &window_menu])?;
                 app.set_menu(menu)?;
             }
+
+            // System tray: live meeting-capture indicator + quick actions.
+            if let Err(error) = tray::setup_tray(app.handle()) {
+                log::warn!("[Tray] Failed to create system tray: {}", error);
+            }
+
             // Configure embedded runtime early in startup
             // This prepends bundled Node.js and Git to PATH
             let paths = embedded_runtime::configure_embedded_runtime(app.handle());
@@ -740,6 +747,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             greet,
+            tray::set_tray_recording,
             get_oauth_redirect_url,
             store_token,
             get_token,

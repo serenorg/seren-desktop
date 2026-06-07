@@ -7,8 +7,15 @@ import {
   type MeetingCaptureHandle,
   startMeetingMicCapture,
 } from "@/lib/audio/meetingCapture";
+import { formatTime } from "@/lib/meeting-format";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import {
+  closeCaptureWidget,
+  onWidgetStopRequest,
+  openCaptureWidget,
+} from "@/services/captureWidget";
+import {
+  createMeeting,
   generateMeetingNotes,
   getMeetingTranscriptText,
   getTranscriptSegments,
@@ -25,6 +32,7 @@ import {
   updateMeetingStatus,
 } from "@/services/meetings";
 import { orchestrate } from "@/services/orchestrator";
+import { onTrayToggleCapture, setTrayRecording } from "@/services/tray";
 import { conversationStore } from "@/stores/conversation.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
@@ -59,6 +67,8 @@ let levelTimer: number | null = null;
 
 let transcriptUnlisten: UnlistenFn | null = null;
 let statusUnlisten: UnlistenFn | null = null;
+let widgetStopUnlisten: (() => void) | null = null;
+let trayToggleUnlisten: (() => void) | null = null;
 
 let autoDetectTimer: number | null = null;
 let autoDetectDismissed = false;
@@ -145,13 +155,31 @@ async function startMeetingEventListeners(): Promise<void> {
       setMeetingState("activeMeeting", event.payload);
     }
   });
+
+  // The floating widget's Stop button can't run the notes/handoff flow in its
+  // own webview, so it asks the main window to stop the capture it owns.
+  widgetStopUnlisten = await onWidgetStopRequest((meetingId) => {
+    const meeting = meetingState.meetings.find((item) => item.id === meetingId);
+    if (meeting && meeting.status === "capturing") {
+      void stopAndProcess(meeting);
+    }
+  });
+
+  // The tray menu's Start/Stop action toggles capture through the same flow.
+  trayToggleUnlisten = await onTrayToggleCapture(() => {
+    void toggleCaptureFromTray();
+  });
 }
 
 function stopMeetingEventListeners(): void {
   transcriptUnlisten?.();
   statusUnlisten?.();
+  widgetStopUnlisten?.();
+  trayToggleUnlisten?.();
   transcriptUnlisten = null;
   statusUnlisten = null;
+  widgetStopUnlisten = null;
+  trayToggleUnlisten = null;
 }
 
 async function startCapture(meeting: Meeting): Promise<void> {
@@ -170,6 +198,8 @@ async function startCapture(meeting: Meeting): Promise<void> {
   levelTimer = window.setInterval(() => {
     setMeetingState("captureLevel", captureHandle?.level() ?? 0);
   }, 60);
+  void openCaptureWidget(meeting.id);
+  void setTrayRecording(true);
 }
 
 async function stopCapture(meetingId: string): Promise<void> {
@@ -178,6 +208,8 @@ async function stopCapture(meetingId: string): Promise<void> {
     levelTimer = null;
   }
   setMeetingState("captureLevel", 0);
+  void closeCaptureWidget();
+  void setTrayRecording(false);
   if (captureHandle) {
     try {
       await captureHandle.stop();
@@ -189,6 +221,27 @@ async function stopCapture(meetingId: string): Promise<void> {
   if (isTauriRuntime()) {
     await stopBackendCapture(meetingId);
   }
+}
+
+// Tray Start/Stop action: stop the active capture if one is running, otherwise
+// create + start a manual capture (mirrors MeetingPanel's manual start path).
+async function toggleCaptureFromTray(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  const active = meetingState.meetings.find(
+    (meeting) => meeting.status === "capturing",
+  );
+  if (active) {
+    await stopAndProcess(active);
+    return;
+  }
+  const meeting = await createMeeting({
+    title: `Meeting ${formatTime(Date.now())}`,
+    sourceApp: "Tray",
+    templateId: settingsStore.get("meetingTemplateId"),
+  });
+  await startCapture(meeting);
+  await loadMeetings();
+  await setActiveMeeting(meeting);
 }
 
 let templateCache: MeetingTemplate[] | null = null;
