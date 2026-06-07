@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use uuid::Uuid;
 
-use crate::audio::capture::PcmFrame;
+use crate::audio::capture::{AudioCaptureSource, PcmFrame};
 use crate::audio::chunker::{Chunk, ChunkCfg, StreamingChunker};
 use crate::audio::transcribe::{
     ChunkTranscriber, GatewayTranscriber, RetryConfig, transcribe_chunk_with_retry,
@@ -119,9 +119,27 @@ impl SegmentSink for DbEmitSink {
 /// One in-flight meeting's capture streams and their worker tasks.
 struct ActiveCapture {
     me_tx: UnboundedSender<PcmFrame>,
-    // The system ("Them") stream is wired by native capture in a later change.
     them_tx: Option<UnboundedSender<PcmFrame>>,
+    // Native system-audio source (WASAPI loopback / Core Audio tap) feeding `them_tx`.
+    system_source: Option<Box<dyn AudioCaptureSource>>,
     tasks: Vec<JoinHandle<()>>,
+}
+
+/// The platform's system-audio ("Them") capture source, if this build supports it.
+/// Returns `None` where native capture is not yet available so the meeting still
+/// captures the "Me" stream.
+fn system_audio_source() -> Option<Box<dyn AudioCaptureSource>> {
+    #[cfg(target_os = "windows")]
+    {
+        return Some(Box::new(
+            crate::audio::capture::windows::WasapiLoopbackSource::new(),
+        ));
+    }
+    // The macOS Core Audio process-tap source is selected here once it lands.
+    #[allow(unreachable_code)]
+    {
+        None
+    }
 }
 
 /// Tauri-managed registry of active meeting captures, keyed by meeting id.
@@ -138,29 +156,57 @@ impl CaptureRegistry {
         if active.contains_key(meeting_id) {
             return;
         }
+        // Me and Them share one sequence counter so segments order globally.
         let seq = Arc::new(AtomicI64::new(0));
-        let sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
-        let transcriber: Arc<dyn ChunkTranscriber + Send + Sync> =
-            Arc::new(GatewayTranscriber::new(app.clone()));
 
+        let me_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> =
+            Arc::new(GatewayTranscriber::new(app.clone()));
+        let me_sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
         let (me_tx, me_rx) = unbounded_channel();
-        let task = tauri::async_runtime::spawn(run_capture_stream(
+        let mut tasks = vec![tauri::async_runtime::spawn(run_capture_stream(
             meeting_id.to_string(),
             Speaker::Me,
             me_rx,
-            transcriber,
+            me_transcriber,
             seq.clone(),
             ChunkCfg::default(),
             RetryConfig::default(),
-            sink,
-        ));
+            me_sink,
+        ))];
+
+        // System audio ("Them") via the native loopback/tap source, when supported.
+        let mut them_tx = None;
+        let mut system_source = system_audio_source();
+        if let Some(source) = system_source.as_mut() {
+            let them_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> =
+                Arc::new(GatewayTranscriber::new(app.clone()));
+            let them_sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
+            let (tx, rx) = unbounded_channel();
+            tasks.push(tauri::async_runtime::spawn(run_capture_stream(
+                meeting_id.to_string(),
+                Speaker::Them,
+                rx,
+                them_transcriber,
+                seq,
+                ChunkCfg::default(),
+                RetryConfig::default(),
+                them_sink,
+            )));
+            match source.start(tx.clone()) {
+                Ok(()) => them_tx = Some(tx),
+                Err(err) => {
+                    log::warn!("[meeting] system-audio capture unavailable: {err}")
+                }
+            }
+        }
 
         active.insert(
             meeting_id.to_string(),
             ActiveCapture {
                 me_tx,
-                them_tx: None,
-                tasks: vec![task],
+                them_tx,
+                system_source,
+                tasks,
             },
         );
     }
@@ -188,9 +234,13 @@ impl CaptureRegistry {
     /// Stop capture for `meeting_id`, draining and finishing all worker tasks.
     pub async fn stop(&self, meeting_id: &str) {
         let capture = self.active.lock().unwrap().remove(meeting_id);
-        let Some(capture) = capture else {
+        let Some(mut capture) = capture else {
             return;
         };
+        // Stop the native source first so it stops feeding the "Them" channel.
+        if let Some(mut source) = capture.system_source.take() {
+            let _ = tauri::async_runtime::spawn_blocking(move || source.stop()).await;
+        }
         // Dropping the senders closes the channels so the workers flush and exit.
         drop(capture.me_tx);
         drop(capture.them_tx);
