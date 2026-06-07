@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   type PrunableMessage,
   pruneCompactedHistory,
+  relieveOverBudgetTail,
   truncateJsonArgs,
 } from "@/lib/compaction/prune";
 
@@ -109,5 +110,50 @@ describe("#2105 pruneCompactedHistory — protected tail and token reduction", (
     expect(out[2].content).toBe("keep me");
     expect(out[2].imageParts).toBe(1);
     expect(stats.tokensAfter).toBeLessThan(stats.tokensBefore);
+  });
+});
+
+describe("#2113 relieveOverBudgetTail — acts on the over-budget tail flag", () => {
+  it("shrinks a tail with reducible payloads and tracks the budget", () => {
+    const big = `head line\n${"x".repeat(6000)}`;
+    const tail: PrunableMessage[] = [
+      tool("t1", "read_file", big),
+      tool("t2", "read_file", big), // duplicate of t1
+      { id: "u1", role: "user", content: "continue" },
+    ];
+    const relieved = relieveOverBudgetTail(tail, 0);
+    // Reducible payloads (duplicate + large tool result) were pruned.
+    expect(relieved.tailTokensAfter).toBeLessThan(relieved.tailTokensBefore);
+    // budget 0 -> still over budget after pruning.
+    expect(relieved.stillOverBudget).toBe(true);
+    // The same pruned tail is within a generous budget.
+    expect(
+      relieveOverBudgetTail(tail, Number.MAX_SAFE_INTEGER).stillOverBudget,
+    ).toBe(false);
+  });
+
+  it("never truncates verbatim user text and reports it still over budget", () => {
+    const hugeText = "word ".repeat(4000);
+    const tail: PrunableMessage[] = [
+      { id: "u1", role: "user", content: hugeText },
+    ];
+    const relieved = relieveOverBudgetTail(tail, 50);
+    // Plain user text is irreducible — no reduction, content preserved verbatim.
+    expect(relieved.tailTokensAfter).toBe(relieved.tailTokensBefore);
+    expect(relieved.messages[0].content).toBe(hugeText);
+    expect(relieved.stillOverBudget).toBe(true);
+  });
+
+  it("strips stale media in the tail but keeps the latest media-bearing turn", () => {
+    const tail: PrunableMessage[] = [
+      { id: "u1", role: "user", content: "old shot", imageParts: 2 },
+      { id: "u2", role: "user", content: "newest shot", imageParts: 1 },
+    ];
+    const relieved = relieveOverBudgetTail(tail, 0);
+    expect(relieved.stats.strippedMediaParts).toBe(2);
+    expect(relieved.messages[0].imageParts).toBe(0);
+    // Latest media-bearing turn keeps its media for the active task.
+    expect(relieved.messages[1].imageParts).toBe(1);
+    expect(relieved.tailTokensAfter).toBeLessThan(relieved.tailTokensBefore);
   });
 });

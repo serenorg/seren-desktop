@@ -6,6 +6,7 @@ import { isLikelyAuthError } from "@/lib/auth-errors";
 import {
   type PrunableMessage,
   pruneCompactedHistory,
+  relieveOverBudgetTail,
 } from "@/lib/compaction/prune";
 import {
   buildDeterministicFallbackSummary,
@@ -704,13 +705,58 @@ export const chatStore = {
         minTailMessages: 2,
       });
       const toCompact = messages.slice(0, tailWindow.cutIndex);
-      const toPreserve = messages.slice(tailWindow.cutIndex);
-      if (toCompact.length === 0) {
-        // The whole tail fits the budget — usage is low enough that there is
-        // nothing worth compacting this pass.
-        console.log(
-          "[chatStore] Token budget preserves the whole tail — nothing to compact",
+      let toPreserve = messages.slice(tailWindow.cutIndex);
+
+      // Act on the soft-ceiling flag (#2113). When the anchored tail itself
+      // exceeds the budget, summarizing the prefix cannot clear it — so prune
+      // the tail's reducible payloads (stale media) in place. Plain user text is
+      // never truncated, so a verbatim oversized message can stay over budget;
+      // surface that instead of silently leaving the context gauge pegged.
+      if (tailWindow.overBudget) {
+        const relief = relieveOverBudgetTail(
+          toPreserve.map((m) => ({
+            id: m.id,
+            role:
+              m.role === "user" || m.role === "assistant" || m.role === "system"
+                ? m.role
+                : "other",
+            content: m.content,
+            imageParts: m.images?.length ?? 0,
+          })),
+          tailWindow.tailBudget,
         );
+        toPreserve = toPreserve.map((m, i) => {
+          const pruned = relief.messages[i];
+          if ((m.images?.length ?? 0) > 0 && (pruned.imageParts ?? 0) === 0) {
+            return { ...m, images: [], content: pruned.content };
+          }
+          return m;
+        });
+        console.log(
+          `[chatStore] over-budget tail pruned ${relief.tailTokensBefore}->${relief.tailTokensAfter} tokens`,
+        );
+        if (relief.stillOverBudget) {
+          console.warn(
+            "[chatStore] preserved tail still exceeds budget after pruning (irreducible content) — gauge may stay elevated",
+          );
+        }
+      }
+
+      if (toCompact.length === 0) {
+        if (tailWindow.overBudget) {
+          // No older prefix to summarize, but the tail relief above shrank
+          // reducible payloads — persist it so the gauge reflects the drop.
+          setState("messages", conversationId, toPreserve);
+          console.log(
+            "[chatStore] no compactable prefix; persisted pruned over-budget tail",
+          );
+        } else {
+          // The whole tail fits the budget — usage is low enough that there is
+          // nothing worth compacting this pass.
+          console.log(
+            "[chatStore] Token budget preserves the whole tail — nothing to compact",
+          );
+        }
         return;
       }
 

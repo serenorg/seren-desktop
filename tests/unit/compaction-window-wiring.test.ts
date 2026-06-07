@@ -36,3 +36,14 @@ describe("#2104 agent compaction uses the token-budgeted selector", () => {
     expect(agentStore).toContain("tailRatio: AGGRESSIVE_RETRY_TAIL_RATIO");
   });
 });
+
+describe("#2113 compaction acts on the over-budget tail flag", () => {
+  it("chat prunes and persists an over-budget anchored tail", () => {
+    expect(chatStore).toContain("tailWindow.overBudget");
+    expect(chatStore).toContain("relieveOverBudgetTail(");
+  });
+
+  it("agent surfaces an over-budget tail with no compactable prefix", () => {
+    expect(agentStore).toContain("tailWindow.overBudget");
+  });
+});
