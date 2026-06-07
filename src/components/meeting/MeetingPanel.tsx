@@ -237,6 +237,22 @@ export function MeetingPanel(props: MeetingPanelProps) {
         </Show>
       </div>
 
+      <Show when={meetingStore.state.error}>
+        {(message) => (
+          <div class="flex items-start gap-2 px-4 py-2.5 border-b border-destructive/30 bg-destructive/10 text-[12px] text-destructive">
+            <span class="flex-1">{message()}</span>
+            <button
+              type="button"
+              class="text-destructive/80 hover:text-destructive"
+              onClick={() => meetingStore.clearError()}
+              aria-label="Dismiss error"
+            >
+              ×
+            </button>
+          </div>
+        )}
+      </Show>
+
       <Show when={!showSettings()} fallback={<MeetingSettings />}>
         <div class="min-h-0 flex-1 grid grid-cols-[220px_1fr]">
           <aside class="min-h-0 overflow-auto border-r border-border bg-surface-0/30">

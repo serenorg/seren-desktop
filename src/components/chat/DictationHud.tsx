@@ -17,6 +17,8 @@ const EDIT_LISTEN_MS = 3500;
 interface DictationHudProps {
   /** Resolve the composer textarea so transcripts write at the cursor. */
   getTextarea: () => HTMLTextAreaElement | undefined;
+  /** Only the active/focused thread's HUD listens and renders. */
+  active: boolean;
 }
 
 /**
@@ -152,6 +154,8 @@ export function DictationHud(props: DictationHudProps) {
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
+    // Only the active thread's HUD reacts, so one keypress drives one capture.
+    if (!props.active) return;
     if (event.code !== PUSH_TO_TALK_CODE || event.repeat) return;
     beginHold();
   };
@@ -243,69 +247,71 @@ export function DictationHud(props: DictationHudProps) {
   const busy = () => isListening() || editing();
 
   return (
-    <div class="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
-      <div
-        class="pointer-events-auto flex items-center gap-2.5 rounded-full border border-border bg-surface-2/95 px-3.5 py-2 shadow-lg backdrop-blur-sm transition-colors duration-200"
-        classList={{
-          "border-accent/60 shadow-[0_4px_20px_var(--accent)]": isListening(),
-          "border-success/60": editing(),
-        }}
-      >
-        <span
-          class="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors"
+    <Show when={props.active}>
+      <div class="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+        <div
+          class="pointer-events-auto flex items-center gap-2.5 rounded-full border border-border bg-surface-2/95 px-3.5 py-2 shadow-lg backdrop-blur-sm transition-colors duration-200"
           classList={{
-            "bg-accent/15 text-accent": isListening(),
-            "bg-success/15 text-success": editing(),
+            "border-accent/60 shadow-[0_4px_20px_var(--accent)]": isListening(),
+            "border-success/60": editing(),
           }}
         >
-          <Show
-            when={voiceState() === "transcribing" || editing()}
-            fallback={<MicGlyph />}
+          <span
+            class="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors"
+            classList={{
+              "bg-accent/15 text-accent": isListening(),
+              "bg-success/15 text-success": editing(),
+            }}
           >
-            <span class="h-3 w-3 animate-spin rounded-full border-2 border-surface-3 border-t-current" />
-          </Show>
-        </span>
-
-        <Show
-          when={isListening()}
-          fallback={
-            <span
-              class="text-xs font-medium text-muted-foreground transition-colors"
-              classList={{ "text-success": editing() }}
+            <Show
+              when={voiceState() === "transcribing" || editing()}
+              fallback={<MicGlyph />}
             >
-              {statusLabel()}
-            </span>
-          }
-        >
-          <div class="flex h-5 items-center gap-[3px]">
-            <Index each={bars()}>
-              {(amp) => (
-                <span
-                  class="w-[3px] rounded-full bg-accent transition-[height] duration-75"
-                  style={{ height: `${Math.max(10, amp() * 100)}%` }}
-                />
-              )}
-            </Index>
-          </div>
-        </Show>
+              <span class="h-3 w-3 animate-spin rounded-full border-2 border-surface-3 border-t-current" />
+            </Show>
+          </span>
 
-        <button
-          type="button"
-          class="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-transparent text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          classList={{ "border-success/60 text-success": editing() }}
-          disabled={busy()}
-          onClick={() => void runEditByVoice()}
-          title="Edit selection by voice"
-        >
-          <WandGlyph />
-        </button>
+          <Show
+            when={isListening()}
+            fallback={
+              <span
+                class="text-xs font-medium text-muted-foreground transition-colors"
+                classList={{ "text-success": editing() }}
+              >
+                {statusLabel()}
+              </span>
+            }
+          >
+            <div class="flex h-5 items-center gap-[3px]">
+              <Index each={bars()}>
+                {(amp) => (
+                  <span
+                    class="w-[3px] rounded-full bg-accent transition-[height] duration-75"
+                    style={{ height: `${Math.max(10, amp() * 100)}%` }}
+                  />
+                )}
+              </Index>
+            </div>
+          </Show>
 
-        <Show when={editError()}>
-          <div class="pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-xs text-destructive">
-            {editError()}
-          </div>
-        </Show>
+          <button
+            type="button"
+            class="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-transparent text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            classList={{ "border-success/60 text-success": editing() }}
+            disabled={busy()}
+            onClick={() => void runEditByVoice()}
+            title="Edit selection by voice"
+          >
+            <WandGlyph />
+          </button>
+
+          <Show when={editError()}>
+            <div class="pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-xs text-destructive">
+              {editError()}
+            </div>
+          </Show>
+        </div>
       </div>
-    </div>
+    </Show>
   );
 }
