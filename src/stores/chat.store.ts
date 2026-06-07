@@ -7,6 +7,10 @@ import {
   buildSummaryLineage,
   type SummaryLineage,
 } from "@/lib/compaction/summary";
+import {
+  type CompactionWindowItem,
+  selectCompactionWindow,
+} from "@/lib/compaction/window";
 import { PROVIDER_CONFIGS, type ProviderId } from "@/lib/providers/types";
 import {
   archiveConversation as archiveConversationDb,
@@ -22,6 +26,7 @@ import {
 } from "@/lib/tauri-bridge";
 import {
   estimateConversationTokens,
+  estimateMessageTokens,
   getModelContextLimit,
   shouldTriggerCompaction,
 } from "@/lib/token-counter";
@@ -647,16 +652,42 @@ export const chatStore = {
     setState("isCompacting", true);
 
     try {
-      // Split messages into those to compact and those to preserve
-      const toCompact = messages.slice(0, messages.length - preserveCount);
-      const toPreserve = messages.slice(-preserveCount);
-
       // Use the active conversation's bound provider/model to compact so
       // the thread's selected runtime — not a global default — produces
       // the summary.
       const activeConvo = state.conversations.find(
         (c) => c.id === conversationId,
       );
+
+      // Token-budgeted boundary instead of a fixed preserve count: keep the
+      // recent tail by token budget so one oversized message can't overflow
+      // the model after compaction, and lightweight chats keep more of their
+      // tail when the budget allows. The latest user message is always
+      // anchored into the preserved tail. #2104.
+      const items: CompactionWindowItem[] = messages.map((m) => ({
+        tokens: estimateMessageTokens(m),
+        role:
+          m.role === "user" || m.role === "assistant" || m.role === "system"
+            ? m.role
+            : "other",
+        groupId: null,
+      }));
+      const tailWindow = selectCompactionWindow(items, {
+        contextLimit: getModelContextLimit(
+          activeConvo?.selectedModel ?? this.selectedModel,
+        ),
+        minTailMessages: 2,
+      });
+      const toCompact = messages.slice(0, tailWindow.cutIndex);
+      const toPreserve = messages.slice(tailWindow.cutIndex);
+      if (toCompact.length === 0) {
+        // The whole tail fits the budget — usage is low enough that there is
+        // nothing worth compacting this pass.
+        console.log(
+          "[chatStore] Token budget preserves the whole tail — nothing to compact",
+        );
+        return;
+      }
 
       // Carry the prior compacted summary forward so a second (or later)
       // compaction iteratively updates it instead of rebuilding from only
