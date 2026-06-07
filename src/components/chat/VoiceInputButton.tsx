@@ -44,7 +44,7 @@ export function VoiceInputButton(props: VoiceInputButtonProps) {
 
   const title = (): string => {
     const state = voiceState();
-    if (state === "recording") return "Stop recording";
+    if (state === "listening") return "Stop recording";
     if (state === "transcribing") return "Transcribing...";
     if (state === "error") return error() || "Voice input error";
     return "Voice input";
@@ -63,7 +63,7 @@ export function VoiceInputButton(props: VoiceInputButtonProps) {
         type="button"
         class="flex items-center justify-center w-8 h-8 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-150 relative shrink-0 hover:bg-surface-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         classList={{
-          "text-destructive bg-destructive/10": voiceState() === "recording",
+          "text-destructive bg-destructive/10": voiceState() === "listening",
           "text-muted-foreground cursor-wait": voiceState() === "transcribing",
           "text-destructive": voiceState() === "error",
         }}
@@ -74,7 +74,7 @@ export function VoiceInputButton(props: VoiceInputButtonProps) {
         <Show when={voiceState() === "transcribing"} fallback={<MicIcon />}>
           <div class="w-4 h-4 border-2 border-surface-3 border-t-muted-foreground rounded-full animate-spin" />
         </Show>
-        <Show when={voiceState() === "recording"}>
+        <Show when={voiceState() === "listening"}>
           <div class="absolute top-1 right-1 w-2 h-2 rounded-full bg-destructive animate-[voicePulse_1s_ease-in-out_infinite]" />
         </Show>
         <Show when={voiceState() === "error" && error()}>

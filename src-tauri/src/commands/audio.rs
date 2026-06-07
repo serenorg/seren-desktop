@@ -2,10 +2,16 @@
 // ABOUTME: Stores meetings and transcript segments without persisting raw audio.
 
 use crate::audio::capture::to_mono_16k;
+use crate::audio::chunker::Chunk;
+use crate::audio::cleanup::{build_cleanup_prompt, build_transform_prompt};
+use crate::audio::llm::{CompletionRequest, complete};
 use crate::audio::merge::merge_segments;
 use crate::audio::notes::{ParsedNotes, generate_notes};
 use crate::audio::pipeline::CaptureRegistry;
 use crate::audio::templates::{BUILT_IN_MEETING_TEMPLATES, MeetingTemplate};
+use crate::audio::transcribe::{
+    GatewayTranscriber, RetryConfig, TranscribeError, transcribe_chunk_with_retry,
+};
 use crate::audio::types::{Meeting, MeetingStatus, SegmentStatus, Speaker, TranscriptSegment};
 use crate::orchestrator::types::SkillRef;
 use crate::services::database::DbPool;
@@ -233,6 +239,80 @@ pub fn select_meeting_skills(skills: Vec<SkillRef>) -> Vec<String> {
 #[tauri::command]
 pub fn list_meeting_templates() -> Vec<MeetingTemplate> {
     BUILT_IN_MEETING_TEMPLATES.to_vec()
+}
+
+// --- Dictation (shares the transcribe + cleanup engines with Meeting Mode) --
+
+/// Transcribe a single dictation chunk; returns "" for silence rather than erroring.
+#[tauri::command]
+pub async fn transcribe_pcm(
+    app: AppHandle,
+    samples: Vec<i16>,
+    channels: u16,
+    sample_rate: u32,
+) -> Result<String, String> {
+    let normalized = to_mono_16k(&samples, channels.max(1), sample_rate);
+    if normalized.is_empty() {
+        return Ok(String::new());
+    }
+    let chunk = Chunk {
+        start_ms: 0,
+        end_ms: 0,
+        samples: normalized,
+    };
+    let transcriber = GatewayTranscriber::new(app);
+    match transcribe_chunk_with_retry(&transcriber, &chunk, RetryConfig::default()).await {
+        Ok(text) => Ok(text),
+        Err(TranscribeError::Empty) => Ok(String::new()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// Polish dictated text through the shared cleanup engine + custom vocabulary.
+#[tauri::command]
+pub async fn cleanup_dictation_text(
+    app: AppHandle,
+    text: String,
+    model: String,
+    vocabulary: Vec<String>,
+) -> Result<String, String> {
+    if text.trim().is_empty() {
+        return Ok(String::new());
+    }
+    let prompt = build_cleanup_prompt(&text, &vocabulary);
+    complete(
+        &app,
+        CompletionRequest {
+            model,
+            system: None,
+            prompt,
+        },
+    )
+    .await
+}
+
+/// Edit-by-voice: transform a selection per a spoken instruction.
+#[tauri::command]
+pub async fn transform_selection(
+    app: AppHandle,
+    selection: String,
+    instruction: String,
+    model: String,
+    vocabulary: Vec<String>,
+) -> Result<String, String> {
+    if selection.trim().is_empty() {
+        return Err("nothing selected to transform".to_string());
+    }
+    let prompt = build_transform_prompt(&selection, &instruction, &vocabulary);
+    complete(
+        &app,
+        CompletionRequest {
+            model,
+            system: None,
+            prompt,
+        },
+    )
+    .await
 }
 
 /// Assemble persisted segments into a chronological "Me/Them" transcript.
