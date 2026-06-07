@@ -162,6 +162,12 @@ export interface Settings {
   meetingAppAllowlist: string[];
   meetingCustomTemplates: { id: string; name: string; prompt: string }[];
   meetingDefaultSkill: string;
+  /**
+   * Set once the user has acknowledged the system-audio + mic priming
+   * explainer shown before the first capture. When true the explainer is
+   * skipped on subsequent captures.
+   */
+  meetingAudioPrimed: boolean;
 
   // General settings
   telemetryEnabled: boolean;
@@ -258,11 +264,12 @@ const DEFAULT_SETTINGS: Settings = {
   voiceCleanupEnabled: true,
   voiceCustomVocabulary: [],
   // Meeting
-  meetingAutoDetectEnabled: true,
+  meetingAutoDetectEnabled: false,
   meetingTemplateId: "discovery",
   meetingAppAllowlist: ["zoom", "teams", "meet", "slack", "webex"],
   meetingCustomTemplates: [],
   meetingDefaultSkill: "",
+  meetingAudioPrimed: false,
   // General
   telemetryEnabled: true,
 };

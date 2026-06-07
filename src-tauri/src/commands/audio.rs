@@ -4,6 +4,7 @@
 use crate::audio::capture::to_mono_16k;
 use crate::audio::chunker::Chunk;
 use crate::audio::cleanup::{build_cleanup_prompt, build_transform_prompt};
+use crate::audio::detect::{probe_running_processes, should_start_capture};
 use crate::audio::llm::{CompletionRequest, complete};
 use crate::audio::merge::merge_segments;
 use crate::audio::notes::{ParsedNotes, generate_notes};
@@ -239,6 +240,15 @@ pub fn select_meeting_skills(skills: Vec<SkillRef>) -> Vec<String> {
 #[tauri::command]
 pub fn list_meeting_templates() -> Vec<MeetingTemplate> {
     BUILT_IN_MEETING_TEMPLATES.to_vec()
+}
+
+/// Probe running processes and decide whether a meeting capture should arm.
+/// mic-in-use detection is not portable, so the decision relies on the
+/// allowlist (see `probe_running_processes`).
+#[tauri::command]
+pub fn meeting_autodetect(allowlist: Vec<String>) -> bool {
+    let processes = probe_running_processes();
+    should_start_capture(&processes, false, &allowlist)
 }
 
 // --- Dictation (shares the transcribe + cleanup engines with Meeting Mode) --

@@ -1,9 +1,29 @@
 // ABOUTME: Pure meeting auto-detect decision logic for capture arming.
 // ABOUTME: Keeps OS process probes separate from testable policy rules.
 
+use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningProcess {
     pub name: String,
+}
+
+/// Enumerate running process names via sysinfo. This is OS I/O kept out of the
+/// pure `should_start_capture` policy so the decision stays unit-testable.
+/// Reliable mic-in-use detection is not portable across macOS/Windows/Linux, so
+/// we report `mic_in_use = false` and lean on the meeting-app allowlist path.
+pub fn probe_running_processes() -> Vec<RunningProcess> {
+    let system = System::new_with_specifics(
+        RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()),
+    );
+
+    system
+        .processes()
+        .values()
+        .map(|process| RunningProcess {
+            name: process.name().to_string_lossy().into_owned(),
+        })
+        .collect()
 }
 
 pub fn should_start_capture(

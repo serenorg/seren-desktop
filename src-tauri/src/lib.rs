@@ -801,6 +801,7 @@ pub fn run() {
             commands::audio::get_meeting_transcript_text,
             commands::audio::select_meeting_skills,
             commands::audio::list_meeting_templates,
+            commands::audio::meeting_autodetect,
             // Dictation commands
             commands::audio::transcribe_pcm,
             commands::audio::cleanup_dictation_text,

@@ -9,6 +9,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { AudioPrimingDialog } from "@/components/meeting/AudioPrimingDialog";
 import { MeetingDetail } from "@/components/meeting/MeetingDetail";
 import { MeetingSettings } from "@/components/meeting/MeetingSettings";
 import {
@@ -62,13 +63,18 @@ export function MeetingPanel(props: MeetingPanelProps) {
   const [stopping, setStopping] = createSignal(false);
   const [title, setTitle] = createSignal("");
   const [showSettings, setShowSettings] = createSignal(false);
+  const [showPriming, setShowPriming] = createSignal(false);
 
   onMount(() => {
     void meetingStore.loadMeetings();
     void meetingStore.startMeetingEventListeners();
+    meetingStore.startAutoDetect();
   });
 
-  onCleanup(() => meetingStore.stopMeetingEventListeners());
+  onCleanup(() => {
+    meetingStore.stopMeetingEventListeners();
+    meetingStore.stopAutoDetect();
+  });
 
   const activeCapture = createMemo(() =>
     meetingStore.state.meetings.find(
@@ -80,8 +86,7 @@ export function MeetingPanel(props: MeetingPanelProps) {
   const template = () => settingsStore.get("meetingTemplateId");
   const desktopRuntime = isTauriRuntime();
 
-  const startManualCapture = async () => {
-    if (!desktopRuntime || starting()) return;
+  const beginCapture = async () => {
     setStarting(true);
     try {
       const meeting = await createMeeting({
@@ -90,6 +95,7 @@ export function MeetingPanel(props: MeetingPanelProps) {
         templateId: template(),
       });
       setTitle("");
+      meetingStore.dismissAutoDetect();
       await meetingStore.startCapture(meeting);
       await meetingStore.loadMeetings();
       await meetingStore.setActiveMeeting(meeting);
@@ -98,12 +104,31 @@ export function MeetingPanel(props: MeetingPanelProps) {
     }
   };
 
+  const startManualCapture = async () => {
+    if (!desktopRuntime || starting()) return;
+    // First run: prime the audio-permission explainer before the OS prompt.
+    if (!settingsStore.get("meetingAudioPrimed")) {
+      setShowPriming(true);
+      return;
+    }
+    await beginCapture();
+  };
+
+  const confirmPriming = async () => {
+    setShowPriming(false);
+    settingsStore.set("meetingAudioPrimed", true);
+    await beginCapture();
+  };
+
+  const cancelPriming = () => setShowPriming(false);
+
   const stopManualCapture = async () => {
     const meeting = activeCapture();
     if (!desktopRuntime || !meeting || stopping()) return;
     setStopping(true);
     try {
       await meetingStore.stopAndProcess(meeting);
+      meetingStore.resetAutoDetectDismissal();
     } finally {
       setStopping(false);
     }
@@ -251,6 +276,42 @@ export function MeetingPanel(props: MeetingPanelProps) {
             </button>
           </div>
         )}
+      </Show>
+
+      <Show
+        when={
+          meetingStore.state.autoDetectSuggested &&
+          activeCapture() === undefined
+        }
+      >
+        <div class="flex items-center gap-3 px-4 py-2.5 border-b border-primary/30 bg-primary/10 text-[12px] text-foreground">
+          <span class="flex-1">
+            A meeting app looks active. Start recording?
+          </span>
+          <button
+            type="button"
+            class="h-7 px-2.5 rounded-md border border-primary/40 bg-primary/10 text-[12px] text-primary hover:bg-primary/15 disabled:opacity-60"
+            onClick={startManualCapture}
+            disabled={starting()}
+          >
+            Start
+          </button>
+          <button
+            type="button"
+            class="text-muted-foreground hover:text-foreground"
+            onClick={() => meetingStore.dismissAutoDetect()}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      </Show>
+
+      <Show when={showPriming()}>
+        <AudioPrimingDialog
+          onContinue={() => void confirmPriming()}
+          onCancel={cancelPriming}
+        />
       </Show>
 
       <Show when={!showSettings()} fallback={<MeetingSettings />}>
