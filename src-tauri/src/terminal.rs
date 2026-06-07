@@ -2593,7 +2593,6 @@ fn build_command(initial_command: Option<&str>) -> CommandBuilder {
     }
 }
 
-#[cfg(any(not(target_os = "windows"), test))]
 fn unix_initial_command_shell_args(command: &str) -> (&'static str, String) {
     // Initial-command terminal launches already receive an augmented PATH below.
     // Avoid login-shell startup here: profile hooks such as `pyenv rehash` can
