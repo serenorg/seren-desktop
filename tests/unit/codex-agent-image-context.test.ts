@@ -2,6 +2,7 @@
 // ABOUTME: reach Codex app-server as image user input items, not disappear.
 
 import { describe, expect, it } from "vitest";
+// @ts-expect-error - providers.mjs is a plain ESM harness without type declarations
 import { buildCodexTurnInput } from "../../bin/browser-local/providers.mjs";
 
 describe("#2016 — Codex agent prompt preserves image context", () => {

@@ -28,6 +28,7 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
 
   let canvasRef: HTMLCanvasElement | undefined;
   let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null;
+  let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
   let currentRenderTask: pdfjsLib.RenderTask | null = null;
 
   // Load PDF when file path changes
@@ -42,9 +43,12 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
     if (currentRenderTask) {
       currentRenderTask.cancel();
     }
-    if (pdfDoc) {
-      pdfDoc.destroy();
+    // In pdfjs-dist v6, teardown is on the loading task (destroys doc + worker).
+    if (loadingTask) {
+      void loadingTask.destroy();
+      loadingTask = null;
     }
+    pdfDoc = null;
   });
 
   async function loadPdf(path: string) {
@@ -53,14 +57,15 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
 
     try {
       // Clean up previous document
-      if (pdfDoc) {
-        pdfDoc.destroy();
-        pdfDoc = null;
+      if (loadingTask) {
+        void loadingTask.destroy();
+        loadingTask = null;
       }
+      pdfDoc = null;
 
-      // Load PDF using file:// URL
+      // Load PDF using a file:// URL (v6 getDocument takes init parameters).
       const url = `file://${path}`;
-      const loadingTask = pdfjsLib.getDocument(url);
+      loadingTask = pdfjsLib.getDocument({ url });
       pdfDoc = await loadingTask.promise;
 
       setTotalPages(pdfDoc.numPages);
