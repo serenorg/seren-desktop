@@ -18,6 +18,10 @@ import {
   buildSummaryLineage,
   type SummaryLineage,
 } from "@/lib/compaction/summary";
+import {
+  type CompactionWindowItem,
+  selectCompactionWindow,
+} from "@/lib/compaction/window";
 import { runtimeHasCapability } from "@/lib/runtime";
 import { estimateTokens } from "@/lib/token-counter";
 import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
@@ -79,13 +83,21 @@ const SESSION_READY_TIMEOUT_MS = 30_000;
 export const PREDICTIVE_COMPACT_THRESHOLD = 0.7;
 
 /**
- * Reactive compaction's last-ditch preserve count. When the configured
+ * Reactive compaction's last-ditch message-count guard. When the configured
  * `autoCompactPreserveMessages` leaves nothing to summarize (short session,
- * heavy per-message token cost), `compactAndRetry` retries with this count
- * — keeping only the most recent user/assistant pair so the session
- * actually shrinks below the model window. #2031.
+ * heavy per-message token cost), `compactAndRetry` retries with this lower
+ * guard so the token-budgeted window selector can run on the session at all.
+ * #2031.
  */
 const AGGRESSIVE_RETRY_PRESERVE_COUNT = 2;
+
+/**
+ * Tail budget used on the aggressive retry. A tighter fraction of the context
+ * window than the default so the post-compaction tail shrinks hard when an
+ * earlier compaction (or the configured count) still left the prompt too
+ * long. Replaces the old fixed retry preserve count with a token budget. #2104.
+ */
+const AGGRESSIVE_RETRY_TAIL_RATIO = 0.15;
 
 /**
  * Global cap = 1 simultaneous predictive compaction across the whole app.
@@ -3788,7 +3800,7 @@ export const agentStore = {
      * events but invisible to the UI until `promoteStandbyAndDispatch`
      * promotes it on the next user submit. #1631.
      */
-    opts?: { mode?: "reactive" | "predictive" },
+    opts?: { mode?: "reactive" | "predictive"; tailRatio?: number },
   ): Promise<CompactAgentResult> {
     const mode = opts?.mode ?? "reactive";
     const session = state.sessions[sessionId];
@@ -3800,6 +3812,49 @@ export const agentStore = {
     if (messages.length <= preserveCount) {
       console.info(
         "[AgentStore] Not enough messages to compact (message count below preserve threshold)",
+      );
+      return { outcome: "skipped_nothing_to_compact" };
+    }
+
+    // Token-budgeted boundary instead of a fixed preserve count: walk back from
+    // the newest message by token cost so a single huge tool result or model
+    // response can't survive into the post-compaction tail and overflow the
+    // window again. Tool results are grouped into their user-led turn so a
+    // result is never split from the turn that produced it, and the latest
+    // user message is always anchored into the tail. #2104.
+    const compactContextLimit =
+      session.contextWindowSize > 0
+        ? session.contextWindowSize
+        : defaultContextWindowFor(
+            session.info.agentType,
+            session.currentModelId,
+          );
+    let compactTurn = 0;
+    const windowItems: CompactionWindowItem[] = messages.map((m) => {
+      if (m.type === "user") compactTurn++;
+      const toolTokens = m.toolCall?.result
+        ? estimateTokens(m.toolCall.result)
+        : 0;
+      const role =
+        m.type === "user" || m.type === "assistant" || m.type === "tool"
+          ? m.type
+          : "other";
+      return {
+        tokens: estimateTokens(m.content) + toolTokens,
+        role,
+        groupId: `t${compactTurn}`,
+      };
+    });
+    const tailWindow = selectCompactionWindow(windowItems, {
+      contextLimit: compactContextLimit,
+      minTailMessages: 2,
+      targetTailRatio: opts?.tailRatio,
+    });
+    const toCompact = messages.slice(0, tailWindow.cutIndex);
+    const toPreserve = messages.slice(tailWindow.cutIndex);
+    if (toCompact.length === 0) {
+      console.info(
+        "[AgentStore] Token budget preserves the whole tail — nothing to compact",
       );
       return { outcome: "skipped_nothing_to_compact" };
     }
@@ -3825,9 +3880,7 @@ export const agentStore = {
     const conversationId = session.conversationId;
 
     try {
-      // Split messages into those to summarize and those to keep
-      const toCompact = messages.slice(0, messages.length - preserveCount);
-      const toPreserve = messages.slice(-preserveCount);
+      // toCompact / toPreserve were selected by token budget above (#2104).
 
       // Generate a structured summary via Gateway API (not via the agent —
       // its context is what's overloaded). Uses a hard-capped schema to keep
@@ -4326,18 +4379,19 @@ export const agentStore = {
 
       // Reactive compaction must recover from short-but-token-heavy sessions
       // — a handful of tool turns can carry 200K+ tokens. When the configured
-      // preserve count leaves nothing to summarize, retry with a minimal
-      // preserve count (last user/assistant pair) so the session actually
-      // shrinks. Only give up when even that has nothing to act on. #2031.
+      // count guard leaves nothing to summarize, retry with a lower guard AND
+      // a tighter tail budget so the token window shrinks the session below the
+      // model window. Only give up when even that has nothing to act on. #2031/#2104.
       if (result.outcome === "skipped_nothing_to_compact") {
         const remaining = state.sessions[sessionId]?.messages.length ?? 0;
         if (remaining > AGGRESSIVE_RETRY_PRESERVE_COUNT) {
           console.info(
-            `[AgentStore] compactAndRetry: configured preserve count left nothing to compact (${remaining} messages); retrying with preserveCount=${AGGRESSIVE_RETRY_PRESERVE_COUNT}`,
+            `[AgentStore] compactAndRetry: configured count left nothing to compact (${remaining} messages); retrying with a tighter tail budget (ratio=${AGGRESSIVE_RETRY_TAIL_RATIO})`,
           );
           result = await this.compactAgentConversation(
             sessionId,
             AGGRESSIVE_RETRY_PRESERVE_COUNT,
+            { tailRatio: AGGRESSIVE_RETRY_TAIL_RATIO },
           );
         }
       }
