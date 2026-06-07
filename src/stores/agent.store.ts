@@ -18,6 +18,11 @@ import {
   pruneCompactedHistory,
 } from "@/lib/compaction/prune";
 import {
+  buildDeterministicFallbackSummary,
+  compactionCooldown,
+  runSummarizerWithPolicy,
+} from "@/lib/compaction/summarizer-policy";
+import {
   buildIterativeCompactionPrompt,
   buildSummaryLineage,
   type SummaryLineage,
@@ -103,6 +108,15 @@ const AGGRESSIVE_RETRY_PRESERVE_COUNT = 2;
  * long. Replaces the old fixed retry preserve count with a token budget. #2104.
  */
 const AGGRESSIVE_RETRY_TAIL_RATIO = 0.15;
+
+/**
+ * Primary and fallback models for the compaction summarizer. Both route through
+ * the public "seren" provider. The fallback is tried when the primary errors,
+ * times out, or returns an invalid summary, before the deterministic local
+ * fallback. #2106.
+ */
+const SUMMARY_PRIMARY_MODEL = "anthropic/claude-sonnet-4";
+const SUMMARY_FALLBACK_MODELS = ["anthropic/claude-3-5-sonnet"];
 
 /**
  * Global cap = 1 simultaneous predictive compaction across the whole app.
@@ -3949,22 +3963,56 @@ export const agentStore = {
       // stale from a previous chat thread (e.g. seren-private). The
       // compaction summary is an internal operation — it must not
       // depend on UI provider state.
-      const summaryModel = "anthropic/claude-sonnet-4";
-      const summaryRequest = buildChatRequest(summaryPrompt, summaryModel);
-      let summary: string;
-      try {
-        summary = await sendProviderMessage("seren", summaryRequest);
-      } catch (firstErr) {
-        // If auth expired, attempt a token refresh and retry once
-        const msg = firstErr instanceof Error ? firstErr.message : "";
-        if (msg.includes("Not authenticated") || msg.includes("401")) {
-          const refreshed = await refreshAccessToken();
-          if (!refreshed) throw firstErr;
-          summary = await sendProviderMessage("seren", summaryRequest);
-        } else {
-          throw firstErr;
+      //
+      // Resilient policy (#2106): primary model, auth-refresh retry, fallback
+      // model, then a deterministic local summary. Only aborts (no-drop) when
+      // none of those can produce a summary — the serving session is left
+      // intact and a cooldown backs auto-compact off the failing summarizer.
+      const summaryOutcome = await runSummarizerWithPolicy({
+        primaryModel: SUMMARY_PRIMARY_MODEL,
+        fallbackModels: SUMMARY_FALLBACK_MODELS,
+        attempt: (model) =>
+          sendProviderMessage("seren", buildChatRequest(summaryPrompt, model)),
+        isAuthError: (e) => {
+          const m = e instanceof Error ? e.message : String(e);
+          return m.includes("Not authenticated") || m.includes("401");
+        },
+        refreshAuth: refreshAccessToken,
+        deterministicFallback: () =>
+          buildDeterministicFallbackSummary(prunable),
+      });
+
+      if (summaryOutcome.status === "aborted") {
+        // No-drop abort: do NOT terminate or replace the serving session.
+        // Cool down so auto-compact stops hammering the failing summarizer.
+        compactionCooldown.enter(conversationId, Date.now());
+        if (mode === "reactive") {
+          setState("sessions", sessionId, "isCompacting", false);
+          setState(
+            "sessions",
+            sessionId,
+            "error",
+            "Compaction paused — the summarizer is unavailable. Your conversation is intact.",
+          );
         }
+        console.warn(
+          `[compact.abort] summarizer unavailable, history kept intact: ${summaryOutcome.reason}`,
+        );
+        return { outcome: "failed_catastrophic" };
       }
+      if (summaryOutcome.status === "fallback") {
+        // Deterministic local summary used — cool down and warn, but proceed
+        // so compaction still relieves the context pressure.
+        compactionCooldown.enter(conversationId, Date.now());
+        console.warn(
+          `[compact.fallback] using deterministic local summary: ${summaryOutcome.reason}`,
+        );
+      } else if (summaryOutcome.usedFallbackModel) {
+        console.info(
+          `[compact.fallback_model] summary produced by fallback model ${summaryOutcome.model}`,
+        );
+      }
+      let summary = summaryOutcome.summary;
 
       // Post-generation verify-before-acting banner. Travels with `summary`
       // itself so BOTH downstream consumers carry it: the passive-prepend
@@ -4500,6 +4548,16 @@ export const agentStore = {
     if (predictiveCompactBusy) return;
     const session = state.sessions[sessionId];
     if (!session || session.predictiveCompactInFlight) return;
+
+    // Back off after a recent summarizer failure so auto-compact (both the
+    // 70% predictive and the 85% reactive-auto triggers route here) does not
+    // hammer a failing summarizer every promptComplete tick. #2106.
+    if (compactionCooldown.isCoolingDown(session.conversationId, Date.now())) {
+      console.info(
+        "[AgentStore] kickPredictiveCompact: in summarizer cooldown — skipping",
+      );
+      return;
+    }
 
     predictiveCompactBusy = true;
     setState("sessions", sessionId, "predictiveCompactInFlight", true);

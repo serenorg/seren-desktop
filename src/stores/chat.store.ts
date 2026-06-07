@@ -2,10 +2,16 @@
 // ABOUTME: Stores conversations, messages, and provides persistence via Tauri.
 
 import { createStore } from "solid-js/store";
+import { isLikelyAuthError } from "@/lib/auth-errors";
 import {
   type PrunableMessage,
   pruneCompactedHistory,
 } from "@/lib/compaction/prune";
+import {
+  buildDeterministicFallbackSummary,
+  compactionCooldown,
+  runSummarizerWithPolicy,
+} from "@/lib/compaction/summarizer-policy";
 import {
   buildIterativeCompactionPrompt,
   buildSummaryLineage,
@@ -34,6 +40,7 @@ import {
   updateConversation as updateConversationDb,
 } from "@/lib/tauri-bridge";
 import { getModelContextLimit } from "@/lib/token-counter";
+import { refreshAccessToken } from "@/services/auth";
 import type { Message } from "@/services/chat";
 import { sendMessage } from "@/services/chat";
 import type { AgentType } from "@/services/providers";
@@ -742,12 +749,42 @@ export const chatStore = {
       const compactionProvider: ProviderId = isChatProvider(selectedProvider)
         ? selectedProvider
         : providerStore.activeProvider;
-      const summary = await sendMessage(
-        summaryPrompt,
-        activeConvo?.selectedModel ?? this.selectedModel,
-        compactionProvider,
-        undefined,
-      );
+
+      // Resilient policy (#2106): primary attempt, auth-refresh retry, then a
+      // deterministic local summary. On abort the messages are NOT replaced —
+      // the conversation is kept intact (no-drop) and a cooldown backs the
+      // auto-compact trigger off the failing summarizer. The conversation's
+      // bound model/provider is single-sourced, so there is no safe alternate
+      // chat model to try; the deterministic fallback covers provider outages.
+      const summaryOutcome = await runSummarizerWithPolicy({
+        primaryModel: activeConvo?.selectedModel ?? this.selectedModel,
+        attempt: (model) =>
+          sendMessage(summaryPrompt, model, compactionProvider, undefined),
+        isAuthError: (e) =>
+          isLikelyAuthError(e instanceof Error ? e.message : String(e)),
+        refreshAuth: refreshAccessToken,
+        deterministicFallback: () =>
+          buildDeterministicFallbackSummary(prunable),
+      });
+
+      if (summaryOutcome.status === "aborted") {
+        compactionCooldown.enter(conversationId, Date.now());
+        setState(
+          "error",
+          "Compaction paused — the summarizer is unavailable. Your conversation is intact.",
+        );
+        console.warn(
+          `[chatStore] compaction aborted (no-drop): ${summaryOutcome.reason}`,
+        );
+        return;
+      }
+      if (summaryOutcome.status === "fallback") {
+        compactionCooldown.enter(conversationId, Date.now());
+        console.warn(
+          `[chatStore] using deterministic local summary: ${summaryOutcome.reason}`,
+        );
+      }
+      const summary = summaryOutcome.summary;
 
       const preCompactionMessages: PreCompactionMessage[] = toCompact
         .filter((m) => m.role === "user" || m.role === "assistant")
@@ -850,6 +887,17 @@ export const chatStore = {
     if (!enabled) return;
     if (state.isCompacting) return;
     if (state.isLoading) return;
+
+    // Back off auto-compaction after a recent summarizer failure so we don't
+    // call a failing summarizer on every message. Manual compaction is not
+    // gated — the user asked for it explicitly. #2106.
+    const conversationId = state.activeConversationId;
+    if (
+      conversationId &&
+      compactionCooldown.isCoolingDown(conversationId, Date.now())
+    ) {
+      return;
+    }
 
     if (this.shouldCompact(threshold)) {
       await this.compactConversation(preserveCount);
