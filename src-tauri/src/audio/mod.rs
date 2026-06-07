@@ -7,6 +7,7 @@ pub mod cleanup;
 pub mod detect;
 pub mod merge;
 pub mod notes;
+pub mod pipeline;
 pub mod templates;
 pub mod transcribe;
 pub mod types;
