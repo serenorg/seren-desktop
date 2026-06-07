@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { buildIterativeCompactionPrompt } from "@/lib/compaction/summary";
 
 const agentStoreSource = readFileSync(
   resolve("src/stores/agent.store.ts"),
@@ -112,15 +113,24 @@ describe("#1733 Bug B — synthetic-transcript ack does not prime acknowledgemen
   });
 
   it("compaction summary template asks about agent action, not predicted user behavior", () => {
-    // The summary's NEXT: line drove the LLM to predict user behavior, which
-    // made the post-compaction agent treat the user's next prompt as
-    // confirmation rather than a fresh instruction. The new wording must
-    // direct the summarizer toward agent action.
-    const idx = agentStoreSource.indexOf("async compactAgentConversation(");
-    expect(idx).toBeGreaterThan(0);
-    const region = agentStoreSource.slice(idx, idx + 6000);
-    expect(region).toMatch(/NEXT:/);
-    expect(region).not.toMatch(/NEXT:\s*<what the user will likely ask next>/);
+    // The old `NEXT: <what the user will likely ask next>` line drove the LLM
+    // to predict user behavior, which made the post-compaction agent treat
+    // the user's next prompt as confirmation rather than a fresh instruction.
+    // Post-#2103 the shared template replaces it with a REMAINING field (next
+    // agent action) plus a LATEST_USER_REQUEST field that preserves — not
+    // predicts — the user's most recent ask. Assert the actual built prompt.
+    const prompt = buildIterativeCompactionPrompt({
+      previousSummary: null,
+      newTurns: "USER: ship the feature\n\nASSISTANT: working on it",
+      mode: "agent",
+    });
+    // Agent-action continuation field present.
+    expect(prompt).toMatch(/REMAINING:\s*<what the agent should do next/);
+    // Latest user request preserved, not predicted.
+    expect(prompt).toMatch(/LATEST_USER_REQUEST:/);
+    // The user-behavior-prediction wording must never come back.
+    expect(prompt.toLowerCase()).not.toContain("likely ask");
+    expect(prompt.toLowerCase()).not.toContain("will likely");
   });
 });
 
