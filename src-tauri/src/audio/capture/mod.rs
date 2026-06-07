@@ -3,6 +3,9 @@
 
 pub mod fake;
 
+#[cfg(target_os = "windows")]
+pub mod windows;
+
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 

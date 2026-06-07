@@ -101,6 +101,10 @@ tauri-plugin-deep-link = "2"
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
 tauri-plugin-single-instance = "2"
 
+# System-audio ("Them") loopback capture for Meeting Mode.
+[target.'cfg(target_os = "windows")'.dependencies]
+wasapi = "0.15"
+
 [features]
 default = []
 messaging = []
