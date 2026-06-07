@@ -146,15 +146,58 @@ pub async fn generate_notes(
         partials.push(partial);
     }
 
-    let combined = combine_partials_text(&partials);
+    reduce_partials(app, model, partials, template_prompt, vocabulary).await
+}
+
+/// Reduce N partial notes into one. If the combined sections exceed
+/// [`TRANSCRIPT_CHAR_BUDGET`], re-chunk + re-summarize and loop — so a
+/// 4-hour meeting that produces too many partials to fit in one prompt
+/// still converges instead of silently overflowing on the reduce pass.
+async fn reduce_partials(
+    app: &tauri::AppHandle,
+    model: String,
+    mut partials: Vec<ParsedNotes>,
+    template_prompt: &str,
+    vocabulary: &[String],
+) -> Result<ParsedNotes, String> {
     let reduce_template = format!(
         "This meeting was very long; the input below is an ordered list of \
          section summaries from earlier passes. Produce ONE coherent set of \
          meeting notes that subsumes them. {template_prompt}",
         template_prompt = template_prompt.trim(),
     );
+    // Cap iterations so a misbehaving model that fails to shrink output can't
+    // spin forever. In practice 1-2 rounds suffice for any realistic meeting.
+    for _ in 0..MAX_REDUCE_ROUNDS {
+        let combined = combine_partials_text(&partials);
+        if partials.len() <= 1 || combined.chars().count() <= TRANSCRIPT_CHAR_BUDGET {
+            return generate_notes_single(app, model, &combined, &reduce_template, vocabulary)
+                .await;
+        }
+        let sub_chunks = chunk_transcript_by_chars(&combined, TRANSCRIPT_CHAR_BUDGET);
+        if sub_chunks.len() >= partials.len() {
+            log::warn!(
+                "[meeting] reduce loop not shrinking ({} -> {} sub-chunks); finalizing",
+                partials.len(),
+                sub_chunks.len(),
+            );
+            return generate_notes_single(app, model, &combined, &reduce_template, vocabulary)
+                .await;
+        }
+        let mut next = Vec::with_capacity(sub_chunks.len());
+        for chunk in sub_chunks.iter() {
+            next.push(
+                generate_notes_single(app, model.clone(), chunk, &reduce_template, vocabulary)
+                    .await?,
+            );
+        }
+        partials = next;
+    }
+    let combined = combine_partials_text(&partials);
     generate_notes_single(app, model, &combined, &reduce_template, vocabulary).await
 }
+
+const MAX_REDUCE_ROUNDS: usize = 4;
 
 async fn generate_notes_single(
     app: &tauri::AppHandle,
@@ -224,11 +267,35 @@ fn hard_split(line: &str, budget: usize) -> Vec<String> {
     pieces
 }
 
+/// Render a set of partial notes as a single reducer-ready string. Structured
+/// fields (`summary`, `action_items`, `fields`) are surfaced as plain text so
+/// the reduce-pass model can roll them up — without this, chunked notes would
+/// silently drop action items whenever the reducer fails to re-emit JSON.
 fn combine_partials_text(partials: &[ParsedNotes]) -> String {
     partials
         .iter()
         .enumerate()
-        .map(|(idx, partial)| format!("## Section {}\n{}", idx + 1, partial.markdown.trim()))
+        .map(|(idx, partial)| {
+            let mut section = format!("## Section {}\n{}", idx + 1, partial.markdown.trim());
+            if !partial.structured.summary.is_empty() {
+                section.push_str(&format!(
+                    "\n\nSection summary: {}",
+                    partial.structured.summary.trim()
+                ));
+            }
+            if !partial.structured.action_items.is_empty() {
+                section.push_str("\n\nSection action items:");
+                for item in &partial.structured.action_items {
+                    section.push_str(&format!("\n- {}", item.trim()));
+                }
+            }
+            if !partial.structured.fields.is_empty() {
+                if let Ok(fields_json) = serde_json::to_string(&partial.structured.fields) {
+                    section.push_str(&format!("\n\nSection fields (JSON): {fields_json}"));
+                }
+            }
+            section
+        })
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -338,5 +405,61 @@ mod tests {
             );
         }
         assert_eq!(chunks.concat().chars().count(), transcript.chars().count());
+    }
+
+    #[test]
+    fn combine_partials_preserves_action_items_and_fields_for_reducer() {
+        use serde_json::json;
+        let mut fields_a = BTreeMap::new();
+        fields_a.insert("company".to_string(), json!("Acme"));
+        let mut fields_b = BTreeMap::new();
+        fields_b.insert("owner".to_string(), json!("Jane"));
+
+        let partials = vec![
+            ParsedNotes {
+                markdown: "# Section A".into(),
+                structured: StructuredNotes {
+                    summary: "Discovery call".into(),
+                    action_items: vec!["Send recap".into(), "Draft contract".into()],
+                    fields: fields_a,
+                },
+            },
+            ParsedNotes {
+                markdown: "# Section B".into(),
+                structured: StructuredNotes {
+                    summary: "Pricing alignment".into(),
+                    action_items: vec!["Confirm budget".into()],
+                    fields: fields_b,
+                },
+            },
+        ];
+
+        let combined = combine_partials_text(&partials);
+
+        // Every action item is visible to the reducer model.
+        assert!(combined.contains("Send recap"), "missing action item 1");
+        assert!(combined.contains("Draft contract"), "missing action item 2");
+        assert!(combined.contains("Confirm budget"), "missing action item 3");
+        // Every field key is visible.
+        assert!(combined.contains("company"), "missing field key 'company'");
+        assert!(combined.contains("owner"), "missing field key 'owner'");
+        // Per-section summaries are visible.
+        assert!(combined.contains("Discovery call"), "missing summary A");
+        assert!(combined.contains("Pricing alignment"), "missing summary B");
+    }
+
+    #[test]
+    fn combine_partials_skips_empty_structured_segments_cleanly() {
+        let partials = vec![ParsedNotes {
+            markdown: "# Just markdown".into(),
+            structured: StructuredNotes::default(),
+        }];
+
+        let combined = combine_partials_text(&partials);
+
+        // No stray "Section action items:" header when the partial has none.
+        assert!(!combined.contains("Section action items"));
+        assert!(!combined.contains("Section fields"));
+        assert!(combined.contains("# Just markdown"));
     }
 }
