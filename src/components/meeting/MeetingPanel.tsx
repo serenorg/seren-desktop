@@ -9,49 +9,21 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { isTauriRuntime } from "@/lib/tauri-bridge";
+import { MeetingDetail } from "@/components/meeting/MeetingDetail";
 import {
-  createMeeting,
-  type Meeting,
-  type TranscriptSegment,
-} from "@/services/meetings";
+  formatDuration,
+  formatTime,
+  meetingTitle,
+  STATUS_LABELS,
+} from "@/lib/meeting-format";
+import { isTauriRuntime } from "@/lib/tauri-bridge";
+import { createMeeting } from "@/services/meetings";
 import { meetingStore } from "@/stores/meeting.store";
 import { settingsStore } from "@/stores/settings.store";
 
 interface MeetingPanelProps {
   onClose: () => void;
 }
-
-function formatTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatDuration(meeting: Meeting): string {
-  const end = meeting.endedAt ?? Date.now();
-  const totalSeconds = Math.max(
-    0,
-    Math.floor((end - meeting.startedAt) / 1000),
-  );
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function meetingTitle(meeting: Meeting): string {
-  return meeting.title.trim() || `Meeting ${formatTime(meeting.startedAt)}`;
-}
-
-const STATUS_LABELS: Record<Meeting["status"], string> = {
-  capturing: "Capturing",
-  transcribing: "Transcribing",
-  notes_ready: "Notes ready",
-  agent_running: "Agent running",
-  done: "Done",
-  failed: "Failed",
-};
 
 function MicGlyph() {
   return (
@@ -81,31 +53,6 @@ function StopGlyph() {
     >
       <rect x="4" y="4" width="8" height="8" rx="1.5" />
     </svg>
-  );
-}
-
-function TranscriptRow(props: { segment: TranscriptSegment }) {
-  return (
-    <div class="grid grid-cols-[52px_1fr] gap-3 py-2 border-b border-border/50 last:border-b-0">
-      <div
-        class="text-[11px] font-mono tabular-nums"
-        classList={{
-          "text-foreground": props.segment.speaker === "me",
-          "text-muted-foreground": props.segment.speaker === "them",
-        }}
-      >
-        {props.segment.speaker === "me" ? "Me" : "Them"}
-      </div>
-      <div
-        class="text-[13px] leading-5"
-        classList={{
-          "text-muted-foreground italic": props.segment.status === "gap",
-          "text-foreground": props.segment.status === "ok",
-        }}
-      >
-        {props.segment.status === "gap" ? "Transcript gap" : props.segment.text}
-      </div>
-    </div>
   );
 }
 
@@ -310,51 +257,7 @@ export function MeetingPanel(props: MeetingPanelProps) {
               </div>
             }
           >
-            {(meeting) => (
-              <div class="p-5 max-w-[720px]">
-                <div class="mb-5">
-                  <h3 class="text-[18px] font-semibold tracking-normal">
-                    {meetingTitle(meeting())}
-                  </h3>
-                  <div class="mt-1 flex items-center gap-3 text-[12px] text-muted-foreground">
-                    <span>{STATUS_LABELS[meeting().status]}</span>
-                    <span class="font-mono tabular-nums">
-                      {formatDuration(meeting())}
-                    </span>
-                    <span>{meeting().sourceApp ?? "Desktop"}</span>
-                  </div>
-                </div>
-
-                <section class="mb-6">
-                  <div class="mb-2 text-[12px] font-medium text-muted-foreground">
-                    Notes
-                  </div>
-                  <div class="min-h-[96px] whitespace-pre-wrap rounded-md border border-border bg-surface-0/50 p-3 text-[13px] leading-5">
-                    {meeting().notesMarkdown ?? "Notes will appear here."}
-                  </div>
-                </section>
-
-                <section>
-                  <div class="mb-2 text-[12px] font-medium text-muted-foreground">
-                    Transcript
-                  </div>
-                  <Show
-                    when={meetingStore.state.liveSegments.length > 0}
-                    fallback={
-                      <div class="rounded-md border border-border bg-surface-0/50 p-3 text-[13px] text-muted-foreground">
-                        No transcript yet.
-                      </div>
-                    }
-                  >
-                    <div class="rounded-md border border-border bg-surface-0/50 px-3">
-                      <For each={meetingStore.state.liveSegments}>
-                        {(segment) => <TranscriptRow segment={segment} />}
-                      </For>
-                    </div>
-                  </Show>
-                </section>
-              </div>
-            )}
+            {(meeting) => <MeetingDetail meeting={meeting()} />}
           </Show>
         </main>
       </div>

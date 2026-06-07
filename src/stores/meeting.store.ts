@@ -284,6 +284,31 @@ async function runHandoff(meeting: Meeting): Promise<void> {
   }
 }
 
+async function regenerateNotes(
+  meeting: Meeting,
+  templateId: string,
+): Promise<void> {
+  if (!isTauriRuntime()) return;
+  const templatePrompt = await resolveTemplatePrompt(templateId);
+  try {
+    await generateMeetingNotes({
+      meetingId: meeting.id,
+      model: providerStore.activeModel,
+      templatePrompt,
+      vocabulary: settingsStore.get("voiceCustomVocabulary"),
+    });
+  } catch (error) {
+    setMeetingState(
+      "error",
+      error instanceof Error ? error.message : "Notes generation failed",
+    );
+  }
+  await loadMeetings();
+  const refreshed =
+    meetingState.meetings.find((m) => m.id === meeting.id) ?? null;
+  await setActiveMeeting(refreshed);
+}
+
 export const meetingStore = {
   get state(): MeetingState {
     return meetingState;
@@ -296,4 +321,5 @@ export const meetingStore = {
   startCapture,
   stopCapture,
   stopAndProcess,
+  regenerateNotes,
 };
