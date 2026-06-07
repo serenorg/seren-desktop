@@ -251,7 +251,13 @@ export function encodeProjectDirName(cwd) {
   // also become `-`). Restricting to just `/` produces a directory that
   // doesn't exist for cwds like `/Users/x/Foo_Bar` — fork's outputJsonlPath
   // then writes into a non-existent dir and ENOENTs. (#1836)
-  const resolved = path.resolve(cwd);
+  const inputPath = String(cwd).replaceAll("\\", "/");
+  const resolved =
+    /^[a-zA-Z]:\//.test(inputPath) || inputPath.startsWith("//")
+      ? path.win32.resolve(cwd).replaceAll("\\", "/")
+      : inputPath.startsWith("/")
+        ? path.posix.resolve(inputPath)
+        : path.resolve(cwd).replaceAll("\\", "/");
   const unixPath = resolved.replaceAll("\\", "/");
   const sanitized = unixPath.replace(/^\/+/, "").replaceAll(":", "");
   return `-${sanitized.replace(/[^a-zA-Z0-9-]/g, "-")}`;

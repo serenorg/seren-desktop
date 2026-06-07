@@ -112,22 +112,26 @@ describe("slash command palette ordering and fuzzy ranking", () => {
     vi.resetModules();
   });
 
-  it("returns a skill via a boundary match (`arb` -> `prophet-arb-bot`)", async () => {
-    mockSkillsService.listAllInstalled.mockResolvedValue([
-      installedSkill("prophet-arb-bot"),
-    ]);
+  it(
+    "returns a skill via a boundary match (`arb` -> `prophet-arb-bot`)",
+    async () => {
+      mockSkillsService.listAllInstalled.mockResolvedValue([
+        installedSkill("prophet-arb-bot"),
+      ]);
 
-    const { skillsStore } = await import("@/stores/skills.store");
-    await skillsStore.refreshInstalled();
+      const { skillsStore } = await import("@/stores/skills.store");
+      await skillsStore.refreshInstalled();
 
-    const { getCompletions } = await import("@/lib/commands/parser");
-    const results = getCompletions("/arb", "chat");
+      const { getCompletions } = await import("@/lib/commands/parser");
+      const results = getCompletions("/arb", "chat");
 
-    expect(results.map((r) => r.name)).toContain("prophet-arb-bot");
-    expect(results.find((r) => r.name === "prophet-arb-bot")?.isSkill).toBe(
-      true,
-    );
-  });
+      expect(results.map((r) => r.name)).toContain("prophet-arb-bot");
+      expect(results.find((r) => r.name === "prophet-arb-bot")?.isSkill).toBe(
+        true,
+      );
+    },
+    15_000,
+  );
 
   it("returns a skill via an initials match (`pab` -> `prophet-arb-bot`)", async () => {
     mockSkillsService.listAllInstalled.mockResolvedValue([

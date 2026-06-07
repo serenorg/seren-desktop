@@ -1,14 +1,10 @@
 // ABOUTME: Critical guard for #1776 — post-init overwrite of session.currentModelId
 // ABOUTME: must route through chooseUpdatedModelId so the [1m] suffix is preserved.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
-const claudeRuntimeSource = readFileSync(
-  resolve("bin/browser-local/claude-runtime.mjs"),
-  "utf-8",
-);
+const claudeRuntimeSource = readSource("bin/browser-local/claude-runtime.mjs");
 
 describe("#1776 — post-init currentModelId resolution preserves [1m]", () => {
   it("spawnSession routes the inferred init.model through chooseUpdatedModelId", () => {

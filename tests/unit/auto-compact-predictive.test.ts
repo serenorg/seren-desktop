@@ -1,14 +1,10 @@
 // ABOUTME: Regression guards for #1675 — auto-compaction at the user-configured
 // ABOUTME: threshold must use predictive mode and must not flash the chatbox.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
-const agentStoreSource = readFileSync(
-  resolve("src/stores/agent.store.ts"),
-  "utf-8",
-);
+const agentStoreSource = readSource("src/stores/agent.store.ts");
 
 describe("#1675 / #1716 — auto-compact-from-promptComplete uses predictive mode", () => {
   it("routes through kickPredictiveCompact so the chatbox stays mounted (#1675) AND the predictive mutex is set before the first await (#1716)", () => {

@@ -1,14 +1,10 @@
 // ABOUTME: Source-text regression guards for #1677 — setModel must pass
 // ABOUTME: through non-catalog model ids so #1635 ground-truth ids work.
 
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
-const claudeRuntimeSource = readFileSync(
-  resolve("bin/browser-local/claude-runtime.mjs"),
-  "utf-8",
-);
+const claudeRuntimeSource = readSource("bin/browser-local/claude-runtime.mjs");
 
 describe("#1677 — setModel passes through non-catalog ids", () => {
   it("setModel does NOT throw on unknown model ids", () => {

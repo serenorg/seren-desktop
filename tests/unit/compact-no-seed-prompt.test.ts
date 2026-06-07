@@ -2,18 +2,11 @@
 // ABOUTME: prepend on next user prompt, synthetic-transcript on reactive
 // ABOUTME: too, schema-drift consumer wired, default flipped on.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
-const agentStoreSource = readFileSync(
-  resolve("src/stores/agent.store.ts"),
-  "utf-8",
-);
-const settingsStoreSource = readFileSync(
-  resolve("src/stores/settings.store.ts"),
-  "utf-8",
-);
+const agentStoreSource = readSource("src/stores/agent.store.ts");
+const settingsStoreSource = readSource("src/stores/settings.store.ts");
 
 function functionBody(anchor: string): string {
   const start = agentStoreSource.indexOf(anchor);

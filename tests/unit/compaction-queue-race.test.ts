@@ -1,14 +1,10 @@
 // ABOUTME: Regression tests for #1623 — queued user messages must survive
 // ABOUTME: auto-compaction (no silent data loss in chat).
 
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
-const agentStoreSource = readFileSync(
-  resolve("src/stores/agent.store.ts"),
-  "utf-8",
-);
+const agentStoreSource = readSource("src/stores/agent.store.ts");
 
 describe("#1623 — auto-compact runs BEFORE drain in promptComplete handler", () => {
   it("auto-compact comment anchor appears before the drain comment anchor", () => {

@@ -1,18 +1,11 @@
 // ABOUTME: Static guardrails for per-thread provider provenance.
 // ABOUTME: Pins the live paths that are hard to exercise without the full UI.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
-const chatContentSource = readFileSync(
-  resolve("src/components/chat/ChatContent.tsx"),
-  "utf-8",
-);
-const orchestratorSource = readFileSync(
-  resolve("src/services/orchestrator.ts"),
-  "utf-8",
-);
+const chatContentSource = readSource("src/components/chat/ChatContent.tsx");
+const orchestratorSource = readSource("src/services/orchestrator.ts");
 
 function sourceBetween(source: string, startNeedle: string, endNeedle: string) {
   const start = source.indexOf(startNeedle);

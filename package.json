@@ -26,6 +26,7 @@
     "check": "biome check",
     "check:fix": "biome check --fix",
     "test": "vitest run",
+    "test:rust:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-windows-cargo.ps1",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",

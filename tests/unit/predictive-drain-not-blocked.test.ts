@@ -1,14 +1,10 @@
 // ABOUTME: Regression guards for #1673 — predictive compaction must not flip
 // ABOUTME: isCompacting on the serving session and block the drain queue.
 
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
-const agentStoreSource = readFileSync(
-  resolve("src/stores/agent.store.ts"),
-  "utf-8",
-);
+const agentStoreSource = readSource("src/stores/agent.store.ts");
 
 describe("#1673 — predictive compaction does not block drain", () => {
   it("compactAgentConversation flips isCompacting=true only inside the reactive branch", () => {

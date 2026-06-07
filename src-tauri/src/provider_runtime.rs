@@ -101,13 +101,7 @@ impl ProviderRuntimeState {
                 token: token.clone(),
             };
 
-            let mut child = spawn_node_process(
-                &node_bin,
-                &runtime_entry,
-                &host,
-                port,
-                &token,
-            )?;
+            let mut child = spawn_node_process(&node_bin, &runtime_entry, &host, port, &token)?;
 
             log::info!(
                 "[ProviderRuntime] Attempt {}/{} — spawned node={} pid={} port={} deadline={}s",
@@ -342,7 +336,6 @@ fn spawn_node_process(
 
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
 
@@ -559,26 +552,48 @@ mod tests {
     /// its child-exit path without a real node runtime. Used by the retry
     /// tests below.
     async fn spawn_exiting_child(exit_code: u8) -> Child {
-        TokioCommand::new("sh")
-            .arg("-c")
-            .arg(format!("exit {}", exit_code))
+        let mut command = test_shell_command(&format!("exit {}", exit_code));
+        command
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .expect("spawn sh exit")
+            .expect("spawn exiting child")
     }
 
     /// Build a child that runs for longer than the readiness deadline, so
     /// the wait loop exits via the timeout branch. We use `sleep 10` which
     /// outlives our 200ms test deadline without tying up system resources.
     async fn spawn_hanging_child() -> Child {
-        TokioCommand::new("sh")
-            .arg("-c")
-            .arg("sleep 10")
+        let mut command = test_shell_command(test_sleep_command());
+        command
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .expect("spawn sh sleep")
+            .expect("spawn sleeping child")
+    }
+
+    #[cfg(windows)]
+    fn test_shell_command(script: &str) -> TokioCommand {
+        let mut command = TokioCommand::new("powershell");
+        command.arg("-NoProfile").arg("-Command").arg(script);
+        command
+    }
+
+    #[cfg(not(windows))]
+    fn test_shell_command(script: &str) -> TokioCommand {
+        let mut command = TokioCommand::new("sh");
+        command.arg("-c").arg(script);
+        command
+    }
+
+    #[cfg(windows)]
+    fn test_sleep_command() -> &'static str {
+        "Start-Sleep -Seconds 10"
+    }
+
+    #[cfg(not(windows))]
+    fn test_sleep_command() -> &'static str {
+        "sleep 10"
     }
 
     fn dummy_config() -> ProviderRuntimeConfig {
@@ -602,13 +617,10 @@ mod tests {
     async fn wait_reports_exit_for_signal_exited_child() {
         let mut child = spawn_exiting_child(1).await;
         let config = dummy_config();
-        let err = wait_for_provider_runtime_with_deadline(
-            &config,
-            &mut child,
-            Duration::from_secs(2),
-        )
-        .await
-        .expect_err("must err on early exit");
+        let err =
+            wait_for_provider_runtime_with_deadline(&config, &mut child, Duration::from_secs(2))
+                .await
+                .expect_err("must err on early exit");
         assert!(
             err.contains("exited before becoming ready"),
             "unexpected err: {err}"
@@ -630,7 +642,10 @@ mod tests {
         .await
         .expect_err("must err on timeout");
         assert!(err.contains("Timed out"), "unexpected err: {err}");
-        assert!(err.contains("0s") || err.contains("after"), "err should mention budget: {err}");
+        assert!(
+            err.contains("0s") || err.contains("after"),
+            "err should mention budget: {err}"
+        );
         // Use start_kill here too — see test below for why.
         let _ = child.start_kill();
         drop(child);
@@ -648,13 +663,10 @@ mod tests {
     async fn start_kill_does_not_block_on_long_running_child() {
         let mut child = spawn_hanging_child().await;
         let t0 = std::time::Instant::now();
-        tokio::time::timeout(
-            Duration::from_millis(100),
-            async { child.start_kill() },
-        )
-        .await
-        .expect("start_kill must not block")
-        .expect("start_kill returned err");
+        tokio::time::timeout(Duration::from_millis(100), async { child.start_kill() })
+            .await
+            .expect("start_kill must not block")
+            .expect("start_kill returned err");
         drop(child);
         assert!(
             t0.elapsed() < Duration::from_millis(100),
