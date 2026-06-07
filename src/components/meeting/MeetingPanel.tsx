@@ -14,7 +14,6 @@ import {
   createMeeting,
   type Meeting,
   type TranscriptSegment,
-  updateMeetingStatus,
 } from "@/services/meetings";
 import { meetingStore } from "@/stores/meeting.store";
 import { settingsStore } from "@/stores/settings.store";
@@ -123,8 +122,8 @@ export function MeetingPanel(props: MeetingPanelProps) {
   onCleanup(() => meetingStore.stopMeetingEventListeners());
 
   const activeCapture = createMemo(() =>
-    meetingStore.state.meetings.find((meeting) =>
-      ["capturing", "transcribing", "agent_running"].includes(meeting.status),
+    meetingStore.state.meetings.find(
+      (meeting) => meeting.status === "capturing",
     ),
   );
 
@@ -142,6 +141,7 @@ export function MeetingPanel(props: MeetingPanelProps) {
         templateId: template(),
       });
       setTitle("");
+      await meetingStore.startCapture(meeting);
       await meetingStore.loadMeetings();
       await meetingStore.setActiveMeeting(meeting);
     } finally {
@@ -154,12 +154,7 @@ export function MeetingPanel(props: MeetingPanelProps) {
     if (!desktopRuntime || !meeting || stopping()) return;
     setStopping(true);
     try {
-      await updateMeetingStatus(meeting.id, "done", Date.now());
-      await meetingStore.loadMeetings();
-      const updated = meetingStore.state.meetings.find(
-        (item) => item.id === meeting.id,
-      );
-      await meetingStore.setActiveMeeting(updated ?? null);
+      await meetingStore.stopAndProcess(meeting);
     } finally {
       setStopping(false);
     }
@@ -203,21 +198,21 @@ export function MeetingPanel(props: MeetingPanelProps) {
         <div class="flex items-center gap-3">
           <div class="flex items-center gap-1.5 h-8 px-2 rounded-md border border-border bg-surface-1">
             <For each={[0, 1, 2, 3, 4, 5, 6]}>
-              {(bar) => (
-                <span
-                  class="w-0.5 rounded-full bg-primary/80 transition-all"
-                  classList={{
-                    "animate-[voicePulse_1s_ease-in-out_infinite]":
-                      activeCapture() !== undefined,
-                  }}
-                  style={{
-                    height: activeCapture()
-                      ? `${8 + ((bar * 7) % 18)}px`
-                      : "4px",
-                    "animation-delay": `${bar * 80}ms`,
-                  }}
-                />
-              )}
+              {(bar) => {
+                const height = () => {
+                  if (!activeCapture()) return 4;
+                  const level = meetingStore.state.captureLevel;
+                  // Vary bars so the meter reads as a meter, driven by real amplitude.
+                  const variation = 0.6 + 0.4 * Math.sin((bar + 1) * 1.7);
+                  return Math.max(3, Math.min(22, 3 + level * 26 * variation));
+                };
+                return (
+                  <span
+                    class="w-0.5 rounded-full bg-primary/80 transition-[height] duration-75"
+                    style={{ height: `${height()}px` }}
+                  />
+                );
+              }}
             </For>
           </div>
           <input
