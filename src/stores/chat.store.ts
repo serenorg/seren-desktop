@@ -3,10 +3,19 @@
 
 import { createStore } from "solid-js/store";
 import {
+  type PrunableMessage,
+  pruneCompactedHistory,
+} from "@/lib/compaction/prune";
+import {
   buildIterativeCompactionPrompt,
   buildSummaryLineage,
   type SummaryLineage,
 } from "@/lib/compaction/summary";
+import {
+  type AccountedMessage,
+  estimateAccountedMessageTokens,
+  estimateRequestTokens,
+} from "@/lib/compaction/token-accounting";
 import {
   type CompactionWindowItem,
   selectCompactionWindow,
@@ -24,12 +33,7 @@ import {
   type UnifiedConversationRow,
   updateConversation as updateConversationDb,
 } from "@/lib/tauri-bridge";
-import {
-  estimateConversationTokens,
-  estimateMessageTokens,
-  getModelContextLimit,
-  shouldTriggerCompaction,
-} from "@/lib/token-counter";
+import { getModelContextLimit } from "@/lib/token-counter";
 import type { Message } from "@/services/chat";
 import { sendMessage } from "@/services/chat";
 import type { AgentType } from "@/services/providers";
@@ -151,6 +155,15 @@ function generateTitle(content: string): string {
   return `${lastSpace > 10 ? truncated.slice(0, lastSpace) : truncated}…`;
 }
 
+/**
+ * Reduce a chat message to its token-bearing parts so the gauge and the
+ * compaction trigger count attached images at a flat cost instead of ignoring
+ * them — the source of context-gauge misses in multimodal chats. #2105.
+ */
+function accountedChatMessage(m: Message): AccountedMessage {
+  return { content: m.content, imageParts: m.images?.length ?? 0 };
+}
+
 export const chatStore = {
   // ============================================================================
   // Getters
@@ -230,10 +243,13 @@ export const chatStore = {
   },
 
   /**
-   * Get estimated token count for the active conversation.
+   * Get estimated token count for the active conversation, including attached
+   * images at a flat per-image cost (#2105).
    */
   get estimatedTokens(): number {
-    return estimateConversationTokens(this.messages);
+    return estimateRequestTokens({
+      messages: this.messages.map(accountedChatMessage),
+    });
   },
 
   /**
@@ -626,13 +642,15 @@ export const chatStore = {
 
   /**
    * Check if compaction should be triggered for the active conversation.
+   * Counts attached images so multimodal chats don't under-read the gauge. #2105.
    */
   shouldCompact(thresholdPercent: number): boolean {
-    return shouldTriggerCompaction(
-      this.messages,
-      this.selectedModel,
-      thresholdPercent,
-    );
+    const limit = getModelContextLimit(this.selectedModel);
+    if (limit <= 0) return false;
+    const tokens = estimateRequestTokens({
+      messages: this.messages.map(accountedChatMessage),
+    });
+    return (tokens / limit) * 100 >= thresholdPercent;
   },
 
   /**
@@ -665,7 +683,7 @@ export const chatStore = {
       // tail when the budget allows. The latest user message is always
       // anchored into the preserved tail. #2104.
       const items: CompactionWindowItem[] = messages.map((m) => ({
-        tokens: estimateMessageTokens(m),
+        tokens: estimateAccountedMessageTokens(accountedChatMessage(m)),
         role:
           m.role === "user" || m.role === "assistant" || m.role === "system"
             ? m.role
@@ -694,7 +712,23 @@ export const chatStore = {
       // the newest window — otherwise context summarized by an earlier
       // compaction silently disappears. #2103.
       const previousSummary = activeConvo?.compactedSummary?.content ?? null;
-      const newTurns = toCompact
+
+      // Pre-prune the compacted history before summarization: strip stale image
+      // payloads outside the latest media-bearing turn so multimodal chats feed
+      // a leaner transcript into the summarizer. #2105.
+      const prunable: PrunableMessage[] = toCompact.map((m) => ({
+        id: m.id,
+        role:
+          m.role === "user" || m.role === "assistant" || m.role === "system"
+            ? m.role
+            : "other",
+        content: m.content,
+        imageParts: m.images?.length ?? 0,
+      }));
+      const pruned = pruneCompactedHistory(prunable, {
+        protectedFromIndex: prunable.length,
+      });
+      const newTurns = pruned.messages
         .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
         .join("\n\n");
       const summaryPrompt = buildIterativeCompactionPrompt({
