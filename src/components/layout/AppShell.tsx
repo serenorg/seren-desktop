@@ -20,6 +20,7 @@ import { ArchivedEmployeeDetail } from "@/components/employees/ArchivedEmployeeD
 import { EmployeeDetail } from "@/components/employees/EmployeeDetail";
 import { InboxList } from "@/components/inbox/InboxList";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
+import { MeetingPanel } from "@/components/meeting/MeetingPanel";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import {
@@ -70,6 +71,7 @@ export type SlidePanelView =
   | "account"
   | "tasks"
   | "sessions"
+  | "meetings"
   | "skills"
   | null;
 
@@ -80,6 +82,7 @@ const PERSISTABLE_VIEWS: ReadonlySet<NonNullable<SlidePanelView>> = new Set([
   "database",
   "tasks",
   "sessions",
+  "meetings",
   "skills",
 ]);
 
@@ -406,6 +409,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
       setSlidePanel("tasks");
     } else if (p === "sessions") {
       setSlidePanel("sessions");
+    } else if (p === "meetings") {
+      setSlidePanel("meetings");
     } else if (p === "skills") {
       setSlidePanel("skills");
     }
@@ -698,6 +703,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
             </Match>
             <Match when={slidePanel() === "sessions"}>
               <SessionPanel onClose={handleCloseSlidePanel} />
+            </Match>
+            <Match when={slidePanel() === "meetings"}>
+              <MeetingPanel onClose={handleCloseSlidePanel} />
             </Match>
             <Match when={slidePanel() === "skills"}>
               <SkillsExplorer panelMode />

@@ -153,6 +153,13 @@ export interface Settings {
 
   // Voice settings
   voiceAutoSubmit: boolean;
+  voiceCleanupEnabled: boolean;
+  voiceCustomVocabulary: string[];
+
+  // Meeting settings
+  meetingAutoDetectEnabled: boolean;
+  meetingTemplateId: string;
+  meetingAppAllowlist: string[];
 
   // General settings
   telemetryEnabled: boolean;
@@ -246,6 +253,12 @@ const DEFAULT_SETTINGS: Settings = {
   claudeReasoningEffort: "medium",
   // Voice
   voiceAutoSubmit: true,
+  voiceCleanupEnabled: true,
+  voiceCustomVocabulary: [],
+  // Meeting
+  meetingAutoDetectEnabled: true,
+  meetingTemplateId: "discovery",
+  meetingAppAllowlist: ["zoom", "teams", "meet", "slack", "webex"],
   // General
   telemetryEnabled: true,
 };

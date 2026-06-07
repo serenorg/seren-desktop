@@ -2,7 +2,9 @@
 // ABOUTME: Manages MediaRecorder lifecycle, audio capture, and Whisper API calls.
 
 import { createSignal, onCleanup } from "solid-js";
+import { cleanupDictationText } from "@/lib/audio/dictationCleanup";
 import { transcribeAudio } from "@/services/seren-whisper";
+import { settingsStore } from "@/stores/settings.store";
 
 export type VoiceState = "idle" | "recording" | "transcribing" | "error";
 
@@ -88,8 +90,16 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
             typeof text,
           );
           if (text?.trim()) {
-            console.log("[VoiceInput] Calling onTranscript with:", text.trim());
-            onTranscript(text.trim());
+            const transcript = settingsStore.get("voiceCleanupEnabled")
+              ? cleanupDictationText(
+                  text,
+                  settingsStore.get("voiceCustomVocabulary"),
+                )
+              : text.trim();
+            console.log("[VoiceInput] Calling onTranscript with:", transcript);
+            if (transcript) {
+              onTranscript(transcript);
+            }
           } else {
             console.log("[VoiceInput] No text returned from transcription");
           }
