@@ -14,10 +14,15 @@ import {
   onRuntimeEvent,
 } from "@/lib/browser-local-runtime";
 import {
+  type PrunableMessage,
+  pruneCompactedHistory,
+} from "@/lib/compaction/prune";
+import {
   buildIterativeCompactionPrompt,
   buildSummaryLineage,
   type SummaryLineage,
 } from "@/lib/compaction/summary";
+import { estimateAccountedMessageTokens } from "@/lib/compaction/token-accounting";
 import {
   type CompactionWindowItem,
   selectCompactionWindow,
@@ -3832,15 +3837,19 @@ export const agentStore = {
     let compactTurn = 0;
     const windowItems: CompactionWindowItem[] = messages.map((m) => {
       if (m.type === "user") compactTurn++;
-      const toolTokens = m.toolCall?.result
-        ? estimateTokens(m.toolCall.result)
-        : 0;
       const role =
         m.type === "user" || m.type === "assistant" || m.type === "tool"
           ? m.type
           : "other";
+      // Request-aware token cost: content + tool-call arguments + tool result,
+      // so the boundary is accurate in tool-heavy turns where the arguments and
+      // output dominate, not just the message text. #2105.
       return {
-        tokens: estimateTokens(m.content) + toolTokens,
+        tokens: estimateAccountedMessageTokens({
+          content: m.content,
+          toolArgs: m.toolCall?.parameters,
+          toolResult: m.toolCall?.result,
+        }),
         role,
         groupId: `t${compactTurn}`,
       };
@@ -3895,8 +3904,38 @@ export const agentStore = {
       // and the #1733 agent-action continuation framing, and it no longer
       // asks the model to predict the next user ask.
       const previousSummary = session.compactedSummary?.content ?? null;
-      const newTurns = toCompact
-        .map((m) => `${m.type.toUpperCase()}: ${m.content}`)
+
+      // Pre-prune the compacted history before summarization: dedupe repeated
+      // tool output to back-references, summarize stale large results, and
+      // bound oversized tool-call arguments. This both shrinks the summarizer
+      // input and lets the summary capture tool outcomes (previously dropped,
+      // since only message content was fed in). #2105.
+      const prunable: PrunableMessage[] = toCompact.map((m) => ({
+        id: m.id,
+        role:
+          m.type === "user" || m.type === "assistant" || m.type === "tool"
+            ? m.type
+            : "other",
+        content: m.content,
+        toolResult: m.toolCall?.result,
+        toolName: m.toolCall?.title,
+        toolArgs: m.toolCall?.parameters
+          ? JSON.stringify(m.toolCall.parameters)
+          : undefined,
+      }));
+      const pruned = pruneCompactedHistory(prunable, {
+        protectedFromIndex: prunable.length,
+      });
+      console.info(
+        `[compact.prune] ${pruned.stats.duplicateToolResults} dup, ${pruned.stats.summarizedToolResults} summarized, ${pruned.stats.truncatedToolArgs} args trimmed, tokens ${pruned.stats.tokensBefore}->${pruned.stats.tokensAfter}`,
+      );
+      const newTurns = pruned.messages
+        .map((m) => {
+          if (m.role === "tool" && m.toolResult) {
+            return `TOOL(${m.toolName ?? "tool"}): ${m.toolResult}`;
+          }
+          return `${m.role.toUpperCase()}: ${m.content}`;
+        })
         .join("\n\n");
       const summaryPrompt = buildIterativeCompactionPrompt({
         previousSummary,
