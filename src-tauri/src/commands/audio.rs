@@ -623,4 +623,34 @@ mod tests {
         assert_eq!(segments[1].speaker, Speaker::Them);
         assert_eq!(segments[2].status, SegmentStatus::Gap);
     }
+
+    #[test]
+    fn rerunning_schema_setup_preserves_existing_meeting_data() {
+        let conn = setup();
+        insert_meeting(&conn, meeting("meeting-1")).unwrap();
+        insert_transcript_segment(
+            &conn,
+            NewTranscriptSegment {
+                id: "segment-1".to_string(),
+                meeting_id: "meeting-1".to_string(),
+                seq: 0,
+                speaker: Speaker::Me,
+                text: "hello".to_string(),
+                start_ms: 0,
+                end_ms: 100,
+                status: SegmentStatus::Ok,
+                created_at: 1,
+            },
+        )
+        .unwrap();
+
+        // Simulate updating an app with a pre-existing chat.db: schema setup runs
+        // again at startup. CREATE TABLE IF NOT EXISTS must not drop prior data.
+        setup_schema(&conn).unwrap();
+
+        assert!(select_meeting(&conn, "meeting-1").unwrap().is_some());
+        let segments = select_transcript_segments(&conn, "meeting-1").unwrap();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "hello");
+    }
 }

@@ -70,13 +70,13 @@ mod tests {
     #[test]
     fn vocabulary_clause_filters_blank_terms() {
         let vocab = vec![
-            "Affinity".to_string(),
+            "Postgres".to_string(),
             "  ".to_string(),
             "".to_string(),
             "SerenBucks".to_string(),
         ];
         let clause = vocabulary_clause(&vocab);
-        assert!(clause.contains("Affinity"));
+        assert!(clause.contains("Postgres"));
         assert!(clause.contains("SerenBucks"));
         // Blank entries must not leave dangling separators.
         assert!(!clause.contains(", ,"));
@@ -92,8 +92,8 @@ mod tests {
     fn cleanup_directives_appends_vocabulary_when_present() {
         let plain = cleanup_directives(&[]);
         assert!(!plain.contains("domain terms"));
-        let with_vocab = cleanup_directives(&["Glide".to_string()]);
-        assert!(with_vocab.contains("Glide"));
+        let with_vocab = cleanup_directives(&["Grafana".to_string()]);
+        assert!(with_vocab.contains("Grafana"));
         assert!(with_vocab.contains("domain terms"));
     }
 

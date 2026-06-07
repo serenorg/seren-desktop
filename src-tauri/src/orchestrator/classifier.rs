@@ -593,13 +593,13 @@ mod tests {
     #[test]
     fn meeting_skill_selection_returns_single_tagged_skill() {
         let skills = vec![
-            make_skill("affinity", "Affinity", &["meetings"]),
+            make_skill("crm-notes", "CRM Notes", &["meetings"]),
             make_skill("recap", "Meeting Recap", &["document"]),
         ];
 
         let result = select_meeting_skills(&skills);
 
-        assert_eq!(result, vec!["affinity".to_string()]);
+        assert_eq!(result, vec!["crm-notes".to_string()]);
     }
 
     // =========================================================================
