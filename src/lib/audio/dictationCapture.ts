@@ -71,7 +71,9 @@ export async function startDictationCapture(
         const text = await transcribePcm({
           samples: frame,
           channels: 1,
-          sampleRate: TARGET_SAMPLE_RATE,
+          // The WebView may ignore the 16 kHz request; report the real rate so
+          // the Rust pipeline resamples correctly.
+          sampleRate: context.sampleRate,
         });
         const trimmed = text.trim();
         if (trimmed) {

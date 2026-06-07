@@ -215,7 +215,7 @@ export function DictationHud(props: DictationHudProps) {
       const replacement = await transformSelection(
         selection,
         instruction,
-        providerStore.activeModel,
+        providerStore.resolvedModel(),
         settingsStore.get("voiceCustomVocabulary"),
       );
 

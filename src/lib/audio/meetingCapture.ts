@@ -55,7 +55,9 @@ export async function startMeetingMicCapture(
       speaker: "me",
       samples: frame,
       channels: 1,
-      sampleRate: TARGET_SAMPLE_RATE,
+      // Report the context's real rate; the WebView may ignore the 16 kHz
+      // request and the Rust pipeline resamples whatever rate it receives.
+      sampleRate: context.sampleRate,
     });
   };
 

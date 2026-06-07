@@ -100,7 +100,7 @@ export function useVoiceInput(
       const transcript = settingsStore.get("voiceCleanupEnabled")
         ? await cleanupDictationText(
             trimmed,
-            providerStore.activeModel,
+            providerStore.resolvedModel(),
             settingsStore.get("voiceCustomVocabulary"),
           )
         : trimmed;

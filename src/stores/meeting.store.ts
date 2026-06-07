@@ -208,7 +208,7 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
   try {
     await generateMeetingNotes({
       meetingId: meeting.id,
-      model: providerStore.activeModel,
+      model: providerStore.resolvedModel(),
       templatePrompt,
       vocabulary: settingsStore.get("voiceCustomVocabulary"),
     });
@@ -293,7 +293,7 @@ async function regenerateNotes(
   try {
     await generateMeetingNotes({
       meetingId: meeting.id,
-      model: providerStore.activeModel,
+      model: providerStore.resolvedModel(),
       templatePrompt,
       vocabulary: settingsStore.get("voiceCustomVocabulary"),
     });
