@@ -1,10 +1,22 @@
 // ABOUTME: Tauri commands for Meeting Mode persistence and transcript history.
 // ABOUTME: Stores meetings and transcript segments without persisting raw audio.
 
+use crate::audio::capture::to_mono_16k;
+use crate::audio::chunker::Chunk;
+use crate::audio::cleanup::{build_cleanup_prompt, build_transform_prompt};
+use crate::audio::llm::{CompletionRequest, complete};
+use crate::audio::merge::merge_segments;
+use crate::audio::notes::{ParsedNotes, generate_notes};
+use crate::audio::pipeline::CaptureRegistry;
+use crate::audio::templates::{BUILT_IN_MEETING_TEMPLATES, MeetingTemplate};
+use crate::audio::transcribe::{
+    GatewayTranscriber, RetryConfig, TranscribeError, transcribe_chunk_with_retry,
+};
 use crate::audio::types::{Meeting, MeetingStatus, SegmentStatus, Speaker, TranscriptSegment};
+use crate::orchestrator::types::SkillRef;
 use crate::services::database::DbPool;
 use rusqlite::{Connection, OptionalExtension, Result, params};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
 #[tauri::command]
@@ -59,21 +71,30 @@ pub async fn update_meeting_notes(
     notes_struct_json: String,
 ) -> Result<(), String> {
     run_db(app, move |conn| {
-        conn.execute(
-            "UPDATE meetings
-             SET notes_markdown = ?1, notes_struct_json = ?2, status = ?3, updated_at = ?4
-             WHERE id = ?5",
-            params![
-                notes_markdown,
-                notes_struct_json,
-                MeetingStatus::NotesReady.as_str(),
-                now_ms(),
-                id
-            ],
-        )?;
-        Ok(())
+        set_meeting_notes_record(conn, &id, &notes_markdown, &notes_struct_json)
     })
     .await
+}
+
+fn set_meeting_notes_record(
+    conn: &Connection,
+    id: &str,
+    markdown: &str,
+    struct_json: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE meetings
+         SET notes_markdown = ?1, notes_struct_json = ?2, status = ?3, updated_at = ?4
+         WHERE id = ?5",
+        params![
+            markdown,
+            struct_json,
+            MeetingStatus::NotesReady.as_str(),
+            now_ms(),
+            id
+        ],
+    )?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -130,6 +151,187 @@ pub async fn get_transcript_segments(
         select_transcript_segments(conn, &meeting_id)
     })
     .await
+}
+
+// --- Capture lifecycle + Tier-1 intelligence -------------------------------
+
+#[tauri::command]
+pub async fn start_meeting_capture(
+    app: AppHandle,
+    registry: State<'_, CaptureRegistry>,
+    meeting_id: String,
+) -> Result<(), String> {
+    registry.start(&app, &meeting_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn push_capture_frame(
+    registry: State<'_, CaptureRegistry>,
+    meeting_id: String,
+    speaker: Speaker,
+    samples: Vec<i16>,
+    channels: u16,
+    sample_rate: u32,
+) -> Result<(), String> {
+    let normalized = to_mono_16k(&samples, channels.max(1), sample_rate);
+    registry.push_frame(&meeting_id, speaker, normalized);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_meeting_capture(
+    app: AppHandle,
+    registry: State<'_, CaptureRegistry>,
+    meeting_id: String,
+) -> Result<(), String> {
+    registry.stop(&meeting_id).await;
+    let ended = now_ms();
+    let id = meeting_id;
+    run_db(app, move |conn| {
+        update_meeting_status_record(conn, &id, MeetingStatus::Transcribing, Some(ended), ended)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn generate_meeting_notes(
+    app: AppHandle,
+    meeting_id: String,
+    model: String,
+    template_prompt: String,
+    vocabulary: Vec<String>,
+) -> Result<ParsedNotes, String> {
+    let lookup = meeting_id.clone();
+    let segments =
+        run_db(app.clone(), move |conn| select_transcript_segments(conn, &lookup)).await?;
+    let transcript = assemble_transcript(segments);
+    if transcript.trim().is_empty() {
+        return Err("no transcript to summarize".to_string());
+    }
+
+    let parsed = generate_notes(&app, model, &transcript, &template_prompt, &vocabulary).await?;
+    let struct_json = serde_json::to_string(&parsed.structured).map_err(|err| err.to_string())?;
+    let markdown = parsed.markdown.clone();
+    let id = meeting_id;
+    run_db(app, move |conn| {
+        set_meeting_notes_record(conn, &id, &markdown, &struct_json)
+    })
+    .await?;
+    Ok(parsed)
+}
+
+#[tauri::command]
+pub async fn get_meeting_transcript_text(
+    app: AppHandle,
+    meeting_id: String,
+) -> Result<String, String> {
+    let segments = run_db(app, move |conn| select_transcript_segments(conn, &meeting_id)).await?;
+    Ok(assemble_transcript(segments))
+}
+
+/// Return the slugs of installed skills tagged to handle meetings (0 / 1 / many).
+#[tauri::command]
+pub fn select_meeting_skills(skills: Vec<SkillRef>) -> Vec<String> {
+    crate::orchestrator::classifier::select_meeting_skills(&skills)
+}
+
+#[tauri::command]
+pub fn list_meeting_templates() -> Vec<MeetingTemplate> {
+    BUILT_IN_MEETING_TEMPLATES.to_vec()
+}
+
+// --- Dictation (shares the transcribe + cleanup engines with Meeting Mode) --
+
+/// Transcribe a single dictation chunk; returns "" for silence rather than erroring.
+#[tauri::command]
+pub async fn transcribe_pcm(
+    app: AppHandle,
+    samples: Vec<i16>,
+    channels: u16,
+    sample_rate: u32,
+) -> Result<String, String> {
+    let normalized = to_mono_16k(&samples, channels.max(1), sample_rate);
+    if normalized.is_empty() {
+        return Ok(String::new());
+    }
+    let chunk = Chunk {
+        start_ms: 0,
+        end_ms: 0,
+        samples: normalized,
+    };
+    let transcriber = GatewayTranscriber::new(app);
+    match transcribe_chunk_with_retry(&transcriber, &chunk, RetryConfig::default()).await {
+        Ok(text) => Ok(text),
+        Err(TranscribeError::Empty) => Ok(String::new()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// Polish dictated text through the shared cleanup engine + custom vocabulary.
+#[tauri::command]
+pub async fn cleanup_dictation_text(
+    app: AppHandle,
+    text: String,
+    model: String,
+    vocabulary: Vec<String>,
+) -> Result<String, String> {
+    if text.trim().is_empty() {
+        return Ok(String::new());
+    }
+    let prompt = build_cleanup_prompt(&text, &vocabulary);
+    complete(
+        &app,
+        CompletionRequest {
+            model,
+            system: None,
+            prompt,
+        },
+    )
+    .await
+}
+
+/// Edit-by-voice: transform a selection per a spoken instruction.
+#[tauri::command]
+pub async fn transform_selection(
+    app: AppHandle,
+    selection: String,
+    instruction: String,
+    model: String,
+    vocabulary: Vec<String>,
+) -> Result<String, String> {
+    if selection.trim().is_empty() {
+        return Err("nothing selected to transform".to_string());
+    }
+    let prompt = build_transform_prompt(&selection, &instruction, &vocabulary);
+    complete(
+        &app,
+        CompletionRequest {
+            model,
+            system: None,
+            prompt,
+        },
+    )
+    .await
+}
+
+/// Assemble persisted segments into a chronological "Me/Them" transcript.
+fn assemble_transcript(segments: Vec<TranscriptSegment>) -> String {
+    let (me, them): (Vec<_>, Vec<_>) = segments
+        .into_iter()
+        .partition(|segment| segment.speaker == Speaker::Me);
+    merge_segments(me, them)
+        .into_iter()
+        .filter(|segment| segment.status == SegmentStatus::Ok && !segment.text.trim().is_empty())
+        .map(|segment| {
+            let speaker = match segment.speaker {
+                Speaker::Me => "Me",
+                Speaker::Them => "Them",
+            };
+            format!("{speaker}: {}", segment.text.trim())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[derive(Debug, Clone)]
@@ -336,7 +538,7 @@ where
     .map_err(|e| e.to_string())?
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -420,5 +622,35 @@ mod tests {
         );
         assert_eq!(segments[1].speaker, Speaker::Them);
         assert_eq!(segments[2].status, SegmentStatus::Gap);
+    }
+
+    #[test]
+    fn rerunning_schema_setup_preserves_existing_meeting_data() {
+        let conn = setup();
+        insert_meeting(&conn, meeting("meeting-1")).unwrap();
+        insert_transcript_segment(
+            &conn,
+            NewTranscriptSegment {
+                id: "segment-1".to_string(),
+                meeting_id: "meeting-1".to_string(),
+                seq: 0,
+                speaker: Speaker::Me,
+                text: "hello".to_string(),
+                start_ms: 0,
+                end_ms: 100,
+                status: SegmentStatus::Ok,
+                created_at: 1,
+            },
+        )
+        .unwrap();
+
+        // Simulate updating an app with a pre-existing chat.db: schema setup runs
+        // again at startup. CREATE TABLE IF NOT EXISTS must not drop prior data.
+        setup_schema(&conn).unwrap();
+
+        assert!(select_meeting(&conn, "meeting-1").unwrap().is_some());
+        let segments = select_transcript_segments(&conn, "meeting-1").unwrap();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "hello");
     }
 }

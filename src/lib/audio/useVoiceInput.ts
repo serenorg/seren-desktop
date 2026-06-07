@@ -1,21 +1,16 @@
-// ABOUTME: SolidJS hook for microphone recording and speech-to-text transcription.
-// ABOUTME: Manages MediaRecorder lifecycle, audio capture, and Whisper API calls.
+// ABOUTME: SolidJS hook for streaming microphone dictation with live partial transcripts.
+// ABOUTME: Drives transcribe_pcm chunking and the shared LLM cleanup engine, preserving its toggle API.
 
 import { createSignal, onCleanup } from "solid-js";
-import { cleanupDictationText } from "@/lib/audio/dictationCleanup";
-import { transcribeAudio } from "@/services/seren-whisper";
+import {
+  type DictationCaptureHandle,
+  startDictationCapture,
+} from "@/lib/audio/dictationCapture";
+import { cleanupDictationText } from "@/services/dictation";
+import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 
-export type VoiceState = "idle" | "recording" | "transcribing" | "error";
-
-const MIME_PREFERENCES = ["audio/webm", "audio/mp4", "audio/ogg"];
-
-function getSupportedMimeType(): string {
-  for (const mime of MIME_PREFERENCES) {
-    if (MediaRecorder.isTypeSupported(mime)) return mime;
-  }
-  return "";
-}
+export type VoiceState = "idle" | "listening" | "transcribing" | "error";
 
 /**
  * Get platform-appropriate instructions for enabling microphone access.
@@ -32,16 +27,26 @@ function getMicrophonePermissionInstructions(): string {
   return "your system settings";
 }
 
-export function useVoiceInput(onTranscript: (text: string) => void) {
+export interface VoiceInputOptions {
+  /** Fired with each transcribed chunk while listening (live partial text). */
+  onPartial?: (text: string) => void;
+}
+
+/**
+ * Stream microphone audio to the dictation pipeline. `onTranscript` receives
+ * the final (optionally LLM-cleaned) text after the user stops; `onPartial`
+ * (via options) receives live chunks as the user speaks.
+ */
+export function useVoiceInput(
+  onTranscript: (text: string) => void,
+  options: VoiceInputOptions = {},
+) {
   const [voiceState, setVoiceState] = createSignal<VoiceState>("idle");
   const [error, setError] = createSignal<string | null>(null);
 
-  let recorder: MediaRecorder | null = null;
-  let chunks: Blob[] = [];
-  let activeMimeType = "";
+  let capture: DictationCaptureHandle | null = null;
 
   async function startRecording() {
-    let stream: MediaStream | null = null;
     try {
       setError(null);
 
@@ -52,70 +57,11 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
         );
       }
 
-      activeMimeType = getSupportedMimeType();
-      const options: MediaRecorderOptions = activeMimeType
-        ? { mimeType: activeMimeType }
-        : {};
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      recorder = new MediaRecorder(stream, options);
-      chunks = [];
-
-      recorder.ondataavailable = (e) => {
-        console.log("[VoiceInput] ondataavailable, size:", e.data.size);
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        console.log("[VoiceInput] onstop fired, chunks:", chunks.length);
-        stream?.getTracks().forEach((t) => t.stop());
-        const mimeType = activeMimeType || "audio/webm";
-        const blob = new Blob(chunks, { type: mimeType });
-        chunks = [];
-
-        console.log("[VoiceInput] Blob size:", blob.size, "type:", mimeType);
-        if (blob.size === 0) {
-          console.log("[VoiceInput] Empty blob, returning to idle");
-          setVoiceState("idle");
-          return;
-        }
-
-        setVoiceState("transcribing");
-        try {
-          console.log("[VoiceInput] Sending blob for transcription");
-          const text = await transcribeAudio(blob, mimeType);
-          console.log(
-            "[VoiceInput] Transcription result:",
-            JSON.stringify(text),
-            "type:",
-            typeof text,
-          );
-          if (text?.trim()) {
-            const transcript = settingsStore.get("voiceCleanupEnabled")
-              ? cleanupDictationText(
-                  text,
-                  settingsStore.get("voiceCustomVocabulary"),
-                )
-              : text.trim();
-            console.log("[VoiceInput] Calling onTranscript with:", transcript);
-            if (transcript) {
-              onTranscript(transcript);
-            }
-          } else {
-            console.log("[VoiceInput] No text returned from transcription");
-          }
-          setVoiceState("idle");
-        } catch (err) {
-          console.error("[VoiceInput] Transcription error:", err);
-          setError(err instanceof Error ? err.message : "Transcription failed");
-          setVoiceState("error");
-        }
-      };
-
-      recorder.start();
-      console.log("[VoiceInput] Recording started, mimeType:", activeMimeType);
-      setVoiceState("recording");
+      capture = await startDictationCapture((partial) => {
+        options.onPartial?.(partial);
+      });
+      setVoiceState("listening");
     } catch (err) {
-      stream?.getTracks().forEach((t) => t.stop());
       console.error("[VoiceInput] startRecording error:", err);
       let message: string;
       if (err instanceof DOMException && err.name === "NotAllowedError") {
@@ -134,20 +80,54 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
     }
   }
 
-  function stopRecording() {
-    console.log("[VoiceInput] stopRecording called, state:", recorder?.state);
-    if (recorder?.state === "recording") {
-      recorder.stop();
+  async function stopRecording() {
+    const handle = capture;
+    capture = null;
+    if (!handle) {
+      setVoiceState("idle");
+      return;
+    }
+
+    setVoiceState("transcribing");
+    try {
+      const raw = await handle.stop();
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        setVoiceState("idle");
+        return;
+      }
+
+      const transcript = settingsStore.get("voiceCleanupEnabled")
+        ? await cleanupDictationText(
+            trimmed,
+            providerStore.resolvedModel(),
+            settingsStore.get("voiceCustomVocabulary"),
+          )
+        : trimmed;
+
+      if (transcript.trim()) {
+        onTranscript(transcript.trim());
+      }
+      setVoiceState("idle");
+    } catch (err) {
+      console.error("[VoiceInput] transcription error:", err);
+      setError(err instanceof Error ? err.message : "Transcription failed");
+      setVoiceState("error");
     }
   }
 
+  /** Current capture amplitude in 0..1 (0 when not listening). */
+  function level(): number {
+    return capture?.level() ?? 0;
+  }
+
   function toggle() {
-    console.log("[VoiceInput] toggle called, voiceState:", voiceState());
-    if (voiceState() === "recording") {
-      stopRecording();
-    } else if (voiceState() === "idle" || voiceState() === "error") {
+    const state = voiceState();
+    if (state === "listening") {
+      void stopRecording();
+    } else if (state === "idle" || state === "error") {
       clearError();
-      startRecording();
+      void startRecording();
     }
   }
 
@@ -157,11 +137,19 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
   }
 
   onCleanup(() => {
-    if (recorder?.state === "recording") {
-      recorder.stream.getTracks().forEach((t) => t.stop());
-      recorder.stop();
+    if (capture) {
+      void capture.stop();
+      capture = null;
     }
   });
 
-  return { voiceState, error, toggle, clearError };
+  return {
+    voiceState,
+    error,
+    toggle,
+    clearError,
+    startRecording,
+    stopRecording,
+    level,
+  };
 }

@@ -99,6 +99,46 @@ fn action_item_to_text(value: Value) -> Option<String> {
     }
 }
 
+/// Build the Tier-1 notes prompt for a transcript under a template, reusing the
+/// shared cleanup engine so notes and dictation never diverge on vocabulary.
+pub fn build_notes_prompt(transcript: &str, template_prompt: &str, vocabulary: &[String]) -> String {
+    format!(
+        "You are taking structured notes from a meeting transcript.\n\n\
+         {cleanup}\n\n\
+         Notes focus: {template}\n\n\
+         Write concise markdown notes (short headers and bullet points). After the \
+         markdown, append a fenced ```json block with exactly this shape: \
+         {{\"summary\": string, \"action_items\": string[], \"fields\": object}}. \
+         Do not add commentary outside the notes and the JSON block.\n\n\
+         Transcript:\n{transcript}",
+        cleanup = crate::audio::cleanup::cleanup_directives(vocabulary),
+        template = template_prompt.trim(),
+        transcript = transcript.trim(),
+    )
+}
+
+/// Generate Tier-1 notes: prompt the selected model, then parse markdown + struct.
+/// Returns parsed notes even when the model omits the JSON block (parser fails safe).
+pub async fn generate_notes(
+    app: &tauri::AppHandle,
+    model: String,
+    transcript: &str,
+    template_prompt: &str,
+    vocabulary: &[String],
+) -> Result<ParsedNotes, String> {
+    let prompt = build_notes_prompt(transcript, template_prompt, vocabulary);
+    let raw = crate::audio::llm::complete(
+        app,
+        crate::audio::llm::CompletionRequest {
+            model,
+            system: None,
+            prompt,
+        },
+    )
+    .await?;
+    Ok(parse_notes_output(&raw))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

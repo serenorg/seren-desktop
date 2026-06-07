@@ -126,3 +126,78 @@ export function getTranscriptSegments(
 ): Promise<TranscriptSegment[]> {
   return invoke("get_transcript_segments", { meetingId });
 }
+
+export interface StructuredNotes {
+  summary: string;
+  actionItems: string[];
+  fields: Record<string, unknown>;
+}
+
+export interface ParsedNotes {
+  markdown: string;
+  structured: StructuredNotes;
+}
+
+export interface MeetingTemplate {
+  id: string;
+  name: string;
+  prompt: string;
+}
+
+export interface SkillRef {
+  slug: string;
+  name: string;
+  description: string;
+  tags: string[];
+  path: string;
+}
+
+export function startMeetingCapture(meetingId: string): Promise<void> {
+  return invoke("start_meeting_capture", { meetingId });
+}
+
+export function pushCaptureFrame(input: {
+  meetingId: string;
+  speaker: Speaker;
+  samples: number[];
+  channels: number;
+  sampleRate: number;
+}): Promise<void> {
+  return invoke("push_capture_frame", {
+    meetingId: input.meetingId,
+    speaker: input.speaker,
+    samples: input.samples,
+    channels: input.channels,
+    sampleRate: input.sampleRate,
+  });
+}
+
+export function stopMeetingCapture(meetingId: string): Promise<void> {
+  return invoke("stop_meeting_capture", { meetingId });
+}
+
+export function generateMeetingNotes(input: {
+  meetingId: string;
+  model: string;
+  templatePrompt: string;
+  vocabulary: string[];
+}): Promise<ParsedNotes> {
+  return invoke("generate_meeting_notes", {
+    meetingId: input.meetingId,
+    model: input.model,
+    templatePrompt: input.templatePrompt,
+    vocabulary: input.vocabulary,
+  });
+}
+
+export function getMeetingTranscriptText(meetingId: string): Promise<string> {
+  return invoke("get_meeting_transcript_text", { meetingId });
+}
+
+export function selectMeetingSkills(skills: SkillRef[]): Promise<string[]> {
+  return invoke("select_meeting_skills", { skills });
+}
+
+export function listMeetingTemplates(): Promise<MeetingTemplate[]> {
+  return invoke("list_meeting_templates");
+}

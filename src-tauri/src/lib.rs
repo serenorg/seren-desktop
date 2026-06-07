@@ -514,6 +514,7 @@ pub fn run() {
         .manage(mcp::McpState::new())
         .manage(mcp::HttpMcpState::new())
         .manage(orchestrator::service::OrchestratorState::new())
+        .manage(audio::pipeline::CaptureRegistry::default())
         .manage(orchestrator::eval::EvalState::new())
         .manage(orchestrator::tool_bridge::ToolResultBridge::new())
         .manage(provider_runtime::ProviderRuntimeState::new())
@@ -792,6 +793,18 @@ pub fn run() {
             commands::audio::set_meeting_routed_skill,
             commands::audio::append_transcript_segment,
             commands::audio::get_transcript_segments,
+            // Meeting Mode capture + intelligence commands
+            commands::audio::start_meeting_capture,
+            commands::audio::push_capture_frame,
+            commands::audio::stop_meeting_capture,
+            commands::audio::generate_meeting_notes,
+            commands::audio::get_meeting_transcript_text,
+            commands::audio::select_meeting_skills,
+            commands::audio::list_meeting_templates,
+            // Dictation commands
+            commands::audio::transcribe_pcm,
+            commands::audio::cleanup_dictation_text,
+            commands::audio::transform_selection,
             // Conversation commands
             commands::chat::create_conversation,
             commands::chat::list_conversations,

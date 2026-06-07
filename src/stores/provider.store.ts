@@ -458,6 +458,19 @@ function getModels(providerId: ProviderId): ProviderModel[] {
 }
 
 /**
+ * Resolve a concrete model id for direct Gateway calls (notes, dictation
+ * cleanup, edit-by-voice). The normal chat path lets the router resolve the
+ * "auto" sentinel; a direct publisher call cannot send "auto", so fall back to
+ * the first available model for the active provider.
+ */
+function resolvedModel(): string {
+  const active = state.activeModel;
+  if (active && active !== AUTO_MODEL_ID) return active;
+  const models = state.providerModels[state.activeProvider] ?? [];
+  return models[0]?.id ?? active;
+}
+
+/**
  * Clear any validation error.
  */
 function clearValidationError(): void {
@@ -519,6 +532,7 @@ export const providerStore = {
   setActiveModel,
   setProviderModels,
   getModels,
+  resolvedModel,
   clearValidationError,
   getUnconfiguredProviders,
 };

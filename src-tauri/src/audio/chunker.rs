@@ -31,9 +31,20 @@ pub struct Chunk {
     pub samples: Vec<i16>,
 }
 
+/// Split a complete PCM buffer into speech chunks on silence boundaries.
 pub fn chunk(samples: &[i16], cfg: ChunkCfg) -> Vec<Chunk> {
+    chunk_stream(samples, cfg, true).0
+}
+
+/// Split a PCM buffer, returning `(completed_chunks, consumed_samples)`.
+///
+/// When `at_end` is false the trailing in-progress utterance is NOT emitted and
+/// is left unconsumed (its start index is the keep-point) so a live stream can
+/// finish it once more audio arrives. `consumed_samples` is the prefix the caller
+/// may discard. When `at_end` is true the remainder is flushed and fully consumed.
+pub fn chunk_stream(samples: &[i16], cfg: ChunkCfg, at_end: bool) -> (Vec<Chunk>, usize) {
     if samples.is_empty() || cfg.sample_rate == 0 || cfg.frame_ms == 0 {
-        return Vec::new();
+        return (Vec::new(), samples.len());
     }
 
     let frame_samples = samples_for_ms(cfg.sample_rate, cfg.frame_ms).max(1);
@@ -86,18 +97,66 @@ pub fn chunk(samples: &[i16], cfg: ChunkCfg) -> Vec<Chunk> {
         frame_start = frame_end;
     }
 
-    if let Some(start) = speech_start {
-        let end = if last_speech_end > start {
-            last_speech_end
-        } else {
-            samples.len()
-        };
-        if duration_ms(start, end, cfg.sample_rate) >= cfg.min_window_ms {
-            push_chunk(&mut chunks, samples, start, end, cfg.sample_rate);
+    let consumed = if at_end {
+        if let Some(start) = speech_start {
+            let end = if last_speech_end > start {
+                last_speech_end
+            } else {
+                samples.len()
+            };
+            if duration_ms(start, end, cfg.sample_rate) >= cfg.min_window_ms {
+                push_chunk(&mut chunks, samples, start, end, cfg.sample_rate);
+            }
+        }
+        samples.len()
+    } else {
+        // Keep only the in-progress utterance; everything before it is resolved.
+        speech_start.unwrap_or(samples.len())
+    };
+
+    (chunks, consumed)
+}
+
+/// Stateful driver that feeds a live stream into [`chunk_stream`], emitting
+/// completed chunks with absolute timestamps and discarding consumed audio.
+pub struct StreamingChunker {
+    cfg: ChunkCfg,
+    buffer: Vec<i16>,
+    base_sample: usize,
+}
+
+impl StreamingChunker {
+    pub fn new(cfg: ChunkCfg) -> Self {
+        Self {
+            cfg,
+            buffer: Vec::new(),
+            base_sample: 0,
         }
     }
 
-    chunks
+    /// Append samples and return any chunks that just completed (absolute ms).
+    pub fn push(&mut self, samples: &[i16]) -> Vec<Chunk> {
+        self.buffer.extend_from_slice(samples);
+        self.drain(false)
+    }
+
+    /// Flush the final in-progress utterance at end of stream (absolute ms).
+    pub fn finish(&mut self) -> Vec<Chunk> {
+        self.drain(true)
+    }
+
+    fn drain(&mut self, at_end: bool) -> Vec<Chunk> {
+        let base_ms = sample_to_ms(self.base_sample, self.cfg.sample_rate);
+        let (mut chunks, consumed) = chunk_stream(&self.buffer, self.cfg, at_end);
+        for chunk in &mut chunks {
+            chunk.start_ms = chunk.start_ms.saturating_add(base_ms);
+            chunk.end_ms = chunk.end_ms.saturating_add(base_ms);
+        }
+        let consumed = consumed.min(self.buffer.len());
+        self.buffer.drain(0..consumed);
+        self.base_sample += consumed;
+        chunks
+    }
 }
 
 fn push_chunk(
@@ -214,5 +273,25 @@ mod tests {
         let chunks = chunk(&samples, cfg());
 
         assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn streaming_chunker_emits_on_close_and_flushes_remainder() {
+        let mut streaming = StreamingChunker::new(cfg());
+
+        // In-progress speech (no trailing silence) emits nothing yet.
+        let first = streaming.push(&[pcm(0, 50), pcm(1_000, 80)].concat());
+        assert!(first.is_empty());
+
+        // A following silence closes the utterance into one chunk, with absolute ms.
+        let second = streaming.push(&pcm(0, 60));
+        assert_eq!(second.len(), 1);
+        assert_eq!((second[0].start_ms, second[0].end_ms), (50, 130));
+
+        // A new utterance stays buffered until the stream ends.
+        let third = streaming.push(&pcm(1_000, 50));
+        assert!(third.is_empty());
+        let flushed = streaming.finish();
+        assert_eq!(flushed.len(), 1);
     }
 }

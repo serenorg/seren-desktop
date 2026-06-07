@@ -160,6 +160,8 @@ export interface Settings {
   meetingAutoDetectEnabled: boolean;
   meetingTemplateId: string;
   meetingAppAllowlist: string[];
+  meetingCustomTemplates: { id: string; name: string; prompt: string }[];
+  meetingDefaultSkill: string;
 
   // General settings
   telemetryEnabled: boolean;
@@ -259,6 +261,8 @@ const DEFAULT_SETTINGS: Settings = {
   meetingAutoDetectEnabled: true,
   meetingTemplateId: "discovery",
   meetingAppAllowlist: ["zoom", "teams", "meet", "slack", "webex"],
+  meetingCustomTemplates: [],
+  meetingDefaultSkill: "",
   // General
   telemetryEnabled: true,
 };

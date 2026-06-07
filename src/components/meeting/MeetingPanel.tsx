@@ -9,50 +9,22 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { isTauriRuntime } from "@/lib/tauri-bridge";
+import { MeetingDetail } from "@/components/meeting/MeetingDetail";
+import { MeetingSettings } from "@/components/meeting/MeetingSettings";
 import {
-  createMeeting,
-  type Meeting,
-  type TranscriptSegment,
-  updateMeetingStatus,
-} from "@/services/meetings";
+  formatDuration,
+  formatTime,
+  meetingTitle,
+  STATUS_LABELS,
+} from "@/lib/meeting-format";
+import { isTauriRuntime } from "@/lib/tauri-bridge";
+import { createMeeting } from "@/services/meetings";
 import { meetingStore } from "@/stores/meeting.store";
 import { settingsStore } from "@/stores/settings.store";
 
 interface MeetingPanelProps {
   onClose: () => void;
 }
-
-function formatTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatDuration(meeting: Meeting): string {
-  const end = meeting.endedAt ?? Date.now();
-  const totalSeconds = Math.max(
-    0,
-    Math.floor((end - meeting.startedAt) / 1000),
-  );
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function meetingTitle(meeting: Meeting): string {
-  return meeting.title.trim() || `Meeting ${formatTime(meeting.startedAt)}`;
-}
-
-const STATUS_LABELS: Record<Meeting["status"], string> = {
-  capturing: "Capturing",
-  transcribing: "Transcribing",
-  notes_ready: "Notes ready",
-  agent_running: "Agent running",
-  done: "Done",
-  failed: "Failed",
-};
 
 function MicGlyph() {
   return (
@@ -85,35 +57,11 @@ function StopGlyph() {
   );
 }
 
-function TranscriptRow(props: { segment: TranscriptSegment }) {
-  return (
-    <div class="grid grid-cols-[52px_1fr] gap-3 py-2 border-b border-border/50 last:border-b-0">
-      <div
-        class="text-[11px] font-mono tabular-nums"
-        classList={{
-          "text-foreground": props.segment.speaker === "me",
-          "text-muted-foreground": props.segment.speaker === "them",
-        }}
-      >
-        {props.segment.speaker === "me" ? "Me" : "Them"}
-      </div>
-      <div
-        class="text-[13px] leading-5"
-        classList={{
-          "text-muted-foreground italic": props.segment.status === "gap",
-          "text-foreground": props.segment.status === "ok",
-        }}
-      >
-        {props.segment.status === "gap" ? "Transcript gap" : props.segment.text}
-      </div>
-    </div>
-  );
-}
-
 export function MeetingPanel(props: MeetingPanelProps) {
   const [starting, setStarting] = createSignal(false);
   const [stopping, setStopping] = createSignal(false);
   const [title, setTitle] = createSignal("");
+  const [showSettings, setShowSettings] = createSignal(false);
 
   onMount(() => {
     void meetingStore.loadMeetings();
@@ -123,8 +71,8 @@ export function MeetingPanel(props: MeetingPanelProps) {
   onCleanup(() => meetingStore.stopMeetingEventListeners());
 
   const activeCapture = createMemo(() =>
-    meetingStore.state.meetings.find((meeting) =>
-      ["capturing", "transcribing", "agent_running"].includes(meeting.status),
+    meetingStore.state.meetings.find(
+      (meeting) => meeting.status === "capturing",
     ),
   );
 
@@ -142,6 +90,7 @@ export function MeetingPanel(props: MeetingPanelProps) {
         templateId: template(),
       });
       setTitle("");
+      await meetingStore.startCapture(meeting);
       await meetingStore.loadMeetings();
       await meetingStore.setActiveMeeting(meeting);
     } finally {
@@ -154,12 +103,7 @@ export function MeetingPanel(props: MeetingPanelProps) {
     if (!desktopRuntime || !meeting || stopping()) return;
     setStopping(true);
     try {
-      await updateMeetingStatus(meeting.id, "done", Date.now());
-      await meetingStore.loadMeetings();
-      const updated = meetingStore.state.meetings.find(
-        (item) => item.id === meeting.id,
-      );
-      await meetingStore.setActiveMeeting(updated ?? null);
+      await meetingStore.stopAndProcess(meeting);
     } finally {
       setStopping(false);
     }
@@ -175,27 +119,51 @@ export function MeetingPanel(props: MeetingPanelProps) {
               {meetingStore.state.meetings.length} saved
             </div>
           </div>
-          <button
-            type="button"
-            class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground hover:text-foreground hover:bg-surface-3 transition-colors"
-            onClick={props.onClose}
-            title="Close"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="none"
-              aria-hidden="true"
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-surface-2 hover:bg-surface-3 transition-colors"
+              classList={{
+                "text-primary": showSettings(),
+                "text-muted-foreground hover:text-foreground": !showSettings(),
+              }}
+              onClick={() => setShowSettings((value) => !value)}
+              title="Meeting settings"
             >
-              <path
-                d="M4 4l8 8M12 4l-8 8"
-                stroke="currentColor"
-                stroke-width="1.4"
-                stroke-linecap="round"
-              />
-            </svg>
-          </button>
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-label="Settings"
+                role="img"
+              >
+                <path d="M8 5.5A2.5 2.5 0 1 0 8 10.5 2.5 2.5 0 0 0 8 5.5Zm0 1.2a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6Z" />
+                <path d="M7.3 1.5a.7.7 0 0 1 1.4 0l.1.9c.4.1.8.3 1.1.5l.8-.5a.7.7 0 0 1 1 1l-.5.8c.2.3.4.7.5 1.1l.9.1a.7.7 0 0 1 0 1.4l-.9.1c-.1.4-.3.8-.5 1.1l.5.8a.7.7 0 0 1-1 1l-.8-.5c-.3.2-.7.4-1.1.5l-.1.9a.7.7 0 0 1-1.4 0l-.1-.9c-.4-.1-.8-.3-1.1-.5l-.8.5a.7.7 0 0 1-1-1l.5-.8c-.2-.3-.4-.7-.5-1.1l-.9-.1a.7.7 0 0 1 0-1.4l.9-.1c.1-.4.3-.8.5-1.1l-.5-.8a.7.7 0 0 1 1-1l.8.5c.3-.2.7-.4 1.1-.5l.1-.9Z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground hover:text-foreground hover:bg-surface-3 transition-colors"
+              onClick={props.onClose}
+              title="Close"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4 4l8 8M12 4l-8 8"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -203,21 +171,21 @@ export function MeetingPanel(props: MeetingPanelProps) {
         <div class="flex items-center gap-3">
           <div class="flex items-center gap-1.5 h-8 px-2 rounded-md border border-border bg-surface-1">
             <For each={[0, 1, 2, 3, 4, 5, 6]}>
-              {(bar) => (
-                <span
-                  class="w-0.5 rounded-full bg-primary/80 transition-all"
-                  classList={{
-                    "animate-[voicePulse_1s_ease-in-out_infinite]":
-                      activeCapture() !== undefined,
-                  }}
-                  style={{
-                    height: activeCapture()
-                      ? `${8 + ((bar * 7) % 18)}px`
-                      : "4px",
-                    "animation-delay": `${bar * 80}ms`,
-                  }}
-                />
-              )}
+              {(bar) => {
+                const height = () => {
+                  if (!activeCapture()) return 4;
+                  const level = meetingStore.state.captureLevel;
+                  // Vary bars so the meter reads as a meter, driven by real amplitude.
+                  const variation = 0.6 + 0.4 * Math.sin((bar + 1) * 1.7);
+                  return Math.max(3, Math.min(22, 3 + level * 26 * variation));
+                };
+                return (
+                  <span
+                    class="w-0.5 rounded-full bg-primary/80 transition-[height] duration-75"
+                    style={{ height: `${height()}px` }}
+                  />
+                );
+              }}
             </For>
           </div>
           <input
@@ -269,100 +237,60 @@ export function MeetingPanel(props: MeetingPanelProps) {
         </Show>
       </div>
 
-      <div class="min-h-0 flex-1 grid grid-cols-[220px_1fr]">
-        <aside class="min-h-0 overflow-auto border-r border-border bg-surface-0/30">
-          <Show
-            when={meetingStore.state.meetings.length > 0}
-            fallback={
-              <div class="p-4 text-[13px] text-muted-foreground">
-                No meetings saved.
-              </div>
-            }
-          >
-            <For each={meetingStore.state.meetings}>
-              {(meeting) => {
-                const selected = () => activeMeeting()?.id === meeting.id;
-                return (
-                  <button
-                    type="button"
-                    class="w-full text-left px-3 py-2.5 border-b border-border/50 bg-transparent hover:bg-surface-2 transition-colors"
-                    classList={{
-                      "bg-surface-2 text-foreground": selected(),
-                      "text-muted-foreground": !selected(),
-                    }}
-                    onClick={() => void meetingStore.setActiveMeeting(meeting)}
-                  >
-                    <div class="text-[13px] font-medium truncate">
-                      {meetingTitle(meeting)}
-                    </div>
-                    <div class="mt-1 flex items-center justify-between gap-2 text-[11px]">
-                      <span>{formatTime(meeting.startedAt)}</span>
-                      <span>{STATUS_LABELS[meeting.status]}</span>
-                    </div>
-                  </button>
-                );
-              }}
-            </For>
-          </Show>
-        </aside>
-
-        <main class="min-h-0 overflow-auto">
-          <Show
-            when={activeMeeting()}
-            fallback={
-              <div class="h-full flex items-center justify-center text-[13px] text-muted-foreground">
-                Select a meeting.
-              </div>
-            }
-          >
-            {(meeting) => (
-              <div class="p-5 max-w-[720px]">
-                <div class="mb-5">
-                  <h3 class="text-[18px] font-semibold tracking-normal">
-                    {meetingTitle(meeting())}
-                  </h3>
-                  <div class="mt-1 flex items-center gap-3 text-[12px] text-muted-foreground">
-                    <span>{STATUS_LABELS[meeting().status]}</span>
-                    <span class="font-mono tabular-nums">
-                      {formatDuration(meeting())}
-                    </span>
-                    <span>{meeting().sourceApp ?? "Desktop"}</span>
-                  </div>
+      <Show when={!showSettings()} fallback={<MeetingSettings />}>
+        <div class="min-h-0 flex-1 grid grid-cols-[220px_1fr]">
+          <aside class="min-h-0 overflow-auto border-r border-border bg-surface-0/30">
+            <Show
+              when={meetingStore.state.meetings.length > 0}
+              fallback={
+                <div class="p-4 text-[13px] text-muted-foreground">
+                  No meetings saved.
                 </div>
-
-                <section class="mb-6">
-                  <div class="mb-2 text-[12px] font-medium text-muted-foreground">
-                    Notes
-                  </div>
-                  <div class="min-h-[96px] whitespace-pre-wrap rounded-md border border-border bg-surface-0/50 p-3 text-[13px] leading-5">
-                    {meeting().notesMarkdown ?? "Notes will appear here."}
-                  </div>
-                </section>
-
-                <section>
-                  <div class="mb-2 text-[12px] font-medium text-muted-foreground">
-                    Transcript
-                  </div>
-                  <Show
-                    when={meetingStore.state.liveSegments.length > 0}
-                    fallback={
-                      <div class="rounded-md border border-border bg-surface-0/50 p-3 text-[13px] text-muted-foreground">
-                        No transcript yet.
+              }
+            >
+              <For each={meetingStore.state.meetings}>
+                {(meeting) => {
+                  const selected = () => activeMeeting()?.id === meeting.id;
+                  return (
+                    <button
+                      type="button"
+                      class="w-full text-left px-3 py-2.5 border-b border-border/50 bg-transparent hover:bg-surface-2 transition-colors"
+                      classList={{
+                        "bg-surface-2 text-foreground": selected(),
+                        "text-muted-foreground": !selected(),
+                      }}
+                      onClick={() =>
+                        void meetingStore.setActiveMeeting(meeting)
+                      }
+                    >
+                      <div class="text-[13px] font-medium truncate">
+                        {meetingTitle(meeting)}
                       </div>
-                    }
-                  >
-                    <div class="rounded-md border border-border bg-surface-0/50 px-3">
-                      <For each={meetingStore.state.liveSegments}>
-                        {(segment) => <TranscriptRow segment={segment} />}
-                      </For>
-                    </div>
-                  </Show>
-                </section>
-              </div>
-            )}
-          </Show>
-        </main>
-      </div>
+                      <div class="mt-1 flex items-center justify-between gap-2 text-[11px]">
+                        <span>{formatTime(meeting.startedAt)}</span>
+                        <span>{STATUS_LABELS[meeting.status]}</span>
+                      </div>
+                    </button>
+                  );
+                }}
+              </For>
+            </Show>
+          </aside>
+
+          <main class="min-h-0 overflow-auto">
+            <Show
+              when={activeMeeting()}
+              fallback={
+                <div class="h-full flex items-center justify-center text-[13px] text-muted-foreground">
+                  Select a meeting.
+                </div>
+              }
+            >
+              {(meeting) => <MeetingDetail meeting={meeting()} />}
+            </Show>
+          </main>
+        </div>
+      </Show>
     </section>
   );
 }
