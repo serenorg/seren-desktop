@@ -30,7 +30,8 @@ describe("#2105 chat compaction prunes history and counts media in the gauge", (
   });
 
   it("the gauge and the trigger count attached images via request accounting", () => {
-    expect(chatStore).toContain("estimateRequestTokens(");
+    expect(chatStore).toContain("estimateActiveChatRequestTokens(");
+    expect(chatStore).toContain("estimateChatRequestTokens({");
     expect(chatStore).toContain("accountedChatMessage");
     // The content-only counter is no longer the source of truth for the gauge.
     expect(chatStore).not.toContain("estimateConversationTokens(this.messages)");
