@@ -3880,9 +3880,21 @@ export const agentStore = {
     const toCompact = messages.slice(0, tailWindow.cutIndex);
     const toPreserve = messages.slice(tailWindow.cutIndex);
     if (toCompact.length === 0) {
-      console.info(
-        "[AgentStore] Token budget preserves the whole tail — nothing to compact",
-      );
+      if (tailWindow.overBudget) {
+        // Soft-ceiling (#2113): the anchored tail alone exceeds the budget and
+        // there is no older prefix to summarize. The serving transcript is left
+        // intact — the agent runtime manages its own context window, and the
+        // post-compaction prepend is already per-message bounded on the normal
+        // path — but surface the condition so a stuck context gauge is visible
+        // instead of being reported as plain "nothing to compact".
+        console.warn(
+          `[AgentStore] over-budget tail with no compactable prefix (tail ${tailWindow.tailTokens} > budget ${tailWindow.tailBudget}); serving transcript left intact`,
+        );
+      } else {
+        console.info(
+          "[AgentStore] Token budget preserves the whole tail — nothing to compact",
+        );
+      }
       return { outcome: "skipped_nothing_to_compact" };
     }
 

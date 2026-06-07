@@ -38,9 +38,13 @@ describe("#2106 chat compaction runs the resilient summarizer policy", () => {
   it("no-drop on abort: returns before replacing messages, enters cooldown", () => {
     expect(chatStore).toContain('summaryOutcome.status === "aborted"');
     expect(chatStore).toContain("compactionCooldown.enter(conversationId");
-    // The abort branch must return before the message-replacement setState.
+    // The main (post-summary) message-replacement must come after the abort
+    // check so an aborted summary never drops messages. #2113 added a separate,
+    // earlier persist in the no-prefix over-budget branch that returns before
+    // summarization, so assert against the LAST replacement — the post-summary
+    // one this invariant is about.
     const abortIdx = chatStore.indexOf('summaryOutcome.status === "aborted"');
-    const replaceIdx = chatStore.indexOf(
+    const replaceIdx = chatStore.lastIndexOf(
       'setState("messages", conversationId, toPreserve)',
     );
     expect(abortIdx).toBeGreaterThan(0);

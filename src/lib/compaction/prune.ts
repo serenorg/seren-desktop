@@ -197,3 +197,40 @@ export function pruneCompactedHistory(
   stats.tokensAfter = sumTokens(out, protectedFrom);
   return { messages: out, stats };
 }
+
+export interface TailReliefResult {
+  /** The tail with its reducible payloads pruned. */
+  messages: PrunableMessage[];
+  /** Estimated tail tokens before pruning. */
+  tailTokensBefore: number;
+  /** Estimated tail tokens after pruning. */
+  tailTokensAfter: number;
+  /** True when the pruned tail still exceeds `tailBudget` (irreducible content). */
+  stillOverBudget: boolean;
+  stats: PruneStats;
+}
+
+/**
+ * Relieve an over-budget preserved tail by pruning its reducible payloads —
+ * stale media, duplicate/large tool results, oversized tool-call arguments —
+ * across the whole tail (no protected region). Used when
+ * `selectCompactionWindow` reports `overBudget`: summarizing the prefix cannot
+ * shrink a tail the boundary was forced to keep, so the tail itself is pruned.
+ * Plain user/assistant text is never truncated, so a verbatim oversized message
+ * can remain over budget — reported via `stillOverBudget` so the caller can
+ * surface it instead of silently leaving the context gauge pegged. #2113.
+ */
+export function relieveOverBudgetTail(
+  tail: PrunableMessage[],
+  tailBudget: number,
+  options: PruneOptions = {},
+): TailReliefResult {
+  const pruned = pruneCompactedHistory(tail, options);
+  return {
+    messages: pruned.messages,
+    tailTokensBefore: pruned.stats.tokensBefore,
+    tailTokensAfter: pruned.stats.tokensAfter,
+    stillOverBudget: pruned.stats.tokensAfter > tailBudget,
+    stats: pruned.stats,
+  };
+}
