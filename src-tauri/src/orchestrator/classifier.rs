@@ -354,6 +354,28 @@ pub fn select_relevant_skills(prompt: &str, skills: &[SkillRef]) -> Vec<String> 
         .collect()
 }
 
+/// Select installed skills that explicitly declare meeting handling.
+///
+/// Meeting Mode calls this at call-end, where relying on transcript text would
+/// make routing accidental. The tag must come from the skill metadata that was
+/// parsed from SKILL.md frontmatter by the frontend.
+#[allow(dead_code)]
+pub fn select_meeting_skills(skills: &[SkillRef]) -> Vec<String> {
+    skills
+        .iter()
+        .filter(|skill| {
+            skill.tags.iter().any(|tag| {
+                let normalized = tag.trim().to_lowercase();
+                matches!(
+                    normalized.as_str(),
+                    "meeting" | "meetings" | "meeting-mode" | "meeting_mode"
+                )
+            })
+        })
+        .map(|skill| skill.slug.clone())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,6 +563,31 @@ mod tests {
         let result = classify("Help me git commit my code changes", &skills);
         assert_eq!(result.task_type, "code_generation");
         assert_eq!(result.relevant_skills, vec!["git-commit"]);
+    }
+
+    #[test]
+    fn meeting_skill_selection_uses_declared_tags_only() {
+        let skills = vec![
+            make_skill("sales-notes", "Sales Notes", &["meeting"]),
+            make_skill("crm-writer", "CRM Writer", &["meeting-mode"]),
+            make_skill("recap", "Meeting Recap", &["document"]),
+        ];
+
+        let result = select_meeting_skills(&skills);
+
+        assert_eq!(
+            result,
+            vec!["sales-notes".to_string(), "crm-writer".to_string()]
+        );
+    }
+
+    #[test]
+    fn meeting_skill_selection_returns_empty_without_tag() {
+        let skills = vec![make_skill("recap", "Meeting Recap", &["document"])];
+
+        let result = select_meeting_skills(&skills);
+
+        assert!(result.is_empty());
     }
 
     // =========================================================================

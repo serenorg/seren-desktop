@@ -1085,6 +1085,39 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             Sessions
           </button>
 
+          <button
+            type="button"
+            data-testid="meetings-button"
+            class="flex w-full px-3 py-2 text-left text-[12px] text-muted-foreground hover:text-foreground hover:bg-surface-1/50 transition-colors items-center gap-2"
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent("seren:open-panel", { detail: "meetings" }),
+              )
+            }
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              role="img"
+              aria-label="Meetings"
+            >
+              <path
+                d="M4.5 7a3.5 3.5 0 0 1 7 0v1.2a3.5 3.5 0 0 1-7 0V7Z"
+                stroke="currentColor"
+                stroke-width="1.2"
+              />
+              <path
+                d="M2.5 8a5.5 5.5 0 0 0 11 0M8 13.5V15"
+                stroke="currentColor"
+                stroke-width="1.2"
+                stroke-linecap="round"
+              />
+            </svg>
+            Meetings
+          </button>
+
           <Show when={threadStore.runningCount > 0}>
             <div class="px-3 py-2 border-t border-border/30">
               <span class="text-[11px] text-status-running flex items-center gap-1.5">

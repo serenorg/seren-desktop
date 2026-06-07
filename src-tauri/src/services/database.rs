@@ -327,6 +327,48 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS meetings (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            source_app TEXT,
+            started_at INTEGER NOT NULL,
+            ended_at INTEGER,
+            status TEXT NOT NULL,
+            template_id TEXT,
+            routed_skill_slug TEXT,
+            agent_conversation_id TEXT,
+            notes_markdown TEXT,
+            notes_struct_json TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (agent_conversation_id) REFERENCES conversations(id)
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS transcript_segments (
+            id TEXT PRIMARY KEY,
+            meeting_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            speaker TEXT NOT NULL,
+            text TEXT NOT NULL,
+            start_ms INTEGER NOT NULL,
+            end_ms INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_segments_meeting
+         ON transcript_segments(meeting_id, seq)",
+        [],
+    )?;
+
     // Migration: add agent conversation columns if they don't exist (for existing DBs)
     let has_kind: bool = conn
         .prepare("SELECT kind FROM conversations LIMIT 1")

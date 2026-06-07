@@ -7,6 +7,7 @@ use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_store::StoreExt;
 
 pub mod commands {
+    pub mod audio;
     pub mod auth;
     pub mod chat;
     pub mod claude_memory;
@@ -31,6 +32,7 @@ pub mod services {
     pub mod vector_store;
 }
 
+pub mod audio;
 mod auth;
 mod claude_memory;
 mod claude_setup;
@@ -781,6 +783,15 @@ pub fn run() {
             // Rust-backed Gateway API bridge
             commands::gateway_http::gateway_http_start,
             commands::gateway_http::gateway_http_cancel,
+            // Meeting Mode persistence commands
+            commands::audio::create_meeting,
+            commands::audio::get_meeting,
+            commands::audio::list_meetings,
+            commands::audio::update_meeting_status,
+            commands::audio::update_meeting_notes,
+            commands::audio::set_meeting_routed_skill,
+            commands::audio::append_transcript_segment,
+            commands::audio::get_transcript_segments,
             // Conversation commands
             commands::chat::create_conversation,
             commands::chat::list_conversations,
