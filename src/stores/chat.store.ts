@@ -4,6 +4,10 @@
 import { createStore } from "solid-js/store";
 import { isLikelyAuthError } from "@/lib/auth-errors";
 import {
+  type ChatSkillEstimate,
+  estimateChatRequestTokens,
+} from "@/lib/compaction/chat-request-accounting";
+import {
   type PrunableMessage,
   pruneCompactedHistory,
   relieveOverBudgetTail,
@@ -21,7 +25,6 @@ import {
 import {
   type AccountedMessage,
   estimateAccountedMessageTokens,
-  estimateRequestTokens,
 } from "@/lib/compaction/token-accounting";
 import {
   type CompactionWindowItem,
@@ -41,11 +44,16 @@ import {
   updateConversation as updateConversationDb,
 } from "@/lib/tauri-bridge";
 import { getModelContextLimit } from "@/lib/token-counter";
+import { getAllTools } from "@/lib/tools";
 import { refreshAccessToken } from "@/services/auth";
 import type { Message } from "@/services/chat";
 import { sendMessage } from "@/services/chat";
 import type { AgentType } from "@/services/providers";
+import { authStore } from "@/stores/auth.store";
+import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
+import { settingsStore } from "@/stores/settings.store";
+import { skillsStore } from "@/stores/skills.store";
 
 const DEFAULT_MODEL = "arcee-ai/trinity-large-thinking";
 const MAX_MESSAGES_PER_CONVERSATION = 1000;
@@ -172,6 +180,62 @@ function accountedChatMessage(m: Message): AccountedMessage {
   return { content: m.content, imageParts: m.images?.length ?? 0 };
 }
 
+const MEMORY_CONTEXT_RESERVE_TOKENS = 2048;
+const PROJECT_CONTEXT_RESERVE_TOKENS = 2048;
+
+function skillToEstimate(skill: {
+  slug: string;
+  name: string;
+  description?: string;
+  tags?: string[];
+  path?: string;
+}): ChatSkillEstimate {
+  return {
+    slug: skill.slug,
+    name: skill.name,
+    description: skill.description,
+    tags: skill.tags,
+    path: skill.path,
+  };
+}
+
+function estimateDynamicChatContextReserve(projectRoot: string | null): number {
+  let reserve = 0;
+  if (settingsStore.get("memoryEnabled") && authStore.isAuthenticated) {
+    reserve += MEMORY_CONTEXT_RESERVE_TOKENS;
+  }
+  // The Rust worker can inject live repo context, and the legacy JS path can
+  // inject semantic code context, when a project is open. Exact bytes are async
+  // and query-dependent, so reserve a conservative synchronous budget. #2115.
+  if (projectRoot) {
+    reserve += PROJECT_CONTEXT_RESERVE_TOKENS;
+  }
+  return reserve;
+}
+
+function estimateActiveChatRequestTokens({
+  conversationId,
+  messages,
+  compactedSummary,
+}: {
+  conversationId: string | null;
+  messages: Message[];
+  compactedSummary?: CompactedSummary;
+}): number {
+  const projectRoot = fileTreeState.rootPath;
+  const skills = skillsStore
+    .getThreadSkills(projectRoot, conversationId)
+    .map(skillToEstimate);
+
+  return estimateChatRequestTokens({
+    messages: messages.map(accountedChatMessage),
+    toolSchemas: getAllTools(),
+    skills,
+    compactedSummary: compactedSummary?.content,
+    dynamicContextReserveTokens: estimateDynamicChatContextReserve(projectRoot),
+  }).totalTokens;
+}
+
 export const chatStore = {
   // ============================================================================
   // Getters
@@ -255,8 +319,10 @@ export const chatStore = {
    * images at a flat per-image cost (#2105).
    */
   get estimatedTokens(): number {
-    return estimateRequestTokens({
-      messages: this.messages.map(accountedChatMessage),
+    return estimateActiveChatRequestTokens({
+      conversationId: state.activeConversationId,
+      messages: this.messages,
+      compactedSummary: this.compactedSummary,
     });
   },
 
@@ -655,8 +721,10 @@ export const chatStore = {
   shouldCompact(thresholdPercent: number): boolean {
     const limit = getModelContextLimit(this.selectedModel);
     if (limit <= 0) return false;
-    const tokens = estimateRequestTokens({
-      messages: this.messages.map(accountedChatMessage),
+    const tokens = estimateActiveChatRequestTokens({
+      conversationId: state.activeConversationId,
+      messages: this.messages,
+      compactedSummary: this.compactedSummary,
     });
     return (tokens / limit) * 100 >= thresholdPercent;
   },
