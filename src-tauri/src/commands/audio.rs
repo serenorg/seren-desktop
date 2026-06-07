@@ -1,10 +1,16 @@
 // ABOUTME: Tauri commands for Meeting Mode persistence and transcript history.
 // ABOUTME: Stores meetings and transcript segments without persisting raw audio.
 
+use crate::audio::capture::to_mono_16k;
+use crate::audio::merge::merge_segments;
+use crate::audio::notes::{ParsedNotes, generate_notes};
+use crate::audio::pipeline::CaptureRegistry;
+use crate::audio::templates::{BUILT_IN_MEETING_TEMPLATES, MeetingTemplate};
 use crate::audio::types::{Meeting, MeetingStatus, SegmentStatus, Speaker, TranscriptSegment};
+use crate::orchestrator::types::SkillRef;
 use crate::services::database::DbPool;
 use rusqlite::{Connection, OptionalExtension, Result, params};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
 #[tauri::command]
@@ -59,21 +65,30 @@ pub async fn update_meeting_notes(
     notes_struct_json: String,
 ) -> Result<(), String> {
     run_db(app, move |conn| {
-        conn.execute(
-            "UPDATE meetings
-             SET notes_markdown = ?1, notes_struct_json = ?2, status = ?3, updated_at = ?4
-             WHERE id = ?5",
-            params![
-                notes_markdown,
-                notes_struct_json,
-                MeetingStatus::NotesReady.as_str(),
-                now_ms(),
-                id
-            ],
-        )?;
-        Ok(())
+        set_meeting_notes_record(conn, &id, &notes_markdown, &notes_struct_json)
     })
     .await
+}
+
+fn set_meeting_notes_record(
+    conn: &Connection,
+    id: &str,
+    markdown: &str,
+    struct_json: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE meetings
+         SET notes_markdown = ?1, notes_struct_json = ?2, status = ?3, updated_at = ?4
+         WHERE id = ?5",
+        params![
+            markdown,
+            struct_json,
+            MeetingStatus::NotesReady.as_str(),
+            now_ms(),
+            id
+        ],
+    )?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -130,6 +145,113 @@ pub async fn get_transcript_segments(
         select_transcript_segments(conn, &meeting_id)
     })
     .await
+}
+
+// --- Capture lifecycle + Tier-1 intelligence -------------------------------
+
+#[tauri::command]
+pub async fn start_meeting_capture(
+    app: AppHandle,
+    registry: State<'_, CaptureRegistry>,
+    meeting_id: String,
+) -> Result<(), String> {
+    registry.start(&app, &meeting_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn push_capture_frame(
+    registry: State<'_, CaptureRegistry>,
+    meeting_id: String,
+    speaker: Speaker,
+    samples: Vec<i16>,
+    channels: u16,
+    sample_rate: u32,
+) -> Result<(), String> {
+    let normalized = to_mono_16k(&samples, channels.max(1), sample_rate);
+    registry.push_frame(&meeting_id, speaker, normalized);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_meeting_capture(
+    app: AppHandle,
+    registry: State<'_, CaptureRegistry>,
+    meeting_id: String,
+) -> Result<(), String> {
+    registry.stop(&meeting_id).await;
+    let ended = now_ms();
+    let id = meeting_id;
+    run_db(app, move |conn| {
+        update_meeting_status_record(conn, &id, MeetingStatus::Transcribing, Some(ended), ended)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn generate_meeting_notes(
+    app: AppHandle,
+    meeting_id: String,
+    model: String,
+    template_prompt: String,
+    vocabulary: Vec<String>,
+) -> Result<ParsedNotes, String> {
+    let lookup = meeting_id.clone();
+    let segments =
+        run_db(app.clone(), move |conn| select_transcript_segments(conn, &lookup)).await?;
+    let transcript = assemble_transcript(segments);
+    if transcript.trim().is_empty() {
+        return Err("no transcript to summarize".to_string());
+    }
+
+    let parsed = generate_notes(&app, model, &transcript, &template_prompt, &vocabulary).await?;
+    let struct_json = serde_json::to_string(&parsed.structured).map_err(|err| err.to_string())?;
+    let markdown = parsed.markdown.clone();
+    let id = meeting_id;
+    run_db(app, move |conn| {
+        set_meeting_notes_record(conn, &id, &markdown, &struct_json)
+    })
+    .await?;
+    Ok(parsed)
+}
+
+#[tauri::command]
+pub async fn get_meeting_transcript_text(
+    app: AppHandle,
+    meeting_id: String,
+) -> Result<String, String> {
+    let segments = run_db(app, move |conn| select_transcript_segments(conn, &meeting_id)).await?;
+    Ok(assemble_transcript(segments))
+}
+
+/// Return the slugs of installed skills tagged to handle meetings (0 / 1 / many).
+#[tauri::command]
+pub fn select_meeting_skills(skills: Vec<SkillRef>) -> Vec<String> {
+    crate::orchestrator::classifier::select_meeting_skills(&skills)
+}
+
+#[tauri::command]
+pub fn list_meeting_templates() -> Vec<MeetingTemplate> {
+    BUILT_IN_MEETING_TEMPLATES.to_vec()
+}
+
+/// Assemble persisted segments into a chronological "Me/Them" transcript.
+fn assemble_transcript(segments: Vec<TranscriptSegment>) -> String {
+    let (me, them): (Vec<_>, Vec<_>) = segments
+        .into_iter()
+        .partition(|segment| segment.speaker == Speaker::Me);
+    merge_segments(me, them)
+        .into_iter()
+        .filter(|segment| segment.status == SegmentStatus::Ok && !segment.text.trim().is_empty())
+        .map(|segment| {
+            let speaker = match segment.speaker {
+                Speaker::Me => "Me",
+                Speaker::Them => "Them",
+            };
+            format!("{speaker}: {}", segment.text.trim())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[derive(Debug, Clone)]

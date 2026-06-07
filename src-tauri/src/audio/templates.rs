@@ -1,7 +1,7 @@
 // ABOUTME: Built-in Tier-1 meeting note templates for Meeting Mode.
 // ABOUTME: Provides stable ids that settings and meeting records can reference.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct MeetingTemplate {
     pub id: &'static str,
     pub name: &'static str,

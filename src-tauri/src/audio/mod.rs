@@ -5,6 +5,7 @@ pub mod capture;
 pub mod chunker;
 pub mod cleanup;
 pub mod detect;
+pub mod llm;
 pub mod merge;
 pub mod notes;
 pub mod pipeline;
