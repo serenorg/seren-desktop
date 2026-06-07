@@ -336,7 +336,6 @@ fn spawn_node_process(
 
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
 
