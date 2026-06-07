@@ -3,19 +3,12 @@
 // ABOUTME: synthetic-transcript ack text must not prime acknowledgement mode,
 // ABOUTME: and the opus-4-7 fallback must use the 1M variant.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 import { buildIterativeCompactionPrompt } from "@/lib/compaction/summary";
 
-const agentStoreSource = readFileSync(
-  resolve("src/stores/agent.store.ts"),
-  "utf-8",
-);
-const syntheticTranscriptSource = readFileSync(
-  resolve("bin/browser-local/synthetic-transcript.mjs"),
-  "utf-8",
-);
+const agentStoreSource = readSource("src/stores/agent.store.ts");
+const syntheticTranscriptSource = readSource("bin/browser-local/synthetic-transcript.mjs");
 
 /**
  * Slice the agent.store source forward from a fixed anchor and return a

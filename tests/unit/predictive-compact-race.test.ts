@@ -1,14 +1,10 @@
 // ABOUTME: Regression guards for #1749 — predictive compaction race where
 // ABOUTME: sendPrompt dispatches on overloaded serving session before standby is ready.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
-const agentStoreSource = readFileSync(
-  resolve("src/stores/agent.store.ts"),
-  "utf-8",
-);
+const agentStoreSource = readSource("src/stores/agent.store.ts");
 
 describe("#1749 — sendPrompt enqueues instead of dispatching when predictive compact is in flight", () => {
   it("guard fires when predictiveCompactInFlight=true, no standby yet, and usage >= autoCompactThreshold", () => {

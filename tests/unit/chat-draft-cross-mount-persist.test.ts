@@ -1,18 +1,11 @@
 // ABOUTME: Source-level regression test for #1996 — Seren Chat drafts must
 // ABOUTME: survive cross-mount thread switches (pane keyed by thread:${id}).
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
-const chatContentSource = readFileSync(
-  resolve("src/components/chat/ChatContent.tsx"),
-  "utf-8",
-);
-const threadContentSource = readFileSync(
-  resolve("src/components/layout/ThreadContent.tsx"),
-  "utf-8",
-);
+const chatContentSource = readSource("src/components/chat/ChatContent.tsx");
+const threadContentSource = readSource("src/components/layout/ThreadContent.tsx");
 
 function indexOrThrow(source: string, anchor: string): number {
   const i = source.indexOf(anchor);

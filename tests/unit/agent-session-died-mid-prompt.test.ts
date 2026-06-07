@@ -1,31 +1,15 @@
 // ABOUTME: Source-level regression tests for #1805/#1952 — mid-prompt session death recovery.
 // ABOUTME: Ensures runtime-emitted death strings recover silently with restored context.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
-const agentStoreSource = readFileSync(
-  resolve("src/stores/agent.store.ts"),
-  "utf-8",
-);
-const agentChatSource = readFileSync(
-  resolve("src/components/chat/AgentChat.tsx"),
-  "utf-8",
-);
+const agentStoreSource = readSource("src/stores/agent.store.ts");
+const agentChatSource = readSource("src/components/chat/AgentChat.tsx");
 
-const claudeRuntimeSource = readFileSync(
-  resolve("bin/browser-local/claude-runtime.mjs"),
-  "utf-8",
-);
-const codexRuntimeSource = readFileSync(
-  resolve("bin/browser-local/providers.mjs"),
-  "utf-8",
-);
-const geminiRuntimeSource = readFileSync(
-  resolve("bin/browser-local/gemini-runtime.mjs"),
-  "utf-8",
-);
+const claudeRuntimeSource = readSource("bin/browser-local/claude-runtime.mjs");
+const codexRuntimeSource = readSource("bin/browser-local/providers.mjs");
+const geminiRuntimeSource = readSource("bin/browser-local/gemini-runtime.mjs");
 
 describe("#1805 — death-string catalog matches what runtimes emit", () => {
   // The error event handler's session-death detection MUST stay in sync with

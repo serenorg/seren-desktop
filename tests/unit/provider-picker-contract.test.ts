@@ -1,22 +1,12 @@
 // ABOUTME: Static contract tests for the thread provider/model pickers.
 // ABOUTME: Pins the browse-vs-commit split that is hard to exercise without UI.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
-const modelSelectorSource = readFileSync(
-  resolve("src/components/chat/ModelSelector.tsx"),
-  "utf-8",
-);
-const threadProviderSwitcherSource = readFileSync(
-  resolve("src/components/chat/ThreadProviderSwitcher.tsx"),
-  "utf-8",
-);
-const chatContentSource = readFileSync(
-  resolve("src/components/chat/ChatContent.tsx"),
-  "utf-8",
-);
+const modelSelectorSource = readSource("src/components/chat/ModelSelector.tsx");
+const threadProviderSwitcherSource = readSource("src/components/chat/ThreadProviderSwitcher.tsx");
+const chatContentSource = readSource("src/components/chat/ChatContent.tsx");
 
 function sourceBetween(source: string, startNeedle: string, endNeedle: string) {
   const start = source.indexOf(startNeedle);

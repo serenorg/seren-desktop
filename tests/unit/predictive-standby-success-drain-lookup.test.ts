@@ -1,14 +1,10 @@
 // ABOUTME: Critical guard for #1772 — standby-success drain in promptComplete must
 // ABOUTME: pivot via standbySessionId backref, not conversationId (which never matches).
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
-const agentStoreSource = readFileSync(
-  resolve("src/stores/agent.store.ts"),
-  "utf-8",
-);
+const agentStoreSource = readSource("src/stores/agent.store.ts");
 
 describe("#1772 — standby-success drain looks up serving via standbySessionId", () => {
   it("standby branch of promptComplete pivots through standbySessionId, not conversationId", () => {

@@ -47,6 +47,10 @@ export function computeSha512(absPath) {
   return hash.digest("hex");
 }
 
+function packageRelativePath(root, absPath) {
+  return path.relative(root, absPath).split(path.sep).join("/");
+}
+
 /**
  * Run `npm pack <pkg>@<version> --pack-destination=<dir>`. Returns the
  * absolute path of the downloaded tarball. npm pack does NOT execute
@@ -128,7 +132,7 @@ export function walkFiles(root) {
       if (entry.isDirectory()) {
         visit(abs);
       } else if (entry.isFile()) {
-        out.push(path.relative(root, abs));
+        out.push(packageRelativePath(root, abs));
       }
     }
   }

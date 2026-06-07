@@ -1,14 +1,10 @@
 // ABOUTME: Regression tests for agent skill context priming and token dedupe.
 // ABOUTME: Guards the source-level contract without constructing the large agent store.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
-const agentStoreSource = readFileSync(
-  join(process.cwd(), "src/stores/agent.store.ts"),
-  "utf8",
-);
+const agentStoreSource = readSource("src/stores/agent.store.ts");
 
 function methodBody(name: string): string {
   const start = agentStoreSource.indexOf(`${name}(`);
