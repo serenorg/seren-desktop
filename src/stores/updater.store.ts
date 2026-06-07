@@ -3,6 +3,7 @@ import { message } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import { createStore } from "solid-js/store";
+import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import { telemetry } from "@/services/telemetry";
 
@@ -64,7 +65,7 @@ async function initUpdater(): Promise<void> {
   }
 
   if (isDevRuntime()) {
-    console.info("[Updater] Dev build — skipping update check");
+    verboseRuntimeConsole.debug("[Updater] Dev build — skipping update check");
     setState({ status: "unsupported" });
     return;
   }
@@ -102,11 +103,14 @@ async function checkForUpdates(_manual = false): Promise<void> {
   setState({ status: "checking", error: null });
 
   try {
-    console.info("[Updater] Checking for updates...");
+    verboseRuntimeConsole.debug("[Updater] Checking for updates...");
     const update = await check();
 
     if (update) {
-      console.info("[Updater] Update available:", update.version);
+      verboseRuntimeConsole.debug(
+        "[Updater] Update available:",
+        update.version,
+      );
       pendingUpdate = update;
       setState({
         status: "available",
@@ -115,7 +119,7 @@ async function checkForUpdates(_manual = false): Promise<void> {
         error: null,
       });
     } else {
-      console.info("[Updater] No update available");
+      verboseRuntimeConsole.debug("[Updater] No update available");
       pendingUpdate = null;
       setState({
         status: "up_to_date",
@@ -134,9 +138,11 @@ async function checkForUpdates(_manual = false): Promise<void> {
 
 async function clearBrowsingDataBeforeRestart(): Promise<void> {
   try {
-    console.info("[Updater] Clearing webview browsing data before restart...");
+    verboseRuntimeConsole.debug(
+      "[Updater] Clearing webview browsing data before restart...",
+    );
     await getCurrentWebview().clearAllBrowsingData();
-    console.info("[Updater] Webview browsing data cleared");
+    verboseRuntimeConsole.debug("[Updater] Webview browsing data cleared");
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     console.warn(
@@ -183,7 +189,7 @@ async function installAvailableUpdate(): Promise<void> {
     return;
   }
 
-  console.info("[Updater] Starting download and install...");
+  verboseRuntimeConsole.debug("[Updater] Starting download and install...");
   let downloaded = 0;
   setState({
     status: "downloading",
@@ -198,7 +204,9 @@ async function installAvailableUpdate(): Promise<void> {
       if (progress.event === "Started") {
         const total = progress.data.contentLength ?? 0;
         if (total > 0) {
-          console.info(`[Updater] Download started, size: ${total} bytes`);
+          verboseRuntimeConsole.debug(
+            `[Updater] Download started, size: ${total} bytes`,
+          );
           setState({ totalBytes: total });
         }
         return;
@@ -214,12 +222,12 @@ async function installAvailableUpdate(): Promise<void> {
         return;
       }
 
-      console.info("[Updater] Download finished, installing...");
+      verboseRuntimeConsole.debug("[Updater] Download finished, installing...");
       setState({ status: "installing", progressPercent: 100 });
     });
-    console.info("[Updater] Install complete");
+    verboseRuntimeConsole.debug("[Updater] Install complete");
     await clearBrowsingDataBeforeRestart();
-    console.info("[Updater] Relaunching after install...");
+    verboseRuntimeConsole.debug("[Updater] Relaunching after install...");
     await relaunch();
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));

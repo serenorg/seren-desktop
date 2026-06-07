@@ -459,7 +459,7 @@ pub async fn mcp_connect(
     // so we cannot rely on the OS to find commands that live in /opt/homebrew/bin etc.
     let resolved_command = resolve_command_in_embedded_path(&command);
 
-    log::info!(
+    log::debug!(
         "[MCP:{}] Connecting: command={:?} (resolved={:?}), args={:?}",
         server_name,
         command,
@@ -596,7 +596,7 @@ pub async fn mcp_connect(
     writeln!(process.stdin, "{}", notification).map_err(|e| e.to_string())?;
     process.stdin.flush().map_err(|e| e.to_string())?;
 
-    log::info!(
+    log::debug!(
         "[MCP:{}] Connected successfully (server: {} v{})",
         server_name,
         init_result.server_info.name,

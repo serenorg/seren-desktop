@@ -4,6 +4,7 @@
 import { createStore } from "solid-js/store";
 import { addSerenDbServer, removeSerenDbServer } from "@/lib/mcp/serendb";
 import { runtimeHasCapability } from "@/lib/runtime";
+import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import {
   clearSerenApiKey,
   getSerenApiKey,
@@ -66,15 +67,19 @@ async function ensureApiKey(): Promise<boolean> {
     // Check if we already have a stored API key
     const existingKey = await getSerenApiKey();
     if (existingKey) {
-      console.log("[Auth Store] Using existing stored API key");
+      verboseRuntimeConsole.debug("[Auth Store] Using existing stored API key");
       return true;
     }
 
     // No stored key - create a new one
-    console.log("[Auth Store] No stored API key, creating new one...");
+    verboseRuntimeConsole.debug(
+      "[Auth Store] No stored API key, creating new one...",
+    );
     const apiKey = await createApiKey();
     await storeSerenApiKey(apiKey);
-    console.log("[Auth Store] API key created and stored successfully");
+    verboseRuntimeConsole.debug(
+      "[Auth Store] API key created and stored successfully",
+    );
     return true;
   } catch (error) {
     console.error("[Auth Store] Failed to ensure API key:", error);
@@ -93,21 +98,30 @@ async function initializeMcpInBackground(): Promise<void> {
   }
 
   try {
-    console.log("[Auth Store] Adding Seren MCP server config...");
+    verboseRuntimeConsole.debug(
+      "[Auth Store] Adding Seren MCP server config...",
+    );
     await addSerenDbServer();
 
-    console.log("[Auth Store] Initializing MCP Gateway (background)...");
+    verboseRuntimeConsole.debug(
+      "[Auth Store] Initializing MCP Gateway (background)...",
+    );
     await initializeGateway();
-    console.log("[Auth Store] MCP Gateway initialized successfully");
+    verboseRuntimeConsole.debug(
+      "[Auth Store] MCP Gateway initialized successfully",
+    );
     setState("mcpConnected", true);
 
     // Trigger auto-connect for local MCP servers
     const { initMcpAutoConnect } = await import("@/lib/mcp/auto-connect");
-    console.log(
+    verboseRuntimeConsole.debug(
       "[Auth Store] Triggering MCP auto-connect for local servers...",
     );
     const results = await initMcpAutoConnect();
-    console.log("[Auth Store] MCP auto-connect results:", results);
+    verboseRuntimeConsole.debug(
+      "[Auth Store] MCP auto-connect results:",
+      results,
+    );
   } catch (error) {
     console.error("[Auth Store] Failed to initialize MCP:", error);
     setState("mcpConnected", false);
@@ -277,7 +291,9 @@ export async function initAuthRuntimeBindings(): Promise<void> {
     requestSignInModal();
   });
   await listen("auth:token-refreshed", async () => {
-    console.info("[Auth Store] Token refreshed event from backend");
+    verboseRuntimeConsole.debug(
+      "[Auth Store] Token refreshed event from backend",
+    );
     try {
       await restoreAuthenticatedSession();
     } catch (error) {

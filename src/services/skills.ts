@@ -15,6 +15,7 @@ import {
   updateSkill,
 } from "@/api/seren-skills";
 import { log } from "@/lib/logger";
+import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import {
   computeContentHash,
   getSkillPath,
@@ -472,7 +473,9 @@ async function fetchSerenSkills(skipCache = false): Promise<Skill[]> {
     if (cached) {
       const { timestamp, data } = JSON.parse(cached);
       if (Date.now() - timestamp < INDEX_CACHE_DURATION) {
-        log.info("[Skills] Using cached seren-skills catalog");
+        verboseRuntimeConsole.debug(
+          "[Skills] Using cached seren-skills catalog",
+        );
         return data as Skill[];
       }
     }
@@ -503,7 +506,11 @@ async function fetchSerenSkills(skipCache = false): Promise<Skill[]> {
       }),
     );
   }
-  log.info("[Skills] Fetched", skills.length, "skills from seren-skills");
+  verboseRuntimeConsole.debug(
+    "[Skills] Fetched",
+    skills.length,
+    "skills from seren-skills",
+  );
   return skills;
 }
 

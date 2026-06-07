@@ -1,6 +1,7 @@
 // ABOUTME: Seren MCP Gateway configuration for built-in gateway access.
 // ABOUTME: Manages the builtin server entry that represents the REST-based gateway connection.
 
+import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import {
   addMcpServer,
   mcpSettings,
@@ -46,7 +47,7 @@ export async function addSerenDbServer(): Promise<void> {
     await removeMcpServer(SERENDB_SERVER_NAME);
   }
 
-  console.log("[Seren MCP] Adding builtin server config");
+  verboseRuntimeConsole.debug("[Seren MCP] Adding builtin server config");
   await addMcpServer(serenDbServerConfig);
 }
 

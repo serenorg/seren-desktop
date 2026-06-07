@@ -3,6 +3,7 @@
 
 import { createStore } from "solid-js/store";
 import { PROVIDER_CONFIGS, type ProviderId } from "@/lib/providers/types";
+import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import { type InstalledSkill, parseSkillMd } from "@/lib/skills";
 import { archiveAgentConversation } from "@/lib/tauri-bridge";
 import {
@@ -757,7 +758,7 @@ export const threadStore = {
       const liveSession = Object.values(agentStore.sessions).find(
         (s) => s.conversationId === id,
       );
-      console.log(
+      verboseRuntimeConsole.debug(
         "[Thread] selectThread - looking for session with conversationId:",
         id,
         "found:",

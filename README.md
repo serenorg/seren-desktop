@@ -156,6 +156,18 @@ A **publisher** is anything a skill can call when it needs to do something - a b
 
 ---
 
+## Development
+
+The runtime console is quiet by default so errors and warnings stay easy to find. To inspect normal success-path breadcrumbs during a deep lifecycle investigation, enable verbose runtime console logging in DevTools:
+
+```js
+localStorage.setItem("seren.debug.verboseConsole", "true");
+```
+
+Set the value to `"false"` or remove the key to return to the default error-focused console.
+
+---
+
 ## Links
 
 - [Seren Website](https://serendb.com)

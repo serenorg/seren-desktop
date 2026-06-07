@@ -46,6 +46,7 @@ import {
   mapAgentModelToChat,
 } from "@/lib/rate-limit-fallback";
 import { escapeHtmlWithSkillsAndLinks } from "@/lib/render-markdown";
+import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
   canAcceptSkillDrop,
@@ -186,7 +187,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     const thread = props.threadId
       ? threadStore.threads.find((candidate) => candidate.id === props.threadId)
       : threadStore.activeThread;
-    if (!thread || thread.kind !== "agent") return null;
+    if (thread?.kind !== "agent") return null;
     return thread;
   });
 
@@ -265,7 +266,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     if (slugs.size === 0) return null;
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const message = messages[i];
-      if (!message || message.type !== "user") continue;
+      if (message?.type !== "user") continue;
       const match = message.content.match(/^\/([a-zA-Z][a-zA-Z0-9:_-]*)/);
       if (!match) continue;
       const slug = match[1];
@@ -552,28 +553,28 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
     try {
       const sessionId = await agentStore.resumeAgentConversation(thread.id);
-      console.log("[AgentChat] Session resumed:", sessionId);
+      verboseRuntimeConsole.debug("[AgentChat] Session resumed:", sessionId);
     } catch (error) {
       console.error("[AgentChat] Failed to resume session:", error);
     }
   };
 
   const handleAttachImages = async () => {
-    console.log(
+    verboseRuntimeConsole.debug(
       "[AgentChat] handleAttachImages called, hasSession:",
       hasSession(),
     );
 
     // Prevent multiple concurrent attach operations
     if (isAttaching()) {
-      console.log("[AgentChat] Already attaching, skipping");
+      verboseRuntimeConsole.debug("[AgentChat] Already attaching, skipping");
       return;
     }
 
     setIsAttaching(true);
     try {
       const files = await pickAndReadAttachments();
-      console.log(
+      verboseRuntimeConsole.debug(
         "[AgentChat] pickAndReadAttachments returned:",
         files.length,
         "files",
@@ -582,7 +583,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       if (files.length > 0) {
         setAttachedImages((prev) => {
           const newAttachments = [...prev, ...files];
-          console.log(
+          verboseRuntimeConsole.debug(
             "[AgentChat] Updating attachedImages, prev:",
             prev.length,
             "adding:",
@@ -593,12 +594,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           return newAttachments;
         });
         // Log the current state after the update
-        console.log(
+        verboseRuntimeConsole.debug(
           "[AgentChat] attachedImages after update:",
           attachedImages().length,
         );
       } else {
-        console.log("[AgentChat] No files selected or dialog cancelled");
+        verboseRuntimeConsole.debug(
+          "[AgentChat] No files selected or dialog cancelled",
+        );
       }
     } catch (error) {
       console.error("[AgentChat] handleAttachImages error:", error);
@@ -734,7 +737,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const sendMessage = async () => {
     const trimmed = input().trim();
     const images = attachedImages();
-    console.log("[AgentChat] sendMessage called:", {
+    verboseRuntimeConsole.debug("[AgentChat] sendMessage called:", {
       hasText: !!trimmed,
       attachments: images.length,
       mimeTypes: images.map((a) => a.mimeType),
@@ -774,7 +777,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         // bail before dispatching the prompt. Without this, the async spawn
         // resolves after Cancel and the user's prompt sneaks through.
         if (!agentStore.isTurnInFlight(thread.id)) {
-          console.info("[AgentChat] cold-start cancelled during spawn");
+          verboseRuntimeConsole.debug(
+            "[AgentChat] cold-start cancelled during spawn",
+          );
           if (sid) await agentStore.terminateSession(sid);
           return;
         }
@@ -822,7 +827,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       const skillMatch = await resolveSkillCommand(trimmed);
       if (skillMatch) {
         const { skill, args } = skillMatch;
-        console.log("[AgentChat] Skill invocation:", skill.slug, "args:", args);
+        verboseRuntimeConsole.debug(
+          "[AgentChat] Skill invocation:",
+          skill.slug,
+          "args:",
+          args,
+        );
 
         setInput("");
         setHistoryIndex(-1);
@@ -875,7 +885,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       setInput("");
       setHistoryIndex(-1);
       setSavedInput("");
-      console.log("[AgentChat] Message queued:", trimmed);
+      verboseRuntimeConsole.debug("[AgentChat] Message queued:", trimmed);
       return;
     }
 
@@ -891,7 +901,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     // Split attachments: images go as agent context blocks; docreader files get extracted to text
     const imageAttachments = images.filter((a) => !isDocreaderMime(a.mimeType));
     const docAttachments = images.filter((a) => isDocreaderMime(a.mimeType));
-    console.log("[AgentChat] Attachment split:", {
+    verboseRuntimeConsole.debug("[AgentChat] Attachment split:", {
       imageAttachments: imageAttachments.length,
       docAttachments: docAttachments.map((d) => d.name),
     });
@@ -901,7 +911,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     if (docAttachments.length > 0) {
       setIsProcessingDocs(true);
       setCommandStatus("Processing documents…");
-      console.log(
+      verboseRuntimeConsole.debug(
         "[AgentChat] Starting DocReader processing for",
         docAttachments.length,
         "documents",
@@ -909,7 +919,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       try {
         const docBlocks = await Promise.all(
           docAttachments.map(async (doc: Attachment) => {
-            console.log(
+            verboseRuntimeConsole.debug(
               "[AgentChat] Processing document:",
               doc.name,
               doc.mimeType,
@@ -917,7 +927,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               doc.base64.length,
             );
             const text = await readDocument(doc);
-            console.log(
+            verboseRuntimeConsole.debug(
               "[AgentChat] DocReader success for",
               doc.name,
               "extracted",
@@ -939,7 +949,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       }
       setCommandStatus(null);
       setIsProcessingDocs(false);
-      console.log(
+      verboseRuntimeConsole.debug(
         "[AgentChat] DocReader complete, prompt length:",
         promptWithDocs.length,
       );
@@ -975,13 +985,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     // and the sendPrompt dispatch, or during an awaited skill/doc load.
     // Honor the cancel before dispatching so the prompt never leaks through.
     if (thread && !agentStore.isTurnInFlight(thread.id)) {
-      console.info(
+      verboseRuntimeConsole.debug(
         "[AgentChat] sendMessage: cancel detected before dispatch — skipping sendPrompt",
       );
       return;
     }
 
-    console.log(
+    verboseRuntimeConsole.debug(
       "[AgentChat] Sending prompt to agent runtime, context blocks:",
       context?.length ?? 0,
     );
@@ -1046,7 +1056,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const handleRunSkillEvent = (event: Event) => {
     const detail = (event as CustomEvent<RunSkillEventDetail>).detail;
-    if (!detail || detail.kind !== "agent") return;
+    if (detail?.kind !== "agent") return;
     const thread = activeAgentThread();
     if (!thread || thread.id !== detail.threadId) return;
 

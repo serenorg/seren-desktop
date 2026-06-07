@@ -113,7 +113,7 @@ pub fn checkpoint_wal(conn: &Connection, mode: WalCheckpointMode) -> Result<()> 
 pub fn checkpoint_managed_db(app: &AppHandle, reason: &str) {
     if let Some(pool) = app.try_state::<DbPool>() {
         match pool.checkpoint_wal(WalCheckpointMode::Truncate) {
-            Ok(()) => log::info!("[Database] WAL checkpoint(TRUNCATE) completed: {}", reason),
+            Ok(()) => log::debug!("[Database] WAL checkpoint(TRUNCATE) completed: {}", reason),
             Err(err) => log::warn!(
                 "[Database] WAL checkpoint(TRUNCATE) failed during {}: {}",
                 reason,
@@ -165,7 +165,7 @@ pub fn save_message_record(conn: &Connection, message: &PersistedMessage) -> Res
         return Err(err);
     }
 
-    log::info!(
+    log::debug!(
         "[Database] Persisted message {} for conversation {}",
         message.id,
         message.conversation_id
