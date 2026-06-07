@@ -1,8 +1,10 @@
 // ABOUTME: macOS CoreAudio process-tap capture for the system ("Them") meeting stream.
 // ABOUTME: Taps all system output via an aggregate device and normalizes to 16 kHz mono PCM.
 
+use std::ffi::CStr;
 use std::ffi::c_void;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use core_foundation::array::CFArray;
@@ -110,12 +112,6 @@ type AudioDeviceIOProcID = *mut c_void;
 
 #[link(name = "CoreAudio", kind = "framework")]
 unsafe extern "C" {
-    fn AudioHardwareCreateProcessTap(
-        in_description: *mut AnyObject,
-        out_tap_id: *mut AudioObjectID,
-    ) -> OSStatus;
-    fn AudioHardwareDestroyProcessTap(in_tap_id: AudioObjectID) -> OSStatus;
-
     fn AudioHardwareCreateAggregateDevice(
         in_description: CFDictionaryRef,
         out_device_id: *mut AudioObjectID,
@@ -150,6 +146,42 @@ unsafe extern "C" {
 // core-foundation 0.10's CFDictionaryRef alias lives in its sys crate; mirror the
 // pointer type CoreAudio expects so our `extern` block stays self-contained.
 type CFDictionaryRef = *const c_void;
+
+// `AudioHardwareCreate/DestroyProcessTap` are macOS 14.2+ symbols. The app deploys
+// to macOS 10.13, so strong-linking them would break launch on older systems.
+// Resolve them lazily via `dlsym` instead and report `Unsupported` when absent.
+type CreateProcessTapFn = unsafe extern "C" fn(*mut AnyObject, *mut AudioObjectID) -> OSStatus;
+type DestroyProcessTapFn = unsafe extern "C" fn(AudioObjectID) -> OSStatus;
+
+fn create_process_tap() -> Option<CreateProcessTapFn> {
+    static ADDR: OnceLock<Option<usize>> = OnceLock::new();
+    (*ADDR.get_or_init(|| dlsym_addr(c"AudioHardwareCreateProcessTap")))
+        // SAFETY: the resolved address is the real CoreAudio function with this ABI.
+        .map(|addr| unsafe { std::mem::transmute::<usize, CreateProcessTapFn>(addr) })
+}
+
+fn destroy_process_tap() -> Option<DestroyProcessTapFn> {
+    static ADDR: OnceLock<Option<usize>> = OnceLock::new();
+    (*ADDR.get_or_init(|| dlsym_addr(c"AudioHardwareDestroyProcessTap")))
+        // SAFETY: the resolved address is the real CoreAudio function with this ABI.
+        .map(|addr| unsafe { std::mem::transmute::<usize, DestroyProcessTapFn>(addr) })
+}
+
+/// Resolve a symbol from the global namespace; `None` if the running OS lacks it.
+fn dlsym_addr(name: &CStr) -> Option<usize> {
+    // SAFETY: RTLD_DEFAULT search with a valid C string; returns null when absent.
+    let ptr = unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) };
+    if ptr.is_null() { None } else { Some(ptr as usize) }
+}
+
+/// Destroy a process tap when the entry point is available — which it always is
+/// once a tap was created (same process, same dlsym result).
+fn destroy_tap(tap: AudioObjectID) {
+    if let Some(destroy) = destroy_process_tap() {
+        // SAFETY: `tap` came from AudioHardwareCreateProcessTap; destroyed once.
+        unsafe { destroy(tap) };
+    }
+}
 
 // === Capture source ===
 
@@ -226,20 +258,25 @@ impl Drop for CoreAudioTapSource {
 
 /// Create the tap + aggregate device, register the IOProc, and start IO.
 fn start_capture(sink: FrameSender) -> Result<CaptureState, CaptureError> {
+    // Resolve the 14.2+ tap entry points before touching the API; bail cleanly on
+    // older macOS so the app stays mic-only instead of crashing.
+    let create_tap = create_process_tap().ok_or_else(|| {
+        CaptureError::Unsupported(
+            "system-audio capture needs macOS 14.2+ (process-tap API unavailable)".to_string(),
+        )
+    })?;
+
     let description = build_tap_description();
     let tap_uuid = tap_uuid_string(&description);
 
     // SAFETY: `description` is a valid CATapDescription; out-param is a live local.
     let mut tap: AudioObjectID = 0;
     let status = unsafe {
-        AudioHardwareCreateProcessTap(
-            Retained::as_ptr(&description) as *mut AnyObject,
-            &mut tap,
-        )
+        create_tap(Retained::as_ptr(&description) as *mut AnyObject, &mut tap)
     };
     if status != NO_ERR {
         return Err(CaptureError::Unsupported(format!(
-            "AudioHardwareCreateProcessTap failed (OSStatus {status}); needs macOS 14.2+ and audio-capture permission"
+            "AudioHardwareCreateProcessTap failed (OSStatus {status}); check audio-capture permission"
         )));
     }
 
@@ -255,8 +292,7 @@ fn start_capture(sink: FrameSender) -> Result<CaptureState, CaptureError> {
         )
     };
     if status != NO_ERR {
-        // SAFETY: `tap` was created above; destroy it before returning.
-        unsafe { AudioHardwareDestroyProcessTap(tap) };
+        destroy_tap(tap);
         return Err(CaptureError::Device(format!(
             "AudioHardwareCreateAggregateDevice failed (OSStatus {status})"
         )));
@@ -284,11 +320,9 @@ fn start_capture(sink: FrameSender) -> Result<CaptureState, CaptureError> {
         )
     };
     if status != NO_ERR || io_proc_id.is_null() {
-        // SAFETY: both objects were created above and are destroyed once.
-        unsafe {
-            AudioHardwareDestroyAggregateDevice(aggregate_device);
-            AudioHardwareDestroyProcessTap(tap);
-        }
+        // SAFETY: the aggregate device was created above and is destroyed once.
+        unsafe { AudioHardwareDestroyAggregateDevice(aggregate_device) };
+        destroy_tap(tap);
         return Err(CaptureError::Device(format!(
             "AudioDeviceCreateIOProcID failed (OSStatus {status})"
         )));
@@ -301,8 +335,8 @@ fn start_capture(sink: FrameSender) -> Result<CaptureState, CaptureError> {
         unsafe {
             AudioDeviceDestroyIOProcID(aggregate_device, io_proc_id);
             AudioHardwareDestroyAggregateDevice(aggregate_device);
-            AudioHardwareDestroyProcessTap(tap);
         }
+        destroy_tap(tap);
         return Err(CaptureError::Device(format!(
             "AudioDeviceStart failed (OSStatus {status})"
         )));
@@ -326,8 +360,8 @@ fn teardown(state: CaptureState) {
         AudioDeviceStop(state.aggregate_device, state.io_proc_id);
         AudioDeviceDestroyIOProcID(state.aggregate_device, state.io_proc_id);
         AudioHardwareDestroyAggregateDevice(state.aggregate_device);
-        AudioHardwareDestroyProcessTap(state.tap);
     }
+    destroy_tap(state.tap);
     drop(state.context);
 }
 
