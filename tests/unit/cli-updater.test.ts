@@ -93,10 +93,11 @@ describe("backgroundUpdateCli TTL gate", () => {
     const state = {
       "lastUpdateCheck:codex": Date.now() - (UPDATE_CHECK_TTL_MS + 1),
     };
-    // No `onUpdated` wired and the binary path does not exist, so
-    // runInstalledVersion will return null and we record a "up_to_date"
-    // skip once npm view also fails (offline / no package). The important
-    // assertion is that we DIDN'T short-circuit on TTL.
+    let npmViewCalls = 0;
+    // Keep this deterministic/offline-safe. The old test used a fake npm
+    // package and waited for `npm view` to fail quickly; on some machines that
+    // hangs until Vitest's 5s timeout. The important assertion is that an old
+    // TTL reaches the registry lookup path instead of short-circuiting.
     const result = await backgroundUpdateCli({
       label: "Codex",
       bareCommand: "codex",
@@ -104,8 +105,19 @@ describe("backgroundUpdateCli TTL gate", () => {
       packageName: "@seren-test/definitely-not-a-real-package-xyz",
       state,
       now: Date.now(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "1.0.0",
+        runNpmView: async () => {
+          npmViewCalls++;
+          return null;
+        },
+      },
     });
-    expect(result.skipped).not.toBe("ttl");
+    expect(npmViewCalls).toBe(1);
+    expect(result).toMatchObject({
+      outcome: "skipped:network",
+      skipped: "network",
+    });
   });
 
   it("skips when resolver returned the bare command — never creates a shadow install", async () => {
