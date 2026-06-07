@@ -6,6 +6,7 @@ import { untrack } from "solid-js";
 import { createStore } from "solid-js/store";
 import { log } from "@/lib/logger";
 import { queryClient } from "@/lib/query-client";
+import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import {
   filterHostCompatibleCatalog,
   type InstalledSkill,
@@ -108,7 +109,7 @@ function applyAvailableCatalog(all: Skill[]): void {
   const available = filterHostCompatibleCatalog(all);
   const excluded = all.length - available.length;
   setState("available", available);
-  log.info(
+  verboseRuntimeConsole.debug(
     "[SkillsStore] Loaded",
     available.length,
     "available skills",
@@ -793,7 +794,7 @@ export const skillsStore = {
       const installed = all.filter((skill) => isSkillCompatibleWithHost(skill));
       const excluded = all.length - installed.length;
       if (excluded > 0) {
-        log.info(
+        verboseRuntimeConsole.debug(
           "[SkillsStore]",
           excluded,
           "installed skill(s) host-excluded from Desktop",
@@ -806,7 +807,11 @@ export const skillsStore = {
       }
 
       setState("installed", installed);
-      log.info("[SkillsStore] Loaded", installed.length, "installed skills");
+      verboseRuntimeConsole.debug(
+        "[SkillsStore] Loaded",
+        installed.length,
+        "installed skills",
+      );
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load installed skills";

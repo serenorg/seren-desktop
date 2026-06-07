@@ -33,6 +33,7 @@ import {
   selectCompactionWindow,
 } from "@/lib/compaction/window";
 import { runtimeHasCapability } from "@/lib/runtime";
+import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import { estimateTokens } from "@/lib/token-counter";
 import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
@@ -3779,7 +3780,7 @@ export const agentStore = {
    * Set the active session.
    */
   setActiveSession(sessionId: string | null) {
-    console.log(
+    verboseRuntimeConsole.debug(
       "[AgentRuntime] setActiveSession - old:",
       state.activeSessionId,
       "new:",
@@ -4773,7 +4774,7 @@ export const agentStore = {
     forSessionId?: string,
   ) {
     const sessionId = forSessionId ?? state.activeSessionId;
-    console.log("[AgentStore] sendPrompt called:", {
+    verboseRuntimeConsole.debug("[AgentStore] sendPrompt called:", {
       sessionId,
       prompt: prompt.slice(0, 50),
     });
@@ -5020,7 +5021,7 @@ export const agentStore = {
       ...(options?.docNames?.length ? { docNames: options.docNames } : {}),
     };
 
-    console.log(
+    verboseRuntimeConsole.debug(
       "[AgentRuntime] Adding user message to session:",
       sessionId,
       "conversationId:",
@@ -5070,7 +5071,9 @@ export const agentStore = {
       }
     }
 
-    console.log("[AgentStore] Calling providerService.sendPrompt...");
+    verboseRuntimeConsole.debug(
+      "[AgentStore] Calling providerService.sendPrompt...",
+    );
     try {
       const { merged, newSignature } = await this.buildPromptContext(
         sessionId,
@@ -5087,7 +5090,9 @@ export const agentStore = {
       if (newSignature !== null) {
         this.markPromptContextPrimed(sessionId, newSignature);
       }
-      console.log("[AgentStore] sendPrompt completed successfully");
+      verboseRuntimeConsole.debug(
+        "[AgentStore] sendPrompt completed successfully",
+      );
     } catch (error) {
       const agentLabel = agentDisplayName(
         state.sessions[sessionId]?.info.agentType,
@@ -5790,7 +5795,7 @@ export const agentStore = {
             setState("sessions", sessionId, "lastInputTokens", inputTokens);
             const ctxSize =
               state.sessions[sessionId]?.contextWindowSize ?? 200_000;
-            console.log(
+            verboseRuntimeConsole.debug(
               `[AgentStore] Agent usage: ${inputTokens} input tokens`,
               `(${Math.round((inputTokens / ctxSize) * 100)}% of ${ctxSize.toLocaleString()} context)`,
             );
@@ -6941,7 +6946,7 @@ export const agentStore = {
         duration,
         finalOutputValidation,
       };
-      console.log(
+      verboseRuntimeConsole.debug(
         "[AgentRuntime] Adding assistant message to session:",
         sessionId,
         "conversationId:",

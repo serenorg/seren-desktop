@@ -138,7 +138,7 @@ pub async fn refresh_access_token(app: &tauri::AppHandle) -> Result<String, Stri
     store_tokens(app, new_access_token, new_refresh_token)?;
     let _ = app.emit("auth:token-refreshed", ());
 
-    log::info!("[auth] Token refreshed successfully");
+    log::debug!("[auth] Token refreshed successfully");
     Ok(new_access_token.to_string())
 }
 
@@ -175,7 +175,7 @@ where
     }
 
     // 401 — attempt refresh and retry
-    log::info!("[auth] Got 401, attempting token refresh...");
+    log::debug!("[auth] Got 401, attempting token refresh...");
     let new_token = refresh_access_token(app).await?;
 
     build_request(client, &new_token)

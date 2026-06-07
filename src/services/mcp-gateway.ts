@@ -4,6 +4,7 @@
 import { MCP_GATEWAY_URL } from "@/lib/config";
 import { mcpClient } from "@/lib/mcp/client";
 import type { McpTool, McpToolResult } from "@/lib/mcp/types";
+import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import { captureSupportError } from "@/lib/support/hook";
 import { getSerenApiKey } from "@/lib/tauri-bridge";
 
@@ -292,14 +293,18 @@ export async function needsMcpAuth(): Promise<boolean> {
 export async function initializeGateway(): Promise<void> {
   // Return cached data if still valid
   if (isCacheValid() && isConnected) {
-    console.log("[MCP Gateway] Using cached tools (still valid)");
+    verboseRuntimeConsole.debug(
+      "[MCP Gateway] Using cached tools (still valid)",
+    );
     return;
   }
 
   if (loadingPromise) return loadingPromise;
 
   loadingPromise = (async () => {
-    console.log("[MCP Gateway] Initializing via MCP protocol...");
+    verboseRuntimeConsole.debug(
+      "[MCP Gateway] Initializing via MCP protocol...",
+    );
 
     // Get Seren API key (auto-created after OAuth login)
     const apiKey = await getSerenApiKey();
@@ -317,14 +322,16 @@ export async function initializeGateway(): Promise<void> {
     try {
       // Connect to Seren MCP Gateway via HTTP streaming transport
       // The API key is passed as the bearer token
-      console.log(`[MCP Gateway] Connecting to ${MCP_GATEWAY_URL}...`);
+      verboseRuntimeConsole.debug(
+        `[MCP Gateway] Connecting to ${MCP_GATEWAY_URL}...`,
+      );
       await mcpClient.connectHttp(
         SEREN_MCP_SERVER_NAME,
         MCP_GATEWAY_URL,
         apiKey,
       );
       isConnected = true;
-      console.log("[MCP Gateway] Connected successfully");
+      verboseRuntimeConsole.debug("[MCP Gateway] Connected successfully");
 
       // Get the connection and its tools
       const connection = mcpClient.getConnection(SEREN_MCP_SERVER_NAME);
@@ -363,7 +370,7 @@ export async function initializeGateway(): Promise<void> {
             (t) => !existingNames.has(t.tool.name),
           );
           cachedTools = [...cachedTools, ...newTools];
-          console.log(
+          verboseRuntimeConsole.debug(
             `[MCP Gateway] Discovered ${newTools.length} additional publisher tools`,
           );
         }
@@ -374,7 +381,7 @@ export async function initializeGateway(): Promise<void> {
 
       lastFetchedAt = Date.now();
 
-      console.log(
+      verboseRuntimeConsole.debug(
         `[MCP Gateway] Initialized with ${cachedTools.length} tools via MCP protocol`,
       );
     } catch (error) {
