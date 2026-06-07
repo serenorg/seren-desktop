@@ -1,7 +1,7 @@
 // ABOUTME: File system operations for the editor.
 // ABOUTME: Provides commands for reading, writing, and listing files/directories.
 
-use base64::{Engine, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -262,28 +262,39 @@ fn verify_on_disk(path: &Path, expected_bytes: u64) -> Result<(), String> {
 fn cross_process_exists_windows(path: &Path) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     use std::process::Command as StdCommand;
+    use std::thread;
+    use std::time::Duration;
 
     let display = path.display().to_string();
-    let mut cmd = StdCommand::new("cmd");
-    // /D disables AutoRun, /S strips one pair of outer quotes from /C.
-    // CREATE_NO_WINDOW keeps the probe invisible.
-    cmd.creation_flags(0x08000000)
-        .args([
-            "/D",
-            "/S",
-            "/C",
-            // Double-quote the path so spaces and special chars survive.
-            &format!("if exist \"{display}\" (echo FOUND) else (echo MISSING)"),
-        ]);
+    let mut last_stdout = String::new();
 
-    let output = cmd
-        .output()
-        .map_err(|e| format!("cross-process check for '{display}' failed to spawn cmd.exe: {e}"))?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if stdout.contains("FOUND") {
-        return Ok(());
+    for attempt in 0..20 {
+        let mut cmd = StdCommand::new("cmd");
+        // /D disables AutoRun, /S strips one pair of outer quotes from /C.
+        // CREATE_NO_WINDOW keeps the probe invisible.
+        cmd.creation_flags(0x08000000)
+            .arg("/D")
+            .arg("/S")
+            .arg("/C")
+            // cmd.exe does not follow normal argv parsing for /C payloads.
+            .raw_arg(format!(
+                "if exist \"{display}\" (echo FOUND) else (echo MISSING)"
+            ));
+
+        let output = cmd.output().map_err(|e| {
+            format!("cross-process check for '{display}' failed to spawn cmd.exe: {e}")
+        })?;
+        last_stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        if last_stdout.contains("FOUND") {
+            return Ok(());
+        }
+
+        if attempt < 19 {
+            thread::sleep(Duration::from_millis(50));
+        }
     }
-    if stdout.contains("MISSING") {
+
+    if last_stdout.contains("MISSING") {
         return Err(format!(
             "Write to '{display}' self-verified in-process but an \
              independent cmd.exe reports the file is MISSING from disk. \
@@ -295,7 +306,7 @@ fn cross_process_exists_windows(path: &Path) -> Result<(), String> {
     Err(format!(
         "Write to '{display}' post-verification is inconclusive: cmd.exe \
          returned unexpected output {:?}.",
-        stdout.trim()
+        last_stdout.trim()
     ))
 }
 
@@ -363,8 +374,7 @@ mod tests {
         ));
 
         // Missing file — must error with a message naming the path.
-        let err = verify_on_disk(&tmp, 42)
-            .expect_err("missing file must not verify as success");
+        let err = verify_on_disk(&tmp, 42).expect_err("missing file must not verify as success");
         assert!(
             err.contains("post-write stat failed"),
             "missing file err should mention the stat failure, got: {err}"
@@ -378,8 +388,7 @@ mod tests {
         );
 
         // Same file, caller claims 1000 bytes were written. Must error.
-        let err = verify_on_disk(&tmp, 1000)
-            .expect_err("size mismatch must not verify as success");
+        let err = verify_on_disk(&tmp, 1000).expect_err("size mismatch must not verify as success");
         assert!(
             err.contains("on-disk size"),
             "size-mismatch err should mention the disk size, got: {err}"
