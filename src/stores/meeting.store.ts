@@ -9,6 +9,11 @@ import {
 } from "@/lib/audio/meetingCapture";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import {
+  closeCaptureWidget,
+  onWidgetStopRequest,
+  openCaptureWidget,
+} from "@/services/captureWidget";
+import {
   generateMeetingNotes,
   getMeetingTranscriptText,
   getTranscriptSegments,
@@ -52,6 +57,7 @@ let levelTimer: number | null = null;
 
 let transcriptUnlisten: UnlistenFn | null = null;
 let statusUnlisten: UnlistenFn | null = null;
+let widgetStopUnlisten: (() => void) | null = null;
 
 async function loadMeetings(): Promise<void> {
   setMeetingState("isLoading", true);
@@ -134,13 +140,24 @@ async function startMeetingEventListeners(): Promise<void> {
       setMeetingState("activeMeeting", event.payload);
     }
   });
+
+  // The floating widget's Stop button can't run the notes/handoff flow in its
+  // own webview, so it asks the main window to stop the capture it owns.
+  widgetStopUnlisten = await onWidgetStopRequest((meetingId) => {
+    const meeting = meetingState.meetings.find((item) => item.id === meetingId);
+    if (meeting && meeting.status === "capturing") {
+      void stopAndProcess(meeting);
+    }
+  });
 }
 
 function stopMeetingEventListeners(): void {
   transcriptUnlisten?.();
   statusUnlisten?.();
+  widgetStopUnlisten?.();
   transcriptUnlisten = null;
   statusUnlisten = null;
+  widgetStopUnlisten = null;
 }
 
 async function startCapture(meeting: Meeting): Promise<void> {
@@ -159,6 +176,7 @@ async function startCapture(meeting: Meeting): Promise<void> {
   levelTimer = window.setInterval(() => {
     setMeetingState("captureLevel", captureHandle?.level() ?? 0);
   }, 60);
+  void openCaptureWidget(meeting.id);
 }
 
 async function stopCapture(meetingId: string): Promise<void> {
@@ -167,6 +185,7 @@ async function stopCapture(meetingId: string): Promise<void> {
     levelTimer = null;
   }
   setMeetingState("captureLevel", 0);
+  void closeCaptureWidget();
   if (captureHandle) {
     try {
       await captureHandle.stop();
