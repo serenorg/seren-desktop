@@ -16,7 +16,7 @@ use crate::audio::types::{Meeting, MeetingStatus, SegmentStatus, Speaker, Transc
 use crate::orchestrator::types::SkillRef;
 use crate::services::database::DbPool;
 use rusqlite::{Connection, OptionalExtension, Result, params};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 #[tauri::command]
@@ -37,7 +37,9 @@ pub async fn create_meeting(
         now,
     };
 
-    run_db(app, move |conn| insert_meeting(conn, meeting)).await
+    let created = run_db(app.clone(), move |conn| insert_meeting(conn, meeting)).await?;
+    emit_meeting_status(&app, &created);
+    Ok(created)
 }
 
 #[tauri::command]
@@ -57,10 +59,13 @@ pub async fn update_meeting_status(
     status: MeetingStatus,
     ended_at: Option<i64>,
 ) -> Result<(), String> {
-    run_db(app, move |conn| {
+    let lookup = id.clone();
+    run_db(app.clone(), move |conn| {
         update_meeting_status_record(conn, &id, status, ended_at, now_ms())
     })
-    .await
+    .await?;
+    emit_meeting_status_by_id(&app, &lookup).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -70,10 +75,13 @@ pub async fn update_meeting_notes(
     notes_markdown: String,
     notes_struct_json: String,
 ) -> Result<(), String> {
-    run_db(app, move |conn| {
+    let lookup = id.clone();
+    run_db(app.clone(), move |conn| {
         set_meeting_notes_record(conn, &id, &notes_markdown, &notes_struct_json)
     })
-    .await
+    .await?;
+    emit_meeting_status_by_id(&app, &lookup).await;
+    Ok(())
 }
 
 fn set_meeting_notes_record(
@@ -104,7 +112,8 @@ pub async fn set_meeting_routed_skill(
     routed_skill_slug: Option<String>,
     agent_conversation_id: Option<String>,
 ) -> Result<(), String> {
-    run_db(app, move |conn| {
+    let lookup = id.clone();
+    run_db(app.clone(), move |conn| {
         conn.execute(
             "UPDATE meetings
              SET routed_skill_slug = ?1, agent_conversation_id = ?2, updated_at = ?3
@@ -113,7 +122,9 @@ pub async fn set_meeting_routed_skill(
         )?;
         Ok(())
     })
-    .await
+    .await?;
+    emit_meeting_status_by_id(&app, &lookup).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -187,11 +198,14 @@ pub async fn stop_meeting_capture(
 ) -> Result<(), String> {
     registry.stop(&meeting_id).await;
     let ended = now_ms();
+    let lookup = meeting_id.clone();
     let id = meeting_id;
-    run_db(app, move |conn| {
+    run_db(app.clone(), move |conn| {
         update_meeting_status_record(conn, &id, MeetingStatus::Transcribing, Some(ended), ended)
     })
-    .await
+    .await?;
+    emit_meeting_status_by_id(&app, &lookup).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -213,11 +227,13 @@ pub async fn generate_meeting_notes(
     let parsed = generate_notes(&app, model, &transcript, &template_prompt, &vocabulary).await?;
     let struct_json = serde_json::to_string(&parsed.structured).map_err(|err| err.to_string())?;
     let markdown = parsed.markdown.clone();
+    let lookup = meeting_id.clone();
     let id = meeting_id;
-    run_db(app, move |conn| {
+    run_db(app.clone(), move |conn| {
         set_meeting_notes_record(conn, &id, &markdown, &struct_json)
     })
     .await?;
+    emit_meeting_status_by_id(&app, &lookup).await;
     Ok(parsed)
 }
 
@@ -543,6 +559,25 @@ pub(crate) fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+fn emit_meeting_status(app: &AppHandle, meeting: &Meeting) {
+    if let Err(err) = app.emit("meeting://status", meeting) {
+        log::warn!(
+            "[meeting] emit meeting://status failed for {}: {err}",
+            meeting.id
+        );
+    }
+}
+
+async fn emit_meeting_status_by_id(app: &AppHandle, meeting_id: &str) {
+    let id = meeting_id.to_string();
+    let lookup = meeting_id.to_string();
+    match run_db(app.clone(), move |conn| select_meeting(conn, &lookup)).await {
+        Ok(Some(meeting)) => emit_meeting_status(app, &meeting),
+        Ok(None) => log::warn!("[meeting] emit meeting://status skipped, not found: {id}"),
+        Err(err) => log::warn!("[meeting] emit meeting://status select failed for {id}: {err}"),
+    }
 }
 
 #[cfg(test)]
