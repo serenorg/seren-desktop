@@ -263,22 +263,23 @@ pub struct GatewayTranscriber {
 }
 
 impl GatewayTranscriber {
-    /// A plain-text whisper transcriber (dictation).
-    pub fn new(app: AppHandle) -> Self {
+    /// A transcriber for the given [`TranscriptionMode`].
+    pub fn with_mode(app: AppHandle, mode: TranscriptionMode) -> Self {
         Self {
             app,
             client: reqwest::Client::new(),
-            mode: TranscriptionMode::Text,
+            mode,
         }
     }
 
-    /// A diarized transcriber (Meeting Mode).
+    /// A plain-text whisper transcriber (dictation, and the meeting "Me" mic).
+    pub fn new(app: AppHandle) -> Self {
+        Self::with_mode(app, TranscriptionMode::Text)
+    }
+
+    /// A diarized transcriber (the meeting "Them" system-audio stream).
     pub fn new_diarized(app: AppHandle) -> Self {
-        Self {
-            app,
-            client: reqwest::Client::new(),
-            mode: TranscriptionMode::Diarized,
-        }
+        Self::with_mode(app, TranscriptionMode::Diarized)
     }
 }
 
