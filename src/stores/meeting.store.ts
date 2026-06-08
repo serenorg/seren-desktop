@@ -86,6 +86,11 @@ const AUTO_DETECT_POLL_MS = 5_000;
 // so a double-trigger can't launch two mic streams for the same session.
 let isStarting = false;
 
+// Stops in flight, keyed by meeting id. Two stop sources (widget + panel, tray +
+// panel) can fire near-simultaneously and both pass the status check, double-
+// running notes + the agent handoff. This guard makes the second a no-op (#2162).
+const processingMeetings = new Set<string>();
+
 async function loadMeetings(): Promise<void> {
   setMeetingState("isLoading", true);
   setMeetingState("error", null);
@@ -356,41 +361,51 @@ async function resolveTemplatePrompt(
 }
 
 // End capture, generate Tier-1 notes, then hand off to a tagged skill if one is
-// installed. With no meeting skill, it stops at notes (Granola parity).
+// installed. With no meeting skill, it stops at notes (Granola parity). A single
+// in-flight guard per meeting keeps two near-simultaneous stop sources (widget,
+// tray, panel) from double-running notes + the agent handoff (#2162).
 async function stopAndProcess(meeting: Meeting): Promise<void> {
-  await stopCapture(meeting.id);
-  await loadMeetings();
-  if (!isTauriRuntime()) return;
-
-  const templatePrompt = await resolveTemplatePrompt(meeting.templateId);
+  if (processingMeetings.has(meeting.id)) return;
+  processingMeetings.add(meeting.id);
   try {
-    await generateMeetingNotes({
-      meetingId: meeting.id,
-      model: providerStore.resolvedModel(),
-      templatePrompt,
-      vocabulary: settingsStore.get("voiceCustomVocabulary"),
-    });
-  } catch (error) {
-    // Notes failed: the backend left the meeting at `transcribing` (it only
-    // sets notes_ready on success). Mark it failed and stop — don't fall
-    // through to runHandoff and auto-invoke a skill on an empty meeting (#2159).
-    setMeetingState(
-      "error",
-      error instanceof Error ? error.message : "Notes generation failed",
-    );
-    await updateMeetingStatus(meeting.id, "failed", Date.now()).catch(() => {});
+    await stopCapture(meeting.id);
     await loadMeetings();
-    await setActiveMeeting(
-      meetingState.meetings.find((m) => m.id === meeting.id) ?? null,
-    );
-    return;
-  }
-  await loadMeetings();
-  const refreshed =
-    meetingState.meetings.find((m) => m.id === meeting.id) ?? null;
-  await setActiveMeeting(refreshed);
+    if (!isTauriRuntime()) return;
 
-  await runHandoff(meeting);
+    const templatePrompt = await resolveTemplatePrompt(meeting.templateId);
+    try {
+      await generateMeetingNotes({
+        meetingId: meeting.id,
+        model: providerStore.resolvedModel(),
+        templatePrompt,
+        vocabulary: settingsStore.get("voiceCustomVocabulary"),
+      });
+    } catch (error) {
+      // Notes failed: the backend left the meeting at `transcribing` (it only
+      // sets notes_ready on success). Mark it failed and stop — don't fall
+      // through to runHandoff and auto-invoke a skill on an empty meeting (#2159).
+      setMeetingState(
+        "error",
+        error instanceof Error ? error.message : "Notes generation failed",
+      );
+      await updateMeetingStatus(meeting.id, "failed", Date.now()).catch(
+        () => {},
+      );
+      await loadMeetings();
+      await setActiveMeeting(
+        meetingState.meetings.find((m) => m.id === meeting.id) ?? null,
+      );
+      return;
+    }
+    await loadMeetings();
+    const refreshed =
+      meetingState.meetings.find((m) => m.id === meeting.id) ?? null;
+    await setActiveMeeting(refreshed);
+
+    await runHandoff(meeting);
+  } finally {
+    processingMeetings.delete(meeting.id);
+  }
 }
 
 async function runHandoff(meeting: Meeting): Promise<void> {
