@@ -24,6 +24,7 @@ import {
   type Meeting,
   type MeetingTemplate,
   meetingAutodetect,
+  reconcileMeetingSpeakers,
   selectMeetingSkills,
   setMeetingRoutedSkill,
   startMeetingCapture as startBackendCapture,
@@ -75,6 +76,7 @@ let levelTimer: number | null = null;
 
 let transcriptUnlisten: UnlistenFn | null = null;
 let statusUnlisten: UnlistenFn | null = null;
+let segmentsUpdatedUnlisten: UnlistenFn | null = null;
 let widgetStopUnlisten: (() => void) | null = null;
 let trayToggleUnlisten: (() => void) | null = null;
 
@@ -177,6 +179,21 @@ async function startMeetingEventListeners(): Promise<void> {
     }
   });
 
+  // The post-call diarization pass relabeled some segments in place. Reload the
+  // active meeting's segments so the refreshed speaker labels show up live.
+  segmentsUpdatedUnlisten = await listen<{ meetingId: string }>(
+    "meeting://segments-updated",
+    (event) => {
+      const active = meetingState.activeMeeting;
+      if (active?.id !== event.payload.meetingId) return;
+      void getTranscriptSegments(event.payload.meetingId)
+        .then((segments) => setMeetingState("liveSegments", segments))
+        .catch(() => {
+          // Non-fatal: the existing labels stay; a manual refresh will reload.
+        });
+    },
+  );
+
   // The floating widget's Stop button can't run the notes/handoff flow in its
   // own webview, so it asks the main window to stop the capture it owns.
   widgetStopUnlisten = await onWidgetStopRequest((meetingId) => {
@@ -195,10 +212,12 @@ async function startMeetingEventListeners(): Promise<void> {
 function stopMeetingEventListeners(): void {
   transcriptUnlisten?.();
   statusUnlisten?.();
+  segmentsUpdatedUnlisten?.();
   widgetStopUnlisten?.();
   trayToggleUnlisten?.();
   transcriptUnlisten = null;
   statusUnlisten = null;
+  segmentsUpdatedUnlisten = null;
   widgetStopUnlisten = null;
   trayToggleUnlisten = null;
 }
@@ -377,6 +396,12 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
     await stopCapture(meeting.id);
     await loadMeetings();
     if (!isTauriRuntime()) return;
+
+    // Post-call speaker refinement: one diarized pass over the full Them
+    // recording, reconciled onto the live segments for meeting-stable labels.
+    // Fire-and-forget so it never delays notes; the segments-updated event
+    // refreshes the transcript when it lands. Best-effort on the backend.
+    void reconcileMeetingSpeakers(meeting.id).catch(() => {});
 
     const templatePrompt = await resolveTemplatePrompt(meeting.templateId);
     try {

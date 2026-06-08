@@ -283,6 +283,59 @@ impl GatewayTranscriber {
     }
 }
 
+/// POST one already-built envelope body to the Whisper publisher and return the
+/// unwrapped publisher body. Shared by the per-chunk live transcriber and the
+/// post-call full-recording pass so both speak to the Gateway the same way.
+async fn post_transcription(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    body: String,
+) -> Result<serde_json::Value, TranscribeError> {
+    let url = format!(
+        "{}/publishers/{}/audio/transcriptions",
+        GATEWAY_BASE_URL, WHISPER_PUBLISHER
+    );
+
+    let response = crate::auth::authenticated_request(app, client, move |client, token| {
+        client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .bearer_auth(token)
+            .body(body.clone())
+    })
+    .await
+    .map_err(TranscribeError::Transport)?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        return Err(TranscribeError::Transport(format!(
+            "whisper http {status}: {detail}"
+        )));
+    }
+
+    let value: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|err| TranscribeError::Transport(err.to_string()))?;
+
+    if let Some(status) = publisher_status(&value) {
+        if status != 200 {
+            let body = unwrap_publisher_body(&value);
+            let message = body
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("upstream error");
+            return Err(TranscribeError::Transport(format!(
+                "whisper upstream {status}: {message}"
+            )));
+        }
+    }
+
+    Ok(unwrap_publisher_body(&value).clone())
+}
+
 #[async_trait]
 impl ChunkTranscriber for GatewayTranscriber {
     async fn transcribe(&self, chunk: &Chunk) -> Result<Vec<DiarizedSegment>, TranscribeError> {
@@ -291,53 +344,76 @@ impl ChunkTranscriber for GatewayTranscriber {
             TranscriptionMode::Diarized => build_diarized_envelope(&wav).to_string(),
             TranscriptionMode::Text => build_whisper_envelope(&wav).to_string(),
         };
-        let url = format!(
-            "{}/publishers/{}/audio/transcriptions",
-            GATEWAY_BASE_URL, WHISPER_PUBLISHER
-        );
 
-        let response =
-            crate::auth::authenticated_request(&self.app, &self.client, move |client, token| {
-                client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .bearer_auth(token)
-                    .body(body.clone())
-            })
-            .await
-            .map_err(TranscribeError::Transport)?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let detail = response.text().await.unwrap_or_default();
-            return Err(TranscribeError::Transport(format!(
-                "whisper http {status}: {detail}"
-            )));
-        }
-
-        let value: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|err| TranscribeError::Transport(err.to_string()))?;
-
-        if let Some(status) = publisher_status(&value) {
-            if status != 200 {
-                let body = unwrap_publisher_body(&value);
-                let message = body
-                    .get("error")
-                    .and_then(|error| error.get("message"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("upstream error");
-                return Err(TranscribeError::Transport(format!(
-                    "whisper upstream {status}: {message}"
-                )));
-            }
-        }
-
-        let body = unwrap_publisher_body(&value);
+        let body = post_transcription(&self.app, &self.client, body).await?;
         let chunk_len_ms = (chunk.end_ms as i64 - chunk.start_ms as i64).max(0);
-        parse_diarized_body(body, chunk_len_ms)
+        parse_diarized_body(&body, chunk_len_ms)
     }
+}
+
+/// OpenAI's transcription upload cap is ~25 MB. 16 kHz mono PCM16 is 32 KB/s, so
+/// a WAV stays under ~24 MB up to ~12.5 minutes. We split the full recording into
+/// the fewest segments at or under [`MAX_SPLIT_SAMPLES`] so each upload fits, then
+/// offset and concatenate the returned segments (see [`split_offsets`]).
+///
+/// 16 kHz * 60 s * 12 min = 11_520_000 samples (~23 MB WAV) — a safe margin
+/// below the 25 MB cap that leaves room for the 44-byte header and rounding.
+const MAX_SPLIT_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 60 * 12;
+
+/// Compute split boundaries over `total_samples` so each piece is at most
+/// `max_samples`. Returns `(start_sample, len_samples, cumulative_start_ms)` per
+/// piece, where `cumulative_start_ms` is the offset to add to each returned
+/// segment's timestamps so they line up against the original recording.
+///
+/// Labels reset across these few splits (each is an independent diarized call) —
+/// acceptable because splitting only happens for very long recordings, and the
+/// reconcile pass matches by time overlap, not by label identity.
+fn split_offsets(total_samples: usize, max_samples: usize) -> Vec<(usize, usize, i64)> {
+    if total_samples == 0 {
+        return Vec::new();
+    }
+    let max = max_samples.max(1);
+    let mut pieces = Vec::new();
+    let mut start = 0usize;
+    while start < total_samples {
+        let len = max.min(total_samples - start);
+        // ms = sample_index / sample_rate * 1000, integer-floored.
+        let cumulative_start_ms = (start as i64 * 1000) / TARGET_SAMPLE_RATE as i64;
+        pieces.push((start, len, cumulative_start_ms));
+        start += len;
+    }
+    pieces
+}
+
+/// Run ONE diarized pass over a full meeting recording and return its segments
+/// with timestamps relative to the start of the recording.
+///
+/// Stable speaker labels come from diarizing the WHOLE recording in one call (a
+/// fresh per-chunk pass resets labels every chunk — that is what #2127 hit). When
+/// the recording exceeds the OpenAI upload cap we fall back to the fewest splits
+/// and offset each piece's timestamps; labels reset across those splits, which is
+/// why reconcile matches by time, not by raw label.
+pub async fn transcribe_full_recording(
+    app: &AppHandle,
+    pcm: &[i16],
+) -> Result<Vec<DiarizedSegment>, TranscribeError> {
+    let client = reqwest::Client::new();
+    let pieces = split_offsets(pcm.len(), MAX_SPLIT_SAMPLES);
+    let mut all = Vec::new();
+    for (start, len, offset_ms) in pieces {
+        let slice = &pcm[start..start + len];
+        let wav = pcm16_to_wav(slice, TARGET_SAMPLE_RATE);
+        let body = build_diarized_envelope(&wav).to_string();
+        let unwrapped = post_transcription(app, &client, body).await?;
+        let piece_len_ms = (len as i64 * 1000) / TARGET_SAMPLE_RATE as i64;
+        let segments = parse_diarized_body(&unwrapped, piece_len_ms)?;
+        for mut segment in segments {
+            segment.start_ms += offset_ms;
+            segment.end_ms += offset_ms;
+            all.push(segment);
+        }
+    }
+    Ok(all)
 }
 
 #[cfg(test)]
@@ -557,5 +633,45 @@ mod tests {
             parse_diarized_body(&body, 1_000).unwrap_err(),
             TranscribeError::Empty
         );
+    }
+
+    #[test]
+    fn split_offsets_keeps_one_piece_under_the_cap() {
+        // A recording that fits in one upload is a single piece at offset 0.
+        let pieces = split_offsets(16_000 * 5, 16_000 * 12 * 60);
+        assert_eq!(pieces, vec![(0, 16_000 * 5, 0)]);
+    }
+
+    #[test]
+    fn split_offsets_partitions_with_cumulative_ms_offsets() {
+        // 25s of 16kHz samples split at a 10s cap -> 3 pieces (10s, 10s, 5s) with
+        // cumulative-start offsets of 0ms, 10_000ms, 20_000ms.
+        let max = 16_000 * 10;
+        let total = 16_000 * 25;
+        let pieces = split_offsets(total, max);
+        assert_eq!(
+            pieces,
+            vec![
+                (0, 16_000 * 10, 0),
+                (16_000 * 10, 16_000 * 10, 10_000),
+                (16_000 * 20, 16_000 * 5, 20_000),
+            ]
+        );
+        // The pieces fully cover the recording with no gaps or overlaps.
+        let covered: usize = pieces.iter().map(|(_, len, _)| len).sum();
+        assert_eq!(covered, total);
+    }
+
+    #[test]
+    fn split_offsets_handles_an_exact_multiple_of_the_cap() {
+        // Exactly two caps' worth -> two full pieces, no trailing empty piece.
+        let max = 16_000 * 10;
+        let pieces = split_offsets(max * 2, max);
+        assert_eq!(pieces, vec![(0, max, 0), (max, max, 10_000)]);
+    }
+
+    #[test]
+    fn split_offsets_is_empty_for_empty_input() {
+        assert!(split_offsets(0, 16_000 * 12 * 60).is_empty());
     }
 }

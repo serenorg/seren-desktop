@@ -9,9 +9,11 @@ use crate::audio::llm::{CompletionRequest, complete};
 use crate::audio::merge::merge_segments;
 use crate::audio::notes::{ParsedNotes, generate_notes};
 use crate::audio::pipeline::CaptureRegistry;
+use crate::audio::reconcile::reconcile_speaker_labels;
 use crate::audio::templates::{BUILT_IN_MEETING_TEMPLATES, MeetingTemplate};
 use crate::audio::transcribe::{
     GatewayTranscriber, RetryConfig, TranscribeError, transcribe_chunk_with_retry,
+    transcribe_full_recording,
 };
 use crate::audio::types::{
     Meeting, MeetingStatus, SegmentStatus, Speaker, SpeakerSource, TranscriptSegment,
@@ -218,6 +220,77 @@ pub async fn stop_meeting_capture(
     .await?;
     emit_meeting_status_by_id(&app, &lookup).await;
     Ok(())
+}
+
+/// Post-call diarization refinement: run ONE diarized pass over the full Them
+/// recording and stamp its meeting-stable speaker labels onto the live Them
+/// segments. The live path diarizes per streaming chunk (#2127), so its labels
+/// reset every chunk; one pass over the whole recording keeps a speaker's label
+/// stable across the meeting. Returns the count of segments relabeled.
+///
+/// Best-effort and additive: absent/short audio, a transcription failure, or no
+/// overlap returns `Ok(0)` and leaves existing labels untouched — it never
+/// corrupts what the live path already produced.
+#[tauri::command]
+pub async fn reconcile_meeting_speakers(
+    app: AppHandle,
+    registry: State<'_, CaptureRegistry>,
+    meeting_id: String,
+) -> Result<usize, String> {
+    // Take (and consume) the buffered Them PCM. Too little audio to be worth a
+    // diarized pass -> nothing to do.
+    let Some(pcm) = registry.take_finished_them_audio(&meeting_id) else {
+        return Ok(0);
+    };
+    // ~30 s of 16 kHz mono. Below this a single short turn gains nothing from a
+    // whole-recording pass; skip the cost.
+    const MIN_RECONCILE_SAMPLES: usize = crate::audio::capture::TARGET_SAMPLE_RATE as usize * 30;
+    if pcm.len() < MIN_RECONCILE_SAMPLES {
+        return Ok(0);
+    }
+
+    let diarized = match transcribe_full_recording(&app, &pcm).await {
+        Ok(segments) => segments,
+        Err(err) => {
+            log::warn!("[meeting] post-call diarization failed for {meeting_id}: {err}");
+            return Ok(0);
+        }
+    };
+    if diarized.is_empty() {
+        return Ok(0);
+    }
+
+    // Reconcile against only the live Them segments — the Me mic is single-speaker
+    // and is never relabeled by this pass.
+    let lookup = meeting_id.clone();
+    let live_them: Vec<TranscriptSegment> =
+        run_db(app.clone(), move |conn| select_transcript_segments(conn, &lookup))
+            .await?
+            .into_iter()
+            .filter(|segment| segment.speaker == Speaker::Them)
+            .collect();
+    if live_them.is_empty() {
+        return Ok(0);
+    }
+
+    let mapping = reconcile_speaker_labels(&live_them, &diarized);
+    if mapping.is_empty() {
+        return Ok(0);
+    }
+
+    let to_apply = mapping.clone();
+    let updated = run_db(app.clone(), move |conn| {
+        let mut count = 0usize;
+        for (id, label) in &to_apply {
+            update_transcript_segment_speaker(conn, id, label)?;
+            count += 1;
+        }
+        Ok(count)
+    })
+    .await?;
+
+    let _ = app.emit("meeting://segments-updated", serde_json::json!({ "meetingId": meeting_id }));
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -523,6 +596,23 @@ pub fn select_transcript_segments(
 
     stmt.query_map(params![meeting_id], row_to_segment)?
         .collect::<Result<Vec<_>>>()
+}
+
+/// Stamp a meeting-stable diarization label onto one segment. Used by the
+/// post-call reconcile pass; only `speaker_label`/`speaker_source` change, so the
+/// segment's text, timing, and channel `speaker` (Me/Them) are left intact.
+pub fn update_transcript_segment_speaker(
+    conn: &Connection,
+    id: &str,
+    label: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE transcript_segments
+         SET speaker_label = ?1, speaker_source = ?2
+         WHERE id = ?3",
+        params![label, SpeakerSource::Diarization.as_str(), id],
+    )?;
+    Ok(())
 }
 
 fn row_to_meeting(row: &rusqlite::Row<'_>) -> Result<Meeting> {

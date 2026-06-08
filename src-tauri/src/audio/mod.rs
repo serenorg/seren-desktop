@@ -9,6 +9,7 @@ pub mod llm;
 pub mod merge;
 pub mod notes;
 pub mod pipeline;
+pub mod reconcile;
 pub mod templates;
 pub mod transcribe;
 pub mod types;
