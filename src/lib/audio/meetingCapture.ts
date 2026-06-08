@@ -1,6 +1,7 @@
 // ABOUTME: Webview microphone capture for the Meeting Mode "Me" stream.
 // ABOUTME: Streams 16 kHz mono PCM frames to the Rust pipeline and exposes live amplitude.
 
+import { createRunningAudioContext } from "@/lib/audio/captureContext";
 import { pushCaptureFrame } from "@/services/meetings";
 
 const TARGET_SAMPLE_RATE = 16_000;
@@ -32,7 +33,16 @@ export async function startMeetingMicCapture(
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
   });
 
-  const context = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+  let context: AudioContext;
+  try {
+    context = await createRunningAudioContext(TARGET_SAMPLE_RATE);
+  } catch (error) {
+    // Release the mic we just opened so a failed start can't leave it live.
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+    throw error;
+  }
   const source = context.createMediaStreamSource(stream);
 
   const analyser = context.createAnalyser();
