@@ -114,7 +114,12 @@ describe("meetingStore handoff terminal status (#2158)", () => {
 
     await meetingStore.stopAndProcess(meeting());
 
-    expect(m.updateMeetingStatus).toHaveBeenCalledWith("m1", "failed");
+    expect(m.updateMeetingStatus).toHaveBeenCalledWith(
+      "m1",
+      "failed",
+      null,
+      expect.stringContaining("Agent handoff failed"),
+    );
     expect(m.updateMeetingStatus).not.toHaveBeenCalledWith("m1", "done");
   });
 });

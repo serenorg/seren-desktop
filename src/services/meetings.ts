@@ -25,6 +25,7 @@ export interface Meeting {
   agentConversationId: string | null;
   notesMarkdown: string | null;
   notesStructJson: string | null;
+  failureReason?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -85,8 +86,14 @@ export function updateMeetingStatus(
   id: string,
   status: MeetingStatus,
   endedAt?: number | null,
+  failureReason?: string | null,
 ): Promise<void> {
-  return invoke("update_meeting_status", { id, status, endedAt });
+  return invoke("update_meeting_status", {
+    id,
+    status,
+    endedAt,
+    failureReason,
+  });
 }
 
 export function updateMeetingNotes(

@@ -93,6 +93,63 @@ let isStarting = false;
 // running notes + the agent handoff. This guard makes the second a no-op (#2162).
 const processingMeetings = new Set<string>();
 
+function meetingErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return "Unknown error";
+}
+
+function captureStartupFailureReason(error: unknown): string {
+  const name = error instanceof DOMException ? error.name : "";
+  const message = meetingErrorMessage(error).toLowerCase();
+  if (
+    name === "NotAllowedError" ||
+    name === "SecurityError" ||
+    message.includes("permission") ||
+    message.includes("denied")
+  ) {
+    return "Microphone access is blocked. Allow microphone access for Seren, then start capture again.";
+  }
+  if (
+    name === "NotFoundError" ||
+    message.includes("requested device not found")
+  ) {
+    return "No microphone was found. Connect or enable a microphone, then start capture again.";
+  }
+  if (message.includes("audio context is suspended")) {
+    return "Audio capture could not start because the audio engine is suspended. Click Start capture again from the app window.";
+  }
+  if (message.includes("media devices") || message.includes("getusermedia")) {
+    return "Microphone capture is unavailable in this desktop WebView. Restart Seren and try capture again.";
+  }
+  return `Meeting capture could not start: ${meetingErrorMessage(error)}`;
+}
+
+function notesFailureReason(error: unknown): string {
+  const message = meetingErrorMessage(error);
+  if (message.toLowerCase().includes("no transcript")) {
+    return "No transcript was captured. Check microphone and system-audio permissions, then start capture again.";
+  }
+  return `Meeting notes could not be generated: ${message}`;
+}
+
+async function failMeeting(
+  meetingId: string,
+  reason: string,
+  endedAt: number | null = Date.now(),
+): Promise<void> {
+  await updateMeetingStatus(meetingId, "failed", endedAt, reason).catch(
+    () => {},
+  );
+  await loadMeetings();
+  setMeetingState("error", reason);
+  const refreshed =
+    meetingState.meetings.find((meeting) => meeting.id === meetingId) ?? null;
+  if (meetingState.activeMeeting?.id === meetingId || refreshed) {
+    await setActiveMeeting(refreshed);
+  }
+}
+
 async function loadMeetings(): Promise<void> {
   setMeetingState("isLoading", true);
   setMeetingState("error", null);
@@ -233,25 +290,37 @@ function stopMeetingEventListeners(): void {
   trayToggleUnlisten = null;
 }
 
-async function startCapture(meeting: Meeting): Promise<void> {
-  if (!isTauriRuntime()) return;
-  await startBackendCapture(meeting.id);
+async function startCapture(meeting: Meeting): Promise<boolean> {
+  if (!isTauriRuntime()) return false;
+  console.info("[meeting] capture start requested", { meetingId: meeting.id });
+  let backendStarted = false;
   try {
+    await startBackendCapture(meeting.id);
+    backendStarted = true;
+    console.info("[meeting] backend capture started", {
+      meetingId: meeting.id,
+    });
     captureHandle = await startMeetingMicCapture(meeting.id);
+    console.info("[meeting] microphone capture started", {
+      meetingId: meeting.id,
+    });
   } catch (error) {
     // The backend capture already started; tear it down and mark the meeting
     // failed so it doesn't linger as a "capturing" zombie, and make sure the
     // widget/tray aren't left signalling an active capture that never began.
-    await stopBackendCapture(meeting.id).catch(() => {});
-    await updateMeetingStatus(meeting.id, "failed", Date.now()).catch(() => {});
+    if (backendStarted) {
+      await stopBackendCapture(meeting.id).catch(() => {});
+    }
     void closeCaptureWidget();
     void setTrayRecording(false);
-    setMeetingState(
-      "error",
-      error instanceof Error ? error.message : "Microphone unavailable",
+    const reason = captureStartupFailureReason(error);
+    console.error(
+      "[meeting] capture startup failed",
+      { meetingId: meeting.id, reason },
+      error,
     );
-    await loadMeetings();
-    return;
+    await failMeeting(meeting.id, reason);
+    return false;
   }
   if (levelTimer !== null) window.clearInterval(levelTimer);
   levelTimer = window.setInterval(() => {
@@ -259,6 +328,7 @@ async function startCapture(meeting: Meeting): Promise<void> {
   }, 60);
   void openCaptureWidget(meeting.id);
   void setTrayRecording(true);
+  return true;
 }
 
 // Start a freshly-created meeting and surface it as the active one. Shared by
@@ -269,9 +339,12 @@ async function beginCapture(meeting: Meeting): Promise<void> {
   if (isCapturing()) return;
   isStarting = true;
   try {
-    await startCapture(meeting);
+    const started = await startCapture(meeting);
+    if (!started) return;
     await loadMeetings();
-    await setActiveMeeting(meeting);
+    await setActiveMeeting(
+      meetingState.meetings.find((item) => item.id === meeting.id) ?? meeting,
+    );
   } finally {
     isStarting = false;
   }
@@ -307,8 +380,10 @@ async function cancelPriming(): Promise<void> {
   const meeting = meetingState.primingRequest;
   setMeetingState("primingRequest", null);
   if (!meeting || !isTauriRuntime()) return;
-  await updateMeetingStatus(meeting.id, "failed", Date.now()).catch(() => {});
-  await loadMeetings();
+  await failMeeting(
+    meeting.id,
+    "Capture was canceled before audio permissions were requested.",
+  );
 }
 
 // At startup, any meeting left mid-pipeline is stale — no capture, notes pass,
@@ -328,7 +403,12 @@ async function reconcileStaleCaptures(): Promise<void> {
     if (stale.length === 0) return;
     await Promise.all(
       stale.map((meeting) =>
-        updateMeetingStatus(meeting.id, "failed").catch(() => {}),
+        updateMeetingStatus(
+          meeting.id,
+          "failed",
+          null,
+          "Seren restarted before this meeting finished processing.",
+        ).catch(() => {}),
       ),
     );
     await loadMeetings();
@@ -428,17 +508,13 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
       // Notes failed: the backend left the meeting at `transcribing` (it only
       // sets notes_ready on success). Mark it failed and stop — don't fall
       // through to runHandoff and auto-invoke a skill on an empty meeting (#2159).
-      setMeetingState(
-        "error",
-        error instanceof Error ? error.message : "Notes generation failed",
+      const reason = notesFailureReason(error);
+      console.error(
+        "[meeting] post-capture processing failed",
+        { meetingId: meeting.id, reason },
+        error,
       );
-      await updateMeetingStatus(meeting.id, "failed", Date.now()).catch(
-        () => {},
-      );
-      await loadMeetings();
-      await setActiveMeeting(
-        meetingState.meetings.find((m) => m.id === meeting.id) ?? null,
-      );
+      await failMeeting(meeting.id, reason);
       return;
     }
     await loadMeetings();
@@ -512,11 +588,11 @@ async function runHandoff(meeting: Meeting): Promise<void> {
     // overwritten with the agent-finish time (#2174).
     await updateMeetingStatus(meeting.id, "done");
   } catch (error) {
-    setMeetingState(
-      "error",
-      error instanceof Error ? error.message : "Agent handoff failed",
+    const reason = `Agent handoff failed: ${meetingErrorMessage(error)}`;
+    setMeetingState("error", reason);
+    await updateMeetingStatus(meeting.id, "failed", null, reason).catch(
+      () => {},
     );
-    await updateMeetingStatus(meeting.id, "failed").catch(() => {});
   }
   await loadMeetings();
 }
@@ -565,7 +641,7 @@ async function pollAutoDetect(): Promise<void> {
     setMeetingState("autoDetectSuggested", false);
     return;
   }
-  if (isCapturing() || autoDetectDismissed) {
+  if (isCapturing()) {
     setMeetingState("autoDetectSuggested", false);
     return;
   }
@@ -574,7 +650,12 @@ async function pollAutoDetect(): Promise<void> {
     const detected = await meetingAutodetect(
       settingsStore.get("meetingAppAllowlist"),
     );
-    setMeetingState("autoDetectSuggested", detected);
+    if (!detected) {
+      autoDetectDismissed = false;
+      setMeetingState("autoDetectSuggested", false);
+      return;
+    }
+    setMeetingState("autoDetectSuggested", !autoDetectDismissed);
   } catch {
     // Probe failures are non-fatal; leave the prompt as-is.
   }

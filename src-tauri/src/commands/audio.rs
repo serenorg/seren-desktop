@@ -63,10 +63,18 @@ pub async fn update_meeting_status(
     id: String,
     status: MeetingStatus,
     ended_at: Option<i64>,
+    failure_reason: Option<String>,
 ) -> Result<(), String> {
     let lookup = id.clone();
     run_db(app.clone(), move |conn| {
-        update_meeting_status_record(conn, &id, status, ended_at, now_ms())
+        update_meeting_status_record_with_failure_reason(
+            conn,
+            &id,
+            status,
+            ended_at,
+            failure_reason.as_deref(),
+            now_ms(),
+        )
     })
     .await?;
     emit_meeting_status_by_id(&app, &lookup).await;
@@ -263,12 +271,13 @@ pub async fn reconcile_meeting_speakers(
     // Reconcile against only the live Them segments — the Me mic is single-speaker
     // and is never relabeled by this pass.
     let lookup = meeting_id.clone();
-    let live_them: Vec<TranscriptSegment> =
-        run_db(app.clone(), move |conn| select_transcript_segments(conn, &lookup))
-            .await?
-            .into_iter()
-            .filter(|segment| segment.speaker == Speaker::Them)
-            .collect();
+    let live_them: Vec<TranscriptSegment> = run_db(app.clone(), move |conn| {
+        select_transcript_segments(conn, &lookup)
+    })
+    .await?
+    .into_iter()
+    .filter(|segment| segment.speaker == Speaker::Them)
+    .collect();
     if live_them.is_empty() {
         return Ok(0);
     }
@@ -289,7 +298,10 @@ pub async fn reconcile_meeting_speakers(
     })
     .await?;
 
-    let _ = app.emit("meeting://segments-updated", serde_json::json!({ "meetingId": meeting_id }));
+    let _ = app.emit(
+        "meeting://segments-updated",
+        serde_json::json!({ "meetingId": meeting_id }),
+    );
     Ok(updated)
 }
 
@@ -302,8 +314,10 @@ pub async fn generate_meeting_notes(
     vocabulary: Vec<String>,
 ) -> Result<ParsedNotes, String> {
     let lookup = meeting_id.clone();
-    let segments =
-        run_db(app.clone(), move |conn| select_transcript_segments(conn, &lookup)).await?;
+    let segments = run_db(app.clone(), move |conn| {
+        select_transcript_segments(conn, &lookup)
+    })
+    .await?;
     let transcript = assemble_transcript(segments);
     if transcript.trim().is_empty() {
         return Err("no transcript to summarize".to_string());
@@ -327,7 +341,10 @@ pub async fn get_meeting_transcript_text(
     app: AppHandle,
     meeting_id: String,
 ) -> Result<String, String> {
-    let segments = run_db(app, move |conn| select_transcript_segments(conn, &meeting_id)).await?;
+    let segments = run_db(app, move |conn| {
+        select_transcript_segments(conn, &meeting_id)
+    })
+    .await?;
     Ok(assemble_transcript(segments))
 }
 
@@ -478,9 +495,9 @@ pub fn insert_meeting(conn: &Connection, meeting: NewMeeting) -> Result<Meeting>
         "INSERT INTO meetings (
             id, title, source_app, started_at, ended_at, status, template_id,
             routed_skill_slug, agent_conversation_id, notes_markdown,
-            notes_struct_json, created_at, updated_at
+            notes_struct_json, failure_reason, created_at, updated_at
          )
-         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL, NULL, NULL, NULL, ?7, ?7)",
+         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL, NULL, NULL, NULL, NULL, ?7, ?7)",
         params![
             meeting.id,
             meeting.title,
@@ -499,7 +516,7 @@ pub fn select_meeting(conn: &Connection, id: &str) -> Result<Option<Meeting>> {
     conn.query_row(
         "SELECT id, title, source_app, started_at, ended_at, status, template_id,
                 routed_skill_slug, agent_conversation_id, notes_markdown,
-                notes_struct_json, created_at, updated_at
+                notes_struct_json, failure_reason, created_at, updated_at
          FROM meetings
          WHERE id = ?1",
         params![id],
@@ -512,7 +529,7 @@ pub fn select_meetings(conn: &Connection, limit: i32) -> Result<Vec<Meeting>> {
     let mut stmt = conn.prepare(
         "SELECT id, title, source_app, started_at, ended_at, status, template_id,
                 routed_skill_slug, agent_conversation_id, notes_markdown,
-                notes_struct_json, created_at, updated_at
+                notes_struct_json, failure_reason, created_at, updated_at
          FROM meetings
          ORDER BY started_at DESC
          LIMIT ?1",
@@ -529,15 +546,30 @@ pub fn update_meeting_status_record(
     ended_at: Option<i64>,
     updated_at: i64,
 ) -> Result<()> {
+    update_meeting_status_record_with_failure_reason(conn, id, status, ended_at, None, updated_at)
+}
+
+pub fn update_meeting_status_record_with_failure_reason(
+    conn: &Connection,
+    id: &str,
+    status: MeetingStatus,
+    ended_at: Option<i64>,
+    failure_reason: Option<&str>,
+    updated_at: i64,
+) -> Result<()> {
     // `ended_at` is set once, when capture stops. COALESCE keeps the existing
     // value when the caller passes None (status-only transitions like
     // agent_running/done), so the capture-end time survives the agent handoff
     // instead of being nulled and later overwritten with the agent-finish time
     // (#2174). A Some value still overwrites (e.g. stop_meeting_capture).
     conn.execute(
-        "UPDATE meetings SET status = ?1, ended_at = COALESCE(?2, ended_at), updated_at = ?3
-         WHERE id = ?4",
-        params![status.as_str(), ended_at, updated_at, id],
+        "UPDATE meetings
+         SET status = ?1,
+             ended_at = COALESCE(?2, ended_at),
+             failure_reason = CASE WHEN ?1 = 'failed' THEN ?3 ELSE NULL END,
+             updated_at = ?4
+         WHERE id = ?5",
+        params![status.as_str(), ended_at, failure_reason, updated_at, id],
     )?;
     Ok(())
 }
@@ -601,11 +633,7 @@ pub fn select_transcript_segments(
 /// Stamp a meeting-stable diarization label onto one segment. Used by the
 /// post-call reconcile pass; only `speaker_label`/`speaker_source` change, so the
 /// segment's text, timing, and channel `speaker` (Me/Them) are left intact.
-pub fn update_transcript_segment_speaker(
-    conn: &Connection,
-    id: &str,
-    label: &str,
-) -> Result<()> {
+pub fn update_transcript_segment_speaker(conn: &Connection, id: &str, label: &str) -> Result<()> {
     conn.execute(
         "UPDATE transcript_segments
          SET speaker_label = ?1, speaker_source = ?2
@@ -635,8 +663,9 @@ fn row_to_meeting(row: &rusqlite::Row<'_>) -> Result<Meeting> {
         agent_conversation_id: row.get(8)?,
         notes_markdown: row.get(9)?,
         notes_struct_json: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        failure_reason: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 
@@ -762,6 +791,7 @@ mod tests {
         assert_eq!(loaded.title, "Customer discovery");
         assert_eq!(loaded.source_app.as_deref(), Some("Zoom"));
         assert_eq!(loaded.template_id.as_deref(), Some("discovery"));
+        assert_eq!(loaded.failure_reason, None);
     }
 
     #[test]
@@ -784,21 +814,45 @@ mod tests {
         update_meeting_status_record(&conn, "meeting-1", MeetingStatus::AgentRunning, None, 600)
             .unwrap();
         assert_eq!(
-            select_meeting(&conn, "meeting-1").unwrap().unwrap().ended_at,
+            select_meeting(&conn, "meeting-1")
+                .unwrap()
+                .unwrap()
+                .ended_at,
             Some(500)
         );
         // Done with None still preserves the capture-end time.
         update_meeting_status_record(&conn, "meeting-1", MeetingStatus::Done, None, 700).unwrap();
         assert_eq!(
-            select_meeting(&conn, "meeting-1").unwrap().unwrap().ended_at,
+            select_meeting(&conn, "meeting-1")
+                .unwrap()
+                .unwrap()
+                .ended_at,
             Some(500)
         );
         // A Some value overwrites.
-        update_meeting_status_record(&conn, "meeting-1", MeetingStatus::Failed, Some(900), 901)
-            .unwrap();
+        update_meeting_status_record_with_failure_reason(
+            &conn,
+            "meeting-1",
+            MeetingStatus::Failed,
+            Some(900),
+            Some("Microphone access is blocked."),
+            901,
+        )
+        .unwrap();
+        let failed = select_meeting(&conn, "meeting-1").unwrap().unwrap();
+        assert_eq!(failed.ended_at, Some(900));
         assert_eq!(
-            select_meeting(&conn, "meeting-1").unwrap().unwrap().ended_at,
-            Some(900)
+            failed.failure_reason.as_deref(),
+            Some("Microphone access is blocked.")
+        );
+
+        update_meeting_status_record(&conn, "meeting-1", MeetingStatus::Done, None, 950).unwrap();
+        assert_eq!(
+            select_meeting(&conn, "meeting-1")
+                .unwrap()
+                .unwrap()
+                .failure_reason,
+            None
         );
     }
 

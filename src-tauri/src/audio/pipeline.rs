@@ -61,13 +61,29 @@ pub async fn run_capture_stream(
             buffer_them_samples(buffer, &frame.samples);
         }
         for chunk in chunker.push(&frame.samples) {
-            emit_segment(&meeting_id, &speaker, chunk, transcriber.as_ref(), retry, &seq, sink.as_ref())
-                .await;
+            emit_segment(
+                &meeting_id,
+                &speaker,
+                chunk,
+                transcriber.as_ref(),
+                retry,
+                &seq,
+                sink.as_ref(),
+            )
+            .await;
         }
     }
     for chunk in chunker.finish() {
-        emit_segment(&meeting_id, &speaker, chunk, transcriber.as_ref(), retry, &seq, sink.as_ref())
-            .await;
+        emit_segment(
+            &meeting_id,
+            &speaker,
+            chunk,
+            transcriber.as_ref(),
+            retry,
+            &seq,
+            sink.as_ref(),
+        )
+        .await;
     }
 }
 
@@ -257,10 +273,12 @@ impl CaptureRegistry {
     /// Begin capturing the "Me" stream for `meeting_id`. Frames arrive via
     /// [`CaptureRegistry::push_frame`]; the worker transcribes and persists them.
     pub fn start(&self, app: &AppHandle, meeting_id: &str) {
+        log::info!("[meeting] capture registry start requested for {meeting_id}");
         let mut active = self.active.lock().unwrap();
         // Reject if the id is already live OR draining (`Stopping` tombstone): a
         // start that raced a still-running stop must not insert a second capture.
         if active.contains_key(meeting_id) {
+            log::warn!("[meeting] capture start ignored; slot already occupied for {meeting_id}");
             return;
         }
         // Me and Them share one sequence counter so segments order globally.
@@ -310,13 +328,19 @@ impl CaptureRegistry {
                 Some(them_audio.clone()),
             )));
             match source.start(tx.clone()) {
-                Ok(()) => them_tx = Some(tx),
+                Ok(()) => {
+                    log::info!("[meeting] system-audio capture started for {meeting_id}");
+                    them_tx = Some(tx);
+                }
                 Err(err) => {
                     log::warn!("[meeting] system-audio capture unavailable: {err}")
                 }
             }
+        } else {
+            log::info!("[meeting] system-audio capture unsupported on this platform");
         }
 
+        let has_system_audio = them_tx.is_some();
         active.insert(
             meeting_id.to_string(),
             CaptureSlot::Active(ActiveCapture {
@@ -326,6 +350,10 @@ impl CaptureRegistry {
                 tasks,
                 them_audio,
             }),
+        );
+        log::info!(
+            "[meeting] capture registry active for {meeting_id}; system_audio={}",
+            has_system_audio
         );
     }
 
@@ -509,7 +537,9 @@ mod tests {
         // Two utterances separated by silence -> two transcribed segments.
         let samples = [pcm(1_000, 80), pcm(0, 60), pcm(1_000, 80), pcm(0, 60)].concat();
         let (tx, rx) = unbounded_channel();
-        FakePcmSource::from_samples(samples, 1_000).start(tx).unwrap();
+        FakePcmSource::from_samples(samples, 1_000)
+            .start(tx)
+            .unwrap();
 
         let transcriber: Arc<dyn ChunkTranscriber + Send + Sync> = Arc::new(SequenceTranscriber {
             texts: Mutex::new(vec!["first".to_string(), "second".to_string()]),
@@ -551,7 +581,9 @@ mod tests {
 
         let samples = [pcm(1_000, 80), pcm(0, 60)].concat();
         let (tx, rx) = unbounded_channel();
-        FakePcmSource::from_samples(samples, 1_000).start(tx).unwrap();
+        FakePcmSource::from_samples(samples, 1_000)
+            .start(tx)
+            .unwrap();
 
         // No texts -> transcription always fails -> the window becomes a gap.
         let transcriber: Arc<dyn ChunkTranscriber + Send + Sync> = Arc::new(SequenceTranscriber {
@@ -587,7 +619,10 @@ mod tests {
     fn me_uses_plain_text_and_them_is_diarized() {
         // #2152 cost contract: the single-speaker mic must NOT use the costly
         // diarize model; only the multi-speaker system stream is diarized.
-        assert_eq!(transcription_mode_for(&Speaker::Me), TranscriptionMode::Text);
+        assert_eq!(
+            transcription_mode_for(&Speaker::Me),
+            TranscriptionMode::Text
+        );
         assert_eq!(
             transcription_mode_for(&Speaker::Them),
             TranscriptionMode::Diarized

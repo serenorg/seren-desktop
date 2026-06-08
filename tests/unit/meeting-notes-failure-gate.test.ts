@@ -109,6 +109,7 @@ describe("meetingStore notes-failure gates handoff (#2159)", () => {
       "m1",
       "failed",
       expect.any(Number),
+      expect.stringContaining("Meeting notes could not be generated"),
     );
     // No handoff: the skill router and agent run must never fire.
     expect(m.selectMeetingSkills).not.toHaveBeenCalled();
