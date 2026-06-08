@@ -50,6 +50,13 @@ interface MeetingState {
    * nothing is capturing. The panel surfaces an arm prompt; the user starts.
    */
   autoDetectSuggested: boolean;
+  /**
+   * The meeting awaiting first-run audio priming. Set when a start is requested
+   * before the user has acknowledged the permission explainer; the app-wide
+   * priming dialog reads this so every start path (panel, tray, auto-detect)
+   * honors the gate, not just the panel button.
+   */
+  primingRequest: Meeting | null;
 }
 
 const [meetingState, setMeetingState] = createStore<MeetingState>({
@@ -60,6 +67,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   isLoading: false,
   error: null,
   autoDetectSuggested: false,
+  primingRequest: null,
 });
 
 let captureHandle: MeetingCaptureHandle | null = null;
@@ -73,6 +81,10 @@ let trayToggleUnlisten: (() => void) | null = null;
 let autoDetectTimer: number | null = null;
 let autoDetectDismissed = false;
 const AUTO_DETECT_POLL_MS = 5_000;
+
+// Shared in-flight guard across every start caller (panel, tray, auto-detect)
+// so a double-trigger can't launch two mic streams for the same session.
+let isStarting = false;
 
 async function loadMeetings(): Promise<void> {
   setMeetingState("isLoading", true);
@@ -188,10 +200,18 @@ async function startCapture(meeting: Meeting): Promise<void> {
   try {
     captureHandle = await startMeetingMicCapture(meeting.id);
   } catch (error) {
+    // The backend capture already started; tear it down and mark the meeting
+    // failed so it doesn't linger as a "capturing" zombie, and make sure the
+    // widget/tray aren't left signalling an active capture that never began.
+    await stopBackendCapture(meeting.id).catch(() => {});
+    await updateMeetingStatus(meeting.id, "failed", Date.now()).catch(() => {});
+    void closeCaptureWidget();
+    void setTrayRecording(false);
     setMeetingState(
       "error",
       error instanceof Error ? error.message : "Microphone unavailable",
     );
+    await loadMeetings();
     return;
   }
   if (levelTimer !== null) window.clearInterval(levelTimer);
@@ -200,6 +220,49 @@ async function startCapture(meeting: Meeting): Promise<void> {
   }, 60);
   void openCaptureWidget(meeting.id);
   void setTrayRecording(true);
+}
+
+// Start a freshly-created meeting and surface it as the active one. Shared by
+// every start caller (panel, tray, auto-detect) behind a single in-flight guard
+// so a double-trigger can't launch two mic streams.
+async function beginCapture(meeting: Meeting): Promise<void> {
+  if (!isTauriRuntime() || isStarting) return;
+  if (isCapturing()) return;
+  isStarting = true;
+  try {
+    await startCapture(meeting);
+    await loadMeetings();
+    await setActiveMeeting(meeting);
+  } finally {
+    isStarting = false;
+  }
+}
+
+// First-run gate shared by every start path. If the user has already
+// acknowledged the audio-permission explainer, start immediately; otherwise
+// stash the meeting and let the app-wide priming dialog drive the decision.
+async function requestCaptureStart(meeting: Meeting): Promise<void> {
+  if (!isTauriRuntime()) return;
+  if (settingsStore.get("meetingAudioPrimed")) {
+    await beginCapture(meeting);
+    return;
+  }
+  setMeetingState("primingRequest", meeting);
+}
+
+// User accepted the explainer: remember the choice, start the stashed meeting,
+// and clear the request.
+async function confirmPriming(): Promise<void> {
+  const meeting = meetingState.primingRequest;
+  setMeetingState("primingRequest", null);
+  if (!meeting) return;
+  settingsStore.set("meetingAudioPrimed", true);
+  await beginCapture(meeting);
+}
+
+// User dismissed the explainer: abort the pending start without capturing.
+function cancelPriming(): void {
+  setMeetingState("primingRequest", null);
 }
 
 async function stopCapture(meetingId: string): Promise<void> {
@@ -224,7 +287,8 @@ async function stopCapture(meetingId: string): Promise<void> {
 }
 
 // Tray Start/Stop action: stop the active capture if one is running, otherwise
-// create + start a manual capture (mirrors MeetingPanel's manual start path).
+// create + request a manual capture. Routing through `requestCaptureStart`
+// means the tray honors the first-run priming gate just like the panel button.
 async function toggleCaptureFromTray(): Promise<void> {
   if (!isTauriRuntime()) return;
   const active = meetingState.meetings.find(
@@ -234,14 +298,13 @@ async function toggleCaptureFromTray(): Promise<void> {
     await stopAndProcess(active);
     return;
   }
+  if (isStarting || meetingState.primingRequest) return;
   const meeting = await createMeeting({
     title: `Meeting ${formatTime(Date.now())}`,
     sourceApp: "Tray",
     templateId: settingsStore.get("meetingTemplateId"),
   });
-  await startCapture(meeting);
-  await loadMeetings();
-  await setActiveMeeting(meeting);
+  await requestCaptureStart(meeting);
 }
 
 let templateCache: MeetingTemplate[] | null = null;
@@ -444,6 +507,9 @@ export const meetingStore = {
   startMeetingEventListeners,
   stopMeetingEventListeners,
   startCapture,
+  requestCaptureStart,
+  confirmPriming,
+  cancelPriming,
   stopCapture,
   stopAndProcess,
   regenerateNotes,

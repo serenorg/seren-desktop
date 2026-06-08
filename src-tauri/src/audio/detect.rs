@@ -1,7 +1,7 @@
 // ABOUTME: Pure meeting auto-detect decision logic for capture arming.
 // ABOUTME: Keeps OS process probes separate from testable policy rules.
 
-use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+use sysinfo::{ProcessRefreshKind, RefreshKind, System, UpdateKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningProcess {
@@ -13,8 +13,14 @@ pub struct RunningProcess {
 /// Reliable mic-in-use detection is not portable across macOS/Windows/Linux, so
 /// we report `mic_in_use = false` and lean on the meeting-app allowlist path.
 pub fn probe_running_processes() -> Vec<RunningProcess> {
+    // Force the executable path to be resolved so `name()` is derived from the
+    // exe basename on every platform. `ProcessRefreshKind::nothing()` leaves the
+    // name empty for processes whose kernel-side name isn't readable, which
+    // breaks the allowlist match. `with_exe(Always)` is the minimal kind that
+    // guarantees a populated name.
     let system = System::new_with_specifics(
-        RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()),
+        RefreshKind::nothing()
+            .with_processes(ProcessRefreshKind::nothing().with_exe(UpdateKind::Always)),
     );
 
     system
