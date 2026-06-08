@@ -38,7 +38,7 @@ pub fn merge_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audio::types::{SegmentStatus, Speaker};
+    use crate::audio::types::{SegmentStatus, Speaker, SpeakerSource};
 
     fn segment(
         speaker: Speaker,
@@ -55,6 +55,8 @@ mod tests {
             start_ms,
             end_ms: start_ms + 100,
             status,
+            speaker_label: None,
+            speaker_source: SpeakerSource::Channel,
             created_at: 1,
         }
     }

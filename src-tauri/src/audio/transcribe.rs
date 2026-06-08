@@ -14,6 +14,9 @@ use crate::orchestrator::gateway_envelope::{publisher_status, unwrap_publisher_b
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 const WHISPER_PUBLISHER: &str = "seren-whisper";
 const WHISPER_MODEL: &str = "whisper-1";
+const DIARIZE_MODEL: &str = "gpt-4o-transcribe-diarize";
+const DIARIZE_RESPONSE_FORMAT: &str = "diarized_json";
+const DIARIZE_CHUNKING_STRATEGY: &str = "auto";
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum TranscribeError {
@@ -21,6 +24,19 @@ pub enum TranscribeError {
     Transport(String),
     #[error("transcription returned no text")]
     Empty,
+}
+
+/// One diarized utterance returned by the transcriber. `speaker_label` is the raw
+/// model label (e.g. "A", "speaker_0") when diarization is available, else `None`.
+/// `start_ms`/`end_ms` are relative to the start of the chunk (offset is applied by
+/// the pipeline). Plain-text responses yield a single segment with `speaker_label`
+/// `None` spanning the whole chunk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiarizedSegment {
+    pub speaker_label: Option<String>,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -42,14 +58,19 @@ impl Default for RetryConfig {
 
 #[async_trait]
 pub trait ChunkTranscriber {
-    async fn transcribe(&self, chunk: &Chunk) -> Result<String, TranscribeError>;
+    async fn transcribe(&self, chunk: &Chunk) -> Result<Vec<DiarizedSegment>, TranscribeError>;
+}
+
+/// A transcription result is "empty" when it has no segment carrying non-blank text.
+fn has_text(segments: &[DiarizedSegment]) -> bool {
+    segments.iter().any(|segment| !segment.text.trim().is_empty())
 }
 
 pub async fn transcribe_chunk_with_retry<T>(
     transcriber: &T,
     chunk: &Chunk,
     cfg: RetryConfig,
-) -> Result<String, TranscribeError>
+) -> Result<Vec<DiarizedSegment>, TranscribeError>
 where
     T: ChunkTranscriber + Sync + ?Sized,
 {
@@ -59,7 +80,7 @@ where
 
     for attempt in 1..=attempts {
         match transcriber.transcribe(chunk).await {
-            Ok(text) if !text.trim().is_empty() => return Ok(text),
+            Ok(segments) if has_text(&segments) => return Ok(segments),
             Ok(_) => last_error = TranscribeError::Empty,
             Err(err) => last_error = err,
         }
@@ -108,7 +129,8 @@ pub fn pcm16_to_wav(samples: &[i16], sample_rate: u32) -> Vec<u8> {
     buf
 }
 
-/// Build the Gateway multipart-envelope body for a Whisper transcription request.
+/// Build the Gateway multipart-envelope body for a plain-text Whisper request.
+/// Used by dictation, which stays on `whisper-1` text transcription.
 pub fn build_whisper_envelope(wav: &[u8]) -> serde_json::Value {
     let encoded = base64::engine::general_purpose::STANDARD.encode(wav);
     json!({
@@ -124,26 +146,150 @@ pub fn build_whisper_envelope(wav: &[u8]) -> serde_json::Value {
     })
 }
 
+/// Build the Gateway multipart-envelope body for a diarized transcription request.
+/// Adds `model`, `response_format`, and `chunking_strategy` so the proxied OpenAI
+/// call returns per-speaker `diarized_json` segments.
+pub fn build_diarized_envelope(wav: &[u8]) -> serde_json::Value {
+    let encoded = base64::engine::general_purpose::STANDARD.encode(wav);
+    json!({
+        "parts": [
+            { "name": "model", "value": DIARIZE_MODEL },
+            { "name": "response_format", "value": DIARIZE_RESPONSE_FORMAT },
+            { "name": "chunking_strategy", "value": DIARIZE_CHUNKING_STRATEGY },
+            {
+                "name": "file",
+                "filename": "audio.wav",
+                "content_type": "audio/wav",
+                "data": encoded
+            }
+        ]
+    })
+}
+
+/// Whether a transcriber requests diarized segments or plain whisper text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranscriptionMode {
+    /// `gpt-4o-transcribe-diarize` -> `diarized_json` (Meeting Mode).
+    Diarized,
+    /// `whisper-1` plain text (dictation).
+    Text,
+}
+
+/// Parse an unwrapped transcription body into diarized segments.
+///
+/// If the body carries a diarized `segments` array, each entry maps to a
+/// [`DiarizedSegment`] with its model speaker label and start/end converted from
+/// seconds to milliseconds relative to the chunk. If there is no segments array
+/// but there is a `text` field, returns a single segment spanning the chunk with
+/// no speaker label, so plain-text (non-diarized) responses still work. Empty or
+/// whitespace-only text yields [`TranscribeError::Empty`].
+fn parse_diarized_body(
+    body: &serde_json::Value,
+    chunk_len_ms: i64,
+) -> Result<Vec<DiarizedSegment>, TranscribeError> {
+    // Tolerate either "segments" (documented) or "chunks" as the array key.
+    let array = body
+        .get("segments")
+        .or_else(|| body.get("chunks"))
+        .and_then(serde_json::Value::as_array);
+
+    if let Some(entries) = array {
+        let segments: Vec<DiarizedSegment> = entries
+            .iter()
+            .filter_map(|entry| {
+                let text = entry
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                if text.is_empty() {
+                    return None;
+                }
+                let speaker_label = entry
+                    .get("speaker")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .filter(|label| !label.is_empty());
+                let start_ms = seconds_to_ms(entry.get("start"));
+                let end_ms = seconds_to_ms(entry.get("end")).max(start_ms);
+                Some(DiarizedSegment {
+                    speaker_label,
+                    start_ms,
+                    end_ms,
+                    text,
+                })
+            })
+            .collect();
+        if !segments.is_empty() {
+            return Ok(segments);
+        }
+        // An empty/all-blank segments array still falls through to the top-level
+        // `text` (if any) so a partly-populated response is not silently dropped.
+    }
+
+    // Plain-text fallback: a single segment spanning the whole chunk.
+    let text = body
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if text.is_empty() {
+        return Err(TranscribeError::Empty);
+    }
+    Ok(vec![DiarizedSegment {
+        speaker_label: None,
+        start_ms: 0,
+        end_ms: chunk_len_ms,
+        text,
+    }])
+}
+
+/// Read an OpenAI timestamp (float seconds) into milliseconds, defaulting to 0.
+fn seconds_to_ms(value: Option<&serde_json::Value>) -> i64 {
+    value
+        .and_then(serde_json::Value::as_f64)
+        .map(|seconds| (seconds * 1000.0).round() as i64)
+        .filter(|ms| *ms >= 0)
+        .unwrap_or(0)
+}
+
 /// Real [`ChunkTranscriber`] that POSTs a chunk to the Seren Whisper publisher.
 pub struct GatewayTranscriber {
     app: AppHandle,
     client: reqwest::Client,
+    mode: TranscriptionMode,
 }
 
 impl GatewayTranscriber {
+    /// A plain-text whisper transcriber (dictation).
     pub fn new(app: AppHandle) -> Self {
         Self {
             app,
             client: reqwest::Client::new(),
+            mode: TranscriptionMode::Text,
+        }
+    }
+
+    /// A diarized transcriber (Meeting Mode).
+    pub fn new_diarized(app: AppHandle) -> Self {
+        Self {
+            app,
+            client: reqwest::Client::new(),
+            mode: TranscriptionMode::Diarized,
         }
     }
 }
 
 #[async_trait]
 impl ChunkTranscriber for GatewayTranscriber {
-    async fn transcribe(&self, chunk: &Chunk) -> Result<String, TranscribeError> {
+    async fn transcribe(&self, chunk: &Chunk) -> Result<Vec<DiarizedSegment>, TranscribeError> {
         let wav = pcm16_to_wav(&chunk.samples, TARGET_SAMPLE_RATE);
-        let body = build_whisper_envelope(&wav).to_string();
+        let body = match self.mode {
+            TranscriptionMode::Diarized => build_diarized_envelope(&wav).to_string(),
+            TranscriptionMode::Text => build_whisper_envelope(&wav).to_string(),
+        };
         let url = format!(
             "{}/publishers/{}/audio/transcriptions",
             GATEWAY_BASE_URL, WHISPER_PUBLISHER
@@ -188,16 +334,8 @@ impl ChunkTranscriber for GatewayTranscriber {
         }
 
         let body = unwrap_publisher_body(&value);
-        let text = body
-            .get("text")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        if text.is_empty() {
-            return Err(TranscribeError::Empty);
-        }
-        Ok(text)
+        let chunk_len_ms = (chunk.end_ms as i64 - chunk.start_ms as i64).max(0);
+        parse_diarized_body(body, chunk_len_ms)
     }
 }
 
@@ -210,12 +348,12 @@ mod tests {
     };
 
     struct FakeTranscriber {
-        responses: Mutex<Vec<Result<String, TranscribeError>>>,
+        responses: Mutex<Vec<Result<Vec<DiarizedSegment>, TranscribeError>>>,
         attempts: AtomicUsize,
     }
 
     impl FakeTranscriber {
-        fn new(responses: Vec<Result<String, TranscribeError>>) -> Self {
+        fn new(responses: Vec<Result<Vec<DiarizedSegment>, TranscribeError>>) -> Self {
             Self {
                 responses: Mutex::new(responses),
                 attempts: AtomicUsize::new(0),
@@ -227,9 +365,19 @@ mod tests {
         }
     }
 
+    /// Build a single plain-text segment, mirroring the text fallback shape.
+    fn text_segment(text: &str) -> Vec<DiarizedSegment> {
+        vec![DiarizedSegment {
+            speaker_label: None,
+            start_ms: 0,
+            end_ms: 100,
+            text: text.to_string(),
+        }]
+    }
+
     #[async_trait]
     impl ChunkTranscriber for Arc<FakeTranscriber> {
-        async fn transcribe(&self, _chunk: &Chunk) -> Result<String, TranscribeError> {
+        async fn transcribe(&self, _chunk: &Chunk) -> Result<Vec<DiarizedSegment>, TranscribeError> {
             self.attempts.fetch_add(1, Ordering::SeqCst);
             self.responses.lock().unwrap().remove(0)
         }
@@ -253,11 +401,11 @@ mod tests {
 
     #[tokio::test]
     async fn transcribe_chunk_returns_successful_text() {
-        let transcriber = Arc::new(FakeTranscriber::new(vec![Ok("hello".to_string())]));
+        let transcriber = Arc::new(FakeTranscriber::new(vec![Ok(text_segment("hello"))]));
 
         let result = transcribe_chunk_with_retry(&transcriber, &chunk(), cfg()).await;
 
-        assert_eq!(result.unwrap(), "hello");
+        assert_eq!(result.unwrap(), text_segment("hello"));
         assert_eq!(transcriber.attempts(), 1);
     }
 
@@ -266,12 +414,12 @@ mod tests {
         let transcriber = Arc::new(FakeTranscriber::new(vec![
             Err(TranscribeError::Transport("timeout".to_string())),
             Err(TranscribeError::Transport("502".to_string())),
-            Ok("eventually".to_string()),
+            Ok(text_segment("eventually")),
         ]));
 
         let result = transcribe_chunk_with_retry(&transcriber, &chunk(), cfg()).await;
 
-        assert_eq!(result.unwrap(), "eventually");
+        assert_eq!(result.unwrap(), text_segment("eventually"));
         assert_eq!(transcriber.attempts(), 3);
     }
 
@@ -318,5 +466,95 @@ mod tests {
         assert_eq!(parts[1]["name"], "file");
         assert_eq!(parts[1]["content_type"], "audio/wav");
         assert!(!parts[1]["data"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn build_diarized_envelope_carries_diarize_params_and_file() {
+        let envelope = build_diarized_envelope(&[0x52, 0x49, 0x46, 0x46]);
+        let parts = envelope["parts"].as_array().unwrap();
+
+        assert_eq!(parts[0]["name"], "model");
+        assert_eq!(parts[0]["value"], "gpt-4o-transcribe-diarize");
+        assert_eq!(parts[1]["name"], "response_format");
+        assert_eq!(parts[1]["value"], "diarized_json");
+        assert_eq!(parts[2]["name"], "chunking_strategy");
+        assert_eq!(parts[2]["value"], "auto");
+        assert_eq!(parts[3]["name"], "file");
+        assert!(!parts[3]["data"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_diarized_body_maps_segments_with_labels_and_ms() {
+        // Representative diarized_json body: segments with speaker labels and
+        // float-second start/end timestamps relative to the chunk.
+        let body = serde_json::json!({
+            "task": "transcribe",
+            "duration": 3.0,
+            "text": "Hi there. Hello.",
+            "segments": [
+                {
+                    "type": "transcript.text.segment",
+                    "id": "seg_0",
+                    "start": 0.0,
+                    "end": 1.5,
+                    "speaker": "A",
+                    "text": " Hi there. "
+                },
+                {
+                    "type": "transcript.text.segment",
+                    "id": "seg_1",
+                    "start": 1.8,
+                    "end": 3.0,
+                    "speaker": "B",
+                    "text": "Hello."
+                }
+            ]
+        });
+
+        let segments = parse_diarized_body(&body, 3_000).unwrap();
+
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].speaker_label.as_deref(), Some("A"));
+        assert_eq!(segments[0].start_ms, 0);
+        assert_eq!(segments[0].end_ms, 1_500);
+        assert_eq!(segments[0].text, "Hi there.");
+        assert_eq!(segments[1].speaker_label.as_deref(), Some("B"));
+        assert_eq!(segments[1].start_ms, 1_800);
+        assert_eq!(segments[1].end_ms, 3_000);
+        assert_eq!(segments[1].text, "Hello.");
+    }
+
+    #[test]
+    fn parse_diarized_body_falls_back_to_single_text_segment() {
+        // No segments array (diarization unavailable) -> one whole-chunk segment.
+        let body = serde_json::json!({ "text": "  plain transcript  " });
+
+        let segments = parse_diarized_body(&body, 4_200).unwrap();
+
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].speaker_label, None);
+        assert_eq!(segments[0].start_ms, 0);
+        assert_eq!(segments[0].end_ms, 4_200);
+        assert_eq!(segments[0].text, "plain transcript");
+    }
+
+    #[test]
+    fn parse_diarized_body_empty_text_is_empty_error() {
+        let body = serde_json::json!({ "text": "   " });
+        assert_eq!(
+            parse_diarized_body(&body, 1_000).unwrap_err(),
+            TranscribeError::Empty
+        );
+    }
+
+    #[test]
+    fn parse_diarized_body_all_blank_segments_is_empty_error() {
+        let body = serde_json::json!({
+            "segments": [ { "speaker": "A", "start": 0.0, "end": 1.0, "text": "  " } ]
+        });
+        assert_eq!(
+            parse_diarized_body(&body, 1_000).unwrap_err(),
+            TranscribeError::Empty
+        );
     }
 }

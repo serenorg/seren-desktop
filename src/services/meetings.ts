@@ -29,6 +29,8 @@ export interface Meeting {
   updatedAt: number;
 }
 
+export type SpeakerSource = "channel" | "diarization";
+
 export interface TranscriptSegment {
   id: string;
   meetingId: string;
@@ -38,6 +40,10 @@ export interface TranscriptSegment {
   startMs: number;
   endMs: number;
   status: SegmentStatus;
+  /** Raw diarization label from the model (e.g. "A"), if any. */
+  speakerLabel?: string | null;
+  /** Whether `speaker` came from the capture channel or model diarization. */
+  speakerSource?: SpeakerSource;
   createdAt: number;
 }
 

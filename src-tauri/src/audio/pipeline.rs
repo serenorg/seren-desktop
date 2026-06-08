@@ -17,7 +17,7 @@ use crate::audio::chunker::{Chunk, ChunkCfg, StreamingChunker};
 use crate::audio::transcribe::{
     ChunkTranscriber, GatewayTranscriber, RetryConfig, transcribe_chunk_with_retry,
 };
-use crate::audio::types::{SegmentStatus, Speaker, TranscriptSegment};
+use crate::audio::types::{SegmentStatus, Speaker, SpeakerSource, TranscriptSegment};
 use crate::commands::audio::{NewTranscriptSegment, insert_transcript_segment, now_ms};
 use crate::services::database::DbPool;
 
@@ -62,22 +62,54 @@ async fn emit_segment(
     seq: &AtomicI64,
     sink: &dyn SegmentSink,
 ) {
-    let (text, status) = match transcribe_chunk_with_retry(transcriber, &chunk, retry).await {
-        Ok(text) => (text, SegmentStatus::Ok),
-        Err(_) => (String::new(), SegmentStatus::Gap),
-    };
-    let segment = TranscriptSegment {
-        id: Uuid::new_v4().to_string(),
-        meeting_id: meeting_id.to_string(),
-        seq: seq.fetch_add(1, Ordering::SeqCst),
-        speaker: speaker.clone(),
-        text,
-        start_ms: chunk.start_ms as i64,
-        end_ms: chunk.end_ms as i64,
-        status,
-        created_at: now_ms(),
-    };
-    sink.segment(segment).await;
+    let chunk_start = chunk.start_ms as i64;
+    let chunk_end = chunk.end_ms as i64;
+    match transcribe_chunk_with_retry(transcriber, &chunk, retry).await {
+        Ok(diarized) => {
+            // One transcript segment per diarized utterance. The capture channel
+            // still decides Me/Them; the model label is metadata for a future
+            // per-speaker correction UI. Offset each utterance by the chunk start.
+            for utterance in diarized {
+                let speaker_source = if utterance.speaker_label.is_some() {
+                    SpeakerSource::Diarization
+                } else {
+                    SpeakerSource::Channel
+                };
+                let segment = TranscriptSegment {
+                    id: Uuid::new_v4().to_string(),
+                    meeting_id: meeting_id.to_string(),
+                    seq: seq.fetch_add(1, Ordering::SeqCst),
+                    speaker: speaker.clone(),
+                    text: utterance.text,
+                    start_ms: chunk_start + utterance.start_ms,
+                    end_ms: chunk_start + utterance.end_ms,
+                    status: SegmentStatus::Ok,
+                    speaker_label: utterance.speaker_label,
+                    speaker_source,
+                    created_at: now_ms(),
+                };
+                sink.segment(segment).await;
+            }
+        }
+        Err(_) => {
+            // A failed window becomes a single Gap spanning the chunk so audio is
+            // never silently dropped.
+            let segment = TranscriptSegment {
+                id: Uuid::new_v4().to_string(),
+                meeting_id: meeting_id.to_string(),
+                seq: seq.fetch_add(1, Ordering::SeqCst),
+                speaker: speaker.clone(),
+                text: String::new(),
+                start_ms: chunk_start,
+                end_ms: chunk_end,
+                status: SegmentStatus::Gap,
+                speaker_label: None,
+                speaker_source: SpeakerSource::Channel,
+                created_at: now_ms(),
+            };
+            sink.segment(segment).await;
+        }
+    }
 }
 
 /// Production sink: persist the segment to SQLite, then emit it to the webview.
@@ -98,6 +130,8 @@ impl SegmentSink for DbEmitSink {
             start_ms: segment.start_ms,
             end_ms: segment.end_ms,
             status: segment.status.clone(),
+            speaker_label: segment.speaker_label.clone(),
+            speaker_source: segment.speaker_source,
             created_at: segment.created_at,
         };
         let persisted = tauri::async_runtime::spawn_blocking(move || {
@@ -165,7 +199,7 @@ impl CaptureRegistry {
         let seq = Arc::new(AtomicI64::new(0));
 
         let me_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> =
-            Arc::new(GatewayTranscriber::new(app.clone()));
+            Arc::new(GatewayTranscriber::new_diarized(app.clone()));
         let me_sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
         let (me_tx, me_rx) = unbounded_channel();
         let mut tasks = vec![tauri::async_runtime::spawn(run_capture_stream(
@@ -184,7 +218,7 @@ impl CaptureRegistry {
         let mut system_source = system_audio_source();
         if let Some(source) = system_source.as_mut() {
             let them_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> =
-                Arc::new(GatewayTranscriber::new(app.clone()));
+                Arc::new(GatewayTranscriber::new_diarized(app.clone()));
             let them_sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
             let (tx, rx) = unbounded_channel();
             tasks.push(tauri::async_runtime::spawn(run_capture_stream(
@@ -269,12 +303,20 @@ mod tests {
         async fn transcribe(
             &self,
             _chunk: &Chunk,
-        ) -> Result<String, crate::audio::transcribe::TranscribeError> {
+        ) -> Result<
+            Vec<crate::audio::transcribe::DiarizedSegment>,
+            crate::audio::transcribe::TranscribeError,
+        > {
             let mut texts = self.texts.lock().unwrap();
             if texts.is_empty() {
                 Err(crate::audio::transcribe::TranscribeError::Empty)
             } else {
-                Ok(texts.remove(0))
+                Ok(vec![crate::audio::transcribe::DiarizedSegment {
+                    speaker_label: None,
+                    start_ms: 0,
+                    end_ms: 100,
+                    text: texts.remove(0),
+                }])
             }
         }
     }
