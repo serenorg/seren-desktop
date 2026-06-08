@@ -371,10 +371,19 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
       vocabulary: settingsStore.get("voiceCustomVocabulary"),
     });
   } catch (error) {
+    // Notes failed: the backend left the meeting at `transcribing` (it only
+    // sets notes_ready on success). Mark it failed and stop — don't fall
+    // through to runHandoff and auto-invoke a skill on an empty meeting (#2159).
     setMeetingState(
       "error",
       error instanceof Error ? error.message : "Notes generation failed",
     );
+    await updateMeetingStatus(meeting.id, "failed", Date.now()).catch(() => {});
+    await loadMeetings();
+    await setActiveMeeting(
+      meetingState.meetings.find((m) => m.id === meeting.id) ?? null,
+    );
+    return;
   }
   await loadMeetings();
   const refreshed =
@@ -385,6 +394,11 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
 }
 
 async function runHandoff(meeting: Meeting): Promise<void> {
+  // No transcript means nothing to hand off — guards a notes/transcribe failure
+  // from auto-invoking a skill with an empty prompt (#2159).
+  const transcript = await getMeetingTranscriptText(meeting.id).catch(() => "");
+  if (!transcript.trim()) return;
+
   const skillRefs = skillsStore.enabledSkills.map((skill) => ({
     slug: skill.slug,
     name: skill.name,
@@ -409,7 +423,6 @@ async function runHandoff(meeting: Meeting): Promise<void> {
   const chosen = skillRefs.find((skill) => skill.slug === chosenSlug);
   if (!chosen) return;
 
-  const transcript = await getMeetingTranscriptText(meeting.id).catch(() => "");
   const notes =
     meetingState.meetings.find((m) => m.id === meeting.id)?.notesMarkdown ?? "";
 
