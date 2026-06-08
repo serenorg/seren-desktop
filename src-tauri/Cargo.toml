@@ -39,7 +39,7 @@ serde_json = "1"
 rusqlite = { version = "0.33", features = ["bundled"] }
 sqlite-vec = "0.1"
 notify = "8"
-sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+sysinfo = { version = "0.38", default-features = false, features = ["system"] }
 lazy_static = "1"
 tokio = { version = "1", features = ["process", "io-util", "sync", "io-std", "time"] }
 tokio-util = { version = "0.7", features = ["compat"] }
