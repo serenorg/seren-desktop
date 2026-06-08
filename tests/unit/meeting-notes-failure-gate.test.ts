@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   updateMeetingStatus: vi.fn(async () => {}),
-  listMeetings: vi.fn(async () => []),
+  listMeetings: vi.fn(async (): Promise<Meeting[]> => []),
   generateMeetingNotes: vi.fn(async () => ({
     markdown: "notes",
     structured: { summary: "s", actionItems: [], fields: {} },
