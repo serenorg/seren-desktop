@@ -4,6 +4,7 @@
 import { type Component, Show } from "solid-js";
 import { BalanceDisplay } from "@/components/common/BalanceDisplay";
 import { WorkspaceBar } from "@/components/layout/WorkspaceBar";
+import { RecordPrompt } from "@/components/meeting/RecordPrompt";
 import { authStore } from "@/stores/auth.store";
 import { updaterStore } from "@/stores/updater.store";
 
@@ -11,6 +12,9 @@ interface TitlebarProps {
   onSignInClick: () => void;
   onToggleSkills: () => void;
   onToggleSettings: () => void;
+  recordPromptVisible?: boolean;
+  onRecordConversation?: () => void;
+  onDismissRecordPrompt?: () => void;
 }
 
 const DOWNLOAD_QUIPS = [
@@ -114,6 +118,13 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
             <span>⚠</span>
             <span>Update failed - Retry</span>
           </button>
+        </Show>
+
+        <Show when={props.recordPromptVisible}>
+          <RecordPrompt
+            onRecord={() => props.onRecordConversation?.()}
+            onDismiss={() => props.onDismissRecordPrompt?.()}
+          />
         </Show>
 
         <Show when={authStore.isAuthenticated}>

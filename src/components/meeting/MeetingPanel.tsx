@@ -251,7 +251,7 @@ export function MeetingPanel(props: MeetingPanelProps) {
         )}
       </Show>
 
-      {/* Auto-detect now surfaces app-wide via RecordPrompt (AppShell); the
+      {/* Auto-detect now surfaces app-wide via RecordPrompt (titlebar); the
           in-panel banner was a dead spot (only visible with this panel open). */}
 
       <Show when={!showSettings()} fallback={<MeetingSettings />}>
