@@ -160,6 +160,15 @@ struct ActiveCapture {
     tasks: Vec<JoinHandle<()>>,
 }
 
+/// A meeting's slot in the registry. `Stopping` is a tombstone left in the map
+/// while `stop` drains its workers off the lock (up to ~1s joining the WASAPI
+/// thread on Windows). It keeps the id occupied so a racing `start` can't slip
+/// past the guard and insert a second coexisting capture (#2164).
+enum CaptureSlot {
+    Active(ActiveCapture),
+    Stopping,
+}
+
 /// The platform's system-audio ("Them") capture source, if this build supports it.
 /// Returns `None` where native capture is not yet available so the meeting still
 /// captures the "Me" stream.
@@ -196,7 +205,7 @@ pub fn transcription_mode_for(speaker: &Speaker) -> TranscriptionMode {
 /// Tauri-managed registry of active meeting captures, keyed by meeting id.
 #[derive(Default)]
 pub struct CaptureRegistry {
-    active: Arc<StdMutex<HashMap<String, ActiveCapture>>>,
+    active: Arc<StdMutex<HashMap<String, CaptureSlot>>>,
 }
 
 impl CaptureRegistry {
@@ -204,6 +213,8 @@ impl CaptureRegistry {
     /// [`CaptureRegistry::push_frame`]; the worker transcribes and persists them.
     pub fn start(&self, app: &AppHandle, meeting_id: &str) {
         let mut active = self.active.lock().unwrap();
+        // Reject if the id is already live OR draining (`Stopping` tombstone): a
+        // start that raced a still-running stop must not insert a second capture.
         if active.contains_key(meeting_id) {
             return;
         }
@@ -257,24 +268,35 @@ impl CaptureRegistry {
 
         active.insert(
             meeting_id.to_string(),
-            ActiveCapture {
+            CaptureSlot::Active(ActiveCapture {
                 me_tx,
                 them_tx,
                 system_source,
                 tasks,
-            },
+            }),
         );
     }
 
-    /// Whether a capture is currently active for `meeting_id`.
+    /// Whether a capture is currently live for `meeting_id`. A draining
+    /// (`Stopping`) slot reports `false` — it is no longer capturing.
     pub fn is_active(&self, meeting_id: &str) -> bool {
+        matches!(
+            self.active.lock().unwrap().get(meeting_id),
+            Some(CaptureSlot::Active(_))
+        )
+    }
+
+    /// Whether the registry slot for `meeting_id` is taken (live or draining).
+    /// This is the predicate `start` guards on, so a draining slot blocks a
+    /// new capture for the same id until the drain completes.
+    pub fn slot_occupied(&self, meeting_id: &str) -> bool {
         self.active.lock().unwrap().contains_key(meeting_id)
     }
 
     /// Push a normalized 16 kHz mono frame into the capture stream for `speaker`.
     pub fn push_frame(&self, meeting_id: &str, speaker: Speaker, samples: Vec<i16>) {
         let active = self.active.lock().unwrap();
-        if let Some(capture) = active.get(meeting_id) {
+        if let Some(CaptureSlot::Active(capture)) = active.get(meeting_id) {
             let sender = match speaker {
                 Speaker::Me => Some(&capture.me_tx),
                 // The system ("Them") stream arrives once native capture lands.
@@ -286,10 +308,36 @@ impl CaptureRegistry {
         }
     }
 
-    /// Stop capture for `meeting_id`, draining and finishing all worker tasks.
+    /// Take the active capture for draining and leave a `Stopping` tombstone, all
+    /// under the lock. Returns `None` if the id is absent or already draining, so a
+    /// second concurrent stop is a no-op. The tombstone outlives the lock so a
+    /// racing `start` is rejected until [`CaptureRegistry::finish_stop`] clears it.
+    fn begin_stop(&self, meeting_id: &str) -> Option<ActiveCapture> {
+        let mut active = self.active.lock().unwrap();
+        match active.remove(meeting_id) {
+            Some(CaptureSlot::Active(capture)) => {
+                active.insert(meeting_id.to_string(), CaptureSlot::Stopping);
+                Some(capture)
+            }
+            // Already draining: restore the tombstone and report nothing to do.
+            Some(CaptureSlot::Stopping) => {
+                active.insert(meeting_id.to_string(), CaptureSlot::Stopping);
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// Clear the `Stopping` tombstone once the drain has completed, freeing the id.
+    fn finish_stop(&self, meeting_id: &str) {
+        self.active.lock().unwrap().remove(meeting_id);
+    }
+
+    /// Stop capture for `meeting_id`, draining and finishing all worker tasks. The
+    /// slot is held as a `Stopping` tombstone across the drain so a concurrent
+    /// `start` for the same id can't insert a second coexisting capture (#2164).
     pub async fn stop(&self, meeting_id: &str) {
-        let capture = self.active.lock().unwrap().remove(meeting_id);
-        let Some(mut capture) = capture else {
+        let Some(mut capture) = self.begin_stop(meeting_id) else {
             return;
         };
         // Stop the native source first so it stops feeding the "Them" channel.
@@ -302,6 +350,7 @@ impl CaptureRegistry {
         for task in capture.tasks {
             let _ = task.await;
         }
+        self.finish_stop(meeting_id);
     }
 }
 
@@ -453,5 +502,42 @@ mod tests {
             transcription_mode_for(&Speaker::Them),
             TranscriptionMode::Diarized
         );
+    }
+
+    #[test]
+    fn stop_keeps_tombstone_until_drain_completes_so_start_cannot_double_insert() {
+        // #2164: stop() removes the entry then awaits the drain off the lock. A
+        // racing start(id) used to pass the contains_key guard and insert a second
+        // ActiveCapture. The Stopping tombstone keeps the slot occupied for the
+        // whole drain so start() is rejected until finish_stop clears it.
+        let registry = CaptureRegistry::default();
+        let (me_tx, _me_rx) = unbounded_channel();
+        registry.active.lock().unwrap().insert(
+            "m1".to_string(),
+            CaptureSlot::Active(ActiveCapture {
+                me_tx,
+                them_tx: None,
+                system_source: None,
+                tasks: Vec::new(),
+            }),
+        );
+        assert!(registry.is_active("m1"));
+        assert!(registry.slot_occupied("m1"));
+
+        // Drain begins: the capture is taken and a tombstone left behind.
+        let taken = registry.begin_stop("m1");
+        assert!(taken.is_some());
+        // Mid-drain the slot is occupied (start() guards on this) but not "active",
+        // so a racing start is rejected rather than inserting a second capture.
+        assert!(registry.slot_occupied("m1"));
+        assert!(!registry.is_active("m1"));
+        // A second concurrent stop while draining is a no-op.
+        assert!(registry.begin_stop("m1").is_none());
+        assert!(registry.slot_occupied("m1"));
+
+        // Drain done: the tombstone clears and the id is free for a new capture.
+        registry.finish_stop("m1");
+        assert!(!registry.slot_occupied("m1"));
+        assert!(!registry.is_active("m1"));
     }
 }
