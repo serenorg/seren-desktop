@@ -15,7 +15,8 @@ use uuid::Uuid;
 use crate::audio::capture::{AudioCaptureSource, PcmFrame};
 use crate::audio::chunker::{Chunk, ChunkCfg, StreamingChunker};
 use crate::audio::transcribe::{
-    ChunkTranscriber, GatewayTranscriber, RetryConfig, transcribe_chunk_with_retry,
+    ChunkTranscriber, GatewayTranscriber, RetryConfig, TranscriptionMode,
+    transcribe_chunk_with_retry,
 };
 use crate::audio::types::{SegmentStatus, Speaker, SpeakerSource, TranscriptSegment};
 use crate::commands::audio::{NewTranscriptSegment, insert_transcript_segment, now_ms};
@@ -181,6 +182,17 @@ fn system_audio_source() -> Option<Box<dyn AudioCaptureSource>> {
     }
 }
 
+/// The transcription mode for a capture stream. The single-speaker microphone
+/// ("Me") uses plain `whisper-1` text; only the multi-speaker system stream
+/// ("Them") is diarized — diarizing the mono mic is pure cost with no payoff
+/// (see #2152).
+pub fn transcription_mode_for(speaker: &Speaker) -> TranscriptionMode {
+    match speaker {
+        Speaker::Me => TranscriptionMode::Text,
+        Speaker::Them => TranscriptionMode::Diarized,
+    }
+}
+
 /// Tauri-managed registry of active meeting captures, keyed by meeting id.
 #[derive(Default)]
 pub struct CaptureRegistry {
@@ -198,8 +210,11 @@ impl CaptureRegistry {
         // Me and Them share one sequence counter so segments order globally.
         let seq = Arc::new(AtomicI64::new(0));
 
-        let me_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> =
-            Arc::new(GatewayTranscriber::new_diarized(app.clone()));
+        // Me is the single-speaker mic -> plain whisper-1 text (cheap); only the
+        // multi-speaker Them stream is diarized (#2152).
+        let me_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> = Arc::new(
+            GatewayTranscriber::with_mode(app.clone(), transcription_mode_for(&Speaker::Me)),
+        );
         let me_sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
         let (me_tx, me_rx) = unbounded_channel();
         let mut tasks = vec![tauri::async_runtime::spawn(run_capture_stream(
@@ -217,8 +232,9 @@ impl CaptureRegistry {
         let mut them_tx = None;
         let mut system_source = system_audio_source();
         if let Some(source) = system_source.as_mut() {
-            let them_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> =
-                Arc::new(GatewayTranscriber::new_diarized(app.clone()));
+            let them_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> = Arc::new(
+                GatewayTranscriber::with_mode(app.clone(), transcription_mode_for(&Speaker::Them)),
+            );
             let them_sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
             let (tx, rx) = unbounded_channel();
             tasks.push(tauri::async_runtime::spawn(run_capture_stream(
@@ -426,5 +442,16 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].status, SegmentStatus::Gap);
         assert!(segments[0].text.is_empty());
+    }
+
+    #[test]
+    fn me_uses_plain_text_and_them_is_diarized() {
+        // #2152 cost contract: the single-speaker mic must NOT use the costly
+        // diarize model; only the multi-speaker system stream is diarized.
+        assert_eq!(transcription_mode_for(&Speaker::Me), TranscriptionMode::Text);
+        assert_eq!(
+            transcription_mode_for(&Speaker::Them),
+            TranscriptionMode::Diarized
+        );
     }
 }
