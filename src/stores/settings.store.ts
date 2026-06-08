@@ -264,9 +264,9 @@ const DEFAULT_SETTINGS: Settings = {
   voiceCleanupEnabled: true,
   voiceCustomVocabulary: [],
   // Meeting
-  meetingAutoDetectEnabled: false,
+  meetingAutoDetectEnabled: true,
   meetingTemplateId: "discovery",
-  meetingAppAllowlist: ["zoom", "teams", "meet", "slack", "webex"],
+  meetingAppAllowlist: ["zoom", "discord", "teams", "meet", "slack", "webex"],
   meetingCustomTemplates: [],
   meetingDefaultSkill: "",
   meetingAudioPrimed: false,

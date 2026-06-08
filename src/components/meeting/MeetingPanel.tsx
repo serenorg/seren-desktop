@@ -251,34 +251,8 @@ export function MeetingPanel(props: MeetingPanelProps) {
         )}
       </Show>
 
-      <Show
-        when={
-          meetingStore.state.autoDetectSuggested &&
-          activeCapture() === undefined
-        }
-      >
-        <div class="flex items-center gap-3 px-4 py-2.5 border-b border-primary/30 bg-primary/10 text-[12px] text-foreground">
-          <span class="flex-1">
-            A meeting app looks active. Start recording?
-          </span>
-          <button
-            type="button"
-            class="h-7 px-2.5 rounded-md border border-primary/40 bg-primary/10 text-[12px] text-primary hover:bg-primary/15 disabled:opacity-60"
-            onClick={startManualCapture}
-            disabled={starting()}
-          >
-            Start
-          </button>
-          <button
-            type="button"
-            class="text-muted-foreground hover:text-foreground"
-            onClick={() => meetingStore.dismissAutoDetect()}
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      </Show>
+      {/* Auto-detect now surfaces app-wide via RecordPrompt (AppShell); the
+          in-panel banner was a dead spot (only visible with this panel open). */}
 
       <Show when={!showSettings()} fallback={<MeetingSettings />}>
         <div class="min-h-0 flex-1 grid grid-cols-[220px_1fr]">

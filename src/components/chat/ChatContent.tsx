@@ -16,7 +16,6 @@ import {
 } from "solid-js";
 import { createStore } from "solid-js/store";
 import { SignIn } from "@/components/auth/SignIn";
-import { DictationHud } from "@/components/chat/DictationHud";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { SlidePanel } from "@/components/layout/SlidePanel";
@@ -2047,10 +2046,6 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                       inputRef?.focus();
                     }
                   }}
-                />
-                <DictationHud
-                  getTextarea={() => inputRef}
-                  active={isPaneActive()}
                 />
                 <Show
                   when={conversationIsLoading()}
