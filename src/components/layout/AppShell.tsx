@@ -20,6 +20,7 @@ import { ArchivedEmployeeDetail } from "@/components/employees/ArchivedEmployeeD
 import { EmployeeDetail } from "@/components/employees/EmployeeDetail";
 import { InboxList } from "@/components/inbox/InboxList";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
+import { AudioPrimingDialog } from "@/components/meeting/AudioPrimingDialog";
 import { MeetingPanel } from "@/components/meeting/MeetingPanel";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
@@ -57,6 +58,7 @@ import {
 } from "@/stores/editor.sessions";
 import { employeeStore } from "@/stores/employees.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { meetingStore } from "@/stores/meeting.store";
 import { skillPublishStore } from "@/stores/skill-publish.store";
 import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
@@ -576,6 +578,13 @@ export const AppShell: Component<AppShellProps> = (props) => {
     initEditorSessionPersistence();
     void restoreEditorSessions();
 
+    // Meeting capture lifecycle lives here, in the always-mounted shell, so the
+    // widget Stop relay, tray toggle, and transcript listeners survive the
+    // MeetingPanel unmounting when its slide panel closes. Started once per app
+    // session; torn down on shell cleanup.
+    void meetingStore.startMeetingEventListeners();
+    meetingStore.startAutoDetect();
+
     window.addEventListener("seren:open-panel", handleOpenPanel);
     window.addEventListener("seren:open-settings", handleOpenSettings);
     document.addEventListener("focusin", handleFocusIn);
@@ -597,6 +606,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
   onCleanup(() => {
     unsubscribeWorkspaceRemoved();
+    meetingStore.stopMeetingEventListeners();
+    meetingStore.stopAutoDetect();
     window.removeEventListener("seren:open-panel", handleOpenPanel);
     window.removeEventListener("seren:open-settings", handleOpenSettings);
     document.removeEventListener("focusin", handleFocusIn);
@@ -753,6 +764,16 @@ export const AppShell: Component<AppShellProps> = (props) => {
             </Show>
           );
         }}
+      </Show>
+
+      {/* First-run audio-permission explainer, surfaced app-wide so non-panel
+          start paths (tray, auto-detect) gate on it too. Driven by the meeting
+          store's pending priming request. */}
+      <Show when={meetingStore.state.primingRequest}>
+        <AudioPrimingDialog
+          onContinue={() => void meetingStore.confirmPriming()}
+          onCancel={() => meetingStore.cancelPriming()}
+        />
       </Show>
 
       {/* Layout-level blocking sign-in modal — fires on mid-session expiry,

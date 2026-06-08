@@ -1,15 +1,7 @@
 // ABOUTME: Slide-panel interface for Meeting Mode library, recorder, and details.
 // ABOUTME: Uses meeting services and store; components never call Tauri IPC directly.
 
-import {
-  createMemo,
-  createSignal,
-  For,
-  onCleanup,
-  onMount,
-  Show,
-} from "solid-js";
-import { AudioPrimingDialog } from "@/components/meeting/AudioPrimingDialog";
+import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { MeetingDetail } from "@/components/meeting/MeetingDetail";
 import { MeetingSettings } from "@/components/meeting/MeetingSettings";
 import {
@@ -63,17 +55,12 @@ export function MeetingPanel(props: MeetingPanelProps) {
   const [stopping, setStopping] = createSignal(false);
   const [title, setTitle] = createSignal("");
   const [showSettings, setShowSettings] = createSignal(false);
-  const [showPriming, setShowPriming] = createSignal(false);
 
+  // The capture lifecycle (event listeners, auto-detect, widget/tray relays)
+  // lives in AppShell so it survives this panel unmounting on close. The panel
+  // only refreshes its own list when it opens.
   onMount(() => {
     void meetingStore.loadMeetings();
-    void meetingStore.startMeetingEventListeners();
-    meetingStore.startAutoDetect();
-  });
-
-  onCleanup(() => {
-    meetingStore.stopMeetingEventListeners();
-    meetingStore.stopAutoDetect();
   });
 
   const activeCapture = createMemo(() =>
@@ -86,7 +73,13 @@ export function MeetingPanel(props: MeetingPanelProps) {
   const template = () => settingsStore.get("meetingTemplateId");
   const desktopRuntime = isTauriRuntime();
 
-  const beginCapture = async () => {
+  // Create the meeting, then hand off to the store's gate. The store decides
+  // whether to start immediately or surface the app-wide priming dialog, so
+  // every start path (panel, tray, auto-detect) honors the first-run gate.
+  const startManualCapture = async () => {
+    if (!desktopRuntime || starting()) return;
+    // A priming dialog is already pending a start; don't create a second one.
+    if (meetingStore.state.primingRequest) return;
     setStarting(true);
     try {
       const meeting = await createMeeting({
@@ -96,31 +89,11 @@ export function MeetingPanel(props: MeetingPanelProps) {
       });
       setTitle("");
       meetingStore.dismissAutoDetect();
-      await meetingStore.startCapture(meeting);
-      await meetingStore.loadMeetings();
-      await meetingStore.setActiveMeeting(meeting);
+      await meetingStore.requestCaptureStart(meeting);
     } finally {
       setStarting(false);
     }
   };
-
-  const startManualCapture = async () => {
-    if (!desktopRuntime || starting()) return;
-    // First run: prime the audio-permission explainer before the OS prompt.
-    if (!settingsStore.get("meetingAudioPrimed")) {
-      setShowPriming(true);
-      return;
-    }
-    await beginCapture();
-  };
-
-  const confirmPriming = async () => {
-    setShowPriming(false);
-    settingsStore.set("meetingAudioPrimed", true);
-    await beginCapture();
-  };
-
-  const cancelPriming = () => setShowPriming(false);
 
   const stopManualCapture = async () => {
     const meeting = activeCapture();
@@ -305,13 +278,6 @@ export function MeetingPanel(props: MeetingPanelProps) {
             ×
           </button>
         </div>
-      </Show>
-
-      <Show when={showPriming()}>
-        <AudioPrimingDialog
-          onContinue={() => void confirmPriming()}
-          onCancel={cancelPriming}
-        />
       </Show>
 
       <Show when={!showSettings()} fallback={<MeetingSettings />}>
