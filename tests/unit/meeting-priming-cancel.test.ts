@@ -62,6 +62,7 @@ describe("meetingStore priming cancel + reconcile (#2160)", () => {
       "z1",
       "failed",
       expect.any(Number),
+      expect.stringContaining("canceled"),
     );
     expect(services.listMeetings).toHaveBeenCalled();
   });
@@ -80,7 +81,12 @@ describe("meetingStore priming cancel + reconcile (#2160)", () => {
     // Fail every mid-pipeline zombie, with no ended_at so a captured row keeps
     // its capture-end time (#2174).
     for (const id of ["cap", "trans", "agent"]) {
-      expect(services.updateMeetingStatus).toHaveBeenCalledWith(id, "failed");
+      expect(services.updateMeetingStatus).toHaveBeenCalledWith(
+        id,
+        "failed",
+        null,
+        expect.stringContaining("Seren restarted"),
+      );
     }
     // Terminal/resting rows are left alone.
     for (const id of ["done1", "notes"]) {

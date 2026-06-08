@@ -143,6 +143,7 @@ pub struct Meeting {
     pub agent_conversation_id: Option<String>,
     pub notes_markdown: Option<String>,
     pub notes_struct_json: Option<String>,
+    pub failure_reason: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

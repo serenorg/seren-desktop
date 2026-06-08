@@ -135,6 +135,17 @@ export function MeetingDetail(props: MeetingDetailProps) {
           </span>
           <span>{props.meeting.sourceApp ?? "Desktop"}</span>
         </div>
+        <Show
+          when={
+            props.meeting.status === "failed" && props.meeting.failureReason
+          }
+        >
+          {(reason) => (
+            <div class="mt-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-[12px] leading-5 text-destructive">
+              {reason()}
+            </div>
+          )}
+        </Show>
       </div>
 
       <div class="mb-4 flex items-center gap-2">

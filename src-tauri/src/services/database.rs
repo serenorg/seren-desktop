@@ -340,6 +340,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             agent_conversation_id TEXT,
             notes_markdown TEXT,
             notes_struct_json TEXT,
+            failure_reason TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             FOREIGN KEY (agent_conversation_id) REFERENCES conversations(id)
@@ -393,6 +394,15 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             [],
         )
         .ok();
+    }
+
+    // Migration: add persisted failure reasons to meetings for existing DBs.
+    let has_failure_reason: bool = conn
+        .prepare("SELECT failure_reason FROM meetings LIMIT 1")
+        .is_ok();
+    if !has_failure_reason {
+        conn.execute("ALTER TABLE meetings ADD COLUMN failure_reason TEXT", [])
+            .ok();
     }
 
     // Migration: add agent conversation columns if they don't exist (for existing DBs)
