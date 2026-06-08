@@ -1,5 +1,5 @@
-// ABOUTME: App-wide, non-modal prompt offering to record when a call app is detected.
-// ABOUTME: Granola-style "Record this conversation?" — the capture entry point, not push-to-talk.
+// ABOUTME: Compact titlebar prompt offering to record when input activity is detected.
+// ABOUTME: Capture entry point for meeting mode, not push-to-talk.
 
 interface RecordPromptProps {
   /** Start recording the detected conversation. */
@@ -26,36 +26,37 @@ function MicGlyph() {
 
 export function RecordPrompt(props: RecordPromptProps) {
   return (
-    <div class="pointer-events-none fixed bottom-6 right-6 z-50">
-      <div class="pointer-events-auto flex items-center gap-3 rounded-xl border border-border bg-surface-2/95 px-4 py-3 shadow-lg backdrop-blur-sm animate-[fadeIn_200ms_ease]">
-        <span class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent">
-          <span class="absolute h-2.5 w-2.5 rounded-full bg-accent animate-[voicePulse_1.4s_ease-in-out_infinite]" />
-          <MicGlyph />
+    <div
+      class="flex h-8 w-[clamp(280px,42vw,430px)] min-w-0 items-center gap-2 rounded-md border border-accent/55 bg-primary-muted px-2 shadow-[0_0_0_1px_rgba(56,189,248,0.12),0_8px_24px_rgba(0,0,0,0.32)] backdrop-blur-sm animate-[fadeIn_200ms_ease]"
+      aria-label="Record detected conversation"
+    >
+      <span class="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
+        <span class="absolute h-2 w-2 rounded-full bg-accent-foreground/75 animate-[voicePulse_1.4s_ease-in-out_infinite]" />
+        <MicGlyph />
+      </span>
+      <div class="flex min-w-0 flex-1 flex-col leading-tight">
+        <span class="truncate text-[12px] font-medium text-foreground">
+          Record this conversation?
         </span>
-        <div class="flex min-w-0 flex-col">
-          <span class="text-[13px] font-medium text-foreground">
-            Record this conversation?
-          </span>
-          <span class="text-[11px] text-muted-foreground">
-            A call looks active — capture a transcript &amp; notes.
-          </span>
-        </div>
-        <div class="ml-2 flex shrink-0 items-center gap-1.5">
-          <button
-            type="button"
-            class="h-7 rounded-md border border-accent/50 bg-accent/15 px-3 text-[12px] font-medium text-accent transition-colors hover:bg-accent/25"
-            onClick={() => props.onRecord()}
-          >
-            Record
-          </button>
-          <button
-            type="button"
-            class="h-7 rounded-md px-2.5 text-[12px] text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground"
-            onClick={() => props.onDismiss()}
-          >
-            Not now
-          </button>
-        </div>
+        <span class="truncate text-[10px] text-muted-foreground">
+          Active input detected. Capture transcript and notes.
+        </span>
+      </div>
+      <div class="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          class="h-6 rounded-md border border-accent bg-accent px-2 text-[11px] font-medium text-accent-foreground transition-colors hover:bg-primary-hover"
+          onClick={() => props.onRecord()}
+        >
+          Record
+        </button>
+        <button
+          type="button"
+          class="h-6 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent/15 hover:text-foreground"
+          onClick={() => props.onDismiss()}
+        >
+          Not now
+        </button>
       </div>
     </div>
   );

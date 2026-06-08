@@ -47,8 +47,8 @@ interface MeetingState {
   isLoading: boolean;
   error: string | null;
   /**
-   * True when the auto-detect poll has seen an allowlisted meeting app while
-   * nothing is capturing. The panel surfaces an arm prompt; the user starts.
+   * True when the auto-detect poll has seen active input while nothing is
+   * capturing. The titlebar surfaces an arm prompt; the user starts.
    */
   autoDetectSuggested: boolean;
   /**
@@ -633,8 +633,8 @@ function isCapturing(): boolean {
 }
 
 // Opt-in poll: while "auto-detect meetings" is on and nothing is capturing,
-// probe for an allowlisted meeting app and surface an arm prompt. The user
-// still presses start — capture is never auto-armed without consent.
+// probe for active input and surface an arm prompt. The user still presses
+// start; capture is never auto-armed without consent.
 async function pollAutoDetect(): Promise<void> {
   if (!isTauriRuntime()) return;
   if (!settingsStore.get("meetingAutoDetectEnabled")) {
@@ -692,8 +692,8 @@ async function acceptAutoDetect(): Promise<void> {
   await requestCaptureStart(meeting);
 }
 
-// Hide the prompt until the next time no meeting app is detected, so a single
-// dismissal doesn't re-nag on every poll for the same running app.
+// Hide the prompt until the next time no input activity is detected, so a
+// single dismissal doesn't re-nag on every poll during the same call.
 function dismissAutoDetect(): void {
   autoDetectDismissed = true;
   setMeetingState("autoDetectSuggested", false);

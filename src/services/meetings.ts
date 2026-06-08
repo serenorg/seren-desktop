@@ -226,8 +226,8 @@ export function listMeetingTemplates(): Promise<MeetingTemplate[]> {
 }
 
 /**
- * Probe running processes and report whether a meeting capture should arm
- * (an allowlisted meeting app is running). mic-in-use is not probed.
+ * Probe whether meeting capture should arm. Native side requires active input
+ * activity; an idle allowlisted app process is not enough.
  */
 export function meetingAutodetect(allowlist: string[]): Promise<boolean> {
   return invoke("meeting_autodetect", { allowlist });
