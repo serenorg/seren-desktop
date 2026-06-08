@@ -22,6 +22,7 @@ import { InboxList } from "@/components/inbox/InboxList";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { AudioPrimingDialog } from "@/components/meeting/AudioPrimingDialog";
 import { MeetingPanel } from "@/components/meeting/MeetingPanel";
+import { RecordPrompt } from "@/components/meeting/RecordPrompt";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import {
@@ -776,6 +777,22 @@ export const AppShell: Component<AppShellProps> = (props) => {
         <AudioPrimingDialog
           onContinue={() => void meetingStore.confirmPriming()}
           onCancel={() => void meetingStore.cancelPriming()}
+        />
+      </Show>
+
+      {/* App-wide Granola-style record prompt: surfaced anywhere (not just the
+          Meetings panel) when the auto-detect poll sees a call app and nothing
+          is capturing or priming. Replaces push-to-talk dictation as the entry. */}
+      <Show
+        when={
+          meetingStore.state.autoDetectSuggested &&
+          !meetingStore.state.primingRequest &&
+          !meetingStore.state.meetings.some((m) => m.status === "capturing")
+        }
+      >
+        <RecordPrompt
+          onRecord={() => void meetingStore.acceptAutoDetect()}
+          onDismiss={() => meetingStore.dismissAutoDetect()}
         />
       </Show>
 

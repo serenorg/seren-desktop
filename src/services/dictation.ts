@@ -31,21 +31,3 @@ export function cleanupDictationText(
 ): Promise<string> {
   return invoke("cleanup_dictation_text", { text, model, vocabulary });
 }
-
-/**
- * Edit-by-voice: apply a spoken instruction to a selected span of text.
- * Returns the rewritten selection.
- */
-export function transformSelection(
-  selection: string,
-  instruction: string,
-  model: string,
-  vocabulary: string[],
-): Promise<string> {
-  return invoke("transform_selection", {
-    selection,
-    instruction,
-    model,
-    vocabulary,
-  });
-}

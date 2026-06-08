@@ -594,6 +594,21 @@ function stopAutoDetect(): void {
   }
 }
 
+// Accept the auto-detect record prompt: clear it, then create + start a meeting
+// through the shared priming gate (same path as the tray/panel start), so the
+// app-wide prompt honors first-run priming and the in-flight guard.
+async function acceptAutoDetect(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  if (isStarting || meetingState.primingRequest) return;
+  dismissAutoDetect();
+  const meeting = await createMeeting({
+    title: `Meeting ${formatTime(Date.now())}`,
+    sourceApp: "Auto-detect",
+    templateId: settingsStore.get("meetingTemplateId"),
+  });
+  await requestCaptureStart(meeting);
+}
+
 // Hide the prompt until the next time no meeting app is detected, so a single
 // dismissal doesn't re-nag on every poll for the same running app.
 function dismissAutoDetect(): void {
@@ -625,6 +640,7 @@ export const meetingStore = {
   clearError,
   startAutoDetect,
   stopAutoDetect,
+  acceptAutoDetect,
   dismissAutoDetect,
   resetAutoDetectDismissal,
 };

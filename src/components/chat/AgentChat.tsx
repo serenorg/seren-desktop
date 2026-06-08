@@ -17,7 +17,6 @@ import {
 import { createStore } from "solid-js/store";
 import { AgentPermissionDialog } from "@/components/agent/AgentPermissionDialog";
 import { DiffProposalDialog } from "@/components/agent/DiffProposalDialog";
-import { DictationHud } from "@/components/chat/DictationHud";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { extractAgentThinkingMarkup } from "@/lib/agent-thinking-markup";
@@ -2042,10 +2041,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                       inputRef?.focus();
                     }
                   }}
-                />
-                <DictationHud
-                  getTextarea={() => inputRef}
-                  active={isPaneActive()}
                 />
                 <Show
                   when={isPrompting()}
