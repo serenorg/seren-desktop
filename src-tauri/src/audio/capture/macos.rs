@@ -473,9 +473,40 @@ fn tap_stream_format(tap: AudioObjectID) -> Option<(u16, u32)> {
     Some((asbd.channels_per_frame as u16, asbd.sample_rate as u32))
 }
 
-/// Realtime IOProc: convert the tap's interleaved Float32 input to normalized
-/// 16 kHz mono PCM and push it into the sink. Runs on a CoreAudio thread; it must
-/// not allocate-and-block beyond the bounded work here and never unwinds.
+/// Scale one clamped Float32 sample to i16 using the positive full-scale factor.
+#[inline]
+fn f32_to_i16(sample: f32) -> i16 {
+    (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
+}
+
+/// Average non-interleaved (planar) Float32 channels into mono i16. Each slice is
+/// one channel; frames past the shortest channel are dropped so a ragged callback
+/// can never read past a buffer. Returns empty when there are no channels.
+fn planar_to_mono_i16(channels: &[&[f32]]) -> Vec<i16> {
+    let Some(frames) = channels.iter().map(|c| c.len()).min() else {
+        return Vec::new();
+    };
+    if frames == 0 {
+        return Vec::new();
+    }
+    let divisor = channels.len() as f32;
+    let mut out = Vec::with_capacity(frames);
+    for frame in 0..frames {
+        let mut sum = 0.0f32;
+        for channel in channels {
+            sum += channel[frame];
+        }
+        out.push(f32_to_i16(sum / divisor));
+    }
+    out
+}
+
+/// Realtime IOProc: convert the tap's Float32 input to normalized 16 kHz mono PCM
+/// and push it into the sink. The tap may deliver audio interleaved (one buffer,
+/// N channels) or non-interleaved/planar (N buffers, one channel each); both are
+/// handled so a planar tap doesn't silently drop every channel but the first.
+/// Runs on a CoreAudio thread; it must not allocate-and-block beyond the bounded
+/// work here and never unwinds.
 extern "C" fn capture_io_proc(
     _in_device: AudioObjectID,
     _in_now: *const c_void,
@@ -493,41 +524,112 @@ extern "C" fn capture_io_proc(
     // shared reference and never move out of it.
     let context = unsafe { &*(in_client_data as *const IoProcContext) };
 
-    // SAFETY: CoreAudio guarantees a valid AudioBufferList here. We read
-    // number_buffers, then access only buffer[0] (the single interleaved tap
-    // buffer) without exceeding the reported count.
+    // SAFETY: CoreAudio guarantees a valid AudioBufferList here.
     let list = unsafe { &*in_input_data };
-    if list.number_buffers == 0 {
+    let buffer_count = list.number_buffers as usize;
+    if buffer_count == 0 {
         return NO_ERR;
     }
-    let buffer = list.buffers[0];
-    if buffer.data.is_null() || buffer.data_byte_size == 0 {
-        return NO_ERR;
-    }
+    // SAFETY: CoreAudio lays out `number_buffers` contiguous AudioBuffer structs
+    // starting at the `buffers` flexible-array head; reading `buffer_count` of
+    // them is the canonical AudioBufferList walk.
+    let buffers = unsafe { std::slice::from_raw_parts(list.buffers.as_ptr(), buffer_count) };
 
-    let sample_count = (buffer.data_byte_size as usize) / std::mem::size_of::<f32>();
-    if sample_count == 0 {
-        return NO_ERR;
-    }
-
-    // SAFETY: `buffer.data` points to `data_byte_size` bytes of Float32 PCM owned
-    // by CoreAudio for the duration of this call; we copy out before returning.
-    let floats = unsafe { std::slice::from_raw_parts(buffer.data as *const f32, sample_count) };
-
-    let mut pcm: Vec<i16> = Vec::with_capacity(sample_count);
-    for &sample in floats {
-        let clamped = sample.clamp(-1.0, 1.0);
-        pcm.push((clamped * i16::MAX as f32) as i16);
-    }
-
-    let channels = if buffer.number_channels > 0 {
-        buffer.number_channels as u16
+    let normalized = if buffer_count > 1 {
+        // Non-interleaved (planar): one channel per buffer. Average to mono so the
+        // channels past the first aren't dropped, then resample.
+        let channels: Vec<&[f32]> = buffers
+            .iter()
+            .filter_map(|buffer| {
+                if buffer.data.is_null() || buffer.data_byte_size == 0 {
+                    return None;
+                }
+                let count = buffer.data_byte_size as usize / std::mem::size_of::<f32>();
+                if count == 0 {
+                    return None;
+                }
+                // SAFETY: each buffer's `data` points to `data_byte_size` bytes of
+                // Float32 PCM owned by CoreAudio for the duration of this call.
+                Some(unsafe { std::slice::from_raw_parts(buffer.data as *const f32, count) })
+            })
+            .collect();
+        let mono = planar_to_mono_i16(&channels);
+        to_mono_16k(&mono, 1, context.sample_rate)
     } else {
-        context.channels
+        // Interleaved: a single buffer holds `number_channels` interleaved samples.
+        let buffer = buffers[0];
+        if buffer.data.is_null() || buffer.data_byte_size == 0 {
+            return NO_ERR;
+        }
+        let sample_count = (buffer.data_byte_size as usize) / std::mem::size_of::<f32>();
+        if sample_count == 0 {
+            return NO_ERR;
+        }
+        // SAFETY: `buffer.data` points to `data_byte_size` bytes of Float32 PCM
+        // owned by CoreAudio for the duration of this call; we copy out before
+        // returning.
+        let floats =
+            unsafe { std::slice::from_raw_parts(buffer.data as *const f32, sample_count) };
+        let mut pcm: Vec<i16> = Vec::with_capacity(sample_count);
+        for &sample in floats {
+            pcm.push(f32_to_i16(sample));
+        }
+        let channels = if buffer.number_channels > 0 {
+            buffer.number_channels as u16
+        } else {
+            context.channels
+        };
+        to_mono_16k(&pcm, channels, context.sample_rate)
     };
-    let normalized = to_mono_16k(&pcm, channels, context.sample_rate);
+
     if !normalized.is_empty() {
         let _ = context.sink.send(PcmFrame { samples: normalized });
     }
     NO_ERR
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{f32_to_i16, planar_to_mono_i16};
+
+    #[test]
+    fn f32_to_i16_clamps_and_scales() {
+        assert_eq!(f32_to_i16(0.0), 0);
+        assert_eq!(f32_to_i16(2.0), i16::MAX);
+        assert_eq!(f32_to_i16(-2.0), -i16::MAX);
+    }
+
+    #[test]
+    fn planar_averages_channels_frame_wise() {
+        let left = [1.0f32, -1.0, 0.0];
+        let right = [1.0f32, -1.0, 0.0];
+        // (1+1)/2 -> +full, (-1-1)/2 -> -full, (0+0)/2 -> 0
+        assert_eq!(
+            planar_to_mono_i16(&[&left, &right]),
+            vec![i16::MAX, -i16::MAX, 0]
+        );
+    }
+
+    #[test]
+    fn planar_single_channel_passes_through() {
+        let only = [0.0f32, 0.5, -0.5];
+        assert_eq!(
+            planar_to_mono_i16(&[&only]),
+            vec![f32_to_i16(0.0), f32_to_i16(0.5), f32_to_i16(-0.5)]
+        );
+    }
+
+    #[test]
+    fn planar_clips_to_shortest_channel_without_overrun() {
+        let long = [0.25f32, 0.25, 0.25];
+        let short = [0.25f32];
+        // Min length is 1 frame; the ragged second buffer is never read past end.
+        assert_eq!(planar_to_mono_i16(&[&long, &short]), vec![f32_to_i16(0.25)]);
+    }
+
+    #[test]
+    fn planar_no_channels_is_empty() {
+        let none: [&[f32]; 0] = [];
+        assert!(planar_to_mono_i16(&none).is_empty());
+    }
 }
