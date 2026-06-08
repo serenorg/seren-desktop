@@ -408,11 +408,13 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
     await loadMeetings();
     if (!isTauriRuntime()) return;
 
-    // Post-call speaker refinement: one diarized pass over the full Them
-    // recording, reconciled onto the live segments for meeting-stable labels.
-    // Fire-and-forget so it never delays notes; the segments-updated event
-    // refreshes the transcript when it lands. Best-effort on the backend.
-    void reconcileMeetingSpeakers(meeting.id).catch(() => {});
+    if (settingsStore.get("meetingStableSpeakers")) {
+      // Post-call speaker refinement: one diarized pass over the full Them
+      // recording, reconciled onto the live segments for meeting-stable labels.
+      // Fire-and-forget so it never delays notes; the segments-updated event
+      // refreshes the transcript when it lands. Best-effort on the backend.
+      void reconcileMeetingSpeakers(meeting.id).catch(() => {});
+    }
 
     const templatePrompt = await resolveTemplatePrompt(meeting.templateId);
     try {

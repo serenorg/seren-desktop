@@ -163,6 +163,12 @@ export interface Settings {
   meetingCustomTemplates: { id: string; name: string; prompt: string }[];
   meetingDefaultSkill: string;
   /**
+   * Run the post-call Them diarization pass that stamps meeting-stable speaker
+   * labels. Default off because it re-transcribes Them audio and no current UI
+   * consumes the labels yet (#2186).
+   */
+  meetingStableSpeakers: boolean;
+  /**
    * Set once the user has acknowledged the system-audio + mic priming
    * explainer shown before the first capture. When true the explainer is
    * skipped on subsequent captures.
@@ -269,6 +275,7 @@ const DEFAULT_SETTINGS: Settings = {
   meetingAppAllowlist: ["zoom", "discord", "teams", "meet", "slack", "webex"],
   meetingCustomTemplates: [],
   meetingDefaultSkill: "",
+  meetingStableSpeakers: false,
   meetingAudioPrimed: false,
   // General
   telemetryEnabled: true,
