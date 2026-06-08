@@ -13,7 +13,7 @@ pub fn probe_audio_activity() -> AudioActivity {
     platform_audio::probe_audio_activity()
 }
 
-pub fn should_start_capture(activity: AudioActivity, _meeting_app_allowlist: &[String]) -> bool {
+pub fn should_start_capture(activity: AudioActivity) -> bool {
     activity.input_active
 }
 
@@ -190,33 +190,21 @@ mod tests {
 
     #[test]
     fn should_start_capture_when_mic_is_in_use() {
-        assert!(should_start_capture(
-            AudioActivity { input_active: true },
-            &[],
-        ));
+        assert!(should_start_capture(AudioActivity { input_active: true }));
     }
 
     #[test]
-    fn should_not_start_capture_when_allowlisted_meeting_app_has_no_input_activity() {
-        let allowlist = vec!["discord".to_string()];
-
-        assert!(!should_start_capture(AudioActivity::default(), &allowlist));
+    fn should_not_start_capture_when_app_has_no_input_activity() {
+        assert!(!should_start_capture(AudioActivity::default()));
     }
 
     #[test]
     fn should_start_capture_when_input_device_is_active_for_browser_meetings() {
-        let allowlist = vec!["meet".to_string()];
-
-        assert!(should_start_capture(
-            AudioActivity { input_active: true },
-            &allowlist,
-        ));
+        assert!(should_start_capture(AudioActivity { input_active: true }));
     }
 
     #[test]
     fn should_not_start_capture_without_input_activity() {
-        let allowlist = vec!["zoom".to_string(), "teams".to_string()];
-
-        assert!(!should_start_capture(AudioActivity::default(), &allowlist));
+        assert!(!should_start_capture(AudioActivity::default()));
     }
 }

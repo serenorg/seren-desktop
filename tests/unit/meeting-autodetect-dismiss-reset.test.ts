@@ -21,7 +21,6 @@ vi.mock("@/stores/settings.store", () => ({
   settingsStore: {
     get: (key: string) => {
       if (key === "meetingAutoDetectEnabled") return true;
-      if (key === "meetingAppAllowlist") return ["zoom"];
       return undefined;
     },
     set: vi.fn(),

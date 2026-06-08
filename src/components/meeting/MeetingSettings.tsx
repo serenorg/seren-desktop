@@ -24,7 +24,6 @@ function FieldLabel(props: { children: string; hint?: string }) {
 export function MeetingSettings() {
   const [builtins, setBuiltins] = createSignal<MeetingTemplate[]>([]);
   const [vocabTerm, setVocabTerm] = createSignal("");
-  const [allowlistApp, setAllowlistApp] = createSignal("");
   const [tplName, setTplName] = createSignal("");
   const [tplPrompt, setTplPrompt] = createSignal("");
 
@@ -38,7 +37,6 @@ export function MeetingSettings() {
 
   const customTemplates = () => settingsStore.get("meetingCustomTemplates");
   const vocabulary = () => settingsStore.get("voiceCustomVocabulary");
-  const allowlist = () => settingsStore.get("meetingAppAllowlist");
 
   const allTemplates = () => [...builtins(), ...customTemplates()];
 
@@ -53,20 +51,6 @@ export function MeetingSettings() {
     settingsStore.set(
       "voiceCustomVocabulary",
       vocabulary().filter((t) => t !== term),
-    );
-  };
-
-  const addAllowlistApp = () => {
-    const app = allowlistApp().trim().toLowerCase();
-    if (!app || allowlist().includes(app)) return;
-    settingsStore.set("meetingAppAllowlist", [...allowlist(), app]);
-    setAllowlistApp("");
-  };
-
-  const removeAllowlistApp = (app: string) => {
-    settingsStore.set(
-      "meetingAppAllowlist",
-      allowlist().filter((a) => a !== app),
     );
   };
 
@@ -230,7 +214,7 @@ export function MeetingSettings() {
 
       <section>
         <label class="flex items-center justify-between gap-3 cursor-pointer">
-          <FieldLabel hint="Auto-arm capture when a known meeting app is running.">
+          <FieldLabel hint="Show the titlebar prompt when active microphone input is detected. Capture still waits for you to press Record.">
             Auto-detect meetings
           </FieldLabel>
           <input
@@ -245,39 +229,6 @@ export function MeetingSettings() {
             }
           />
         </label>
-        <div class="mt-2 flex flex-wrap gap-1.5">
-          <For each={allowlist()}>
-            {(app) => (
-              <span class="inline-flex items-center gap-1 rounded border border-border bg-surface-1 px-1.5 py-0.5 text-[12px] text-foreground">
-                {app}
-                <button
-                  type="button"
-                  class="text-muted-foreground hover:text-destructive"
-                  onClick={() => removeAllowlistApp(app)}
-                  aria-label={`Remove ${app}`}
-                >
-                  ×
-                </button>
-              </span>
-            )}
-          </For>
-        </div>
-        <div class="mt-2 flex gap-2">
-          <input
-            class="h-8 flex-1 rounded-md border border-border bg-surface-1 px-2.5 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/60"
-            placeholder="Add a meeting app (e.g. zoom)"
-            value={allowlistApp()}
-            onInput={(event) => setAllowlistApp(event.currentTarget.value)}
-            onKeyDown={(event) => event.key === "Enter" && addAllowlistApp()}
-          />
-          <button
-            type="button"
-            class="h-8 px-3 rounded-md border border-border bg-surface-2 text-[12px] text-foreground hover:bg-surface-3"
-            onClick={addAllowlistApp}
-          >
-            Add
-          </button>
-        </div>
       </section>
     </div>
   );
