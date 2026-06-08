@@ -583,6 +583,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
     // MeetingPanel unmounting when its slide panel closes. Started once per app
     // session; torn down on shell cleanup.
     void meetingStore.startMeetingEventListeners();
+    // Fail any meeting left `capturing` by a crash/force-quit so it can't block
+    // every future capture (#2160).
+    void meetingStore.reconcileStaleCaptures();
     meetingStore.startAutoDetect();
 
     window.addEventListener("seren:open-panel", handleOpenPanel);
@@ -772,7 +775,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
       <Show when={meetingStore.state.primingRequest}>
         <AudioPrimingDialog
           onContinue={() => void meetingStore.confirmPriming()}
-          onCancel={() => meetingStore.cancelPriming()}
+          onCancel={() => void meetingStore.cancelPriming()}
         />
       </Show>
 
