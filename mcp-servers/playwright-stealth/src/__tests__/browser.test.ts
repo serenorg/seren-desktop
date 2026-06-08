@@ -19,14 +19,16 @@ const TEST_INSTALLED_BROWSERS: InstalledBrowser[] = [
   {
     name: "chrome",
     browserName: "chromium",
-    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    executablePath:
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     isChromiumBased: true,
     stealthSupported: true,
   },
   {
     name: "msedge",
     browserName: "chromium",
-    executablePath: "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    executablePath:
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
     isChromiumBased: true,
     stealthSupported: true,
   },

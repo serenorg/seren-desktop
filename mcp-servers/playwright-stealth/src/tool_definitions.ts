@@ -7,8 +7,7 @@ export const NAVIGATION_WAIT_UNTIL_VALUES = [
   "networkidle",
 ] as const;
 
-export type NavigationWaitUntil =
-  (typeof NAVIGATION_WAIT_UNTIL_VALUES)[number];
+export type NavigationWaitUntil = (typeof NAVIGATION_WAIT_UNTIL_VALUES)[number];
 
 export type NavigateOptions = {
   waitUntil?: NavigationWaitUntil;

@@ -10,7 +10,13 @@ type Child = ReturnType<typeof spawn>;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "../..");
 const serverPath = path.join(packageRoot, "dist", "index.js");
-const tscPath = path.join(packageRoot, "node_modules", "typescript", "bin", "tsc");
+const tscPath = path.join(
+  packageRoot,
+  "node_modules",
+  "typescript",
+  "bin",
+  "tsc",
+);
 
 const initializeRequest = {
   jsonrpc: "2.0",
