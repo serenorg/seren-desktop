@@ -14,7 +14,7 @@ test.describe("Agent Spawn Feedback", () => {
     page.on("pageerror", (err) => errors.push(err.message));
 
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
     await page.waitForTimeout(2_000);
 
     // Try to create a new agent thread — this will attempt to spawn Claude
