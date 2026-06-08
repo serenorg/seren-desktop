@@ -22,6 +22,7 @@ import {
   buildSyntheticTranscript as writeSyntheticJsonl,
   writeForkedTranscript,
 } from "./synthetic-transcript.mjs";
+import { providerLogPrefix } from "./logging.mjs";
 
 /**
  * Resolve the full path to the `claude` binary.
@@ -1365,7 +1366,9 @@ function handleSystemMessage(emit, session, payload) {
 
     case "hook_response":
       if (payload.outcome === "error" && payload.stderr) {
-        console.warn(`[browser-local][claude] Hook error: ${payload.stderr}`);
+        console.warn(
+          `${session.logPrefix ?? providerLogPrefix("claude")} Hook error: ${payload.stderr}`,
+        );
       }
       return;
 
@@ -1436,8 +1439,12 @@ function handleAssistantMessage(emit, session, payload) {
       nextModelId != null &&
       previousModelId === nextModelId;
     if (!isNoOpResolution) {
+      const logPrefix = session.logPrefix ?? providerLogPrefix("claude");
       console.warn(
-        `[browser-local][claude] chooseUpdatedModelId: previous=${previousModelId ?? "<unset>"}, incoming=${message.model ?? "<missing>"}, resolved=${nextModelId ?? "<null>"}`,
+        `${logPrefix} chooseUpdatedModelId: ` +
+          `previous=${previousModelId ?? "<unset>"}, ` +
+          `incoming=${message.model ?? "<missing>"}, ` +
+          `resolved=${nextModelId ?? "<null>"}`,
       );
     }
     if (nextModelId != null && nextModelId !== session.currentModelId) {
@@ -1605,6 +1612,7 @@ function handleLine(emit, session, line) {
 }
 
 function attachProcessListeners(emit, sessions, session, exitPromises) {
+  const logPrefix = session.logPrefix ?? providerLogPrefix("claude");
   session.output.on("line", (line) => handleLine(emit, session, line));
 
   // Buffer the last stderr lines so exit diagnostics include the reason.
@@ -1614,7 +1622,7 @@ function attachProcessListeners(emit, sessions, session, exitPromises) {
   session.process.stderr.on("data", (chunk) => {
     const message = String(chunk).trim();
     if (message.length > 0) {
-      console.log(`[browser-local][claude] ${message}`);
+      console.log(`${logPrefix} ${message}`);
       stderrLines.push(message);
       if (stderrLines.length > MAX_STDERR_LINES) {
         stderrLines.shift();
@@ -1637,11 +1645,11 @@ function attachProcessListeners(emit, sessions, session, exitPromises) {
 
     if (stderrTail) {
       console.error(
-        `[browser-local][claude] Process exited (${exitDetail}) stderr:\n${stderrTail}`,
+        `${logPrefix} Process exited (${exitDetail}) stderr:\n${stderrTail}`,
       );
     } else {
       console.warn(
-        `[browser-local][claude] Process exited (${exitDetail}) with no stderr`,
+        `${logPrefix} Process exited (${exitDetail}) with no stderr`,
       );
     }
 
@@ -1689,8 +1697,9 @@ function attachProcessListeners(emit, sessions, session, exitPromises) {
   });
 }
 
-export function createClaudeRuntime({ emit }) {
+export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) {
   const sessions = new Map();
+  const claudeLogPrefix = providerLogPrefix("claude", runtimeMode);
   // Tracks pending exit cleanup per session ID. When a process exits,
   // the promise resolves. Before spawning with a reused ID, we await
   // this to prevent the old exit handler from deleting the new session.
@@ -1719,6 +1728,7 @@ export function createClaudeRuntime({ emit }) {
       pendingControlRequests: new Map(),
       nextControlRequestId: 1,
       pendingPermissions: new Map(),
+      logPrefix: claudeLogPrefix,
       currentPrompt: null,
       currentPromptHasStreamedText: false,
       currentPromptHasStreamedThinking: false,
@@ -1808,17 +1818,18 @@ export function createClaudeRuntime({ emit }) {
     // mismatches (e.g. picker shows [1m] but the spawned session reports a
     // 200K window) are diagnosable without ad-hoc instrumentation. Goes to
     // stderr so it shares the [ProviderRuntime stderr] channel with other
-    // browser-local diagnostics; mcpConfigJson is intentionally omitted to
+    // provider-runtime diagnostics; mcpConfigJson is intentionally omitted to
     // avoid surfacing publisher credentials embedded in the inline config.
     // See #1854.
     // Print BOTH ids: `sessionId` is the Seren-side handle every frontend
     // event is tagged with, while `agentSessionId` is the Claude CLI's
     // internal session id (used in --resume and JSONL paths). Logging
-    // only the latter made the [browser-local][claude] spawn line
+    // only the latter made the Claude spawn line
     // useless when correlating with [AgentRuntime] Event received logs
     // in the renderer console. #1889
     console.error(
-      `[browser-local][claude] spawn sessionId=${sessionId} agentSessionId=${remoteSessionId} preferredModel="${preferredModel}"`,
+      `${claudeLogPrefix} spawn sessionId=${sessionId} ` +
+        `agentSessionId=${remoteSessionId} preferredModel="${preferredModel}"`,
     );
     const processHandle = spawn(
       claudeBin,
@@ -1845,7 +1856,7 @@ export function createClaudeRuntime({ emit }) {
 
     // Catch spawn errors (e.g. ENOENT, EBADARCH) to prevent crashing the provider runtime.
     processHandle.on("error", (spawnError) => {
-      console.error(`[browser-local][claude] Spawn error: ${spawnError.message}`);
+      console.error(`${claudeLogPrefix} Spawn error: ${spawnError.message}`);
       sessions.delete(sessionId);
       // macOS surfaces a wrong-arch binary as `errno: -86` / "Bad CPU type in
       // executable" (EBADARCH). It hits when a prior install dropped the wrong
@@ -1955,7 +1966,7 @@ export function createClaudeRuntime({ emit }) {
             resumeAgentSessionId,
           ).catch((err) => {
             console.warn(
-              "[browser-local][claude] history replay failed:",
+              `${claudeLogPrefix} history replay failed:`,
               err?.message ?? err,
             );
           })
@@ -2191,9 +2202,11 @@ export function createClaudeRuntime({ emit }) {
     const targetModel =
       session.availableModelRecords.find((record) => record.modelId === modelId) ??
       null;
+    const logPrefix = session.logPrefix ?? claudeLogPrefix;
     if (!targetModel) {
       console.warn(
-        `[browser-local][claude] setModel: ${modelId} not in catalog (size=${session.availableModelRecords.length}); passing through to CLI`,
+        `${logPrefix} setModel: ${modelId} not in catalog ` +
+          `(size=${session.availableModelRecords.length}); passing through to CLI`,
       );
     }
 
@@ -2216,7 +2229,7 @@ export function createClaudeRuntime({ emit }) {
       responseSummary = "<unserializable>";
     }
     console.warn(
-      `[browser-local][claude] setModel ack: requested=${modelId}, response=${responseSummary}`,
+      `${logPrefix} setModel ack: requested=${modelId}, response=${responseSummary}`,
     );
 
     session.currentModelId = targetModel?.modelId ?? modelId;

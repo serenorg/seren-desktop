@@ -10,6 +10,7 @@ import {
 } from "./agent-registry.mjs";
 import { createClaudeRuntime } from "./claude-runtime.mjs";
 import { createGeminiRuntime } from "./gemini-runtime.mjs";
+import { providerLogPrefix } from "./logging.mjs";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
 
 function isAuthError(message) {
@@ -902,13 +903,18 @@ function handleLine(emit, session, line) {
   }
 }
 
-function attachProcessListeners(emit, sessions, session) {
+function attachProcessListeners(
+  emit,
+  sessions,
+  session,
+  logPrefix = providerLogPrefix("codex"),
+) {
   session.output.on("line", (line) => handleLine(emit, session, line));
 
   session.process.stderr.on("data", (chunk) => {
     const message = String(chunk).trim();
     if (message.length > 0) {
-      console.log(`[browser-local][codex] ${message}`);
+      console.log(`${logPrefix} ${message}`);
     }
   });
 
@@ -924,7 +930,7 @@ function attachProcessListeners(emit, sessions, session) {
       err && err.code === "ENOENT"
         ? "Codex binary not found. Install codex or fix the spawn path."
         : `Codex spawn error: ${err?.message ?? String(err)}`;
-    console.warn(`[browser-local][codex] ${message}`);
+    console.warn(`${logPrefix} ${message}`);
     sessions.delete(session.id);
     if (session.currentPrompt) {
       rejectCurrentPrompt(session, new Error(message));
@@ -973,11 +979,12 @@ function attachProcessListeners(emit, sessions, session) {
   });
 }
 
-export function createProviderHandlers({ emit }) {
+export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" }) {
   const sessions = new Map();
+  const codexLogPrefix = providerLogPrefix("codex", runtimeMode);
   const agentRegistry = createBrowserLocalAgentRegistry({ emit });
-  const claudeRuntime = createClaudeRuntime({ emit });
-  const geminiRuntime = createGeminiRuntime({ emit });
+  const claudeRuntime = createClaudeRuntime({ emit, runtimeMode });
+  const geminiRuntime = createGeminiRuntime({ emit, runtimeMode });
 
   async function withTemporaryCodexSession(cwd, callback) {
     const processHandle = spawnCodexProcess(cwd);
@@ -988,7 +995,7 @@ export function createProviderHandlers({ emit }) {
       currentModeId: "auto",
     });
     const tempSessions = new Map([[session.id, session]]);
-    attachProcessListeners(() => {}, tempSessions, session);
+    attachProcessListeners(() => {}, tempSessions, session, codexLogPrefix);
 
     try {
       await sendRequest(session, "initialize", buildInitializeParams(), 15_000);
@@ -1054,7 +1061,7 @@ export function createProviderHandlers({ emit }) {
     });
 
     sessions.set(sessionId, session);
-    attachProcessListeners(emit, sessions, session);
+    attachProcessListeners(emit, sessions, session, codexLogPrefix);
 
     try {
       await sendRequest(session, "initialize", buildInitializeParams(), 15_000);
@@ -1067,7 +1074,7 @@ export function createProviderHandlers({ emit }) {
       try {
         modelListResult = await sendRequest(session, "model/list", {}, 10_000);
       } catch (error) {
-        console.warn("[browser-local] Codex model/list failed:", error);
+        console.warn(`${codexLogPrefix} model/list failed:`, error);
         // If the process was terminated during model/list, don't continue
         // to thread/start on a dead process — it will just time out.
         const errMsg = error instanceof Error ? error.message : String(error);
@@ -1145,7 +1152,7 @@ export function createProviderHandlers({ emit }) {
         servedModelId !== requestedModelId
       ) {
         console.warn(
-          `[browser-local][codex] threadResult.model: requested=${requestedModelId}, served=${servedModelId}`,
+          `${codexLogPrefix} threadResult.model: requested=${requestedModelId}, served=${servedModelId}`,
         );
       }
       session.currentModelId =

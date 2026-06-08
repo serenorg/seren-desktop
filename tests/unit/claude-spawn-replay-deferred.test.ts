@@ -102,10 +102,10 @@ describe("#1889 — spawn stderr log surfaces both Seren and Claude session ids"
     // Frontend events are tagged with the Seren-side `sessionId` (the value
     // of `session.id`). The stderr log previously only printed the Claude
     // CLI's `remoteSessionId`/`agentSessionId`, making the
-    // [browser-local][claude] spawn line useless when correlating with
+    // runtime-prefixed Claude spawn line useless when correlating with
     // [AgentRuntime] Event received logs in the renderer console.
     expect(runtimeSource).toMatch(
-      /\[browser-local\]\[claude\] spawn sessionId=\$\{(session\.id|sessionId)\}[\s\S]*?agentSessionId=\$\{remoteSessionId\}/,
+      /\$\{claudeLogPrefix\} spawn sessionId=\$\{(session\.id|sessionId)\}[\s\S]*?agentSessionId=\$\{remoteSessionId\}/,
     );
   });
 });
