@@ -178,7 +178,13 @@ pub async fn start_meeting_capture(
     registry: State<'_, CaptureRegistry>,
     meeting_id: String,
 ) -> Result<(), String> {
-    registry.start(&app, &meeting_id);
+    // start() blocks on native WASAPI/Core Audio init (#2157). Run it on the
+    // blocking pool so it never stalls a tokio worker thread; the registry is an
+    // Arc handle, so the clone shares the same state (#2176).
+    let registry = (*registry).clone();
+    tauri::async_runtime::spawn_blocking(move || registry.start(&app, &meeting_id))
+        .await
+        .map_err(|err| err.to_string())?;
     Ok(())
 }
 
