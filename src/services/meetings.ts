@@ -201,3 +201,11 @@ export function selectMeetingSkills(skills: SkillRef[]): Promise<string[]> {
 export function listMeetingTemplates(): Promise<MeetingTemplate[]> {
   return invoke("list_meeting_templates");
 }
+
+/**
+ * Probe running processes and report whether a meeting capture should arm
+ * (an allowlisted meeting app is running). mic-in-use is not probed.
+ */
+export function meetingAutodetect(allowlist: string[]): Promise<boolean> {
+  return invoke("meeting_autodetect", { allowlist });
+}

@@ -23,6 +23,7 @@ import {
   listMeetingTemplates,
   type Meeting,
   type MeetingTemplate,
+  meetingAutodetect,
   selectMeetingSkills,
   setMeetingRoutedSkill,
   startMeetingCapture as startBackendCapture,
@@ -44,6 +45,11 @@ interface MeetingState {
   captureLevel: number;
   isLoading: boolean;
   error: string | null;
+  /**
+   * True when the auto-detect poll has seen an allowlisted meeting app while
+   * nothing is capturing. The panel surfaces an arm prompt; the user starts.
+   */
+  autoDetectSuggested: boolean;
 }
 
 const [meetingState, setMeetingState] = createStore<MeetingState>({
@@ -53,6 +59,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   captureLevel: 0,
   isLoading: false,
   error: null,
+  autoDetectSuggested: false,
 });
 
 let captureHandle: MeetingCaptureHandle | null = null;
@@ -62,6 +69,10 @@ let transcriptUnlisten: UnlistenFn | null = null;
 let statusUnlisten: UnlistenFn | null = null;
 let widgetStopUnlisten: (() => void) | null = null;
 let trayToggleUnlisten: (() => void) | null = null;
+
+let autoDetectTimer: number | null = null;
+let autoDetectDismissed = false;
+const AUTO_DETECT_POLL_MS = 5_000;
 
 async function loadMeetings(): Promise<void> {
   setMeetingState("isLoading", true);
@@ -366,6 +377,63 @@ function clearError(): void {
   setMeetingState("error", null);
 }
 
+function isCapturing(): boolean {
+  return meetingState.meetings.some(
+    (meeting) => meeting.status === "capturing",
+  );
+}
+
+// Opt-in poll: while "auto-detect meetings" is on and nothing is capturing,
+// probe for an allowlisted meeting app and surface an arm prompt. The user
+// still presses start — capture is never auto-armed without consent.
+async function pollAutoDetect(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  if (!settingsStore.get("meetingAutoDetectEnabled")) {
+    setMeetingState("autoDetectSuggested", false);
+    return;
+  }
+  if (isCapturing() || autoDetectDismissed) {
+    setMeetingState("autoDetectSuggested", false);
+    return;
+  }
+
+  try {
+    const detected = await meetingAutodetect(
+      settingsStore.get("meetingAppAllowlist"),
+    );
+    setMeetingState("autoDetectSuggested", detected);
+  } catch {
+    // Probe failures are non-fatal; leave the prompt as-is.
+  }
+}
+
+function startAutoDetect(): void {
+  stopAutoDetect();
+  if (!isTauriRuntime()) return;
+  void pollAutoDetect();
+  autoDetectTimer = window.setInterval(() => {
+    void pollAutoDetect();
+  }, AUTO_DETECT_POLL_MS);
+}
+
+function stopAutoDetect(): void {
+  if (autoDetectTimer !== null) {
+    window.clearInterval(autoDetectTimer);
+    autoDetectTimer = null;
+  }
+}
+
+// Hide the prompt until the next time no meeting app is detected, so a single
+// dismissal doesn't re-nag on every poll for the same running app.
+function dismissAutoDetect(): void {
+  autoDetectDismissed = true;
+  setMeetingState("autoDetectSuggested", false);
+}
+
+function resetAutoDetectDismissal(): void {
+  autoDetectDismissed = false;
+}
+
 export const meetingStore = {
   get state(): MeetingState {
     return meetingState;
@@ -380,4 +448,8 @@ export const meetingStore = {
   stopAndProcess,
   regenerateNotes,
   clearError,
+  startAutoDetect,
+  stopAutoDetect,
+  dismissAutoDetect,
+  resetAutoDetectDismissal,
 };
