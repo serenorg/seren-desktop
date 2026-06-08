@@ -2,7 +2,10 @@
 // ABOUTME: Streams live transcript into the active composer; hold right Option/Alt to talk.
 
 import { createSignal, Index, onCleanup, onMount, Show } from "solid-js";
-import { startDictationCapture } from "@/lib/audio/dictationCapture";
+import {
+  type DictationCaptureHandle,
+  startDictationCapture,
+} from "@/lib/audio/dictationCapture";
 import { useVoiceInput } from "@/lib/audio/useVoiceInput";
 import { transformSelection } from "@/services/dictation";
 import { providerStore } from "@/stores/provider.store";
@@ -80,6 +83,9 @@ export function DictationHud(props: DictationHudProps) {
   let rafId: number | undefined;
   let holding = false;
   let editErrorTimer: ReturnType<typeof setTimeout> | undefined;
+  // The edit-by-voice mic handle, tracked so onCleanup/onBlur can release it —
+  // it is acquired outside useVoiceInput, so the #2161 guard doesn't cover it (#2173).
+  let editCapture: DictationCaptureHandle | null = null;
 
   // Span [start, end) of the text this dictation session has written. Partials
   // grow `end`; the final cleaned text replaces the whole span (no double-insert).
@@ -165,9 +171,17 @@ export function DictationHud(props: DictationHudProps) {
     endHold();
   };
 
+  const releaseEditCapture = () => {
+    if (editCapture) {
+      void editCapture.stop().catch(() => {});
+      editCapture = null;
+    }
+  };
+
   const onBlur = () => {
-    // Window lost focus mid-hold: stop cleanly so the mic is released.
+    // Window lost focus mid-hold or mid-edit: stop cleanly so the mic is released.
     if (holding) endHold();
+    releaseEditCapture();
   };
 
   onMount(() => {
@@ -182,6 +196,9 @@ export function DictationHud(props: DictationHudProps) {
     window.removeEventListener("blur", onBlur);
     stopAnimation();
     clearTimeout(editErrorTimer);
+    // Unmount during the edit-by-voice listen window: release the mic now
+    // instead of waiting out EDIT_LISTEN_MS (#2173).
+    releaseEditCapture();
   });
 
   const flashEditError = (message: string) => {
@@ -193,7 +210,10 @@ export function DictationHud(props: DictationHudProps) {
   // Edit-by-voice: capture a short spoken instruction, transform the current
   // textarea selection in place. Scoped to the chat composer textarea only.
   const runEditByVoice = async () => {
-    if (editing() || isListening()) return;
+    // Bail if a push-to-talk hold is starting too: `holding` flips synchronously
+    // in beginHold, before voiceState reaches "listening", so guarding on
+    // isListening() alone leaves a window where both acquire the mic (#2173).
+    if (editing() || isListening() || holding) return;
     const textarea = props.getTextarea();
     if (!textarea) return;
 
@@ -208,9 +228,13 @@ export function DictationHud(props: DictationHudProps) {
     setEditing(true);
     setEditError(null);
     try {
-      const capture = await startDictationCapture(() => {});
+      editCapture = await startDictationCapture(() => {});
       await new Promise((resolve) => setTimeout(resolve, EDIT_LISTEN_MS));
-      const instruction = (await capture.stop()).trim();
+      // onBlur/onCleanup may have stopped and cleared the handle while we waited.
+      const handle = editCapture;
+      editCapture = null;
+      if (!handle) return;
+      const instruction = (await handle.stop()).trim();
       if (!instruction) {
         flashEditError("No instruction heard");
         return;
@@ -232,6 +256,8 @@ export function DictationHud(props: DictationHudProps) {
         err instanceof Error ? err.message : "Edit by voice failed",
       );
     } finally {
+      // Released early (error during acquire/wait): make sure the mic is freed.
+      releaseEditCapture();
       setEditing(false);
     }
   };
