@@ -9,6 +9,7 @@ import path from "node:path";
 import readline from "node:readline";
 
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
+import { providerLogPrefix } from "./logging.mjs";
 
 // ============================================================================
 // Binary resolution
@@ -244,6 +245,7 @@ function createGeminiSessionRecord({
   processHandle,
   timeoutSecs,
   currentModeId,
+  logPrefix,
 }) {
   return {
     id: sessionId,
@@ -256,6 +258,7 @@ function createGeminiSessionRecord({
     pendingRequests: new Map(),
     nextRequestId: 1,
     pendingPermissions: new Map(),
+    logPrefix,
     currentPrompt: null,
     agentSessionId: undefined,
     timeoutSecs: timeoutSecs ?? undefined,
@@ -598,6 +601,7 @@ function buildSessionStatus(session, status = session.status) {
 }
 
 function attachProcessListeners(emit, sessions, session) {
+  const logPrefix = session.logPrefix ?? providerLogPrefix("gemini");
   session.output.on("line", (line) => handleLine(emit, session, line));
 
   // Buffer the latest stderr lines so the spawn-time catch block has
@@ -611,7 +615,7 @@ function attachProcessListeners(emit, sessions, session) {
     session.stderrTail = (session.stderrTail + message).slice(-4096);
     const trimmed = message.trim();
     if (trimmed.length > 0) {
-      console.log(`[browser-local][gemini] ${trimmed}`);
+      console.log(`${logPrefix} ${trimmed}`);
     }
 
     // Proactively detect auth failures from stderr while initialize is
@@ -654,8 +658,9 @@ function attachProcessListeners(emit, sessions, session) {
 // Public factory
 // ============================================================================
 
-export function createGeminiRuntime({ emit }) {
+export function createGeminiRuntime({ emit, runtimeMode = "provider-runtime" }) {
   const sessions = new Map();
+  const geminiLogPrefix = providerLogPrefix("gemini", runtimeMode);
 
   async function spawnSession(params) {
     const {
@@ -681,6 +686,7 @@ export function createGeminiRuntime({ emit }) {
       processHandle,
       timeoutSecs,
       currentModeId: resolvedMode,
+      logPrefix: geminiLogPrefix,
     });
 
     sessions.set(sessionId, session);
@@ -1009,8 +1015,11 @@ export function createGeminiRuntime({ emit }) {
     // this assignment; the picker change only takes effect on the next
     // session spawn. Surface this so the user can see the disconnect in
     // logs instead of silently sending prompts to the wrong model. #1718.
+    const logPrefix = session.logPrefix ?? geminiLogPrefix;
     console.warn(
-      `[browser-local][gemini] setModel: ${modelId} stored as session intent — no-op against the running CLI process (Gemini --model is fixed at spawn time). The next session spawn will use this model.`,
+      `${logPrefix} setModel: ${modelId} stored as session intent — ` +
+        "no-op against the running CLI process (Gemini --model is fixed at " +
+        "spawn time). The next session spawn will use this model.",
     );
   }
 

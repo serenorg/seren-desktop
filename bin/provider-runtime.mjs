@@ -14,6 +14,8 @@ import { handleRpcMessage, registerHandler } from "./browser-local/rpc.mjs";
 process.env.SEREN_HOST = "seren-desktop";
 process.env.SEREN_DESKTOP = "1";
 
+const RUNTIME_MODE = "desktop-native";
+
 function usage() {
   console.log(`
 Usage: seren-provider-runtime [--host <address>] [--port <number>] [--token <value>]
@@ -71,7 +73,10 @@ function parseArgs(argv) {
 }
 
 function registerProviderHandlers() {
-  const providerHandlers = createProviderHandlers({ emit });
+  const providerHandlers = createProviderHandlers({
+    emit,
+    runtimeMode: RUNTIME_MODE,
+  });
 
   registerHandler("provider_spawn", providerHandlers.spawnSession);
   registerHandler("provider_prompt", providerHandlers.sendPrompt);
@@ -132,7 +137,7 @@ function startServer(config) {
   const server = http.createServer((req, res) => {
     if (req.url === "/__seren/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, mode: "desktop-native" }));
+      res.end(JSON.stringify({ ok: true, mode: RUNTIME_MODE }));
       return;
     }
 
@@ -200,7 +205,7 @@ function startServer(config) {
     console.log(
       JSON.stringify({
         ok: true,
-        mode: "desktop-native",
+        mode: RUNTIME_MODE,
         host: config.host,
         port,
         token: config.token,

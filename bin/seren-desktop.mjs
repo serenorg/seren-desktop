@@ -33,6 +33,7 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const distDir = join(rootDir, "dist");
 const indexHtmlPath = join(distDir, "index.html");
+const RUNTIME_MODE = "browser-local";
 
 function usage() {
   console.log(`
@@ -151,7 +152,7 @@ function contentTypeForPath(pathname) {
 
 function injectRuntimeConfig(html, origin, projectRoot) {
   const runtimeConfig = {
-    mode: "browser-local",
+    mode: RUNTIME_MODE,
     capabilities: {
       agents: true,
       localFiles: true,
@@ -230,7 +231,10 @@ function registerBrowserLocalHandlers() {
   registerHandler("save_file_dialog", saveFileDialog);
   registerHandler("reveal_in_file_manager", revealInFileManager);
 
-  const providerHandlers = createProviderHandlers({ emit });
+  const providerHandlers = createProviderHandlers({
+    emit,
+    runtimeMode: RUNTIME_MODE,
+  });
 
   registerHandler("provider_spawn", providerHandlers.spawnSession);
   registerHandler("provider_prompt", providerHandlers.sendPrompt);
@@ -321,7 +325,7 @@ function main() {
       res.end(
         JSON.stringify({
           ok: true,
-          mode: "browser-local",
+          mode: RUNTIME_MODE,
           token: authToken,
           projectRoot,
         }),
