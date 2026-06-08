@@ -227,8 +227,8 @@ export function listMeetingTemplates(): Promise<MeetingTemplate[]> {
 
 /**
  * Probe whether meeting capture should arm. Native side requires active input
- * activity; an idle allowlisted app process is not enough.
+ * activity; process presence alone is not enough.
  */
-export function meetingAutodetect(allowlist: string[]): Promise<boolean> {
-  return invoke("meeting_autodetect", { allowlist });
+export function meetingAutodetect(): Promise<boolean> {
+  return invoke("meeting_autodetect");
 }

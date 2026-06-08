@@ -362,9 +362,9 @@ pub fn list_meeting_templates() -> Vec<MeetingTemplate> {
 /// Probe audio activity, then decide whether a meeting capture should arm.
 /// Process presence alone must not surface a record prompt.
 #[tauri::command]
-pub fn meeting_autodetect(allowlist: Vec<String>) -> bool {
+pub fn meeting_autodetect() -> bool {
     let activity = probe_audio_activity();
-    should_start_capture(activity, &allowlist)
+    should_start_capture(activity)
 }
 
 // --- Dictation (shares the transcribe + cleanup engines with Meeting Mode) --

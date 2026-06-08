@@ -159,7 +159,6 @@ export interface Settings {
   // Meeting settings
   meetingAutoDetectEnabled: boolean;
   meetingTemplateId: string;
-  meetingAppAllowlist: string[];
   meetingCustomTemplates: { id: string; name: string; prompt: string }[];
   meetingDefaultSkill: string;
   /**
@@ -272,7 +271,6 @@ const DEFAULT_SETTINGS: Settings = {
   // Meeting
   meetingAutoDetectEnabled: true,
   meetingTemplateId: "discovery",
-  meetingAppAllowlist: ["zoom", "discord", "teams", "meet", "slack", "webex"],
   meetingCustomTemplates: [],
   meetingDefaultSkill: "",
   meetingStableSpeakers: false,

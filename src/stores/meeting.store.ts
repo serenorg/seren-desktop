@@ -647,9 +647,7 @@ async function pollAutoDetect(): Promise<void> {
   }
 
   try {
-    const detected = await meetingAutodetect(
-      settingsStore.get("meetingAppAllowlist"),
-    );
+    const detected = await meetingAutodetect();
     if (!detected) {
       autoDetectDismissed = false;
       setMeetingState("autoDetectSuggested", false);
