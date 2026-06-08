@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use tauri::async_runtime::JoinHandle;
@@ -202,6 +203,11 @@ pub fn transcription_mode_for(speaker: &Speaker) -> TranscriptionMode {
     }
 }
 
+/// Upper bound on each `stop` drain step (native source stop, then each worker
+/// join). Generous enough that a healthy drain never hits it, so it only fires on
+/// a genuinely wedged task / WASAPI thread (#2175).
+const STOP_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Tauri-managed registry of active meeting captures, keyed by meeting id.
 #[derive(Default)]
 pub struct CaptureRegistry {
@@ -337,19 +343,38 @@ impl CaptureRegistry {
     /// slot is held as a `Stopping` tombstone across the drain so a concurrent
     /// `start` for the same id can't insert a second coexisting capture (#2164).
     pub async fn stop(&self, meeting_id: &str) {
+        self.stop_with_timeout(meeting_id, STOP_DRAIN_TIMEOUT).await;
+    }
+
+    /// Stop with an explicit per-step drain timeout (the public [`stop`] uses
+    /// [`STOP_DRAIN_TIMEOUT`]). Bounding each drain step and *always* clearing the
+    /// `Stopping` tombstone guarantees a wedged worker (e.g. a stuck transcribe)
+    /// or a hung native `source.stop()` (joining a wedged WASAPI thread) can't
+    /// leave the meeting id permanently un-restartable (#2175). A timed-out task
+    /// is detached, not joined.
+    ///
+    /// [`stop`]: CaptureRegistry::stop
+    async fn stop_with_timeout(&self, meeting_id: &str, drain_timeout: Duration) {
         let Some(mut capture) = self.begin_stop(meeting_id) else {
             return;
         };
         // Stop the native source first so it stops feeding the "Them" channel.
         if let Some(mut source) = capture.system_source.take() {
-            let _ = tauri::async_runtime::spawn_blocking(move || source.stop()).await;
+            let join = tauri::async_runtime::spawn_blocking(move || source.stop());
+            if tokio::time::timeout(drain_timeout, join).await.is_err() {
+                log::warn!("[meeting] native source stop timed out for {meeting_id}; detaching");
+            }
         }
         // Dropping the senders closes the channels so the workers flush and exit.
         drop(capture.me_tx);
         drop(capture.them_tx);
         for task in capture.tasks {
-            let _ = task.await;
+            if tokio::time::timeout(drain_timeout, task).await.is_err() {
+                log::warn!("[meeting] capture worker drain timed out for {meeting_id}; detaching");
+            }
         }
+        // Always clear the tombstone — even on a timed-out drain — so the id is
+        // never permanently blocked from a fresh capture (#2175).
         self.finish_stop(meeting_id);
     }
 }
@@ -537,6 +562,39 @@ mod tests {
 
         // Drain done: the tombstone clears and the id is free for a new capture.
         registry.finish_stop("m1");
+        assert!(!registry.slot_occupied("m1"));
+        assert!(!registry.is_active("m1"));
+    }
+
+    #[tokio::test]
+    async fn stop_clears_tombstone_even_when_a_worker_hangs() {
+        // #2175: stop() left a Stopping tombstone and awaited the drain unbounded.
+        // A wedged worker (e.g. a stuck transcribe) or a hung native source.stop()
+        // would never reach finish_stop, leaving the id permanently un-restartable.
+        // The bounded drain must always clear the tombstone.
+        let registry = CaptureRegistry::default();
+        let (me_tx, me_rx) = unbounded_channel::<PcmFrame>();
+        // A worker that never finishes, even after its channel closes.
+        let hung = tauri::async_runtime::spawn(async move {
+            let _keep_rx = me_rx;
+            std::future::pending::<()>().await;
+        });
+        registry.active.lock().unwrap().insert(
+            "m1".to_string(),
+            CaptureSlot::Active(ActiveCapture {
+                me_tx,
+                them_tx: None,
+                system_source: None,
+                tasks: vec![hung],
+            }),
+        );
+
+        // A short per-step timeout keeps the test fast; production uses 5s.
+        registry
+            .stop_with_timeout("m1", Duration::from_millis(50))
+            .await;
+
+        // The id is freed for a fresh capture, not leaked behind a tombstone.
         assert!(!registry.slot_occupied("m1"));
         assert!(!registry.is_active("m1"));
     }
