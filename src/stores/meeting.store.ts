@@ -434,12 +434,17 @@ async function runHandoff(meeting: Meeting): Promise<void> {
   conversationStore.setActiveConversation(conversation.id);
   try {
     await orchestrate(conversation.id, prompt);
+    // The agent finished: drive the status machine to a terminal state so the
+    // meeting doesn't sit at `agent_running` forever (#2158).
+    await updateMeetingStatus(meeting.id, "done", Date.now());
   } catch (error) {
     setMeetingState(
       "error",
       error instanceof Error ? error.message : "Agent handoff failed",
     );
+    await updateMeetingStatus(meeting.id, "failed", Date.now()).catch(() => {});
   }
+  await loadMeetings();
 }
 
 async function regenerateNotes(
