@@ -128,7 +128,7 @@ async function setActiveMeeting(meeting: Meeting | null): Promise<void> {
 
   try {
     const segments = await getTranscriptSegments(meeting.id);
-    setMeetingState("liveSegments", segments);
+    setMeetingState("liveSegments", sortSegmentsByCapture(segments));
   } catch (error) {
     setMeetingState(
       "error",
@@ -137,17 +137,26 @@ async function setActiveMeeting(meeting: Meeting | null): Promise<void> {
   }
 }
 
+// Order transcript segments by capture time, not completion order. `seq` is
+// assigned when each chunk's transcription request returns, so the fast Me
+// (whisper-1) vs slow Them (diarize) streams would otherwise interleave
+// scrambled. startMs is the chunk's capture offset; seq only breaks exact-start
+// ties (#2163). Every path that sets liveSegments — live append AND the reload
+// paths (setActiveMeeting, the post-call segments-updated refresh) — must run
+// through this so the DB's `ORDER BY seq` rows don't render scrambled (#2197).
+export function sortSegmentsByCapture(
+  segments: readonly TranscriptSegment[],
+): TranscriptSegment[] {
+  return [...segments].sort((left, right) => {
+    if (left.startMs !== right.startMs) return left.startMs - right.startMs;
+    return left.seq - right.seq;
+  });
+}
+
 function appendLiveSegment(segment: TranscriptSegment): void {
   setMeetingState("liveSegments", (segments) => {
     const withoutDuplicate = segments.filter((item) => item.id !== segment.id);
-    // Order by capture time, not completion order. `seq` is assigned when each
-    // chunk's transcription request returns, so the fast Me (whisper-1) vs slow
-    // Them (diarize) streams would otherwise interleave scrambled. startMs is the
-    // chunk's capture offset; seq only breaks exact-start ties (#2163).
-    return [...withoutDuplicate, segment].sort((left, right) => {
-      if (left.startMs !== right.startMs) return left.startMs - right.startMs;
-      return left.seq - right.seq;
-    });
+    return sortSegmentsByCapture([...withoutDuplicate, segment]);
   });
 }
 
@@ -187,7 +196,9 @@ async function startMeetingEventListeners(): Promise<void> {
       const active = meetingState.activeMeeting;
       if (active?.id !== event.payload.meetingId) return;
       void getTranscriptSegments(event.payload.meetingId)
-        .then((segments) => setMeetingState("liveSegments", segments))
+        .then((segments) =>
+          setMeetingState("liveSegments", sortSegmentsByCapture(segments)),
+        )
         .catch(() => {
           // Non-fatal: the existing labels stay; a manual refresh will reload.
         });
