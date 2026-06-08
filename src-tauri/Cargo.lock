@@ -9390,15 +9390,15 @@ dependencies = [
 
 [[package]]
 name = "wasapi"
-version = "0.15.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f6b03b82e419f186fcdc06ac6068621bdadc88b89b2612067f1c021ad2c9449"
+checksum = "80c3aa5d6b0e7acc3ea10cb19c334df0c8d825060f14a30d9e3b03385e6e5175"
 dependencies = [
  "log",
  "num-integer",
- "widestring",
- "windows 0.57.0",
- "windows-core 0.57.0",
+ "thiserror 2.0.18",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -9828,12 +9828,6 @@ dependencies = [
  "ureq",
  "wacore",
 ]
-
-[[package]]
-name = "widestring"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
 name = "winapi"

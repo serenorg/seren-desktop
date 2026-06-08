@@ -104,7 +104,7 @@ tauri-plugin-single-instance = "2"
 
 # System-audio ("Them") loopback capture for Meeting Mode.
 [target.'cfg(target_os = "windows")'.dependencies]
-wasapi = "0.15"
+wasapi = "0.23"
 
 # System-audio ("Them") process-tap capture for Meeting Mode (CoreAudio + ObjC FFI).
 [target.'cfg(target_os = "macos")'.dependencies]
