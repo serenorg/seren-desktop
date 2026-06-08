@@ -96,7 +96,11 @@ function main(): void {
   // Use --node-linker=hoisted to create real files instead of pnpm symlinks.
   // Symlinks don't survive Tauri bundling or macOS notarization, so without
   // this the ws package is missing from the app bundle at runtime.
-  run("pnpm", ["install", "--prod", "--ignore-scripts", "--node-linker=hoisted"], destDir);
+  run(
+    "pnpm",
+    ["install", "--prod", "--ignore-workspace", "--ignore-scripts", "--node-linker=hoisted"],
+    destDir,
+  );
 
   writeFileSync(
     markerPath,
