@@ -75,4 +75,18 @@ describe("agent skill context priming", () => {
     expect(compactIdx).toBeGreaterThan(signatureIdx);
     expect(returnIdx).toBeGreaterThan(compactIdx);
   });
+
+  it("#2212 filters generated primer replay even when publisher text precedes active skills", () => {
+    const start = agentStoreSource.indexOf(
+      "flushPendingUserMessage(sessionId: string)",
+    );
+    expect(start).toBeGreaterThan(0);
+    const end = agentStoreSource.indexOf("\n  },", start);
+    expect(end).toBeGreaterThan(start);
+    const body = agentStoreSource.slice(start, end);
+
+    expect(agentStoreSource).toContain("isGeneratedPromptPrimer");
+    expect(body).toContain("isGeneratedPromptPrimer(session.pendingUserMessage)");
+    expect(body).not.toContain('startsWith("# Active Skills")');
+  });
 });

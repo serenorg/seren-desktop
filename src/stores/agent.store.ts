@@ -13,6 +13,7 @@ import {
   isLocalProviderRuntime,
   onRuntimeEvent,
 } from "@/lib/browser-local-runtime";
+import { isGeneratedPromptPrimer } from "@/lib/chat-history-export";
 import {
   type PrunableMessage,
   pruneCompactedHistory,
@@ -6267,9 +6268,9 @@ export const agentStore = {
       return;
     }
 
-    // Skill context can arrive as a userMessage event when the provider stores
-    // context items as user turns. Discard it — same as in finalizeStreamingContent.
-    if (session.pendingUserMessage.trimStart().startsWith("# Active Skills")) {
+    // Provider replay can store prompt primers as user turns. Discard them,
+    // including the #2212 shape where publisher text precedes Active Skills.
+    if (isGeneratedPromptPrimer(session.pendingUserMessage)) {
       setState("sessions", sessionId, "pendingUserMessage", "");
       setState("sessions", sessionId, "pendingUserMessageId", undefined);
       setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
@@ -6897,9 +6898,9 @@ export const agentStore = {
       // calls: the first chunk starts with '# Active Skills' (caught here), but
       // subsequent chunks of the same block start mid-content. The
       // isSkippingSkillContext flag ensures those continuations are also dropped.
-      const isSkillContextStart = session.streamingContent
-        .trimStart()
-        .startsWith("# Active Skills");
+      const isSkillContextStart = isGeneratedPromptPrimer(
+        session.streamingContent,
+      );
       if (isSkillContextStart || session.isSkippingSkillContext) {
         if (isSkillContextStart) {
           setState("sessions", sessionId, "isSkippingSkillContext", true);

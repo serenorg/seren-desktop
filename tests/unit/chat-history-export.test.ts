@@ -64,4 +64,35 @@ describe("formatChatHistoryMarkdown", () => {
     ];
     expect(hasExportableMessages(messages)).toBe(true);
   });
+
+  it("#2212 excludes generated publisher and active-skills primer content embedded in chat rows", () => {
+    const messages: ChatHistoryExportMessage[] = [
+      {
+        type: "user",
+        content:
+          "You have access to a Seren MCP gateway with callable publishers via your seren-mcp tools (list_agent_publishers, call_publisher).\n\n# Active Skills\n\n## Skill: Demo\n\n> **Skill runtime directory:** `/Users/me/.config/seren/skills/demo`\n\nBefore using this skill, open `/Users/me/.config/seren/skills/demo/SKILL.md` and follow its full instructions.",
+      },
+      { type: "assistant", content: "Ready." },
+    ];
+
+    const md = formatChatHistoryMarkdown(messages);
+
+    expect(md).not.toContain("# Active Skills");
+    expect(md).not.toContain("list_agent_publishers");
+    expect(md).not.toContain("Skill runtime directory");
+    expect(md).toContain("**Assistant:** Ready.");
+  });
+
+  it("#2212 keeps normal user discussion about active skills", () => {
+    const messages: ChatHistoryExportMessage[] = [
+      {
+        type: "user",
+        content: "Why did the phrase # Active Skills appear in my chat?",
+      },
+    ];
+
+    const md = formatChatHistoryMarkdown(messages);
+
+    expect(md).toContain("Why did the phrase # Active Skills appear");
+  });
 });

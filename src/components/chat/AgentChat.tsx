@@ -23,6 +23,10 @@ import { extractAgentThinkingMarkup } from "@/lib/agent-thinking-markup";
 import { isAuthError, isLikelyAuthError } from "@/lib/auth-errors";
 import { collapseBuildOutput } from "@/lib/build-output";
 import {
+  formatChatHistoryMarkdown,
+  hasExportableMessages,
+} from "@/lib/chat-history-export";
+import {
   getCompletions,
   isInvokableSkill,
   parseCommand,
@@ -620,20 +624,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const copyAllChatHistory = async () => {
     const messages = threadMessages();
-    if (messages.length === 0) {
+    if (!hasExportableMessages(messages)) {
       alert("No chat history to copy");
       return;
     }
 
-    // Format messages as markdown
-    let markdown = "# Agent Chat History\n\n";
-    for (const msg of messages) {
-      if (msg.type === "user") {
-        markdown += `**You:** ${msg.content}\n\n`;
-      } else if (msg.type === "assistant") {
-        markdown += `**Agent:** ${msg.content}\n\n`;
-      }
-    }
+    const markdown = formatChatHistoryMarkdown(messages, {
+      header: "# Agent Chat History",
+    });
 
     try {
       await navigator.clipboard.writeText(markdown);
@@ -649,20 +647,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const downloadChatHistory = async () => {
     if (isSaving()) return;
     const messages = threadMessages();
-    if (messages.length === 0) return;
+    if (!hasExportableMessages(messages)) return;
 
-    const dateStr = new Date().toISOString().split("T")[0];
+    const now = new Date();
+    const dateStr = now.toISOString().split("T")[0];
     const title = `Agent Chat History - ${dateStr}`;
 
-    let markdown = "# Agent Chat History\n\n";
-    markdown += `*Exported ${new Date().toLocaleString()}*\n\n---\n\n`;
-    for (const msg of messages) {
-      if (msg.type === "user") {
-        markdown += `**You:** ${msg.content}\n\n`;
-      } else if (msg.type === "assistant") {
-        markdown += `**Agent:** ${msg.content}\n\n`;
-      }
-    }
+    const markdown = formatChatHistoryMarkdown(messages, {
+      header: "# Agent Chat History",
+      exportedAt: now,
+    });
 
     setIsSaving(true);
     try {

@@ -1,11 +1,39 @@
 // ABOUTME: Renders a conversation as plain-text markdown for copy/save exports.
 // ABOUTME: Filters out tool calls, tool results, and other non-chat message types.
 
-import type { UnifiedMessage } from "@/types/conversation";
-
 export interface ChatHistoryExportMessage {
-  type: UnifiedMessage["type"];
+  type: string;
   content: string;
+}
+
+const ACTIVE_SKILLS_HEADER = "# Active Skills";
+const PUBLISHER_PRIMER_MARKERS = ["list_agent_publishers", "call_publisher"];
+const SKILL_MANIFEST_MARKERS = [
+  "Skill runtime directory",
+  "Before using this skill, open",
+  "/SKILL.md",
+];
+
+export function isGeneratedPromptPrimer(content: string): boolean {
+  const trimmed = content.trimStart();
+  const hasActiveSkillsHeader = trimmed.includes(ACTIVE_SKILLS_HEADER);
+  if (!hasActiveSkillsHeader) return false;
+
+  const hasPublisherPrimer = PUBLISHER_PRIMER_MARKERS.every((marker) =>
+    trimmed.includes(marker),
+  );
+  const hasSkillManifest = SKILL_MANIFEST_MARKERS.some((marker) =>
+    trimmed.includes(marker),
+  );
+
+  return hasPublisherPrimer || hasSkillManifest;
+}
+
+function exportableMessageContent(
+  message: ChatHistoryExportMessage,
+): string | null {
+  if (isGeneratedPromptPrimer(message.content)) return null;
+  return message.content;
 }
 
 /**
@@ -29,10 +57,13 @@ export function formatChatHistoryMarkdown(
     markdown += `*Exported ${options.exportedAt.toLocaleString()}*\n\n---\n\n`;
   }
   for (const msg of messages) {
+    const content = exportableMessageContent(msg);
+    if (content === null) continue;
+
     if (msg.type === "user") {
-      markdown += `**You:** ${msg.content}\n\n`;
+      markdown += `**You:** ${content}\n\n`;
     } else if (msg.type === "assistant") {
-      markdown += `**Assistant:** ${msg.content}\n\n`;
+      markdown += `**Assistant:** ${content}\n\n`;
     }
   }
   return markdown;
@@ -42,5 +73,9 @@ export function formatChatHistoryMarkdown(
 export function hasExportableMessages(
   messages: readonly ChatHistoryExportMessage[],
 ): boolean {
-  return messages.some((m) => m.type === "user" || m.type === "assistant");
+  return messages.some(
+    (m) =>
+      (m.type === "user" || m.type === "assistant") &&
+      exportableMessageContent(m) !== null,
+  );
 }
