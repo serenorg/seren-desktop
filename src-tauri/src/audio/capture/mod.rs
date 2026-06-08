@@ -9,6 +9,9 @@ pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+use std::sync::mpsc::SyncSender;
+use std::thread::JoinHandle;
+
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -41,6 +44,36 @@ pub enum CaptureError {
 pub trait AudioCaptureSource: Send {
     fn start(&mut self, sink: FrameSender) -> Result<(), CaptureError>;
     fn stop(&mut self);
+}
+
+/// Spawn `worker` on a dedicated OS thread and block until it reports readiness.
+///
+/// The worker must send exactly one verdict on the channel: `Ok(())` once its
+/// capture stream is live, or `Err(_)` if initialization failed. This returns the
+/// running thread handle once `Ok` is seen, the worker's error (after joining) on
+/// failure, or a `Device` error if the worker exits without signaling (panic /
+/// early return). It exists so sources whose real init runs on a non-`Send` worker
+/// thread (WASAPI loopback) can report the *true* init result to their caller
+/// instead of an unconditional `Ok` that masks a dead stream (#2157).
+pub fn spawn_with_readiness<F>(worker: F) -> Result<JoinHandle<()>, CaptureError>
+where
+    F: FnOnce(SyncSender<Result<(), CaptureError>>) + Send + 'static,
+{
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    let handle = std::thread::spawn(move || worker(ready_tx));
+    match ready_rx.recv() {
+        Ok(Ok(())) => Ok(handle),
+        Ok(Err(err)) => {
+            let _ = handle.join();
+            Err(err)
+        }
+        Err(_) => {
+            let _ = handle.join();
+            Err(CaptureError::Device(
+                "capture worker exited before signaling readiness".to_string(),
+            ))
+        }
+    }
 }
 
 /// Downmix interleaved PCM to mono and resample to [`TARGET_SAMPLE_RATE`].
@@ -96,6 +129,43 @@ pub fn resample_to_16k(mono: &[i16], sample_rate: u32) -> Vec<i16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn spawn_with_readiness_returns_handle_when_worker_signals_ok() {
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = ran.clone();
+        let handle = spawn_with_readiness(move |ready| {
+            flag.store(true, Ordering::SeqCst);
+            ready.send(Ok(())).unwrap();
+        })
+        .expect("a worker that signals Ok yields a running handle");
+        handle.join().unwrap();
+        assert!(ran.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn spawn_with_readiness_propagates_worker_init_error() {
+        // An init failure on the worker thread must surface to the caller, not be
+        // swallowed as a phantom-live stream (the #2157 regression).
+        let err = spawn_with_readiness(|ready| {
+            ready
+                .send(Err(CaptureError::Device("no render endpoint".to_string())))
+                .unwrap();
+        })
+        .expect_err("init failure must be returned");
+        assert_eq!(err, CaptureError::Device("no render endpoint".to_string()));
+    }
+
+    #[test]
+    fn spawn_with_readiness_errors_when_worker_exits_without_signaling() {
+        // A worker that drops its sender without sending (panic / early return)
+        // must not be reported as a live capture.
+        let err = spawn_with_readiness(|_ready| {})
+            .expect_err("a silent worker exit must surface as an error");
+        assert!(matches!(err, CaptureError::Device(_)));
+    }
 
     #[test]
     fn mono_at_target_rate_passes_through_unchanged() {

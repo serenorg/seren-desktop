@@ -4,11 +4,14 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::SyncSender;
 use std::thread::JoinHandle;
 
 use wasapi::{Direction, ShareMode, get_default_device, initialize_mta};
 
-use super::{AudioCaptureSource, CaptureError, FrameSender, PcmFrame, to_mono_16k};
+use super::{
+    AudioCaptureSource, CaptureError, FrameSender, PcmFrame, spawn_with_readiness, to_mono_16k,
+};
 
 // How long to block waiting for the next WASAPI buffer before re-checking stop.
 const EVENT_TIMEOUT_MS: u32 = 1000;
@@ -40,11 +43,12 @@ impl AudioCaptureSource for WasapiLoopbackSource {
         self.stop_flag.store(false, Ordering::SeqCst);
         let stop = self.stop_flag.clone();
         // The WASAPI client is not Send, so it is owned entirely on this thread.
-        let handle = std::thread::spawn(move || {
-            if let Err(err) = run_loopback(&stop, &sink) {
-                log::warn!("[wasapi] loopback capture stopped: {err}");
-            }
-        });
+        // Block until run_loopback reports the stream is live (or init failed) so
+        // a real failure (no render endpoint, COM error) is returned to the caller
+        // instead of leaving the "Them" worker blocked on a silent channel (#2157).
+        let handle = spawn_with_readiness(move |ready| {
+            run_loopback(&stop, &sink, &ready);
+        })?;
         self.handle = Some(handle);
         Ok(())
     }
@@ -57,44 +61,71 @@ impl AudioCaptureSource for WasapiLoopbackSource {
     }
 }
 
-fn run_loopback(stop: &AtomicBool, sink: &FrameSender) -> Result<(), String> {
-    initialize_mta()
-        .ok()
-        .map_err(|err| format!("COM init failed: {err:?}"))?;
+/// Initialize WASAPI loopback capture, signal readiness through `ready`, then pump
+/// frames until `stop` is set. The init result is reported on `ready` exactly once:
+/// `Err` if any init step fails (the stream never started), or `Ok` after the
+/// stream is live. Read failures during the capture loop only end the loop.
+fn run_loopback(stop: &AtomicBool, sink: &FrameSender, ready: &SyncSender<Result<(), CaptureError>>) {
+    // Report an init-step failure to the caller and stop: the device is not live.
+    macro_rules! init {
+        ($step:expr) => {
+            match $step {
+                Ok(value) => value,
+                Err(err) => {
+                    let _ = ready.send(Err(CaptureError::Device(err.to_string())));
+                    return;
+                }
+            }
+        };
+    }
 
-    let device = get_default_device(&Direction::Render).map_err(|err| err.to_string())?;
-    let mut audio_client = device.get_iaudioclient().map_err(|err| err.to_string())?;
-    let format = audio_client.get_mixformat().map_err(|err| err.to_string())?;
+    init!(
+        initialize_mta()
+            .ok()
+            .map_err(|err| format!("COM init failed: {err:?}"))
+    );
+
+    let device = init!(get_default_device(&Direction::Render).map_err(|err| err.to_string()));
+    let mut audio_client = init!(device.get_iaudioclient().map_err(|err| err.to_string()));
+    let format = init!(audio_client.get_mixformat().map_err(|err| err.to_string()));
     let (_default_period, min_period) =
-        audio_client.get_periods().map_err(|err| err.to_string())?;
+        init!(audio_client.get_periods().map_err(|err| err.to_string()));
 
-    audio_client
-        .initialize_client(
-            &format,
-            min_period,
-            &Direction::Capture,
-            &ShareMode::Shared,
-            true,
-        )
-        .map_err(|err| err.to_string())?;
+    init!(
+        audio_client
+            .initialize_client(
+                &format,
+                min_period,
+                &Direction::Capture,
+                &ShareMode::Shared,
+                true,
+            )
+            .map_err(|err| err.to_string())
+    );
 
-    let h_event = audio_client.set_get_eventhandle().map_err(|err| err.to_string())?;
-    let capture_client = audio_client
-        .get_audiocaptureclient()
-        .map_err(|err| err.to_string())?;
+    let h_event = init!(audio_client.set_get_eventhandle().map_err(|err| err.to_string()));
+    let capture_client = init!(
+        audio_client
+            .get_audiocaptureclient()
+            .map_err(|err| err.to_string())
+    );
 
     let channels = format.get_nchannels();
     let sample_rate = format.get_samplespersec();
     let bits = format.get_bitspersample();
     let block_align = format.get_blockalign() as usize;
 
-    audio_client.start_stream().map_err(|err| err.to_string())?;
+    init!(audio_client.start_stream().map_err(|err| err.to_string()));
+
+    // The stream is live: report success. From here, errors only end the loop.
+    let _ = ready.send(Ok(()));
 
     let mut bytes: VecDeque<u8> = VecDeque::new();
     while !stop.load(Ordering::SeqCst) {
-        capture_client
-            .read_from_device_to_deque(&mut bytes)
-            .map_err(|err| err.to_string())?;
+        if let Err(err) = capture_client.read_from_device_to_deque(&mut bytes) {
+            log::warn!("[wasapi] loopback read failed: {err}");
+            break;
+        }
 
         let frame_count = if block_align == 0 {
             0
@@ -117,7 +148,6 @@ fn run_loopback(stop: &AtomicBool, sink: &FrameSender) -> Result<(), String> {
     }
 
     let _ = audio_client.stop_stream();
-    Ok(())
 }
 
 /// Pop one interleaved sample from the byte queue and convert it to i16. The
