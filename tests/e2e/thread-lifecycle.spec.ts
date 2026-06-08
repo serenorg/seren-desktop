@@ -46,6 +46,13 @@ test.describe("Thread Lifecycle", () => {
   });
 
   test("creating a chat thread adds it to the sidebar", async ({ page }) => {
+    // Browser-fallback seeds one default chat thread on load (loadHistory's
+    // catch path, #1630). Wait for that seeded thread to render before sampling
+    // the baseline — otherwise the count is captured mid-hydration and races the
+    // seed, giving threadsBefore=0 and a final count of 2 (flaky, #2179).
+    await expect(page.getByTestId("thread-item").first()).toBeVisible({
+      timeout: 10_000,
+    });
     const threadsBefore = await page.getByTestId("thread-item").count();
 
     await page.getByTestId("new-thread-button").click();
