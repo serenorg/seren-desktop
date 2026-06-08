@@ -133,9 +133,13 @@ async function setActiveMeeting(meeting: Meeting | null): Promise<void> {
 function appendLiveSegment(segment: TranscriptSegment): void {
   setMeetingState("liveSegments", (segments) => {
     const withoutDuplicate = segments.filter((item) => item.id !== segment.id);
+    // Order by capture time, not completion order. `seq` is assigned when each
+    // chunk's transcription request returns, so the fast Me (whisper-1) vs slow
+    // Them (diarize) streams would otherwise interleave scrambled. startMs is the
+    // chunk's capture offset; seq only breaks exact-start ties (#2163).
     return [...withoutDuplicate, segment].sort((left, right) => {
-      if (left.seq !== right.seq) return left.seq - right.seq;
-      return left.startMs - right.startMs;
+      if (left.startMs !== right.startMs) return left.startMs - right.startMs;
+      return left.seq - right.seq;
     });
   });
 }

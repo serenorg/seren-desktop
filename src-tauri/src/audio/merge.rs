@@ -19,9 +19,14 @@ pub fn merge_segments(
         index += 1;
     }
 
+    // Order by capture time, then by the persisted capture/emission `seq` so a
+    // start_ms tie between the Me and Them streams resolves to capture order
+    // rather than always Me-before-Them. The insertion index is the final stable
+    // tiebreak when seq also ties (#2163).
     indexed.sort_by(|(left_index, left), (right_index, right)| {
         left.start_ms
             .cmp(&right.start_ms)
+            .then_with(|| left.seq.cmp(&right.seq))
             .then_with(|| left_index.cmp(right_index))
     });
 
@@ -89,6 +94,20 @@ mod tests {
 
         assert_eq!(merged[0].speaker, Speaker::Me);
         assert_eq!(merged[1].speaker, Speaker::Them);
+    }
+
+    #[test]
+    fn merge_segments_breaks_start_ties_by_capture_seq() {
+        // Same start_ms, but Them was captured first (lower seq): it must sort
+        // first. The pre-#2163 tiebreak always put Me first, scrambling order
+        // whenever the two streams' chunks shared a start_ms.
+        let me = vec![segment(Speaker::Me, 5, 100, SegmentStatus::Ok)];
+        let them = vec![segment(Speaker::Them, 2, 100, SegmentStatus::Ok)];
+
+        let merged = merge_segments(me, them);
+
+        assert_eq!(merged[0].speaker, Speaker::Them);
+        assert_eq!(merged[1].speaker, Speaker::Me);
     }
 
     #[test]
