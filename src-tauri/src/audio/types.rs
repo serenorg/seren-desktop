@@ -71,6 +71,36 @@ impl TryFrom<&str> for MeetingStatus {
     }
 }
 
+/// Where a segment's `speaker` came from: the capture channel (mic = Me, system
+/// audio = Them) or the transcription model's diarization labels.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeakerSource {
+    Channel,
+    Diarization,
+}
+
+impl SpeakerSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Channel => "channel",
+            Self::Diarization => "diarization",
+        }
+    }
+}
+
+impl TryFrom<&str> for SpeakerSource {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "channel" => Ok(Self::Channel),
+            "diarization" => Ok(Self::Diarization),
+            _ => Err(format!("Unknown speaker source: {}", value)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SegmentStatus {
@@ -128,5 +158,9 @@ pub struct TranscriptSegment {
     pub start_ms: i64,
     pub end_ms: i64,
     pub status: SegmentStatus,
+    /// Raw diarization label from the model (e.g. "A", "speaker_0"), if any.
+    pub speaker_label: Option<String>,
+    /// Whether `speaker` was assigned by the capture channel or by diarization.
+    pub speaker_source: SpeakerSource,
     pub created_at: i64,
 }

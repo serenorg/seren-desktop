@@ -13,7 +13,9 @@ use crate::audio::templates::{BUILT_IN_MEETING_TEMPLATES, MeetingTemplate};
 use crate::audio::transcribe::{
     GatewayTranscriber, RetryConfig, TranscribeError, transcribe_chunk_with_retry,
 };
-use crate::audio::types::{Meeting, MeetingStatus, SegmentStatus, Speaker, TranscriptSegment};
+use crate::audio::types::{
+    Meeting, MeetingStatus, SegmentStatus, Speaker, SpeakerSource, TranscriptSegment,
+};
 use crate::orchestrator::types::SkillRef;
 use crate::services::database::DbPool;
 use rusqlite::{Connection, OptionalExtension, Result, params};
@@ -148,6 +150,9 @@ pub async fn append_transcript_segment(
         start_ms,
         end_ms,
         status,
+        // Manual appends carry the channel speaker, not a diarization label.
+        speaker_label: None,
+        speaker_source: SpeakerSource::Channel,
         created_at: now_ms(),
     };
 
@@ -288,7 +293,11 @@ pub async fn transcribe_pcm(
     };
     let transcriber = GatewayTranscriber::new(app);
     match transcribe_chunk_with_retry(&transcriber, &chunk, RetryConfig::default()).await {
-        Ok(text) => Ok(text),
+        Ok(segments) => Ok(segments
+            .into_iter()
+            .map(|segment| segment.text)
+            .collect::<Vec<_>>()
+            .join(" ")),
         Err(TranscribeError::Empty) => Ok(String::new()),
         Err(err) => Err(err.to_string()),
     }
@@ -380,6 +389,8 @@ pub struct NewTranscriptSegment {
     pub start_ms: i64,
     pub end_ms: i64,
     pub status: SegmentStatus,
+    pub speaker_label: Option<String>,
+    pub speaker_source: SpeakerSource,
     pub created_at: i64,
 }
 
@@ -452,9 +463,10 @@ pub fn insert_transcript_segment(
 ) -> Result<TranscriptSegment> {
     conn.execute(
         "INSERT INTO transcript_segments (
-            id, meeting_id, seq, speaker, text, start_ms, end_ms, status, created_at
+            id, meeting_id, seq, speaker, text, start_ms, end_ms, status,
+            speaker_label, speaker_source, created_at
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             segment.id,
             segment.meeting_id,
@@ -464,6 +476,8 @@ pub fn insert_transcript_segment(
             segment.start_ms,
             segment.end_ms,
             segment.status.as_str(),
+            segment.speaker_label,
+            segment.speaker_source.as_str(),
             segment.created_at
         ],
     )?;
@@ -477,6 +491,8 @@ pub fn insert_transcript_segment(
         start_ms: segment.start_ms,
         end_ms: segment.end_ms,
         status: segment.status,
+        speaker_label: segment.speaker_label,
+        speaker_source: segment.speaker_source,
         created_at: segment.created_at,
     })
 }
@@ -486,7 +502,8 @@ pub fn select_transcript_segments(
     meeting_id: &str,
 ) -> Result<Vec<TranscriptSegment>> {
     let mut stmt = conn.prepare(
-        "SELECT id, meeting_id, seq, speaker, text, start_ms, end_ms, status, created_at
+        "SELECT id, meeting_id, seq, speaker, text, start_ms, end_ms, status,
+                speaker_label, speaker_source, created_at
          FROM transcript_segments
          WHERE meeting_id = ?1
          ORDER BY seq ASC",
@@ -524,6 +541,20 @@ fn row_to_meeting(row: &rusqlite::Row<'_>) -> Result<Meeting> {
 fn row_to_segment(row: &rusqlite::Row<'_>) -> Result<TranscriptSegment> {
     let speaker: String = row.get(3)?;
     let status: String = row.get(7)?;
+    // Legacy rows (pre-diarization) have NULL speaker_source; treat them as channel.
+    let speaker_source: Option<String> = row.get(9)?;
+    let speaker_source = speaker_source
+        .as_deref()
+        .map(SpeakerSource::try_from)
+        .transpose()
+        .map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                9,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err)),
+            )
+        })?
+        .unwrap_or(SpeakerSource::Channel);
     Ok(TranscriptSegment {
         id: row.get(0)?,
         meeting_id: row.get(1)?,
@@ -545,7 +576,9 @@ fn row_to_segment(row: &rusqlite::Row<'_>) -> Result<TranscriptSegment> {
                 Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err)),
             )
         })?,
-        created_at: row.get(8)?,
+        speaker_label: row.get(8)?,
+        speaker_source,
+        created_at: row.get(10)?,
     })
 }
 
@@ -650,6 +683,16 @@ mod tests {
                     } else {
                         SegmentStatus::Ok
                     },
+                    speaker_label: if seq == 1 {
+                        Some("A".to_string())
+                    } else {
+                        None
+                    },
+                    speaker_source: if seq == 1 {
+                        SpeakerSource::Diarization
+                    } else {
+                        SpeakerSource::Channel
+                    },
                     created_at: 30 + seq,
                 },
             )
@@ -666,6 +709,10 @@ mod tests {
             vec![0, 1, 2]
         );
         assert_eq!(segments[1].speaker, Speaker::Them);
+        assert_eq!(segments[1].speaker_label.as_deref(), Some("A"));
+        assert_eq!(segments[1].speaker_source, SpeakerSource::Diarization);
+        assert_eq!(segments[0].speaker_label, None);
+        assert_eq!(segments[0].speaker_source, SpeakerSource::Channel);
         assert_eq!(segments[2].status, SegmentStatus::Gap);
     }
 
@@ -684,6 +731,8 @@ mod tests {
                 start_ms: 0,
                 end_ms: 100,
                 status: SegmentStatus::Ok,
+                speaker_label: None,
+                speaker_source: SpeakerSource::Channel,
                 created_at: 1,
             },
         )

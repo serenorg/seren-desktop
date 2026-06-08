@@ -357,6 +357,8 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             start_ms INTEGER NOT NULL,
             end_ms INTEGER NOT NULL,
             status TEXT NOT NULL,
+            speaker_label TEXT,
+            speaker_source TEXT,
             created_at INTEGER NOT NULL,
             FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
         )",
@@ -368,6 +370,30 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
          ON transcript_segments(meeting_id, seq)",
         [],
     )?;
+
+    // Migration: add diarization columns to transcript_segments for existing DBs.
+    // Both are nullable so the round-trip of older rows is preserved.
+    let has_speaker_label: bool = conn
+        .prepare("SELECT speaker_label FROM transcript_segments LIMIT 1")
+        .is_ok();
+    if !has_speaker_label {
+        conn.execute(
+            "ALTER TABLE transcript_segments ADD COLUMN speaker_label TEXT",
+            [],
+        )
+        .ok();
+    }
+
+    let has_speaker_source: bool = conn
+        .prepare("SELECT speaker_source FROM transcript_segments LIMIT 1")
+        .is_ok();
+    if !has_speaker_source {
+        conn.execute(
+            "ALTER TABLE transcript_segments ADD COLUMN speaker_source TEXT",
+            [],
+        )
+        .ok();
+    }
 
     // Migration: add agent conversation columns if they don't exist (for existing DBs)
     let has_kind: bool = conn
