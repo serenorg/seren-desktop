@@ -1,6 +1,7 @@
 // ABOUTME: Streaming webview microphone capture for dictation.
 // ABOUTME: Transcribes ~1.5s chunks (or on silence) via transcribe_pcm and emits live partial text.
 
+import { createRunningAudioContext } from "@/lib/audio/captureContext";
 import { transcribePcm } from "@/services/dictation";
 
 const TARGET_SAMPLE_RATE = 16_000;
@@ -47,7 +48,16 @@ export async function startDictationCapture(
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
   });
 
-  const context = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+  let context: AudioContext;
+  try {
+    context = await createRunningAudioContext(TARGET_SAMPLE_RATE);
+  } catch (error) {
+    // Release the mic we just opened so a failed start can't leave it live.
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+    throw error;
+  }
   const source = context.createMediaStreamSource(stream);
 
   const analyser = context.createAnalyser();
