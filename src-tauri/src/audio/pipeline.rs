@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use uuid::Uuid;
 
-use crate::audio::capture::{AudioCaptureSource, PcmFrame};
+use crate::audio::capture::{AudioCaptureSource, PcmFrame, TARGET_SAMPLE_RATE};
 use crate::audio::chunker::{Chunk, ChunkCfg, StreamingChunker};
 use crate::audio::transcribe::{
     ChunkTranscriber, GatewayTranscriber, RetryConfig, TranscriptionMode,
@@ -29,9 +29,21 @@ pub trait SegmentSink: Send + Sync {
     async fn segment(&self, segment: TranscriptSegment);
 }
 
+/// Cap on the in-memory Them PCM buffer kept for the post-call diarization pass:
+/// ~90 minutes of 16 kHz mono i16 (≈173 MB). Past this the buffer stops growing
+/// so a marathon meeting can't exhaust memory; the post-call pass still covers the
+/// first ~90 minutes. Nothing is written to disk (privacy rule #2125).
+const MAX_THEM_BUFFER_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 60 * 90;
+
 /// Drive one capture stream end to end: read frames, chunk on silence, transcribe
 /// each window with retry, and hand finished segments to `sink`. A failed window
 /// becomes a `Gap` segment so audio is never silently dropped.
+///
+/// When `them_buffer` is `Some` (the Them stream only), each frame's samples are
+/// also appended to the shared buffer for the post-call diarization pass, capped
+/// at [`MAX_THEM_BUFFER_SAMPLES`]. The Me stream passes `None` and is never
+/// buffered. The lock-and-extend is per-frame and off the transcription path, so
+/// it does not slow the chunk/transcribe loop.
 pub async fn run_capture_stream(
     meeting_id: String,
     speaker: Speaker,
@@ -41,9 +53,13 @@ pub async fn run_capture_stream(
     cfg: ChunkCfg,
     retry: RetryConfig,
     sink: Arc<dyn SegmentSink>,
+    them_buffer: Option<Arc<StdMutex<Vec<i16>>>>,
 ) {
     let mut chunker = StreamingChunker::new(cfg);
     while let Some(frame) = frames.recv().await {
+        if let Some(buffer) = them_buffer.as_ref() {
+            buffer_them_samples(buffer, &frame.samples);
+        }
         for chunk in chunker.push(&frame.samples) {
             emit_segment(&meeting_id, &speaker, chunk, transcriber.as_ref(), retry, &seq, sink.as_ref())
                 .await;
@@ -53,6 +69,19 @@ pub async fn run_capture_stream(
         emit_segment(&meeting_id, &speaker, chunk, transcriber.as_ref(), retry, &seq, sink.as_ref())
             .await;
     }
+}
+
+/// Append a frame's samples to the Them buffer, stopping at the cap. Once full the
+/// buffer is frozen rather than ring-rotated so the post-call pass keeps a single
+/// contiguous timeline that lines up with the live segment timestamps.
+fn buffer_them_samples(buffer: &StdMutex<Vec<i16>>, samples: &[i16]) {
+    let mut buffer = buffer.lock().unwrap();
+    if buffer.len() >= MAX_THEM_BUFFER_SAMPLES {
+        return;
+    }
+    let remaining = MAX_THEM_BUFFER_SAMPLES - buffer.len();
+    let take = remaining.min(samples.len());
+    buffer.extend_from_slice(&samples[..take]);
 }
 
 async fn emit_segment(
@@ -159,6 +188,9 @@ struct ActiveCapture {
     // Native system-audio source (WASAPI loopback / Core Audio tap) feeding `them_tx`.
     system_source: Option<Box<dyn AudioCaptureSource>>,
     tasks: Vec<JoinHandle<()>>,
+    // Full Them PCM buffered in memory for the post-call diarization pass. The
+    // Them worker appends frames here; `stop` takes it for [`reconcile_meeting_speakers`].
+    them_audio: Arc<StdMutex<Vec<i16>>>,
 }
 
 /// A meeting's slot in the registry. `Stopping` is a tombstone left in the map
@@ -215,6 +247,10 @@ const STOP_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Default, Clone)]
 pub struct CaptureRegistry {
     active: Arc<StdMutex<HashMap<String, CaptureSlot>>>,
+    // Them PCM handed off by `stop`, keyed by meeting id, awaiting the post-call
+    // diarization pass. `reconcile_meeting_speakers` removes its entry; the buffer
+    // lives only in memory and is dropped once consumed (privacy rule #2125).
+    finished_them_audio: Arc<StdMutex<HashMap<String, Vec<i16>>>>,
 }
 
 impl CaptureRegistry {
@@ -237,6 +273,7 @@ impl CaptureRegistry {
         );
         let me_sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
         let (me_tx, me_rx) = unbounded_channel();
+        // The Me mic is single-speaker; it is never buffered for the post-call pass.
         let mut tasks = vec![tauri::async_runtime::spawn(run_capture_stream(
             meeting_id.to_string(),
             Speaker::Me,
@@ -246,7 +283,11 @@ impl CaptureRegistry {
             ChunkCfg::default(),
             RetryConfig::default(),
             me_sink,
+            None,
         ))];
+
+        // Shared buffer the Them worker fills for the post-call diarization pass.
+        let them_audio: Arc<StdMutex<Vec<i16>>> = Arc::new(StdMutex::new(Vec::new()));
 
         // System audio ("Them") via the native loopback/tap source, when supported.
         let mut them_tx = None;
@@ -266,6 +307,7 @@ impl CaptureRegistry {
                 ChunkCfg::default(),
                 RetryConfig::default(),
                 them_sink,
+                Some(them_audio.clone()),
             )));
             match source.start(tx.clone()) {
                 Ok(()) => them_tx = Some(tx),
@@ -282,6 +324,7 @@ impl CaptureRegistry {
                 them_tx,
                 system_source,
                 tasks,
+                them_audio,
             }),
         );
     }
@@ -376,9 +419,26 @@ impl CaptureRegistry {
                 log::warn!("[meeting] capture worker drain timed out for {meeting_id}; detaching");
             }
         }
+        // The workers have flushed: take the buffered Them PCM out of the capture
+        // (before it drops) and hand it to the post-call diarization pass. Done
+        // after the drain so any tail frames the Them worker buffered are included.
+        let buffered = std::mem::take(&mut *capture.them_audio.lock().unwrap());
+        if !buffered.is_empty() {
+            self.finished_them_audio
+                .lock()
+                .unwrap()
+                .insert(meeting_id.to_string(), buffered);
+        }
         // Always clear the tombstone — even on a timed-out drain — so the id is
         // never permanently blocked from a fresh capture (#2175).
         self.finish_stop(meeting_id);
+    }
+
+    /// Remove and return the Them PCM buffered for `meeting_id`'s post-call pass,
+    /// if any. The buffer is consumed once: a second call returns `None`, so the
+    /// in-memory audio is not retained after the reconcile pass reads it.
+    pub fn take_finished_them_audio(&self, meeting_id: &str) -> Option<Vec<i16>> {
+        self.finished_them_audio.lock().unwrap().remove(meeting_id)
     }
 }
 
@@ -470,6 +530,7 @@ mod tests {
                 max_backoff_ms: 0,
             },
             collected,
+            None,
         )
         .await;
 
@@ -512,6 +573,7 @@ mod tests {
                 max_backoff_ms: 0,
             },
             collected,
+            None,
         )
         .await;
 
@@ -547,6 +609,7 @@ mod tests {
                 them_tx: None,
                 system_source: None,
                 tasks: Vec::new(),
+                them_audio: Arc::new(StdMutex::new(Vec::new())),
             }),
         );
         assert!(registry.is_active("m1"));
@@ -589,6 +652,7 @@ mod tests {
                 them_tx: None,
                 system_source: None,
                 tasks: vec![hung],
+                them_audio: Arc::new(StdMutex::new(Vec::new())),
             }),
         );
 

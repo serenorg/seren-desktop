@@ -182,6 +182,16 @@ export function stopMeetingCapture(meetingId: string): Promise<void> {
   return invoke("stop_meeting_capture", { meetingId });
 }
 
+/**
+ * Post-call refinement: diarize the full Them recording in one pass and stamp
+ * meeting-stable speaker labels onto the live segments. Returns the number of
+ * segments relabeled. Best-effort on the backend — resolves to 0 when there's no
+ * buffered audio, the audio is too short, or diarization fails.
+ */
+export function reconcileMeetingSpeakers(meetingId: string): Promise<number> {
+  return invoke("reconcile_meeting_speakers", { meetingId });
+}
+
 export function generateMeetingNotes(input: {
   meetingId: string;
   model: string;

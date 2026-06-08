@@ -805,6 +805,7 @@ pub fn run() {
             commands::audio::start_meeting_capture,
             commands::audio::push_capture_frame,
             commands::audio::stop_meeting_capture,
+            commands::audio::reconcile_meeting_speakers,
             commands::audio::generate_meeting_notes,
             commands::audio::get_meeting_transcript_text,
             commands::audio::select_meeting_skills,
