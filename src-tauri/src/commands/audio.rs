@@ -450,8 +450,14 @@ pub fn update_meeting_status_record(
     ended_at: Option<i64>,
     updated_at: i64,
 ) -> Result<()> {
+    // `ended_at` is set once, when capture stops. COALESCE keeps the existing
+    // value when the caller passes None (status-only transitions like
+    // agent_running/done), so the capture-end time survives the agent handoff
+    // instead of being nulled and later overwritten with the agent-finish time
+    // (#2174). A Some value still overwrites (e.g. stop_meeting_capture).
     conn.execute(
-        "UPDATE meetings SET status = ?1, ended_at = ?2, updated_at = ?3 WHERE id = ?4",
+        "UPDATE meetings SET status = ?1, ended_at = COALESCE(?2, ended_at), updated_at = ?3
+         WHERE id = ?4",
         params![status.as_str(), ended_at, updated_at, id],
     )?;
     Ok(())
@@ -660,6 +666,44 @@ mod tests {
         assert_eq!(loaded.title, "Customer discovery");
         assert_eq!(loaded.source_app.as_deref(), Some("Zoom"));
         assert_eq!(loaded.template_id.as_deref(), Some("discovery"));
+    }
+
+    #[test]
+    fn status_update_preserves_ended_at_unless_overwritten() {
+        // #2174: ended_at is stamped once at capture stop; status-only transitions
+        // (None) must preserve it; a Some value still overwrites.
+        let conn = setup();
+        insert_meeting(&conn, meeting("meeting-1")).unwrap();
+
+        // Capture stops: ended_at set.
+        update_meeting_status_record(
+            &conn,
+            "meeting-1",
+            MeetingStatus::Transcribing,
+            Some(500),
+            501,
+        )
+        .unwrap();
+        // Status-only transition (handoff): None must keep ended_at = 500.
+        update_meeting_status_record(&conn, "meeting-1", MeetingStatus::AgentRunning, None, 600)
+            .unwrap();
+        assert_eq!(
+            select_meeting(&conn, "meeting-1").unwrap().unwrap().ended_at,
+            Some(500)
+        );
+        // Done with None still preserves the capture-end time.
+        update_meeting_status_record(&conn, "meeting-1", MeetingStatus::Done, None, 700).unwrap();
+        assert_eq!(
+            select_meeting(&conn, "meeting-1").unwrap().unwrap().ended_at,
+            Some(500)
+        );
+        // A Some value overwrites.
+        update_meeting_status_record(&conn, "meeting-1", MeetingStatus::Failed, Some(900), 901)
+            .unwrap();
+        assert_eq!(
+            select_meeting(&conn, "meeting-1").unwrap().unwrap().ended_at,
+            Some(900)
+        );
     }
 
     #[test]

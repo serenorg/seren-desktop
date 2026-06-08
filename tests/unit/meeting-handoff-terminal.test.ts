@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   updateMeetingStatus: vi.fn(async () => {}),
-  listMeetings: vi.fn(async () => []),
+  listMeetings: vi.fn(async (): Promise<Meeting[]> => []),
   generateMeetingNotes: vi.fn(async () => ({
     markdown: "notes",
     structured: { summary: "s", actionItems: [], fields: {} },
@@ -105,11 +105,8 @@ describe("meetingStore handoff terminal status (#2158)", () => {
     await meetingStore.stopAndProcess(meeting());
 
     expect(m.orchestrate).toHaveBeenCalledTimes(1);
-    expect(m.updateMeetingStatus).toHaveBeenCalledWith(
-      "m1",
-      "done",
-      expect.any(Number),
-    );
+    // Terminal transition carries no ended_at so the capture-end time survives (#2174).
+    expect(m.updateMeetingStatus).toHaveBeenCalledWith("m1", "done");
   });
 
   it("sets failed when the agent run rejects", async () => {
@@ -117,15 +114,7 @@ describe("meetingStore handoff terminal status (#2158)", () => {
 
     await meetingStore.stopAndProcess(meeting());
 
-    expect(m.updateMeetingStatus).toHaveBeenCalledWith(
-      "m1",
-      "failed",
-      expect.any(Number),
-    );
-    expect(m.updateMeetingStatus).not.toHaveBeenCalledWith(
-      "m1",
-      "done",
-      expect.any(Number),
-    );
+    expect(m.updateMeetingStatus).toHaveBeenCalledWith("m1", "failed");
+    expect(m.updateMeetingStatus).not.toHaveBeenCalledWith("m1", "done");
   });
 });

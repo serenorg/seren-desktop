@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const services = vi.hoisted(() => ({
   updateMeetingStatus: vi.fn(async () => {}),
-  listMeetings: vi.fn(async () => []),
+  listMeetings: vi.fn(async (): Promise<Meeting[]> => []),
 }));
 
 vi.mock("@/lib/tauri-bridge", async (importOriginal) => ({
@@ -66,23 +66,28 @@ describe("meetingStore priming cancel + reconcile (#2160)", () => {
     expect(services.listMeetings).toHaveBeenCalled();
   });
 
-  it("reconcileStaleCaptures fails leftover capturing rows, leaves others", async () => {
+  it("reconcileStaleCaptures fails leftover mid-pipeline rows, leaves terminal ones", async () => {
     services.listMeetings.mockResolvedValueOnce([
-      meeting({ id: "stale", status: "capturing" }),
+      meeting({ id: "cap", status: "capturing" }),
+      meeting({ id: "trans", status: "transcribing" }),
+      meeting({ id: "agent", status: "agent_running" }),
       meeting({ id: "done1", status: "done" }),
+      meeting({ id: "notes", status: "notes_ready" }),
     ]);
 
     await meetingStore.reconcileStaleCaptures();
 
-    expect(services.updateMeetingStatus).toHaveBeenCalledWith(
-      "stale",
-      "failed",
-      expect.any(Number),
-    );
-    expect(services.updateMeetingStatus).not.toHaveBeenCalledWith(
-      "done1",
-      "failed",
-      expect.any(Number),
-    );
+    // Fail every mid-pipeline zombie, with no ended_at so a captured row keeps
+    // its capture-end time (#2174).
+    for (const id of ["cap", "trans", "agent"]) {
+      expect(services.updateMeetingStatus).toHaveBeenCalledWith(id, "failed");
+    }
+    // Terminal/resting rows are left alone.
+    for (const id of ["done1", "notes"]) {
+      expect(services.updateMeetingStatus).not.toHaveBeenCalledWith(
+        id,
+        "failed",
+      );
+    }
   });
 });

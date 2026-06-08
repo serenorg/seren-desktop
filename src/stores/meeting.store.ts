@@ -281,18 +281,24 @@ async function cancelPriming(): Promise<void> {
   await loadMeetings();
 }
 
-// At startup, any meeting still marked `capturing` is stale — no live capture
-// survives a restart. Mark them failed so a crashed or force-quit session
-// can't strand a zombie that blocks isCapturing() and every future start (#2160).
+// At startup, any meeting left mid-pipeline is stale — no capture, notes pass,
+// or agent run survives a restart. `capturing` zombies block isCapturing() and
+// every future start (#2160); `transcribing`/`agent_running` zombies show a
+// misleading badge and (for agent_running) a runaway timer (#2174). Fail them
+// all; ended_at is preserved (no arg) where the capture had already ended.
+const STALE_STATUSES = new Set(["capturing", "transcribing", "agent_running"]);
+
 async function reconcileStaleCaptures(): Promise<void> {
   if (!isTauriRuntime()) return;
   try {
     const meetings = await listMeetings();
-    const stale = meetings.filter((meeting) => meeting.status === "capturing");
+    const stale = meetings.filter((meeting) =>
+      STALE_STATUSES.has(meeting.status),
+    );
     if (stale.length === 0) return;
     await Promise.all(
       stale.map((meeting) =>
-        updateMeetingStatus(meeting.id, "failed", Date.now()).catch(() => {}),
+        updateMeetingStatus(meeting.id, "failed").catch(() => {}),
       ),
     );
     await loadMeetings();
@@ -463,14 +469,16 @@ async function runHandoff(meeting: Meeting): Promise<void> {
   try {
     await orchestrate(conversation.id, prompt);
     // The agent finished: drive the status machine to a terminal state so the
-    // meeting doesn't sit at `agent_running` forever (#2158).
-    await updateMeetingStatus(meeting.id, "done", Date.now());
+    // meeting doesn't sit at `agent_running` forever (#2158). Pass no ended_at
+    // so the capture-end timestamp set at stop survives instead of being
+    // overwritten with the agent-finish time (#2174).
+    await updateMeetingStatus(meeting.id, "done");
   } catch (error) {
     setMeetingState(
       "error",
       error instanceof Error ? error.message : "Agent handoff failed",
     );
-    await updateMeetingStatus(meeting.id, "failed", Date.now()).catch(() => {});
+    await updateMeetingStatus(meeting.id, "failed").catch(() => {});
   }
   await loadMeetings();
 }
