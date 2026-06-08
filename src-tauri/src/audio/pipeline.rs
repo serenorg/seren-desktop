@@ -209,7 +209,10 @@ pub fn transcription_mode_for(speaker: &Speaker) -> TranscriptionMode {
 const STOP_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Tauri-managed registry of active meeting captures, keyed by meeting id.
-#[derive(Default)]
+///
+/// `Clone` shares the same `active` map (it only wraps an `Arc`), so the start
+/// command can hand a handle to a blocking thread without copying state (#2176).
+#[derive(Default, Clone)]
 pub struct CaptureRegistry {
     active: Arc<StdMutex<HashMap<String, CaptureSlot>>>,
 }
