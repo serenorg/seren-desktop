@@ -264,9 +264,36 @@ async function confirmPriming(): Promise<void> {
   await beginCapture(meeting);
 }
 
-// User dismissed the explainer: abort the pending start without capturing.
-function cancelPriming(): void {
+// User dismissed the explainer: abort the pending start. The meeting row was
+// created `capturing` before the gate, so mark it failed (mirroring the
+// mic-failure cleanup) — otherwise isCapturing() stays true forever and blocks
+// every future capture, even across restarts (#2160).
+async function cancelPriming(): Promise<void> {
+  const meeting = meetingState.primingRequest;
   setMeetingState("primingRequest", null);
+  if (!meeting || !isTauriRuntime()) return;
+  await updateMeetingStatus(meeting.id, "failed", Date.now()).catch(() => {});
+  await loadMeetings();
+}
+
+// At startup, any meeting still marked `capturing` is stale — no live capture
+// survives a restart. Mark them failed so a crashed or force-quit session
+// can't strand a zombie that blocks isCapturing() and every future start (#2160).
+async function reconcileStaleCaptures(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  try {
+    const meetings = await listMeetings();
+    const stale = meetings.filter((meeting) => meeting.status === "capturing");
+    if (stale.length === 0) return;
+    await Promise.all(
+      stale.map((meeting) =>
+        updateMeetingStatus(meeting.id, "failed", Date.now()).catch(() => {}),
+      ),
+    );
+    await loadMeetings();
+  } catch {
+    // Non-fatal: the panel still loads the (possibly stale) list on open.
+  }
 }
 
 async function stopCapture(meetingId: string): Promise<void> {
@@ -514,6 +541,7 @@ export const meetingStore = {
   requestCaptureStart,
   confirmPriming,
   cancelPriming,
+  reconcileStaleCaptures,
   stopCapture,
   stopAndProcess,
   regenerateNotes,
