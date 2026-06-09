@@ -12,6 +12,7 @@
       "**/.vscode/**/*",
       "**/index.html",
       "**/vite.config.ts",
+      "!**/.worktrees/**/*",
       "!**/src/api/generated/**/*",
       "!**/src-tauri/target/**/*"
     ]
