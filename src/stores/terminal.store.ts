@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createStore, produce } from "solid-js/store";
+import { isTauriRuntime } from "@/lib/tauri-bridge";
 import { fileTreeState } from "@/stores/fileTree";
 
 export type TerminalStatus = "running" | "exited";
@@ -72,6 +73,7 @@ export const terminalStore = {
   async init() {
     if (state.initialized) return;
     setState("initialized", true);
+    if (!isTauriRuntime()) return;
 
     exitUnlisten = await listen<TerminalExitEvent>(
       "terminal://exit",
