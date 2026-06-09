@@ -620,6 +620,66 @@ jobs:
           echo "Files in $BUNDLE_DIR:"
           ls -la "$BUNDLE_DIR/"
 
+      # The NSIS helper DLLs (System.dll, nsExec.dll, nsDialogs.dll,
+      # nsis_tauri_utils.dll) ship inside the tauri-bundler NSIS cache and
+      # makensis compiles them INTO the setup .exe. At install they are
+      # extracted to %TEMP%\nsXXXX.tmp and loaded, so Smart App Control blocks
+      # them when unsigned regardless of the outer installer's signature
+      # (#2237 / #2230). The first `tauri build` above populated the cache; sign
+      # those DLLs in place, then rebuild so makensis embeds the signed copies.
+      # This is the fix we own — no upstream tauri dependency.
+      - name: Flatten NSIS helper DLLs for signing (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $nsisCache = Join-Path $env:LOCALAPPDATA "tauri\NSIS"
+          if (-not (Test-Path $nsisCache)) {
+            Write-Host "::error::Tauri NSIS cache not found at $nsisCache after build — cannot sign helper DLLs (#2237)."
+            exit 1
+          }
+          $plugins = Join-Path $nsisCache "Plugins"
+          node scripts/flatten-windows-signables.mjs `
+            nsis-plugin-staging/unsigned `
+            nsis-plugin-staging/manifest.json `
+            $plugins
+          $count = @(Get-Content nsis-plugin-staging/manifest.json | ConvertFrom-Json).Count
+          if ($count -eq 0) {
+            Write-Host "::error::No NSIS plugin DLLs found under $plugins — nothing to sign (#2237)."
+            exit 1
+          }
+          Write-Host "Found $count NSIS helper DLL(s) to sign."
+
+      - name: Batch-sign NSIS helper DLLs (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        uses: sslcom/esigner-codesign@v1.3.2
+        with:
+          command: batch_sign
+          username: ${{ secrets.ES_USERNAME }}
+          password: ${{ secrets.ES_PASSWORD }}
+          credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
+          dir_path: nsis-plugin-staging/unsigned
+          output_path: nsis-plugin-staging/signed
+          environment_name: PROD
+          malware_block: true
+
+      - name: Restore signed NSIS helper DLLs to cache (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          node scripts/restore-windows-signables.mjs `
+            nsis-plugin-staging/signed `
+            nsis-plugin-staging/manifest.json
+
+      # Rebuild so makensis recompiles the installer with the now-signed helper
+      # DLLs. Cargo reuses the pass-1 target dir and SEREN_TAURI_SKIP_PREP keeps
+      # the already-signed embedded runtime in place, so this pass only re-bundles.
+      - name: Rebuild with signed NSIS helper DLLs (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        env:
+          SEREN_TAURI_SKIP_PREP: "1"
+        run: pnpm tauri build --target ${{ matrix.target }}
+
       # Move updater artifacts (.sig, .nsis.zip) out of NSIS dir before code signing
       # so SSL.com's batch_sign doesn't choke on non-exe files
       - name: Move updater artifacts before code signing
@@ -834,6 +894,61 @@ jobs:
             exit 1
           }
           Write-Host "All loose .exe/.dll in the Windows bundle are validly signed."
+
+      # Deepest gate: 7-Zip can unpack an NSIS installer, exposing the files it
+      # would extract at runtime — the $PLUGINSDIR helper DLLs (#2237) AND the
+      # whole embedded runtime (#2235), which are otherwise hidden inside the
+      # compressed setup .exe. Confirm every embedded .exe/.dll/.node carries a
+      # Valid Authenticode signature. This is what a user's Smart App Control
+      # actually evaluates, so a failure here means a real publisher prompt.
+      - name: Verify embedded installer payload signatures (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
+          $setup = Get-ChildItem -Path $nsisDir -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $setup) {
+            Write-Host "::error::No setup .exe found to deep-verify."
+            exit 1
+          }
+          $sevenZip = "7z"
+          if (-not (Get-Command 7z -ErrorAction SilentlyContinue)) {
+            $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          }
+          $extractDir = Join-Path $env:RUNNER_TEMP "setup-exe-verify"
+          if (Test-Path $extractDir) { Remove-Item -Path $extractDir -Recurse -Force }
+          # NSIS extraction emits warnings (exit 1) for the script sections; only
+          # a fatal error (>=2) means the unpack failed.
+          & $sevenZip x "$($setup.FullName)" "-o$extractDir" -y | Out-Null
+          if ($LASTEXITCODE -ge 2) {
+            Write-Host "::error::7-Zip failed to unpack $($setup.Name) (exit $LASTEXITCODE)."
+            exit 1
+          }
+          $pluginDir = Join-Path $extractDir '$PLUGINSDIR'
+          if (-not (Test-Path $pluginDir)) {
+            # The recursive signature scan below is the real gate; this only
+            # flags that 7-Zip labelled the helper-DLL folder unexpectedly.
+            Write-Host "::warning::No `$PLUGINSDIR folder in the unpacked installer; helper DLLs will still be checked by the recursive scan (#2237)."
+          }
+          $bins = @(Get-ChildItem -Path $extractDir -Recurse -Include "*.exe","*.dll","*.node" -File)
+          Write-Host "Embedded binaries to verify: $($bins.Count)"
+          $unsigned = @()
+          foreach ($b in $bins) {
+            $sig = Get-AuthenticodeSignature -FilePath $b.FullName
+            if ($sig.Status -ne "Valid") {
+              $unsigned += [PSCustomObject]@{
+                Path = $b.FullName.Substring($extractDir.Length).TrimStart("/\")
+                Status = $sig.Status.ToString()
+              }
+            }
+          }
+          if ($unsigned.Count -gt 0) {
+            Write-Host "::error::Unsigned/invalid binaries inside the installer ($($unsigned.Count) of $($bins.Count)) — Smart App Control will prompt on these:"
+            $unsigned | Format-Table -AutoSize | Out-String | Write-Host
+            exit 1
+          }
+          Write-Host "All $($bins.Count) embedded installer binaries (incl. `$PLUGINSDIR helper DLLs) are validly signed."
+          Remove-Item -Path $extractDir -Recurse -Force
 
       # Scan the Tauri-generated NSI / NSH output for unresolved ${...}
       # placeholders. #2230 showed "${product_name} is running" rendering
