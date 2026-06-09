@@ -219,12 +219,15 @@ pub async fn wipe_remote_history(
     let lock = HistorySyncLock::handle(&app);
     let _guard = lock.lock().await;
     let mut client = open_remote_client(&app, &config).await?;
-    client
-        .execute("DROP SCHEMA IF EXISTS seren_desktop CASCADE", &[])
-        .map_err(|err| err.to_string())?;
-    ensure_remote_schema(&mut client)?;
-    with_local_db(&app, |conn| reset_local_sync_state(conn))?;
-    Ok(())
+    wipe_remote_history_in_order(
+        || with_local_db(&app, |conn| reset_local_sync_state(conn)),
+        || {
+            client
+                .execute("DROP SCHEMA IF EXISTS seren_desktop CASCADE", &[])
+                .map_err(|err| err.to_string())?;
+            ensure_remote_schema(&mut client)
+        },
+    )
 }
 
 /// Clear local sync bookkeeping after the remote copy is wiped so the next sync
@@ -255,6 +258,14 @@ fn ensure_remote_schema(client: &mut PgClient) -> Result<(), String> {
             .map_err(|err| format!("failed to apply history sync schema: {err}"))?;
     }
     Ok(())
+}
+
+fn wipe_remote_history_in_order(
+    mut reset_local_sync_state: impl FnMut() -> Result<(), String>,
+    mut wipe_remote_schema: impl FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    reset_local_sync_state()?;
+    wipe_remote_schema()
 }
 
 async fn open_remote_client(
@@ -1611,6 +1622,7 @@ where
 mod tests {
     use super::*;
     use crate::services::database::{PersistedMessage, save_message_record, setup_schema};
+    use std::cell::RefCell;
 
     #[test]
     fn remote_schema_has_no_audio_binary_columns() {
@@ -1758,6 +1770,50 @@ mod tests {
         let batch = read_outbox_batch(&conn).unwrap();
         let ids: Vec<i64> = batch.iter().map(|item| item.id).collect();
         assert_eq!(ids, vec![live], "quarantined row must not appear in batch");
+    }
+
+    #[test]
+    fn wipe_runs_local_reset_before_destructive_remote_drop() {
+        let steps = RefCell::new(Vec::new());
+
+        wipe_remote_history_in_order(
+            || {
+                steps.borrow_mut().push("local-reset");
+                Ok(())
+            },
+            || {
+                steps.borrow_mut().push("remote-drop");
+                steps.borrow_mut().push("remote-schema");
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            steps.into_inner(),
+            vec!["local-reset", "remote-drop", "remote-schema"]
+        );
+    }
+
+    #[test]
+    fn wipe_local_reset_failure_leaves_remote_copy_untouched() {
+        let steps = RefCell::new(Vec::new());
+
+        let err = wipe_remote_history_in_order(
+            || {
+                steps.borrow_mut().push("local-reset");
+                Err("database is locked".to_string())
+            },
+            || {
+                steps.borrow_mut().push("remote-drop");
+                steps.borrow_mut().push("remote-schema");
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(err, "database is locked");
+        assert_eq!(steps.into_inner(), vec!["local-reset"]);
     }
 
     #[test]
