@@ -529,6 +529,9 @@ fn setup_history_sync_schema(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
+    add_column_if_missing(conn, "sync_outbox", "attempts", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(conn, "sync_outbox", "last_error", "TEXT")?;
+    add_column_if_missing(conn, "sync_outbox", "last_attempt_at", "INTEGER")?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_sync_outbox_order
          ON sync_outbox(id ASC)",

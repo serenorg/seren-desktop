@@ -12,6 +12,7 @@ const HISTORY_SYNC_BRANCH_NAME = "production";
 const HISTORY_SYNC_DATABASE_NAME = "seren_desktop_history";
 const FOREGROUND_SYNC_MS = 15_000;
 const BACKGROUND_SYNC_MS = 60_000;
+const MAX_BACKOFF_MS = 5 * 60_000;
 
 export interface HistorySyncProvisioning {
   projectId: string;
@@ -29,6 +30,15 @@ export interface HistorySyncSummary {
 
 let syncTimer: number | null = null;
 let syncInFlight = false;
+let consecutiveFailures = 0;
+
+export function _resetHistorySyncBackoffForTests(): void {
+  consecutiveFailures = 0;
+}
+
+export function _peekHistorySyncBackoffForTests(): number {
+  return consecutiveFailures;
+}
 
 function resolveBranch(
   branches: Branch[],
@@ -42,20 +52,31 @@ function resolveBranch(
   );
 }
 
-function syncDelayMs(): number {
+function baseSyncDelayMs(): number {
   return document.visibilityState === "hidden"
     ? BACKGROUND_SYNC_MS
     : FOREGROUND_SYNC_MS;
+}
+
+export function nextSyncDelayMs(
+  base: number,
+  failures: number,
+  cap: number = MAX_BACKOFF_MS,
+): number {
+  if (failures <= 0) return base;
+  const multiplier = 2 ** Math.min(failures, 16);
+  return Math.min(base * multiplier, cap);
 }
 
 function scheduleNextSync(): void {
   if (syncTimer !== null) {
     window.clearTimeout(syncTimer);
   }
+  const delay = nextSyncDelayMs(baseSyncDelayMs(), consecutiveFailures);
   syncTimer = window.setTimeout(() => {
     syncTimer = null;
     void runScheduledSync();
-  }, syncDelayMs());
+  }, delay);
 }
 
 async function runScheduledSync(): Promise<void> {
@@ -65,8 +86,13 @@ async function runScheduledSync(): Promise<void> {
   }
   try {
     await runHistorySyncNow();
+    consecutiveFailures = 0;
   } catch (err) {
-    console.warn("[HistorySync] scheduled sync failed", err);
+    consecutiveFailures += 1;
+    console.warn(
+      `[HistorySync] scheduled sync failed (attempt ${consecutiveFailures})`,
+      err,
+    );
   } finally {
     if (settingsStore.get("historySyncEnabled")) {
       scheduleNextSync();
@@ -166,6 +192,7 @@ export function startHistorySync(): void {
   if (!isTauriRuntime()) return;
   if (!settingsStore.get("historySyncEnabled")) return;
   if (syncTimer !== null || syncInFlight) return;
+  consecutiveFailures = 0;
   void runScheduledSync();
 }
 
