@@ -93,15 +93,36 @@ function meeting(overrides: Partial<Meeting> = {}): Meeting {
   };
 }
 
-describe("meetingStore notes-failure gates handoff (#2159)", () => {
+describe("meetingStore notes-failure gates handoff (#2159 / #2227)", () => {
   beforeEach(() => {
     for (const fn of Object.values(m)) fn.mockClear();
     m.listMeetings.mockResolvedValue([meeting()]);
     m.getMeetingTranscriptText.mockResolvedValue("hello transcript");
   });
 
-  it("marks failed and skips handoff when notes generation throws", async () => {
-    m.generateMeetingNotes.mockRejectedValueOnce(new Error("notes boom"));
+  it("keeps a transcripted meeting usable and skips handoff when notes generation throws", async () => {
+    m.generateMeetingNotes.mockRejectedValueOnce(
+      new Error("chat completion returned no content"),
+    );
+
+    await meetingStore.stopAndProcess(meeting());
+
+    expect(m.updateMeetingStatus).toHaveBeenCalledWith(
+      "m1",
+      "transcript_ready",
+      null,
+      expect.stringContaining("Meeting notes could not be generated"),
+    );
+    // No handoff: the skill router and agent run must never fire.
+    expect(m.selectMeetingSkills).not.toHaveBeenCalled();
+    expect(m.orchestrate).not.toHaveBeenCalled();
+  });
+
+  it("still marks failed when notes generation fails because no transcript exists", async () => {
+    m.generateMeetingNotes.mockRejectedValueOnce(
+      new Error("no transcript to summarize"),
+    );
+    m.getMeetingTranscriptText.mockResolvedValueOnce("   ");
 
     await meetingStore.stopAndProcess(meeting());
 
@@ -109,9 +130,8 @@ describe("meetingStore notes-failure gates handoff (#2159)", () => {
       "m1",
       "failed",
       expect.any(Number),
-      expect.stringContaining("Meeting notes could not be generated"),
+      expect.stringContaining("No transcript was captured"),
     );
-    // No handoff: the skill router and agent run must never fire.
     expect(m.selectMeetingSkills).not.toHaveBeenCalled();
     expect(m.orchestrate).not.toHaveBeenCalled();
   });

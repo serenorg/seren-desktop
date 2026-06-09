@@ -8,6 +8,7 @@ export type MeetingStatus =
   | "pending_capture"
   | "capturing"
   | "transcribing"
+  | "transcript_ready"
   | "notes_ready"
   | "agent_running"
   | "done"

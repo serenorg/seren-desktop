@@ -339,6 +339,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
     setSlidePanel((v) => (v === "settings" ? null : "settings"));
   };
 
+  const handleToggleMeetings = () => {
+    setSlidePanel((v) => (v === "meetings" ? null : "meetings"));
+  };
+
   const handleToggleSkills = () => {
     setSlidePanel((v) => (v === "skills" ? null : "skills"));
   };
@@ -638,6 +642,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     <div class="flex flex-col h-screen bg-background text-foreground">
       <Titlebar
         onSignInClick={handleSignInClick}
+        onToggleMeetings={handleToggleMeetings}
         onToggleSkills={handleToggleSkills}
         onToggleSettings={handleToggleSettings}
         recordPromptVisible={recordPromptVisible()}
@@ -710,6 +715,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
           open={slidePanel() !== null}
           onClose={handleCloseSlidePanel}
           docked={slidePanel() === "skills"}
+          reader={slidePanel() === "meetings"}
           wide={slidePanel() === "settings"}
         >
           <Switch>

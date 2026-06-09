@@ -5,6 +5,52 @@ import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 const WIDGET_LABEL = "capture-widget";
 const WIDGET_STOP_EVENT = "meeting://widget-stop";
+const WIDGET_WIDTH = 220;
+const WIDGET_HEIGHT = 80;
+const WIDGET_MARGIN = 16;
+const TITLEBAR_CLEARANCE = 48;
+
+interface WidgetPosition {
+  x: number;
+  y: number;
+}
+
+export async function captureWidgetPosition(): Promise<WidgetPosition> {
+  const { currentMonitor, getCurrentWindow, primaryMonitor } = await import(
+    "@tauri-apps/api/window"
+  );
+
+  try {
+    const appWindow = getCurrentWindow();
+    const [position, size, scaleFactor] = await Promise.all([
+      appWindow.outerPosition(),
+      appWindow.outerSize(),
+      appWindow.scaleFactor(),
+    ]);
+    const scale = scaleFactor || 1;
+    return {
+      x: Math.round(
+        position.x / scale + size.width / scale - WIDGET_WIDTH - WIDGET_MARGIN,
+      ),
+      y: Math.round(position.y / scale + TITLEBAR_CLEARANCE),
+    };
+  } catch {
+    const monitor = (await currentMonitor()) ?? (await primaryMonitor());
+    if (!monitor) {
+      return { x: WIDGET_MARGIN, y: WIDGET_MARGIN };
+    }
+    const scale = monitor.scaleFactor || 1;
+    return {
+      x: Math.round(
+        monitor.position.x / scale +
+          monitor.size.width / scale -
+          WIDGET_WIDTH -
+          WIDGET_MARGIN,
+      ),
+      y: Math.round(monitor.position.y / scale + TITLEBAR_CLEARANCE),
+    };
+  }
+}
 
 /**
  * Open the floating capture widget when a meeting capture starts. The widget
@@ -15,10 +61,13 @@ const WIDGET_STOP_EVENT = "meeting://widget-stop";
 export async function openCaptureWidget(meetingId: string): Promise<void> {
   if (!isTauriRuntime()) return;
   const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  const { LogicalPosition } = await import("@tauri-apps/api/window");
+  const position = await captureWidgetPosition();
 
   const existing = await WebviewWindow.getByLabel(WIDGET_LABEL);
   if (existing) {
     try {
+      await existing.setPosition(new LogicalPosition(position.x, position.y));
       await existing.show();
       await existing.setFocus();
     } catch {
@@ -31,8 +80,10 @@ export async function openCaptureWidget(meetingId: string): Promise<void> {
   const widget = new WebviewWindow(WIDGET_LABEL, {
     url,
     title: "Meeting capture",
-    width: 220,
-    height: 80,
+    x: position.x,
+    y: position.y,
+    width: WIDGET_WIDTH,
+    height: WIDGET_HEIGHT,
     resizable: false,
     decorations: false,
     alwaysOnTop: true,

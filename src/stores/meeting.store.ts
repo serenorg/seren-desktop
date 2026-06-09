@@ -545,16 +545,32 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
         vocabulary: settingsStore.get("voiceCustomVocabulary"),
       });
     } catch (error) {
-      // Notes failed: the backend left the meeting at `transcribing` (it only
-      // sets notes_ready on success). Mark it failed and stop — don't fall
-      // through to runHandoff and auto-invoke a skill on an empty meeting (#2159).
+      // Notes failed: keep successful transcripts usable instead of marking the
+      // recording failed. Only true empty-transcript cases remain failed (#2227).
       const reason = notesFailureReason(error);
       console.error(
         "[meeting] post-capture processing failed",
         { meetingId: meeting.id, reason },
         error,
       );
-      await failMeeting(meeting.id, reason);
+      const transcript = await getMeetingTranscriptText(meeting.id).catch(
+        () => "",
+      );
+      if (transcript.trim()) {
+        await updateMeetingStatus(
+          meeting.id,
+          "transcript_ready",
+          null,
+          reason,
+        ).catch(() => {});
+        await loadMeetings();
+        const refreshed =
+          meetingState.meetings.find((m) => m.id === meeting.id) ?? null;
+        await setActiveMeeting(refreshed);
+        setMeetingState("error", reason);
+      } else {
+        await failMeeting(meeting.id, notesFailureReason(error));
+      }
       return;
     }
     await loadMeetings();

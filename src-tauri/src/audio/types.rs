@@ -37,6 +37,7 @@ pub enum MeetingStatus {
     PendingCapture,
     Capturing,
     Transcribing,
+    TranscriptReady,
     NotesReady,
     AgentRunning,
     Done,
@@ -49,6 +50,7 @@ impl MeetingStatus {
             Self::PendingCapture => "pending_capture",
             Self::Capturing => "capturing",
             Self::Transcribing => "transcribing",
+            Self::TranscriptReady => "transcript_ready",
             Self::NotesReady => "notes_ready",
             Self::AgentRunning => "agent_running",
             Self::Done => "done",
@@ -65,6 +67,7 @@ impl TryFrom<&str> for MeetingStatus {
             "pending_capture" => Ok(Self::PendingCapture),
             "capturing" => Ok(Self::Capturing),
             "transcribing" => Ok(Self::Transcribing),
+            "transcript_ready" => Ok(Self::TranscriptReady),
             "notes_ready" => Ok(Self::NotesReady),
             "agent_running" => Ok(Self::AgentRunning),
             "done" => Ok(Self::Done),
@@ -168,4 +171,18 @@ pub struct TranscriptSegment {
     /// Whether `speaker` was assigned by the capture channel or by diarization.
     pub speaker_source: SpeakerSource,
     pub created_at: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MeetingStatus;
+
+    #[test]
+    fn transcript_ready_status_round_trips_through_storage_value() {
+        assert_eq!(MeetingStatus::TranscriptReady.as_str(), "transcript_ready");
+        assert_eq!(
+            MeetingStatus::try_from("transcript_ready"),
+            Ok(MeetingStatus::TranscriptReady)
+        );
+    }
 }
