@@ -9,7 +9,9 @@ on:
       - 'v*'
 
 permissions:
+  actions: read
   contents: write
+  id-token: write
 
 # Prevent multiple releases from running simultaneously
 concurrency:
@@ -1056,8 +1058,169 @@ jobs:
         run: |
           security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
 
+  windows-app-e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      WINDOWS_E2E_INSTANCE_ID: ${{ secrets.WINDOWS_E2E_INSTANCE_ID }}
+      WINDOWS_E2E_S3_BUCKET: ${{ secrets.WINDOWS_E2E_S3_BUCKET }}
+      WINDOWS_E2E_SECRET_PARAMETER_PREFIX: ${{ secrets.WINDOWS_E2E_SECRET_PARAMETER_PREFIX }}
+      WINDOWS_E2E_AWS_ROLE_ARN: ${{ secrets.WINDOWS_E2E_AWS_ROLE_ARN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+    steps:
+      - name: Checkout e2e scripts
+        uses: actions/checkout@v6
+
+      - name: Download signed Windows installer
+        uses: actions/download-artifact@v8
+        with:
+          name: Seren-Desktop-Windows-x64.exe
+          path: windows-artifact
+
+      - name: Validate Windows e2e AWS configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in WINDOWS_E2E_INSTANCE_ID WINDOWS_E2E_S3_BUCKET WINDOWS_E2E_SECRET_PARAMETER_PREFIX AWS_REGION; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ -z "${WINDOWS_E2E_AWS_ROLE_ARN:-}" ] && { [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; }; then
+            missing+=("WINDOWS_E2E_AWS_ROLE_ARN or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY")
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf '::error::Missing required Windows e2e secret(s): %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials with OIDC role
+        if: env.WINDOWS_E2E_AWS_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.WINDOWS_E2E_AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure AWS credentials with access keys
+        if: env.WINDOWS_E2E_AWS_ROLE_ARN == ''
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Stage Windows e2e payload in S3
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          installer="$(find windows-artifact -type f -name '*.exe' | head -n 1)"
+          if [ -z "$installer" ]; then
+            echo "::error::No signed Windows installer artifact found"
+            exit 1
+          fi
+          payload="$RUNNER_TEMP/windows-e2e-payload.zip"
+          zip -q -r "$payload" \
+            package.json \
+            pnpm-lock.yaml \
+            scripts/windows-e2e-app.ps1 \
+            scripts/windows-e2e-app.mjs
+          prefix="release-windows-e2e/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
+          aws s3 cp "$installer" "s3://${WINDOWS_E2E_S3_BUCKET}/${prefix}/SerenDesktop-setup.exe"
+          aws s3 cp "$payload" "s3://${WINDOWS_E2E_S3_BUCKET}/${prefix}/windows-e2e-payload.zip"
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+
+      - name: Run full Windows app e2e on AWS host
+        id: ssm
+        shell: bash
+        env:
+          S3_PREFIX: ${{ steps.stage.outputs.prefix }}
+        run: |
+          set -euo pipefail
+          node <<'NODE' > "$RUNNER_TEMP/windows-e2e-commands.json"
+          const env = process.env;
+          const secretNames = [
+            "SEREN_E2E_EMAIL",
+            "SEREN_E2E_PASSWORD",
+            "SEREN_E2E_HISTORY_PROJECT_ID",
+            "SEREN_E2E_HISTORY_BRANCH_ID",
+            "SEREN_E2E_HISTORY_DATABASE_NAME",
+            "SEREN_E2E_GITHUB_USERNAME",
+            "SEREN_E2E_GITHUB_PASSWORD",
+            "SEREN_E2E_GITHUB_PAT",
+            "SEREN_E2E_GITHUB_TOTP_SECRET",
+            "SEREN_E2E_AGENT_TYPE",
+            "SEREN_E2E_AGENT_CWD",
+          ];
+          const workName = `seren-release-windows-e2e-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`;
+          const installerS3 = `s3://${env.WINDOWS_E2E_S3_BUCKET}/${env.S3_PREFIX}/SerenDesktop-setup.exe`;
+          const payloadS3 = `s3://${env.WINDOWS_E2E_S3_BUCKET}/${env.S3_PREFIX}/windows-e2e-payload.zip`;
+          const commands = [
+            "$ErrorActionPreference = 'Stop'",
+            "$ProgressPreference = 'SilentlyContinue'",
+            `$work = Join-Path $env:TEMP '${workName}'`,
+            "if (Test-Path $work) { Remove-Item -LiteralPath $work -Recurse -Force }",
+            "New-Item -ItemType Directory -Force -Path $work | Out-Null",
+            `aws s3 cp '${installerS3}' (Join-Path $work 'SerenDesktop-setup.exe')`,
+            `aws s3 cp '${payloadS3}' (Join-Path $work 'windows-e2e-payload.zip')`,
+            "Expand-Archive -LiteralPath (Join-Path $work 'windows-e2e-payload.zip') -DestinationPath $work -Force",
+            `$secretNames = @(${secretNames.map((name) => `'${name}'`).join(",")})`,
+            `foreach ($name in $secretNames) { $parameterName = '${env.WINDOWS_E2E_SECRET_PARAMETER_PREFIX}/' + $name; $value = aws ssm get-parameter --with-decryption --name $parameterName --query 'Parameter.Value' --output text 2>$null; if ($LASTEXITCODE -eq 0 -and $value -and $value -ne 'None') { [Environment]::SetEnvironmentVariable($name, $value, 'Process') } }`,
+            "[Environment]::SetEnvironmentVariable('SEREN_E2E_API_BASE', 'https://api.serendb.com', 'Process')",
+            "Set-Location $work",
+            "corepack enable",
+            "corepack prepare pnpm@9 --activate",
+            "pnpm install --frozen-lockfile",
+            "pnpm exec playwright install chromium",
+            "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows-e2e-app.ps1 -InstallerPath (Join-Path $work 'SerenDesktop-setup.exe')",
+          ];
+          process.stdout.write(JSON.stringify({ commands }, null, 2));
+          NODE
+          command_id="$(aws ssm send-command \
+            --instance-ids "$WINDOWS_E2E_INSTANCE_ID" \
+            --document-name "AWS-RunPowerShellScript" \
+            --comment "Seren Desktop release Windows production e2e ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}" \
+            --parameters "file://$RUNNER_TEMP/windows-e2e-commands.json" \
+            --query "Command.CommandId" \
+            --output text)"
+          echo "command_id=$command_id" >> "$GITHUB_OUTPUT"
+          echo "SSM command: $command_id"
+          deadline=$((SECONDS + 3600))
+          while true; do
+            status="$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$WINDOWS_E2E_INSTANCE_ID" \
+              --query "Status" \
+              --output text 2>/dev/null || echo Pending)"
+            echo "Windows e2e SSM status: $status"
+            case "$status" in
+              Success) break ;;
+              Failed|Cancelled|TimedOut|Cancelling)
+                aws ssm get-command-invocation \
+                  --command-id "$command_id" \
+                  --instance-id "$WINDOWS_E2E_INSTANCE_ID" \
+                  --query "{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}" \
+                  --output json
+                exit 1
+                ;;
+            esac
+            if [ "$SECONDS" -gt "$deadline" ]; then
+              echo "::error::Timed out waiting for Windows e2e SSM command $command_id"
+              exit 1
+            fi
+            sleep 30
+          done
+          aws ssm get-command-invocation \
+            --command-id "$command_id" \
+            --instance-id "$WINDOWS_E2E_INSTANCE_ID" \
+            --query "{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}" \
+            --output json
+
   publish-release:
-    needs: [create-release, build]
+    needs: [create-release, build, windows-app-e2e]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
