@@ -58,7 +58,11 @@ describe("BYOC OAuth tool errors", () => {
           "gateway__gmail__get_messages",
           message,
         ),
-      ).toEqual({ publisherSlug: "gmail", reason: "connection_required" });
+      ).toEqual({
+        publisherSlug: "gmail",
+        reason: "connection_required",
+        revokeBeforeConnect: true,
+      });
     }
   });
 

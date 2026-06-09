@@ -8,6 +8,7 @@ export type OAuthConnectActionReason =
 export interface OAuthConnectAction {
   publisherSlug: string;
   reason: OAuthConnectActionReason;
+  revokeBeforeConnect?: boolean;
 }
 
 const OAUTH_REFRESH_ERROR_MARKERS = [
@@ -94,10 +95,14 @@ export function getOAuthConnectActionForToolError(
   const publisherSlug = parseGatewayPublisherSlug(toolName);
   if (!publisherSlug) return null;
 
-  if (
-    isOAuthConnectionRequiredError(errorMessage) ||
-    isOAuthRefreshError(errorMessage)
-  ) {
+  if (isOAuthRefreshError(errorMessage)) {
+    return {
+      publisherSlug,
+      reason: "connection_required",
+      revokeBeforeConnect: true,
+    };
+  }
+  if (isOAuthConnectionRequiredError(errorMessage)) {
     return { publisherSlug, reason: "connection_required" };
   }
   if (isOAuthScopeError(errorMessage)) {
