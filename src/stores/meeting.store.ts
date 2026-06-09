@@ -15,6 +15,7 @@ import {
   openCaptureWidget,
 } from "@/services/captureWidget";
 import {
+  type CaptureStopOutcome,
   createMeeting,
   generateMeetingNotes,
   getMeetingTranscriptText,
@@ -426,7 +427,9 @@ async function reconcileStaleCaptures(): Promise<void> {
   }
 }
 
-async function stopCapture(meetingId: string): Promise<void> {
+async function stopCapture(
+  meetingId: string,
+): Promise<CaptureStopOutcome | null> {
   if (levelTimer !== null) {
     window.clearInterval(levelTimer);
     levelTimer = null;
@@ -443,8 +446,9 @@ async function stopCapture(meetingId: string): Promise<void> {
     captureHandle = null;
   }
   if (isTauriRuntime()) {
-    await stopBackendCapture(meetingId);
+    return await stopBackendCapture(meetingId);
   }
+  return null;
 }
 
 // Tray Start/Stop action: stop the active capture if one is running, otherwise
@@ -493,9 +497,17 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
   if (processingMeetings.has(meeting.id)) return;
   processingMeetings.add(meeting.id);
   try {
-    await stopCapture(meeting.id);
+    const stopOutcome = await stopCapture(meeting.id);
     await loadMeetings();
     if (!isTauriRuntime()) return;
+    if (stopOutcome?.failureReason) {
+      console.error("[meeting] capture stopped without transcript output", {
+        meetingId: meeting.id,
+        outcome: stopOutcome,
+      });
+      await failMeeting(meeting.id, stopOutcome.failureReason, null);
+      return;
+    }
 
     if (settingsStore.get("meetingStableSpeakers")) {
       // Post-call speaker refinement: one diarized pass over the full Them

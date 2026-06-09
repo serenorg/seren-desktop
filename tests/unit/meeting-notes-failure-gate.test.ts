@@ -116,6 +116,34 @@ describe("meetingStore notes-failure gates handoff (#2159)", () => {
     expect(m.orchestrate).not.toHaveBeenCalled();
   });
 
+  it("marks failed and skips notes when capture stop reports no transcript output", async () => {
+    m.stopMeetingCapture.mockResolvedValueOnce({
+      hadCapture: true,
+      frameCount: 0,
+      sampleCount: 0,
+      speechFrameCount: 0,
+      chunkCount: 0,
+      emittedSegmentCount: 0,
+      emittedGapCount: 0,
+      persistedSegmentCount: 0,
+      persistedTextSegmentCount: 0,
+      failureReason:
+        "No audio reached Meeting capture. Check microphone and system-audio permissions, then start capture again.",
+    });
+
+    await meetingStore.stopAndProcess(meeting());
+
+    expect(m.generateMeetingNotes).not.toHaveBeenCalled();
+    expect(m.updateMeetingStatus).toHaveBeenCalledWith(
+      "m1",
+      "failed",
+      null,
+      expect.stringContaining("No audio reached Meeting capture"),
+    );
+    expect(m.selectMeetingSkills).not.toHaveBeenCalled();
+    expect(m.orchestrate).not.toHaveBeenCalled();
+  });
+
   it("does not hand off when the transcript is empty", async () => {
     m.getMeetingTranscriptText.mockResolvedValue("   ");
 
