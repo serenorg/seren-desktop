@@ -204,6 +204,7 @@ export interface CaptureStopOutcome {
   apm: {
     initialized: boolean;
     active: boolean;
+    echoCancellerEnabled: boolean;
     renderFrameCount: number;
     captureFrameCount: number;
     processedSampleCount: number;
