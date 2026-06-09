@@ -320,6 +320,54 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
+      # Windows: stage + EV-sign the embedded runtime payload BEFORE `tauri build`
+      # so the signatures are baked into the NSIS installer AND the .nsis.zip
+      # updater bundle (#2235). The unsigned node.exe / Git-for-Windows binaries
+      # / Python DLLs / sidecars are what Smart App Control blocks once extracted
+      # to %LOCALAPPDATA%\SerenDesktop\embedded-runtime on the user's machine.
+      #
+      # We stage the runtime here, flatten every signable into one directory, run
+      # a single SSL.com batch_sign (its per-file TOTP throttle makes per-dir
+      # signing prohibitively slow), copy the signed files back, then build with
+      # SEREN_TAURI_SKIP_PREP so the build does not re-download and clobber them.
+      - name: Stage embedded runtime for signing (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        env:
+          CARGO_BUILD_TARGET: ${{ matrix.target }}
+        run: pnpm prepare:tauri-build
+
+      - name: Flatten embedded runtime signables (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          node scripts/flatten-windows-signables.mjs `
+            sign-staging/unsigned `
+            sign-staging/manifest.json `
+            src-tauri/embedded-runtime `
+            src-tauri/mcp-servers
+
+      - name: Batch-sign embedded runtime (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        uses: sslcom/esigner-codesign@v1.3.2
+        with:
+          command: batch_sign
+          username: ${{ secrets.ES_USERNAME }}
+          password: ${{ secrets.ES_PASSWORD }}
+          credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
+          dir_path: sign-staging/unsigned
+          output_path: sign-staging/signed
+          environment_name: PROD
+          malware_block: true
+
+      - name: Restore signed embedded runtime (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          node scripts/restore-windows-signables.mjs `
+            sign-staging/signed `
+            sign-staging/manifest.json
+
       # Build the app (with signing for macOS when certificates available)
       # Note: APPLE_ID/PASSWORD/TEAM_ID removed to prevent Tauri's internal notarization
       # Notarization is handled separately with polling in the "Notarize macOS app" step
@@ -339,6 +387,11 @@ jobs:
         run: pnpm tauri build --verbose --target ${{ matrix.target }} --bundles deb,appimage
       - name: Build Tauri app (unsigned, other)
         if: matrix.os != 'macos-latest' && !startsWith(matrix.os, 'ubuntu')
+        env:
+          # On the Windows signing path the embedded runtime was already staged
+          # and EV-signed above; skip re-preparation so the build does not
+          # overwrite the signed binaries with fresh unsigned downloads (#2235).
+          SEREN_TAURI_SKIP_PREP: ${{ (matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true') && '1' || '' }}
         run: pnpm tauri build --target ${{ matrix.target }}
       - name: Build Tauri app (unsigned, macOS without signing)
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING != 'true'
@@ -666,17 +719,16 @@ jobs:
           }
           Write-Host "NSIS setup .exe is properly signed."
 
-      # Recursive Authenticode check over the Tauri-produced app bundle
-      # (Seren.exe + any shipped .exe/.dll). Reports unsigned files but is
-      # non-blocking pending follow-up: full embedded-runtime signing (Git for
-      # Windows binaries, bundled node.exe, sidecars) is tracked separately
-      # because it needs CI-side staging-dir batch signing not in this PR.
-      # The report lets us see the actual exposure surface for SmartScreen
-      # reputation building.
-      - name: Audit Windows payload signature coverage (non-blocking)
+      # Recursive Authenticode check over every loose .exe/.dll the Tauri build
+      # emits under bundle/. Now that the embedded runtime is EV-signed pre-build
+      # (#2235), any unsigned/invalid file here is a real regression — a missed
+      # signing root or a signer that silently dropped a file — so this is a hard
+      # gate, not a warning. Deep verification of the binaries packed INSIDE the
+      # installer / updater archives is done by the extraction checks in #2236
+      # (.nsis.zip) and #2237 ($PLUGINSDIR helper DLLs).
+      - name: Audit Windows payload signature coverage
         id: audit_windows_payload
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        continue-on-error: true
         shell: pwsh
         run: |
           $bundleRoot = "src-tauri/target/${{ matrix.target }}/release/bundle"
@@ -696,9 +748,11 @@ jobs:
           Write-Host "Signed files in bundle: $($validFiles.Count)"
           Write-Host "Unsigned/invalid files in bundle: $($unsignedFiles.Count)"
           if ($unsignedFiles.Count -gt 0) {
-            Write-Host "::warning::Unsigned files in Windows payload (follow-up #2230 embedded-runtime signing):"
+            Write-Host "::error::Unsigned/invalid .exe/.dll in Windows payload after embedded-runtime signing (#2235):"
             $unsignedFiles | Format-Table -AutoSize | Out-String | Write-Host
+            exit 1
           }
+          Write-Host "All loose .exe/.dll in the Windows bundle are validly signed."
 
       # Scan the Tauri-generated NSI / NSH output for unresolved ${...}
       # placeholders. #2230 showed "${product_name} is running" rendering
