@@ -14,7 +14,7 @@ const m = vi.hoisted(() => ({
   getTranscriptSegments: vi.fn(async () => []),
   selectMeetingSkills: vi.fn(async () => ["s"]),
   setMeetingRoutedSkill: vi.fn(async () => {}),
-  stopMeetingCapture: vi.fn(async () => {}),
+  stopMeetingCapture: vi.fn(async (): Promise<unknown> => null),
   listMeetingTemplates: vi.fn(async () => []),
   orchestrate: vi.fn(async () => {}),
 }));
@@ -131,6 +131,22 @@ describe("meetingStore notes-failure gates handoff (#2159)", () => {
       emittedGapCount: 0,
       persistedSegmentCount: 0,
       persistedTextSegmentCount: 0,
+      nativeMicReady: true,
+      systemAudioReady: false,
+      apmReady: true,
+      apmActive: true,
+      nativeMicFrameCount: 0,
+      systemAudioFrameCount: 0,
+      levelEventCount: 0,
+      apm: {
+        initialized: true,
+        active: true,
+        renderFrameCount: 0,
+        captureFrameCount: 0,
+        processedSampleCount: 0,
+        lastError: null,
+      },
+      captureDiagnosticsJson: "{}",
       failureReason:
         "No audio reached Meeting capture. Check microphone and system-audio permissions, then start capture again.",
     });

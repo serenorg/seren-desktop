@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type Speaker = "me" | "them";
 export type MeetingStatus =
+  | "pending_capture"
   | "capturing"
   | "transcribing"
   | "notes_ready"
@@ -26,6 +27,7 @@ export interface Meeting {
   notesMarkdown: string | null;
   notesStructJson: string | null;
   failureReason?: string | null;
+  captureDiagnosticsJson?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -169,24 +171,19 @@ export function startMeetingCapture(meetingId: string): Promise<void> {
   return invoke("start_meeting_capture", { meetingId });
 }
 
-export function pushCaptureFrame(input: {
-  meetingId: string;
-  speaker: Speaker;
-  samples: number[];
-  channels: number;
-  sampleRate: number;
-}): Promise<void> {
-  return invoke("push_capture_frame", {
-    meetingId: input.meetingId,
-    speaker: input.speaker,
-    samples: input.samples,
-    channels: input.channels,
-    sampleRate: input.sampleRate,
-  });
+export function isMeetingCaptureActive(meetingId: string): Promise<boolean> {
+  return invoke("is_meeting_capture_active", { meetingId });
 }
 
 export interface CaptureStopOutcome {
   hadCapture: boolean;
+  nativeMicReady: boolean;
+  systemAudioReady: boolean;
+  apmReady: boolean;
+  apmActive: boolean;
+  nativeMicFrameCount: number;
+  systemAudioFrameCount: number;
+  levelEventCount: number;
   pushFrameCount: number;
   acceptedPushFrameCount: number;
   droppedPushFrameCount: number;
@@ -199,6 +196,15 @@ export interface CaptureStopOutcome {
   emittedGapCount: number;
   persistedSegmentCount: number;
   persistedTextSegmentCount: number;
+  apm: {
+    initialized: boolean;
+    active: boolean;
+    renderFrameCount: number;
+    captureFrameCount: number;
+    processedSampleCount: number;
+    lastError?: string | null;
+  };
+  captureDiagnosticsJson: string;
   failureReason?: string | null;
 }
 

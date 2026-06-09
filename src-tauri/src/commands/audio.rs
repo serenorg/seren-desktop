@@ -193,24 +193,63 @@ pub async fn start_meeting_capture(
     // blocking pool so it never stalls a tokio worker thread; the registry is an
     // Arc handle, so the clone shares the same state (#2176).
     let registry = (*registry).clone();
-    tauri::async_runtime::spawn_blocking(move || registry.start(&app, &meeting_id))
-        .await
-        .map_err(|err| err.to_string())??;
-    Ok(())
+    let registry_for_start = registry.clone();
+    let app_for_start = app.clone();
+    let id_for_start = meeting_id.clone();
+    let started = tauri::async_runtime::spawn_blocking(move || {
+        registry_for_start.start(&app_for_start, &id_for_start)
+    })
+    .await
+    .map_err(|err| err.to_string())?;
+    match started {
+        Ok(()) => {
+            let diagnostics = capture_start_diagnostics_json(true, None);
+            let id = meeting_id.clone();
+            let update = run_db(app.clone(), move |conn| {
+                update_meeting_status_record_with_failure_reason_and_diagnostics(
+                    conn,
+                    &id,
+                    MeetingStatus::Capturing,
+                    None,
+                    None,
+                    Some(&diagnostics),
+                    now_ms(),
+                )
+            })
+            .await;
+            if let Err(err) = update {
+                let _ = registry.stop(&meeting_id).await;
+                return Err(err);
+            }
+            emit_meeting_status_by_id(&app, &meeting_id).await;
+            Ok(())
+        }
+        Err(reason) => {
+            let ended = now_ms();
+            let diagnostics = capture_start_diagnostics_json(false, Some(&reason));
+            let id = meeting_id.clone();
+            let reason_for_db = reason.clone();
+            run_db(app.clone(), move |conn| {
+                update_meeting_status_record_with_failure_reason_and_diagnostics(
+                    conn,
+                    &id,
+                    MeetingStatus::Failed,
+                    Some(ended),
+                    Some(&reason_for_db),
+                    Some(&diagnostics),
+                    ended,
+                )
+            })
+            .await?;
+            emit_meeting_status_by_id(&app, &meeting_id).await;
+            Err(reason)
+        }
+    }
 }
 
 #[tauri::command]
-pub async fn push_capture_frame(
-    registry: State<'_, CaptureRegistry>,
-    meeting_id: String,
-    speaker: Speaker,
-    samples: Vec<i16>,
-    channels: u16,
-    sample_rate: u32,
-) -> Result<(), String> {
-    let normalized = to_mono_16k(&samples, channels.max(1), sample_rate);
-    registry.push_frame(&meeting_id, speaker, normalized);
-    Ok(())
+pub fn is_meeting_capture_active(registry: State<'_, CaptureRegistry>, meeting_id: String) -> bool {
+    registry.is_active(&meeting_id)
 }
 
 #[tauri::command]
@@ -231,14 +270,40 @@ pub async fn stop_meeting_capture(
         .iter()
         .filter(|segment| segment.status == SegmentStatus::Ok && !segment.text.trim().is_empty())
         .count() as u64;
-    let failure_reason = stop_capture_failure_reason(
+    let existing_lookup = meeting_id.clone();
+    let existing = run_db(app.clone(), move |conn| {
+        select_meeting(conn, &existing_lookup)
+    })
+    .await?;
+    let preserve_existing_failure = !summary.had_capture
+        && existing
+            .as_ref()
+            .is_some_and(|meeting| meeting.status == MeetingStatus::Failed);
+    let failure_reason = if preserve_existing_failure {
+        existing.and_then(|meeting| meeting.failure_reason)
+    } else {
+        stop_capture_failure_reason(
+            &summary,
+            persisted_segment_count,
+            persisted_text_segment_count,
+        )
+    };
+    let capture_diagnostics_json = capture_stop_diagnostics_json(
         &summary,
         persisted_segment_count,
         persisted_text_segment_count,
+        failure_reason.as_deref(),
     );
 
     let outcome = StopMeetingCaptureOutcome {
         had_capture: summary.had_capture,
+        native_mic_ready: summary.native_mic_ready,
+        system_audio_ready: summary.system_audio_ready,
+        apm_ready: summary.apm_ready,
+        apm_active: summary.apm_active,
+        native_mic_frame_count: summary.native_mic_frame_count,
+        system_audio_frame_count: summary.system_audio_frame_count,
+        level_event_count: summary.level_event_count,
         push_frame_count: summary.push_frame_count,
         accepted_push_frame_count: summary.accepted_push_frame_count,
         dropped_push_frame_count: summary.dropped_push_frame_count,
@@ -251,8 +316,13 @@ pub async fn stop_meeting_capture(
         emitted_gap_count: summary.emitted_gap_count,
         persisted_segment_count,
         persisted_text_segment_count,
+        apm: summary.apm.clone(),
+        capture_diagnostics_json: capture_diagnostics_json.clone(),
         failure_reason: failure_reason.clone(),
     };
+    if preserve_existing_failure {
+        return Ok(outcome);
+    }
 
     let status = if failure_reason.is_some() {
         MeetingStatus::Failed
@@ -262,12 +332,13 @@ pub async fn stop_meeting_capture(
     let id = meeting_id.clone();
     let reason = failure_reason.clone();
     run_db(app.clone(), move |conn| {
-        update_meeting_status_record_with_failure_reason(
+        update_meeting_status_record_with_failure_reason_and_diagnostics(
             conn,
             &id,
             status,
             Some(ended),
             reason.as_deref(),
+            Some(&capture_diagnostics_json),
             ended,
         )
     })
@@ -280,6 +351,13 @@ pub async fn stop_meeting_capture(
 #[serde(rename_all = "camelCase")]
 pub struct StopMeetingCaptureOutcome {
     pub had_capture: bool,
+    pub native_mic_ready: bool,
+    pub system_audio_ready: bool,
+    pub apm_ready: bool,
+    pub apm_active: bool,
+    pub native_mic_frame_count: u64,
+    pub system_audio_frame_count: u64,
+    pub level_event_count: u64,
     pub push_frame_count: u64,
     pub accepted_push_frame_count: u64,
     pub dropped_push_frame_count: u64,
@@ -292,7 +370,61 @@ pub struct StopMeetingCaptureOutcome {
     pub emitted_gap_count: u64,
     pub persisted_segment_count: u64,
     pub persisted_text_segment_count: u64,
+    pub apm: crate::audio::apm::ApmDiagnostics,
+    pub capture_diagnostics_json: String,
     pub failure_reason: Option<String>,
+}
+
+fn capture_start_diagnostics_json(started: bool, error: Option<&str>) -> String {
+    serde_json::json!({
+        "schema": "meeting_capture_v2",
+        "phase": if started { "started" } else { "start_failed" },
+        "backend": "native_rust",
+        "rendererPushPath": "disabled",
+        "nativeMicRequired": true,
+        "apmRequired": true,
+        "error": error,
+        "updatedAt": now_ms(),
+    })
+    .to_string()
+}
+
+fn capture_stop_diagnostics_json(
+    summary: &CaptureStopSummary,
+    persisted_segment_count: u64,
+    persisted_text_segment_count: u64,
+    failure_reason: Option<&str>,
+) -> String {
+    serde_json::json!({
+        "schema": "meeting_capture_v2",
+        "phase": "stopped",
+        "backend": "native_rust",
+        "rendererPushPath": "disabled",
+        "hadCapture": summary.had_capture,
+        "nativeMicReady": summary.native_mic_ready,
+        "systemAudioReady": summary.system_audio_ready,
+        "apmReady": summary.apm_ready,
+        "apmActive": summary.apm_active,
+        "nativeMicFrameCount": summary.native_mic_frame_count,
+        "systemAudioFrameCount": summary.system_audio_frame_count,
+        "levelEventCount": summary.level_event_count,
+        "pushFrameCount": summary.push_frame_count,
+        "acceptedPushFrameCount": summary.accepted_push_frame_count,
+        "droppedPushFrameCount": summary.dropped_push_frame_count,
+        "droppedPushSampleCount": summary.dropped_push_sample_count,
+        "frameCount": summary.frame_count,
+        "sampleCount": summary.sample_count,
+        "speechFrameCount": summary.speech_frame_count,
+        "chunkCount": summary.chunk_count,
+        "emittedSegmentCount": summary.emitted_segment_count,
+        "emittedGapCount": summary.emitted_gap_count,
+        "persistedSegmentCount": persisted_segment_count,
+        "persistedTextSegmentCount": persisted_text_segment_count,
+        "failureReason": failure_reason,
+        "apm": summary.apm,
+        "updatedAt": now_ms(),
+    })
+    .to_string()
 }
 
 fn stop_capture_failure_reason(
@@ -621,15 +753,16 @@ pub fn insert_meeting(conn: &Connection, meeting: NewMeeting) -> Result<Meeting>
         "INSERT INTO meetings (
             id, title, source_app, started_at, ended_at, status, template_id,
             routed_skill_slug, agent_conversation_id, notes_markdown,
-            notes_struct_json, failure_reason, created_at, updated_at
+            notes_struct_json, failure_reason, capture_diagnostics_json,
+            created_at, updated_at
          )
-         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL, NULL, NULL, NULL, NULL, ?7, ?7)",
+         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL, NULL, NULL, NULL, NULL, NULL, ?7, ?7)",
         params![
             meeting.id,
             meeting.title,
             meeting.source_app,
             meeting.started_at,
-            MeetingStatus::Capturing.as_str(),
+            MeetingStatus::PendingCapture.as_str(),
             meeting.template_id,
             meeting.now
         ],
@@ -642,7 +775,8 @@ pub fn select_meeting(conn: &Connection, id: &str) -> Result<Option<Meeting>> {
     conn.query_row(
         "SELECT id, title, source_app, started_at, ended_at, status, template_id,
                 routed_skill_slug, agent_conversation_id, notes_markdown,
-                notes_struct_json, failure_reason, created_at, updated_at
+                notes_struct_json, failure_reason, capture_diagnostics_json,
+                created_at, updated_at
          FROM meetings
          WHERE id = ?1",
         params![id],
@@ -655,7 +789,8 @@ pub fn select_meetings(conn: &Connection, limit: i32) -> Result<Vec<Meeting>> {
     let mut stmt = conn.prepare(
         "SELECT id, title, source_app, started_at, ended_at, status, template_id,
                 routed_skill_slug, agent_conversation_id, notes_markdown,
-                notes_struct_json, failure_reason, created_at, updated_at
+                notes_struct_json, failure_reason, capture_diagnostics_json,
+                created_at, updated_at
          FROM meetings
          ORDER BY started_at DESC
          LIMIT ?1",
@@ -672,7 +807,9 @@ pub fn update_meeting_status_record(
     ended_at: Option<i64>,
     updated_at: i64,
 ) -> Result<()> {
-    update_meeting_status_record_with_failure_reason(conn, id, status, ended_at, None, updated_at)
+    update_meeting_status_record_with_failure_reason_and_diagnostics(
+        conn, id, status, ended_at, None, None, updated_at,
+    )
 }
 
 pub fn update_meeting_status_record_with_failure_reason(
@@ -681,6 +818,26 @@ pub fn update_meeting_status_record_with_failure_reason(
     status: MeetingStatus,
     ended_at: Option<i64>,
     failure_reason: Option<&str>,
+    updated_at: i64,
+) -> Result<()> {
+    update_meeting_status_record_with_failure_reason_and_diagnostics(
+        conn,
+        id,
+        status,
+        ended_at,
+        failure_reason,
+        None,
+        updated_at,
+    )
+}
+
+pub fn update_meeting_status_record_with_failure_reason_and_diagnostics(
+    conn: &Connection,
+    id: &str,
+    status: MeetingStatus,
+    ended_at: Option<i64>,
+    failure_reason: Option<&str>,
+    capture_diagnostics_json: Option<&str>,
     updated_at: i64,
 ) -> Result<()> {
     // `ended_at` is set once, when capture stops. COALESCE keeps the existing
@@ -693,9 +850,17 @@ pub fn update_meeting_status_record_with_failure_reason(
          SET status = ?1,
              ended_at = COALESCE(?2, ended_at),
              failure_reason = CASE WHEN ?1 = 'failed' THEN ?3 ELSE NULL END,
-             updated_at = ?4
-         WHERE id = ?5",
-        params![status.as_str(), ended_at, failure_reason, updated_at, id],
+             capture_diagnostics_json = COALESCE(?4, capture_diagnostics_json),
+             updated_at = ?5
+         WHERE id = ?6",
+        params![
+            status.as_str(),
+            ended_at,
+            failure_reason,
+            capture_diagnostics_json,
+            updated_at,
+            id
+        ],
     )?;
     Ok(())
 }
@@ -790,8 +955,9 @@ fn row_to_meeting(row: &rusqlite::Row<'_>) -> Result<Meeting> {
         notes_markdown: row.get(9)?,
         notes_struct_json: row.get(10)?,
         failure_reason: row.get(11)?,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
+        capture_diagnostics_json: row.get(12)?,
+        created_at: row.get(13)?,
+        updated_at: row.get(14)?,
     })
 }
 
@@ -911,13 +1077,14 @@ mod tests {
             .unwrap();
         let loaded = select_meeting(&conn, "meeting-1").unwrap().unwrap();
 
-        assert_eq!(created.status, MeetingStatus::Capturing);
+        assert_eq!(created.status, MeetingStatus::PendingCapture);
         assert_eq!(loaded.status, MeetingStatus::Done);
         assert_eq!(loaded.ended_at, Some(100));
         assert_eq!(loaded.title, "Customer discovery");
         assert_eq!(loaded.source_app.as_deref(), Some("Zoom"));
         assert_eq!(loaded.template_id.as_deref(), Some("discovery"));
         assert_eq!(loaded.failure_reason, None);
+        assert_eq!(loaded.capture_diagnostics_json, None);
     }
 
     #[test]
@@ -928,11 +1095,13 @@ mod tests {
         insert_meeting(&conn, meeting("meeting-1")).unwrap();
 
         // Capture stops: ended_at set.
-        update_meeting_status_record(
+        update_meeting_status_record_with_failure_reason_and_diagnostics(
             &conn,
             "meeting-1",
             MeetingStatus::Transcribing,
             Some(500),
+            None,
+            Some("{\"phase\":\"stopped\"}"),
             501,
         )
         .unwrap();
@@ -952,8 +1121,9 @@ mod tests {
             select_meeting(&conn, "meeting-1")
                 .unwrap()
                 .unwrap()
-                .ended_at,
-            Some(500)
+                .capture_diagnostics_json
+                .as_deref(),
+            Some("{\"phase\":\"stopped\"}")
         );
         // A Some value overwrites.
         update_meeting_status_record_with_failure_reason(
@@ -970,6 +1140,10 @@ mod tests {
         assert_eq!(
             failed.failure_reason.as_deref(),
             Some("Microphone access is blocked.")
+        );
+        assert_eq!(
+            failed.capture_diagnostics_json.as_deref(),
+            Some("{\"phase\":\"stopped\"}")
         );
 
         update_meeting_status_record(&conn, "meeting-1", MeetingStatus::Done, None, 950).unwrap();

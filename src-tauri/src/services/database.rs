@@ -341,6 +341,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             notes_markdown TEXT,
             notes_struct_json TEXT,
             failure_reason TEXT,
+            capture_diagnostics_json TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             FOREIGN KEY (agent_conversation_id) REFERENCES conversations(id)
@@ -403,6 +404,20 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     if !has_failure_reason {
         conn.execute("ALTER TABLE meetings ADD COLUMN failure_reason TEXT", [])
             .ok();
+    }
+
+    // Migration: add capture diagnostics to meetings for existing DBs. This is
+    // nullable so historical rows remain valid and only capture lifecycle paths
+    // write JSON summaries.
+    let has_capture_diagnostics: bool = conn
+        .prepare("SELECT capture_diagnostics_json FROM meetings LIMIT 1")
+        .is_ok();
+    if !has_capture_diagnostics {
+        conn.execute(
+            "ALTER TABLE meetings ADD COLUMN capture_diagnostics_json TEXT",
+            [],
+        )
+        .ok();
     }
 
     // Migration: add agent conversation columns if they don't exist (for existing DBs)

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use serde::Serialize;
@@ -14,6 +14,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use uuid::Uuid;
 
+use crate::audio::apm::{ApmDiagnostics, MeetingAudioProcessor};
 use crate::audio::capture::{AudioCaptureSource, CaptureError, PcmFrame, TARGET_SAMPLE_RATE};
 use crate::audio::chunker::{Chunk, ChunkCfg, StreamingChunker};
 use crate::audio::transcribe::{
@@ -40,6 +41,13 @@ const MAX_THEM_BUFFER_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 60 * 90;
 #[serde(rename_all = "camelCase")]
 pub struct CaptureStopSummary {
     pub had_capture: bool,
+    pub native_mic_ready: bool,
+    pub system_audio_ready: bool,
+    pub apm_ready: bool,
+    pub apm_active: bool,
+    pub native_mic_frame_count: u64,
+    pub system_audio_frame_count: u64,
+    pub level_event_count: u64,
     pub push_frame_count: u64,
     pub accepted_push_frame_count: u64,
     pub dropped_push_frame_count: u64,
@@ -50,6 +58,7 @@ pub struct CaptureStopSummary {
     pub chunk_count: u64,
     pub emitted_segment_count: u64,
     pub emitted_gap_count: u64,
+    pub apm: ApmDiagnostics,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -68,6 +77,28 @@ pub struct CaptureStreamStats {
     chunk_count: AtomicU64,
     emitted_segment_count: AtomicU64,
     emitted_gap_count: AtomicU64,
+}
+
+#[derive(Default)]
+struct CaptureSourceStats {
+    native_mic_frame_count: AtomicU64,
+    system_audio_frame_count: AtomicU64,
+    level_event_count: AtomicU64,
+}
+
+impl CaptureSourceStats {
+    fn record_native_mic_frame(&self) {
+        self.native_mic_frame_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_system_audio_frame(&self) {
+        self.system_audio_frame_count
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_level_event(&self) {
+        self.level_event_count.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 impl CaptureStreamStats {
@@ -93,9 +124,24 @@ impl CaptureStreamStats {
         self.emitted_gap_count.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn summary(&self, had_capture: bool, ingress: CaptureIngressSummary) -> CaptureStopSummary {
+    fn summary(
+        &self,
+        had_capture: bool,
+        ingress: CaptureIngressSummary,
+        source: &CaptureSourceStats,
+        native_mic_ready: bool,
+        system_audio_ready: bool,
+        apm: ApmDiagnostics,
+    ) -> CaptureStopSummary {
         CaptureStopSummary {
             had_capture,
+            native_mic_ready,
+            system_audio_ready,
+            apm_ready: apm.initialized,
+            apm_active: apm.active,
+            native_mic_frame_count: source.native_mic_frame_count.load(Ordering::Relaxed),
+            system_audio_frame_count: source.system_audio_frame_count.load(Ordering::Relaxed),
+            level_event_count: source.level_event_count.load(Ordering::Relaxed),
             push_frame_count: ingress.push_frame_count,
             accepted_push_frame_count: ingress.accepted_push_frame_count,
             dropped_push_frame_count: ingress.dropped_push_frame_count,
@@ -106,6 +152,7 @@ impl CaptureStreamStats {
             chunk_count: self.chunk_count.load(Ordering::Relaxed),
             emitted_segment_count: self.emitted_segment_count.load(Ordering::Relaxed),
             emitted_gap_count: self.emitted_gap_count.load(Ordering::Relaxed),
+            apm,
         }
     }
 }
@@ -294,17 +341,126 @@ impl SegmentSink for DbEmitSink {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureLevelEvent {
+    pub meeting_id: String,
+    pub speaker: Speaker,
+    pub level: f32,
+}
+
+enum ApmInput {
+    Capture(PcmFrame),
+    Render(PcmFrame),
+}
+
+async fn run_mic_apm_stream(
+    app: Option<AppHandle>,
+    meeting_id: String,
+    mut input: UnboundedReceiver<ApmInput>,
+    processed_tx: UnboundedSender<PcmFrame>,
+    source_stats: Arc<CaptureSourceStats>,
+    apm_diagnostics: Arc<StdMutex<ApmDiagnostics>>,
+) {
+    let mut processor = MeetingAudioProcessor::new();
+    let mut last_level_emit = Instant::now()
+        .checked_sub(Duration::from_millis(100))
+        .unwrap_or_else(Instant::now);
+    while let Some(item) = input.recv().await {
+        match item {
+            ApmInput::Render(frame) => {
+                processor.accept_render_reference(&frame.samples);
+            }
+            ApmInput::Capture(frame) => {
+                let processed = processor.process_capture(&frame.samples);
+                if processed.is_empty() {
+                    continue;
+                }
+                maybe_emit_level(
+                    app.as_ref(),
+                    &meeting_id,
+                    &processed,
+                    &source_stats,
+                    &mut last_level_emit,
+                );
+                if processed_tx.send(PcmFrame { samples: processed }).is_err() {
+                    break;
+                }
+            }
+        }
+        *apm_diagnostics.lock().unwrap() = processor.diagnostics();
+    }
+    *apm_diagnostics.lock().unwrap() = processor.diagnostics();
+}
+
+async fn route_mic_to_apm(
+    mut rx: UnboundedReceiver<PcmFrame>,
+    apm_tx: UnboundedSender<ApmInput>,
+    source_stats: Arc<CaptureSourceStats>,
+) {
+    while let Some(frame) = rx.recv().await {
+        source_stats.record_native_mic_frame();
+        if apm_tx.send(ApmInput::Capture(frame)).is_err() {
+            break;
+        }
+    }
+}
+
+async fn route_system_to_them_and_apm(
+    mut rx: UnboundedReceiver<PcmFrame>,
+    them_tx: UnboundedSender<PcmFrame>,
+    apm_tx: UnboundedSender<ApmInput>,
+    source_stats: Arc<CaptureSourceStats>,
+) {
+    while let Some(frame) = rx.recv().await {
+        source_stats.record_system_audio_frame();
+        let _ = them_tx.send(frame.clone());
+        if apm_tx.send(ApmInput::Render(frame)).is_err() {
+            break;
+        }
+    }
+}
+
+fn maybe_emit_level(
+    app: Option<&AppHandle>,
+    meeting_id: &str,
+    samples: &[i16],
+    source_stats: &CaptureSourceStats,
+    last_emit: &mut Instant,
+) {
+    if last_emit.elapsed() < Duration::from_millis(60) {
+        return;
+    }
+    *last_emit = Instant::now();
+    source_stats.record_level_event();
+    let level = (rms(samples) / i16::MAX as f32).clamp(0.0, 1.0);
+    if let Some(app) = app {
+        let _ = app.emit(
+            "meeting://capture-level",
+            CaptureLevelEvent {
+                meeting_id: meeting_id.to_string(),
+                speaker: Speaker::Me,
+                level,
+            },
+        );
+    }
+}
+
 /// One in-flight meeting's capture streams and their worker tasks.
 struct ActiveCapture {
-    me_tx: UnboundedSender<PcmFrame>,
-    them_tx: Option<UnboundedSender<PcmFrame>>,
-    // Native system-audio source (WASAPI loopback / Core Audio tap) feeding `them_tx`.
+    // Native mic source feeding the APM stage.
+    mic_source: Option<Box<dyn AudioCaptureSource>>,
+    // Native system-audio source feeding Them transcription and the APM render reference.
     system_source: Option<Box<dyn AudioCaptureSource>>,
     tasks: Vec<JoinHandle<()>>,
     // Full Them PCM buffered in memory for the post-call diarization pass. The
     // Them worker appends frames here; `stop` takes it for [`reconcile_meeting_speakers`].
     them_audio: Arc<StdMutex<Vec<i16>>>,
     stats: Arc<CaptureStreamStats>,
+    source_stats: Arc<CaptureSourceStats>,
+    apm_diagnostics: Arc<StdMutex<ApmDiagnostics>>,
+    native_mic_ready: bool,
+    system_audio_ready: bool,
 }
 
 /// A meeting's slot in the registry. `Stopping` is a tombstone left in the map
@@ -317,8 +473,7 @@ enum CaptureSlot {
 }
 
 /// The platform's system-audio ("Them") capture source, if this build supports it.
-/// Returns `None` where native capture is not yet available so the meeting still
-/// captures the "Me" stream.
+/// Returns `None` where native render capture is not yet available.
 fn system_audio_source() -> Option<Box<dyn AudioCaptureSource>> {
     #[cfg(target_os = "windows")]
     {
@@ -338,16 +493,55 @@ fn system_audio_source() -> Option<Box<dyn AudioCaptureSource>> {
     }
 }
 
+/// The platform's native microphone ("Me") capture source.
+fn mic_audio_source() -> Option<Box<dyn AudioCaptureSource>> {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        return Some(Box::new(crate::audio::capture::mic::CpalMicSource::new()));
+    }
+    #[allow(unreachable_code)]
+    {
+        None
+    }
+}
+
+struct PreparedMicAudioStream {
+    source: Box<dyn AudioCaptureSource>,
+    rx: UnboundedReceiver<PcmFrame>,
+}
+
+fn prepare_mic_audio_stream(
+    meeting_id: &str,
+    mic_source: Option<Box<dyn AudioCaptureSource>>,
+) -> Result<PreparedMicAudioStream, CaptureError> {
+    let Some(mut source) = mic_source else {
+        return Err(CaptureError::Unsupported(
+            "native microphone capture is not compiled for this platform".to_string(),
+        ));
+    };
+    let (tx, rx) = unbounded_channel();
+    match source.start(tx) {
+        Ok(()) => {
+            log::info!("[meeting] native mic capture started for {meeting_id}");
+            Ok(PreparedMicAudioStream { source, rx })
+        }
+        Err(err) => {
+            log::warn!("[meeting] native mic capture startup failed for {meeting_id}: {err}");
+            Err(err)
+        }
+    }
+}
+
 #[derive(Default)]
 struct PreparedSystemAudioStream {
     source: Option<Box<dyn AudioCaptureSource>>,
-    tx: Option<UnboundedSender<PcmFrame>>,
     rx: Option<UnboundedReceiver<PcmFrame>>,
 }
 
 impl PreparedSystemAudioStream {
+    #[cfg(test)]
     fn has_system_audio(&self) -> bool {
-        self.tx.is_some()
+        self.rx.is_some()
     }
 }
 
@@ -370,7 +564,6 @@ fn prepare_system_audio_stream(
             log::info!("[meeting] system-audio capture started for {meeting_id}");
             Ok(PreparedSystemAudioStream {
                 source: Some(source),
-                tx: Some(tx),
                 rx: Some(rx),
             })
         }
@@ -418,10 +611,38 @@ pub struct CaptureRegistry {
 }
 
 impl CaptureRegistry {
-    /// Begin capturing the "Me" stream for `meeting_id`. Frames arrive via
-    /// [`CaptureRegistry::push_frame`]; the worker transcribes and persists them.
+    /// Begin native capture for `meeting_id`. Rust owns both the microphone
+    /// ("Me") and system-audio ("Them") streams before the slot becomes active.
     pub fn start(&self, app: &AppHandle, meeting_id: &str) -> Result<(), String> {
         log::info!("[meeting] capture registry start requested for {meeting_id}");
+        let me_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> = Arc::new(
+            GatewayTranscriber::with_mode(app.clone(), transcription_mode_for(&Speaker::Me)),
+        );
+        let them_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> = Arc::new(
+            GatewayTranscriber::with_mode(app.clone(), transcription_mode_for(&Speaker::Them)),
+        );
+        let sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
+        self.start_with_sources(
+            Some(app.clone()),
+            meeting_id,
+            mic_audio_source(),
+            system_audio_source(),
+            me_transcriber,
+            them_transcriber,
+            sink,
+        )
+    }
+
+    fn start_with_sources(
+        &self,
+        app: Option<AppHandle>,
+        meeting_id: &str,
+        mic_source: Option<Box<dyn AudioCaptureSource>>,
+        system_source: Option<Box<dyn AudioCaptureSource>>,
+        me_transcriber: Arc<dyn ChunkTranscriber + Send + Sync>,
+        them_transcriber: Arc<dyn ChunkTranscriber + Send + Sync>,
+        sink: Arc<dyn SegmentSink>,
+    ) -> Result<(), String> {
         let mut active = self.active.lock().unwrap();
         // Reject if the id is already live OR draining (`Stopping` tombstone): a
         // start that raced a still-running stop must not insert a second capture.
@@ -429,27 +650,33 @@ impl CaptureRegistry {
             log::warn!("[meeting] capture start ignored; slot already occupied for {meeting_id}");
             return Ok(());
         }
-        let prepared_system_audio = prepare_system_audio_stream(meeting_id, system_audio_source())
-            .map_err(|err| format!("system-audio capture unavailable: {err}"))?;
+
+        let mut prepared_mic = prepare_mic_audio_stream(meeting_id, mic_source)
+            .map_err(|err| format!("native microphone capture unavailable: {err}"))?;
+        let prepared_system_audio = prepare_system_audio_stream(meeting_id, system_source)
+            .map_err(|err| {
+                prepared_mic.source.stop();
+                format!("system-audio capture unavailable: {err}")
+            })?;
         let PreparedSystemAudioStream {
             source: system_source,
-            tx: system_tx,
             rx: system_rx,
         } = prepared_system_audio;
-        let has_system_audio = system_tx.is_some();
+        let has_system_audio = system_rx.is_some();
 
         // Me and Them share one sequence counter so segments order globally.
         let seq = Arc::new(AtomicI64::new(0));
         let stats = Arc::new(CaptureStreamStats::default());
+        let source_stats = Arc::new(CaptureSourceStats::default());
+        let apm_diagnostics = Arc::new(StdMutex::new(ApmDiagnostics {
+            initialized: true,
+            active: true,
+            ..Default::default()
+        }));
         self.reset_ingress_summary(meeting_id);
 
-        // Me is the single-speaker mic -> plain whisper-1 text (cheap); only the
-        // multi-speaker Them stream is diarized (#2152).
-        let me_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> = Arc::new(
-            GatewayTranscriber::with_mode(app.clone(), transcription_mode_for(&Speaker::Me)),
-        );
-        let me_sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
         let (me_tx, me_rx) = unbounded_channel();
+        let (apm_tx, apm_rx) = unbounded_channel();
         // The Me mic is single-speaker; it is never buffered for the post-call pass.
         let mut tasks = vec![tauri::async_runtime::spawn(run_capture_stream(
             meeting_id.to_string(),
@@ -459,44 +686,62 @@ impl CaptureRegistry {
             seq.clone(),
             ChunkCfg::default(),
             RetryConfig::default(),
-            me_sink,
+            sink.clone(),
             stats.clone(),
             None,
         ))];
+        tasks.push(tauri::async_runtime::spawn(run_mic_apm_stream(
+            app,
+            meeting_id.to_string(),
+            apm_rx,
+            me_tx,
+            source_stats.clone(),
+            apm_diagnostics.clone(),
+        )));
+        tasks.push(tauri::async_runtime::spawn(route_mic_to_apm(
+            prepared_mic.rx,
+            apm_tx.clone(),
+            source_stats.clone(),
+        )));
 
         // Shared buffer the Them worker fills for the post-call diarization pass.
         let them_audio: Arc<StdMutex<Vec<i16>>> = Arc::new(StdMutex::new(Vec::new()));
 
-        let mut them_tx = None;
         if let Some(rx) = system_rx {
-            let them_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> = Arc::new(
-                GatewayTranscriber::with_mode(app.clone(), transcription_mode_for(&Speaker::Them)),
-            );
-            let them_sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
+            let (them_tx, them_rx) = unbounded_channel();
             tasks.push(tauri::async_runtime::spawn(run_capture_stream(
                 meeting_id.to_string(),
                 Speaker::Them,
-                rx,
+                them_rx,
                 them_transcriber,
                 seq,
                 ChunkCfg::default(),
                 RetryConfig::default(),
-                them_sink,
+                sink,
                 stats.clone(),
                 Some(them_audio.clone()),
             )));
-            them_tx = system_tx;
+            tasks.push(tauri::async_runtime::spawn(route_system_to_them_and_apm(
+                rx,
+                them_tx,
+                apm_tx.clone(),
+                source_stats.clone(),
+            )));
         }
+        drop(apm_tx);
 
         active.insert(
             meeting_id.to_string(),
             CaptureSlot::Active(ActiveCapture {
-                me_tx,
-                them_tx,
+                mic_source: Some(prepared_mic.source),
                 system_source,
                 tasks,
                 them_audio,
                 stats,
+                source_stats,
+                apm_diagnostics,
+                native_mic_ready: true,
+                system_audio_ready: has_system_audio,
             }),
         );
         log::info!(
@@ -527,23 +772,7 @@ impl CaptureRegistry {
         let sample_count = samples.len() as u64;
         let active = self.active.lock().unwrap();
         let drop_reason = match active.get(meeting_id) {
-            Some(CaptureSlot::Active(capture)) => {
-                let sender = match &speaker {
-                    Speaker::Me => Some(&capture.me_tx),
-                    // The system ("Them") stream arrives once native capture lands.
-                    Speaker::Them => capture.them_tx.as_ref(),
-                };
-                if let Some(sender) = sender {
-                    if sender.send(PcmFrame { samples }).is_ok() {
-                        drop(active);
-                        self.record_accepted_push_frame(meeting_id);
-                        return;
-                    }
-                    "channel_closed"
-                } else {
-                    "speaker_not_captured"
-                }
-            }
+            Some(CaptureSlot::Active(_capture)) => "renderer_push_disabled",
             Some(CaptureSlot::Stopping) => "stopping",
             None => "no_slot",
         };
@@ -566,13 +795,6 @@ impl CaptureRegistry {
             .lock()
             .unwrap()
             .insert(meeting_id.to_string(), CaptureIngressSummary::default());
-    }
-
-    fn record_accepted_push_frame(&self, meeting_id: &str) {
-        let mut ingress = self.ingress.lock().unwrap();
-        let summary = ingress.entry(meeting_id.to_string()).or_default();
-        summary.push_frame_count += 1;
-        summary.accepted_push_frame_count += 1;
     }
 
     fn record_dropped_push_frame(
@@ -643,27 +865,52 @@ impl CaptureRegistry {
     ) -> CaptureStopSummary {
         let Some(mut capture) = self.begin_stop(meeting_id) else {
             let ingress = self.take_ingress_summary(meeting_id);
-            return CaptureStreamStats::default().summary(false, ingress);
+            return CaptureStreamStats::default().summary(
+                false,
+                ingress,
+                &CaptureSourceStats::default(),
+                false,
+                false,
+                ApmDiagnostics::default(),
+            );
         };
-        // Stop the native source first so it stops feeding the "Them" channel.
+        // Stop native sources first so their channels close and routers can exit.
+        if let Some(mut source) = capture.mic_source.take() {
+            let join = tauri::async_runtime::spawn_blocking(move || source.stop());
+            if tokio::time::timeout(drain_timeout, join).await.is_err() {
+                log::warn!(
+                    "[meeting] native mic source stop timed out for {meeting_id}; detaching"
+                );
+            }
+        }
         if let Some(mut source) = capture.system_source.take() {
             let join = tauri::async_runtime::spawn_blocking(move || source.stop());
             if tokio::time::timeout(drain_timeout, join).await.is_err() {
                 log::warn!("[meeting] native source stop timed out for {meeting_id}; detaching");
             }
         }
-        // Dropping the senders closes the channels so the workers flush and exit.
-        drop(capture.me_tx);
-        drop(capture.them_tx);
         for task in capture.tasks.drain(..) {
             if tokio::time::timeout(drain_timeout, task).await.is_err() {
                 log::warn!("[meeting] capture worker drain timed out for {meeting_id}; detaching");
             }
         }
         let ingress = self.take_ingress_summary(meeting_id);
-        let summary = capture.stats.summary(true, ingress);
+        let apm = capture.apm_diagnostics.lock().unwrap().clone();
+        let summary = capture.stats.summary(
+            true,
+            ingress,
+            capture.source_stats.as_ref(),
+            capture.native_mic_ready,
+            capture.system_audio_ready,
+            apm,
+        );
         log::info!(
-            "[meeting] capture stop summary for {meeting_id}: push_frames={} accepted_push_frames={} dropped_push_frames={} dropped_push_samples={} frames={} speech_frames={} chunks={} emitted_segments={} emitted_gaps={}",
+            "[meeting] capture stop summary for {meeting_id}: native_mic_ready={} system_audio_ready={} apm_ready={} mic_source_frames={} system_source_frames={} push_frames={} accepted_push_frames={} dropped_push_frames={} dropped_push_samples={} frames={} speech_frames={} chunks={} emitted_segments={} emitted_gaps={}",
+            summary.native_mic_ready,
+            summary.system_audio_ready,
+            summary.apm_ready,
+            summary.native_mic_frame_count,
+            summary.system_audio_frame_count,
             summary.push_frame_count,
             summary.accepted_push_frame_count,
             summary.dropped_push_frame_count,
@@ -762,6 +1009,32 @@ mod tests {
         vec![value; ms]
     }
 
+    fn tone(samples: usize, amplitude: i16) -> Vec<i16> {
+        (0..samples)
+            .map(|index| {
+                let phase = index as f32 / 8.0;
+                (phase.sin() * amplitude as f32).round() as i16
+            })
+            .collect()
+    }
+
+    fn active_capture_for_test(
+        tasks: Vec<JoinHandle<()>>,
+        stats: Arc<CaptureStreamStats>,
+    ) -> ActiveCapture {
+        ActiveCapture {
+            mic_source: None,
+            system_source: None,
+            tasks,
+            them_audio: Arc::new(StdMutex::new(Vec::new())),
+            stats,
+            source_stats: Arc::new(CaptureSourceStats::default()),
+            apm_diagnostics: Arc::new(StdMutex::new(ApmDiagnostics::default())),
+            native_mic_ready: true,
+            system_audio_ready: false,
+        }
+    }
+
     #[tokio::test]
     async fn pipeline_yields_ordered_segments_from_a_fake_source() {
         use crate::audio::capture::AudioCaptureSource;
@@ -850,7 +1123,14 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].status, SegmentStatus::Gap);
         assert!(segments[0].text.is_empty());
-        let summary = stats.summary(true, CaptureIngressSummary::default());
+        let summary = stats.summary(
+            true,
+            CaptureIngressSummary::default(),
+            &CaptureSourceStats::default(),
+            true,
+            false,
+            ApmDiagnostics::default(),
+        );
         assert!(summary.had_capture);
         assert!(summary.frame_count > 0);
         assert!(summary.speech_frame_count > 0);
@@ -880,17 +1160,12 @@ mod tests {
         // ActiveCapture. The Stopping tombstone keeps the slot occupied for the
         // whole drain so start() is rejected until finish_stop clears it.
         let registry = CaptureRegistry::default();
-        let (me_tx, _me_rx) = unbounded_channel();
         registry.active.lock().unwrap().insert(
             "m1".to_string(),
-            CaptureSlot::Active(ActiveCapture {
-                me_tx,
-                them_tx: None,
-                system_source: None,
-                tasks: Vec::new(),
-                them_audio: Arc::new(StdMutex::new(Vec::new())),
-                stats: Arc::new(CaptureStreamStats::default()),
-            }),
+            CaptureSlot::Active(active_capture_for_test(
+                Vec::new(),
+                Arc::new(CaptureStreamStats::default()),
+            )),
         );
         assert!(registry.is_active("m1"));
         assert!(registry.slot_occupied("m1"));
@@ -919,7 +1194,7 @@ mod tests {
         // would never reach finish_stop, leaving the id permanently un-restartable.
         // The bounded drain must always clear the tombstone.
         let registry = CaptureRegistry::default();
-        let (me_tx, me_rx) = unbounded_channel::<PcmFrame>();
+        let (_me_tx, me_rx) = unbounded_channel::<PcmFrame>();
         // A worker that never finishes, even after its channel closes.
         let hung = tauri::async_runtime::spawn(async move {
             let _keep_rx = me_rx;
@@ -927,14 +1202,10 @@ mod tests {
         });
         registry.active.lock().unwrap().insert(
             "m1".to_string(),
-            CaptureSlot::Active(ActiveCapture {
-                me_tx,
-                them_tx: None,
-                system_source: None,
-                tasks: vec![hung],
-                them_audio: Arc::new(StdMutex::new(Vec::new())),
-                stats: Arc::new(CaptureStreamStats::default()),
-            }),
+            CaptureSlot::Active(active_capture_for_test(
+                vec![hung],
+                Arc::new(CaptureStreamStats::default()),
+            )),
         );
 
         // A short per-step timeout keeps the test fast; production uses 5s.
@@ -950,17 +1221,12 @@ mod tests {
     #[tokio::test]
     async fn stop_summary_reports_active_capture_without_frames() {
         let registry = CaptureRegistry::default();
-        let (me_tx, _me_rx) = unbounded_channel();
         registry.active.lock().unwrap().insert(
             "m1".to_string(),
-            CaptureSlot::Active(ActiveCapture {
-                me_tx,
-                them_tx: None,
-                system_source: None,
-                tasks: Vec::new(),
-                them_audio: Arc::new(StdMutex::new(Vec::new())),
-                stats: Arc::new(CaptureStreamStats::default()),
-            }),
+            CaptureSlot::Active(active_capture_for_test(
+                Vec::new(),
+                Arc::new(CaptureStreamStats::default()),
+            )),
         );
 
         let summary = registry
@@ -992,6 +1258,61 @@ mod tests {
         assert_eq!(summary.accepted_push_frame_count, 0);
         assert_eq!(summary.dropped_push_frame_count, 1);
         assert_eq!(summary.dropped_push_sample_count, 3);
+    }
+
+    #[tokio::test]
+    async fn registry_start_owns_native_mic_without_renderer_pushes() {
+        use crate::audio::capture::fake::FakePcmSource;
+
+        let registry = CaptureRegistry::default();
+        let samples = [
+            tone(TARGET_SAMPLE_RATE as usize / 2, 8_000),
+            vec![0; TARGET_SAMPLE_RATE as usize * 3 / 5],
+        ]
+        .concat();
+        let mic_source = FakePcmSource::from_samples(samples, TARGET_SAMPLE_RATE as usize / 100);
+        let me_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> =
+            Arc::new(SequenceTranscriber {
+                texts: Mutex::new(vec!["native me".to_string()]),
+            });
+        let them_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> =
+            Arc::new(SequenceTranscriber {
+                texts: Mutex::new(vec!["native them".to_string()]),
+            });
+        let sink = Arc::new(CollectingSink::default());
+        let collected: Arc<dyn SegmentSink> = sink.clone();
+
+        registry
+            .start_with_sources(
+                None,
+                "m1",
+                Some(Box::new(mic_source)),
+                None,
+                me_transcriber,
+                them_transcriber,
+                collected,
+            )
+            .expect("native mic source should start without renderer audio");
+
+        let summary = registry
+            .stop_with_timeout("m1", Duration::from_secs(1))
+            .await;
+
+        let segments = sink.segments.lock().unwrap();
+        assert!(summary.had_capture);
+        assert!(summary.native_mic_ready);
+        assert!(summary.apm_ready);
+        assert!(summary.apm_active);
+        assert!(summary.native_mic_frame_count > 0);
+        assert_eq!(summary.push_frame_count, 0);
+        assert_eq!(summary.accepted_push_frame_count, 0);
+        assert_eq!(summary.dropped_push_frame_count, 0);
+        assert!(summary.frame_count > 0);
+        assert!(segments.iter().any(|segment| {
+            segment.speaker == Speaker::Me
+                && segment.status == SegmentStatus::Ok
+                && segment.text == "native me"
+        }));
     }
 
     struct FailingSource {

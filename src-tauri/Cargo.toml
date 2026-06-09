@@ -78,6 +78,7 @@ dirs = "6"
 tree-sitter = "0.26.9"
 tree-sitter-rust = "0.24.2"
 tree-sitter-typescript = "0.23.2"
+sonora = "0.1.0"
 
 tokio-tungstenite = { version = "0.28" }
 
@@ -103,6 +104,7 @@ tauri-plugin-single-instance = "2"
 
 # System-audio ("Them") loopback capture for Meeting Mode.
 [target.'cfg(target_os = "windows")'.dependencies]
+cpal = "0.18.1"
 wasapi = "0.15"
 windows = { version = "0.57", features = [
     "Win32_Foundation",
@@ -112,6 +114,7 @@ windows = { version = "0.57", features = [
 
 # System-audio ("Them") process-tap capture for Meeting Mode (CoreAudio + ObjC FFI).
 [target.'cfg(target_os = "macos")'.dependencies]
+cpal = "0.18.1"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSValue", "NSUUID"] }
 core-foundation = "0.10"

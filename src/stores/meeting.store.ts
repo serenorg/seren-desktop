@@ -3,10 +3,6 @@
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createStore } from "solid-js/store";
-import {
-  type MeetingCaptureHandle,
-  startMeetingMicCapture,
-} from "@/lib/audio/meetingCapture";
 import { formatTime } from "@/lib/meeting-format";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import {
@@ -20,6 +16,7 @@ import {
   generateMeetingNotes,
   getMeetingTranscriptText,
   getTranscriptSegments,
+  isMeetingCaptureActive,
   listMeetings,
   listMeetingTemplates,
   type Meeting,
@@ -72,11 +69,9 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   primingRequest: null,
 });
 
-let captureHandle: MeetingCaptureHandle | null = null;
-let levelTimer: number | null = null;
-
 let transcriptUnlisten: UnlistenFn | null = null;
 let statusUnlisten: UnlistenFn | null = null;
+let levelUnlisten: UnlistenFn | null = null;
 let segmentsUpdatedUnlisten: UnlistenFn | null = null;
 let widgetStopUnlisten: (() => void) | null = null;
 let trayToggleUnlisten: (() => void) | null = null;
@@ -93,6 +88,12 @@ let isStarting = false;
 // panel) can fire near-simultaneously and both pass the status check, double-
 // running notes + the agent handoff. This guard makes the second a no-op (#2162).
 const processingMeetings = new Set<string>();
+
+interface CaptureLevelEvent {
+  meetingId: string;
+  speaker: "me" | "them";
+  level: number;
+}
 
 function meetingErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -113,6 +114,7 @@ function captureStartupFailureReason(error: unknown): string {
     return "System audio capture could not start. Allow system-audio recording for Seren and make sure an output device is available, then start capture again.";
   }
   if (
+    message.includes("native microphone") ||
     name === "NotAllowedError" ||
     name === "SecurityError" ||
     message.includes("permission") ||
@@ -122,7 +124,8 @@ function captureStartupFailureReason(error: unknown): string {
   }
   if (
     name === "NotFoundError" ||
-    message.includes("requested device not found")
+    message.includes("requested device not found") ||
+    message.includes("no default input device")
   ) {
     return "No microphone was found. Connect or enable a microphone, then start capture again.";
   }
@@ -255,6 +258,22 @@ async function startMeetingEventListeners(): Promise<void> {
     }
   });
 
+  levelUnlisten = await listen<CaptureLevelEvent>(
+    "meeting://capture-level",
+    (event) => {
+      const active = meetingState.activeMeeting;
+      if (
+        active?.id === event.payload.meetingId &&
+        event.payload.speaker === "me"
+      ) {
+        setMeetingState(
+          "captureLevel",
+          Math.max(0, Math.min(1, event.payload.level)),
+        );
+      }
+    },
+  );
+
   // The post-call diarization pass relabeled some segments in place. Reload the
   // active meeting's segments so the refreshed speaker labels show up live.
   segmentsUpdatedUnlisten = await listen<{ meetingId: string }>(
@@ -290,11 +309,13 @@ async function startMeetingEventListeners(): Promise<void> {
 function stopMeetingEventListeners(): void {
   transcriptUnlisten?.();
   statusUnlisten?.();
+  levelUnlisten?.();
   segmentsUpdatedUnlisten?.();
   widgetStopUnlisten?.();
   trayToggleUnlisten?.();
   transcriptUnlisten = null;
   statusUnlisten = null;
+  levelUnlisten = null;
   segmentsUpdatedUnlisten = null;
   widgetStopUnlisten = null;
   trayToggleUnlisten = null;
@@ -303,24 +324,12 @@ function stopMeetingEventListeners(): void {
 async function startCapture(meeting: Meeting): Promise<boolean> {
   if (!isTauriRuntime()) return false;
   console.info("[meeting] capture start requested", { meetingId: meeting.id });
-  let backendStarted = false;
   try {
     await startBackendCapture(meeting.id);
-    backendStarted = true;
     console.info("[meeting] backend capture started", {
       meetingId: meeting.id,
     });
-    captureHandle = await startMeetingMicCapture(meeting.id);
-    console.info("[meeting] microphone capture started", {
-      meetingId: meeting.id,
-    });
   } catch (error) {
-    // The backend capture already started; tear it down and mark the meeting
-    // failed so it doesn't linger as a "capturing" zombie, and make sure the
-    // widget/tray aren't left signalling an active capture that never began.
-    if (backendStarted) {
-      await stopBackendCapture(meeting.id).catch(() => {});
-    }
     void closeCaptureWidget();
     void setTrayRecording(false);
     const reason = captureStartupFailureReason(error);
@@ -329,13 +338,14 @@ async function startCapture(meeting: Meeting): Promise<boolean> {
       { meetingId: meeting.id, reason },
       error,
     );
-    await failMeeting(meeting.id, reason);
+    await loadMeetings();
+    const refreshed =
+      meetingState.meetings.find((item) => item.id === meeting.id) ?? meeting;
+    await setActiveMeeting(refreshed);
+    setMeetingState("error", reason);
     return false;
   }
-  if (levelTimer !== null) window.clearInterval(levelTimer);
-  levelTimer = window.setInterval(() => {
-    setMeetingState("captureLevel", captureHandle?.level() ?? 0);
-  }, 60);
+  setMeetingState("captureLevel", 0);
   void openCaptureWidget(meeting.id);
   void setTrayRecording(true);
   return true;
@@ -346,7 +356,7 @@ async function startCapture(meeting: Meeting): Promise<boolean> {
 // so a double-trigger can't launch two mic streams.
 async function beginCapture(meeting: Meeting): Promise<void> {
   if (!isTauriRuntime() || isStarting) return;
-  if (isCapturing()) return;
+  if (isCapturing(meeting.id)) return;
   isStarting = true;
   try {
     const started = await startCapture(meeting);
@@ -383,9 +393,8 @@ async function confirmPriming(): Promise<void> {
 }
 
 // User dismissed the explainer: abort the pending start. The meeting row was
-// created `capturing` before the gate, so mark it failed (mirroring the
-// mic-failure cleanup) — otherwise isCapturing() stays true forever and blocks
-// every future capture, even across restarts (#2160).
+// created `pending_capture` before the gate, so mark it failed; otherwise
+// isCapturing() stays true forever and blocks every future capture.
 async function cancelPriming(): Promise<void> {
   const meeting = meetingState.primingRequest;
   setMeetingState("primingRequest", null);
@@ -396,12 +405,15 @@ async function cancelPriming(): Promise<void> {
   );
 }
 
-// At startup, any meeting left mid-pipeline is stale — no capture, notes pass,
-// or agent run survives a restart. `capturing` zombies block isCapturing() and
-// every future start (#2160); `transcribing`/`agent_running` zombies show a
-// misleading badge and (for agent_running) a runaway timer (#2174). Fail them
-// all; ended_at is preserved (no arg) where the capture had already ended.
-const STALE_STATUSES = new Set(["capturing", "transcribing", "agent_running"]);
+// At startup, backend capture may still be active even though the renderer
+// reloaded. Reattach to that live capture; fail only rows whose backend registry
+// is gone or whose post-capture processing cannot survive restart.
+const STALE_STATUSES = new Set([
+  "pending_capture",
+  "capturing",
+  "transcribing",
+  "agent_running",
+]);
 
 async function reconcileStaleCaptures(): Promise<void> {
   if (!isTauriRuntime()) return;
@@ -411,17 +423,36 @@ async function reconcileStaleCaptures(): Promise<void> {
       STALE_STATUSES.has(meeting.status),
     );
     if (stale.length === 0) return;
-    await Promise.all(
-      stale.map((meeting) =>
-        updateMeetingStatus(
-          meeting.id,
-          "failed",
-          null,
-          "Seren restarted before this meeting finished processing.",
-        ).catch(() => {}),
-      ),
-    );
-    await loadMeetings();
+    let changed = false;
+    let reattached = false;
+    for (const meeting of stale) {
+      if (meeting.status === "capturing") {
+        const active = await isMeetingCaptureActive(meeting.id).catch(
+          () => false,
+        );
+        if (active) {
+          void openCaptureWidget(meeting.id);
+          void setTrayRecording(true);
+          reattached = true;
+          if (!meetingState.activeMeeting) {
+            await setActiveMeeting(meeting);
+          }
+          continue;
+        }
+      }
+      changed = true;
+      await updateMeetingStatus(
+        meeting.id,
+        "failed",
+        null,
+        meeting.status === "capturing"
+          ? "Seren found a capturing meeting without an active backend capture. Capture was stopped to prevent a stale recording."
+          : "Seren restarted before this meeting finished processing.",
+      ).catch(() => {});
+    }
+    if (changed || reattached) {
+      await loadMeetings();
+    }
   } catch {
     // Non-fatal: the panel still loads the (possibly stale) list on open.
   }
@@ -430,21 +461,9 @@ async function reconcileStaleCaptures(): Promise<void> {
 async function stopCapture(
   meetingId: string,
 ): Promise<CaptureStopOutcome | null> {
-  if (levelTimer !== null) {
-    window.clearInterval(levelTimer);
-    levelTimer = null;
-  }
   setMeetingState("captureLevel", 0);
   void closeCaptureWidget();
   void setTrayRecording(false);
-  if (captureHandle) {
-    try {
-      await captureHandle.stop();
-    } catch {
-      // The audio graph may already be torn down; ignore.
-    }
-    captureHandle = null;
-  }
   if (isTauriRuntime()) {
     return await stopBackendCapture(meetingId);
   }
@@ -647,9 +666,11 @@ function clearError(): void {
   setMeetingState("error", null);
 }
 
-function isCapturing(): boolean {
+function isCapturing(ignoreMeetingId?: string): boolean {
   return meetingState.meetings.some(
-    (meeting) => meeting.status === "capturing",
+    (meeting) =>
+      meeting.id !== ignoreMeetingId &&
+      (meeting.status === "pending_capture" || meeting.status === "capturing"),
   );
 }
 
