@@ -17,6 +17,7 @@ const CONNECTION_STRING_KEY: &str = "connection_string";
 const CONNECTION_STRING_CACHED_AT_KEY: &str = "connection_string_cached_at";
 const CONNECTION_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 const MAX_SYNC_PAYLOAD_BYTES: usize = 2 * 1024 * 1024;
+const MAX_PUSH_ATTEMPTS: i64 = 5;
 
 const PULL_ORDER: &[&str] = &[
     "conversations",
@@ -378,89 +379,150 @@ fn push_outbox(app: &AppHandle, client: &mut PgClient) -> Result<usize, String> 
         if batch.is_empty() {
             break;
         }
+        let mut left_active_set = 0usize;
         for item in batch {
-            if item.op == "tombstone" {
-                push_tombstone(client, &item)?;
-                clear_outbox_item(app, item.id)?;
-                pushed += 1;
-                continue;
+            match push_outbox_item(app, client, &item) {
+                Ok(PushItemOutcome::Pushed) => {
+                    clear_outbox_item(app, item.id)?;
+                    mark_synced(app, &item.table_name, &item.row_id)?;
+                    pushed += 1;
+                    left_active_set += 1;
+                }
+                Ok(PushItemOutcome::Tombstoned) => {
+                    clear_outbox_item(app, item.id)?;
+                    pushed += 1;
+                    left_active_set += 1;
+                }
+                Ok(PushItemOutcome::Skipped) => {
+                    clear_outbox_item(app, item.id)?;
+                    left_active_set += 1;
+                }
+                Err(err) => {
+                    let quarantined = record_push_failure(app, item.id, &err)?;
+                    if quarantined {
+                        left_active_set += 1;
+                    }
+                }
             }
-
-            let pushed_row = match item.table_name.as_str() {
-                "conversations" => {
-                    if let Some(row) =
-                        with_local_db(app, |conn| load_conversation(conn, &item.row_id))?
-                    {
-                        push_conversation(client, row)?;
-                        true
-                    } else {
-                        false
-                    }
-                }
-                "messages" => {
-                    if let Some(row) = with_local_db(app, |conn| load_message(conn, &item.row_id))?
-                    {
-                        push_message(client, row)?;
-                        true
-                    } else {
-                        false
-                    }
-                }
-                "message_events" => {
-                    if let Some(row) =
-                        with_local_db(app, |conn| load_message_event(conn, &item.row_id))?
-                    {
-                        push_message_event(client, row)?;
-                        true
-                    } else {
-                        false
-                    }
-                }
-                "thread_drafts" => {
-                    if let Some(row) =
-                        with_local_db(app, |conn| load_thread_draft(conn, &item.row_id))?
-                    {
-                        push_thread_draft(client, row)?;
-                        true
-                    } else {
-                        false
-                    }
-                }
-                "meetings" => {
-                    if let Some(row) = with_local_db(app, |conn| load_meeting(conn, &item.row_id))?
-                    {
-                        push_meeting(client, row)?;
-                        true
-                    } else {
-                        false
-                    }
-                }
-                "transcript_segments" => {
-                    if let Some(row) =
-                        with_local_db(app, |conn| load_transcript_segment(conn, &item.row_id))?
-                    {
-                        push_transcript_segment(client, row)?;
-                        true
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            };
-            clear_outbox_item(app, item.id)?;
-            if pushed_row {
-                mark_synced(app, &item.table_name, &item.row_id)?;
-                pushed += 1;
-            }
+        }
+        if left_active_set == 0 {
+            break;
         }
     }
     Ok(pushed)
+}
+
+enum PushItemOutcome {
+    Pushed,
+    Tombstoned,
+    Skipped,
+}
+
+fn push_outbox_item(
+    app: &AppHandle,
+    client: &mut PgClient,
+    item: &OutboxItem,
+) -> Result<PushItemOutcome, String> {
+    if item.op == "tombstone" {
+        push_tombstone(client, item)?;
+        return Ok(PushItemOutcome::Tombstoned);
+    }
+
+    let pushed_row = match item.table_name.as_str() {
+        "conversations" => {
+            if let Some(row) = with_local_db(app, |conn| load_conversation(conn, &item.row_id))? {
+                push_conversation(client, row)?;
+                true
+            } else {
+                false
+            }
+        }
+        "messages" => {
+            if let Some(row) = with_local_db(app, |conn| load_message(conn, &item.row_id))? {
+                push_message(client, row)?;
+                true
+            } else {
+                false
+            }
+        }
+        "message_events" => {
+            if let Some(row) = with_local_db(app, |conn| load_message_event(conn, &item.row_id))? {
+                push_message_event(client, row)?;
+                true
+            } else {
+                false
+            }
+        }
+        "thread_drafts" => {
+            if let Some(row) = with_local_db(app, |conn| load_thread_draft(conn, &item.row_id))? {
+                push_thread_draft(client, row)?;
+                true
+            } else {
+                false
+            }
+        }
+        "meetings" => {
+            if let Some(row) = with_local_db(app, |conn| load_meeting(conn, &item.row_id))? {
+                push_meeting(client, row)?;
+                true
+            } else {
+                false
+            }
+        }
+        "transcript_segments" => {
+            if let Some(row) =
+                with_local_db(app, |conn| load_transcript_segment(conn, &item.row_id))?
+            {
+                push_transcript_segment(client, row)?;
+                true
+            } else {
+                false
+            }
+        }
+        _ => false,
+    };
+    Ok(if pushed_row {
+        PushItemOutcome::Pushed
+    } else {
+        PushItemOutcome::Skipped
+    })
+}
+
+fn record_push_failure(app: &AppHandle, item_id: i64, error: &str) -> Result<bool, String> {
+    with_local_db(app, |conn| {
+        let quarantined = record_push_failure_on_conn(conn, item_id, error)?;
+        Ok(quarantined)
+    })
+}
+
+fn record_push_failure_on_conn(
+    conn: &Connection,
+    item_id: i64,
+    error: &str,
+) -> rusqlite::Result<bool> {
+    let truncated_error: String = error.chars().take(500).collect();
+    conn.execute(
+        "UPDATE sync_outbox
+         SET attempts = attempts + 1,
+             last_error = ?1,
+             last_attempt_at = ?2,
+             conflict = CASE WHEN attempts + 1 >= ?3 THEN 1 ELSE conflict END
+         WHERE id = ?4",
+        params![truncated_error, now_ms(), MAX_PUSH_ATTEMPTS, item_id],
+    )?;
+    let conflict: i64 = conn.query_row(
+        "SELECT conflict FROM sync_outbox WHERE id = ?1",
+        params![item_id],
+        |row| row.get(0),
+    )?;
+    Ok(conflict == 1)
 }
 
 fn read_outbox_batch(conn: &Connection) -> rusqlite::Result<Vec<OutboxItem>> {
     let mut stmt = conn.prepare(
         "SELECT id, table_name, row_id, op, enqueued_at
          FROM sync_outbox
+         WHERE conflict = 0
          ORDER BY id ASC
          LIMIT 500",
     )?;
@@ -1599,5 +1661,83 @@ mod tests {
         assert!(first >= 3);
         assert_eq!(second, 0);
         assert_eq!(queued, first as i64);
+    }
+
+    fn insert_outbox_row(conn: &Connection, table: &str, row_id: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO sync_outbox (table_name, row_id, op, enqueued_at)
+             VALUES (?1, ?2, 'upsert', 1)",
+            params![table, row_id],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn failing_row_quarantines_after_max_attempts() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        let id = insert_outbox_row(&conn, "messages", "poison");
+
+        for attempt in 1..MAX_PUSH_ATTEMPTS {
+            let quarantined =
+                record_push_failure_on_conn(&conn, id, "remote rejected payload").unwrap();
+            assert!(
+                !quarantined,
+                "row must not quarantine before threshold (attempt {attempt})"
+            );
+        }
+        let quarantined =
+            record_push_failure_on_conn(&conn, id, "remote rejected payload").unwrap();
+        assert!(
+            quarantined,
+            "row must quarantine on the {MAX_PUSH_ATTEMPTS}th failure"
+        );
+
+        let (attempts, conflict, last_error): (i64, i64, String) = conn
+            .query_row(
+                "SELECT attempts, conflict, last_error FROM sync_outbox WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(attempts, MAX_PUSH_ATTEMPTS);
+        assert_eq!(conflict, 1);
+        assert_eq!(last_error, "remote rejected payload");
+    }
+
+    #[test]
+    fn read_outbox_batch_skips_quarantined_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        let live = insert_outbox_row(&conn, "messages", "live");
+        let poisoned = insert_outbox_row(&conn, "messages", "poison");
+
+        for _ in 0..MAX_PUSH_ATTEMPTS {
+            record_push_failure_on_conn(&conn, poisoned, "perma-fail").unwrap();
+        }
+
+        let batch = read_outbox_batch(&conn).unwrap();
+        let ids: Vec<i64> = batch.iter().map(|item| item.id).collect();
+        assert_eq!(ids, vec![live], "quarantined row must not appear in batch");
+    }
+
+    #[test]
+    fn record_push_failure_truncates_long_error_messages() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        let id = insert_outbox_row(&conn, "messages", "long-error");
+        let long_error: String = "x".repeat(5_000);
+
+        record_push_failure_on_conn(&conn, id, &long_error).unwrap();
+
+        let stored: String = conn
+            .query_row(
+                "SELECT last_error FROM sync_outbox WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored.chars().count(), 500);
     }
 }
