@@ -223,7 +223,9 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
       stopHistorySync();
       setHistorySyncSummary(null);
       setHistorySyncWipeConfirm("");
-      setHistorySyncMessage("Remote history copy wiped. Cloud sync is off.");
+      setHistorySyncMessage(
+        "Remote history copy wiped. Cloud sync is off — re-enable it to upload a fresh copy.",
+      );
     } catch (err) {
       setHistorySyncMessage(`Remote wipe failed: ${err}`);
       console.error("[HistorySync] remote wipe failed", err);
