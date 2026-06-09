@@ -36,6 +36,18 @@ pub struct HistorySyncConfig {
     pub database_name: String,
 }
 
+/// Serializes a history sync run against a remote wipe so the two never
+/// interleave on the shared local database and leave the cloud mirror in a
+/// stuck or divergent state.
+#[derive(Default)]
+pub struct HistorySyncLock(std::sync::Arc<tokio::sync::Mutex<()>>);
+
+impl HistorySyncLock {
+    fn handle(app: &AppHandle) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+        app.state::<HistorySyncLock>().0.clone()
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistorySyncSummary {
@@ -163,6 +175,8 @@ pub async fn run_history_sync_once(
     app: AppHandle,
     config: HistorySyncConfig,
 ) -> Result<HistorySyncSummary, String> {
+    let lock = HistorySyncLock::handle(&app);
+    let _guard = lock.lock().await;
     let mut client = open_remote_client(&app, &config).await?;
     ensure_remote_schema(&mut client)?;
 
@@ -202,6 +216,8 @@ pub async fn wipe_remote_history(
             name = config.database_name
         ));
     }
+    let lock = HistorySyncLock::handle(&app);
+    let _guard = lock.lock().await;
     let mut client = open_remote_client(&app, &config).await?;
     client
         .execute("DROP SCHEMA IF EXISTS seren_desktop CASCADE", &[])

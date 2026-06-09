@@ -217,10 +217,13 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   const handleHistorySyncWipe = async () => {
     setHistorySyncBusy(true);
     setHistorySyncMessage(null);
+    // Stop scheduled ticks before wiping so no new sync dispatches mid-wipe.
+    // The Rust-side lock still serializes an already-running sync against the
+    // wipe; this just avoids queuing more work to wait behind it.
+    handleBooleanChange("historySyncEnabled", false);
+    stopHistorySync();
     try {
       await wipeHistorySyncRemote(historySyncWipeConfirm());
-      handleBooleanChange("historySyncEnabled", false);
-      stopHistorySync();
       setHistorySyncSummary(null);
       setHistorySyncWipeConfirm("");
       setHistorySyncMessage(
