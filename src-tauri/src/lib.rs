@@ -21,6 +21,7 @@ pub mod commands {
     pub mod orchestrator;
     pub mod provider_runtime;
     pub mod session;
+    pub mod updater;
     pub mod web;
 }
 
@@ -519,6 +520,9 @@ pub fn run() {
         .manage(orchestrator::eval::EvalState::new())
         .manage(orchestrator::tool_bridge::ToolResultBridge::new())
         .manage(provider_runtime::ProviderRuntimeState::new())
+        .manage(std::sync::Arc::new(
+            commands::updater::ShutdownGuard::default(),
+        ))
         .manage(services::database::WalCheckpointTask::default())
         .manage(messaging::MessagingState::new())
         .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
@@ -892,6 +896,8 @@ pub fn run() {
             embedded_runtime::get_embedded_runtime_info,
             provider_runtime::provider_runtime_get_config,
             provider_runtime::provider_runtime_stop,
+            commands::updater::updater_pre_install,
+            commands::updater::updater_pre_install_release,
             // CLI installer commands
             commands::cli_installer::check_cli_installed,
             commands::cli_installer::install_cli_tool,

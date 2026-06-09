@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { message } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -175,6 +176,57 @@ async function acknowledgeAutoInstall(
   }
 }
 
+interface PreInstallReport {
+  mcpDrained: boolean;
+  terminalsDrained: boolean;
+  providerRuntimeDrained: boolean;
+  claudeMemoryDrained: boolean;
+  handleReleased: boolean;
+  lockedNodePath: string | null;
+  elapsedMs: number;
+}
+
+/** Drain Seren-owned child processes before handing control to the NSIS
+ *  installer / macOS updater. Failure to drain on Windows is the root cause
+ *  of #2230's "Error opening file for writing: node.exe" — a stale bundled
+ *  node.exe child keeps the executable mapped and the installer cannot
+ *  overwrite it. The native command also engages a shutdown guard so any
+ *  orchestrator run that fires DURING the download (which can take minutes)
+ *  cannot re-spawn the runtime mid-install.
+ *
+ *  On macOS / Linux this is a defensive call — handle locking is not the
+ *  issue, but draining MCP/terminal children before the updater swaps the
+ *  .app bundle keeps the post-relaunch state clean. */
+async function preInstallShutdown(): Promise<PreInstallReport | null> {
+  if (!isTauriRuntime()) return null;
+  try {
+    const report = await invoke<PreInstallReport>("updater_pre_install");
+    verboseRuntimeConsole.debug("[Updater] Pre-install drain report:", report);
+    if (!report.handleReleased) {
+      // Log but continue — the install may still succeed if the lock clears
+      // before NSIS reaches the file-replace step. Surfacing as an error
+      // here would block users whose runtime drained correctly but where
+      // the handle-release poll timed out under heavy Defender scanning.
+      console.warn(
+        "[Updater] Bundled node handle did not release during pre-install drain:",
+        report.lockedNodePath,
+      );
+      telemetry.captureError(
+        new Error(
+          `Updater pre-install handle lock: ${report.lockedNodePath ?? "unknown"}`,
+        ),
+        { type: "updater", phase: "pre_install_handle_lock" },
+      );
+    }
+    return report;
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.warn("[Updater] Pre-install shutdown failed:", err.message);
+    telemetry.captureError(err, { type: "updater", phase: "pre_install" });
+    return null;
+  }
+}
+
 async function installAvailableUpdate(): Promise<void> {
   if (!isTauriRuntime()) {
     console.warn("[Updater] Install skipped: not Tauri runtime");
@@ -198,6 +250,13 @@ async function installAvailableUpdate(): Promise<void> {
     totalBytes: 0,
     progressPercent: 0,
   });
+
+  // Drain Seren-owned children BEFORE the download begins so the shutdown
+  // guard stays engaged for the full download+install window. Otherwise the
+  // orchestrator can spawn fresh node.exe processes during the multi-minute
+  // download and re-lock the bundled runtime by the time NSIS reaches the
+  // file-replace step (#2230).
+  await preInstallShutdown();
 
   try {
     await pendingUpdate.downloadAndInstall((progress: DownloadEvent) => {
@@ -234,6 +293,25 @@ async function installAvailableUpdate(): Promise<void> {
     console.error("[Updater] Install failed:", err.message);
     telemetry.captureError(err, { type: "updater", phase: "install" });
     setState({ status: "error", error: err.message });
+    // Release the native shutdown guard so the user can keep using the app
+    // without restarting. Without this, provider runtime / MCP spawns stay
+    // blocked until manual restart, which is bad UX after a failed update.
+    if (isTauriRuntime()) {
+      try {
+        await invoke("updater_pre_install_release");
+      } catch (releaseError) {
+        // Best-effort — if release fails, the next successful update or app
+        // restart will clear the guard.
+        const releaseErr =
+          releaseError instanceof Error
+            ? releaseError
+            : new Error(String(releaseError));
+        console.warn(
+          "[Updater] Failed to release pre-install guard after install failure:",
+          releaseErr.message,
+        );
+      }
+    }
   }
 }
 

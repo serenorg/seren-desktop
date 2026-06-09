@@ -66,7 +66,9 @@ jobs:
             echo ""
             echo "## Note"
             echo ""
-            echo "This is an alpha release. Windows builds are EV code signed. macOS builds are signed; if notarization is still processing, run: \`xattr -cr /Volumes/SerenDesktop/SerenDesktop.app\`"
+            echo "This is an alpha release. macOS builds are signed; if notarization is still processing, run: \`xattr -cr /Volumes/SerenDesktop/SerenDesktop.app\`"
+            echo ""
+            echo "<!-- WINDOWS_SIGNING_NOTE -->"
           } > release_notes.md
 
           echo "Generated release notes:"
@@ -277,6 +279,21 @@ jobs:
             . \
             seren-desktop-publishers \
             seren-desktop-mcp
+
+      # Windows: gate v* tag releases on signing being available.
+      # Without this, a misconfigured secret causes us to ship an unsigned
+      # Windows binary that Smart App Control immediately blocks (#2230 audit
+      # P1 "Release workflow can claim EV signing even when Windows signing
+      # is skipped"). For tag pushes that ARE production releases, refuse to
+      # proceed rather than ship unsigned.
+      - name: Require Windows signing for tag releases
+        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/v') && env.HAS_WINDOWS_SIGNING != 'true'
+        shell: bash
+        run: |
+          echo "::error::Windows signing secrets (ES_USERNAME et al.) are not configured."
+          echo "::error::Refusing to publish an unsigned Windows artifact for ${GITHUB_REF}."
+          echo "::error::Either configure SSL.com eSigner secrets or push a non-v* tag for unsigned dev builds."
+          exit 1
 
       # macOS: Import certificates and setup keychain (skip if no certificate)
       - name: Import macOS certificates
@@ -621,27 +638,83 @@ jobs:
             Remove-Item -Path $tempDir -Force
           }
 
-      # Verify Windows code signing
-      - name: Verify Windows code signing
+      # Verify Windows code signing on the NSIS setup .exe AND every shipped
+      # .exe inside the installed app payload. The prior check only validated
+      # the outer setup .exe, which left bundled Seren.exe + sidecars unsigned
+      # in the install payload and triggered Smart App Control blocks on
+      # users' machines (#2230 audit P0/P1 #1).
+      - name: Verify Windows code signing (NSIS setup .exe)
+        id: verify_windows_setup
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         shell: pwsh
         run: |
-          Write-Host "Verifying code signatures..."
-
-          # Verify NSIS installer
+          Write-Host "Verifying NSIS setup .exe signatures..."
           $nsisFiles = Get-ChildItem -Path "src-tauri/target/${{ matrix.target }}/release/bundle/nsis" -Filter "*.exe"
+          if ($nsisFiles.Count -eq 0) {
+            Write-Host "::error::No NSIS .exe files found to verify"
+            exit 1
+          }
           foreach ($file in $nsisFiles) {
             Write-Host "Checking signature for: $($file.FullName)"
             $sig = Get-AuthenticodeSignature -FilePath $file.FullName
             if ($sig.Status -eq "Valid") {
-              Write-Host "✓ Valid signature: $($sig.SignerCertificate.Subject)"
+              Write-Host "  Valid signature: $($sig.SignerCertificate.Subject)"
             } else {
-              Write-Host "✗ Invalid or missing signature: $($sig.Status)"
+              Write-Host "::error::Invalid or missing signature on $($file.FullName): $($sig.Status)"
               exit 1
             }
           }
+          Write-Host "NSIS setup .exe is properly signed."
 
-          Write-Host "NSIS installer is properly signed!"
+      # Recursive Authenticode check over the Tauri-produced app bundle
+      # (Seren.exe + any shipped .exe/.dll). Reports unsigned files but is
+      # non-blocking pending follow-up: full embedded-runtime signing (Git for
+      # Windows binaries, bundled node.exe, sidecars) is tracked separately
+      # because it needs CI-side staging-dir batch signing not in this PR.
+      # The report lets us see the actual exposure surface for SmartScreen
+      # reputation building.
+      - name: Audit Windows payload signature coverage (non-blocking)
+        id: audit_windows_payload
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $bundleRoot = "src-tauri/target/${{ matrix.target }}/release/bundle"
+          $unsignedFiles = @()
+          $validFiles = @()
+          Get-ChildItem -Path $bundleRoot -Recurse -Include "*.exe","*.dll" -File | ForEach-Object {
+            $sig = Get-AuthenticodeSignature -FilePath $_.FullName
+            if ($sig.Status -eq "Valid") {
+              $validFiles += $_.FullName
+            } else {
+              $unsignedFiles += [PSCustomObject]@{
+                Path = $_.FullName.Substring($bundleRoot.Length).TrimStart("/\")
+                Status = $sig.Status.ToString()
+              }
+            }
+          }
+          Write-Host "Signed files in bundle: $($validFiles.Count)"
+          Write-Host "Unsigned/invalid files in bundle: $($unsignedFiles.Count)"
+          if ($unsignedFiles.Count -gt 0) {
+            Write-Host "::warning::Unsigned files in Windows payload (follow-up #2230 embedded-runtime signing):"
+            $unsignedFiles | Format-Table -AutoSize | Out-String | Write-Host
+          }
+
+      # Scan the Tauri-generated NSI / NSH output for unresolved ${...}
+      # placeholders. #2230 showed "${product_name} is running" rendering
+      # literally in the installer UI, which means a template variable
+      # leaked through unsubstituted. Fail the build if any are found so
+      # this regression cannot ship to users again.
+      - name: Scan NSIS template for unresolved placeholders
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $nsiRoot = "src-tauri/target/${{ matrix.target }}/release/nsis"
+          if (-not (Test-Path $nsiRoot)) {
+            Write-Host "No generated NSIS template directory at $nsiRoot — skipping scan"
+            exit 0
+          }
+          node scripts/scan-nsis-placeholders.mjs $nsiRoot
 
       # Upload artifacts
       - name: Upload Windows NSIS
@@ -849,6 +922,40 @@ jobs:
             if (publishTarget.id !== uploadTarget.id) {
               console.log(`Canonical release changed from ${uploadTarget.id} to ${publishTarget.id}; syncing artifacts to the latest canonical release`);
               await syncArtifactsToRelease(publishTarget);
+            }
+
+            // Resolve the Windows-signed claim against actual artifact
+            // presence. The build job's `Require Windows signing for tag
+            // releases` step refuses to publish unsigned for v* tags, and
+            // the `Verify Windows code signing (NSIS setup .exe)` step
+            // fails the build on signature mismatch. So if a Windows setup
+            // .exe lands here for a v* tag, signing succeeded. For other
+            // tag formats (dev builds), don't claim signing happened.
+            //
+            // #2230 audit item I: prior workflow unconditionally claimed
+            // "Windows builds are EV code signed" in release notes even when
+            // the unsigned build path produced the artifact.
+            const isProductionTag = tagName.startsWith('v');
+            const hasWindowsArtifact = fs.existsSync(artifactsDir)
+              && fs.readdirSync(artifactsDir).some((entry) => {
+                const dir = path.join(artifactsDir, entry);
+                if (!fs.statSync(dir).isDirectory()) return false;
+                return fs.readdirSync(dir).some((f) => f.endsWith('-setup.exe'));
+              });
+            const windowsSignedClaim = isProductionTag && hasWindowsArtifact
+              ? 'Windows builds are EV code signed. If you still see a SmartScreen warning, click "More info" → "Run anyway"; reputation builds with installs.'
+              : 'Windows artifacts in this release are NOT EV code signed.';
+            const noteMarker = '<!-- WINDOWS_SIGNING_NOTE -->';
+            if (publishTarget.body && publishTarget.body.includes(noteMarker)) {
+              const updatedBody = publishTarget.body.replace(noteMarker, windowsSignedClaim);
+              console.log(`Resolving Windows signing note: tag=${tagName} hasWindowsArtifact=${hasWindowsArtifact}`);
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: publishTarget.id,
+                body: updatedBody,
+              });
+              publishTarget.body = updatedBody;
             }
 
             if (publishTarget.draft) {
