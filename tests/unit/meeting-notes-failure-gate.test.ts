@@ -119,6 +119,10 @@ describe("meetingStore notes-failure gates handoff (#2159)", () => {
   it("marks failed and skips notes when capture stop reports no transcript output", async () => {
     m.stopMeetingCapture.mockResolvedValueOnce({
       hadCapture: true,
+      pushFrameCount: 0,
+      acceptedPushFrameCount: 0,
+      droppedPushFrameCount: 0,
+      droppedPushSampleCount: 0,
       frameCount: 0,
       sampleCount: 0,
       speechFrameCount: 0,

@@ -2,16 +2,16 @@
 // ABOUTME: Transcribes ~1.5s chunks (or on silence) via transcribe_pcm and emits live partial text.
 
 import { createRunningAudioContext } from "@/lib/audio/captureContext";
+import { connectPulledScriptProcessor } from "@/lib/audio/scriptProcessor";
 import { transcribePcm } from "@/services/dictation";
 
-const TARGET_SAMPLE_RATE = 16_000;
 // Transcribe roughly every 1.5s of audio so text appears live as the user speaks.
-const CHUNK_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 1.5);
+const CHUNK_SECONDS = 1.5;
 // A short run of quiet samples ends a phrase early so partials feel responsive.
 const SILENCE_RMS = 0.012;
-const SILENCE_FLUSH_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.6);
+const SILENCE_FLUSH_SECONDS = 0.6;
 // Never fire a chunk on a tiny sliver of audio (avoids empty/garbled partials).
-const MIN_FLUSH_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.4);
+const MIN_FLUSH_SECONDS = 0.4;
 
 export interface DictationCaptureHandle {
   /** Current input amplitude in 0..1 for the HUD meter (0 on silence). */
@@ -36,10 +36,10 @@ function frameRms(input: Float32Array): number {
 }
 
 /**
- * Begin streaming the microphone for dictation. The browser resamples to
- * 16 kHz mono (the AudioContext rate), so frames are pipeline-ready. Each
- * flushed chunk is transcribed and surfaced through `onPartial`; transcripts
- * are serialized so the concatenated result stays in order.
+ * Begin streaming the microphone for dictation. Use the hardware context rate
+ * and let Rust normalize frames before transcription. Each flushed chunk is
+ * transcribed and surfaced through `onPartial`; transcripts are serialized so
+ * the concatenated result stays in order.
  */
 export async function startDictationCapture(
   onPartial: (text: string) => void,
@@ -50,7 +50,7 @@ export async function startDictationCapture(
 
   let context: AudioContext;
   try {
-    context = await createRunningAudioContext(TARGET_SAMPLE_RATE);
+    context = await createRunningAudioContext();
   } catch (error) {
     // Release the mic we just opened so a failed start can't leave it live.
     for (const track of stream.getTracks()) {
@@ -64,10 +64,11 @@ export async function startDictationCapture(
   analyser.fftSize = 512;
   source.connect(analyser);
 
-  const processor = context.createScriptProcessor(4096, 1, 1);
-  // Route through a muted gain so onaudioprocess fires without echoing the mic.
-  const mute = context.createGain();
-  mute.gain.value = 0;
+  const chunkSamples = Math.floor(context.sampleRate * CHUNK_SECONDS);
+  const silenceFlushSamples = Math.floor(
+    context.sampleRate * SILENCE_FLUSH_SECONDS,
+  );
+  const minFlushSamples = Math.floor(context.sampleRate * MIN_FLUSH_SECONDS);
 
   let buffer: number[] = [];
   let quietSamples = 0;
@@ -81,8 +82,7 @@ export async function startDictationCapture(
         const text = await transcribePcm({
           samples: frame,
           channels: 1,
-          // The WebView may ignore the 16 kHz request; report the real rate so
-          // the Rust pipeline resamples correctly.
+          // Report the context's real hardware rate so Rust can resample accurately.
           sampleRate: context.sampleRate,
         });
         const trimmed = text.trim();
@@ -97,14 +97,14 @@ export async function startDictationCapture(
   };
 
   const flush = () => {
-    if (buffer.length < MIN_FLUSH_SAMPLES) return;
+    if (buffer.length < minFlushSamples) return;
     const frame = buffer;
     buffer = [];
     quietSamples = 0;
     queueTranscription(frame);
   };
 
-  processor.onaudioprocess = (event) => {
+  const processor = connectPulledScriptProcessor(context, source, (event) => {
     const channel = event.inputBuffer.getChannelData(0);
     floatToPcm16(channel, buffer);
 
@@ -115,17 +115,12 @@ export async function startDictationCapture(
     }
 
     if (
-      buffer.length >= CHUNK_SAMPLES ||
-      (quietSamples >= SILENCE_FLUSH_SAMPLES &&
-        buffer.length >= MIN_FLUSH_SAMPLES)
+      buffer.length >= chunkSamples ||
+      (quietSamples >= silenceFlushSamples && buffer.length >= minFlushSamples)
     ) {
       flush();
     }
-  };
-
-  source.connect(processor);
-  processor.connect(mute);
-  mute.connect(context.destination);
+  });
 
   const timeData = new Uint8Array(analyser.frequencyBinCount);
   const level = () => {
@@ -147,7 +142,6 @@ export async function startDictationCapture(
       queueTranscription(frame);
     }
     processor.disconnect();
-    mute.disconnect();
     analyser.disconnect();
     source.disconnect();
     for (const track of stream.getTracks()) {

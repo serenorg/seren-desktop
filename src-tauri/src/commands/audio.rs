@@ -239,6 +239,10 @@ pub async fn stop_meeting_capture(
 
     let outcome = StopMeetingCaptureOutcome {
         had_capture: summary.had_capture,
+        push_frame_count: summary.push_frame_count,
+        accepted_push_frame_count: summary.accepted_push_frame_count,
+        dropped_push_frame_count: summary.dropped_push_frame_count,
+        dropped_push_sample_count: summary.dropped_push_sample_count,
         frame_count: summary.frame_count,
         sample_count: summary.sample_count,
         speech_frame_count: summary.speech_frame_count,
@@ -276,6 +280,10 @@ pub async fn stop_meeting_capture(
 #[serde(rename_all = "camelCase")]
 pub struct StopMeetingCaptureOutcome {
     pub had_capture: bool,
+    pub push_frame_count: u64,
+    pub accepted_push_frame_count: u64,
+    pub dropped_push_frame_count: u64,
+    pub dropped_push_sample_count: u64,
     pub frame_count: u64,
     pub sample_count: u64,
     pub speech_frame_count: u64,
@@ -296,12 +304,30 @@ fn stop_capture_failure_reason(
         return None;
     }
     if !summary.had_capture {
+        if summary.dropped_push_frame_count > 0 {
+            return Some(
+                "Audio frames reached Seren, but Meeting capture had no active stream to accept them. Restart capture; if it repeats, send logs with the dropped-frame counters."
+                    .to_string(),
+            );
+        }
         return Some(
             "Meeting capture was no longer active when Stop was pressed. Restart Seren and start capture again."
                 .to_string(),
         );
     }
     if summary.frame_count == 0 {
+        if summary.accepted_push_frame_count > 0 {
+            return Some(
+                "Audio frames reached Meeting capture, but the transcription worker did not process them. Restart capture; if it repeats, send logs with the accepted-frame counters."
+                    .to_string(),
+            );
+        }
+        if summary.dropped_push_frame_count > 0 {
+            return Some(
+                "Audio frames reached Seren, but were dropped before transcription. Restart capture; if it repeats, send logs with the dropped-frame counters."
+                    .to_string(),
+            );
+        }
         return Some(
             "No audio reached Meeting capture. Check microphone and system-audio permissions, then start capture again."
                 .to_string(),
@@ -1020,11 +1046,41 @@ mod tests {
             chunk_count: 0,
             emitted_segment_count: 0,
             emitted_gap_count: 0,
+            ..Default::default()
         };
 
         let reason = stop_capture_failure_reason(&summary, 0, 0).unwrap();
 
         assert!(reason.contains("No audio reached Meeting capture"));
+    }
+
+    #[test]
+    fn stop_capture_failure_reason_describes_dropped_capture_frames() {
+        let summary = crate::audio::pipeline::CaptureStopSummary {
+            had_capture: true,
+            push_frame_count: 1,
+            dropped_push_frame_count: 1,
+            dropped_push_sample_count: 128,
+            ..Default::default()
+        };
+
+        let reason = stop_capture_failure_reason(&summary, 0, 0).unwrap();
+
+        assert!(reason.contains("dropped before transcription"));
+    }
+
+    #[test]
+    fn stop_capture_failure_reason_describes_unprocessed_accepted_frames() {
+        let summary = crate::audio::pipeline::CaptureStopSummary {
+            had_capture: true,
+            push_frame_count: 1,
+            accepted_push_frame_count: 1,
+            ..Default::default()
+        };
+
+        let reason = stop_capture_failure_reason(&summary, 0, 0).unwrap();
+
+        assert!(reason.contains("transcription worker did not process"));
     }
 
     #[test]
@@ -1037,6 +1093,7 @@ mod tests {
             chunk_count: 1,
             emitted_segment_count: 1,
             emitted_gap_count: 0,
+            ..Default::default()
         };
 
         let reason = stop_capture_failure_reason(&summary, 0, 0).unwrap();
@@ -1054,6 +1111,7 @@ mod tests {
             chunk_count: 1,
             emitted_segment_count: 1,
             emitted_gap_count: 0,
+            ..Default::default()
         };
 
         assert_eq!(stop_capture_failure_reason(&summary, 1, 1), None);
