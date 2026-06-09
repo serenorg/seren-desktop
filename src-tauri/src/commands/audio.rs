@@ -19,7 +19,7 @@ use crate::audio::types::{
     Meeting, MeetingStatus, SegmentStatus, Speaker, SpeakerSource, TranscriptSegment,
 };
 use crate::orchestrator::types::SkillRef;
-use crate::services::database::DbPool;
+use crate::services::database::{DbPool, enqueue_sync_tombstone, mark_sync_upsert};
 use rusqlite::{Connection, OptionalExtension, Result, params};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -135,6 +135,7 @@ fn set_meeting_notes_record(
             id
         ],
     )?;
+    mark_sync_upsert(conn, "meetings", id)?;
     Ok(())
 }
 
@@ -153,6 +154,7 @@ pub async fn set_meeting_routed_skill(
              WHERE id = ?4",
             params![routed_skill_slug, agent_conversation_id, now_ms(), id],
         )?;
+        mark_sync_upsert(conn, "meetings", &id)?;
         Ok(())
     })
     .await?;
@@ -786,6 +788,7 @@ pub fn insert_meeting(conn: &Connection, meeting: NewMeeting) -> Result<Meeting>
             meeting.now
         ],
     )?;
+    mark_sync_upsert(conn, "meetings", &meeting.id)?;
 
     select_meeting(conn, &meeting.id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
 }
@@ -821,6 +824,15 @@ pub fn select_meetings(conn: &Connection, limit: i32) -> Result<Vec<Meeting>> {
 
 pub fn delete_meeting_record(conn: &Connection, id: &str) -> Result<usize> {
     let tx = conn.unchecked_transaction()?;
+    let mut stmt = tx.prepare("SELECT id FROM transcript_segments WHERE meeting_id = ?1")?;
+    let segment_ids = stmt
+        .query_map(params![id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+    for segment_id in &segment_ids {
+        enqueue_sync_tombstone(&tx, "transcript_segments", segment_id)?;
+    }
+    enqueue_sync_tombstone(&tx, "meetings", id)?;
     tx.execute(
         "DELETE FROM transcript_segments WHERE meeting_id = ?1",
         params![id],
@@ -892,6 +904,7 @@ pub fn update_meeting_status_record_with_failure_reason_and_diagnostics(
             id
         ],
     )?;
+    mark_sync_upsert(conn, "meetings", id)?;
     Ok(())
 }
 
@@ -919,6 +932,7 @@ pub fn insert_transcript_segment(
             segment.created_at
         ],
     )?;
+    mark_sync_upsert(conn, "transcript_segments", &segment.id)?;
 
     Ok(TranscriptSegment {
         id: segment.id,
@@ -961,6 +975,7 @@ pub fn update_transcript_segment_speaker(conn: &Connection, id: &str, label: &st
          WHERE id = ?3",
         params![label, SpeakerSource::Diarization.as_str(), id],
     )?;
+    mark_sync_upsert(conn, "transcript_segments", id)?;
     Ok(())
 }
 

@@ -17,6 +17,13 @@ import {
   startClaudeMemoryInterceptor,
   stopClaudeMemoryInterceptor,
 } from "@/services/claudeMemory";
+import {
+  type HistorySyncSummary,
+  runHistorySyncNow,
+  startHistorySync,
+  stopHistorySync,
+  wipeHistorySyncRemote,
+} from "@/services/historySync";
 import { allowsSerenPublicModels } from "@/services/organization-policy";
 import {
   appearanceState,
@@ -55,6 +62,7 @@ type SettingsSection =
   | "agent"
   | "providers"
   | "logins"
+  | "sync"
   | "keys"
   | "toolsets"
   | "editor"
@@ -89,6 +97,13 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   const [claudeMemoryMessage, setClaudeMemoryMessage] = createSignal<
     string | null
   >(null);
+  const [historySyncBusy, setHistorySyncBusy] = createSignal(false);
+  const [historySyncMessage, setHistorySyncMessage] = createSignal<
+    string | null
+  >(null);
+  const [historySyncSummary, setHistorySyncSummary] =
+    createSignal<HistorySyncSummary | null>(null);
+  const [historySyncWipeConfirm, setHistorySyncWipeConfirm] = createSignal("");
 
   const refreshClaudeMemoryStatus = async () => {
     try {
@@ -159,6 +174,62 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
   const handleBooleanChange = (key: keyof Settings, checked: boolean) => {
     settingsStore.set(key, checked as Settings[typeof key]);
+  };
+
+  const historySyncDatabaseName = () =>
+    settingsState.app.historySyncDatabaseName ?? "seren_desktop_history";
+
+  const formatHistorySyncLastSynced = () => {
+    const value = settingsState.app.historySyncLastSyncedAt;
+    if (!value) return "Not synced yet.";
+    return new Date(value).toLocaleString();
+  };
+
+  const describeHistorySyncSummary = (summary: HistorySyncSummary) =>
+    `Pushed ${summary.pushed}, pulled ${summary.pulled}, backfilled ${summary.backfilled}, queued ${summary.queued}.`;
+
+  const handleHistorySyncNow = async () => {
+    setHistorySyncBusy(true);
+    setHistorySyncMessage(null);
+    try {
+      const summary = await runHistorySyncNow();
+      setHistorySyncSummary(summary);
+      setHistorySyncMessage(describeHistorySyncSummary(summary));
+    } catch (err) {
+      setHistorySyncMessage(`Sync failed: ${err}`);
+      console.error("[HistorySync] manual sync failed", err);
+    } finally {
+      setHistorySyncBusy(false);
+    }
+  };
+
+  const handleHistorySyncToggle = async (enabled: boolean) => {
+    handleBooleanChange("historySyncEnabled", enabled);
+    setHistorySyncMessage(null);
+    if (!enabled) {
+      stopHistorySync();
+      return;
+    }
+    startHistorySync();
+    await handleHistorySyncNow();
+  };
+
+  const handleHistorySyncWipe = async () => {
+    setHistorySyncBusy(true);
+    setHistorySyncMessage(null);
+    try {
+      await wipeHistorySyncRemote(historySyncWipeConfirm());
+      handleBooleanChange("historySyncEnabled", false);
+      stopHistorySync();
+      setHistorySyncSummary(null);
+      setHistorySyncWipeConfirm("");
+      setHistorySyncMessage("Remote history copy wiped. Cloud sync is off.");
+    } catch (err) {
+      setHistorySyncMessage(`Remote wipe failed: ${err}`);
+      console.error("[HistorySync] remote wipe failed", err);
+    } finally {
+      setHistorySyncBusy(false);
+    }
   };
 
   const handleThemeChange = (value: Theme) => {
@@ -291,6 +362,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "agent", label: "Agent", icon: "🛡️" },
     { id: "providers", label: "AI Providers", icon: "🤖" },
     { id: "logins", label: "Logins", icon: "🔐" },
+    { id: "sync", label: "Cloud Sync", icon: "☁️" },
     { id: "keys", label: "Keys", icon: "🔑" },
     { id: "toolsets", label: "Toolsets", icon: "📦" },
     { id: "editor", label: "Editor", icon: "📝" },
@@ -1975,6 +2047,129 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             <Show when={claudeMemoryMessage()}>
               <p class="m-0 mt-2 text-[0.78rem] text-muted-foreground">
                 {claudeMemoryMessage()}
+              </p>
+            </Show>
+          </section>
+        </Show>
+
+        <Show when={activeSection() === "sync"}>
+          <section>
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Cloud Sync</h3>
+            <p class="m-0 mb-6 text-muted-foreground leading-normal">
+              Keep durable chat and meeting history mirrored to SerenDB.
+            </p>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.historySyncEnabled}
+                  disabled={historySyncBusy()}
+                  onChange={(e) =>
+                    handleHistorySyncToggle(e.currentTarget.checked)
+                  }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Sync Chat & Meeting History
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Uses the default SerenDB project named{" "}
+                    <code class="px-1 py-0.5 rounded bg-border/40 text-[0.78rem]">
+                      speech-text
+                    </code>{" "}
+                    and database{" "}
+                    <code class="px-1 py-0.5 rounded bg-border/40 text-[0.78rem]">
+                      {historySyncDatabaseName()}
+                    </code>
+                    .
+                  </span>
+                </span>
+              </label>
+              <button
+                type="button"
+                disabled={
+                  historySyncBusy() || !settingsState.app.historySyncEnabled
+                }
+                class="shrink-0 px-3 py-1.5 text-[0.8rem] rounded-md border border-border-strong bg-transparent hover:bg-border text-foreground cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleHistorySyncNow}
+              >
+                {historySyncBusy() ? "Syncing..." : "Sync Now"}
+              </button>
+            </div>
+
+            <div class="flex items-center justify-between gap-4 py-3 border-b border-border">
+              <div class="flex flex-col gap-0.5 min-w-0">
+                <span class="text-[0.85rem] font-medium text-foreground">
+                  Status
+                </span>
+                <span class="text-[0.78rem] text-muted-foreground">
+                  Last synced: {formatHistorySyncLastSynced()}
+                </span>
+                <Show when={historySyncSummary()}>
+                  {(summary) => (
+                    <span class="text-[0.78rem] text-muted-foreground">
+                      Conflicts waiting: {summary().conflicts}
+                    </span>
+                  )}
+                </Show>
+              </div>
+              <div class="text-right text-[0.78rem] text-muted-foreground min-w-[11rem]">
+                <div class="truncate">
+                  Project:{" "}
+                  {settingsState.app.historySyncProjectId ?? "Not provisioned"}
+                </div>
+                <div class="truncate">
+                  Branch:{" "}
+                  {settingsState.app.historySyncBranchId ?? "Not provisioned"}
+                </div>
+              </div>
+            </div>
+
+            <div class="py-3 border-b border-border">
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex flex-col gap-0.5 flex-1">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Wipe Remote Copy
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Type{" "}
+                    <code class="px-1 py-0.5 rounded bg-border/40 text-[0.78rem]">
+                      {historySyncDatabaseName()}
+                    </code>{" "}
+                    to remove the remote mirror. Local SQLite history is not
+                    deleted.
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <input
+                    type="text"
+                    value={historySyncWipeConfirm()}
+                    onInput={(e) =>
+                      setHistorySyncWipeConfirm(e.currentTarget.value)
+                    }
+                    placeholder={historySyncDatabaseName()}
+                    class="w-[14rem] px-2.5 py-1.5 rounded-md border border-border bg-surface text-[0.82rem] text-foreground outline-none focus:border-accent"
+                  />
+                  <button
+                    type="button"
+                    disabled={
+                      historySyncBusy() ||
+                      historySyncWipeConfirm() !== historySyncDatabaseName()
+                    }
+                    class="px-3 py-1.5 text-[0.8rem] rounded-md border border-destructive/60 bg-destructive/10 text-destructive hover:bg-destructive/15 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleHistorySyncWipe}
+                  >
+                    Wipe
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <Show when={historySyncMessage()}>
+              <p class="m-0 mt-3 text-[0.78rem] text-muted-foreground">
+                {historySyncMessage()}
               </p>
             </Show>
           </section>

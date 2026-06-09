@@ -138,6 +138,17 @@ export interface Settings {
    */
   claudeMemoryDatabaseName: string | null;
 
+  /**
+   * Sync durable chat and meeting history to the user's SerenDB branch.
+   * Auto-provisions the dedicated "speech-text" project and
+   * "seren_desktop_history" database on first authenticated run.
+   */
+  historySyncEnabled: boolean;
+  historySyncProjectId: string | null;
+  historySyncBranchId: string | null;
+  historySyncDatabaseName: string | null;
+  historySyncLastSyncedAt: number | null;
+
   // Agent settings
   agentSandboxMode: "read-only" | "workspace-write" | "full-access";
   agentApprovalPolicy: "untrusted" | "on-failure" | "on-request" | "never";
@@ -257,6 +268,11 @@ const DEFAULT_SETTINGS: Settings = {
   claudeMemoryProjectId: null,
   claudeMemoryBranchId: null,
   claudeMemoryDatabaseName: null,
+  historySyncEnabled: true,
+  historySyncProjectId: null,
+  historySyncBranchId: null,
+  historySyncDatabaseName: null,
+  historySyncLastSyncedAt: null,
   // Agent
   agentSandboxMode: "workspace-write",
   agentApprovalPolicy: "on-request",

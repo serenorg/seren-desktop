@@ -59,6 +59,9 @@ sha2 = "0.10"
 base64 = "0.22"
 libc = "0.2"
 reqwest = { version = "0.13", features = ["json", "stream"] }
+postgres = { version = "0.19", features = ["with-serde_json-1"] }
+postgres-native-tls = "0.5"
+native-tls = "0.2"
 seren-memory-sdk = { git = "https://github.com/serenorg/seren-memory-sdk.git", branch = "main" }
 rmcp = { version = "1.2", features = [
     "client",
