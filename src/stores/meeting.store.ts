@@ -13,6 +13,7 @@ import {
 import {
   type CaptureStopOutcome,
   createMeeting,
+  deleteMeeting as deleteMeetingRecord,
   generateMeetingNotes,
   getMeetingTranscriptText,
   getTranscriptSegments,
@@ -49,6 +50,7 @@ interface MeetingState {
    * capturing. The titlebar surfaces an arm prompt; the user starts.
    */
   autoDetectSuggested: boolean;
+  autoDetectSourceApp: string | null;
   /**
    * The meeting awaiting first-run audio priming. Set when a start is requested
    * before the user has acknowledged the permission explainer; the app-wide
@@ -66,6 +68,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   isLoading: false,
   error: null,
   autoDetectSuggested: false,
+  autoDetectSourceApp: null,
   primingRequest: null,
 });
 
@@ -168,6 +171,7 @@ async function loadMeetings(): Promise<void> {
   setMeetingState("error", null);
   if (!isTauriRuntime()) {
     setMeetingState("meetings", []);
+    setMeetingState("autoDetectSourceApp", null);
     setMeetingState("isLoading", false);
     return;
   }
@@ -682,6 +686,35 @@ function clearError(): void {
   setMeetingState("error", null);
 }
 
+async function deleteMeeting(meeting: Meeting): Promise<void> {
+  if (!isTauriRuntime()) return;
+  setMeetingState("error", null);
+  if (
+    meeting.status === "pending_capture" ||
+    meeting.status === "capturing" ||
+    meeting.status === "transcribing" ||
+    meeting.status === "agent_running"
+  ) {
+    setMeetingState("error", "Stop or finish this meeting before deleting it.");
+    return;
+  }
+  try {
+    await deleteMeetingRecord(meeting.id);
+    const remaining = meetingState.meetings.filter(
+      (item) => item.id !== meeting.id,
+    );
+    setMeetingState("meetings", remaining);
+    if (meetingState.activeMeeting?.id === meeting.id) {
+      await setActiveMeeting(remaining[0] ?? null);
+    }
+  } catch (error) {
+    setMeetingState(
+      "error",
+      error instanceof Error ? error.message : "Failed to delete meeting",
+    );
+  }
+}
+
 function isCapturing(ignoreMeetingId?: string): boolean {
   return meetingState.meetings.some(
     (meeting) =>
@@ -697,20 +730,24 @@ async function pollAutoDetect(): Promise<void> {
   if (!isTauriRuntime()) return;
   if (!settingsStore.get("meetingAutoDetectEnabled")) {
     setMeetingState("autoDetectSuggested", false);
+    setMeetingState("autoDetectSourceApp", null);
     return;
   }
   if (isCapturing()) {
     setMeetingState("autoDetectSuggested", false);
+    setMeetingState("autoDetectSourceApp", null);
     return;
   }
 
   try {
-    const detected = await meetingAutodetect();
-    if (!detected) {
+    const detection = await meetingAutodetect();
+    if (!detection.detected) {
       autoDetectDismissed = false;
       setMeetingState("autoDetectSuggested", false);
+      setMeetingState("autoDetectSourceApp", null);
       return;
     }
+    setMeetingState("autoDetectSourceApp", detection.sourceApp);
     setMeetingState("autoDetectSuggested", !autoDetectDismissed);
   } catch {
     // Probe failures are non-fatal; leave the prompt as-is.
@@ -739,10 +776,11 @@ function stopAutoDetect(): void {
 async function acceptAutoDetect(): Promise<void> {
   if (!isTauriRuntime()) return;
   if (isStarting || meetingState.primingRequest) return;
+  const sourceApp = meetingState.autoDetectSourceApp;
   dismissAutoDetect();
   const meeting = await createMeeting({
     title: `Meeting ${formatTime(Date.now())}`,
-    sourceApp: "Auto-detect",
+    sourceApp: meetingState.autoDetectSourceApp ?? sourceApp ?? "Auto-detect",
     templateId: settingsStore.get("meetingTemplateId"),
   });
   await requestCaptureStart(meeting);
@@ -776,6 +814,7 @@ export const meetingStore = {
   stopCapture,
   stopAndProcess,
   regenerateNotes,
+  deleteMeeting,
   clearError,
   startAutoDetect,
   stopAutoDetect,

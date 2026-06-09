@@ -796,6 +796,7 @@ pub fn run() {
             commands::audio::create_meeting,
             commands::audio::get_meeting,
             commands::audio::list_meetings,
+            commands::audio::delete_meeting,
             commands::audio::update_meeting_status,
             commands::audio::update_meeting_notes,
             commands::audio::set_meeting_routed_skill,

@@ -21,6 +21,27 @@ import { settingsStore } from "@/stores/settings.store";
 
 interface MeetingDetailProps {
   meeting: Meeting;
+  onRequestDelete?: (meeting: Meeting) => void;
+}
+
+function TrashGlyph() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M6.2 2.5h3.6M3.5 4.5h9M5 4.5l.4 8.2c.1.6.5.9 1.1.9h3c.6 0 1-.3 1.1-.9l.4-8.2M6.9 6.7v4.5M9.1 6.7v4.5"
+        stroke="currentColor"
+        stroke-width="1.35"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
 }
 
 function parseStructured(json: string | null): StructuredNotes | null {
@@ -89,6 +110,11 @@ export function MeetingDetail(props: MeetingDetailProps) {
   );
 
   const segments = () => meetingStore.state.liveSegments;
+  const deleteDisabled = () =>
+    props.meeting.status === "pending_capture" ||
+    props.meeting.status === "capturing" ||
+    props.meeting.status === "transcribing" ||
+    props.meeting.status === "agent_running";
 
   const jumpToSource = (text: string) => {
     const target = keywords(text);
@@ -125,15 +151,33 @@ export function MeetingDetail(props: MeetingDetailProps) {
   return (
     <div class="p-5 max-w-none">
       <div class="mb-5">
-        <h3 class="text-[18px] font-semibold tracking-normal">
-          {meetingTitle(props.meeting)}
-        </h3>
-        <div class="mt-1 flex items-center gap-3 text-[12px] text-muted-foreground">
-          <span>{STATUS_LABELS[props.meeting.status]}</span>
-          <span class="font-mono tabular-nums">
-            {formatDuration(props.meeting)}
-          </span>
-          <span>{props.meeting.sourceApp ?? "Desktop"}</span>
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <h3 class="truncate text-[18px] font-semibold tracking-normal">
+              {meetingTitle(props.meeting)}
+            </h3>
+            <div class="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
+              <span>{STATUS_LABELS[props.meeting.status]}</span>
+              <span class="font-mono tabular-nums">
+                {formatDuration(props.meeting)}
+              </span>
+              <span>{props.meeting.sourceApp ?? "Desktop"}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="h-8 w-8 shrink-0 flex items-center justify-center rounded-md border border-destructive/35 bg-destructive/10 text-destructive transition-colors hover:bg-destructive/15 disabled:opacity-45 disabled:cursor-not-allowed"
+            onClick={() => props.onRequestDelete?.(props.meeting)}
+            disabled={deleteDisabled()}
+            title={
+              deleteDisabled()
+                ? "Stop capture before deleting"
+                : "Delete meeting"
+            }
+            aria-label="Delete meeting"
+          >
+            <TrashGlyph />
+          </button>
         </div>
         <Show when={props.meeting.failureReason}>
           {(reason) => (

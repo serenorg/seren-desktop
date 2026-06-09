@@ -14,6 +14,7 @@ interface TitlebarProps {
   onToggleSkills: () => void;
   onToggleSettings: () => void;
   recordPromptVisible?: boolean;
+  recordPromptSourceApp?: string | null;
   onRecordConversation?: () => void;
   onDismissRecordPrompt?: () => void;
 }
@@ -143,6 +144,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
 
         <Show when={props.recordPromptVisible}>
           <RecordPrompt
+            sourceApp={props.recordPromptSourceApp}
             onRecord={() => props.onRecordConversation?.()}
             onDismiss={() => props.onDismissRecordPrompt?.()}
           />

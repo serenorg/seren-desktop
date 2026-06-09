@@ -6,6 +6,8 @@ interface RecordPromptProps {
   onRecord: () => void;
   /** Dismiss; won't re-nag for the same running app this session. */
   onDismiss: () => void;
+  /** Best-effort app label from the native audio activity probe. */
+  sourceApp?: string | null;
 }
 
 function MicGlyph() {
@@ -25,9 +27,11 @@ function MicGlyph() {
 }
 
 export function RecordPrompt(props: RecordPromptProps) {
+  const appLabel = () => props.sourceApp?.trim() || "Voice app";
+
   return (
     <div
-      class="flex h-8 w-[clamp(280px,42vw,430px)] min-w-0 items-center gap-2 rounded-md border border-accent/55 bg-primary-muted px-2 shadow-[0_0_0_1px_rgba(56,189,248,0.12),0_8px_24px_rgba(0,0,0,0.32)] backdrop-blur-sm animate-[fadeIn_200ms_ease]"
+      class="flex h-9 w-[clamp(300px,42vw,440px)] min-w-0 items-center gap-2 rounded-lg border border-accent/55 bg-popover px-2 shadow-[0_0_0_1px_rgba(56,189,248,0.12),0_8px_24px_rgba(0,0,0,0.32)] backdrop-blur-sm animate-[fadeIn_200ms_ease]"
       aria-label="Record detected conversation"
     >
       <span class="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
@@ -36,23 +40,23 @@ export function RecordPrompt(props: RecordPromptProps) {
       </span>
       <div class="flex min-w-0 flex-1 flex-col leading-tight">
         <span class="truncate text-[12px] font-medium text-foreground">
-          Record this conversation?
+          Call detected
         </span>
         <span class="truncate text-[10px] text-muted-foreground">
-          Active input detected. Capture transcript and notes.
+          {appLabel()}
         </span>
       </div>
       <div class="flex shrink-0 items-center gap-1">
         <button
           type="button"
-          class="h-6 rounded-md border border-accent bg-accent px-2 text-[11px] font-medium text-accent-foreground transition-colors hover:bg-primary-hover"
+          class="h-7 rounded-md border border-accent bg-accent px-2.5 text-[11px] font-medium text-accent-foreground transition-colors hover:bg-primary-hover"
           onClick={() => props.onRecord()}
         >
-          Record
+          Take notes
         </button>
         <button
           type="button"
-          class="h-6 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent/15 hover:text-foreground"
+          class="h-7 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent/15 hover:text-foreground"
           onClick={() => props.onDismiss()}
         >
           Not now

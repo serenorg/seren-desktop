@@ -4,7 +4,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
-  meetingAutodetect: vi.fn(async () => false),
+  meetingAutodetect: vi.fn(async () => ({
+    detected: false,
+    sourceApp: null,
+  })),
   listMeetings: vi.fn(async (): Promise<Meeting[]> => []),
 }));
 
@@ -50,22 +53,34 @@ describe("meeting auto-detect dismissal reset (#2209)", () => {
   });
 
   it("re-arms the record prompt after the previously dismissed call app disappears", async () => {
-    m.meetingAutodetect.mockResolvedValueOnce(true);
+    m.meetingAutodetect.mockResolvedValueOnce({
+      detected: true,
+      sourceApp: "Discord",
+    });
     meetingStore.startAutoDetect();
     await Promise.resolve();
 
     expect(meetingStore.state.autoDetectSuggested).toBe(true);
+    expect(meetingStore.state.autoDetectSourceApp).toBe("Discord");
     meetingStore.dismissAutoDetect();
     expect(meetingStore.state.autoDetectSuggested).toBe(false);
 
-    m.meetingAutodetect.mockResolvedValueOnce(false);
+    m.meetingAutodetect.mockResolvedValueOnce({
+      detected: false,
+      sourceApp: null,
+    });
     await vi.advanceTimersByTimeAsync(5_000);
     expect(meetingStore.state.autoDetectSuggested).toBe(false);
+    expect(meetingStore.state.autoDetectSourceApp).toBeNull();
 
-    m.meetingAutodetect.mockResolvedValueOnce(true);
+    m.meetingAutodetect.mockResolvedValueOnce({
+      detected: true,
+      sourceApp: "Zoom",
+    });
     await vi.advanceTimersByTimeAsync(5_000);
 
     expect(m.meetingAutodetect).toHaveBeenCalledTimes(3);
     expect(meetingStore.state.autoDetectSuggested).toBe(true);
+    expect(meetingStore.state.autoDetectSourceApp).toBe("Zoom");
   });
 });

@@ -1,9 +1,19 @@
 // ABOUTME: Meeting auto-detect decision logic for capture arming.
-// ABOUTME: Uses passive platform audio activity probes, not process-name presence.
+// ABOUTME: Uses passive audio activity probes plus best-effort app naming.
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AudioActivity {
     pub input_active: bool,
+    pub source_app: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingAutodetectResult {
+    pub detected: bool,
+    pub source_app: Option<String>,
 }
 
 /// Read whether the default input device is actively used by another app. The
@@ -17,9 +27,80 @@ pub fn should_start_capture(activity: AudioActivity) -> bool {
     activity.input_active
 }
 
+pub fn meeting_detection(activity: AudioActivity) -> MeetingAutodetectResult {
+    if should_start_capture(activity.clone()) {
+        return MeetingAutodetectResult {
+            detected: true,
+            source_app: activity.source_app,
+        };
+    }
+    MeetingAutodetectResult {
+        detected: false,
+        source_app: None,
+    }
+}
+
+fn known_call_app_from_process_list(process_list: &str) -> Option<String> {
+    let lower = process_list.to_lowercase();
+    for (needles, display) in KNOWN_CALL_APPS {
+        if needles.iter().any(|needle| lower.contains(needle)) {
+            return Some((*display).to_string());
+        }
+    }
+    None
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn known_call_app_from_system_processes() -> Option<String> {
+    let output = system_process_list()?;
+    known_call_app_from_process_list(&output)
+}
+
+#[cfg(target_os = "windows")]
+fn system_process_list() -> Option<String> {
+    let output = std::process::Command::new("tasklist")
+        .args(["/FO", "CSV", "/NH"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
+}
+
+#[cfg(target_os = "macos")]
+fn system_process_list() -> Option<String> {
+    let output = std::process::Command::new("ps")
+        .args(["-axo", "comm="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
+}
+
+const KNOWN_CALL_APPS: &[(&[&str], &str)] = &[
+    (&["zoom.us", "zoom.exe"], "Zoom"),
+    (&["discord"], "Discord"),
+    (&["whatsapp"], "WhatsApp"),
+    (
+        &["microsoft teams", "ms-teams", "teams.exe"],
+        "Microsoft Teams",
+    ),
+    (&["slack"], "Slack"),
+    (&["facetime"], "FaceTime"),
+    (&["telegram"], "Telegram"),
+    (&["google chrome", "chrome.exe"], "Google Chrome"),
+    (&["arc.app", "/arc", "arc.exe"], "Arc"),
+    (&["safari"], "Safari"),
+    (&["firefox"], "Firefox"),
+    (&["brave browser", "brave.exe"], "Brave"),
+];
+
 #[cfg(target_os = "macos")]
 mod platform_audio {
-    use super::AudioActivity;
+    use super::{AudioActivity, known_call_app_from_system_processes};
     use std::ffi::c_void;
 
     type OSStatus = i32;
@@ -58,8 +139,12 @@ mod platform_audio {
     }
 
     pub(super) fn probe_audio_activity() -> AudioActivity {
+        let input_active = default_input_device_is_running();
         AudioActivity {
-            input_active: default_input_device_is_running(),
+            input_active,
+            source_app: input_active
+                .then(known_call_app_from_system_processes)
+                .flatten(),
         }
     }
 
@@ -123,7 +208,7 @@ mod platform_audio {
 
 #[cfg(target_os = "windows")]
 mod platform_audio {
-    use super::AudioActivity;
+    use super::{AudioActivity, known_call_app_from_system_processes};
     use wasapi::initialize_mta;
     use windows::Win32::Media::Audio::{
         AudioSessionStateActive, IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator,
@@ -132,8 +217,12 @@ mod platform_audio {
     use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance};
 
     pub(super) fn probe_audio_activity() -> AudioActivity {
+        let input_active = default_capture_session_is_active();
         AudioActivity {
-            input_active: default_capture_session_is_active(),
+            input_active,
+            source_app: input_active
+                .then(known_call_app_from_system_processes)
+                .flatten(),
         }
     }
 
@@ -190,7 +279,10 @@ mod tests {
 
     #[test]
     fn should_start_capture_when_mic_is_in_use() {
-        assert!(should_start_capture(AudioActivity { input_active: true }));
+        assert!(should_start_capture(AudioActivity {
+            input_active: true,
+            ..Default::default()
+        }));
     }
 
     #[test]
@@ -200,11 +292,42 @@ mod tests {
 
     #[test]
     fn should_start_capture_when_input_device_is_active_for_browser_meetings() {
-        assert!(should_start_capture(AudioActivity { input_active: true }));
+        assert!(should_start_capture(AudioActivity {
+            input_active: true,
+            ..Default::default()
+        }));
     }
 
     #[test]
     fn should_not_start_capture_without_input_activity() {
         assert!(!should_start_capture(AudioActivity::default()));
+    }
+
+    #[test]
+    fn detection_includes_source_app_only_when_input_is_active() {
+        let inactive = meeting_detection(AudioActivity {
+            input_active: false,
+            source_app: Some("Discord".to_string()),
+        });
+        assert!(!inactive.detected);
+        assert_eq!(inactive.source_app, None);
+
+        let active = meeting_detection(AudioActivity {
+            input_active: true,
+            source_app: Some("Discord".to_string()),
+        });
+        assert!(active.detected);
+        assert_eq!(active.source_app.as_deref(), Some("Discord"));
+    }
+
+    #[test]
+    fn known_call_app_detection_prefers_specific_voice_apps_over_browsers() {
+        let processes = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n\
+            /Applications/Discord.app/Contents/MacOS/Discord\n";
+
+        assert_eq!(
+            known_call_app_from_process_list(processes).as_deref(),
+            Some("Discord")
+        );
     }
 }

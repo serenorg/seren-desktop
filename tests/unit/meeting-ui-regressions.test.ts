@@ -56,4 +56,54 @@ describe("Meeting capture widget behavior (#2228)", () => {
     expect(widget).toContain("tick();");
     expect(widget).toContain('data-tauri-drag-region');
   });
+
+  it("renders as a compact widget instead of a screen-sized floating panel (#2231)", () => {
+    const widget = source("src/components/meeting/CaptureWidget.tsx");
+
+    expect(widget).not.toContain("h-screen w-screen");
+    expect(widget).toContain("h-full w-full");
+    expect(widget).toContain("overflow-hidden");
+  });
+});
+
+describe("Meeting auto-detect consent prompt (#2231)", () => {
+  it("surfaces the detected app name while keeping capture consent-first", () => {
+    const prompt = source("src/components/meeting/RecordPrompt.tsx");
+    const appShell = source("src/components/layout/AppShell.tsx");
+    const store = source("src/stores/meeting.store.ts");
+    const service = source("src/services/meetings.ts");
+    const nativeCommand = source("src-tauri/src/commands/audio.rs");
+
+    expect(prompt).toContain("sourceApp");
+    expect(prompt).toContain("Call detected");
+    expect(prompt).toContain("Take notes");
+    expect(prompt).not.toContain("Active input detected");
+    expect(appShell).toContain("recordPromptSourceApp");
+    expect(store).toContain("autoDetectSourceApp");
+    expect(store).toContain("sourceApp: meetingState.autoDetectSourceApp");
+    expect(service).toContain("MeetingAutodetectResult");
+    expect(nativeCommand).toContain("MeetingAutodetectResult");
+  });
+});
+
+describe("Meeting delete affordance (#2231)", () => {
+  it("wires confirmed deletion through the UI, store, service, and native command", () => {
+    const panel = source("src/components/meeting/MeetingPanel.tsx");
+    const detail = source("src/components/meeting/MeetingDetail.tsx");
+    const store = source("src/stores/meeting.store.ts");
+    const service = source("src/services/meetings.ts");
+    const nativeCommand = source("src-tauri/src/commands/audio.rs");
+    const lib = source("src-tauri/src/lib.rs");
+
+    expect(panel).toContain("ConfirmDialog");
+    expect(panel).toContain("pendingDelete");
+    expect(panel).toContain("deleteSelectedMeeting");
+    expect(detail).toContain("onRequestDelete");
+    expect(detail).toContain("Delete meeting");
+    expect(store).toContain("deleteMeeting");
+    expect(service).toContain('invoke("delete_meeting"');
+    expect(nativeCommand).toContain("pub async fn delete_meeting");
+    expect(nativeCommand).toContain("delete_meeting_record");
+    expect(lib).toContain("commands::audio::delete_meeting");
+  });
 });
