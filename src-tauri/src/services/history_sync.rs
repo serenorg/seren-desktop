@@ -207,6 +207,28 @@ pub async fn wipe_remote_history(
         .execute("DROP SCHEMA IF EXISTS seren_desktop CASCADE", &[])
         .map_err(|err| err.to_string())?;
     ensure_remote_schema(&mut client)?;
+    with_local_db(&app, |conn| reset_local_sync_state(conn))?;
+    Ok(())
+}
+
+/// Clear local sync bookkeeping after the remote copy is wiped so the next sync
+/// performs a fresh full backfill instead of short-circuiting on stale state.
+fn reset_local_sync_state(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE history_sync_state
+         SET last_pulled_version = 0,
+             first_backfill_completed = 0,
+             updated_at = ?1",
+        params![now_ms()],
+    )?;
+    for table in HISTORY_SYNC_TABLES {
+        // Drafts live on the conversations row, not a table of their own.
+        if *table == "thread_drafts" {
+            continue;
+        }
+        conn.execute(&format!("UPDATE {table} SET synced_at = NULL"), [])?;
+    }
+    conn.execute("DELETE FROM sync_outbox", [])?;
     Ok(())
 }
 
@@ -1739,5 +1761,74 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored.chars().count(), 500);
+    }
+
+    #[test]
+    fn wipe_resets_local_state_so_backfill_reenqueues() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind)
+             VALUES ('c1', 'Chat', 1000, 'chat')",
+            [],
+        )
+        .unwrap();
+        save_message_record(
+            &conn,
+            &PersistedMessage {
+                id: "m1".to_string(),
+                conversation_id: "c1".to_string(),
+                role: "user".to_string(),
+                content: "hello".to_string(),
+                model: None,
+                timestamp: 1100,
+                metadata: None,
+                provider: None,
+            },
+        )
+        .unwrap();
+
+        // First sync: backfill everything, then simulate a successful push that
+        // drains the outbox and stamps rows as synced.
+        let first = enqueue_initial_backfill(&conn).unwrap();
+        assert!(first >= 2);
+        conn.execute("DELETE FROM sync_outbox", []).unwrap();
+        conn.execute("UPDATE conversations SET synced_at = 123", [])
+            .unwrap();
+        conn.execute("UPDATE messages SET synced_at = 123", [])
+            .unwrap();
+
+        // Without a reset, a re-sync short-circuits and uploads nothing — the bug.
+        assert_eq!(enqueue_initial_backfill(&conn).unwrap(), 0);
+
+        // Wiping the remote must reset local state so the next sync re-uploads.
+        reset_local_sync_state(&conn).unwrap();
+
+        let completed: i64 = conn
+            .query_row(
+                "SELECT MAX(first_backfill_completed) FROM history_sync_state",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap()
+            .unwrap_or(0);
+        assert_eq!(completed, 0, "backfill flag must be cleared");
+
+        let still_synced: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE synced_at IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_synced, 0, "synced_at must be cleared");
+
+        let outbox: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sync_outbox", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(outbox, 0, "stale outbox rows must be cleared");
+
+        // The next backfill re-enqueues the full history.
+        assert_eq!(enqueue_initial_backfill(&conn).unwrap(), first);
     }
 }
