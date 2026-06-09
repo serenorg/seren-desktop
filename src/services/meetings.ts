@@ -185,7 +185,22 @@ export function pushCaptureFrame(input: {
   });
 }
 
-export function stopMeetingCapture(meetingId: string): Promise<void> {
+export interface CaptureStopOutcome {
+  hadCapture: boolean;
+  frameCount: number;
+  sampleCount: number;
+  speechFrameCount: number;
+  chunkCount: number;
+  emittedSegmentCount: number;
+  emittedGapCount: number;
+  persistedSegmentCount: number;
+  persistedTextSegmentCount: number;
+  failureReason?: string | null;
+}
+
+export function stopMeetingCapture(
+  meetingId: string,
+): Promise<CaptureStopOutcome> {
   return invoke("stop_meeting_capture", { meetingId });
 }
 

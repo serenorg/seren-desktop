@@ -8,7 +8,7 @@ use crate::audio::detect::{probe_audio_activity, should_start_capture};
 use crate::audio::llm::{CompletionRequest, complete};
 use crate::audio::merge::merge_segments;
 use crate::audio::notes::{ParsedNotes, generate_notes};
-use crate::audio::pipeline::CaptureRegistry;
+use crate::audio::pipeline::{CaptureRegistry, CaptureStopSummary};
 use crate::audio::reconcile::reconcile_speaker_labels;
 use crate::audio::templates::{BUILT_IN_MEETING_TEMPLATES, MeetingTemplate};
 use crate::audio::transcribe::{
@@ -21,6 +21,7 @@ use crate::audio::types::{
 use crate::orchestrator::types::SkillRef;
 use crate::services::database::DbPool;
 use rusqlite::{Connection, OptionalExtension, Result, params};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
@@ -217,17 +218,117 @@ pub async fn stop_meeting_capture(
     app: AppHandle,
     registry: State<'_, CaptureRegistry>,
     meeting_id: String,
-) -> Result<(), String> {
-    registry.stop(&meeting_id).await;
+) -> Result<StopMeetingCaptureOutcome, String> {
+    let summary = registry.stop(&meeting_id).await;
     let ended = now_ms();
     let lookup = meeting_id.clone();
-    let id = meeting_id;
-    run_db(app.clone(), move |conn| {
-        update_meeting_status_record(conn, &id, MeetingStatus::Transcribing, Some(ended), ended)
+    let segments = run_db(app.clone(), move |conn| {
+        select_transcript_segments(conn, &lookup)
     })
     .await?;
-    emit_meeting_status_by_id(&app, &lookup).await;
-    Ok(())
+    let persisted_segment_count = segments.len() as u64;
+    let persisted_text_segment_count = segments
+        .iter()
+        .filter(|segment| segment.status == SegmentStatus::Ok && !segment.text.trim().is_empty())
+        .count() as u64;
+    let failure_reason = stop_capture_failure_reason(
+        &summary,
+        persisted_segment_count,
+        persisted_text_segment_count,
+    );
+
+    let outcome = StopMeetingCaptureOutcome {
+        had_capture: summary.had_capture,
+        frame_count: summary.frame_count,
+        sample_count: summary.sample_count,
+        speech_frame_count: summary.speech_frame_count,
+        chunk_count: summary.chunk_count,
+        emitted_segment_count: summary.emitted_segment_count,
+        emitted_gap_count: summary.emitted_gap_count,
+        persisted_segment_count,
+        persisted_text_segment_count,
+        failure_reason: failure_reason.clone(),
+    };
+
+    let status = if failure_reason.is_some() {
+        MeetingStatus::Failed
+    } else {
+        MeetingStatus::Transcribing
+    };
+    let id = meeting_id.clone();
+    let reason = failure_reason.clone();
+    run_db(app.clone(), move |conn| {
+        update_meeting_status_record_with_failure_reason(
+            conn,
+            &id,
+            status,
+            Some(ended),
+            reason.as_deref(),
+            ended,
+        )
+    })
+    .await?;
+    emit_meeting_status_by_id(&app, &meeting_id).await;
+    Ok(outcome)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMeetingCaptureOutcome {
+    pub had_capture: bool,
+    pub frame_count: u64,
+    pub sample_count: u64,
+    pub speech_frame_count: u64,
+    pub chunk_count: u64,
+    pub emitted_segment_count: u64,
+    pub emitted_gap_count: u64,
+    pub persisted_segment_count: u64,
+    pub persisted_text_segment_count: u64,
+    pub failure_reason: Option<String>,
+}
+
+fn stop_capture_failure_reason(
+    summary: &CaptureStopSummary,
+    persisted_segment_count: u64,
+    persisted_text_segment_count: u64,
+) -> Option<String> {
+    if persisted_text_segment_count > 0 {
+        return None;
+    }
+    if !summary.had_capture {
+        return Some(
+            "Meeting capture was no longer active when Stop was pressed. Restart Seren and start capture again."
+                .to_string(),
+        );
+    }
+    if summary.frame_count == 0 {
+        return Some(
+            "No audio reached Meeting capture. Check microphone and system-audio permissions, then start capture again."
+                .to_string(),
+        );
+    }
+    if summary.speech_frame_count == 0 {
+        return Some(
+            "Audio reached Meeting capture, but no speech was detected. Check the selected microphone and system-audio source, then start capture again."
+                .to_string(),
+        );
+    }
+    if summary.chunk_count == 0 {
+        return Some(
+            "Audio reached Meeting capture, but it was too short or quiet to transcribe. Speak for a few seconds, then start capture again."
+                .to_string(),
+        );
+    }
+    if persisted_segment_count == 0 {
+        return Some(
+            "Audio reached transcription, but no transcript segments were saved. Check network and speech-to-text service connectivity, then start capture again."
+                .to_string(),
+        );
+    }
+    Some(
+        "Audio reached transcription, but no words were transcribed. Check input levels and try capture again."
+            .to_string(),
+    )
 }
 
 /// Post-call diarization refinement: run ONE diarized pass over the full Them
@@ -907,6 +1008,55 @@ mod tests {
         assert_eq!(segments[0].speaker_label, None);
         assert_eq!(segments[0].speaker_source, SpeakerSource::Channel);
         assert_eq!(segments[2].status, SegmentStatus::Gap);
+    }
+
+    #[test]
+    fn stop_capture_failure_reason_describes_no_audio_frames() {
+        let summary = crate::audio::pipeline::CaptureStopSummary {
+            had_capture: true,
+            frame_count: 0,
+            sample_count: 0,
+            speech_frame_count: 0,
+            chunk_count: 0,
+            emitted_segment_count: 0,
+            emitted_gap_count: 0,
+        };
+
+        let reason = stop_capture_failure_reason(&summary, 0, 0).unwrap();
+
+        assert!(reason.contains("No audio reached Meeting capture"));
+    }
+
+    #[test]
+    fn stop_capture_failure_reason_describes_unpersisted_transcript_output() {
+        let summary = crate::audio::pipeline::CaptureStopSummary {
+            had_capture: true,
+            frame_count: 12,
+            sample_count: 3_840,
+            speech_frame_count: 6,
+            chunk_count: 1,
+            emitted_segment_count: 1,
+            emitted_gap_count: 0,
+        };
+
+        let reason = stop_capture_failure_reason(&summary, 0, 0).unwrap();
+
+        assert!(reason.contains("reached transcription"));
+    }
+
+    #[test]
+    fn stop_capture_failure_reason_allows_persisted_transcript_text() {
+        let summary = crate::audio::pipeline::CaptureStopSummary {
+            had_capture: true,
+            frame_count: 12,
+            sample_count: 3_840,
+            speech_frame_count: 6,
+            chunk_count: 1,
+            emitted_segment_count: 1,
+            emitted_gap_count: 0,
+        };
+
+        assert_eq!(stop_capture_failure_reason(&summary, 1, 1), None);
     }
 
     #[test]

@@ -4,18 +4,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use serde::Serialize;
 use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use uuid::Uuid;
 
-use crate::audio::capture::{
-    AudioCaptureSource, CaptureError, PcmFrame, TARGET_SAMPLE_RATE,
-};
+use crate::audio::capture::{AudioCaptureSource, CaptureError, PcmFrame, TARGET_SAMPLE_RATE};
 use crate::audio::chunker::{Chunk, ChunkCfg, StreamingChunker};
 use crate::audio::transcribe::{
     ChunkTranscriber, GatewayTranscriber, RetryConfig, TranscriptionMode,
@@ -37,6 +36,78 @@ pub trait SegmentSink: Send + Sync {
 /// first ~90 minutes. Nothing is written to disk (privacy rule #2125).
 const MAX_THEM_BUFFER_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 60 * 90;
 
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureStopSummary {
+    pub had_capture: bool,
+    pub frame_count: u64,
+    pub sample_count: u64,
+    pub speech_frame_count: u64,
+    pub chunk_count: u64,
+    pub emitted_segment_count: u64,
+    pub emitted_gap_count: u64,
+}
+
+#[derive(Default)]
+pub struct CaptureStreamStats {
+    frame_count: AtomicU64,
+    sample_count: AtomicU64,
+    speech_frame_count: AtomicU64,
+    chunk_count: AtomicU64,
+    emitted_segment_count: AtomicU64,
+    emitted_gap_count: AtomicU64,
+}
+
+impl CaptureStreamStats {
+    fn record_frame(&self, samples: &[i16], speech_threshold: f32) {
+        self.frame_count.fetch_add(1, Ordering::Relaxed);
+        self.sample_count
+            .fetch_add(samples.len() as u64, Ordering::Relaxed);
+        if rms(samples) >= speech_threshold {
+            self.speech_frame_count.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn record_chunk(&self) {
+        self.chunk_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_ok_segment(&self) {
+        self.emitted_segment_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_gap_segment(&self) {
+        self.emitted_segment_count.fetch_add(1, Ordering::Relaxed);
+        self.emitted_gap_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn summary(&self, had_capture: bool) -> CaptureStopSummary {
+        CaptureStopSummary {
+            had_capture,
+            frame_count: self.frame_count.load(Ordering::Relaxed),
+            sample_count: self.sample_count.load(Ordering::Relaxed),
+            speech_frame_count: self.speech_frame_count.load(Ordering::Relaxed),
+            chunk_count: self.chunk_count.load(Ordering::Relaxed),
+            emitted_segment_count: self.emitted_segment_count.load(Ordering::Relaxed),
+            emitted_gap_count: self.emitted_gap_count.load(Ordering::Relaxed),
+        }
+    }
+}
+
+fn rms(samples: &[i16]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum = samples
+        .iter()
+        .map(|sample| {
+            let value = *sample as f64;
+            value * value
+        })
+        .sum::<f64>();
+    (sum / samples.len() as f64).sqrt() as f32
+}
+
 /// Drive one capture stream end to end: read frames, chunk on silence, transcribe
 /// each window with retry, and hand finished segments to `sink`. A failed window
 /// becomes a `Gap` segment so audio is never silently dropped.
@@ -55,10 +126,12 @@ pub async fn run_capture_stream(
     cfg: ChunkCfg,
     retry: RetryConfig,
     sink: Arc<dyn SegmentSink>,
+    stats: Arc<CaptureStreamStats>,
     them_buffer: Option<Arc<StdMutex<Vec<i16>>>>,
 ) {
     let mut chunker = StreamingChunker::new(cfg);
     while let Some(frame) = frames.recv().await {
+        stats.record_frame(&frame.samples, cfg.rms_threshold);
         if let Some(buffer) = them_buffer.as_ref() {
             buffer_them_samples(buffer, &frame.samples);
         }
@@ -71,6 +144,7 @@ pub async fn run_capture_stream(
                 retry,
                 &seq,
                 sink.as_ref(),
+                stats.as_ref(),
             )
             .await;
         }
@@ -84,6 +158,7 @@ pub async fn run_capture_stream(
             retry,
             &seq,
             sink.as_ref(),
+            stats.as_ref(),
         )
         .await;
     }
@@ -110,7 +185,9 @@ async fn emit_segment(
     retry: RetryConfig,
     seq: &AtomicI64,
     sink: &dyn SegmentSink,
+    stats: &CaptureStreamStats,
 ) {
+    stats.record_chunk();
     let chunk_start = chunk.start_ms as i64;
     let chunk_end = chunk.end_ms as i64;
     match transcribe_chunk_with_retry(transcriber, &chunk, retry).await {
@@ -138,6 +215,7 @@ async fn emit_segment(
                     created_at: now_ms(),
                 };
                 sink.segment(segment).await;
+                stats.record_ok_segment();
             }
         }
         Err(_) => {
@@ -157,6 +235,7 @@ async fn emit_segment(
                 created_at: now_ms(),
             };
             sink.segment(segment).await;
+            stats.record_gap_segment();
         }
     }
 }
@@ -209,6 +288,7 @@ struct ActiveCapture {
     // Full Them PCM buffered in memory for the post-call diarization pass. The
     // Them worker appends frames here; `stop` takes it for [`reconcile_meeting_speakers`].
     them_audio: Arc<StdMutex<Vec<i16>>>,
+    stats: Arc<CaptureStreamStats>,
 }
 
 /// A meeting's slot in the registry. `Stopping` is a tombstone left in the map
@@ -343,6 +423,7 @@ impl CaptureRegistry {
 
         // Me and Them share one sequence counter so segments order globally.
         let seq = Arc::new(AtomicI64::new(0));
+        let stats = Arc::new(CaptureStreamStats::default());
 
         // Me is the single-speaker mic -> plain whisper-1 text (cheap); only the
         // multi-speaker Them stream is diarized (#2152).
@@ -361,6 +442,7 @@ impl CaptureRegistry {
             ChunkCfg::default(),
             RetryConfig::default(),
             me_sink,
+            stats.clone(),
             None,
         ))];
 
@@ -382,6 +464,7 @@ impl CaptureRegistry {
                 ChunkCfg::default(),
                 RetryConfig::default(),
                 them_sink,
+                stats.clone(),
                 Some(them_audio.clone()),
             )));
             them_tx = system_tx;
@@ -395,6 +478,7 @@ impl CaptureRegistry {
                 system_source,
                 tasks,
                 them_audio,
+                stats,
             }),
         );
         log::info!(
@@ -463,8 +547,8 @@ impl CaptureRegistry {
     /// Stop capture for `meeting_id`, draining and finishing all worker tasks. The
     /// slot is held as a `Stopping` tombstone across the drain so a concurrent
     /// `start` for the same id can't insert a second coexisting capture (#2164).
-    pub async fn stop(&self, meeting_id: &str) {
-        self.stop_with_timeout(meeting_id, STOP_DRAIN_TIMEOUT).await;
+    pub async fn stop(&self, meeting_id: &str) -> CaptureStopSummary {
+        self.stop_with_timeout(meeting_id, STOP_DRAIN_TIMEOUT).await
     }
 
     /// Stop with an explicit per-step drain timeout (the public [`stop`] uses
@@ -475,9 +559,13 @@ impl CaptureRegistry {
     /// is detached, not joined.
     ///
     /// [`stop`]: CaptureRegistry::stop
-    async fn stop_with_timeout(&self, meeting_id: &str, drain_timeout: Duration) {
+    async fn stop_with_timeout(
+        &self,
+        meeting_id: &str,
+        drain_timeout: Duration,
+    ) -> CaptureStopSummary {
         let Some(mut capture) = self.begin_stop(meeting_id) else {
-            return;
+            return CaptureStopSummary::default();
         };
         // Stop the native source first so it stops feeding the "Them" channel.
         if let Some(mut source) = capture.system_source.take() {
@@ -489,11 +577,20 @@ impl CaptureRegistry {
         // Dropping the senders closes the channels so the workers flush and exit.
         drop(capture.me_tx);
         drop(capture.them_tx);
-        for task in capture.tasks {
+        for task in capture.tasks.drain(..) {
             if tokio::time::timeout(drain_timeout, task).await.is_err() {
                 log::warn!("[meeting] capture worker drain timed out for {meeting_id}; detaching");
             }
         }
+        let summary = capture.stats.summary(true);
+        log::info!(
+            "[meeting] capture stop summary for {meeting_id}: frames={} speech_frames={} chunks={} emitted_segments={} emitted_gaps={}",
+            summary.frame_count,
+            summary.speech_frame_count,
+            summary.chunk_count,
+            summary.emitted_segment_count,
+            summary.emitted_gap_count
+        );
         // The workers have flushed: take the buffered Them PCM out of the capture
         // (before it drops) and hand it to the post-call diarization pass. Done
         // after the drain so any tail frames the Them worker buffered are included.
@@ -507,6 +604,7 @@ impl CaptureRegistry {
         // Always clear the tombstone — even on a timed-out drain — so the id is
         // never permanently blocked from a fresh capture (#2175).
         self.finish_stop(meeting_id);
+        summary
     }
 
     /// Remove and return the Them PCM buffered for `meeting_id`'s post-call pass,
@@ -594,6 +692,7 @@ mod tests {
         });
         let sink = Arc::new(CollectingSink::default());
         let collected: Arc<dyn SegmentSink> = sink.clone();
+        let stats = Arc::new(CaptureStreamStats::default());
 
         run_capture_stream(
             "meeting-1".to_string(),
@@ -608,6 +707,7 @@ mod tests {
                 max_backoff_ms: 0,
             },
             collected,
+            stats,
             None,
         )
         .await;
@@ -639,6 +739,7 @@ mod tests {
         });
         let sink = Arc::new(CollectingSink::default());
         let collected: Arc<dyn SegmentSink> = sink.clone();
+        let stats = Arc::new(CaptureStreamStats::default());
 
         run_capture_stream(
             "meeting-1".to_string(),
@@ -653,6 +754,7 @@ mod tests {
                 max_backoff_ms: 0,
             },
             collected,
+            stats.clone(),
             None,
         )
         .await;
@@ -661,6 +763,13 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].status, SegmentStatus::Gap);
         assert!(segments[0].text.is_empty());
+        let summary = stats.summary(true);
+        assert!(summary.had_capture);
+        assert!(summary.frame_count > 0);
+        assert!(summary.speech_frame_count > 0);
+        assert_eq!(summary.chunk_count, 1);
+        assert_eq!(summary.emitted_segment_count, 1);
+        assert_eq!(summary.emitted_gap_count, 1);
     }
 
     #[test]
@@ -693,6 +802,7 @@ mod tests {
                 system_source: None,
                 tasks: Vec::new(),
                 them_audio: Arc::new(StdMutex::new(Vec::new())),
+                stats: Arc::new(CaptureStreamStats::default()),
             }),
         );
         assert!(registry.is_active("m1"));
@@ -736,6 +846,7 @@ mod tests {
                 system_source: None,
                 tasks: vec![hung],
                 them_audio: Arc::new(StdMutex::new(Vec::new())),
+                stats: Arc::new(CaptureStreamStats::default()),
             }),
         );
 
@@ -747,6 +858,33 @@ mod tests {
         // The id is freed for a fresh capture, not leaked behind a tombstone.
         assert!(!registry.slot_occupied("m1"));
         assert!(!registry.is_active("m1"));
+    }
+
+    #[tokio::test]
+    async fn stop_summary_reports_active_capture_without_frames() {
+        let registry = CaptureRegistry::default();
+        let (me_tx, _me_rx) = unbounded_channel();
+        registry.active.lock().unwrap().insert(
+            "m1".to_string(),
+            CaptureSlot::Active(ActiveCapture {
+                me_tx,
+                them_tx: None,
+                system_source: None,
+                tasks: Vec::new(),
+                them_audio: Arc::new(StdMutex::new(Vec::new())),
+                stats: Arc::new(CaptureStreamStats::default()),
+            }),
+        );
+
+        let summary = registry
+            .stop_with_timeout("m1", Duration::from_millis(50))
+            .await;
+
+        assert!(summary.had_capture);
+        assert_eq!(summary.frame_count, 0);
+        assert_eq!(summary.chunk_count, 0);
+        assert_eq!(summary.emitted_segment_count, 0);
+        assert!(!registry.slot_occupied("m1"));
     }
 
     struct FailingSource {
