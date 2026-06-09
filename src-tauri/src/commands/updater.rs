@@ -5,7 +5,9 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+#[cfg(target_os = "windows")]
+use std::time::Duration;
+use std::time::Instant;
 use tauri::{AppHandle, Manager, State};
 
 use crate::{mcp, provider_runtime, terminal};
@@ -22,6 +24,10 @@ pub struct ShutdownGuard {
 impl ShutdownGuard {
     pub fn engage(&self) {
         self.locked.store(true, Ordering::SeqCst);
+    }
+
+    pub fn release(&self) {
+        self.locked.store(false, Ordering::SeqCst);
     }
 
     pub fn is_engaged(&self) -> bool {
@@ -129,6 +135,19 @@ pub async fn updater_pre_install(
     Ok(report)
 }
 
+/// Release the shutdown guard so provider runtime / MCP can spawn again.
+/// Called from the renderer when downloadAndInstall fails — without this
+/// the user is left unable to use the app until they manually restart
+/// (#2230 functional audit).
+#[tauri::command]
+pub async fn updater_pre_install_release(
+    guard: State<'_, Arc<ShutdownGuard>>,
+) -> Result<(), String> {
+    guard.release();
+    log::info!("[Updater] Pre-install shutdown released (install failed or cancelled)");
+    Ok(())
+}
+
 /// Poll the bundled `node.exe` file with FILE_GENERIC_WRITE access until the
 /// kernel releases the handle or the deadline expires. On non-Windows targets
 /// this is a no-op that immediately returns `(true, None)` — the issue is
@@ -201,6 +220,21 @@ mod tests {
         guard.engage();
         assert!(guard.is_engaged());
         // Engaging twice is idempotent.
+        guard.engage();
+        assert!(guard.is_engaged());
+    }
+
+    #[test]
+    fn shutdown_guard_releases_on_install_failure() {
+        // After a failed update, the renderer must be able to disengage the
+        // guard so the user is not locked out of provider runtime / MCP
+        // until they restart the app.
+        let guard = ShutdownGuard::default();
+        guard.engage();
+        assert!(guard.is_engaged());
+        guard.release();
+        assert!(!guard.is_engaged());
+        // Re-engaging after release works (a second update attempt).
         guard.engage();
         assert!(guard.is_engaged());
     }

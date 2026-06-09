@@ -293,6 +293,25 @@ async function installAvailableUpdate(): Promise<void> {
     console.error("[Updater] Install failed:", err.message);
     telemetry.captureError(err, { type: "updater", phase: "install" });
     setState({ status: "error", error: err.message });
+    // Release the native shutdown guard so the user can keep using the app
+    // without restarting. Without this, provider runtime / MCP spawns stay
+    // blocked until manual restart, which is bad UX after a failed update.
+    if (isTauriRuntime()) {
+      try {
+        await invoke("updater_pre_install_release");
+      } catch (releaseError) {
+        // Best-effort — if release fails, the next successful update or app
+        // restart will clear the guard.
+        const releaseErr =
+          releaseError instanceof Error
+            ? releaseError
+            : new Error(String(releaseError));
+        console.warn(
+          "[Updater] Failed to release pre-install guard after install failure:",
+          releaseErr.message,
+        );
+      }
+    }
   }
 }
 

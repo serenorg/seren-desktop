@@ -233,6 +233,34 @@ describe("updaterStore install flow", () => {
     });
   });
 
+  it("releases the shutdown guard when downloadAndInstall fails (#2230)", async () => {
+    // Without releasing, the user is locked out of provider runtime / MCP
+    // until they manually restart — terrible UX after a transient download
+    // failure. This test pins the failure-path cleanup.
+    isTauriRuntimeMock.mockReturnValue(true);
+    const downloadAndInstallMock = vi.fn(async () => {
+      throw new Error("network drop mid-download");
+    });
+    checkMock.mockResolvedValue({
+      version: "1.3.53",
+      downloadAndInstall: downloadAndInstallMock,
+    });
+
+    const { updaterStore } = await import("@/stores/updater.store");
+
+    await updaterStore.checkForUpdates();
+    await updaterStore.installAvailableUpdate();
+
+    expect(downloadAndInstallMock).toHaveBeenCalledOnce();
+    // The first invoke is updater_pre_install (engage), the second after
+    // failure is updater_pre_install_release.
+    const releaseCall = invokeMock.mock.calls.find(
+      (call) => call[0] === "updater_pre_install_release",
+    );
+    expect(releaseCall).toBeDefined();
+    expect(mockStoreState.status).toBe("error");
+  });
+
   it("still relaunches if browsing-data clearing fails", async () => {
     isTauriRuntimeMock.mockReturnValue(true);
     const downloadAndInstallMock = vi.fn(async () => {});
