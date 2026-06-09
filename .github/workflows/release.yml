@@ -719,6 +719,87 @@ jobs:
           }
           Write-Host "NSIS setup .exe is properly signed."
 
+      # The .nsis.zip updater bundle is what pendingUpdate.downloadAndInstall()
+      # consumes — NOT the public setup .exe. Tauri builds the .nsis.zip during
+      # `tauri build`, zipping the setup .exe BEFORE our post-build EV signing
+      # runs, so the installer inside the bundle is unsigned even though the
+      # loose setup .exe got signed. Rebuild the bundle from the now-signed
+      # setup .exe and re-sign the .nsis.zip.sig with the Tauri updater key —
+      # mirrors the macOS .app.tar.gz re-pack/re-sign pattern above (#2236).
+      - name: Re-pack and re-sign .nsis.zip updater bundle (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
+          $zip = Get-ChildItem -Path $nsisDir -Filter "*.nsis.zip" | Select-Object -First 1
+          if (-not $zip) {
+            Write-Host "No .nsis.zip updater bundle found in $nsisDir — skipping re-pack."
+            exit 0
+          }
+          $setup = Get-ChildItem -Path $nsisDir -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $setup) {
+            Write-Host "::error::.nsis.zip present but no *-setup.exe to pack into it."
+            exit 1
+          }
+          # The setup .exe must already be EV-signed (verified in the step above).
+          $sig = Get-AuthenticodeSignature -FilePath $setup.FullName
+          if ($sig.Status -ne "Valid") {
+            Write-Host "::error::Refusing to pack an unsigned setup .exe into the updater bundle: $($sig.Status)"
+            exit 1
+          }
+          Write-Host "Re-packing $($zip.Name) from signed $($setup.Name)..."
+          Remove-Item -Path $zip.FullName -Force
+          Remove-Item -Path "$($zip.FullName).sig" -Force -ErrorAction SilentlyContinue
+          # Compress-Archive stores the file at the archive root by basename,
+          # matching the layout Tauri's updater expects.
+          Compress-Archive -Path $setup.FullName -DestinationPath $zip.FullName -CompressionLevel Optimal -Force
+          Write-Host "Re-signing $($zip.Name) with the Tauri updater key..."
+          pnpm tauri signer sign -k "$env:TAURI_SIGNING_PRIVATE_KEY" -p "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" $zip.FullName
+          if (-not (Test-Path "$($zip.FullName).sig")) {
+            Write-Host "::error::Updater signature not produced: $($zip.FullName).sig"
+            exit 1
+          }
+          Write-Host "Re-packed and re-signed the .nsis.zip updater bundle."
+
+      # Verify the re-packed updater bundle on the actual bytes the updater will
+      # deliver: extract it and confirm every .exe/.dll inside reports a Valid
+      # Authenticode signature. We have been bitten before by Tauri repacking
+      # artifacts and losing signatures, so this is a hard gate (#2236).
+      - name: Verify .nsis.zip updater bundle signatures (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
+          $zip = Get-ChildItem -Path $nsisDir -Filter "*.nsis.zip" | Select-Object -First 1
+          if (-not $zip) {
+            Write-Host "No .nsis.zip to verify — skipping."
+            exit 0
+          }
+          $extractDir = Join-Path $env:RUNNER_TEMP "nsis-zip-verify"
+          if (Test-Path $extractDir) { Remove-Item -Path $extractDir -Recurse -Force }
+          Expand-Archive -Path $zip.FullName -DestinationPath $extractDir -Force
+          $files = @(Get-ChildItem -Path $extractDir -Recurse -Include "*.exe","*.dll" -File)
+          if ($files.Count -eq 0) {
+            Write-Host "::error::.nsis.zip contained no .exe/.dll to verify — unexpected updater layout."
+            exit 1
+          }
+          $unsigned = @()
+          foreach ($f in $files) {
+            $sig = Get-AuthenticodeSignature -FilePath $f.FullName
+            if ($sig.Status -eq "Valid") {
+              Write-Host "  Valid: $($f.Name)"
+            } else {
+              $unsigned += "$($f.Name): $($sig.Status)"
+            }
+          }
+          if ($unsigned.Count -gt 0) {
+            Write-Host "::error::Unsigned/invalid binaries inside .nsis.zip updater bundle:"
+            $unsigned | ForEach-Object { Write-Host "    $_" }
+            exit 1
+          }
+          Write-Host "All binaries inside the .nsis.zip updater bundle are validly signed."
+          Remove-Item -Path $extractDir -Recurse -Force
+
       # Recursive Authenticode check over every loose .exe/.dll the Tauri build
       # emits under bundle/. Now that the embedded runtime is EV-signed pre-build
       # (#2235), any unsigned/invalid file here is a real regression — a missed
