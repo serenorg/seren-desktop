@@ -26,6 +26,7 @@ export function meetingTitle(meeting: Meeting): string {
 }
 
 export const STATUS_LABELS: Record<Meeting["status"], string> = {
+  pending_capture: "Starting",
   capturing: "Capturing",
   transcribing: "Transcribing",
   notes_ready: "Notes ready",

@@ -3,6 +3,9 @@
 
 pub mod fake;
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub mod mic;
+
 #[cfg(target_os = "macos")]
 pub mod macos;
 
@@ -108,8 +111,7 @@ pub fn resample_to_16k(mono: &[i16], sample_rate: u32) -> Vec<i16> {
         return mono.to_vec();
     }
 
-    let out_len =
-        ((mono.len() as u64 * TARGET_SAMPLE_RATE as u64) / sample_rate as u64) as usize;
+    let out_len = ((mono.len() as u64 * TARGET_SAMPLE_RATE as u64) / sample_rate as u64) as usize;
     if out_len == 0 {
         return Vec::new();
     }

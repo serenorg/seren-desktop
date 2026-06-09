@@ -34,6 +34,7 @@ impl TryFrom<&str> for Speaker {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingStatus {
+    PendingCapture,
     Capturing,
     Transcribing,
     NotesReady,
@@ -45,6 +46,7 @@ pub enum MeetingStatus {
 impl MeetingStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::PendingCapture => "pending_capture",
             Self::Capturing => "capturing",
             Self::Transcribing => "transcribing",
             Self::NotesReady => "notes_ready",
@@ -60,6 +62,7 @@ impl TryFrom<&str> for MeetingStatus {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
+            "pending_capture" => Ok(Self::PendingCapture),
             "capturing" => Ok(Self::Capturing),
             "transcribing" => Ok(Self::Transcribing),
             "notes_ready" => Ok(Self::NotesReady),
@@ -144,6 +147,7 @@ pub struct Meeting {
     pub notes_markdown: Option<String>,
     pub notes_struct_json: Option<String>,
     pub failure_reason: Option<String>,
+    pub capture_diagnostics_json: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

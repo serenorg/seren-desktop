@@ -803,7 +803,7 @@ pub fn run() {
             commands::audio::get_transcript_segments,
             // Meeting Mode capture + intelligence commands
             commands::audio::start_meeting_capture,
-            commands::audio::push_capture_frame,
+            commands::audio::is_meeting_capture_active,
             commands::audio::stop_meeting_capture,
             commands::audio::reconcile_meeting_speakers,
             commands::audio::generate_meeting_notes,

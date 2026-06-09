@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const services = vi.hoisted(() => ({
   updateMeetingStatus: vi.fn(async () => {}),
   listMeetings: vi.fn(async (): Promise<Meeting[]> => []),
+  isMeetingCaptureActive: vi.fn(async () => false),
 }));
 
 vi.mock("@/lib/tauri-bridge", async (importOriginal) => ({
@@ -16,6 +17,7 @@ vi.mock("@/services/meetings", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/meetings")>()),
   updateMeetingStatus: services.updateMeetingStatus,
   listMeetings: services.listMeetings,
+  isMeetingCaptureActive: services.isMeetingCaptureActive,
 }));
 vi.mock("@/stores/settings.store", () => ({
   settingsStore: { get: () => false, set: vi.fn() },
@@ -47,12 +49,16 @@ describe("meetingStore priming cancel + reconcile (#2160)", () => {
   beforeEach(() => {
     services.updateMeetingStatus.mockClear();
     services.listMeetings.mockReset();
+    services.isMeetingCaptureActive.mockReset();
     services.listMeetings.mockResolvedValue([]);
+    services.isMeetingCaptureActive.mockResolvedValue(false);
   });
 
-  it("cancelPriming marks the stashed capturing meeting failed", async () => {
-    // Not yet primed -> requestCaptureStart stashes the (already-capturing) row.
-    await meetingStore.requestCaptureStart(meeting({ id: "z1" }));
+  it("cancelPriming marks the stashed pending meeting failed", async () => {
+    // Not yet primed -> requestCaptureStart stashes the pending backend row.
+    await meetingStore.requestCaptureStart(
+      meeting({ id: "z1", status: "pending_capture" }),
+    );
     expect(meetingStore.state.primingRequest?.id).toBe("z1");
 
     await meetingStore.cancelPriming();
@@ -69,6 +75,7 @@ describe("meetingStore priming cancel + reconcile (#2160)", () => {
 
   it("reconcileStaleCaptures fails leftover mid-pipeline rows, leaves terminal ones", async () => {
     services.listMeetings.mockResolvedValueOnce([
+      meeting({ id: "pending", status: "pending_capture" }),
       meeting({ id: "cap", status: "capturing" }),
       meeting({ id: "trans", status: "transcribing" }),
       meeting({ id: "agent", status: "agent_running" }),
@@ -80,7 +87,14 @@ describe("meetingStore priming cancel + reconcile (#2160)", () => {
 
     // Fail every mid-pipeline zombie, with no ended_at so a captured row keeps
     // its capture-end time (#2174).
-    for (const id of ["cap", "trans", "agent"]) {
+    expect(services.isMeetingCaptureActive).toHaveBeenCalledWith("cap");
+    expect(services.updateMeetingStatus).toHaveBeenCalledWith(
+      "cap",
+      "failed",
+      null,
+      expect.stringContaining("without an active backend capture"),
+    );
+    for (const id of ["pending", "trans", "agent"]) {
       expect(services.updateMeetingStatus).toHaveBeenCalledWith(
         id,
         "failed",

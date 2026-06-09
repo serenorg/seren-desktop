@@ -1,5 +1,5 @@
-// ABOUTME: Regression coverage for #2209 — capture startup failures must be loud and persistent.
-// ABOUTME: A mic/WebAudio failure should not leave only a silent Failed row.
+// ABOUTME: Regression coverage for #2225 — native capture startup failures stay visible.
+// ABOUTME: Rust persists the failed row; the renderer surfaces it without overwriting diagnostics.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,9 +9,6 @@ const m = vi.hoisted(() => ({
   updateMeetingStatus: vi.fn(async () => {}),
   listMeetings: vi.fn(async (): Promise<Meeting[]> => []),
   getTranscriptSegments: vi.fn(async () => []),
-  startMeetingMicCapture: vi.fn(async () => {
-    throw new DOMException("Permission denied", "NotAllowedError");
-  }),
   closeCaptureWidget: vi.fn(),
   openCaptureWidget: vi.fn(),
   setTrayRecording: vi.fn(),
@@ -20,9 +17,6 @@ const m = vi.hoisted(() => ({
 vi.mock("@/lib/tauri-bridge", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tauri-bridge")>()),
   isTauriRuntime: () => true,
-}));
-vi.mock("@/lib/audio/meetingCapture", () => ({
-  startMeetingMicCapture: m.startMeetingMicCapture,
 }));
 vi.mock("@/services/meetings", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/meetings")>()),
@@ -80,20 +74,21 @@ function meeting(overrides: Partial<Meeting> = {}): Meeting {
 describe("meetingStore capture startup failure visibility (#2209)", () => {
   beforeEach(() => {
     for (const fn of Object.values(m)) fn.mockClear();
-    m.startMeetingMicCapture.mockRejectedValue(
-      new DOMException("Permission denied", "NotAllowedError"),
+    m.startMeetingCapture.mockResolvedValue(undefined);
+    m.startMeetingCapture.mockRejectedValueOnce(
+      "native microphone capture unavailable: microphone permission denied",
     );
     m.listMeetings.mockResolvedValue([
       meeting({
         status: "failed",
         failureReason:
-          "Microphone access is blocked. Allow microphone access for Seren, then start capture again.",
+          "native microphone capture unavailable: microphone permission denied",
       }),
     ]);
     meetingStore.clearError();
   });
 
-  it("marks the meeting failed with an actionable reason and logs the startup error", async () => {
+  it("surfaces backend mic startup failure without rewriting the persisted row", async () => {
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});
@@ -102,13 +97,8 @@ describe("meetingStore capture startup failure visibility (#2209)", () => {
     await meetingStore.requestCaptureStart(meeting());
 
     expect(m.startMeetingCapture).toHaveBeenCalledWith("m1");
-    expect(m.stopMeetingCapture).toHaveBeenCalledWith("m1");
-    expect(m.updateMeetingStatus).toHaveBeenCalledWith(
-      "m1",
-      "failed",
-      expect.any(Number),
-      expect.stringContaining("Microphone access is blocked"),
-    );
+    expect(m.stopMeetingCapture).not.toHaveBeenCalled();
+    expect(m.updateMeetingStatus).not.toHaveBeenCalled();
     expect(m.openCaptureWidget).not.toHaveBeenCalled();
     expect(m.closeCaptureWidget).toHaveBeenCalled();
     expect(m.setTrayRecording).toHaveBeenCalledWith(false);
@@ -120,7 +110,7 @@ describe("meetingStore capture startup failure visibility (#2209)", () => {
     expect(consoleError).toHaveBeenCalledWith(
       "[meeting] capture startup failed",
       expect.objectContaining({ meetingId: "m1" }),
-      expect.any(DOMException),
+      expect.any(String),
     );
 
     consoleError.mockRestore();
@@ -132,6 +122,7 @@ describe("meetingStore capture startup failure visibility (#2209)", () => {
       .spyOn(console, "error")
       .mockImplementation(() => {});
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    m.startMeetingCapture.mockReset();
     m.startMeetingCapture.mockRejectedValueOnce(
       "system-audio capture unavailable: audio capture permission denied: AudioHardwareCreateProcessTap failed",
     );
@@ -146,14 +137,8 @@ describe("meetingStore capture startup failure visibility (#2209)", () => {
     await meetingStore.requestCaptureStart(meeting());
 
     expect(m.startMeetingCapture).toHaveBeenCalledWith("m1");
-    expect(m.startMeetingMicCapture).not.toHaveBeenCalled();
     expect(m.stopMeetingCapture).not.toHaveBeenCalled();
-    expect(m.updateMeetingStatus).toHaveBeenCalledWith(
-      "m1",
-      "failed",
-      expect.any(Number),
-      expect.stringContaining("System audio capture could not start"),
-    );
+    expect(m.updateMeetingStatus).not.toHaveBeenCalled();
     expect(meetingStore.state.error).toContain(
       "System audio capture could not start",
     );
