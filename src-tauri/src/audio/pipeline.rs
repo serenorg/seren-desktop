@@ -13,7 +13,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use uuid::Uuid;
 
-use crate::audio::capture::{AudioCaptureSource, PcmFrame, TARGET_SAMPLE_RATE};
+use crate::audio::capture::{
+    AudioCaptureSource, CaptureError, PcmFrame, TARGET_SAMPLE_RATE,
+};
 use crate::audio::chunker::{Chunk, ChunkCfg, StreamingChunker};
 use crate::audio::transcribe::{
     ChunkTranscriber, GatewayTranscriber, RetryConfig, TranscriptionMode,
@@ -240,6 +242,55 @@ fn system_audio_source() -> Option<Box<dyn AudioCaptureSource>> {
     }
 }
 
+#[derive(Default)]
+struct PreparedSystemAudioStream {
+    source: Option<Box<dyn AudioCaptureSource>>,
+    tx: Option<UnboundedSender<PcmFrame>>,
+    rx: Option<UnboundedReceiver<PcmFrame>>,
+}
+
+impl PreparedSystemAudioStream {
+    fn has_system_audio(&self) -> bool {
+        self.tx.is_some()
+    }
+}
+
+/// Start the native system-audio source before marking a meeting capture active.
+/// Unsupported platforms/builds stay mic-only; a supported source that fails to
+/// initialize must reject startup so the UI can surface the real permission or
+/// device cause instead of recording an empty transcript (#2217).
+fn prepare_system_audio_stream(
+    meeting_id: &str,
+    system_source: Option<Box<dyn AudioCaptureSource>>,
+) -> Result<PreparedSystemAudioStream, CaptureError> {
+    let Some(mut source) = system_source else {
+        log::info!("[meeting] system-audio capture unsupported on this platform");
+        return Ok(PreparedSystemAudioStream::default());
+    };
+
+    let (tx, rx) = unbounded_channel();
+    match source.start(tx.clone()) {
+        Ok(()) => {
+            log::info!("[meeting] system-audio capture started for {meeting_id}");
+            Ok(PreparedSystemAudioStream {
+                source: Some(source),
+                tx: Some(tx),
+                rx: Some(rx),
+            })
+        }
+        Err(CaptureError::Unsupported(reason)) => {
+            log::info!(
+                "[meeting] system-audio capture unsupported for {meeting_id}: {reason}; continuing mic-only"
+            );
+            Ok(PreparedSystemAudioStream::default())
+        }
+        Err(err) => {
+            log::warn!("[meeting] system-audio capture startup failed for {meeting_id}: {err}");
+            Err(err)
+        }
+    }
+}
+
 /// The transcription mode for a capture stream. The single-speaker microphone
 /// ("Me") uses plain `whisper-1` text; only the multi-speaker system stream
 /// ("Them") is diarized — diarizing the mono mic is pure cost with no payoff
@@ -272,15 +323,24 @@ pub struct CaptureRegistry {
 impl CaptureRegistry {
     /// Begin capturing the "Me" stream for `meeting_id`. Frames arrive via
     /// [`CaptureRegistry::push_frame`]; the worker transcribes and persists them.
-    pub fn start(&self, app: &AppHandle, meeting_id: &str) {
+    pub fn start(&self, app: &AppHandle, meeting_id: &str) -> Result<(), String> {
         log::info!("[meeting] capture registry start requested for {meeting_id}");
         let mut active = self.active.lock().unwrap();
         // Reject if the id is already live OR draining (`Stopping` tombstone): a
         // start that raced a still-running stop must not insert a second capture.
         if active.contains_key(meeting_id) {
             log::warn!("[meeting] capture start ignored; slot already occupied for {meeting_id}");
-            return;
+            return Ok(());
         }
+        let prepared_system_audio = prepare_system_audio_stream(meeting_id, system_audio_source())
+            .map_err(|err| format!("system-audio capture unavailable: {err}"))?;
+        let PreparedSystemAudioStream {
+            source: system_source,
+            tx: system_tx,
+            rx: system_rx,
+        } = prepared_system_audio;
+        let has_system_audio = system_tx.is_some();
+
         // Me and Them share one sequence counter so segments order globally.
         let seq = Arc::new(AtomicI64::new(0));
 
@@ -307,15 +367,12 @@ impl CaptureRegistry {
         // Shared buffer the Them worker fills for the post-call diarization pass.
         let them_audio: Arc<StdMutex<Vec<i16>>> = Arc::new(StdMutex::new(Vec::new()));
 
-        // System audio ("Them") via the native loopback/tap source, when supported.
         let mut them_tx = None;
-        let mut system_source = system_audio_source();
-        if let Some(source) = system_source.as_mut() {
+        if let Some(rx) = system_rx {
             let them_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> = Arc::new(
                 GatewayTranscriber::with_mode(app.clone(), transcription_mode_for(&Speaker::Them)),
             );
             let them_sink: Arc<dyn SegmentSink> = Arc::new(DbEmitSink { app: app.clone() });
-            let (tx, rx) = unbounded_channel();
             tasks.push(tauri::async_runtime::spawn(run_capture_stream(
                 meeting_id.to_string(),
                 Speaker::Them,
@@ -327,20 +384,9 @@ impl CaptureRegistry {
                 them_sink,
                 Some(them_audio.clone()),
             )));
-            match source.start(tx.clone()) {
-                Ok(()) => {
-                    log::info!("[meeting] system-audio capture started for {meeting_id}");
-                    them_tx = Some(tx);
-                }
-                Err(err) => {
-                    log::warn!("[meeting] system-audio capture unavailable: {err}")
-                }
-            }
-        } else {
-            log::info!("[meeting] system-audio capture unsupported on this platform");
+            them_tx = system_tx;
         }
 
-        let has_system_audio = them_tx.is_some();
         active.insert(
             meeting_id.to_string(),
             CaptureSlot::Active(ActiveCapture {
@@ -355,6 +401,7 @@ impl CaptureRegistry {
             "[meeting] capture registry active for {meeting_id}; system_audio={}",
             has_system_audio
         );
+        Ok(())
     }
 
     /// Whether a capture is currently live for `meeting_id`. A draining
@@ -473,6 +520,7 @@ impl CaptureRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio::capture::FrameSender;
     use std::sync::Mutex;
 
     struct SequenceTranscriber {
@@ -699,5 +747,55 @@ mod tests {
         // The id is freed for a fresh capture, not leaked behind a tombstone.
         assert!(!registry.slot_occupied("m1"));
         assert!(!registry.is_active("m1"));
+    }
+
+    struct FailingSource {
+        error: CaptureError,
+    }
+
+    impl AudioCaptureSource for FailingSource {
+        fn start(&mut self, _sink: FrameSender) -> Result<(), CaptureError> {
+            Err(self.error.clone())
+        }
+
+        fn stop(&mut self) {}
+    }
+
+    #[test]
+    fn system_audio_permission_failure_is_capture_startup_error() {
+        // #2217: on supported native capture platforms, a failed system-audio
+        // tap/loopback must reject startup instead of recording a mic-only
+        // session that later fails with an empty transcript.
+        let result = prepare_system_audio_stream(
+            "m1",
+            Some(Box::new(FailingSource {
+                error: CaptureError::Permission("audio-capture permission denied".to_string()),
+            })),
+        );
+
+        match result {
+            Err(err) => assert_eq!(
+                err,
+                CaptureError::Permission("audio-capture permission denied".to_string())
+            ),
+            Ok(_) => panic!("permission failures must reject capture startup"),
+        }
+    }
+
+    #[test]
+    fn unsupported_system_audio_remains_mic_only() {
+        // Unsupported platform/build remains a valid mic-only capture path; only
+        // a supported source that fails to initialize is fatal.
+        let stream = prepare_system_audio_stream(
+            "m1",
+            Some(Box::new(FailingSource {
+                error: CaptureError::Unsupported(
+                    "system-audio capture unsupported on this platform".to_string(),
+                ),
+            })),
+        )
+        .expect("unsupported system audio should degrade to mic-only");
+
+        assert!(!stream.has_system_audio());
     }
 }

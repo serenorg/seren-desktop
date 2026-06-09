@@ -194,7 +194,7 @@ pub async fn start_meeting_capture(
     let registry = (*registry).clone();
     tauri::async_runtime::spawn_blocking(move || registry.start(&app, &meeting_id))
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| err.to_string())??;
     Ok(())
 }
 

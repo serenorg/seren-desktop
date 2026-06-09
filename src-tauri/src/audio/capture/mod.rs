@@ -31,6 +31,8 @@ pub type FrameSender = UnboundedSender<PcmFrame>;
 pub enum CaptureError {
     #[error("audio device unavailable: {0}")]
     Device(String),
+    #[error("audio capture permission denied: {0}")]
+    Permission(String),
     #[error("audio capture unsupported on this platform/build: {0}")]
     Unsupported(String),
 }

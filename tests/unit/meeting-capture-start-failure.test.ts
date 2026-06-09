@@ -126,4 +126,39 @@ describe("meetingStore capture startup failure visibility (#2209)", () => {
     consoleError.mockRestore();
     consoleInfo.mockRestore();
   });
+
+  it("surfaces native system-audio startup failures as system-audio errors", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    m.startMeetingCapture.mockRejectedValueOnce(
+      "system-audio capture unavailable: audio capture permission denied: AudioHardwareCreateProcessTap failed",
+    );
+    m.listMeetings.mockResolvedValue([
+      meeting({
+        status: "failed",
+        failureReason:
+          "System audio capture could not start. Allow system-audio recording for Seren and make sure an output device is available, then start capture again.",
+      }),
+    ]);
+
+    await meetingStore.requestCaptureStart(meeting());
+
+    expect(m.startMeetingCapture).toHaveBeenCalledWith("m1");
+    expect(m.startMeetingMicCapture).not.toHaveBeenCalled();
+    expect(m.stopMeetingCapture).not.toHaveBeenCalled();
+    expect(m.updateMeetingStatus).toHaveBeenCalledWith(
+      "m1",
+      "failed",
+      expect.any(Number),
+      expect.stringContaining("System audio capture could not start"),
+    );
+    expect(meetingStore.state.error).toContain(
+      "System audio capture could not start",
+    );
+
+    consoleError.mockRestore();
+    consoleInfo.mockRestore();
+  });
 });
