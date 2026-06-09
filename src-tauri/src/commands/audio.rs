@@ -4,7 +4,7 @@
 use crate::audio::capture::to_mono_16k;
 use crate::audio::chunker::Chunk;
 use crate::audio::cleanup::{build_cleanup_prompt, build_transform_prompt};
-use crate::audio::detect::{probe_audio_activity, should_start_capture};
+use crate::audio::detect::{MeetingAutodetectResult, meeting_detection, probe_audio_activity};
 use crate::audio::llm::{CompletionRequest, complete};
 use crate::audio::merge::merge_segments;
 use crate::audio::notes::{ParsedNotes, generate_notes};
@@ -56,6 +56,21 @@ pub async fn get_meeting(app: AppHandle, id: String) -> Result<Option<Meeting>, 
 #[tauri::command]
 pub async fn list_meetings(app: AppHandle, limit: Option<i32>) -> Result<Vec<Meeting>, String> {
     run_db(app, move |conn| select_meetings(conn, limit.unwrap_or(50))).await
+}
+
+#[tauri::command]
+pub async fn delete_meeting(app: AppHandle, id: String) -> Result<(), String> {
+    let deleted_id = id.clone();
+    run_db(app.clone(), move |conn| {
+        delete_meeting_record(conn, &id)?;
+        Ok(())
+    })
+    .await?;
+    let _ = app.emit(
+        "meeting://deleted",
+        serde_json::json!({ "meetingId": deleted_id }),
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -625,9 +640,9 @@ pub fn list_meeting_templates() -> Vec<MeetingTemplate> {
 /// Probe audio activity, then decide whether a meeting capture should arm.
 /// Process presence alone must not surface a record prompt.
 #[tauri::command]
-pub fn meeting_autodetect() -> bool {
+pub fn meeting_autodetect() -> MeetingAutodetectResult {
     let activity = probe_audio_activity();
-    should_start_capture(activity)
+    meeting_detection(activity)
 }
 
 // --- Dictation (shares the transcribe + cleanup engines with Meeting Mode) --
@@ -802,6 +817,17 @@ pub fn select_meetings(conn: &Connection, limit: i32) -> Result<Vec<Meeting>> {
 
     stmt.query_map(params![limit], row_to_meeting)?
         .collect::<Result<Vec<_>>>()
+}
+
+pub fn delete_meeting_record(conn: &Connection, id: &str) -> Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM transcript_segments WHERE meeting_id = ?1",
+        params![id],
+    )?;
+    let deleted = tx.execute("DELETE FROM meetings WHERE id = ?1", params![id])?;
+    tx.commit()?;
+    Ok(deleted)
 }
 
 pub fn update_meeting_status_record(
@@ -1212,6 +1238,38 @@ mod tests {
         assert_eq!(segments[0].speaker_label, None);
         assert_eq!(segments[0].speaker_source, SpeakerSource::Channel);
         assert_eq!(segments[2].status, SegmentStatus::Gap);
+    }
+
+    #[test]
+    fn delete_meeting_record_removes_notes_and_transcript_segments() {
+        let conn = setup();
+        insert_meeting(&conn, meeting("meeting-1")).unwrap();
+        set_meeting_notes_record(&conn, "meeting-1", "notes", "{}").unwrap();
+        insert_transcript_segment(
+            &conn,
+            NewTranscriptSegment {
+                id: "segment-1".to_string(),
+                meeting_id: "meeting-1".to_string(),
+                seq: 0,
+                speaker: Speaker::Me,
+                text: "hello".to_string(),
+                start_ms: 0,
+                end_ms: 100,
+                status: SegmentStatus::Ok,
+                speaker_label: None,
+                speaker_source: SpeakerSource::Channel,
+                created_at: 30,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(delete_meeting_record(&conn, "meeting-1").unwrap(), 1);
+        assert!(select_meeting(&conn, "meeting-1").unwrap().is_none());
+        assert!(
+            select_transcript_segments(&conn, "meeting-1")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

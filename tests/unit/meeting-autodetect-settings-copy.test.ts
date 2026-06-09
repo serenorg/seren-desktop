@@ -26,8 +26,10 @@ describe("meeting auto-detect settings (#2215)", () => {
     expect(settingsSource).not.toContain("Add a meeting app");
     expect(settingsStoreSource).not.toContain("meetingAppAllowlist");
     expect(meetingStoreSource).not.toContain("meetingAppAllowlist");
-    expect(serviceSource).toContain("meetingAutodetect(): Promise<boolean>");
-    expect(nativeCommandSource).toContain("pub fn meeting_autodetect() -> bool");
+    expect(serviceSource).toContain("MeetingAutodetectResult");
+    expect(nativeCommandSource).toContain(
+      "pub fn meeting_autodetect() -> MeetingAutodetectResult",
+    );
     expect(detectionSource).toContain(
       "pub fn should_start_capture(activity: AudioActivity) -> bool",
     );

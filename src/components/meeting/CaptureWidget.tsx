@@ -29,6 +29,7 @@ function meetingIdFromUrl(): string | null {
 
 export function CaptureWidget() {
   const meetingId = meetingIdFromUrl();
+  const fallbackStartedAt = Date.now();
   const [meeting, setMeeting] = createSignal<Meeting | null>(null);
   const [stopping, setStopping] = createSignal(false);
   // A ticking signal so the elapsed clock re-renders once per second.
@@ -38,6 +39,7 @@ export function CaptureWidget() {
   let clock: number | null = null;
 
   onMount(async () => {
+    clock = window.setInterval(() => setTick((value) => value + 1), 1000);
     if (!meetingId || !isTauriRuntime()) return;
 
     try {
@@ -51,8 +53,6 @@ export function CaptureWidget() {
     statusUnlisten = await listen<Meeting>("meeting://status", (event) => {
       if (event.payload.id === meetingId) setMeeting(event.payload);
     });
-
-    clock = window.setInterval(() => setTick((value) => value + 1), 1000);
   });
 
   onCleanup(() => {
@@ -61,6 +61,13 @@ export function CaptureWidget() {
   });
 
   const recording = () => meeting()?.status === "capturing";
+  const fallbackDuration = () => {
+    tick();
+    return formatDuration({
+      startedAt: fallbackStartedAt,
+      endedAt: null,
+    } as Meeting);
+  };
 
   const stop = async () => {
     if (!meetingId || stopping()) return;
@@ -73,7 +80,7 @@ export function CaptureWidget() {
   };
 
   return (
-    <div class="h-screen w-screen flex items-center gap-2.5 px-3 rounded-xl border border-border bg-surface-1/95 text-foreground select-none backdrop-blur">
+    <div class="h-full w-full overflow-hidden box-border flex items-center gap-2.5 px-3 rounded-xl border border-border bg-surface-1/95 text-foreground select-none backdrop-blur">
       <div
         data-tauri-drag-region
         class="min-w-0 flex flex-1 items-center gap-2.5"
@@ -87,7 +94,7 @@ export function CaptureWidget() {
         />
         <div class="min-w-0 flex-1 leading-tight">
           <div class="font-mono tabular-nums text-[13px]">
-            <Show when={meeting()} fallback="00:00">
+            <Show when={meeting()} fallback={fallbackDuration()}>
               {(active) => {
                 tick();
                 return formatDuration(active());

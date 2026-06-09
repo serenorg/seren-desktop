@@ -2,6 +2,7 @@
 // ABOUTME: Uses meeting services and store; components never call Tauri IPC directly.
 
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { ConfirmDialog } from "@/components/catalog/ConfirmDialog";
 import { MeetingDetail } from "@/components/meeting/MeetingDetail";
 import { MeetingSettings } from "@/components/meeting/MeetingSettings";
 import {
@@ -11,7 +12,7 @@ import {
   STATUS_LABELS,
 } from "@/lib/meeting-format";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
-import { createMeeting } from "@/services/meetings";
+import { createMeeting, type Meeting } from "@/services/meetings";
 import { meetingStore } from "@/stores/meeting.store";
 import { settingsStore } from "@/stores/settings.store";
 
@@ -55,6 +56,8 @@ export function MeetingPanel(props: MeetingPanelProps) {
   const [stopping, setStopping] = createSignal(false);
   const [title, setTitle] = createSignal("");
   const [showSettings, setShowSettings] = createSignal(false);
+  const [pendingDelete, setPendingDelete] = createSignal<Meeting | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
 
   // The capture lifecycle (event listeners, auto-detect, widget/tray relays)
   // lives in AppShell so it survives this panel unmounting on close. The panel
@@ -72,6 +75,12 @@ export function MeetingPanel(props: MeetingPanelProps) {
   const activeMeeting = () => meetingStore.state.activeMeeting;
   const template = () => settingsStore.get("meetingTemplateId");
   const desktopRuntime = isTauriRuntime();
+  const deleteConfirmationMessage = () => {
+    const meeting = pendingDelete();
+    return meeting
+      ? `Delete "${meetingTitle(meeting)}"? Notes and transcript segments will be permanently removed.`
+      : "";
+  };
 
   // Create the meeting, then hand off to the store's gate. The store decides
   // whether to start immediately or surface the app-wide priming dialog, so
@@ -104,6 +113,20 @@ export function MeetingPanel(props: MeetingPanelProps) {
       meetingStore.resetAutoDetectDismissal();
     } finally {
       setStopping(false);
+    }
+  };
+
+  const deleteSelectedMeeting = async () => {
+    const meeting = pendingDelete();
+    if (!meeting || deleting()) return;
+    setDeleting(true);
+    try {
+      await meetingStore.deleteMeeting(meeting);
+      if (!meetingStore.state.error) {
+        setPendingDelete(null);
+      }
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -303,11 +326,28 @@ export function MeetingPanel(props: MeetingPanelProps) {
                 </div>
               }
             >
-              {(meeting) => <MeetingDetail meeting={meeting()} />}
+              {(meeting) => (
+                <MeetingDetail
+                  meeting={meeting()}
+                  onRequestDelete={(target) => setPendingDelete(target)}
+                />
+              )}
             </Show>
           </main>
         </div>
       </Show>
+      <ConfirmDialog
+        open={pendingDelete() !== null}
+        title="Delete meeting"
+        message={deleteConfirmationMessage()}
+        confirmLabel="Delete"
+        destructive
+        pending={deleting()}
+        onConfirm={() => void deleteSelectedMeeting()}
+        onCancel={() => {
+          if (!deleting()) setPendingDelete(null);
+        }}
+      />
     </section>
   );
 }

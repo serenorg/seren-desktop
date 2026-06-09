@@ -85,6 +85,10 @@ export function listMeetings(limit = 50): Promise<Meeting[]> {
   return invoke("list_meetings", { limit });
 }
 
+export function deleteMeeting(id: string): Promise<void> {
+  return invoke("delete_meeting", { id });
+}
+
 export function updateMeetingStatus(
   id: string,
   status: MeetingStatus,
@@ -255,6 +259,11 @@ export function listMeetingTemplates(): Promise<MeetingTemplate[]> {
  * Probe whether meeting capture should arm. Native side requires active input
  * activity; process presence alone is not enough.
  */
-export function meetingAutodetect(): Promise<boolean> {
+export interface MeetingAutodetectResult {
+  detected: boolean;
+  sourceApp: string | null;
+}
+
+export function meetingAutodetect(): Promise<MeetingAutodetectResult> {
   return invoke("meeting_autodetect");
 }

@@ -646,6 +646,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
         onToggleSkills={handleToggleSkills}
         onToggleSettings={handleToggleSettings}
         recordPromptVisible={recordPromptVisible()}
+        recordPromptSourceApp={meetingStore.state.autoDetectSourceApp}
         onRecordConversation={() => void meetingStore.acceptAutoDetect()}
         onDismissRecordPrompt={() => meetingStore.dismissAutoDetect()}
       />
