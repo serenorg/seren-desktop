@@ -1,12 +1,12 @@
 // ABOUTME: Webview microphone capture for the Meeting Mode "Me" stream.
-// ABOUTME: Streams 16 kHz mono PCM frames to the Rust pipeline and exposes live amplitude.
+// ABOUTME: Streams microphone PCM frames to the Rust pipeline and exposes live amplitude.
 
 import { createRunningAudioContext } from "@/lib/audio/captureContext";
+import { connectPulledScriptProcessor } from "@/lib/audio/scriptProcessor";
 import { pushCaptureFrame } from "@/services/meetings";
 
-const TARGET_SAMPLE_RATE = 16_000;
 // Flush roughly every 250 ms so the Rust chunker sees audio promptly.
-const FLUSH_SAMPLES = TARGET_SAMPLE_RATE / 4;
+const FLUSH_SECONDS = 0.25;
 
 export interface MeetingCaptureHandle {
   /** Current input amplitude in 0..1 for the recorder meter (0 on silence). */
@@ -23,8 +23,8 @@ function floatToPcm16(input: Float32Array, out: number[]): void {
 }
 
 /**
- * Begin capturing the microphone as the meeting "Me" stream. The browser
- * resamples to 16 kHz mono (the AudioContext rate), so frames are pipeline-ready.
+ * Begin capturing the microphone as the meeting "Me" stream. Use the hardware
+ * context rate and let Rust normalize frames to the pipeline's 16 kHz mono rate.
  */
 export async function startMeetingMicCapture(
   meetingId: string,
@@ -35,7 +35,7 @@ export async function startMeetingMicCapture(
 
   let context: AudioContext;
   try {
-    context = await createRunningAudioContext(TARGET_SAMPLE_RATE);
+    context = await createRunningAudioContext();
   } catch (error) {
     // Release the mic we just opened so a failed start can't leave it live.
     for (const track of stream.getTracks()) {
@@ -49,11 +49,10 @@ export async function startMeetingMicCapture(
   analyser.fftSize = 512;
   source.connect(analyser);
 
-  const processor = context.createScriptProcessor(4096, 1, 1);
-  // Route the processor through a muted gain so onaudioprocess fires without
-  // playing the microphone back through the speakers.
-  const mute = context.createGain();
-  mute.gain.value = 0;
+  const flushSamples = Math.max(
+    1,
+    Math.floor(context.sampleRate * FLUSH_SECONDS),
+  );
 
   let buffer: number[] = [];
   const flush = () => {
@@ -65,22 +64,17 @@ export async function startMeetingMicCapture(
       speaker: "me",
       samples: frame,
       channels: 1,
-      // Report the context's real rate; the WebView may ignore the 16 kHz
-      // request and the Rust pipeline resamples whatever rate it receives.
+      // Report the context's real hardware rate so Rust can resample accurately.
       sampleRate: context.sampleRate,
     });
   };
 
-  processor.onaudioprocess = (event) => {
+  const processor = connectPulledScriptProcessor(context, source, (event) => {
     floatToPcm16(event.inputBuffer.getChannelData(0), buffer);
-    if (buffer.length >= FLUSH_SAMPLES) {
+    if (buffer.length >= flushSamples) {
       flush();
     }
-  };
-
-  source.connect(processor);
-  processor.connect(mute);
-  mute.connect(context.destination);
+  });
 
   const timeData = new Uint8Array(analyser.frequencyBinCount);
   const level = () => {
@@ -97,7 +91,6 @@ export async function startMeetingMicCapture(
     processor.onaudioprocess = null;
     flush();
     processor.disconnect();
-    mute.disconnect();
     analyser.disconnect();
     source.disconnect();
     for (const track of stream.getTracks()) {

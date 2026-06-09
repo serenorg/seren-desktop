@@ -40,12 +40,24 @@ const MAX_THEM_BUFFER_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 60 * 90;
 #[serde(rename_all = "camelCase")]
 pub struct CaptureStopSummary {
     pub had_capture: bool,
+    pub push_frame_count: u64,
+    pub accepted_push_frame_count: u64,
+    pub dropped_push_frame_count: u64,
+    pub dropped_push_sample_count: u64,
     pub frame_count: u64,
     pub sample_count: u64,
     pub speech_frame_count: u64,
     pub chunk_count: u64,
     pub emitted_segment_count: u64,
     pub emitted_gap_count: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct CaptureIngressSummary {
+    push_frame_count: u64,
+    accepted_push_frame_count: u64,
+    dropped_push_frame_count: u64,
+    dropped_push_sample_count: u64,
 }
 
 #[derive(Default)]
@@ -81,9 +93,13 @@ impl CaptureStreamStats {
         self.emitted_gap_count.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn summary(&self, had_capture: bool) -> CaptureStopSummary {
+    fn summary(&self, had_capture: bool, ingress: CaptureIngressSummary) -> CaptureStopSummary {
         CaptureStopSummary {
             had_capture,
+            push_frame_count: ingress.push_frame_count,
+            accepted_push_frame_count: ingress.accepted_push_frame_count,
+            dropped_push_frame_count: ingress.dropped_push_frame_count,
+            dropped_push_sample_count: ingress.dropped_push_sample_count,
             frame_count: self.frame_count.load(Ordering::Relaxed),
             sample_count: self.sample_count.load(Ordering::Relaxed),
             speech_frame_count: self.speech_frame_count.load(Ordering::Relaxed),
@@ -394,6 +410,7 @@ const STOP_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Default, Clone)]
 pub struct CaptureRegistry {
     active: Arc<StdMutex<HashMap<String, CaptureSlot>>>,
+    ingress: Arc<StdMutex<HashMap<String, CaptureIngressSummary>>>,
     // Them PCM handed off by `stop`, keyed by meeting id, awaiting the post-call
     // diarization pass. `reconcile_meeting_speakers` removes its entry; the buffer
     // lives only in memory and is dropped once consumed (privacy rule #2125).
@@ -424,6 +441,7 @@ impl CaptureRegistry {
         // Me and Them share one sequence counter so segments order globally.
         let seq = Arc::new(AtomicI64::new(0));
         let stats = Arc::new(CaptureStreamStats::default());
+        self.reset_ingress_summary(meeting_id);
 
         // Me is the single-speaker mic -> plain whisper-1 text (cheap); only the
         // multi-speaker Them stream is diarized (#2152).
@@ -506,17 +524,76 @@ impl CaptureRegistry {
 
     /// Push a normalized 16 kHz mono frame into the capture stream for `speaker`.
     pub fn push_frame(&self, meeting_id: &str, speaker: Speaker, samples: Vec<i16>) {
+        let sample_count = samples.len() as u64;
         let active = self.active.lock().unwrap();
-        if let Some(CaptureSlot::Active(capture)) = active.get(meeting_id) {
-            let sender = match speaker {
-                Speaker::Me => Some(&capture.me_tx),
-                // The system ("Them") stream arrives once native capture lands.
-                Speaker::Them => capture.them_tx.as_ref(),
-            };
-            if let Some(sender) = sender {
-                let _ = sender.send(PcmFrame { samples });
+        let drop_reason = match active.get(meeting_id) {
+            Some(CaptureSlot::Active(capture)) => {
+                let sender = match &speaker {
+                    Speaker::Me => Some(&capture.me_tx),
+                    // The system ("Them") stream arrives once native capture lands.
+                    Speaker::Them => capture.them_tx.as_ref(),
+                };
+                if let Some(sender) = sender {
+                    if sender.send(PcmFrame { samples }).is_ok() {
+                        drop(active);
+                        self.record_accepted_push_frame(meeting_id);
+                        return;
+                    }
+                    "channel_closed"
+                } else {
+                    "speaker_not_captured"
+                }
             }
+            Some(CaptureSlot::Stopping) => "stopping",
+            None => "no_slot",
+        };
+        drop(active);
+
+        let ingress = self.record_dropped_push_frame(meeting_id, sample_count);
+        if should_log_dropped_push(ingress.dropped_push_frame_count) {
+            log::warn!(
+                "[meeting] capture frame dropped for {meeting_id}; speaker={} reason={} dropped_frames={} dropped_samples={}",
+                speaker.as_str(),
+                drop_reason,
+                ingress.dropped_push_frame_count,
+                ingress.dropped_push_sample_count
+            );
         }
+    }
+
+    fn reset_ingress_summary(&self, meeting_id: &str) {
+        self.ingress
+            .lock()
+            .unwrap()
+            .insert(meeting_id.to_string(), CaptureIngressSummary::default());
+    }
+
+    fn record_accepted_push_frame(&self, meeting_id: &str) {
+        let mut ingress = self.ingress.lock().unwrap();
+        let summary = ingress.entry(meeting_id.to_string()).or_default();
+        summary.push_frame_count += 1;
+        summary.accepted_push_frame_count += 1;
+    }
+
+    fn record_dropped_push_frame(
+        &self,
+        meeting_id: &str,
+        sample_count: u64,
+    ) -> CaptureIngressSummary {
+        let mut ingress = self.ingress.lock().unwrap();
+        let summary = ingress.entry(meeting_id.to_string()).or_default();
+        summary.push_frame_count += 1;
+        summary.dropped_push_frame_count += 1;
+        summary.dropped_push_sample_count += sample_count;
+        *summary
+    }
+
+    fn take_ingress_summary(&self, meeting_id: &str) -> CaptureIngressSummary {
+        self.ingress
+            .lock()
+            .unwrap()
+            .remove(meeting_id)
+            .unwrap_or_default()
     }
 
     /// Take the active capture for draining and leave a `Stopping` tombstone, all
@@ -565,7 +642,8 @@ impl CaptureRegistry {
         drain_timeout: Duration,
     ) -> CaptureStopSummary {
         let Some(mut capture) = self.begin_stop(meeting_id) else {
-            return CaptureStopSummary::default();
+            let ingress = self.take_ingress_summary(meeting_id);
+            return CaptureStreamStats::default().summary(false, ingress);
         };
         // Stop the native source first so it stops feeding the "Them" channel.
         if let Some(mut source) = capture.system_source.take() {
@@ -582,9 +660,14 @@ impl CaptureRegistry {
                 log::warn!("[meeting] capture worker drain timed out for {meeting_id}; detaching");
             }
         }
-        let summary = capture.stats.summary(true);
+        let ingress = self.take_ingress_summary(meeting_id);
+        let summary = capture.stats.summary(true, ingress);
         log::info!(
-            "[meeting] capture stop summary for {meeting_id}: frames={} speech_frames={} chunks={} emitted_segments={} emitted_gaps={}",
+            "[meeting] capture stop summary for {meeting_id}: push_frames={} accepted_push_frames={} dropped_push_frames={} dropped_push_samples={} frames={} speech_frames={} chunks={} emitted_segments={} emitted_gaps={}",
+            summary.push_frame_count,
+            summary.accepted_push_frame_count,
+            summary.dropped_push_frame_count,
+            summary.dropped_push_sample_count,
             summary.frame_count,
             summary.speech_frame_count,
             summary.chunk_count,
@@ -613,6 +696,10 @@ impl CaptureRegistry {
     pub fn take_finished_them_audio(&self, meeting_id: &str) -> Option<Vec<i16>> {
         self.finished_them_audio.lock().unwrap().remove(meeting_id)
     }
+}
+
+fn should_log_dropped_push(drop_count: u64) -> bool {
+    drop_count <= 5 || drop_count.is_power_of_two()
 }
 
 #[cfg(test)]
@@ -763,7 +850,7 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].status, SegmentStatus::Gap);
         assert!(segments[0].text.is_empty());
-        let summary = stats.summary(true);
+        let summary = stats.summary(true, CaptureIngressSummary::default());
         assert!(summary.had_capture);
         assert!(summary.frame_count > 0);
         assert!(summary.speech_frame_count > 0);
@@ -884,7 +971,27 @@ mod tests {
         assert_eq!(summary.frame_count, 0);
         assert_eq!(summary.chunk_count, 0);
         assert_eq!(summary.emitted_segment_count, 0);
+        assert_eq!(summary.push_frame_count, 0);
+        assert_eq!(summary.dropped_push_frame_count, 0);
         assert!(!registry.slot_occupied("m1"));
+    }
+
+    #[tokio::test]
+    async fn stop_summary_reports_frames_dropped_before_active_capture() {
+        let registry = CaptureRegistry::default();
+
+        registry.push_frame("m1", Speaker::Me, vec![1, 2, 3]);
+
+        let summary = registry
+            .stop_with_timeout("m1", Duration::from_millis(50))
+            .await;
+
+        assert!(!summary.had_capture);
+        assert_eq!(summary.frame_count, 0);
+        assert_eq!(summary.push_frame_count, 1);
+        assert_eq!(summary.accepted_push_frame_count, 0);
+        assert_eq!(summary.dropped_push_frame_count, 1);
+        assert_eq!(summary.dropped_push_sample_count, 3);
     }
 
     struct FailingSource {

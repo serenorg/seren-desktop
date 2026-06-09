@@ -2,7 +2,8 @@
 // ABOUTME: Resumes the context so a suspended-by-default WKWebView can't silently capture nothing.
 
 /**
- * Create an `AudioContext` at `sampleRate` and guarantee it is actually running.
+ * Create an `AudioContext` and guarantee it is actually running. When
+ * `sampleRate` is omitted, the WebView picks the hardware rate.
  *
  * WKWebView/Safari — and any context created outside a user gesture — start an
  * `AudioContext` in the `suspended` state. While suspended a `ScriptProcessor`'s
@@ -11,9 +12,12 @@
  * and fail loudly if it cannot run, rather than record silence.
  */
 export async function createRunningAudioContext(
-  sampleRate: number,
+  sampleRate?: number,
 ): Promise<AudioContext> {
-  const context = new AudioContext({ sampleRate });
+  const context =
+    sampleRate === undefined
+      ? new AudioContext()
+      : new AudioContext({ sampleRate });
   await context.resume();
   if (context.state !== "running") {
     await context.close().catch(() => {});

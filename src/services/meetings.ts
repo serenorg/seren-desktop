@@ -187,6 +187,10 @@ export function pushCaptureFrame(input: {
 
 export interface CaptureStopOutcome {
   hadCapture: boolean;
+  pushFrameCount: number;
+  acceptedPushFrameCount: number;
+  droppedPushFrameCount: number;
+  droppedPushSampleCount: number;
   frameCount: number;
   sampleCount: number;
   speechFrameCount: number;
