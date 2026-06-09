@@ -526,6 +526,7 @@ pub fn run() {
             commands::updater::ShutdownGuard::default(),
         ))
         .manage(services::database::WalCheckpointTask::default())
+        .manage(services::history_sync::HistorySyncLock::default())
         .manage(messaging::MessagingState::new())
         .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
             as polymarket::commands::PolymarketWsState);
