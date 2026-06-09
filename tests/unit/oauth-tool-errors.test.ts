@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   getOAuthConnectActionForToolError,
   isOAuthConnectionRequiredError,
+  isOAuthRefreshError,
   isOAuthScopeError,
   isOAuthTokenError,
 } from "@/lib/oauth-tool-errors";
@@ -36,6 +37,29 @@ describe("BYOC OAuth tool errors", () => {
   it("classifies canonical scope markers directly", () => {
     expect(isOAuthScopeError("insufficient authentication scopes")).toBe(true);
     expect(isOAuthScopeError("access_token_scope_insufficient")).toBe(true);
+  });
+
+  it("classifies expired-token refresh failures as reconnect-worthy", () => {
+    expect(isOAuthRefreshError("OAuth token refresh failed")).toBe(true);
+    expect(isOAuthRefreshError('{"error":"invalid_grant"}')).toBe(true);
+    expect(isOAuthRefreshError("refresh token expired")).toBe(true);
+    expect(isOAuthRefreshError("403 Forbidden: quota exceeded")).toBe(false);
+  });
+
+  it("surfaces an inline reconnect action when a previously-valid token expires", () => {
+    for (const message of [
+      "OAuth token refresh failed",
+      "Provider error during token refresh",
+      '{"error":"invalid_grant","error_description":"Token has been expired or revoked."}',
+      "refresh token expired",
+    ]) {
+      expect(
+        getOAuthConnectActionForToolError(
+          "gateway__gmail__get_messages",
+          message,
+        ),
+      ).toEqual({ publisherSlug: "gmail", reason: "connection_required" });
+    }
   });
 
   it("returns an inline action only for actionable gateway OAuth failures", () => {

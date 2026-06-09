@@ -57,12 +57,20 @@ export function isOAuthConnectionRequiredError(message: string): boolean {
 }
 
 /**
+ * Check if an error message indicates a previously-valid token that expired or
+ * was revoked, so the gateway could not refresh it on the user's behalf.
+ */
+export function isOAuthRefreshError(message: string): boolean {
+  return includesAny(message, OAUTH_REFRESH_ERROR_MARKERS);
+}
+
+/**
  * Check if an error message indicates an OAuth token issue.
  * These errors mean the user's OAuth connection needs to be refreshed.
  */
 export function isOAuthTokenError(message: string): boolean {
   return (
-    includesAny(message, OAUTH_REFRESH_ERROR_MARKERS) ||
+    isOAuthRefreshError(message) ||
     isOAuthConnectionRequiredError(message) ||
     isOAuthScopeError(message)
   );
@@ -86,7 +94,10 @@ export function getOAuthConnectActionForToolError(
   const publisherSlug = parseGatewayPublisherSlug(toolName);
   if (!publisherSlug) return null;
 
-  if (isOAuthConnectionRequiredError(errorMessage)) {
+  if (
+    isOAuthConnectionRequiredError(errorMessage) ||
+    isOAuthRefreshError(errorMessage)
+  ) {
     return { publisherSlug, reason: "connection_required" };
   }
   if (isOAuthScopeError(errorMessage)) {
