@@ -80,8 +80,10 @@ async function initUpdater(): Promise<void> {
   // without it users see "app stopped, nothing happens" and assume failure.
   // OK is the only choice: skipped upgrades mean users on old broken builds.
   if (state.status === "available") {
-    await acknowledgeAutoInstall(state.availableVersion);
-    await installAvailableUpdate();
+    if (await installPreflight()) {
+      await acknowledgeAutoInstall(state.availableVersion);
+      await installAvailableUpdate({ preflightAlreadyPassed: true });
+    }
   }
 
   // Re-check every 15 minutes so the badge appears without requiring a restart
@@ -186,6 +188,69 @@ interface PreInstallReport {
   elapsedMs: number;
 }
 
+interface InstallPreflightReport {
+  installReady: boolean;
+  currentAppPath: string | null;
+  reason: string | null;
+  remediation: string | null;
+}
+
+const MACOS_DMG_UPDATE_REMEDIATION =
+  "Move SerenDesktop to /Applications, eject the installer disk image, reopen Seren, then install the update.";
+
+async function installPreflight(): Promise<boolean> {
+  if (!isTauriRuntime()) return false;
+
+  try {
+    const report = await invoke<InstallPreflightReport>(
+      "updater_install_preflight",
+    );
+    if (report.installReady) return true;
+
+    const remediation = report.remediation ?? MACOS_DMG_UPDATE_REMEDIATION;
+    const reason =
+      report.reason ??
+      "SerenDesktop cannot install updates from this app location.";
+    console.error("[Updater] Install blocked by preflight:", reason);
+    telemetry.captureError(new Error(reason), {
+      type: "updater",
+      phase: "install_preflight",
+      currentAppPath: report.currentAppPath ?? "unknown",
+    });
+    setState({
+      status: "error",
+      error: remediation,
+      downloadedBytes: 0,
+      totalBytes: 0,
+      progressPercent: 0,
+    });
+
+    try {
+      await message(remediation, {
+        title: "Move Seren to Applications",
+        kind: "warning",
+        okLabel: "OK",
+      });
+    } catch (dialogError) {
+      const err =
+        dialogError instanceof Error
+          ? dialogError
+          : new Error(String(dialogError));
+      console.warn("[Updater] Preflight dialog failed:", err.message);
+    }
+
+    return false;
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.warn("[Updater] Install preflight failed:", err.message);
+    telemetry.captureError(err, {
+      type: "updater",
+      phase: "install_preflight",
+    });
+    return true;
+  }
+}
+
 /** Drain Seren-owned child processes before handing control to the NSIS
  *  installer / macOS updater. Failure to drain on Windows is the root cause
  *  of #2230's "Error opening file for writing: node.exe" — a stale bundled
@@ -227,7 +292,13 @@ async function preInstallShutdown(): Promise<PreInstallReport | null> {
   }
 }
 
-async function installAvailableUpdate(): Promise<void> {
+interface InstallOptions {
+  preflightAlreadyPassed?: boolean;
+}
+
+async function installAvailableUpdate(
+  options: InstallOptions = {},
+): Promise<void> {
   if (!isTauriRuntime()) {
     console.warn("[Updater] Install skipped: not Tauri runtime");
     return;
@@ -238,6 +309,10 @@ async function installAvailableUpdate(): Promise<void> {
       status: "error",
       error: "No pending update found. Try checking again.",
     });
+    return;
+  }
+
+  if (!options.preflightAlreadyPassed && !(await installPreflight())) {
     return;
   }
 
