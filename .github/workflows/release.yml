@@ -589,15 +589,21 @@ jobs:
           $signedDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis-signed"
           $targetDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
 
-          if (Test-Path $signedDir) {
-            Write-Host "Copying signed files from $signedDir to $targetDir"
-            Get-ChildItem -Path $signedDir -Filter "*.exe" | ForEach-Object {
-              Copy-Item -Path $_.FullName -Destination $targetDir -Force
-              Write-Host "Copied: $($_.Name)"
-            }
-          } else {
+          if (-not (Test-Path $signedDir)) {
             Write-Host "Signed output directory not found: $signedDir"
             exit 1
+          }
+
+          $signedExes = @(Get-ChildItem -Path $signedDir -Filter "*.exe")
+          if ($signedExes.Count -eq 0) {
+            Write-Host "No signed .exe files found in $signedDir — CodeSignTool likely failed silently (check the 'Sign Windows NSIS installer' step log)."
+            exit 1
+          }
+
+          Write-Host "Copying signed files from $signedDir to $targetDir"
+          foreach ($file in $signedExes) {
+            Copy-Item -Path $file.FullName -Destination $targetDir -Force
+            Write-Host "Copied: $($file.Name)"
           }
 
       # Restore updater artifacts (.sig, .nsis.zip) back to NSIS dir
