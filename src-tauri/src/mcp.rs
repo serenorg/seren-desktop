@@ -448,12 +448,27 @@ fn collect_process_diagnostics(process: &mut McpProcess, base_error: &str) -> St
 /// Connect to an MCP server
 #[tauri::command]
 pub async fn mcp_connect(
+    app: tauri::AppHandle,
     state: State<'_, McpState>,
     server_name: String,
     command: String,
     args: Vec<String>,
     env: Option<HashMap<String, String>>,
 ) -> Result<McpInitializeResult, String> {
+    // Same rationale as provider_runtime_get_config: once the updater has
+    // engaged the shutdown guard, refuse to spawn new stdio MCP children so
+    // they can't re-lock the bundled node.exe between the pre-install drain
+    // and the NSIS file-replace step (#2230).
+    if let Some(guard) = app.try_state::<std::sync::Arc<crate::commands::updater::ShutdownGuard>>()
+    {
+        if guard.is_engaged() {
+            return Err(format!(
+                "Update in progress — MCP connect for '{}' refused",
+                server_name
+            ));
+        }
+    }
+
     // Resolve bare command names (e.g. "node") to absolute paths using the embedded PATH.
     // The parent process PATH may be minimal when launched from Finder/Dock on macOS,
     // so we cannot rely on the OS to find commands that live in /opt/homebrew/bin etc.

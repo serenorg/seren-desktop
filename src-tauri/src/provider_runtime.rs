@@ -507,6 +507,16 @@ pub async fn provider_runtime_get_config(
     app: AppHandle,
     state: State<'_, ProviderRuntimeState>,
 ) -> Result<ProviderRuntimeConfig, String> {
+    // Once the updater has engaged the shutdown guard, refuse to spawn a new
+    // node child. The orchestrator can race the install window otherwise and
+    // re-lock the bundled node.exe between pre-install shutdown and the NSIS
+    // file-replace step (#2230).
+    if let Some(guard) = app.try_state::<std::sync::Arc<crate::commands::updater::ShutdownGuard>>()
+    {
+        if guard.is_engaged() {
+            return Err("Update in progress — provider runtime spawn refused".to_string());
+        }
+    }
     state.ensure_started(&app).await
 }
 

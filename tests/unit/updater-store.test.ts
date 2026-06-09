@@ -10,6 +10,7 @@ const {
   relaunchMock,
   clearAllBrowsingDataMock,
   captureErrorMock,
+  invokeMock,
 } = vi.hoisted(() => ({
   mockStoreState: {} as Record<string, unknown>,
   isTauriRuntimeMock: vi.fn<() => boolean>(),
@@ -17,6 +18,7 @@ const {
   relaunchMock: vi.fn(),
   clearAllBrowsingDataMock: vi.fn(),
   captureErrorMock: vi.fn(),
+  invokeMock: vi.fn(),
 }));
 
 vi.mock("solid-js/store", () => ({
@@ -31,6 +33,10 @@ vi.mock("solid-js/store", () => ({
 
 vi.mock("@/lib/tauri-bridge", () => ({
   isTauriRuntime: isTauriRuntimeMock,
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: invokeMock,
 }));
 
 vi.mock("@tauri-apps/plugin-updater", () => ({
@@ -62,6 +68,16 @@ describe("updaterStore install flow", () => {
     relaunchMock.mockReset();
     clearAllBrowsingDataMock.mockReset();
     captureErrorMock.mockReset();
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({
+      mcpDrained: true,
+      terminalsDrained: true,
+      providerRuntimeDrained: true,
+      claudeMemoryDrained: true,
+      handleReleased: true,
+      lockedNodePath: null,
+      elapsedMs: 10,
+    });
     // Vitest sets import.meta.env.DEV=true; the prod-only code paths under
     // test would otherwise short-circuit through isDevRuntime().
     vi.stubEnv("DEV", false);
@@ -123,6 +139,98 @@ describe("updaterStore install flow", () => {
 
     expect(downloadAndInstallMock).not.toHaveBeenCalled();
     expect(relaunchMock).not.toHaveBeenCalled();
+  });
+
+  it("drains Seren-owned children before downloadAndInstall (#2230)", async () => {
+    // The bundled node.exe is held open by the provider runtime / MCP
+    // children. If we let downloadAndInstall run without draining first,
+    // the NSIS file-replace step on Windows fails with "Error opening file
+    // for writing: node.exe". Pin the call order so a future refactor that
+    // moves the drain after download can't ship without failing this test.
+    isTauriRuntimeMock.mockReturnValue(true);
+    const downloadAndInstallMock = vi.fn(async () => {});
+    checkMock.mockResolvedValue({
+      version: "1.3.53",
+      downloadAndInstall: downloadAndInstallMock,
+    });
+    clearAllBrowsingDataMock.mockResolvedValue(undefined);
+    relaunchMock.mockResolvedValue(undefined);
+
+    const { updaterStore } = await import("@/stores/updater.store");
+
+    await updaterStore.checkForUpdates();
+    await updaterStore.installAvailableUpdate();
+
+    expect(invokeMock).toHaveBeenCalledWith("updater_pre_install");
+    expect(downloadAndInstallMock).toHaveBeenCalledOnce();
+    expect(invokeMock.mock.invocationCallOrder[0]).toBeLessThan(
+      downloadAndInstallMock.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("continues install when pre-install handle release times out", async () => {
+    // The pre-install command can succeed at draining but still report the
+    // bundled node handle as locked under heavy Defender scanning. We log
+    // and continue rather than block the install — the actual file-replace
+    // may still succeed if the kernel flushes the handle by the time NSIS
+    // gets there.
+    isTauriRuntimeMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({
+      mcpDrained: true,
+      terminalsDrained: true,
+      providerRuntimeDrained: true,
+      claudeMemoryDrained: true,
+      handleReleased: false,
+      lockedNodePath: "C:\\Users\\u\\AppData\\Local\\SerenDesktop\\embedded-runtime\\win32-x64\\node\\node.exe",
+      elapsedMs: 15000,
+    });
+    const downloadAndInstallMock = vi.fn(async () => {});
+    checkMock.mockResolvedValue({
+      version: "1.3.53",
+      downloadAndInstall: downloadAndInstallMock,
+    });
+    clearAllBrowsingDataMock.mockResolvedValue(undefined);
+    relaunchMock.mockResolvedValue(undefined);
+
+    const { updaterStore } = await import("@/stores/updater.store");
+
+    await updaterStore.checkForUpdates();
+    await updaterStore.installAvailableUpdate();
+
+    expect(downloadAndInstallMock).toHaveBeenCalledOnce();
+    expect(captureErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("pre-install handle lock"),
+      }),
+      { type: "updater", phase: "pre_install_handle_lock" },
+    );
+  });
+
+  it("continues install when pre-install command itself fails", async () => {
+    // The pre-install command can fail (e.g. permission, IPC race). The
+    // updater must not block — the in-app drain is defense in depth on top
+    // of the installer-side NSIS hook. Failing here would strand users on
+    // broken builds with no path forward.
+    isTauriRuntimeMock.mockReturnValue(true);
+    invokeMock.mockRejectedValue(new Error("ipc unavailable"));
+    const downloadAndInstallMock = vi.fn(async () => {});
+    checkMock.mockResolvedValue({
+      version: "1.3.53",
+      downloadAndInstall: downloadAndInstallMock,
+    });
+    clearAllBrowsingDataMock.mockResolvedValue(undefined);
+    relaunchMock.mockResolvedValue(undefined);
+
+    const { updaterStore } = await import("@/stores/updater.store");
+
+    await updaterStore.checkForUpdates();
+    await updaterStore.installAvailableUpdate();
+
+    expect(downloadAndInstallMock).toHaveBeenCalledOnce();
+    expect(captureErrorMock).toHaveBeenCalledWith(expect.any(Error), {
+      type: "updater",
+      phase: "pre_install",
+    });
   });
 
   it("still relaunches if browsing-data clearing fails", async () => {
