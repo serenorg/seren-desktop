@@ -159,7 +159,9 @@ const OAuthToolConnectPrompt: Component<{
       const resolved = await resolveOAuthProviderForPublisher(
         props.action.publisherSlug,
       );
-      await connectPublisher(resolved.providerSlug);
+      await connectPublisher(resolved.providerSlug, {
+        revokeBeforeConnect: props.action.revokeBeforeConnect,
+      });
       setOpened(true);
     } catch (err) {
       setConnectError(

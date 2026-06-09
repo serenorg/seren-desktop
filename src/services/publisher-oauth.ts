@@ -22,6 +22,15 @@ export interface PublisherOAuthProviderResolution {
   providerName: string;
 }
 
+export interface ConnectPublisherOptions {
+  /**
+   * Used for refresh-token failures where the gateway still has a stale
+   * provider grant. Revoking first forces providers like Google through fresh
+   * consent so a new refresh token can be minted.
+   */
+  revokeBeforeConnect?: boolean;
+}
+
 let providerLookupPromise: Promise<
   Map<string, PublisherOAuthProviderResolution>
 > | null = null;
@@ -122,12 +131,19 @@ export async function resolveOAuthProviderForPublisher(
  *
  * In dev mode, uses localhost redirect for easier testing without deep link conflicts.
  */
-export async function connectPublisher(providerSlug: string): Promise<void> {
+export async function connectPublisher(
+  providerSlug: string,
+  options: ConnectPublisherOptions = {},
+): Promise<void> {
   console.log(`[PublisherOAuth] Starting OAuth flow for ${providerSlug}`);
 
   const token = await getToken();
   if (!token) {
     throw new Error("Not authenticated. Please log in first.");
+  }
+
+  if (options.revokeBeforeConnect) {
+    await revokePublisherConnection(providerSlug, { ignoreNotFound: true });
   }
 
   // Use deep links on macOS/Linux where seren:// URL scheme is registered.
@@ -184,20 +200,41 @@ export async function listConnectedPublishers(): Promise<
  */
 export async function disconnectPublisher(providerSlug: string): Promise<void> {
   console.log(`[PublisherOAuth] Disconnecting ${providerSlug}`);
-  const { error } = await revokeConnection({
+  await revokePublisherConnection(providerSlug);
+  console.log(`[PublisherOAuth] Successfully disconnected ${providerSlug}`);
+}
+
+async function revokePublisherConnection(
+  providerSlug: string,
+  options: { ignoreNotFound?: boolean } = {},
+): Promise<void> {
+  const { error, response } = await revokeConnection({
     path: { provider: providerSlug },
     throwOnError: false,
   });
 
   if (error) {
+    if (options.ignoreNotFound && response?.status === 404) {
+      console.log(
+        `[PublisherOAuth] No existing ${providerSlug} connection to revoke`,
+      );
+      return;
+    }
     console.error(
       `[PublisherOAuth] Error disconnecting ${providerSlug}:`,
       error,
     );
-    throw new Error(`Failed to revoke connection: ${error}`);
+    throw new Error(`Failed to revoke connection: ${formatOAuthError(error)}`);
   }
+}
 
-  console.log(`[PublisherOAuth] Successfully disconnected ${providerSlug}`);
+function formatOAuthError(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+  return JSON.stringify(error) ?? String(error);
 }
 
 /**
