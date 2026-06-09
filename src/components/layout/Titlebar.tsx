@@ -10,6 +10,7 @@ import { updaterStore } from "@/stores/updater.store";
 
 interface TitlebarProps {
   onSignInClick: () => void;
+  onToggleMeetings: () => void;
   onToggleSkills: () => void;
   onToggleSettings: () => void;
   recordPromptVisible?: boolean;
@@ -39,6 +40,26 @@ function formatBytes(bytes: number): string {
   const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${(bytes / k ** i).toFixed(1)} ${sizes[i]}`;
+}
+
+function MeetingsIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.4"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      role="img"
+      aria-label="Meetings"
+    >
+      <path d="M8 9.8a2.25 2.25 0 0 0 2.25-2.25V4.25a2.25 2.25 0 0 0-4.5 0v3.3A2.25 2.25 0 0 0 8 9.8Z" />
+      <path d="M3.8 7.25a4.2 4.2 0 0 0 8.4 0M8 11.45V14M6.25 14h3.5" />
+    </svg>
+  );
 }
 
 export const Titlebar: Component<TitlebarProps> = (props) => {
@@ -130,6 +151,16 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         <Show when={authStore.isAuthenticated}>
           <BalanceDisplay />
         </Show>
+
+        <button
+          type="button"
+          data-testid="titlebar-meetings-button"
+          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
+          onClick={props.onToggleMeetings}
+          title="Meetings"
+        >
+          <MeetingsIcon />
+        </button>
 
         <button
           type="button"

@@ -32,7 +32,7 @@ export function CaptureWidget() {
   const [meeting, setMeeting] = createSignal<Meeting | null>(null);
   const [stopping, setStopping] = createSignal(false);
   // A ticking signal so the elapsed clock re-renders once per second.
-  const [, setTick] = createSignal(0);
+  const [tick, setTick] = createSignal(0);
 
   let statusUnlisten: (() => void) | null = null;
   let clock: number | null = null;
@@ -73,27 +73,32 @@ export function CaptureWidget() {
   };
 
   return (
-    <div
-      data-tauri-drag-region
-      class="h-screen w-screen flex items-center gap-2.5 px-3 rounded-xl border border-border bg-surface-1/95 text-foreground select-none backdrop-blur"
-    >
-      <span
-        class="w-2 h-2 shrink-0 rounded-full"
-        classList={{
-          "bg-destructive animate-pulse": recording(),
-          "bg-muted-foreground": !recording(),
-        }}
-      />
-      <div class="min-w-0 flex-1 leading-tight">
-        <div class="font-mono tabular-nums text-[13px]">
-          <Show when={meeting()} fallback="00:00">
-            {(active) => formatDuration(active())}
-          </Show>
-        </div>
-        <div class="truncate text-[10px] text-muted-foreground">
-          <Show when={meeting()} fallback="Recording">
-            {(active) => meetingTitle(active())}
-          </Show>
+    <div class="h-screen w-screen flex items-center gap-2.5 px-3 rounded-xl border border-border bg-surface-1/95 text-foreground select-none backdrop-blur">
+      <div
+        data-tauri-drag-region
+        class="min-w-0 flex flex-1 items-center gap-2.5"
+      >
+        <span
+          class="w-2 h-2 shrink-0 rounded-full"
+          classList={{
+            "bg-destructive animate-pulse": recording(),
+            "bg-muted-foreground": !recording(),
+          }}
+        />
+        <div class="min-w-0 flex-1 leading-tight">
+          <div class="font-mono tabular-nums text-[13px]">
+            <Show when={meeting()} fallback="00:00">
+              {(active) => {
+                tick();
+                return formatDuration(active());
+              }}
+            </Show>
+          </div>
+          <div class="truncate text-[10px] text-muted-foreground">
+            <Show when={meeting()} fallback="Recording">
+              {(active) => meetingTitle(active())}
+            </Show>
+          </div>
         </div>
       </div>
       <button

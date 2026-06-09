@@ -123,7 +123,7 @@ export function MeetingDetail(props: MeetingDetailProps) {
   };
 
   return (
-    <div class="p-5 max-w-[760px]">
+    <div class="p-5 max-w-none">
       <div class="mb-5">
         <h3 class="text-[18px] font-semibold tracking-normal">
           {meetingTitle(props.meeting)}
@@ -135,13 +135,17 @@ export function MeetingDetail(props: MeetingDetailProps) {
           </span>
           <span>{props.meeting.sourceApp ?? "Desktop"}</span>
         </div>
-        <Show
-          when={
-            props.meeting.status === "failed" && props.meeting.failureReason
-          }
-        >
+        <Show when={props.meeting.failureReason}>
           {(reason) => (
-            <div class="mt-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-[12px] leading-5 text-destructive">
+            <div
+              class="mt-3 rounded-md border p-3 text-[12px] leading-5"
+              classList={{
+                "border-destructive/30 bg-destructive/10 text-destructive":
+                  props.meeting.status === "failed",
+                "border-warning/30 bg-warning/10 text-warning":
+                  props.meeting.status !== "failed",
+              }}
+            >
               {reason()}
             </div>
           )}
@@ -233,7 +237,7 @@ export function MeetingDetail(props: MeetingDetailProps) {
               {(segment) => (
                 <div
                   ref={(el) => rows.set(segment.seq, el)}
-                  class="grid grid-cols-[52px_1fr] gap-3 py-2 border-b border-border/50 last:border-b-0 transition-colors"
+                  class="grid grid-cols-[64px_minmax(0,1fr)] gap-3 py-2 border-b border-border/50 last:border-b-0 transition-colors"
                   classList={{
                     "bg-primary/10": highlightedSeq() === segment.seq,
                   }}
@@ -248,7 +252,7 @@ export function MeetingDetail(props: MeetingDetailProps) {
                     {segment.speaker === "me" ? "Me" : "Them"}
                   </div>
                   <div
-                    class="text-[13px] leading-5"
+                    class="min-w-0 break-words text-[13px] leading-5"
                     classList={{
                       "text-muted-foreground italic": segment.status === "gap",
                       "text-foreground": segment.status === "ok",

@@ -106,7 +106,11 @@ fn set_meeting_notes_record(
 ) -> Result<()> {
     conn.execute(
         "UPDATE meetings
-         SET notes_markdown = ?1, notes_struct_json = ?2, status = ?3, updated_at = ?4
+         SET notes_markdown = ?1,
+             notes_struct_json = ?2,
+             status = ?3,
+             failure_reason = NULL,
+             updated_at = ?4
          WHERE id = ?5",
         params![
             markdown,
@@ -849,7 +853,7 @@ pub fn update_meeting_status_record_with_failure_reason_and_diagnostics(
         "UPDATE meetings
          SET status = ?1,
              ended_at = COALESCE(?2, ended_at),
-             failure_reason = CASE WHEN ?1 = 'failed' THEN ?3 ELSE NULL END,
+             failure_reason = CASE WHEN ?1 IN ('failed', 'transcript_ready') THEN ?3 ELSE NULL END,
              capture_diagnostics_json = COALESCE(?4, capture_diagnostics_json),
              updated_at = ?5
          WHERE id = ?6",

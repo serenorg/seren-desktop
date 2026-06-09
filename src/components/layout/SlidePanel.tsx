@@ -14,6 +14,7 @@ interface SlidePanelProps {
   open: boolean;
   onClose: () => void;
   wide?: boolean;
+  reader?: boolean;
   docked?: boolean;
   children: JSX.Element;
 }
@@ -74,8 +75,9 @@ export const SlidePanel: Component<SlidePanelProps> = (props) => {
   // persisted preference, clamped against the current viewport so a width
   // saved on a larger display does not overflow on a smaller one.
   const effectiveWidth = () => clampWidth(storedWidth(), viewportWidth());
-  const panelWidth = () => (props.wide ? "860px" : `${effectiveWidth()}px`);
-  const resizable = () => !props.wide;
+  const panelWidth = () =>
+    props.reader ? "1040px" : props.wide ? "860px" : `${effectiveWidth()}px`;
+  const resizable = () => !props.wide && !props.reader;
 
   const handleResizeStart = (event: PointerEvent) => {
     if (!resizable()) return;

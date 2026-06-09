@@ -29,6 +29,7 @@ export const STATUS_LABELS: Record<Meeting["status"], string> = {
   pending_capture: "Starting",
   capturing: "Capturing",
   transcribing: "Transcribing",
+  transcript_ready: "Transcript ready",
   notes_ready: "Notes ready",
   agent_running: "Agent running",
   done: "Done",
