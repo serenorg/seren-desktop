@@ -58,6 +58,14 @@ impl ProviderRuntimeState {
         &self,
         app: &AppHandle,
     ) -> Result<ProviderRuntimeConfig, String> {
+        // Refuse to spawn when an update is in flight. The check lives here,
+        // not in the `provider_runtime_get_config` IPC command, so internal
+        // Rust callers (orchestrator workers) cannot bypass the gate by
+        // skipping IPC — #2240, caught in the #2230 functional walk-through.
+        if is_update_in_progress(app) {
+            return Err("Update in progress — provider runtime spawn refused".to_string());
+        }
+
         let mut guard = self.process.lock().await;
 
         if let Some(process) = guard.as_mut() {
@@ -224,6 +232,15 @@ impl Default for ProviderRuntimeState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// True when the in-app updater has engaged the shutdown guard. Generic over
+/// the Tauri runtime so the same check works in both the production Wry app
+/// and `tauri::test::MockRuntime` integration tests (#2240).
+fn is_update_in_progress<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    app.try_state::<std::sync::Arc<crate::commands::updater::ShutdownGuard>>()
+        .map(|g| g.is_engaged())
+        .unwrap_or(false)
 }
 
 fn find_available_port() -> Result<u16, String> {
@@ -507,16 +524,9 @@ pub async fn provider_runtime_get_config(
     app: AppHandle,
     state: State<'_, ProviderRuntimeState>,
 ) -> Result<ProviderRuntimeConfig, String> {
-    // Once the updater has engaged the shutdown guard, refuse to spawn a new
-    // node child. The orchestrator can race the install window otherwise and
-    // re-lock the bundled node.exe between pre-install shutdown and the NSIS
-    // file-replace step (#2230).
-    if let Some(guard) = app.try_state::<std::sync::Arc<crate::commands::updater::ShutdownGuard>>()
-    {
-        if guard.is_engaged() {
-            return Err("Update in progress — provider runtime spawn refused".to_string());
-        }
-    }
+    // The shutdown-guard check lives inside `ensure_started` so internal
+    // Rust callers (orchestrator workers) cannot bypass it by skipping the
+    // IPC layer. See #2240.
     state.ensure_started(&app).await
 }
 
@@ -682,6 +692,46 @@ mod tests {
             t0.elapsed() < Duration::from_millis(100),
             "start_kill should be near-instant, took {:?}",
             t0.elapsed()
+        );
+    }
+
+    /// #2240: the shutdown-guard check must live inside `ensure_started`,
+    /// not at the IPC layer, so internal Rust callers (orchestrator workers
+    /// that call `ensure_started` directly without going through the
+    /// `provider_runtime_get_config` command) cannot bypass it during the
+    /// updater's install window. We test the guard predicate against a
+    /// mock-runtime AppHandle here — the same predicate is the gate that
+    /// `ensure_started` calls in production.
+    #[test]
+    fn is_update_in_progress_is_true_when_managed_guard_engaged() {
+        use std::sync::Arc;
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app builds");
+
+        assert!(
+            !super::is_update_in_progress(app.handle()),
+            "no guard managed yet"
+        );
+
+        let shutdown_guard = Arc::new(crate::commands::updater::ShutdownGuard::default());
+        app.manage(shutdown_guard.clone());
+        assert!(
+            !super::is_update_in_progress(app.handle()),
+            "guard present but not engaged"
+        );
+
+        shutdown_guard.engage();
+        assert!(
+            super::is_update_in_progress(app.handle()),
+            "guard engaged must surface as in-progress"
+        );
+
+        shutdown_guard.release();
+        assert!(
+            !super::is_update_in_progress(app.handle()),
+            "released guard must surface as not-in-progress so the user can keep using the app"
         );
     }
 
