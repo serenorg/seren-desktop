@@ -113,6 +113,54 @@ Convert to base64:
 base64 -i certificate.pfx
 ```
 
+## Windows Signing Coverage (What Smart App Control Evaluates)
+
+A signed outer setup `.exe` is not enough. Smart App Control / Defender
+evaluates **every** executable and library that is actually loaded on the
+user's machine, including binaries extracted from the installer at runtime.
+The Windows release path therefore signs three distinct surfaces, each before
+the artifact that embeds it is produced:
+
+1. **Embedded runtime payload** (`#2235`) — `node.exe`, the Git-for-Windows
+   portable tree, the bundled Python DLLs/`.pyd`, sidecars under
+   `embedded-runtime/`, and `mcp-servers/**/*.node`. These are signed *before*
+   `tauri build` so the signatures land inside both the NSIS installer and the
+   `.nsis.zip` updater bundle. Files are flattened into one staging directory
+   (`scripts/flatten-windows-signables.mjs`) and signed in a single SSL.com
+   `batch_sign` to avoid the per-file TOTP throttle, then copied back via the
+   manifest (`scripts/restore-windows-signables.mjs`).
+
+2. **NSIS helper DLLs** (`#2237`) — `System.dll`, `nsExec.dll`, `nsDialogs.dll`,
+   and `nsis_tauri_utils.dll` ship inside the `tauri-bundler` NSIS cache
+   (`%LOCALAPPDATA%\tauri\NSIS\Plugins`) and `makensis` compiles them *into* the
+   setup `.exe`; at install they are extracted to `%TEMP%\nsXXXX.tmp` and loaded.
+   We do not depend on an upstream tauri change: the first `tauri build`
+   populates the cache, we sign those DLLs in place (reusing the same
+   flatten/restore scripts), and a second `tauri build` (with
+   `SEREN_TAURI_SKIP_PREP=1`, so the already-signed runtime is untouched and
+   cargo reuses its target dir) recompiles the installer with the signed copies.
+
+3. **Outer setup `.exe` and `.nsis.zip`** — the setup `.exe` is signed
+   post-build with SSL.com eSigner. Because Tauri builds the `.nsis.zip` from
+   the *unsigned* setup `.exe` during the build, the updater bundle is re-packed
+   from the signed `.exe` and its `.nsis.zip.sig` re-signed with the Tauri
+   updater key (`#2236`).
+
+### Verification gates (release CI, hard-fail)
+
+- Loose `.exe`/`.dll` under `bundle/` are all `Valid` (`#2235`).
+- Every `.exe`/`.dll` extracted from `.nsis.zip` is `Valid` (`#2236`).
+- The setup `.exe` is unpacked with 7-Zip and **every** embedded
+  `.exe`/`.dll`/`.node` — including the `$PLUGINSDIR` helper DLLs — is `Valid`
+  (`#2237`). This is the closest CI proxy for what Smart App Control sees.
+
+### SEREN_TAURI_SKIP_PREP
+
+`build/prepare-tauri-build.ts` honours `SEREN_TAURI_SKIP_PREP=1` by skipping
+runtime preparation entirely. The release workflow sets it on every
+`tauri build` that runs **after** the embedded runtime has been staged and
+signed, so the build cannot re-download and clobber the signed binaries.
+
 ## Testing Locally
 
 ### macOS
