@@ -2,7 +2,10 @@
 // ABOUTME: Handles CRUD operations for conversations and messages in SQLite.
 
 use crate::commands::provider_runtime::DERIVED_KIND_CASE_SQL;
-use crate::services::database::{DbPool, PersistedMessage, init_db, save_message_record};
+use crate::services::database::{
+    DbPool, PersistedMessage, enqueue_sync_tombstone, init_db, mark_sync_upsert,
+    save_message_record,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -15,6 +18,25 @@ pub(crate) fn delete_conversation_records(
     let tx = conn.unchecked_transaction()?;
     let mut deleted = 0;
     for id in conversation_ids {
+        let mut event_stmt =
+            tx.prepare("SELECT id FROM message_events WHERE conversation_id = ?1")?;
+        let event_ids = event_stmt
+            .query_map(params![id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(event_stmt);
+        let mut message_stmt = tx.prepare("SELECT id FROM messages WHERE conversation_id = ?1")?;
+        let message_ids = message_stmt
+            .query_map(params![id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(message_stmt);
+        for event_id in &event_ids {
+            enqueue_sync_tombstone(&tx, "message_events", event_id)?;
+        }
+        for message_id in &message_ids {
+            enqueue_sync_tombstone(&tx, "messages", message_id)?;
+        }
+        enqueue_sync_tombstone(&tx, "thread_drafts", id)?;
+        enqueue_sync_tombstone(&tx, "conversations", id)?;
         tx.execute(
             "DELETE FROM eval_signals
              WHERE message_id IN (
@@ -54,6 +76,10 @@ pub(crate) fn delete_conversation_records(
         )?;
         tx.execute(
             "DELETE FROM runtime_sessions WHERE thread_id = ?1",
+            params![id],
+        )?;
+        tx.execute(
+            "DELETE FROM message_events WHERE conversation_id = ?1",
             params![id],
         )?;
         tx.execute(
@@ -187,6 +213,7 @@ pub async fn create_conversation(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 'chat', ?7)",
             params![id, title, created_at, selected_model, selected_provider, normalized_project_root, employee_id],
         )?;
+        mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
     .await?;
@@ -276,29 +303,26 @@ pub async fn list_conversations(
         let mut stmt = conn.prepare(&sql)?;
 
         let rows = stmt
-            .query_map(
-                params![kind, raw, normalized, effective_limit],
-                |row| {
-                    Ok(UnifiedConversationRow {
-                        id: row.get(0)?,
-                        title: row.get(1)?,
-                        created_at: row.get(2)?,
-                        kind: row.get(3)?,
-                        project_root: row.get(4)?,
-                        is_archived: row.get::<_, i32>(5)? != 0,
-                        selected_provider: row.get(6)?,
-                        selected_model: row.get(7)?,
-                        employee_id: row.get(8)?,
-                        agent_type: row.get(9)?,
-                        agent_session_id: row.get(10)?,
-                        agent_cwd: row.get(11)?,
-                        agent_model_id: row.get(12)?,
-                        agent_permission_mode: row.get(13)?,
-                        agent_metadata: row.get(14)?,
-                        project_id: row.get(15)?,
-                    })
-                },
-            )?
+            .query_map(params![kind, raw, normalized, effective_limit], |row| {
+                Ok(UnifiedConversationRow {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    created_at: row.get(2)?,
+                    kind: row.get(3)?,
+                    project_root: row.get(4)?,
+                    is_archived: row.get::<_, i32>(5)? != 0,
+                    selected_provider: row.get(6)?,
+                    selected_model: row.get(7)?,
+                    employee_id: row.get(8)?,
+                    agent_type: row.get(9)?,
+                    agent_session_id: row.get(10)?,
+                    agent_cwd: row.get(11)?,
+                    agent_model_id: row.get(12)?,
+                    agent_permission_mode: row.get(13)?,
+                    agent_metadata: row.get(14)?,
+                    project_id: row.get(15)?,
+                })
+            })?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(rows)
@@ -360,18 +384,21 @@ pub async fn update_conversation(
                 "UPDATE conversations SET title = ?1 WHERE id = ?2",
                 params![t, id],
             )?;
+            mark_sync_upsert(conn, "conversations", &id)?;
         }
         if let Some(m) = selected_model {
             conn.execute(
                 "UPDATE conversations SET selected_model = ?1 WHERE id = ?2",
                 params![m, id],
             )?;
+            mark_sync_upsert(conn, "conversations", &id)?;
         }
         if let Some(p) = selected_provider {
             conn.execute(
                 "UPDATE conversations SET selected_provider = ?1 WHERE id = ?2",
                 params![p, id],
             )?;
+            mark_sync_upsert(conn, "conversations", &id)?;
         }
         Ok(())
     })
@@ -385,6 +412,7 @@ pub async fn archive_conversation(app: AppHandle, id: String) -> Result<(), Stri
             "UPDATE conversations SET is_archived = 1 WHERE id = ?1",
             params![id],
         )?;
+        mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
     .await
@@ -492,6 +520,7 @@ pub async fn create_agent_conversation(
                 normalized_project_root
             ],
         )?;
+        mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
     .await?;
@@ -559,6 +588,7 @@ pub async fn set_agent_conversation_session_id(
             "UPDATE conversations SET agent_session_id = ?1 WHERE id = ?2 AND kind = 'agent'",
             params![agent_session_id, id],
         )?;
+        mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
     .await
@@ -575,6 +605,7 @@ pub async fn set_agent_conversation_title(
             "UPDATE conversations SET title = ?1 WHERE id = ?2 AND kind = 'agent'",
             params![title, id],
         )?;
+        mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
     .await
@@ -591,6 +622,7 @@ pub async fn set_agent_conversation_model_id(
             "UPDATE conversations SET agent_model_id = ?1 WHERE id = ?2 AND kind = 'agent'",
             params![agent_model_id, id],
         )?;
+        mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
     .await
@@ -607,6 +639,7 @@ pub async fn set_agent_conversation_permission_mode(
             "UPDATE conversations SET agent_permission_mode = ?1 WHERE id = ?2 AND kind = 'agent'",
             params![agent_permission_mode, id],
         )?;
+        mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
     .await
@@ -615,10 +648,7 @@ pub async fn set_agent_conversation_permission_mode(
 /// Fetch the persisted composer draft for a thread (#1631).
 /// Survives force-quit so the user never loses unsent text.
 #[tauri::command]
-pub async fn get_thread_draft(
-    app: AppHandle,
-    thread_id: String,
-) -> Result<String, String> {
+pub async fn get_thread_draft(app: AppHandle, thread_id: String) -> Result<String, String> {
     run_db(app, move |conn| {
         let draft: Option<String> = conn
             .query_row(
@@ -646,6 +676,7 @@ pub async fn set_thread_draft(
             "UPDATE conversations SET draft = ?1 WHERE id = ?2",
             params![draft, thread_id],
         )?;
+        mark_sync_upsert(conn, "thread_drafts", &thread_id)?;
         Ok(())
     })
     .await
@@ -719,6 +750,7 @@ pub async fn set_agent_conversation_metadata(
             "UPDATE conversations SET agent_metadata = ?1 WHERE id = ?2 AND kind = 'agent'",
             params![agent_metadata, id],
         )?;
+        mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
     .await
@@ -731,6 +763,7 @@ pub async fn archive_agent_conversation(app: AppHandle, id: String) -> Result<()
             "UPDATE conversations SET is_archived = 1 WHERE id = ?1 AND kind = 'agent'",
             params![id],
         )?;
+        mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
     .await
@@ -814,6 +847,28 @@ pub async fn clear_conversation_history(
     conversation_id: String,
 ) -> Result<(), String> {
     run_db(app, move |conn| {
+        let mut event_stmt =
+            conn.prepare("SELECT id FROM message_events WHERE conversation_id = ?1")?;
+        let event_ids = event_stmt
+            .query_map(params![conversation_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(event_stmt);
+        let mut message_stmt =
+            conn.prepare("SELECT id FROM messages WHERE conversation_id = ?1")?;
+        let message_ids = message_stmt
+            .query_map(params![conversation_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(message_stmt);
+        for event_id in &event_ids {
+            enqueue_sync_tombstone(conn, "message_events", event_id)?;
+        }
+        for message_id in &message_ids {
+            enqueue_sync_tombstone(conn, "messages", message_id)?;
+        }
+        conn.execute(
+            "DELETE FROM message_events WHERE conversation_id = ?1",
+            params![conversation_id],
+        )?;
         conn.execute(
             "DELETE FROM messages WHERE conversation_id = ?1",
             params![conversation_id],
@@ -826,6 +881,29 @@ pub async fn clear_conversation_history(
 #[tauri::command]
 pub async fn clear_all_history(app: AppHandle) -> Result<(), String> {
     run_db(app, move |conn| {
+        let conversation_ids = conn
+            .prepare("SELECT id FROM conversations")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for id in &conversation_ids {
+            enqueue_sync_tombstone(conn, "thread_drafts", id)?;
+            enqueue_sync_tombstone(conn, "conversations", id)?;
+        }
+        let event_ids = conn
+            .prepare("SELECT id FROM message_events")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for id in &event_ids {
+            enqueue_sync_tombstone(conn, "message_events", id)?;
+        }
+        let message_ids = conn
+            .prepare("SELECT id FROM messages")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for id in &message_ids {
+            enqueue_sync_tombstone(conn, "messages", id)?;
+        }
+        conn.execute("DELETE FROM message_events", [])?;
         conn.execute("DELETE FROM messages", [])?;
         conn.execute("DELETE FROM conversations", [])?;
         Ok(())
@@ -929,7 +1007,12 @@ mod tests {
         let effective_limit = limit.unwrap_or(-1);
         let mut stmt = conn.prepare(&sql).unwrap();
         stmt.query_map(
-            params![kind, raw_project_root, normalized_project_root, effective_limit],
+            params![
+                kind,
+                raw_project_root,
+                normalized_project_root,
+                effective_limit
+            ],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .unwrap()
@@ -1029,14 +1112,29 @@ mod tests {
         let rows = list_for_test_full(&conn, None, Some("/tmp/proj"), None, None);
         let ids: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
         // chat-pr, agent-pid, agent-cwd match by the requested project.
-        assert!(ids.contains(&"chat-pr"), "chat-pr should match by project_root");
-        assert!(ids.contains(&"agent-pid"), "agent-pid should match by project_id");
-        assert!(ids.contains(&"agent-cwd"), "agent-cwd should match by agent_cwd");
+        assert!(
+            ids.contains(&"chat-pr"),
+            "chat-pr should match by project_root"
+        );
+        assert!(
+            ids.contains(&"agent-pid"),
+            "agent-pid should match by project_id"
+        );
+        assert!(
+            ids.contains(&"agent-cwd"),
+            "agent-cwd should match by agent_cwd"
+        );
         // chat-null is included because the chat bucket always surfaces
         // unscoped chat rows.
-        assert!(ids.contains(&"chat-null"), "chat with NULL project_root should surface");
+        assert!(
+            ids.contains(&"chat-null"),
+            "chat with NULL project_root should surface"
+        );
         // chat-other is in a different project and must be excluded.
-        assert!(!ids.contains(&"chat-other"), "chat in other project must be filtered out");
+        assert!(
+            !ids.contains(&"chat-other"),
+            "chat in other project must be filtered out"
+        );
     }
 
     #[test]

@@ -11,6 +11,14 @@ use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
 pub const MAX_MESSAGES_PER_CONVERSATION: i32 = 1000;
+pub const HISTORY_SYNC_TABLES: &[&str] = &[
+    "conversations",
+    "messages",
+    "message_events",
+    "thread_drafts",
+    "meetings",
+    "transcript_segments",
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PersistedMessage {
@@ -123,6 +131,115 @@ pub fn checkpoint_managed_db(app: &AppHandle, reason: &str) {
     }
 }
 
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+pub fn enqueue_sync_outbox(
+    conn: &Connection,
+    table_name: &str,
+    row_id: &str,
+    op: &str,
+) -> Result<()> {
+    if !HISTORY_SYNC_TABLES.contains(&table_name) {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "unknown sync table: {table_name}"
+        )));
+    }
+    if op != "upsert" && op != "tombstone" {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "unknown sync operation: {op}"
+        )));
+    }
+    conn.execute(
+        "INSERT INTO sync_outbox (table_name, row_id, op, enqueued_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(table_name, row_id) DO UPDATE SET
+             op = excluded.op,
+             enqueued_at = excluded.enqueued_at",
+        rusqlite::params![table_name, row_id, op, now_ms()],
+    )?;
+    Ok(())
+}
+
+pub fn enqueue_sync_tombstone(conn: &Connection, table_name: &str, row_id: &str) -> Result<()> {
+    enqueue_sync_outbox(conn, table_name, row_id, "tombstone")
+}
+
+pub fn mark_sync_upsert(conn: &Connection, table_name: &str, row_id: &str) -> Result<()> {
+    let updated_at = now_ms();
+    match table_name {
+        "conversations" => {
+            conn.execute(
+                "UPDATE conversations
+                 SET row_version = COALESCE(row_version, 1) + 1,
+                     updated_at = ?1,
+                     deleted_at = NULL
+                 WHERE id = ?2",
+                rusqlite::params![updated_at, row_id],
+            )?;
+        }
+        "messages" => {
+            conn.execute(
+                "UPDATE messages
+                 SET row_version = COALESCE(row_version, 1) + 1,
+                     updated_at = ?1,
+                     deleted_at = NULL
+                 WHERE id = ?2",
+                rusqlite::params![updated_at, row_id],
+            )?;
+        }
+        "message_events" => {
+            conn.execute(
+                "UPDATE message_events
+                 SET row_version = COALESCE(row_version, 1) + 1,
+                     updated_at = ?1,
+                     deleted_at = NULL
+                 WHERE id = ?2",
+                rusqlite::params![updated_at, row_id],
+            )?;
+        }
+        "meetings" => {
+            conn.execute(
+                "UPDATE meetings
+                 SET row_version = COALESCE(row_version, 1) + 1,
+                     deleted_at = NULL
+                 WHERE id = ?1",
+                rusqlite::params![row_id],
+            )?;
+        }
+        "transcript_segments" => {
+            conn.execute(
+                "UPDATE transcript_segments
+                 SET row_version = COALESCE(row_version, 1) + 1,
+                     updated_at = ?1,
+                     deleted_at = NULL
+                 WHERE id = ?2",
+                rusqlite::params![updated_at, row_id],
+            )?;
+        }
+        "thread_drafts" => {
+            conn.execute(
+                "UPDATE conversations
+                 SET row_version = COALESCE(row_version, 1) + 1,
+                     updated_at = ?1,
+                     deleted_at = NULL
+                 WHERE id = ?2",
+                rusqlite::params![updated_at, row_id],
+            )?;
+        }
+        _ => {
+            return Err(rusqlite::Error::InvalidParameterName(format!(
+                "unknown sync table: {table_name}"
+            )));
+        }
+    }
+    enqueue_sync_outbox(conn, table_name, row_id, "upsert")
+}
+
 pub fn start_wal_checkpoint_task(app: &AppHandle) {
     let app_handle = app.clone();
     let handle = tauri::async_runtime::spawn(async move {
@@ -143,8 +260,22 @@ pub fn start_wal_checkpoint_task(app: &AppHandle) {
 
 pub fn save_message_record(conn: &Connection, message: &PersistedMessage) -> Result<()> {
     if let Err(err) = conn.execute(
-        "INSERT OR REPLACE INTO messages (id, conversation_id, role, content, model, timestamp, metadata, provider)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO messages (
+            id, conversation_id, role, content, model, timestamp, metadata,
+            provider, row_version, updated_at, deleted_at
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?6, NULL)
+         ON CONFLICT(id) DO UPDATE SET
+            conversation_id = excluded.conversation_id,
+            role = excluded.role,
+            content = excluded.content,
+            model = excluded.model,
+            timestamp = excluded.timestamp,
+            metadata = excluded.metadata,
+            provider = excluded.provider,
+            row_version = COALESCE(messages.row_version, 1) + 1,
+            updated_at = excluded.updated_at,
+            deleted_at = NULL",
         rusqlite::params![
             message.id,
             message.conversation_id,
@@ -171,17 +302,24 @@ pub fn save_message_record(conn: &Connection, message: &PersistedMessage) -> Res
         message.conversation_id
     );
 
+    enqueue_sync_outbox(conn, "messages", &message.id, "upsert")?;
+
+    let event_id = Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO message_events (id, conversation_id, message_id, event_type, status, metadata, created_at)
-         VALUES (?1, ?2, ?3, 'message_persisted', 'completed', ?4, ?5)",
+        "INSERT INTO message_events (
+            id, conversation_id, message_id, event_type, status, metadata,
+            created_at, row_version, updated_at, deleted_at
+         )
+         VALUES (?1, ?2, ?3, 'message_persisted', 'completed', ?4, ?5, 1, ?5, NULL)",
         rusqlite::params![
-            Uuid::new_v4().to_string(),
+            event_id,
             message.conversation_id,
             message.id,
             message.metadata,
             message.timestamp
         ],
     )?;
+    enqueue_sync_outbox(conn, "message_events", &event_id, "upsert")?;
 
     let count: i32 = conn.query_row(
         "SELECT COUNT(*) FROM messages WHERE conversation_id = ?1",
@@ -189,6 +327,37 @@ pub fn save_message_record(conn: &Connection, message: &PersistedMessage) -> Res
         |row| row.get(0),
     )?;
     if count > MAX_MESSAGES_PER_CONVERSATION {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM messages WHERE conversation_id = ?1 AND id NOT IN (
+                SELECT id FROM messages WHERE conversation_id = ?1 ORDER BY timestamp DESC LIMIT ?2
+            )",
+        )?;
+        let stale_ids = stmt
+            .query_map(
+                rusqlite::params![message.conversation_id, MAX_MESSAGES_PER_CONVERSATION],
+                |row| row.get::<_, String>(0),
+            )?
+            .collect::<Result<Vec<_>>>()?;
+        drop(stmt);
+        let mut event_stmt = conn.prepare("SELECT id FROM message_events WHERE message_id = ?1")?;
+        for stale_id in &stale_ids {
+            let event_ids = event_stmt
+                .query_map(rusqlite::params![stale_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>>>()?;
+            for event_id in event_ids {
+                enqueue_sync_tombstone(conn, "message_events", &event_id)?;
+            }
+            enqueue_sync_tombstone(conn, "messages", stale_id)?;
+        }
+        drop(event_stmt);
+        conn.execute(
+            "DELETE FROM message_events WHERE message_id IN (
+                SELECT id FROM messages WHERE conversation_id = ?1 AND id NOT IN (
+                    SELECT id FROM messages WHERE conversation_id = ?1 ORDER BY timestamp DESC LIMIT ?2
+                )
+            )",
+            rusqlite::params![message.conversation_id, MAX_MESSAGES_PER_CONVERSATION],
+        )?;
         conn.execute(
             "DELETE FROM messages WHERE conversation_id = ?1 AND id NOT IN (
                 SELECT id FROM messages WHERE conversation_id = ?1 ORDER BY timestamp DESC LIMIT ?2
@@ -240,6 +409,142 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
     checkpoint_wal(&conn, WalCheckpointMode::Restart)?;
     checkpoint_wal(&conn, WalCheckpointMode::Truncate)?;
     Ok(conn)
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+    conn.prepare(&format!("SELECT {column} FROM {table} LIMIT 1"))
+        .is_ok()
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
+    if !column_exists(conn, table, column) {
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn setup_history_sync_schema(conn: &Connection) -> Result<()> {
+    add_column_if_missing(
+        conn,
+        "conversations",
+        "row_version",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    add_column_if_missing(conn, "conversations", "deleted_at", "INTEGER")?;
+    add_column_if_missing(conn, "conversations", "synced_at", "INTEGER")?;
+    add_column_if_missing(conn, "conversations", "updated_at", "INTEGER")?;
+    conn.execute(
+        "UPDATE conversations
+         SET updated_at = created_at
+         WHERE updated_at IS NULL OR updated_at = 0",
+        [],
+    )
+    .ok();
+
+    add_column_if_missing(
+        conn,
+        "messages",
+        "row_version",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    add_column_if_missing(conn, "messages", "deleted_at", "INTEGER")?;
+    add_column_if_missing(conn, "messages", "synced_at", "INTEGER")?;
+    add_column_if_missing(conn, "messages", "updated_at", "INTEGER")?;
+    conn.execute(
+        "UPDATE messages
+         SET updated_at = timestamp
+         WHERE updated_at IS NULL OR updated_at = 0",
+        [],
+    )
+    .ok();
+
+    add_column_if_missing(
+        conn,
+        "message_events",
+        "row_version",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    add_column_if_missing(conn, "message_events", "deleted_at", "INTEGER")?;
+    add_column_if_missing(conn, "message_events", "synced_at", "INTEGER")?;
+    add_column_if_missing(conn, "message_events", "updated_at", "INTEGER")?;
+    conn.execute(
+        "UPDATE message_events
+         SET updated_at = created_at
+         WHERE updated_at IS NULL OR updated_at = 0",
+        [],
+    )
+    .ok();
+
+    add_column_if_missing(
+        conn,
+        "meetings",
+        "row_version",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    add_column_if_missing(conn, "meetings", "deleted_at", "INTEGER")?;
+    add_column_if_missing(conn, "meetings", "synced_at", "INTEGER")?;
+    add_column_if_missing(conn, "meetings", "updated_at", "INTEGER")?;
+    conn.execute(
+        "UPDATE meetings
+         SET updated_at = created_at
+         WHERE updated_at IS NULL OR updated_at = 0",
+        [],
+    )
+    .ok();
+
+    add_column_if_missing(
+        conn,
+        "transcript_segments",
+        "row_version",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    add_column_if_missing(conn, "transcript_segments", "deleted_at", "INTEGER")?;
+    add_column_if_missing(conn, "transcript_segments", "synced_at", "INTEGER")?;
+    add_column_if_missing(conn, "transcript_segments", "updated_at", "INTEGER")?;
+    conn.execute(
+        "UPDATE transcript_segments
+         SET updated_at = created_at
+         WHERE updated_at IS NULL OR updated_at = 0",
+        [],
+    )
+    .ok();
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sync_outbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            table_name TEXT NOT NULL,
+            row_id TEXT NOT NULL,
+            op TEXT NOT NULL,
+            enqueued_at INTEGER NOT NULL,
+            conflict INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(table_name, row_id)
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sync_outbox_order
+         ON sync_outbox(id ASC)",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS history_sync_state (
+            table_name TEXT PRIMARY KEY,
+            last_pulled_version INTEGER NOT NULL DEFAULT 0,
+            first_backfill_completed INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+    Ok(())
 }
 
 /// Create tables and run migrations on a connection.
@@ -768,6 +1073,8 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     )
     .ok();
 
+    setup_history_sync_schema(conn)?;
+
     // Persisted context-window observations keyed by (provider, model_id).
     // Populated from CLI prompt-completion metadata so the catalog does not
     // need to be edited every time a new model ships.
@@ -907,8 +1214,8 @@ fn migrate_orphan_messages(conn: &Connection) -> Result<()> {
             .as_millis() as i64;
 
         conn.execute(
-            "INSERT OR IGNORE INTO conversations (id, title, created_at, is_archived)
-             VALUES (?1, ?2, ?3, 0)",
+            "INSERT OR IGNORE INTO conversations (id, title, created_at, is_archived, updated_at)
+             VALUES (?1, ?2, ?3, 0, ?3)",
             rusqlite::params![default_id, "Previous Chat", now],
         )?;
 
@@ -979,6 +1286,93 @@ mod tests {
             )
             .unwrap();
         assert_eq!(event_count, 2);
+    }
+
+    #[test]
+    fn save_message_record_prune_tombstones_message_events() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Chat', 1000)",
+            [],
+        )
+        .unwrap();
+
+        for idx in 0..=MAX_MESSAGES_PER_CONVERSATION {
+            save_message_record(
+                &conn,
+                &PersistedMessage {
+                    id: format!("m{idx}"),
+                    conversation_id: "c1".to_string(),
+                    role: "user".to_string(),
+                    content: format!("message {idx}"),
+                    model: None,
+                    timestamp: 2000 + i64::from(idx),
+                    metadata: None,
+                    provider: None,
+                },
+            )
+            .unwrap();
+        }
+
+        let stale_message_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM messages WHERE id = 'm0'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let stale_event_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM message_events WHERE message_id = 'm0'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let event_tombstones: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sync_outbox
+                 WHERE table_name = 'message_events' AND op = 'tombstone'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(stale_message_count, 0);
+        assert_eq!(stale_event_count, 0);
+        assert!(event_tombstones >= 1);
+    }
+
+    #[test]
+    fn mark_sync_upsert_thread_draft_refreshes_snapshot_version() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, updated_at, row_version)
+             VALUES ('c1', 'Chat', 1000, 1000, 1)",
+            [],
+        )
+        .unwrap();
+
+        mark_sync_upsert(&conn, "thread_drafts", "c1").unwrap();
+
+        let (row_version, updated_at): (i64, i64) = conn
+            .query_row(
+                "SELECT row_version, updated_at FROM conversations WHERE id = 'c1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let outbox_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sync_outbox
+                 WHERE table_name = 'thread_drafts' AND row_id = 'c1' AND op = 'upsert'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(row_version, 2);
+        assert!(updated_at >= 1000);
+        assert_eq!(outbox_count, 1);
     }
 
     #[test]

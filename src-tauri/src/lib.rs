@@ -15,6 +15,7 @@ pub mod commands {
     pub mod context_intelligence;
     pub mod employees_archive;
     pub mod gateway_http;
+    pub mod history_sync;
     pub mod indexing;
     pub mod memory;
     pub mod model_context_cache;
@@ -29,6 +30,7 @@ pub mod services {
     pub mod chunker;
     pub mod context_intelligence;
     pub mod database;
+    pub mod history_sync;
     pub mod indexer;
     pub mod vector_store;
 }
@@ -796,6 +798,8 @@ pub fn run() {
             // Rust-backed Gateway API bridge
             commands::gateway_http::gateway_http_start,
             commands::gateway_http::gateway_http_cancel,
+            commands::history_sync::history_sync_run_now,
+            commands::history_sync::history_sync_wipe_remote,
             // Meeting Mode persistence commands
             commands::audio::create_meeting,
             commands::audio::get_meeting,

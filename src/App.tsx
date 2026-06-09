@@ -42,7 +42,7 @@ import { autocompleteStore } from "@/stores/autocomplete.store";
 import { chatStore } from "@/stores/chat.store";
 import { fileTreeState, initDefaultRootIfNeeded } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
-import { loadAllSettings } from "@/stores/settings.store";
+import { loadAllSettings, settingsState } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
 import {
@@ -223,6 +223,28 @@ function App() {
 
     return isAuth;
   }, authStore.isAuthenticated);
+
+  let historySyncStartedForAuth: string | null = null;
+  createEffect(() => {
+    const isAuth = authStore.isAuthenticated;
+    const settingsLoaded = !settingsState.isLoading;
+    const enabled = settingsState.app.historySyncEnabled;
+
+    untrack(async () => {
+      const { startHistorySync, stopHistorySync } = await import(
+        "@/services/historySync"
+      );
+      if (!settingsLoaded || !isAuth || !enabled) {
+        historySyncStartedForAuth = null;
+        stopHistorySync();
+        return;
+      }
+      const key = "auth-session";
+      if (historySyncStartedForAuth === key) return;
+      historySyncStartedForAuth = key;
+      startHistorySync();
+    });
+  });
 
   // Claude Code auto-memory interceptor — start only after the user is
   // authenticated. The interceptor auto-provisions its own SerenDB project

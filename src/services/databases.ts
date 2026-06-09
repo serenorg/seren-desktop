@@ -9,6 +9,7 @@ import {
   type Organization,
 } from "@/api";
 import {
+  serenDbCreateBranch as apiCreateBranch,
   serenDbCreateDatabase as apiCreateDatabase,
   serenDbCreateProject as apiCreateProject,
   serenDbDeleteProject as apiDeleteProject,
@@ -118,6 +119,23 @@ export const databases = {
     const branches = data?.data || [];
     console.log("[Databases] Found", branches.length, "branches");
     return branches;
+  },
+
+  /**
+   * Create a new branch in a project.
+   */
+  async createBranch(projectId: string, name: string): Promise<Branch> {
+    console.log("[Databases] Creating branch:", name, "in project:", projectId);
+    const { data, error } = await apiCreateBranch({
+      path: { id: projectId },
+      body: { name, add_endpoint: true },
+      throwOnError: false,
+    });
+    if (error || !data?.data?.branch) {
+      console.error("[Databases] Error creating branch:", error);
+      throw new Error("Failed to create branch");
+    }
+    return this.getBranch(projectId, data.data.branch.id);
   },
 
   /**
