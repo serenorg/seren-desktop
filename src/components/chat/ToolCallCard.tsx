@@ -2,12 +2,20 @@
 // ABOUTME: Shows tool summary, status indicator, and expandable details.
 
 import type { Component } from "solid-js";
-import { createEffect, createSignal, Show } from "solid-js";
+import { createEffect, createResource, createSignal, Show } from "solid-js";
 import {
   isDirectoryListing,
   summarizeDirectoryListing,
 } from "@/lib/directory-listing";
+import {
+  getOAuthConnectActionForToolError,
+  type OAuthConnectAction,
+} from "@/lib/oauth-tool-errors";
 import type { ToolCallEvent } from "@/services/providers";
+import {
+  connectPublisher,
+  resolveOAuthProviderForPublisher,
+} from "@/services/publisher-oauth";
 
 interface ToolCallCardProps {
   toolCall: ToolCallEvent;
@@ -120,6 +128,94 @@ function extractSummary(toolCall: ToolCallEvent): string {
   return "No description available";
 }
 
+const OAuthToolConnectPrompt: Component<{
+  action: OAuthConnectAction;
+}> = (props) => {
+  const [connecting, setConnecting] = createSignal(false);
+  const [opened, setOpened] = createSignal(false);
+  const [connectError, setConnectError] = createSignal<string | null>(null);
+  const [provider] = createResource(
+    () => props.action.publisherSlug,
+    resolveOAuthProviderForPublisher,
+  );
+
+  const providerName = () => provider()?.providerName ?? "account";
+  const buttonLabel = () =>
+    props.action.reason === "scope_insufficient"
+      ? `Reconnect ${providerName()}`
+      : `Connect ${providerName()}`;
+  const message = () =>
+    props.action.reason === "scope_insufficient"
+      ? `${providerName()} needs updated permissions for this tool.`
+      : `${providerName()} is required before this tool can run.`;
+
+  const handleConnect = async (event: MouseEvent) => {
+    event.stopPropagation();
+    if (connecting()) return;
+    setConnecting(true);
+    setOpened(false);
+    setConnectError(null);
+    try {
+      const resolved = await resolveOAuthProviderForPublisher(
+        props.action.publisherSlug,
+      );
+      await connectPublisher(resolved.providerSlug);
+      setOpened(true);
+    } catch (err) {
+      setConnectError(
+        err instanceof Error ? err.message : "Failed to start OAuth flow",
+      );
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  return (
+    <div class="flex items-center gap-3 border-t border-warning/30 bg-warning/[0.07] px-3 py-2.5">
+      <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-warning/15 text-warning">
+        <svg
+          class="h-4 w-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          role="img"
+          aria-label="OAuth"
+        >
+          <path d="M15 7a5 5 0 1 0-4 4" />
+          <path d="M21 2l-9.6 9.6" />
+          <path d="M15 2h6v6" />
+        </svg>
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-xs font-medium text-foreground">{message()}</div>
+        <Show when={opened()}>
+          <div class="mt-0.5 text-[11px] text-muted-foreground">
+            Authorization opened in your browser.
+          </div>
+        </Show>
+        <Show when={connectError()}>
+          {(error) => (
+            <div class="mt-0.5 break-words text-[11px] text-destructive">
+              {error()}
+            </div>
+          )}
+        </Show>
+      </div>
+      <button
+        type="button"
+        class="shrink-0 whitespace-nowrap rounded-md border border-warning/50 bg-warning/90 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:not-disabled:bg-warning/75 disabled:cursor-not-allowed disabled:opacity-55"
+        onClick={handleConnect}
+        disabled={connecting() || provider.loading}
+      >
+        {connecting() || provider.loading ? "Opening..." : buttonLabel()}
+      </button>
+    </div>
+  );
+};
+
 export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
   const [isExpanded, setIsExpanded] = createSignal(false);
   const [isResultExpanded, setIsResultExpanded] = createSignal(false);
@@ -190,6 +286,11 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
   };
 
   const summary = () => extractSummary(props.toolCall);
+  const oauthConnectAction = () =>
+    getOAuthConnectActionForToolError(
+      props.toolCall.name ?? props.toolCall.title,
+      props.toolCall.error,
+    );
 
   const statusInfo = () => {
     const status = props.toolCall.status.toLowerCase();
@@ -463,6 +564,10 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
           />
         </svg>
       </button>
+
+      <Show when={oauthConnectAction()}>
+        {(action) => <OAuthToolConnectPrompt action={action()} />}
+      </Show>
 
       {/* Details */}
       <Show when={isOpen()}>

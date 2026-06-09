@@ -35,6 +35,7 @@ export function toToolCallEvent(data: ToolCallData): ToolCallEvent {
     sessionId: "",
     toolCallId: data.toolCallId,
     title: data.title || data.name || "Tool",
+    name: data.name,
     kind: data.kind,
     status: data.status,
     parameters: params,
