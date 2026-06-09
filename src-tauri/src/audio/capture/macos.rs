@@ -275,7 +275,7 @@ fn start_capture(sink: FrameSender) -> Result<CaptureState, CaptureError> {
         create_tap(Retained::as_ptr(&description) as *mut AnyObject, &mut tap)
     };
     if status != NO_ERR {
-        return Err(CaptureError::Unsupported(format!(
+        return Err(CaptureError::Permission(format!(
             "AudioHardwareCreateProcessTap failed (OSStatus {status}); check audio-capture permission"
         )));
     }

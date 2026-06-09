@@ -103,6 +103,15 @@ function captureStartupFailureReason(error: unknown): string {
   const name = error instanceof DOMException ? error.name : "";
   const message = meetingErrorMessage(error).toLowerCase();
   if (
+    message.includes("system-audio") ||
+    message.includes("audio capture permission") ||
+    message.includes("audio-capture") ||
+    message.includes("process tap") ||
+    message.includes("loopback")
+  ) {
+    return "System audio capture could not start. Allow system-audio recording for Seren and make sure an output device is available, then start capture again.";
+  }
+  if (
     name === "NotAllowedError" ||
     name === "SecurityError" ||
     message.includes("permission") ||
