@@ -1303,6 +1303,7 @@ mod tests {
         assert!(summary.native_mic_ready);
         assert!(summary.apm_ready);
         assert!(summary.apm_active);
+        assert!(!summary.apm.echo_canceller_enabled);
         assert!(summary.native_mic_frame_count > 0);
         assert_eq!(summary.push_frame_count, 0);
         assert_eq!(summary.accepted_push_frame_count, 0);

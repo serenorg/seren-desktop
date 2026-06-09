@@ -1,10 +1,9 @@
 // ABOUTME: WebRTC-style audio processing for native Meeting Mode microphone capture.
-// ABOUTME: Feeds Them render-reference frames into AEC before Me reaches transcription.
+// ABOUTME: Applies stable capture-side cleanup before Me reaches transcription.
 
 use serde::Serialize;
 use sonora::config::{
-    AdaptiveDigital, EchoCanceller, GainController2, HighPassFilter, NoiseSuppression,
-    NoiseSuppressionLevel,
+    AdaptiveDigital, GainController2, HighPassFilter, NoiseSuppression, NoiseSuppressionLevel,
 };
 use sonora::{AudioProcessing, Config, StreamConfig};
 
@@ -19,6 +18,7 @@ const I16_SCALE: f32 = i16::MAX as f32;
 pub struct ApmDiagnostics {
     pub initialized: bool,
     pub active: bool,
+    pub echo_canceller_enabled: bool,
     pub render_frame_count: u64,
     pub capture_frame_count: u64,
     pub processed_sample_count: u64,
@@ -30,6 +30,7 @@ impl Default for ApmDiagnostics {
         Self {
             initialized: false,
             active: false,
+            echo_canceller_enabled: false,
             render_frame_count: 0,
             capture_frame_count: 0,
             processed_sample_count: 0,
@@ -38,7 +39,7 @@ impl Default for ApmDiagnostics {
     }
 }
 
-/// Owns the AEC/NS/AGC state for one active meeting capture.
+/// Owns capture-side cleanup state for one active meeting capture.
 pub struct MeetingAudioProcessor {
     apm: AudioProcessing,
     capture_buffer: Vec<i16>,
@@ -48,20 +49,8 @@ pub struct MeetingAudioProcessor {
 
 impl MeetingAudioProcessor {
     pub fn new() -> Self {
-        let config = Config {
-            echo_canceller: Some(EchoCanceller::default()),
-            noise_suppression: Some(NoiseSuppression {
-                level: NoiseSuppressionLevel::High,
-                ..Default::default()
-            }),
-            high_pass_filter: Some(HighPassFilter::default()),
-            gain_controller2: Some(GainController2 {
-                input_volume_controller: false,
-                adaptive_digital: Some(AdaptiveDigital::default()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
+        let config = meeting_apm_config();
+        let echo_canceller_enabled = config.echo_canceller.is_some();
         let stream = StreamConfig::new(TARGET_SAMPLE_RATE, 1);
         let mut apm = AudioProcessing::builder()
             .config(config)
@@ -77,6 +66,7 @@ impl MeetingAudioProcessor {
             diagnostics: ApmDiagnostics {
                 initialized: true,
                 active: true,
+                echo_canceller_enabled,
                 ..Default::default()
             },
         }
@@ -137,6 +127,26 @@ impl MeetingAudioProcessor {
     }
 }
 
+fn meeting_apm_config() -> Config {
+    Config {
+        // Sonora AEC3 can panic while resizing its adaptive FIR filter after
+        // live echo-path changes. Keep non-AEC processing enabled so capture
+        // stays reliable instead of crashing mid-meeting.
+        echo_canceller: None,
+        noise_suppression: Some(NoiseSuppression {
+            level: NoiseSuppressionLevel::High,
+            ..Default::default()
+        }),
+        high_pass_filter: Some(HighPassFilter::default()),
+        gain_controller2: Some(GainController2 {
+            input_volume_controller: false,
+            adaptive_digital: Some(AdaptiveDigital::default()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 impl Default for MeetingAudioProcessor {
     fn default() -> Self {
         Self::new()
@@ -171,13 +181,24 @@ mod tests {
     }
 
     #[test]
-    fn apm_initializes_with_echo_noise_and_gain_path_active() {
+    fn meeting_apm_config_disables_unstable_echo_canceller() {
+        let config = meeting_apm_config();
+
+        assert!(config.echo_canceller.is_none());
+        assert!(config.noise_suppression.is_some());
+        assert!(config.high_pass_filter.is_some());
+        assert!(config.gain_controller2.is_some());
+    }
+
+    #[test]
+    fn apm_initializes_with_noise_and_gain_path_active() {
         let apm = MeetingAudioProcessor::new();
 
         let diagnostics = apm.diagnostics();
 
         assert!(diagnostics.initialized);
         assert!(diagnostics.active);
+        assert!(!diagnostics.echo_canceller_enabled);
         assert_eq!(diagnostics.render_frame_count, 0);
         assert_eq!(diagnostics.capture_frame_count, 0);
     }
@@ -196,6 +217,28 @@ mod tests {
         assert_eq!(diagnostics.render_frame_count, 1);
         assert_eq!(diagnostics.capture_frame_count, 1);
         assert_eq!(diagnostics.processed_sample_count, APM_FRAME_SAMPLES as u64);
+        assert!(diagnostics.last_error.is_none());
+    }
+
+    #[test]
+    fn apm_handles_sustained_render_and_capture_without_panic() {
+        let mut apm = MeetingAudioProcessor::new();
+        let render = tone(APM_FRAME_SAMPLES, 7_500);
+        let capture = tone(APM_FRAME_SAMPLES, 5_500);
+        let mut processed_sample_count = 0usize;
+
+        for frame_index in 0..700 {
+            if frame_index == 400 {
+                apm.apm.set_stream_delay_ms(50).unwrap();
+            }
+            apm.accept_render_reference(&render);
+            processed_sample_count += apm.process_capture(&capture).len();
+        }
+
+        let diagnostics = apm.diagnostics();
+        assert_eq!(diagnostics.render_frame_count, 700);
+        assert_eq!(diagnostics.capture_frame_count, 700);
+        assert_eq!(processed_sample_count, 700 * APM_FRAME_SAMPLES);
         assert!(diagnostics.last_error.is_none());
     }
 }
