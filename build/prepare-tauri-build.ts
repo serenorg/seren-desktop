@@ -185,7 +185,26 @@ function runCommand(command: TauriPreparationCommand): void {
   }
 }
 
+// The Windows release path stages the embedded runtime, batch-signs it, then
+// runs `tauri build` — whose `beforeBuildCommand` would otherwise re-run this
+// preparation and overwrite the freshly signed binaries with fresh unsigned
+// downloads. The signing step sets SEREN_TAURI_SKIP_PREP so the second pass
+// reuses the already-staged, already-signed runtime.
+export function shouldSkipPreparation(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const flag = env.SEREN_TAURI_SKIP_PREP?.trim().toLowerCase();
+  return flag === "1" || flag === "true";
+}
+
 export function prepareTauriBuild(): void {
+  if (shouldSkipPreparation()) {
+    console.log(
+      "[prepare-tauri-build] SEREN_TAURI_SKIP_PREP set — runtime already staged and signed; skipping preparation.",
+    );
+    return;
+  }
+
   const target = resolveRuntimeTarget();
   console.log(
     `[prepare-tauri-build] Resolved Tauri runtime target: ${target.platform}-${target.arch}`,
