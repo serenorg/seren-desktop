@@ -4,11 +4,116 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   listConnections,
+  listProviders,
+  listStorePublishers,
   revokeConnection,
   type UserOAuthConnectionResponse,
 } from "@/api";
 import { apiBase } from "@/lib/config";
+import {
+  getKnownOAuthProviderForPublisher,
+  humanizeOAuthProviderSlug,
+} from "@/lib/oauth-provider-resolution";
 import { getToken } from "@/lib/tauri-bridge";
+
+export interface PublisherOAuthProviderResolution {
+  publisherSlug: string;
+  providerSlug: string;
+  providerName: string;
+}
+
+let providerLookupPromise: Promise<
+  Map<string, PublisherOAuthProviderResolution>
+> | null = null;
+
+function fallbackOAuthProviderForPublisher(
+  publisherSlug: string,
+): PublisherOAuthProviderResolution {
+  const known = getKnownOAuthProviderForPublisher(publisherSlug);
+  const providerSlug = known?.providerSlug ?? publisherSlug;
+  return {
+    publisherSlug,
+    providerSlug,
+    providerName:
+      known?.providerName ?? humanizeOAuthProviderSlug(providerSlug),
+  };
+}
+
+async function loadPublisherOAuthProviderLookup(): Promise<
+  Map<string, PublisherOAuthProviderResolution>
+> {
+  const [providerResult, publisherResult] = await Promise.all([
+    listProviders({ throwOnError: false }),
+    listStorePublishers({
+      query: { limit: 100 },
+      throwOnError: false,
+    }),
+  ]);
+
+  const providers = providerResult.data?.providers ?? [];
+  const publishers = publisherResult.data?.data ?? [];
+  const providersById = new Map(
+    providers.map((provider) => [provider.id, provider]),
+  );
+  const lookup = new Map<string, PublisherOAuthProviderResolution>();
+
+  for (const provider of providers) {
+    lookup.set(provider.slug, {
+      publisherSlug: provider.slug,
+      providerSlug: provider.slug,
+      providerName: provider.name,
+    });
+  }
+
+  for (const publisher of publishers) {
+    const provider = publisher.oauth_provider_id
+      ? providersById.get(publisher.oauth_provider_id)
+      : null;
+    if (!provider) continue;
+    lookup.set(publisher.slug, {
+      publisherSlug: publisher.slug,
+      providerSlug: provider.slug,
+      providerName: provider.name,
+    });
+  }
+
+  for (const publisher of publishers) {
+    const known = getKnownOAuthProviderForPublisher(publisher.slug);
+    if (!known || lookup.has(publisher.slug)) continue;
+    lookup.set(publisher.slug, {
+      publisherSlug: publisher.slug,
+      providerSlug: known.providerSlug,
+      providerName: known.providerName,
+    });
+  }
+
+  return lookup;
+}
+
+/**
+ * Resolve a Gateway publisher slug (e.g. "gmail") to the OAuth provider slug
+ * accepted by connectPublisher() (e.g. "google").
+ */
+export async function resolveOAuthProviderForPublisher(
+  publisherSlug: string,
+): Promise<PublisherOAuthProviderResolution> {
+  providerLookupPromise ??= loadPublisherOAuthProviderLookup();
+
+  try {
+    const lookup = await providerLookupPromise;
+    return (
+      lookup.get(publisherSlug) ??
+      fallbackOAuthProviderForPublisher(publisherSlug)
+    );
+  } catch (err) {
+    console.warn(
+      `[PublisherOAuth] Failed to resolve OAuth provider for ${publisherSlug}:`,
+      err,
+    );
+    providerLookupPromise = null;
+    return fallbackOAuthProviderForPublisher(publisherSlug);
+  }
+}
 
 /**
  * Start OAuth flow for a publisher provider.

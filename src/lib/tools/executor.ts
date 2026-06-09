@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mcpClient } from "@/lib/mcp/client";
+import { isOAuthTokenError } from "@/lib/oauth-tool-errors";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
 import { type PaymentRequirements, parsePaymentRequirements } from "@/lib/x402";
 import {
@@ -29,22 +30,6 @@ const GATEWAY_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const SHELL_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_RESULT_SIZE = 50_000; // 50KB cap
 const MAX_ARRAY_ITEMS = 25;
-
-/**
- * Check if an error message indicates an OAuth token issue.
- * These errors mean the user's OAuth connection needs to be refreshed.
- */
-function isOAuthTokenError(message: string): boolean {
-  const lowerMessage = message.toLowerCase();
-  return (
-    lowerMessage.includes("oauth token refresh failed") ||
-    lowerMessage.includes("token refresh failed") ||
-    lowerMessage.includes("provider error during token refresh") ||
-    lowerMessage.includes("oauth authentication required") ||
-    lowerMessage.includes("invalid_grant") ||
-    lowerMessage.includes("refresh token expired")
-  );
-}
 
 /**
  * Emit an event to notify the UI that an OAuth connection has expired.
@@ -650,7 +635,7 @@ async function executeGatewayTool(
         new Error(JSON.stringify(response.payment_proxy)),
       );
 
-      if (!paymentResult || !paymentResult.success) {
+      if (!paymentResult?.success) {
         return {
           tool_call_id: toolCallId,
           content: paymentResult?.error || "Payment was cancelled or failed",

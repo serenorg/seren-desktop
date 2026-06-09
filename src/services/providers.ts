@@ -91,6 +91,8 @@ export interface ToolCallEvent {
   sessionId: string;
   toolCallId: string;
   title: string;
+  /** Raw provider/runtime tool name, e.g. gateway__gmail__get_messages. */
+  name?: string;
   kind: string;
   status: string;
   parameters?: Record<string, unknown>;

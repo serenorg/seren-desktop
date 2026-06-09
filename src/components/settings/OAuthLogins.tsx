@@ -23,6 +23,10 @@ import githubLogo from "@/assets/oauth-logos/github.svg";
 import googleLogo from "@/assets/oauth-logos/google.svg";
 import linearLogo from "@/assets/oauth-logos/linear.svg";
 import { apiBase } from "@/lib/config";
+import {
+  getExpiredOAuthProviderSlugs,
+  isOAuthProviderExpired,
+} from "@/lib/oauth-provider-resolution";
 import { listenForOAuthCallback } from "@/lib/tauri-bridge";
 import {
   connectPublisher,
@@ -159,6 +163,13 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
         setExpiredProviders((prev) => {
           const next = new Set(prev);
           next.add(publisherSlug);
+          for (const providerSlug of getExpiredOAuthProviderSlugs(
+            publisherSlug,
+            providers() ?? [],
+            publisherData()?.byProvider ?? {},
+          )) {
+            next.add(providerSlug);
+          }
           return next;
         });
       },
@@ -234,14 +245,26 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
     );
   };
 
-  const isExpired = (providerSlug: string): boolean => {
-    return expiredProviders().has(providerSlug);
+  const isExpired = (providerSlug: string, providerId: string): boolean => {
+    return isOAuthProviderExpired(
+      providerSlug,
+      providerId,
+      publisherData()?.byProvider ?? {},
+      expiredProviders(),
+    );
   };
 
   const clearExpiredStatus = (providerSlug: string) => {
     setExpiredProviders((prev) => {
       const next = new Set(prev);
       next.delete(providerSlug);
+      const provider = providers()?.find((item) => item.slug === providerSlug);
+      const linkedPublishers = provider
+        ? (publisherData()?.byProvider[provider.id] ?? [])
+        : [];
+      for (const publisher of linkedPublishers) {
+        next.delete(publisher.slug);
+      }
       return next;
     });
   };
@@ -375,7 +398,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
           <For each={providers()}>
             {(provider) => {
               const connection = () => isConnected(provider.slug);
-              const expired = () => isExpired(provider.slug);
+              const expired = () => isExpired(provider.slug, provider.id);
               const isConnecting = () => connectingProvider() === provider.slug;
               const isDisconnecting = () =>
                 disconnectingProvider() === provider.slug;
