@@ -335,9 +335,18 @@ function extractDescriptionFromContent(content: string): string | null {
  * Compute SHA-256 hash of content for change detection.
  */
 export async function computeContentHash(content: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(content);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  return computeBytesHash(new TextEncoder().encode(content));
+}
+
+/**
+ * Compute SHA-256 hash of raw bytes. Binary-safe counterpart of
+ * computeContentHash; for valid UTF-8 text the two agree (#2297).
+ */
+export async function computeBytesHash(bytes: Uint8Array): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest(
+    "SHA-256",
+    bytes as BufferSource,
+  );
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }

@@ -391,7 +391,7 @@ fn write_skill_tree(
                 .map_err(|e| format!("Failed to create directory for {}: {}", file.path, e))?;
         }
 
-        fs::write(&target, &file.content)
+        fs::write(&target, file.bytes()?)
             .map_err(|e| format!("Failed to write {}: {}", file.path, e))?;
 
         #[cfg(unix)]
@@ -1194,9 +1194,28 @@ pub fn rename_skill_dir(
 }
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ExtraFile {
     path: String,
-    content: String,
+    /// Plain-text content. Legacy field; lossy for non-UTF-8 bytes.
+    #[serde(default)]
+    content: Option<String>,
+    /// Base64 of the raw file bytes. Binary-safe; preferred over `content`.
+    #[serde(default)]
+    content_b64: Option<String>,
+}
+
+impl ExtraFile {
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        match (&self.content_b64, &self.content) {
+            (Some(encoded), _) => STANDARD
+                .decode(encoded)
+                .map_err(|e| format!("Invalid base64 content for {}: {}", self.path, e)),
+            (None, Some(text)) => Ok(text.as_bytes().to_vec()),
+            (None, None) => Err(format!("Bundle file {} has no content", self.path)),
+        }
+    }
 }
 
 /// Extract file paths referenced in SKILL.md content.
@@ -1477,6 +1496,33 @@ pub fn read_skill_file(
     Ok(Some(content))
 }
 
+/// Read a relative file from a skill directory as base64 of its raw bytes.
+/// Binary-safe counterpart of `read_skill_file` for sync-state hashing (#2297).
+#[tauri::command]
+pub fn read_skill_file_b64(
+    skills_dir: String,
+    slug: String,
+    relative_path: String,
+) -> Result<Option<String>, String> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+
+    let dir_path = PathBuf::from(&skills_dir);
+    let skill_dir = match resolve_skill_dir_path(&dir_path, &slug) {
+        Some(path) => path,
+        None => return Ok(None),
+    };
+
+    let target = resolve_relative_skill_path(&skill_dir, &relative_path)?;
+    if !target.exists() {
+        return Ok(None);
+    }
+    let target = canonicalize_within_skill_dir(&skill_dir, &target)?;
+
+    let bytes =
+        fs::read(&target).map_err(|e| format!("Failed to read {}: {}", relative_path, e))?;
+    Ok(Some(STANDARD.encode(&bytes)))
+}
+
 /// Read the persisted sync state for a skill if present.
 #[tauri::command]
 pub fn read_skill_sync_state(skills_dir: String, slug: String) -> Result<Option<String>, String> {
@@ -1645,6 +1691,78 @@ See [section](#overview) and [email](mailto:test@example.com).
             fs::read_to_string(skill_dir.join("scripts/agent.py")).unwrap(),
             "print('hello')"
         );
+    }
+
+    #[test]
+    fn install_skill_writes_binary_extra_file_byte_identical() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        // zip/pptx magic followed by bytes that are not valid UTF-8. A text
+        // round-trip would replace them with U+FFFD (#2297).
+        let payload: Vec<u8> = vec![
+            0x50, 0x4B, 0x03, 0x04, 0xFF, 0xFE, 0x00, 0x80, 0xC3, 0x28, 0xA0, 0xA1,
+        ];
+        let extras = serde_json::json!([
+            {"path": "assets/template.pptx", "contentB64": STANDARD.encode(&payload)},
+        ]);
+
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            "# Test\n".to_string(),
+            Some(extras.to_string()),
+            None,
+        )
+        .unwrap();
+
+        let written = fs::read(tmp.path().join("test-skill/assets/template.pptx")).unwrap();
+        assert_eq!(written, payload, "binary payload must be byte-identical");
+    }
+
+    #[test]
+    fn install_skill_rejects_extra_file_without_content() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let extras = serde_json::json!([
+            {"path": "assets/empty.bin"},
+        ]);
+
+        let result = install_skill(
+            skills_dir,
+            "test-skill".to_string(),
+            "# Test\n".to_string(),
+            Some(extras.to_string()),
+            None,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no content"));
+    }
+
+    #[test]
+    fn read_skill_file_b64_returns_raw_bytes() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+        let skill_dir = tmp.path().join("test-skill");
+        fs::create_dir_all(skill_dir.join("assets")).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "# Test\n").unwrap();
+
+        let payload: Vec<u8> = vec![0x50, 0x4B, 0x03, 0x04, 0xFF, 0xFE, 0x00, 0x80];
+        fs::write(skill_dir.join("assets/template.pptx"), &payload).unwrap();
+
+        let encoded = read_skill_file_b64(
+            skills_dir,
+            "test-skill".to_string(),
+            "assets/template.pptx".to_string(),
+        )
+        .unwrap()
+        .expect("file should be found");
+        assert_eq!(STANDARD.decode(encoded).unwrap(), payload);
     }
 
     #[test]
@@ -2430,27 +2548,17 @@ Run [agent](scripts/agent.py) — it writes to `state/session_cache.json` lazily
         // tries, `bundle_managed_paths` strips them so `preserve_user_files`
         // keeps the backup copy and `write_skill_tree` refuses to lay down
         // the contaminated bundle file.
+        let extra = |path: &str, content: &str| ExtraFile {
+            path: path.to_string(),
+            content: Some(content.to_string()),
+            content_b64: None,
+        };
         let extras = vec![
-            ExtraFile {
-                path: "scripts/agent.py".to_string(),
-                content: "print('ok')\n".to_string(),
-            },
-            ExtraFile {
-                path: ".env".to_string(),
-                content: "SEREN_API_KEY=leaked\n".to_string(),
-            },
-            ExtraFile {
-                path: "state/session.json".to_string(),
-                content: "{}\n".to_string(),
-            },
-            ExtraFile {
-                path: "logs/old.jsonl".to_string(),
-                content: "".to_string(),
-            },
-            ExtraFile {
-                path: ".env.example".to_string(),
-                content: "SEREN_API_KEY=\n".to_string(),
-            },
+            extra("scripts/agent.py", "print('ok')\n"),
+            extra(".env", "SEREN_API_KEY=leaked\n"),
+            extra("state/session.json", "{}\n"),
+            extra("logs/old.jsonl", ""),
+            extra(".env.example", "SEREN_API_KEY=\n"),
         ];
         let paths = bundle_managed_paths(&extras, true);
         assert!(paths.contains("SKILL.md"));

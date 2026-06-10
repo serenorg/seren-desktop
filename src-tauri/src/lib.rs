@@ -960,6 +960,7 @@ pub fn run() {
             skills::remove_skill,
             skills::read_skill_content,
             skills::read_skill_file,
+            skills::read_skill_file_b64,
             skills::list_skill_payload_files,
             skills::read_skill_sync_state,
             skills::write_skill_sync_state,
