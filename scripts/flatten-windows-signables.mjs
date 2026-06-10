@@ -10,6 +10,13 @@ import process from "node:process";
 // modules (.pyd are DLLs). Anything else (.cmd, .json, .txt, .py) is left alone.
 const SIGNABLE = new Set([".exe", ".dll", ".node", ".pyd"]);
 
+// SSL.com CodeSignTool dispatches on the file extension against a fixed allowlist
+// and rejects .pyd/.node with "Unsupported file format for signing", even though
+// both are ordinary PE DLLs. Stage those under a .dll name so the signer accepts
+// them; the Authenticode signature lives in the PE Certificate Table, so restoring
+// the signed bytes to the original .pyd/.node path leaves it validly signed.
+const SIGN_AS_DLL = new Set([".node", ".pyd"]);
+
 function walk(dir, out) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
@@ -53,9 +60,15 @@ mkdirSync(stagingDir, { recursive: true });
 const manifest = [];
 found.forEach((original, index) => {
   // Zero-padded index prefix keeps flat names unique even when basenames
-  // collide (Git for Windows ships many same-named DLLs). Original extension
-  // is preserved so the signer dispatches on file type correctly.
-  const flat = `${String(index + 1).padStart(5, "0")}__${basename(original)}`;
+  // collide (Git for Windows ships many same-named DLLs). The extension drives
+  // how the signer dispatches: keep it as-is for .exe/.dll, but rewrite the ones
+  // the signer rejects by extension (.pyd/.node) to .dll. Restore copies by the
+  // original path, so the signed bytes land back on the real .pyd/.node file.
+  const ext = extname(original).toLowerCase();
+  const flatBase = SIGN_AS_DLL.has(ext)
+    ? `${basename(original, ext)}.dll`
+    : basename(original);
+  const flat = `${String(index + 1).padStart(5, "0")}__${flatBase}`;
   copyFileSync(original, join(stagingDir, flat));
   manifest.push({ flat, original });
 });
