@@ -130,7 +130,11 @@ describe("#1631 — abortTurn wired for user cancel", () => {
   it("abortTurn symbol exists and does NOT set turnError", () => {
     const idx = agentStoreSource.indexOf("async abortTurn(");
     expect(idx).toBeGreaterThan(0);
-    const body = agentStoreSource.slice(idx, idx + 1200);
+    // Bound the slice to the actual method body (next method declaration)
+    // rather than a fixed-width window, so it stays accurate as abortTurn
+    // grows (e.g. the #2301 terminate-escalation path).
+    const end = agentStoreSource.indexOf("focusProjectSession(", idx);
+    const body = agentStoreSource.slice(idx, end > idx ? end : idx + 2000);
     expect(body).toContain("this.setTurnInFlight(threadId, false)");
     expect(body).not.toContain("this.setTurnError(");
   });
