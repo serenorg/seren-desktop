@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { acceptUpdateRequest, createOrgFolder, createSkill, createUpdateRequest, createUpdateRequestComment, createVersion, deleteCollaborator, deleteFile, deleteSkill, downloadSkill, getAuthorIdentity, getDraft, getFile, getMergeState, getOrgFolder, getSkill, getSkillEditDocument, getUpdateRequest, getUpdateRequestDiff, getVersionManifest, githubStatus, listCollaborators, listFiles, listSkills, listUpdateRequestComments, listUpdateRequests, listUsageEvents, listVersions, type Options, publisherRoot, purchaseSkill, putFile, reconcileOrphans, rejectUpdateRequest, replaceOrgFolder, resolveConflict, retryGithubPublish, skillMd, syncFromMain, transferOrgFolder, updateOrgFolder, updateSkill, updateSponsor, upsertAuthorIdentity, upsertCollaborator, usageSummary } from '../sdk.gen';
-import type { AcceptUpdateRequestData, AcceptUpdateRequestResponse, CreateOrgFolderData, CreateOrgFolderResponse, CreateSkillData, CreateSkillResponse, CreateUpdateRequestCommentData, CreateUpdateRequestCommentResponse, CreateUpdateRequestData, CreateUpdateRequestResponse, CreateVersionData, CreateVersionResponse2, DeleteCollaboratorData, DeleteCollaboratorResponse, DeleteFileData, DeleteFileResponse, DeleteSkillData, DeleteSkillResponse, DownloadSkillData, DownloadSkillResponse, GetAuthorIdentityData, GetAuthorIdentityResponse, GetDraftData, GetDraftResponse, GetFileData, GetFileResponse2, GetMergeStateData, GetMergeStateResponse, GetOrgFolderData, GetOrgFolderResponse, GetSkillData, GetSkillEditDocumentData, GetSkillEditDocumentResponse, GetSkillResponse, GetUpdateRequestData, GetUpdateRequestDiffData, GetUpdateRequestDiffResponse, GetUpdateRequestResponse, GetVersionManifestData, GetVersionManifestResponse, GithubStatusData, GithubStatusResponse, ListCollaboratorsData, ListCollaboratorsResponse2, ListFilesData, ListFilesResponse2, ListSkillsData, ListSkillsResponse2, ListUpdateRequestCommentsData, ListUpdateRequestCommentsResponse2, ListUpdateRequestsData, ListUpdateRequestsResponse2, ListUsageEventsData, ListUsageEventsResponse2, ListVersionsData, ListVersionsResponse2, PublisherRootData, PublisherRootResponse, PurchaseSkillData, PurchaseSkillResponse, PutFileData, PutFileResponse, ReconcileOrphansData, ReconcileOrphansError, ReconcileOrphansResponse, RejectUpdateRequestData, RejectUpdateRequestResponse, ReplaceOrgFolderData, ReplaceOrgFolderResponse, ResolveConflictData, ResolveConflictResponse, RetryGithubPublishData, RetryGithubPublishResponse, SkillMdData, SyncFromMainData, SyncFromMainResponse, TransferOrgFolderData, TransferOrgFolderResponse, UpdateOrgFolderData, UpdateOrgFolderResponse, UpdateSkillData, UpdateSkillResponse, UpdateSponsorData, UpdateSponsorResponse, UpsertAuthorIdentityData, UpsertAuthorIdentityResponse, UpsertCollaboratorData, UpsertCollaboratorResponse, UsageSummaryData, UsageSummaryResponse2 } from '../types.gen';
+import { acceptUpdateRequest, createOrgFolder, createSkill, createUpdateRequest, createUpdateRequestComment, createVersion, deleteCollaborator, deleteFile, deleteSkill, downloadSkill, downloadSkillFile, downloadSkillManifest, getAuthorIdentity, getDraft, getFile, getMergeState, getOrgFolder, getSkill, getSkillEditDocument, getUpdateRequest, getUpdateRequestDiff, getVersionManifest, githubStatus, listCollaborators, listFiles, listOrphanFolders, listSkills, listUpdateRequestComments, listUpdateRequests, listUsageEvents, listVersions, type Options, publisherRoot, purchaseSkill, putFile, reconcileOrphans, rejectUpdateRequest, replaceOrgFolder, resolveConflict, retryGithubPublish, skillMd, syncFromMain, transferOrgFolder, updateOrgFolder, updateSkill, updateSponsor, upsertAuthorIdentity, upsertCollaborator, usageSummary } from '../sdk.gen';
+import type { AcceptUpdateRequestData, AcceptUpdateRequestResponse, CreateOrgFolderData, CreateOrgFolderResponse, CreateSkillData, CreateSkillResponse, CreateUpdateRequestCommentData, CreateUpdateRequestCommentResponse, CreateUpdateRequestData, CreateUpdateRequestResponse, CreateVersionData, CreateVersionResponse2, DeleteCollaboratorData, DeleteCollaboratorResponse, DeleteFileData, DeleteFileResponse, DeleteSkillData, DeleteSkillResponse, DownloadSkillData, DownloadSkillFileData, DownloadSkillFileResponse, DownloadSkillManifestData, DownloadSkillManifestResponse, DownloadSkillResponse, GetAuthorIdentityData, GetAuthorIdentityResponse, GetDraftData, GetDraftResponse, GetFileData, GetFileResponse2, GetMergeStateData, GetMergeStateResponse, GetOrgFolderData, GetOrgFolderResponse, GetSkillData, GetSkillEditDocumentData, GetSkillEditDocumentResponse, GetSkillResponse, GetUpdateRequestData, GetUpdateRequestDiffData, GetUpdateRequestDiffResponse, GetUpdateRequestResponse, GetVersionManifestData, GetVersionManifestResponse, GithubStatusData, GithubStatusResponse, ListCollaboratorsData, ListCollaboratorsResponse2, ListFilesData, ListFilesResponse2, ListOrphanFoldersData, ListOrphanFoldersResponse, ListSkillsData, ListSkillsResponse2, ListUpdateRequestCommentsData, ListUpdateRequestCommentsResponse2, ListUpdateRequestsData, ListUpdateRequestsResponse2, ListUsageEventsData, ListUsageEventsResponse2, ListVersionsData, ListVersionsResponse2, PublisherRootData, PublisherRootResponse, PurchaseSkillData, PurchaseSkillResponse, PutFileData, PutFileResponse, ReconcileOrphansData, ReconcileOrphansError, ReconcileOrphansResponse, RejectUpdateRequestData, RejectUpdateRequestResponse, ReplaceOrgFolderData, ReplaceOrgFolderResponse, ResolveConflictData, ResolveConflictResponse, RetryGithubPublishData, RetryGithubPublishResponse, SkillMdData, SyncFromMainData, SyncFromMainResponse, TransferOrgFolderData, TransferOrgFolderResponse, UpdateOrgFolderData, UpdateOrgFolderResponse, UpdateSkillData, UpdateSkillResponse, UpdateSponsorData, UpdateSponsorResponse, UpsertAuthorIdentityData, UpsertAuthorIdentityResponse, UpsertCollaboratorData, UpsertCollaboratorResponse, UsageSummaryData, UsageSummaryResponse2 } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -52,6 +52,56 @@ export const publisherRootOptions = (options?: Options<PublisherRootData>) => qu
         return data;
     },
     queryKey: publisherRootQueryKey(options)
+});
+
+export const listOrphanFoldersQueryKey = (options?: Options<ListOrphanFoldersData>) => createQueryKey('listOrphanFolders', options);
+
+/**
+ * Operator inventory of canonical-repo paths the gateway has no
+ * claim on.
+ *
+ * Authorization: any caller with `X-Seren-User-Role: admin` (platform
+ * admin set by Seren Core's `ADMIN_USER_IDS`). The endpoint is
+ * **read-only** and does not return per-org data — every orphan is by
+ * definition a path the gateway has lost track of, so scoping it to one
+ * organization would defeat the visibility purpose. Unauthorized callers
+ * receive 403.
+ *
+ * On success returns:
+ *
+ * ```json
+ * {
+ * "head_commit_sha": "...",
+ * "head_tree_sha": "...",
+ * "orphan_folders": [
+ * {
+ * "folder_slug": "org-deadbeef",
+ * "skill_folder_name": "grid-trader",
+ * "paths": ["org-deadbeef/grid-trader/SKILL.md", "..."]
+ * }
+ * ]
+ * }
+ * ```
+ *
+ * Failure modes:
+ *
+ * - 403 if the caller lacks `X-Seren-User-Role=admin`.
+ * - 400 if GitHub publishing is not configured for this deployment.
+ * - 500 if GitHub returned a truncated tree listing (we cannot
+ * trust a partial view for an inventory pass — same posture as
+ * `derive_orphan_paths` in `github_status`).
+ */
+export const listOrphanFoldersOptions = (options?: Options<ListOrphanFoldersData>) => queryOptions<ListOrphanFoldersResponse, DefaultError, ListOrphanFoldersResponse, ReturnType<typeof listOrphanFoldersQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listOrphanFolders({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listOrphanFoldersQueryKey(options)
 });
 
 export const getAuthorIdentityQueryKey = (options?: Options<GetAuthorIdentityData>) => createQueryKey('getAuthorIdentity', options);
@@ -352,6 +402,36 @@ export const downloadSkillOptions = (options: Options<DownloadSkillData>) => que
     queryKey: downloadSkillQueryKey(options)
 });
 
+export const downloadSkillFileQueryKey = (options: Options<DownloadSkillFileData>) => createQueryKey('downloadSkillFile', options);
+
+export const downloadSkillFileOptions = (options: Options<DownloadSkillFileData>) => queryOptions<DownloadSkillFileResponse, DefaultError, DownloadSkillFileResponse, ReturnType<typeof downloadSkillFileQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await downloadSkillFile({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: downloadSkillFileQueryKey(options)
+});
+
+export const downloadSkillManifestQueryKey = (options: Options<DownloadSkillManifestData>) => createQueryKey('downloadSkillManifest', options);
+
+export const downloadSkillManifestOptions = (options: Options<DownloadSkillManifestData>) => queryOptions<DownloadSkillManifestResponse, DefaultError, DownloadSkillManifestResponse, ReturnType<typeof downloadSkillManifestQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await downloadSkillManifest({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: downloadSkillManifestQueryKey(options)
+});
+
 export const getDraftQueryKey = (options: Options<GetDraftData>) => createQueryKey('getDraft', options);
 
 export const getDraftOptions = (options: Options<GetDraftData>) => queryOptions<GetDraftResponse, DefaultError, GetDraftResponse, ReturnType<typeof getDraftQueryKey>>({
@@ -502,8 +582,9 @@ export const githubStatusOptions = (options: Options<GithubStatusData>) => query
  * that mechanically removes canonical-repo paths the gateway no
  * longer claims for this skill. Issue #22 acceptance:
  *
- * - Owner-or-operator-only authz (same `ensure_can_manage_skill`
- * pattern as `/github/sync-from-main` and `/github/retry`).
+ * - Owner, org-admin, or platform-admin authz (same
+ * `ensure_can_operate_skill_catalog` pattern as
+ * `/github/sync-from-main` and `/github/retry`).
  * - `confirm: true` is required. `false` or missing returns 409.
  * - The handler re-derives the **live** orphan-path set against the
  * canonical-repo HEAD and returns 409 if it does not match the
@@ -551,8 +632,8 @@ export const retryGithubPublishMutation = (options?: Partial<Options<RetryGithub
  * `POST /skills/{slug}/github/sync-from-main` -- ops endpoint that
  * re-fetches the canonical GitHub bundle at HEAD and reconciles it
  * into a new gateway version. No-op when the resulting
- * `content_hash_bundle` matches the current version. Owner-only,
- * same authz pattern as `retry_github_publish`.
+ * `content_hash_bundle` matches the current version. Requires owner,
+ * org-admin, or `X-Seren-User-Role=admin`.
  */
 export const syncFromMainMutation = (options?: Partial<Options<SyncFromMainData>>): MutationOptions<SyncFromMainResponse, DefaultError, Options<SyncFromMainData>> => {
     const mutationOptions: MutationOptions<SyncFromMainResponse, DefaultError, Options<SyncFromMainData>> = {

@@ -8,9 +8,13 @@ import {
   createVersion,
   deleteSkill,
   downloadSkill,
+  downloadSkillFile,
+  downloadSkillManifest,
   listSkills,
   type SkillBundle,
   type SkillBundleFile,
+  type SkillBundleFileDownload,
+  type SkillBundleManifest,
   type SkillSummary,
   updateSkill,
 } from "@/api/seren-skills";
@@ -148,7 +152,9 @@ function skillToCacheEntry(skill: Skill): Skill {
   };
 }
 
-function remoteRevisionFromBundle(bundle: SkillBundle): RemoteSkillRevision {
+function remoteRevisionFromBundle(
+  bundle: SkillBundle | SkillBundleManifest,
+): RemoteSkillRevision {
   return {
     sha: bundle.content_hash,
     shortSha: bundle.content_hash.slice(0, 10),
@@ -368,22 +374,28 @@ function normalizeSkillBundle(value: unknown): SkillBundle | null {
   });
 }
 
-async function downloadSkillBundle(slug: string): Promise<SkillBundle> {
+async function downloadSkillBundleSingleShot(
+  slug: string,
+): Promise<SkillBundle> {
   const { data, error, response } = await downloadSkill({
     path: { slug },
     throwOnError: false,
   });
   if (error || !data) {
     const status = response ? `: ${response.status}` : "";
-    throw new Error(`Failed to download skill ${slug}${status}`);
+    throw new SkillsApiError(
+      `Failed to download skill ${slug}${status}`,
+      response?.status,
+    );
   }
   const apiResultFailure = findApiResultFailure(data);
   if (apiResultFailure) {
     const message = apiResultFailure.message
       ? ` (${apiResultFailure.message})`
       : "";
-    throw new Error(
+    throw new SkillsApiError(
       `Failed to download skill ${slug}: ${apiResultFailure.status}${message}`,
+      apiResultFailure.status,
     );
   }
   const bundle = normalizeSkillBundle(data);
@@ -393,6 +405,193 @@ async function downloadSkillBundle(slug: string): Promise<SkillBundle> {
     );
   }
   return bundle;
+}
+
+/**
+ * The gateway buffers authenticated publisher responses and rejects
+ * oversized bodies with a 500, so a 500 from the single-shot download is
+ * the trigger for the split flow (#2296). Other statuses (401/403/404)
+ * are real access failures and must surface unchanged.
+ */
+function isOversizedBundleError(error: unknown): boolean {
+  return error instanceof SkillsApiError && error.status === 500;
+}
+
+function normalizeSkillBundleManifest(
+  value: unknown,
+): SkillBundleManifest | null {
+  return findInResponseEnvelopes(value, (candidate) => {
+    const manifest = candidate as {
+      skill_md?: unknown;
+      content_hash?: unknown;
+      skill?: unknown;
+    };
+    if (
+      typeof manifest.skill_md !== "string" ||
+      typeof manifest.content_hash !== "string" ||
+      !manifest.skill ||
+      typeof manifest.skill !== "object"
+    ) {
+      return null;
+    }
+    return candidate as SkillBundleManifest;
+  });
+}
+
+async function downloadSkillBundleManifest(
+  slug: string,
+): Promise<SkillBundleManifest> {
+  const { data, error, response } = await downloadSkillManifest({
+    path: { slug },
+    throwOnError: false,
+  });
+  if (error || !data) {
+    const status = response ? `: ${response.status}` : "";
+    throw new SkillsApiError(
+      `Failed to download manifest for skill ${slug}${status}`,
+      response?.status,
+    );
+  }
+  const apiResultFailure = findApiResultFailure(data);
+  if (apiResultFailure) {
+    throw new SkillsApiError(
+      `Failed to download manifest for skill ${slug}: ${apiResultFailure.status}`,
+      apiResultFailure.status,
+    );
+  }
+  const manifest = normalizeSkillBundleManifest(data);
+  if (!manifest) {
+    throw new Error(
+      `Unexpected seren-skills manifest response for ${slug}${describeBundleEnvelope(data)}`,
+    );
+  }
+  return manifest;
+}
+
+function normalizeSkillBundleFileDownload(
+  value: unknown,
+): SkillBundleFileDownload | null {
+  return findInResponseEnvelopes(value, (candidate) => {
+    const file = candidate as { path?: unknown; content_b64?: unknown };
+    if (typeof file.path !== "string" || typeof file.content_b64 !== "string") {
+      return null;
+    }
+    return candidate as SkillBundleFileDownload;
+  });
+}
+
+async function downloadSkillBundleFilePayload(
+  slug: string,
+  path: string,
+): Promise<SkillBundleFileDownload> {
+  const { data, error, response } = await downloadSkillFile({
+    path: { slug },
+    query: { path },
+    throwOnError: false,
+  });
+  if (error || !data) {
+    const status = response ? `: ${response.status}` : "";
+    throw new SkillsApiError(
+      `Failed to download file ${path} of skill ${slug}${status}`,
+      response?.status,
+    );
+  }
+  const apiResultFailure = findApiResultFailure(data);
+  if (apiResultFailure) {
+    throw new SkillsApiError(
+      `Failed to download file ${path} of skill ${slug}: ${apiResultFailure.status}`,
+      apiResultFailure.status,
+    );
+  }
+  const file = normalizeSkillBundleFileDownload(data);
+  if (!file) {
+    throw new Error(
+      `Unexpected seren-skills file response for ${slug} ${path}${describeBundleEnvelope(data)}`,
+    );
+  }
+  return file;
+}
+
+/** Per-file fetch fan-out cap for the split download flow. */
+const SPLIT_DOWNLOAD_CONCURRENCY = 4;
+
+/**
+ * Fetch every manifest file body with bounded concurrency and assemble
+ * the `SkillBundle.files` shape the install pipeline consumes. Each file
+ * response is pinned to the bundle version, so a publish landing between
+ * the manifest fetch and a body fetch fails loudly instead of silently
+ * assembling a mixed-version bundle.
+ */
+async function fetchManifestFiles(
+  slug: string,
+  manifest: SkillBundleManifest,
+): Promise<SkillBundleFile[]> {
+  const metas = manifest.files ?? [];
+  const files: SkillBundleFile[] = new Array(metas.length);
+  let next = 0;
+
+  const workers = Array.from(
+    { length: Math.min(SPLIT_DOWNLOAD_CONCURRENCY, metas.length) },
+    async () => {
+      while (next < metas.length) {
+        const index = next++;
+        const meta = metas[index];
+        const payload = await downloadSkillBundleFilePayload(slug, meta.path);
+        if (payload.version !== manifest.version) {
+          throw new Error(
+            `Skill ${slug} was republished during download (manifest version ${manifest.version}, file ${meta.path} is ${payload.version}). Retry the install.`,
+          );
+        }
+        files[index] = {
+          path: payload.path,
+          content_b64: payload.content_b64,
+          content_hash: payload.content_hash,
+          mode: payload.mode,
+          is_binary: payload.is_binary,
+        };
+      }
+    },
+  );
+  await Promise.all(workers);
+  return files;
+}
+
+async function downloadSkillBundle(slug: string): Promise<SkillBundle> {
+  try {
+    return await downloadSkillBundleSingleShot(slug);
+  } catch (error) {
+    if (!isOversizedBundleError(error)) throw error;
+    log.warn(
+      `[Skills] Single-shot download of ${slug} failed with 500; using split download fallback`,
+    );
+    const manifest = await downloadSkillBundleManifest(slug);
+    const files = await fetchManifestFiles(slug, manifest);
+    return {
+      skill: manifest.skill,
+      version: manifest.version,
+      skill_md: manifest.skill_md,
+      manifest: manifest.manifest,
+      content_hash: manifest.content_hash,
+      files,
+    };
+  }
+}
+
+/**
+ * Bundle metadata for callers that never read file bodies (content
+ * preview, sync-state revision checks). On the oversized-bundle fallback
+ * this stops at the manifest, so previewing a 50 MiB skill costs one
+ * metadata request instead of the full payload fan-out (#2296).
+ */
+async function downloadSkillBundleMetadata(
+  slug: string,
+): Promise<SkillBundle | SkillBundleManifest> {
+  try {
+    return await downloadSkillBundleSingleShot(slug);
+  } catch (error) {
+    if (!isOversizedBundleError(error)) throw error;
+    return downloadSkillBundleManifest(slug);
+  }
 }
 
 async function fetchSerenSkillsPage(
@@ -640,7 +839,7 @@ async function fetchRemoteSkillRevision(
 ): Promise<RemoteSkillRevision | null> {
   const slug = skillSlugFromSourceUrl(sourceUrl);
   if (!slug) return null;
-  return remoteRevisionFromBundle(await downloadSkillBundle(slug));
+  return remoteRevisionFromBundle(await downloadSkillBundleMetadata(slug));
 }
 
 /**
@@ -1222,7 +1421,7 @@ export const skills = {
     }
 
     log.info("[Skills] Fetching content for", slug);
-    return (await downloadSkillBundle(slug)).skill_md;
+    return (await downloadSkillBundleMetadata(slug)).skill_md;
   },
 
   /**
