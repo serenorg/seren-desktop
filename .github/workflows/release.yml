@@ -396,7 +396,7 @@ jobs:
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         shell: pwsh
         run: |
-          pnpm tsx scripts/windows-signables.ts `
+          pnpm tsx scripts/print-windows-signables.ts `
             src-tauri/embedded-runtime src-tauri/mcp-servers > sign-targets.txt
           ./scripts/sign-windows-payload.ps1 `
             -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT `
