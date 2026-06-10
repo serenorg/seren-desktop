@@ -562,10 +562,173 @@ pub async fn provider_runtime_stop(state: State<'_, ProviderRuntimeState>) -> Re
     }
 }
 
+/// Look up the parent PID of `pid` via the OS, or `None` if it can't be
+/// determined (the process is gone or the query failed). Implemented with a
+/// subprocess on every platform so the same code compiles and is testable
+/// everywhere — this only runs on the rare force-kill escalation path.
+fn parent_pid(pid: u32) -> Option<u32> {
+    #[cfg(unix)]
+    {
+        // `ps -o ppid= -p <pid>` prints just the parent PID (macOS + Linux).
+        let output = std::process::Command::new("ps")
+            .args(["-o", "ppid=", "-p", &pid.to_string()])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u32>()
+            .ok()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Win32_Process.ParentProcessId is the reliable parent-PID source.
+        let script = format!(
+            "(Get-CimInstance Win32_Process -Filter 'ProcessId={}').ParentProcessId",
+            pid
+        );
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u32>()
+            .ok()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// True if `target` is a (proper) descendant of `ancestor`, found by walking
+/// `target`'s parent chain. The walk is bounded to defend against PID-reuse
+/// cycles, and stops at the kernel/init roots (PID 0/1).
+fn is_descendant_of(target: u32, ancestor: u32) -> bool {
+    let mut current = target;
+    for _ in 0..64 {
+        match parent_pid(current) {
+            Some(parent) => {
+                if parent == ancestor {
+                    return true;
+                }
+                if parent == 0 || parent == 1 || parent == current {
+                    return false;
+                }
+                current = parent;
+            }
+            None => return false,
+        }
+    }
+    false
+}
+
+/// Force-kill the process tree rooted at `pid`. On Windows `taskkill /T` reaps
+/// the whole tree; on unix we SIGKILL the agent process (its stdio children
+/// exit on the closed pipes), matching `kill_sync`'s behavior.
+fn force_kill_pid_tree(pid: u32) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as i32, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .status();
+    }
+}
+
+/// Force-kill a single agent session's child process by PID, as the last-resort
+/// escalation when the runtime's cooperative cancel/terminate RPCs are
+/// unreachable. Returns `true` if the process was killed, `false` if the kill
+/// was refused by the PID-reuse guard.
+///
+/// PID-reuse guard: the target must be a descendant of the managed provider
+/// runtime. If the agent already exited and the OS reused its PID for an
+/// unrelated process, that process is not under our runtime and is left
+/// untouched. The runtime process itself is never a valid target.
+#[tauri::command]
+pub async fn provider_force_kill_session(
+    state: State<'_, ProviderRuntimeState>,
+    pid: u32,
+) -> Result<bool, String> {
+    let runtime_pid = {
+        let guard = state.process.lock().await;
+        guard.as_ref().and_then(|process| process.child.id())
+    };
+    let Some(runtime_pid) = runtime_pid else {
+        log::warn!("[ProviderRuntime] force-kill refused for pid={pid}: runtime not running");
+        return Ok(false);
+    };
+
+    if pid == runtime_pid {
+        log::warn!(
+            "[ProviderRuntime] force-kill refused: pid={pid} is the provider runtime itself"
+        );
+        return Ok(false);
+    }
+
+    if !is_descendant_of(pid, runtime_pid) {
+        log::warn!(
+            "[ProviderRuntime] force-kill refused: pid={pid} is not a descendant of provider runtime pid={runtime_pid} (possible PID reuse)"
+        );
+        return Ok(false);
+    }
+
+    log::info!(
+        "[ProviderRuntime] force-killing agent session pid={pid} (runtime pid={runtime_pid})"
+    );
+    force_kill_pid_tree(pid);
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::process::Command as TokioCommand;
+
+    #[test]
+    fn force_kill_guard_only_matches_descendants() {
+        let me = std::process::id();
+        // Spawn a real, short-lived child of this test process.
+        #[cfg(unix)]
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn child");
+        #[cfg(windows)]
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "ping", "-n", "30", "127.0.0.1"])
+            .spawn()
+            .expect("spawn child");
+        let child_pid = child.id();
+
+        // The spawned child's parent is this test process, so it is a
+        // descendant of it — the guard would permit killing it.
+        assert_eq!(parent_pid(child_pid), Some(me));
+        assert!(
+            is_descendant_of(child_pid, me),
+            "spawned child must be a descendant of this process"
+        );
+        // An unrelated root process (init/launchd, PID 1) is NOT our
+        // descendant — the guard must refuse it.
+        assert!(
+            !is_descendant_of(1, me),
+            "PID 1 must not be a descendant of the test process"
+        );
+        // A process is not a descendant of itself, so the runtime PID can
+        // never be force-killed as if it were one of its own sessions.
+        assert!(!is_descendant_of(me, me));
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 
     /// Build a stub child process that exits instantly with the requested
     /// code/signal so `wait_for_provider_runtime_with_deadline` can exercise
