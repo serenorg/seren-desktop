@@ -1,1709 +1,7 @@
 {
-  "openapi": "3.1.0",
-  "info": {
-    "title": "Seren Skills",
-    "description": "Publisher API for creating, selling, downloading, and maintaining Seren agent skills.",
-    "contact": {
-      "name": "SerenAI",
-      "email": "hello@serendb.com"
-    },
-    "license": {
-      "name": ""
-    },
-    "version": "0.1.0"
-  },
-  "servers": [
-    {
-      "url": "/publishers/seren-skills",
-      "description": "Hosted at the Seren gateway publisher path"
-    }
-  ],
-  "paths": {
-    "/": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "publisher_root",
-        "responses": {
-          "200": {
-            "description": "Publisher metadata",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/git-identity": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "get_author_identity",
-        "responses": {
-          "200": {
-            "description": "Git author identity",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthorIdentity"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "upsert_author_identity",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpsertAuthorIdentityRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Upserted Git author identity",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthorIdentity"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/organizations/{org_id}/folder": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "get_org_folder",
-        "parameters": [
-          {
-            "name": "org_id",
-            "in": "path",
-            "description": "Organization ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Organization folder",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "replace_org_folder",
-        "parameters": [
-          {
-            "name": "org_id",
-            "in": "path",
-            "description": "Organization ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpsertOrgFolderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Organization folder",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "create_org_folder",
-        "parameters": [
-          {
-            "name": "org_id",
-            "in": "path",
-            "description": "Organization ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpsertOrgFolderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Organization folder",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "update_org_folder",
-        "parameters": [
-          {
-            "name": "org_id",
-            "in": "path",
-            "description": "Organization ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpsertOrgFolderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Organization folder",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/organizations/{org_id}/folder/transfer": {
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "transfer_org_folder",
-        "parameters": [
-          {
-            "name": "org_id",
-            "in": "path",
-            "description": "Organization ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TransferOrgFolderRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Organization folder",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Caller is not org-admin or personal-owner of {org_id}"
-          },
-          "404": {
-            "description": "Slug is not held by any folder row"
-          },
-          "409": {
-            "description": "Slug is held by a real organization, not a placeholder"
-          }
-        }
-      }
-    },
-    "/skill.md": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "skill_md",
-        "responses": {
-          "200": {
-            "description": "Publisher skill definition",
-            "content": {
-              "text/markdown": {}
-            }
-          }
-        }
-      }
-    },
-    "/skills": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "list_skills",
-        "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "visibility",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "oneOf": [
-                {
-                  "type": "null"
-                },
-                {
-                  "$ref": "#/components/schemas/SkillVisibility"
-                }
-              ]
-            }
-          },
-          {
-            "name": "mine",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": [
-                "boolean",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "sort",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "oneOf": [
-                {
-                  "type": "null"
-                },
-                {
-                  "$ref": "#/components/schemas/ListSkillsSort"
-                }
-              ]
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "int64"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Skills",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListSkillsResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "create_skill",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSkillRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Created skill",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillDetail"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "get_skill",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Skill detail",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillDetail"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "delete_skill",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Soft-deleted skill",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "update_skill",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateSkillRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Updated skill",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillDetail"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/collaborators": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "list_collaborators",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Skill collaborators",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListCollaboratorsResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/collaborators/{user_id}": {
-      "put": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "upsert_collaborator",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "user_id",
-            "in": "path",
-            "description": "Collaborator user ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpsertCollaboratorRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Upserted collaborator",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Collaborator"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "delete_collaborator",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "user_id",
-            "in": "path",
-            "description": "Collaborator user ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Deleted collaborator",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/download": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "download_skill",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Downloadable skill bundle",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillBundle"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/drafts/{draft_id}": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "get_draft",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "draft_id",
-            "in": "path",
-            "description": "Draft ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Chat conflict draft",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChatDraftResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/drafts/{draft_id}/merge-state": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "get_merge_state",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "draft_id",
-            "in": "path",
-            "description": "Draft ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Merge state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MergeStateResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/drafts/{draft_id}/resolve-conflict": {
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "resolve_conflict",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "draft_id",
-            "in": "path",
-            "description": "Draft ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResolveConflictRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Resolved conflict version",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateVersionResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/edit": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "get_skill_edit_document",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Editor-facing document",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillEditDocument"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Owner access required"
-          }
-        }
-      }
-    },
-    "/skills/{slug}/files": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "summary": "`GET /skills/{slug}/files` -- list every file in the current\nversion's bundle, plus a synthetic `SKILL.md` entry.",
-        "operationId": "list_files",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Bundle file listing",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListFilesResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/files/{path}": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "summary": "`GET /skills/{slug}/files/{path...}` -- one file's bytes.",
-        "operationId": "get_file",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "path",
-            "in": "path",
-            "description": "Bundle path or 'SKILL.md'",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Single bundle file",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetFileResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "skills"
-        ],
-        "summary": "`PUT /skills/{slug}/files/{path...}` -- replace or add one file.",
-        "operationId": "put_file",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "path",
-            "in": "path",
-            "description": "Bundle path or 'SKILL.md'",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutFileRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Per-file edit result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FileEditResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "skills"
-        ],
-        "summary": "`DELETE /skills/{slug}/files/{path...}` -- drop one file.",
-        "operationId": "delete_file",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "path",
-            "in": "path",
-            "description": "Bundle path; SKILL.md is rejected with 400",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeleteFileRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Per-file delete result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FileEditResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/github": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "github_status",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "GitHub publish ledger",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/github/reconcile-orphans": {
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "summary": "`POST /skills/{slug}/github/reconcile-orphans` -- ops endpoint\nthat mechanically removes canonical-repo paths the gateway no\nlonger claims for this skill. Issue #22 acceptance:",
-        "description": "- Owner-or-operator-only authz (same `ensure_can_manage_skill`\n  pattern as `/github/sync-from-main` and `/github/retry`).\n- `confirm: true` is required. `false` or missing returns 409.\n- The handler re-derives the **live** orphan-path set against the\n  canonical-repo HEAD and returns 409 if it does not match the\n  `expected_orphan_paths` payload (optimistic concurrency mirrors\n  `expected_current_version_id`).\n- On match (and `dry_run: false`): stages one signed commit on\n  the canonical branch deleting every path. Author/committer is\n  the forward-publish bot pair so reverse-sync skips the commit\n  via `is_forward_publish_commit`.\n- On `dry_run: true`: skips the commit and returns the planned\n  shape (paths + parent commit SHA + audit row id) without\n  touching GitHub.\n- Records a `skill_orphan_reconciliations` audit row in both\n  modes (issue #22 acceptance criterion + migration 011).",
-        "operationId": "reconcile_orphans",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReconcileOrphansRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Reconcile result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Mismatch or unconfirmed request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/github/retry": {
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "retry_github_publish",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "GitHub publish retry queued",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/github/sync-from-main": {
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "summary": "`POST /skills/{slug}/github/sync-from-main` -- ops endpoint that\nre-fetches the canonical GitHub bundle at HEAD and reconciles it\ninto a new gateway version. No-op when the resulting\n`content_hash_bundle` matches the current version. Owner-only,\nsame authz pattern as `retry_github_publish`.",
-        "operationId": "sync_from_main",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "GitHub sync-from-main result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/purchase": {
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "purchase_skill",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Purchase result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PurchaseResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Insufficient balance"
-          }
-        }
-      }
-    },
-    "/skills/{slug}/sponsor": {
-      "put": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "update_sponsor",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateSponsorRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Updated sponsor settings",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillDetail"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/update-requests": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "list_update_requests",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Update requests",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListUpdateRequestsResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "create_update_request",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateUpdateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Created update request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateRequest"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/versions": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "list_versions",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Skill versions",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListVersionsResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "create_version",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateVersionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Created skill version or conflict draft",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateVersionResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/skills/{slug}/versions/{version}/manifest": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "get_version_manifest",
-        "parameters": [
-          {
-            "name": "slug",
-            "in": "path",
-            "description": "Skill slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "version",
-            "in": "path",
-            "description": "Version string",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Version manifest",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/update-requests/{request_id}": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "get_update_request",
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "description": "Update request ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Update request detail",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateRequestDetail"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/update-requests/{request_id}/accept": {
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "accept_update_request",
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "description": "Update request ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AcceptUpdateRequestRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Accepted update request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateRequest"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/update-requests/{request_id}/comments": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "list_update_request_comments",
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "description": "Update request ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Update request comments",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListUpdateRequestCommentsResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "create_update_request_comment",
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "description": "Update request ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateCommentRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Created comment",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/update-requests/{request_id}/diff": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "get_update_request_diff",
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "description": "Update request ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Update request diff payload",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateRequestDiff"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/update-requests/{request_id}/reject": {
-      "post": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "reject_update_request",
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "description": "Update request ID",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Rejected update request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateRequest"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/usage": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "list_usage_events",
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "int64"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Usage events",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListUsageEventsResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/usage/summary": {
-      "get": {
-        "tags": [
-          "skills"
-        ],
-        "operationId": "usage_summary",
-        "responses": {
-          "200": {
-            "description": "Current-month usage totals",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageSummaryResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  },
   "components": {
     "schemas": {
       "AcceptUpdateRequestRequest": {
-        "type": "object",
         "properties": {
           "allow_outdated_base": {
             "type": [
@@ -1718,11 +16,11 @@
             ]
           },
           "expected_current_version_id": {
+            "format": "uuid",
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "manifest": {},
           "publish_version": {
@@ -1731,16 +29,10 @@
               "null"
             ]
           }
-        }
+        },
+        "type": "object"
       },
       "AuthorIdentity": {
-        "type": "object",
-        "required": [
-          "user_id",
-          "display_name",
-          "git_email",
-          "updated_at"
-        ],
         "properties": {
           "display_name": {
             "type": "string"
@@ -1749,48 +41,87 @@
             "type": "string"
           },
           "updated_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "type": "string"
           },
           "user_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           }
-        }
+        },
+        "required": [
+          "user_id",
+          "display_name",
+          "git_email",
+          "updated_at"
+        ],
+        "type": "object"
       },
       "BundleFileInput": {
-        "type": "object",
         "description": "Bundle delta entry on a `CreateVersionRequest`. Path is POSIX,\nrelative to the bundle root, never `SKILL.md` (which is the canonical\nMarkdown column). `content_b64` is base64 of the raw file bytes so\nbinary payloads survive a JSON round-trip; `mode` defaults to 0o100644\n(0o100755 for files under `scripts/`); `deleted: true` drops the\nmatching path from the new version instead of inserting bytes.",
-        "required": [
-          "path"
-        ],
         "properties": {
           "content_b64": {
+            "description": "Required unless `deleted` is true.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "Required unless `deleted` is true."
+            ]
           },
           "deleted": {
             "type": "boolean"
           },
           "mode": {
+            "description": "Optional file mode in Git tree mode bits. Defaults to 0o100644.",
+            "format": "int32",
+            "minimum": 0,
             "type": [
               "integer",
               "null"
-            ],
-            "format": "int32",
-            "description": "Optional file mode in Git tree mode bits. Defaults to 0o100644.",
-            "minimum": 0
+            ]
           },
           "path": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
       },
       "ChatDraftResponse": {
-        "type": "object",
+        "properties": {
+          "base_version_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "editor_user_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "session_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "skill_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
         "required": [
           "id",
           "skill_id",
@@ -1801,42 +132,30 @@
           "created_at",
           "updated_at"
         ],
-        "properties": {
-          "base_version_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "editor_user_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "session_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "skill_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
+        "type": "object"
       },
       "Collaborator": {
-        "type": "object",
+        "properties": {
+          "granted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "granted_by_user_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "skill_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
         "required": [
           "skill_id",
           "user_id",
@@ -1844,47 +163,20 @@
           "granted_by_user_id",
           "granted_at"
         ],
-        "properties": {
-          "granted_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "granted_by_user_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "role": {
-            "type": "string"
-          },
-          "skill_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
+        "type": "object"
       },
       "CreateCommentRequest": {
-        "type": "object",
-        "required": [
-          "body"
-        ],
         "properties": {
           "body": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
       },
       "CreateSkillRequest": {
-        "type": "object",
-        "required": [
-          "slug",
-          "name",
-          "description",
-          "visibility"
-        ],
         "properties": {
           "changelog": {
             "type": [
@@ -1907,14 +199,14 @@
             ]
           },
           "files": {
-            "type": [
-              "array",
-              "null"
-            ],
+            "description": "Optional initial bundle files for the seed version. The first\nversion has no prior carry-over, so these are inserted as the\nentire non-SKILL.md bundle.",
             "items": {
               "$ref": "#/components/schemas/BundleFileInput"
             },
-            "description": "Optional initial bundle files for the seed version. The first\nversion has no prior carry-over, so these are inserted as the\nentire non-SKILL.md bundle."
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "frontmatter": {},
           "manifest": {},
@@ -1932,11 +224,11 @@
             ]
           },
           "price_cents": {
+            "format": "int32",
             "type": [
               "integer",
               "null"
-            ],
-            "format": "int32"
+            ]
           },
           "publish_now": {
             "type": [
@@ -1979,14 +271,16 @@
           "visibility": {
             "$ref": "#/components/schemas/SkillVisibility"
           }
-        }
+        },
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "visibility"
+        ],
+        "type": "object"
       },
       "CreateUpdateRequest": {
-        "type": "object",
-        "required": [
-          "title",
-          "body"
-        ],
         "properties": {
           "body": {
             "type": "string"
@@ -2002,13 +296,14 @@
           "title": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "title",
+          "body"
+        ],
+        "type": "object"
       },
       "CreateVersionRequest": {
-        "type": "object",
-        "required": [
-          "version"
-        ],
         "properties": {
           "changelog": {
             "type": [
@@ -2018,30 +313,30 @@
           },
           "content_doc": {},
           "expected_current_version_id": {
+            "format": "uuid",
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "files": {
-            "type": [
-              "array",
-              "null"
-            ],
+            "description": "Optional bundle deltas. Files supplied here are added to or\nreplaced in the new version's bundle. Files from the prior\ncurrent version are otherwise carried forward unchanged. Mark\n`deleted: true` to drop a path; reserve the SKILL.md root path\nfor the canonical Markdown column. See [`BundleFileInput`].",
             "items": {
               "$ref": "#/components/schemas/BundleFileInput"
             },
-            "description": "Optional bundle deltas. Files supplied here are added to or\nreplaced in the new version's bundle. Files from the prior\ncurrent version are otherwise carried forward unchanged. Mark\n`deleted: true` to drop a path; reserve the SKILL.md root path\nfor the canonical Markdown column. See [`BundleFileInput`]."
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "frontmatter": {},
           "manifest": {},
           "session_id": {
+            "format": "uuid",
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "skill_md": {
             "type": [
@@ -2052,13 +347,13 @@
           "version": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
       },
       "CreateVersionResponse": {
-        "type": "object",
-        "required": [
-          "status"
-        ],
         "properties": {
           "draft": {
             "oneOf": [
@@ -2093,18 +388,18 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
       },
       "DeleteFileRequest": {
-        "type": "object",
         "description": "`DELETE /skills/{slug}/files/{path...}` body.",
-        "required": [
-          "expected_current_version_id"
-        ],
         "properties": {
           "expected_current_version_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           },
           "version_label": {
             "type": [
@@ -2112,15 +407,14 @@
               "null"
             ]
           }
-        }
+        },
+        "required": [
+          "expected_current_version_id"
+        ],
+        "type": "object"
       },
       "FileEditResponse": {
-        "type": "object",
         "description": "Per-file edit response. `unchanged: true` means the resulting\nbundle hash matches the current version's `content_hash_bundle`\nand no new version was written; `version` then carries the\nexisting current version. On conflict, `status = \"conflict\"` and\n`draft` + `merge_state` come from the standard chat-conflict\npipeline reused from `create_version`.",
-        "required": [
-          "status",
-          "unchanged"
-        ],
         "properties": {
           "draft": {
             "oneOf": [
@@ -2158,18 +452,15 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "status",
+          "unchanged"
+        ],
+        "type": "object"
       },
       "FileListing": {
-        "type": "object",
         "description": "One row in the [`ListFilesResponse`]. `preview` is the first 200\nchars of the file when it is text; `null` for binaries.",
-        "required": [
-          "path",
-          "mode",
-          "is_binary",
-          "size_bytes",
-          "content_hash"
-        ],
         "properties": {
           "content_hash": {
             "type": "string"
@@ -2178,9 +469,9 @@
             "type": "boolean"
           },
           "mode": {
-            "type": "integer",
             "format": "int32",
-            "minimum": 0
+            "minimum": 0,
+            "type": "integer"
           },
           "path": {
             "type": "string"
@@ -2192,21 +483,21 @@
             ]
           },
           "size_bytes": {
-            "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "type": "integer"
           }
-        }
-      },
-      "GetFileResponse": {
-        "type": "object",
-        "description": "`GET /skills/{slug}/files/{path...}` response: one file's bytes.",
+        },
         "required": [
           "path",
-          "content_b64",
           "mode",
           "is_binary",
+          "size_bytes",
           "content_hash"
         ],
+        "type": "object"
+      },
+      "GetFileResponse": {
+        "description": "`GET /skills/{slug}/files/{path...}` response: one file's bytes.",
         "properties": {
           "content_b64": {
             "type": "string"
@@ -2218,9 +509,9 @@
             "type": "boolean"
           },
           "mode": {
-            "type": "integer",
             "format": "int32",
-            "minimum": 0
+            "minimum": 0,
+            "type": "integer"
           },
           "path": {
             "type": "string"
@@ -2231,28 +522,27 @@
               "null"
             ]
           }
-        }
+        },
+        "required": [
+          "path",
+          "content_b64",
+          "mode",
+          "is_binary",
+          "content_hash"
+        ],
+        "type": "object"
       },
       "GithubMirrorHealth": {
-        "type": "string",
         "description": "Health of the GitHub mirror for a public/paid skill, as observed by\nthe forward-publish worker. Surfaced on `SkillSummary` so owners see\na broken mirror without a separate `/skills/{slug}/github` lookup.\n\n- `Pending`: row not yet attempted, or the skill is private and the\n  mirror is intentionally inactive. Default for new skills.\n- `Healthy`: most recent terminal worker outcome was a successful\n  push.\n- `Degraded`: reserved for partial-push or transient-failure flows;\n  not currently emitted by the worker but defined so the column is\n  future-proof against a finer-grained health model.\n- `Failed`: most recent terminal worker outcome exhausted retries\n  without pushing. Owner action required.",
         "enum": [
           "pending",
           "healthy",
           "degraded",
           "failed"
-        ]
+        ],
+        "type": "string"
       },
       "GithubPublishStatusResponse": {
-        "type": "object",
-        "required": [
-          "skill_id",
-          "version_id",
-          "folder_slug",
-          "skill_folder_name",
-          "status",
-          "resolved_via"
-        ],
         "properties": {
           "commit_sha": {
             "type": [
@@ -2270,63 +560,71 @@
             ]
           },
           "resolved_via": {
-            "type": "string",
-            "description": "Source that supplied `folder_slug` at enqueue time.\n`\"skill\"` -> per-skill override (`skills.folder_slug`).\n`\"organization\"` -> org default (`skill_org_folders.folder_slug`).\nPinned at enqueue rather than recomputed on read because both\nunderlying values can drift after the publish row is written."
+            "description": "Source that supplied `folder_slug` at enqueue time.\n`\"skill\"` -> per-skill override (`skills.folder_slug`).\n`\"organization\"` -> org default (`skill_org_folders.folder_slug`).\nPinned at enqueue rather than recomputed on read because both\nunderlying values can drift after the publish row is written.",
+            "type": "string"
           },
           "skill_folder_name": {
             "type": "string"
           },
           "skill_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           },
           "status": {
             "type": "string"
           },
           "version_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           }
-        }
+        },
+        "required": [
+          "skill_id",
+          "version_id",
+          "folder_slug",
+          "skill_folder_name",
+          "status",
+          "resolved_via"
+        ],
+        "type": "object"
       },
       "ListCollaboratorsResponse": {
-        "type": "object",
+        "properties": {
+          "collaborators": {
+            "items": {
+              "$ref": "#/components/schemas/Collaborator"
+            },
+            "type": "array"
+          }
+        },
         "required": [
           "collaborators"
         ],
-        "properties": {
-          "collaborators": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Collaborator"
-            }
-          }
-        }
+        "type": "object"
       },
       "ListFilesResponse": {
-        "type": "object",
         "description": "`GET /skills/{slug}/files` response: every path in the current\nbundle including a synthetic `SKILL.md` entry for completeness.",
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileListing"
+            },
+            "type": "array"
+          }
+        },
         "required": [
           "files"
         ],
-        "properties": {
-          "files": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FileListing"
-            }
-          }
-        }
+        "type": "object"
       },
       "ListSkillsQuery": {
-        "type": "object",
         "properties": {
           "limit": {
+            "format": "int64",
             "type": [
               "integer",
               "null"
-            ],
-            "format": "int64"
+            ]
           },
           "mine": {
             "type": [
@@ -2335,11 +633,11 @@
             ]
           },
           "offset": {
+            "format": "int64",
             "type": [
               "integer",
               "null"
-            ],
-            "format": "int64"
+            ]
           },
           "q": {
             "type": [
@@ -2367,105 +665,160 @@
               }
             ]
           }
-        }
+        },
+        "type": "object"
       },
       "ListSkillsResponse": {
-        "type": "object",
+        "properties": {
+          "has_more": {
+            "description": "True when more pages remain after this one. Equivalent to\n`offset + skills.len() < total`, exposed so callers (and LLM\nagents reading SKILL.md) don't have to compute the loop\ncondition themselves.",
+            "type": "boolean"
+          },
+          "next_offset": {
+            "description": "The `offset` value to pass on the next request to continue\npaging, or `None` when the catalog is exhausted.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/SkillSummary"
+            },
+            "type": "array"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
         "required": [
           "skills",
           "total",
           "has_more"
         ],
-        "properties": {
-          "has_more": {
-            "type": "boolean",
-            "description": "True when more pages remain after this one. Equivalent to\n`offset + skills.len() < total`, exposed so callers (and LLM\nagents reading SKILL.md) don't have to compute the loop\ncondition themselves."
-          },
-          "next_offset": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "The `offset` value to pass on the next request to continue\npaging, or `None` when the catalog is exhausted."
-          },
-          "skills": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SkillSummary"
-            }
-          },
-          "total": {
-            "type": "integer",
-            "format": "int64"
-          }
-        }
+        "type": "object"
       },
       "ListSkillsSort": {
-        "type": "string",
         "enum": [
           "updated",
           "installs"
-        ]
+        ],
+        "type": "string"
       },
       "ListUpdateRequestCommentsResponse": {
-        "type": "object",
+        "properties": {
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/UpdateRequestComment"
+            },
+            "type": "array"
+          }
+        },
         "required": [
           "comments"
         ],
-        "properties": {
-          "comments": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UpdateRequestComment"
-            }
-          }
-        }
+        "type": "object"
       },
       "ListUpdateRequestsResponse": {
-        "type": "object",
+        "properties": {
+          "update_requests": {
+            "items": {
+              "$ref": "#/components/schemas/UpdateRequest"
+            },
+            "type": "array"
+          }
+        },
         "required": [
           "update_requests"
         ],
-        "properties": {
-          "update_requests": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UpdateRequest"
-            }
-          }
-        }
+        "type": "object"
       },
       "ListUsageEventsResponse": {
-        "type": "object",
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/UsageEvent"
+            },
+            "type": "array"
+          }
+        },
         "required": [
           "events"
         ],
-        "properties": {
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UsageEvent"
-            }
-          }
-        }
+        "type": "object"
       },
       "ListVersionsResponse": {
-        "type": "object",
+        "properties": {
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/SkillVersion"
+            },
+            "type": "array"
+          }
+        },
         "required": [
           "versions"
         ],
-        "properties": {
-          "versions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SkillVersion"
-            }
-          }
-        }
+        "type": "object"
       },
       "MergeStateResponse": {
-        "type": "object",
+        "properties": {
+          "base_version_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "chat_draft_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "conflict_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "editor_user_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "incoming_version_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "merged_content_doc": {},
+          "merged_skill_md": {
+            "type": "string"
+          },
+          "resolved_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "skill_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "update_request_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "required": [
           "id",
           "skill_id",
@@ -2477,103 +830,89 @@
           "merged_content_doc",
           "created_at"
         ],
+        "type": "object"
+      },
+      "OrphanFolderEntry": {
         "properties": {
-          "base_version_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "chat_draft_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "conflict_count": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "editor_user_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "incoming_version_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "merged_content_doc": {},
-          "merged_skill_md": {
+          "folder_slug": {
             "type": "string"
           },
-          "resolved_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
+          "paths": {
+            "description": "Every blob path at depth ≥ 3 under `<folder_slug>/<skill_folder_name>/`.\nSorted, deduped. Empty `paths` cannot occur — the entry only\nexists because at least one path matched.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
-          "skill_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "update_request_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
+          "skill_folder_name": {
+            "type": "string"
           }
-        }
+        },
+        "required": [
+          "folder_slug",
+          "skill_folder_name",
+          "paths"
+        ],
+        "type": "object"
+      },
+      "OrphanFoldersResponse": {
+        "properties": {
+          "head_commit_sha": {
+            "type": "string"
+          },
+          "head_tree_sha": {
+            "type": "string"
+          },
+          "orphan_folders": {
+            "items": {
+              "$ref": "#/components/schemas/OrphanFolderEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "head_commit_sha",
+          "head_tree_sha",
+          "orphan_folders"
+        ],
+        "type": "object"
       },
       "PurchaseResponse": {
-        "type": "object",
-        "required": [
-          "skill_id",
-          "access_granted",
-          "source"
-        ],
         "properties": {
           "access_granted": {
             "type": "boolean"
           },
           "charge_id": {
+            "format": "uuid",
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "purchase_id": {
+            "format": "uuid",
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "skill_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           },
           "source": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "skill_id",
+          "access_granted",
+          "source"
+        ],
+        "type": "object"
       },
       "PutFileRequest": {
-        "type": "object",
         "description": "`PUT /skills/{slug}/files/{path...}` body. `expected_content_hash`\nis the per-file hex SHA from `GET /files`; it is an *optional*\npre-flight check that fails fast (409) before the version write.\n`expected_current_version_id` is forwarded to `create_version`'s\nexisting conflict-draft path -- mismatch returns 409 with a chat\ndraft + merge-state pointer.",
-        "required": [
-          "content_b64",
-          "expected_current_version_id"
-        ],
         "properties": {
           "content_b64": {
             "type": "string"
@@ -2585,59 +924,60 @@
             ]
           },
           "expected_current_version_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           },
           "mode": {
+            "format": "int32",
+            "minimum": 0,
             "type": [
               "integer",
               "null"
-            ],
-            "format": "int32",
-            "minimum": 0
+            ]
           },
           "version_label": {
+            "description": "Optional override for the auto-synthesised\n`file-edit-<hash>` version label.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "Optional override for the auto-synthesised\n`file-edit-<hash>` version label."
+            ]
           }
-        }
+        },
+        "required": [
+          "content_b64",
+          "expected_current_version_id"
+        ],
+        "type": "object"
       },
       "ReconcileOrphansRequest": {
-        "type": "object",
         "description": "Body of `POST /skills/{slug}/github/reconcile-orphans`.",
         "properties": {
           "confirm": {
-            "type": "boolean",
-            "description": "Must be `true` -- the handler 409s on `false` or missing. The\nguard exists so a misconfigured CLI/script cannot quietly\ndelete canonical-repo paths."
+            "description": "Must be `true` -- the handler 409s on `false` or missing. The\nguard exists so a misconfigured CLI/script cannot quietly\ndelete canonical-repo paths.",
+            "type": "boolean"
           },
           "dry_run": {
-            "type": "boolean",
-            "description": "When true, the handler returns the planned commit shape\nwithout touching GitHub. The audit row is still recorded so\nthe operator's preview is auditable."
+            "description": "When true, the handler returns the planned commit shape\nwithout touching GitHub. The audit row is still recorded so\nthe operator's preview is auditable.",
+            "type": "boolean"
           },
           "expected_orphan_paths": {
-            "type": "array",
+            "description": "The orphan-path set the operator computed (e.g. via the\n`reconcile_canonical_repo` binary). The handler 409s if the\nlive set against canonical HEAD has diverged.",
             "items": {
               "type": "string"
             },
-            "description": "The orphan-path set the operator computed (e.g. via the\n`reconcile_canonical_repo` binary). The handler 409s if the\nlive set against canonical HEAD has diverged."
+            "type": "array"
           },
           "reason": {
+            "description": "Optional free-text reason (recorded on the audit row).",
             "type": [
               "string",
               "null"
-            ],
-            "description": "Optional free-text reason (recorded on the audit row)."
+            ]
           }
-        }
+        },
+        "type": "object"
       },
       "ResolveConflictRequest": {
-        "type": "object",
-        "required": [
-          "resolution_strategy"
-        ],
         "properties": {
           "changelog": {
             "type": [
@@ -2663,16 +1003,13 @@
               "null"
             ]
           }
-        }
+        },
+        "required": [
+          "resolution_strategy"
+        ],
+        "type": "object"
       },
       "SkillAccess": {
-        "type": "object",
-        "required": [
-          "can_view",
-          "can_download",
-          "can_manage",
-          "reason"
-        ],
         "properties": {
           "can_download": {
             "type": "boolean"
@@ -2686,27 +1023,26 @@
           "reason": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "can_view",
+          "can_download",
+          "can_manage",
+          "reason"
+        ],
+        "type": "object"
       },
       "SkillBundle": {
-        "type": "object",
-        "required": [
-          "skill",
-          "version",
-          "skill_md",
-          "manifest",
-          "content_hash"
-        ],
         "properties": {
           "content_hash": {
             "type": "string"
           },
           "files": {
-            "type": "array",
+            "description": "Non-SKILL.md files attached to the version. Empty for versions that\npredate bundle persistence.",
             "items": {
               "$ref": "#/components/schemas/SkillBundleFile"
             },
-            "description": "Non-SKILL.md files attached to the version. Empty for versions that\npredate bundle persistence."
+            "type": "array"
           },
           "manifest": {},
           "skill": {
@@ -2718,17 +1054,17 @@
           "version": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "skill",
+          "version",
+          "skill_md",
+          "manifest",
+          "content_hash"
+        ],
+        "type": "object"
       },
       "SkillBundleFile": {
-        "type": "object",
-        "required": [
-          "path",
-          "content_b64",
-          "content_hash",
-          "mode",
-          "is_binary"
-        ],
         "properties": {
           "content_b64": {
             "type": "string"
@@ -2740,17 +1076,122 @@
             "type": "boolean"
           },
           "mode": {
-            "type": "integer",
             "format": "int32",
-            "minimum": 0
+            "minimum": 0,
+            "type": "integer"
           },
           "path": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "path",
+          "content_b64",
+          "content_hash",
+          "mode",
+          "is_binary"
+        ],
+        "type": "object"
+      },
+      "SkillBundleFileDownload": {
+        "description": "Single-file body returned by `GET /skills/{slug}/download/file`.\nShares the [`SkillBundleFile`] field shape (path + base64 body +\nper-file hash + mode + is_binary) and adds the bundle `version` so a\nclient can detect a publish that landed between its manifest fetch\nand this body fetch (version mismatch -> restart from the manifest).",
+        "properties": {
+          "content_b64": {
+            "type": "string"
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "is_binary": {
+            "type": "boolean"
+          },
+          "mode": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content_b64",
+          "content_hash",
+          "mode",
+          "is_binary",
+          "version"
+        ],
+        "type": "object"
+      },
+      "SkillBundleManifest": {
+        "description": "Split-download manifest (issue #53): the same envelope as\n[`SkillBundle`] but every entry in `files` carries *metadata only* —\nno `content_b64` body. Clients fetch each body separately via\n`GET /skills/{slug}/download/file?path=...`, keeping every response\nunder the gateway's per-response byte cap even for bundles whose\nsingle-shot `/download` JSON would exceed it.",
+        "properties": {
+          "content_hash": {
+            "type": "string"
+          },
+          "files": {
+            "description": "Per-file metadata with no bodies. Empty for versions that predate\nbundle persistence.",
+            "items": {
+              "$ref": "#/components/schemas/SkillBundleManifestFile"
+            },
+            "type": "array"
+          },
+          "manifest": {},
+          "skill": {
+            "$ref": "#/components/schemas/SkillSummary"
+          },
+          "skill_md": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill",
+          "version",
+          "skill_md",
+          "manifest",
+          "content_hash"
+        ],
+        "type": "object"
+      },
+      "SkillBundleManifestFile": {
+        "description": "Body-less per-file metadata returned in a [`SkillBundleManifest`].\n`size_bytes` is the raw (pre-base64) byte length so clients can show\nprogress and pre-size buffers before fetching each body.",
+        "properties": {
+          "content_hash": {
+            "type": "string"
+          },
+          "is_binary": {
+            "type": "boolean"
+          },
+          "mode": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "content_hash",
+          "mode",
+          "is_binary",
+          "size_bytes"
+        ],
+        "type": "object"
       },
       "SkillContentInput": {
-        "type": "object",
         "description": "One of `skill_md` (markdown body, server parses to ProseMirror) or\n`content_doc` + `frontmatter` (editor-native: server renders markdown\nfrom the doc and stores both). Exactly one branch must be provided.",
         "properties": {
           "content_doc": {},
@@ -2761,7 +1202,8 @@
               "null"
             ]
           }
-        }
+        },
+        "type": "object"
       },
       "SkillDetail": {
         "allOf": [
@@ -2769,10 +1211,6 @@
             "$ref": "#/components/schemas/SkillSummary"
           },
           {
-            "type": "object",
-            "required": [
-              "access"
-            ],
             "properties": {
               "access": {
                 "$ref": "#/components/schemas/SkillAccess"
@@ -2787,25 +1225,23 @@
                   }
                 ]
               }
-            }
+            },
+            "required": [
+              "access"
+            ],
+            "type": "object"
           }
         ]
       },
       "SkillDiscoverability": {
-        "type": "string",
         "enum": [
           "listed",
           "unlisted"
-        ]
+        ],
+        "type": "string"
       },
       "SkillEditDocument": {
-        "type": "object",
         "description": "Editor-facing payload: ProseMirror document tree for the rich-text editor\nplus the parsed frontmatter as JSON. Returned by GET /skills/{slug}/edit\nand accepted by POST /skills/{slug}/versions when a client wants to write\nthe document directly instead of round-tripping through markdown.",
-        "required": [
-          "skill",
-          "frontmatter",
-          "content_doc"
-        ],
         "properties": {
           "content_doc": {},
           "content_hash": {
@@ -2815,11 +1251,11 @@
             ]
           },
           "current_version_id": {
+            "format": "uuid",
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "frontmatter": {},
           "skill": {
@@ -2831,61 +1267,47 @@
               "null"
             ]
           }
-        }
+        },
+        "required": [
+          "skill",
+          "frontmatter",
+          "content_doc"
+        ],
+        "type": "object"
       },
       "SkillOwnerKind": {
-        "type": "string",
         "enum": [
           "user",
           "organization"
-        ]
+        ],
+        "type": "string"
       },
       "SkillSponsorMode": {
-        "type": "string",
         "enum": [
           "skip",
           "static",
           "seren_bounty"
-        ]
+        ],
+        "type": "string"
       },
       "SkillStatus": {
-        "type": "string",
         "enum": [
           "draft",
           "published",
           "suspended",
           "deleted"
-        ]
+        ],
+        "type": "string"
       },
       "SkillSummary": {
-        "type": "object",
-        "required": [
-          "id",
-          "owner_kind",
-          "slug",
-          "skill_folder_name",
-          "name",
-          "description",
-          "visibility",
-          "discoverability",
-          "status",
-          "sponsor_mode",
-          "price_cents",
-          "install_count",
-          "owner_organization_id",
-          "created_by_user_id",
-          "github_mirror_health",
-          "created_at",
-          "updated_at"
-        ],
         "properties": {
           "created_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "type": "string"
           },
           "created_by_user_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           },
           "current_version": {
             "type": [
@@ -2894,18 +1316,18 @@
             ]
           },
           "current_version_id": {
+            "format": "uuid",
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "deleted_at": {
+            "format": "date-time",
             "type": [
               "string",
               "null"
-            ],
-            "format": "date-time"
+            ]
           },
           "description": {
             "type": "string"
@@ -2914,22 +1336,22 @@
             "$ref": "#/components/schemas/SkillDiscoverability"
           },
           "folder_slug": {
+            "description": "Per-skill override for the GitHub mirror folder. When set, takes\nprecedence over `skill_org_folders.folder_slug`. `None` means\nfall through to the org default. See migration 009 + issue #17.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "Per-skill override for the GitHub mirror folder. When set, takes\nprecedence over `skill_org_folders.folder_slug`. `None` means\nfall through to the org default. See migration 009 + issue #17."
+            ]
           },
           "github_mirror_health": {
             "$ref": "#/components/schemas/GithubMirrorHealth"
           },
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           },
           "install_count": {
-            "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "type": "integer"
           },
           "name": {
             "type": "string"
@@ -2938,26 +1360,26 @@
             "$ref": "#/components/schemas/SkillOwnerKind"
           },
           "owner_organization_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           },
           "owner_user_id": {
+            "format": "uuid",
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "price_cents": {
-            "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "type": "integer"
           },
           "seren_bounty_campaign_id": {
+            "format": "uuid",
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "skill_folder_name": {
             "type": "string"
@@ -2979,26 +1401,35 @@
             "$ref": "#/components/schemas/SkillStatus"
           },
           "updated_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "type": "string"
           },
           "visibility": {
             "$ref": "#/components/schemas/SkillVisibility"
           }
-        }
-      },
-      "SkillVersion": {
-        "type": "object",
+        },
         "required": [
           "id",
-          "skill_id",
-          "version",
-          "manifest",
-          "content_hash",
-          "review_status",
+          "owner_kind",
+          "slug",
+          "skill_folder_name",
+          "name",
+          "description",
+          "visibility",
+          "discoverability",
+          "status",
+          "sponsor_mode",
+          "price_cents",
+          "install_count",
+          "owner_organization_id",
           "created_by_user_id",
-          "created_at"
+          "github_mirror_health",
+          "created_at",
+          "updated_at"
         ],
+        "type": "object"
+      },
+      "SkillVersion": {
         "properties": {
           "changelog": {
             "type": [
@@ -3010,43 +1441,50 @@
             "type": "string"
           },
           "created_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "type": "string"
           },
           "created_by_user_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           },
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           },
           "manifest": {},
           "review_status": {
             "type": "string"
           },
           "skill_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           },
           "version": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "id",
+          "skill_id",
+          "version",
+          "manifest",
+          "content_hash",
+          "review_status",
+          "created_by_user_id",
+          "created_at"
+        ],
+        "type": "object"
       },
       "SkillVisibility": {
-        "type": "string",
         "enum": [
           "private",
           "public",
           "paid"
-        ]
+        ],
+        "type": "string"
       },
       "TransferOrgFolderRequest": {
-        "type": "object",
-        "required": [
-          "folder_slug"
-        ],
         "properties": {
           "display_name": {
             "type": [
@@ -3057,10 +1495,57 @@
           "folder_slug": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "folder_slug"
+        ],
+        "type": "object"
       },
       "UpdateRequest": {
-        "type": "object",
+        "properties": {
+          "base_version_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "proposed_content_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "proposer_user_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "skill_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
         "required": [
           "id",
           "skill_id",
@@ -3071,53 +1556,30 @@
           "created_at",
           "updated_at"
         ],
+        "type": "object"
+      },
+      "UpdateRequestComment": {
         "properties": {
-          "base_version_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
+          "author_user_id": {
+            "format": "uuid",
+            "type": "string"
           },
           "body": {
             "type": "string"
           },
           "created_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "type": "string"
           },
           "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "proposed_content_hash": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "proposer_user_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "skill_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
+            "format": "uuid",
             "type": "string"
           },
-          "title": {
+          "request_id": {
+            "format": "uuid",
             "type": "string"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
           }
-        }
-      },
-      "UpdateRequestComment": {
-        "type": "object",
+        },
         "required": [
           "id",
           "request_id",
@@ -3125,27 +1587,7 @@
           "body",
           "created_at"
         ],
-        "properties": {
-          "author_user_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "body": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "request_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
+        "type": "object"
       },
       "UpdateRequestDetail": {
         "allOf": [
@@ -3153,10 +1595,6 @@
             "$ref": "#/components/schemas/UpdateRequest"
           },
           {
-            "type": "object",
-            "required": [
-              "skill"
-            ],
             "properties": {
               "base_version": {
                 "oneOf": [
@@ -3179,16 +1617,15 @@
               "skill": {
                 "$ref": "#/components/schemas/SkillSummary"
               }
-            }
+            },
+            "required": [
+              "skill"
+            ],
+            "type": "object"
           }
         ]
       },
       "UpdateRequestDiff": {
-        "type": "object",
-        "required": [
-          "request_id",
-          "is_outdated"
-        ],
         "properties": {
           "base_skill_md": {
             "type": [
@@ -3197,18 +1634,18 @@
             ]
           },
           "base_version_id": {
+            "format": "uuid",
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "current_version_id": {
+            "format": "uuid",
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "is_outdated": {
             "type": "boolean"
@@ -3220,13 +1657,17 @@
             ]
           },
           "request_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           }
-        }
+        },
+        "required": [
+          "request_id",
+          "is_outdated"
+        ],
+        "type": "object"
       },
       "UpdateSkillRequest": {
-        "type": "object",
         "properties": {
           "description": {
             "type": [
@@ -3245,11 +1686,11 @@
             ]
           },
           "folder_slug": {
+            "description": "Per-skill GitHub mirror folder override. Three-state field:\nfield absent → no change; explicit `null` → clear the override\n(fall back to org default); string → set the override.\nSee issue #17.",
             "type": [
               "string",
               "null"
-            ],
-            "description": "Per-skill GitHub mirror folder override. Three-state field:\nfield absent → no change; explicit `null` → clear the override\n(fall back to org default); string → set the override.\nSee issue #17."
+            ]
           },
           "name": {
             "type": [
@@ -3258,11 +1699,11 @@
             ]
           },
           "price_cents": {
+            "format": "int32",
             "type": [
               "integer",
               "null"
-            ],
-            "format": "int32"
+            ]
           },
           "status": {
             "oneOf": [
@@ -3284,26 +1725,22 @@
               }
             ]
           }
-        }
+        },
+        "type": "object"
       },
       "UpdateSponsorRequest": {
-        "type": "object",
-        "required": [
-          "sponsor_mode"
-        ],
         "properties": {
           "sponsor_mode": {
             "$ref": "#/components/schemas/SkillSponsorMode"
           },
           "sponsor_static": {}
-        }
+        },
+        "required": [
+          "sponsor_mode"
+        ],
+        "type": "object"
       },
       "UpsertAuthorIdentityRequest": {
-        "type": "object",
-        "required": [
-          "display_name",
-          "git_email"
-        ],
         "properties": {
           "display_name": {
             "type": "string"
@@ -3311,29 +1748,30 @@
           "git_email": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "display_name",
+          "git_email"
+        ],
+        "type": "object"
       },
       "UpsertCollaboratorRequest": {
-        "type": "object",
-        "required": [
-          "user_id",
-          "role"
-        ],
         "properties": {
           "role": {
             "type": "string"
           },
           "user_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "type": "string"
           }
-        }
+        },
+        "required": [
+          "user_id",
+          "role"
+        ],
+        "type": "object"
       },
       "UpsertOrgFolderRequest": {
-        "type": "object",
-        "required": [
-          "folder_slug"
-        ],
         "properties": {
           "display_name": {
             "type": [
@@ -3344,10 +1782,59 @@
           "folder_slug": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "folder_slug"
+        ],
+        "type": "object"
       },
       "UsageEvent": {
-        "type": "object",
+        "properties": {
+          "amount_atomic": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "billing_charge_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "billing_status": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "skill_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "units": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "user_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
         "required": [
           "id",
           "user_id",
@@ -3358,61 +1845,9 @@
           "billing_status",
           "created_at"
         ],
-        "properties": {
-          "amount_atomic": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "billing_charge_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "billing_status": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "event_type": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "organization_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "skill_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "units": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
+        "type": "object"
       },
       "UsageSummaryResponse": {
-        "type": "object",
-        "required": [
-          "month",
-          "rows",
-          "total_amount_atomic",
-          "note"
-        ],
         "properties": {
           "month": {
             "type": "string"
@@ -3421,44 +1856,1848 @@
             "type": "string"
           },
           "rows": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/UsageSummaryRow"
-            }
+            },
+            "type": "array"
           },
           "total_amount_atomic": {
-            "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "type": "integer"
           }
-        }
+        },
+        "required": [
+          "month",
+          "rows",
+          "total_amount_atomic",
+          "note"
+        ],
+        "type": "object"
       },
       "UsageSummaryRow": {
-        "type": "object",
-        "required": [
-          "event_type",
-          "units",
-          "amount_atomic"
-        ],
         "properties": {
           "amount_atomic": {
-            "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "type": "integer"
           },
           "event_type": {
             "type": "string"
           },
           "units": {
-            "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "type": "integer"
           }
-        }
+        },
+        "required": [
+          "event_type",
+          "units",
+          "amount_atomic"
+        ],
+        "type": "object"
       }
     }
   },
+  "info": {
+    "contact": {
+      "email": "hello@serendb.com",
+      "name": "SerenAI"
+    },
+    "description": "Publisher API for creating, selling, downloading, and maintaining Seren agent skills.",
+    "license": {
+      "name": ""
+    },
+    "title": "Seren Skills",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "publisher_root",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Publisher metadata"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/admin/skills/orphan-folders": {
+      "get": {
+        "description": "Authorization: any caller with `X-Seren-User-Role: admin` (platform\nadmin set by Seren Core's `ADMIN_USER_IDS`). The endpoint is\n**read-only** and does not return per-org data — every orphan is by\ndefinition a path the gateway has lost track of, so scoping it to one\norganization would defeat the visibility purpose. Unauthorized callers\nreceive 403.\n\nOn success returns:\n\n```json\n{\n  \"head_commit_sha\": \"...\",\n  \"head_tree_sha\": \"...\",\n  \"orphan_folders\": [\n    {\n      \"folder_slug\": \"org-deadbeef\",\n      \"skill_folder_name\": \"grid-trader\",\n      \"paths\": [\"org-deadbeef/grid-trader/SKILL.md\", \"...\"]\n    }\n  ]\n}\n```\n\nFailure modes:\n\n- 403 if the caller lacks `X-Seren-User-Role=admin`.\n- 400 if GitHub publishing is not configured for this deployment.\n- 500 if GitHub returned a truncated tree listing (we cannot\n  trust a partial view for an inventory pass — same posture as\n  `derive_orphan_paths` in `github_status`).",
+        "operationId": "list_orphan_folders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrphanFoldersResponse"
+                }
+              }
+            },
+            "description": "Operator orphan-folders inventory"
+          },
+          "403": {
+            "description": "Caller lacks platform admin role"
+          }
+        },
+        "summary": "Operator inventory of canonical-repo paths the gateway has no\nclaim on.",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/git-identity": {
+      "get": {
+        "operationId": "get_author_identity",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorIdentity"
+                }
+              }
+            },
+            "description": "Git author identity"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      },
+      "put": {
+        "operationId": "upsert_author_identity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertAuthorIdentityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorIdentity"
+                }
+              }
+            },
+            "description": "Upserted Git author identity"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/organizations/{org_id}/folder": {
+      "get": {
+        "operationId": "get_org_folder",
+        "parameters": [
+          {
+            "description": "Organization ID",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Organization folder"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      },
+      "patch": {
+        "operationId": "update_org_folder",
+        "parameters": [
+          {
+            "description": "Organization ID",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertOrgFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Organization folder"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "create_org_folder",
+        "parameters": [
+          {
+            "description": "Organization ID",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertOrgFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Organization folder"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      },
+      "put": {
+        "operationId": "replace_org_folder",
+        "parameters": [
+          {
+            "description": "Organization ID",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertOrgFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Organization folder"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/organizations/{org_id}/folder/transfer": {
+      "post": {
+        "operationId": "transfer_org_folder",
+        "parameters": [
+          {
+            "description": "Organization ID",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferOrgFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Organization folder"
+          },
+          "403": {
+            "description": "Caller is not org-admin, personal-owner of {org_id}, or platform admin"
+          },
+          "404": {
+            "description": "Slug is not held by any folder row"
+          },
+          "409": {
+            "description": "Slug is held by a real organization, not a placeholder"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skill.md": {
+      "get": {
+        "operationId": "skill_md",
+        "responses": {
+          "200": {
+            "content": {
+              "text/markdown": {}
+            },
+            "description": "Publisher skill definition"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills": {
+      "get": {
+        "operationId": "list_skills",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "visibility",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/SkillVisibility"
+                }
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/ListSkillsSort"
+                }
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSkillsResponse"
+                }
+              }
+            },
+            "description": "Skills"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "create_skill",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSkillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetail"
+                }
+              }
+            },
+            "description": "Created skill"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}": {
+      "delete": {
+        "operationId": "delete_skill",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Soft-deleted skill"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      },
+      "get": {
+        "operationId": "get_skill",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetail"
+                }
+              }
+            },
+            "description": "Skill detail"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      },
+      "patch": {
+        "operationId": "update_skill",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetail"
+                }
+              }
+            },
+            "description": "Updated skill"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/collaborators": {
+      "get": {
+        "operationId": "list_collaborators",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCollaboratorsResponse"
+                }
+              }
+            },
+            "description": "Skill collaborators"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/collaborators/{user_id}": {
+      "delete": {
+        "operationId": "delete_collaborator",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Collaborator user ID",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Deleted collaborator"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      },
+      "put": {
+        "operationId": "upsert_collaborator",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Collaborator user ID",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertCollaboratorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collaborator"
+                }
+              }
+            },
+            "description": "Upserted collaborator"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/download": {
+      "get": {
+        "operationId": "download_skill",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillBundle"
+                }
+              }
+            },
+            "description": "Downloadable skill bundle"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/download/file": {
+      "get": {
+        "operationId": "download_skill_file",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bundle-relative file path from the manifest",
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillBundleFileDownload"
+                }
+              }
+            },
+            "description": "One bundle file body"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/download/manifest": {
+      "get": {
+        "operationId": "download_skill_manifest",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillBundleManifest"
+                }
+              }
+            },
+            "description": "Bundle manifest without file bodies"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/drafts/{draft_id}": {
+      "get": {
+        "operationId": "get_draft",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Draft ID",
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatDraftResponse"
+                }
+              }
+            },
+            "description": "Chat conflict draft"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/drafts/{draft_id}/merge-state": {
+      "get": {
+        "operationId": "get_merge_state",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Draft ID",
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergeStateResponse"
+                }
+              }
+            },
+            "description": "Merge state"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/drafts/{draft_id}/resolve-conflict": {
+      "post": {
+        "operationId": "resolve_conflict",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Draft ID",
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveConflictRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateVersionResponse"
+                }
+              }
+            },
+            "description": "Resolved conflict version"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/edit": {
+      "get": {
+        "operationId": "get_skill_edit_document",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillEditDocument"
+                }
+              }
+            },
+            "description": "Editor-facing document"
+          },
+          "403": {
+            "description": "Owner access required"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/files": {
+      "get": {
+        "operationId": "list_files",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListFilesResponse"
+                }
+              }
+            },
+            "description": "Bundle file listing"
+          }
+        },
+        "summary": "`GET /skills/{slug}/files` -- list every file in the current\nversion's bundle, plus a synthetic `SKILL.md` entry.",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/files/{path}": {
+      "delete": {
+        "operationId": "delete_file",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bundle path; SKILL.md is rejected with 400",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileEditResponse"
+                }
+              }
+            },
+            "description": "Per-file delete result"
+          }
+        },
+        "summary": "`DELETE /skills/{slug}/files/{path...}` -- drop one file.",
+        "tags": [
+          "skills"
+        ]
+      },
+      "get": {
+        "operationId": "get_file",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bundle path or 'SKILL.md'",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetFileResponse"
+                }
+              }
+            },
+            "description": "Single bundle file"
+          }
+        },
+        "summary": "`GET /skills/{slug}/files/{path...}` -- one file's bytes.",
+        "tags": [
+          "skills"
+        ]
+      },
+      "put": {
+        "operationId": "put_file",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bundle path or 'SKILL.md'",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileEditResponse"
+                }
+              }
+            },
+            "description": "Per-file edit result"
+          }
+        },
+        "summary": "`PUT /skills/{slug}/files/{path...}` -- replace or add one file.",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/github": {
+      "get": {
+        "operationId": "github_status",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "GitHub publish ledger"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/github/reconcile-orphans": {
+      "post": {
+        "description": "- Owner, org-admin, or platform-admin authz (same\n  `ensure_can_operate_skill_catalog` pattern as\n  `/github/sync-from-main` and `/github/retry`).\n- `confirm: true` is required. `false` or missing returns 409.\n- The handler re-derives the **live** orphan-path set against the\n  canonical-repo HEAD and returns 409 if it does not match the\n  `expected_orphan_paths` payload (optimistic concurrency mirrors\n  `expected_current_version_id`).\n- On match (and `dry_run: false`): stages one signed commit on\n  the canonical branch deleting every path. Author/committer is\n  the forward-publish bot pair so reverse-sync skips the commit\n  via `is_forward_publish_commit`.\n- On `dry_run: true`: skips the commit and returns the planned\n  shape (paths + parent commit SHA + audit row id) without\n  touching GitHub.\n- Records a `skill_orphan_reconciliations` audit row in both\n  modes (issue #22 acceptance criterion + migration 011).",
+        "operationId": "reconcile_orphans",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileOrphansRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Reconcile result"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Mismatch or unconfirmed request"
+          }
+        },
+        "summary": "`POST /skills/{slug}/github/reconcile-orphans` -- ops endpoint\nthat mechanically removes canonical-repo paths the gateway no\nlonger claims for this skill. Issue #22 acceptance:",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/github/retry": {
+      "post": {
+        "operationId": "retry_github_publish",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "GitHub publish retry queued"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/github/sync-from-main": {
+      "post": {
+        "operationId": "sync_from_main",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "GitHub sync-from-main result"
+          }
+        },
+        "summary": "`POST /skills/{slug}/github/sync-from-main` -- ops endpoint that\nre-fetches the canonical GitHub bundle at HEAD and reconciles it\ninto a new gateway version. No-op when the resulting\n`content_hash_bundle` matches the current version. Requires owner,\norg-admin, or `X-Seren-User-Role=admin`.",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/purchase": {
+      "post": {
+        "operationId": "purchase_skill",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseResponse"
+                }
+              }
+            },
+            "description": "Purchase result"
+          },
+          "402": {
+            "description": "Insufficient balance"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/sponsor": {
+      "put": {
+        "operationId": "update_sponsor",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSponsorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetail"
+                }
+              }
+            },
+            "description": "Updated sponsor settings"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/update-requests": {
+      "get": {
+        "operationId": "list_update_requests",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUpdateRequestsResponse"
+                }
+              }
+            },
+            "description": "Update requests"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "create_update_request",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRequest"
+                }
+              }
+            },
+            "description": "Created update request"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/versions": {
+      "get": {
+        "operationId": "list_versions",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListVersionsResponse"
+                }
+              }
+            },
+            "description": "Skill versions"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "create_version",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateVersionResponse"
+                }
+              }
+            },
+            "description": "Created skill version or conflict draft"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/skills/{slug}/versions/{version}/manifest": {
+      "get": {
+        "operationId": "get_version_manifest",
+        "parameters": [
+          {
+            "description": "Skill slug",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Version string",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Version manifest"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/update-requests/{request_id}": {
+      "get": {
+        "operationId": "get_update_request",
+        "parameters": [
+          {
+            "description": "Update request ID",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRequestDetail"
+                }
+              }
+            },
+            "description": "Update request detail"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/update-requests/{request_id}/accept": {
+      "post": {
+        "operationId": "accept_update_request",
+        "parameters": [
+          {
+            "description": "Update request ID",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptUpdateRequestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRequest"
+                }
+              }
+            },
+            "description": "Accepted update request"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/update-requests/{request_id}/comments": {
+      "get": {
+        "operationId": "list_update_request_comments",
+        "parameters": [
+          {
+            "description": "Update request ID",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUpdateRequestCommentsResponse"
+                }
+              }
+            },
+            "description": "Update request comments"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "create_update_request_comment",
+        "parameters": [
+          {
+            "description": "Update request ID",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCommentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created comment"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/update-requests/{request_id}/diff": {
+      "get": {
+        "operationId": "get_update_request_diff",
+        "parameters": [
+          {
+            "description": "Update request ID",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRequestDiff"
+                }
+              }
+            },
+            "description": "Update request diff payload"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/update-requests/{request_id}/reject": {
+      "post": {
+        "operationId": "reject_update_request",
+        "parameters": [
+          {
+            "description": "Update request ID",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRequest"
+                }
+              }
+            },
+            "description": "Rejected update request"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/usage": {
+      "get": {
+        "operationId": "list_usage_events",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUsageEventsResponse"
+                }
+              }
+            },
+            "description": "Usage events"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/usage/summary": {
+      "get": {
+        "operationId": "usage_summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummaryResponse"
+                }
+              }
+            },
+            "description": "Current-month usage totals"
+          }
+        },
+        "tags": [
+          "skills"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Hosted at the Seren gateway publisher path",
+      "url": "/publishers/seren-skills"
+    }
+  ],
   "tags": [
     {
-      "name": "skills",
-      "description": "Seren Skills publisher API"
+      "description": "Seren Skills publisher API",
+      "name": "skills"
     }
   ]
 }

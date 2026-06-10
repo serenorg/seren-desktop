@@ -278,6 +278,23 @@ export type MergeStateResponse = {
     update_request_id?: string | null;
 };
 
+export type OrphanFolderEntry = {
+    folder_slug: string;
+    /**
+     * Every blob path at depth ≥ 3 under `<folder_slug>/<skill_folder_name>/`.
+     * Sorted, deduped. Empty `paths` cannot occur — the entry only
+     * exists because at least one path matched.
+     */
+    paths: Array<string>;
+    skill_folder_name: string;
+};
+
+export type OrphanFoldersResponse = {
+    head_commit_sha: string;
+    head_tree_sha: string;
+    orphan_folders: Array<OrphanFolderEntry>;
+};
+
 export type PurchaseResponse = {
     access_granted: boolean;
     charge_id?: string | null;
@@ -370,6 +387,56 @@ export type SkillBundleFile = {
     is_binary: boolean;
     mode: number;
     path: string;
+};
+
+/**
+ * Single-file body returned by `GET /skills/{slug}/download/file`.
+ * Shares the [`SkillBundleFile`] field shape (path + base64 body +
+ * per-file hash + mode + is_binary) and adds the bundle `version` so a
+ * client can detect a publish that landed between its manifest fetch
+ * and this body fetch (version mismatch -> restart from the manifest).
+ */
+export type SkillBundleFileDownload = {
+    content_b64: string;
+    content_hash: string;
+    is_binary: boolean;
+    mode: number;
+    path: string;
+    version: string;
+};
+
+/**
+ * Split-download manifest (issue #53): the same envelope as
+ * [`SkillBundle`] but every entry in `files` carries *metadata only* —
+ * no `content_b64` body. Clients fetch each body separately via
+ * `GET /skills/{slug}/download/file?path=...`, keeping every response
+ * under the gateway's per-response byte cap even for bundles whose
+ * single-shot `/download` JSON would exceed it.
+ */
+export type SkillBundleManifest = {
+    content_hash: string;
+    /**
+     * Per-file metadata with no bodies. Empty for versions that predate
+     * bundle persistence.
+     */
+    files?: Array<SkillBundleManifestFile>;
+    manifest: unknown;
+    skill: SkillSummary;
+    skill_md: string;
+    version: string;
+};
+
+/**
+ * Body-less per-file metadata returned in a [`SkillBundleManifest`].
+ * `size_bytes` is the raw (pre-base64) byte length so clients can show
+ * progress and pre-size buffers before fetching each body.
+ */
+export type SkillBundleManifestFile = {
+    content_hash: string;
+    is_binary: boolean;
+    mode: number;
+    path: string;
+    size_bytes: number;
 };
 
 /**
@@ -581,6 +648,29 @@ export type PublisherRootResponses = {
 
 export type PublisherRootResponse = PublisherRootResponses[keyof PublisherRootResponses];
 
+export type ListOrphanFoldersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/skills/orphan-folders';
+};
+
+export type ListOrphanFoldersErrors = {
+    /**
+     * Caller lacks platform admin role
+     */
+    403: unknown;
+};
+
+export type ListOrphanFoldersResponses = {
+    /**
+     * Operator orphan-folders inventory
+     */
+    200: OrphanFoldersResponse;
+};
+
+export type ListOrphanFoldersResponse = ListOrphanFoldersResponses[keyof ListOrphanFoldersResponses];
+
 export type GetAuthorIdentityData = {
     body?: never;
     path?: never;
@@ -719,7 +809,7 @@ export type TransferOrgFolderData = {
 
 export type TransferOrgFolderErrors = {
     /**
-     * Caller is not org-admin or personal-owner of {org_id}
+     * Caller is not org-admin, personal-owner of {org_id}, or platform admin
      */
     403: unknown;
     /**
@@ -954,6 +1044,53 @@ export type DownloadSkillResponses = {
 };
 
 export type DownloadSkillResponse = DownloadSkillResponses[keyof DownloadSkillResponses];
+
+export type DownloadSkillFileData = {
+    body?: never;
+    path: {
+        /**
+         * Skill slug
+         */
+        slug: string;
+    };
+    query: {
+        /**
+         * Bundle-relative file path from the manifest
+         */
+        path: string;
+    };
+    url: '/skills/{slug}/download/file';
+};
+
+export type DownloadSkillFileResponses = {
+    /**
+     * One bundle file body
+     */
+    200: SkillBundleFileDownload;
+};
+
+export type DownloadSkillFileResponse = DownloadSkillFileResponses[keyof DownloadSkillFileResponses];
+
+export type DownloadSkillManifestData = {
+    body?: never;
+    path: {
+        /**
+         * Skill slug
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/skills/{slug}/download/manifest';
+};
+
+export type DownloadSkillManifestResponses = {
+    /**
+     * Bundle manifest without file bodies
+     */
+    200: SkillBundleManifest;
+};
+
+export type DownloadSkillManifestResponse = DownloadSkillManifestResponses[keyof DownloadSkillManifestResponses];
 
 export type GetDraftData = {
     body?: never;
