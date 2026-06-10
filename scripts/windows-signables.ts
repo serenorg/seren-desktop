@@ -3,7 +3,6 @@
 
 import { readdirSync } from "node:fs";
 import path from "node:path";
-import process from "node:process";
 
 // Authenticode-signable PE extensions. .pyd/.node are ordinary DLLs that
 // signtool signs in place by content.
@@ -49,17 +48,4 @@ export function collectSignables(roots: string[], opts: CollectOptions = {}): st
     walk(root, exts, exclude, out);
   }
   return [...out].sort();
-}
-
-// CLI: `tsx scripts/windows-signables.ts <root> [<root> ...]`
-// Prints one absolute path per line for the release signer to consume via -ListFile.
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.url.replace(/^file:\/\//, ""));
-if (isMain) {
-  const roots = process.argv.slice(2);
-  if (roots.length === 0) {
-    console.error("usage: windows-signables.ts <root> [<root> ...]");
-    process.exit(2);
-  }
-  const files = collectSignables(roots);
-  process.stdout.write(files.join("\n") + (files.length ? "\n" : ""));
 }
