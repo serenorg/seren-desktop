@@ -4,7 +4,9 @@
 [CmdletBinding()]
 param(
   # Authenticode cert thumbprint loaded into Cert:\CurrentUser\My by eSigner CKA.
-  [Parameter(Mandatory = $true)][string]$Thumbprint,
+  # Defaults from WINDOWS_SIGN_THUMBPRINT so tauri's signCommand (static args,
+  # no secrets) can invoke this wrapper per file (#2294).
+  [string]$Thumbprint = "",
   # Directories to recurse for signable PE files.
   [string[]]$Root = @(),
   # Explicit files to sign (in addition to anything found under -Root).
@@ -23,6 +25,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Resolve the thumbprint before anything else so a missing credential fails
+# fast with an actionable error instead of a confusing signtool failure.
+if (-not $Thumbprint) { $Thumbprint = $env:WINDOWS_SIGN_THUMBPRINT }
+if (-not $Thumbprint) {
+  Write-Host "::error::No certificate thumbprint: pass -Thumbprint or set WINDOWS_SIGN_THUMBPRINT (exported by the eSigner CKA setup step)."
+  exit 1
+}
 
 # Authenticode-signable PE extensions. .pyd/.node are ordinary DLLs; signtool
 # signs them in place by content, so (unlike CodeSignTool) no extension rewrite
