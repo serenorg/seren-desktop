@@ -34,7 +34,7 @@ function Require-ValidSignature([string]$Path, [string]$Label) {
   if (-not (Test-Path -LiteralPath $Path)) {
     Fail "$Label not found: $Path"
   }
-  $signature = Get-AuthenticodeSignature -FilePath $Path
+  $signature = Get-AuthenticodeSignature -LiteralPath $Path
   if ($signature.Status -ne "Valid") {
     Fail "$Label is not validly Authenticode signed. Status=$($signature.Status) Subject=$($signature.SignerCertificate.Subject)"
   }
