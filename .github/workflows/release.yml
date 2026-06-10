@@ -337,12 +337,30 @@ jobs:
         run: |
           $installDir = Join-Path $env:USERPROFILE "eSignerCKA"
           $masterKey  = Join-Path $installDir "master.key"
-          Invoke-WebRequest -Uri "https://github.com/SSLcom/eSignerCKA/releases/download/v1.0.7/SSL.COM-eSigner-CKA_1.0.7.zip" -OutFile eSigner_CKA_Setup.zip
+          Invoke-WebRequest -Uri "https://github.com/SSLcom/eSignerCKA/releases/download/v1.0.8/SSL.COM-eSigner-CKA_1.0.8.zip" -OutFile eSigner_CKA_Setup.zip
           Expand-Archive -Force eSigner_CKA_Setup.zip
           Remove-Item eSigner_CKA_Setup.zip
           Move-Item -Destination "eSigner_CKA_Installer.exe" -Path "eSigner_CKA_Setup\*.exe"
           New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-          ./eSigner_CKA_Installer.exe /CURRENTUSER /VERYSILENT /SUPPRESSMSGBOXES /DIR="$installDir" | Out-Null
+          Start-Process ".\eSigner_CKA_Installer.exe" -ArgumentList '/CURRENTUSER','/VERYSILENT','/SUPPRESSMSGBOXES',"/DIR=$installDir" -Wait
+          # Register the eSigner CNG Key Storage Provider so signtool can reach the
+          # cloud private key. Without RegisterKSP, signtool sees the cert but no
+          # usable key and fails with "No certificates were found that met all the
+          # given criteria" (#2276 follow-up). VC++ runtimes are pre-installed on
+          # the runner, so install the bundled redists only if the installer
+          # staged them.
+          if (Test-Path ".\setup\vc_redist.x64.exe") {
+            Start-Process ".\setup\vc_redist.x86.exe" -ArgumentList "/install","/q" -Wait
+            Start-Process ".\setup\vc_redist.x64.exe" -ArgumentList "/install","/q" -Wait
+          }
+          $registerKsp = Get-ChildItem -Path $installDir -Recurse -Filter "RegisterKSP.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $registerKsp) {
+            Write-Host "::error::RegisterKSP.exe not found under $installDir — eSigner KSP cannot be registered."
+            exit 1
+          }
+          & $registerKsp.FullName | Out-Null
+          $cspConfig = Get-ChildItem -Path $installDir -Recurse -Filter "eSignerCSP.Config.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($cspConfig) { & $cspConfig.FullName | Out-Null }
           $cka = Join-Path $installDir "eSignerCKATool.exe"
           & $cka config -mode "PRODUCTION" -user "$env:ES_USERNAME" -pass "$env:ES_PASSWORD" -totp "$env:ES_TOTP_SECRET" -key "$masterKey" -r
           & $cka unload
