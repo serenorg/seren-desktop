@@ -901,6 +901,7 @@ pub fn run() {
             embedded_runtime::get_embedded_runtime_info,
             provider_runtime::provider_runtime_get_config,
             provider_runtime::provider_runtime_stop,
+            commands::updater::updater_install_preflight,
             commands::updater::updater_pre_install,
             commands::updater::updater_pre_install_release,
             // CLI installer commands

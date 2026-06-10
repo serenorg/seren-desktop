@@ -11,6 +11,7 @@ const {
   clearAllBrowsingDataMock,
   captureErrorMock,
   invokeMock,
+  messageMock,
 } = vi.hoisted(() => ({
   mockStoreState: {} as Record<string, unknown>,
   isTauriRuntimeMock: vi.fn<() => boolean>(),
@@ -19,6 +20,7 @@ const {
   clearAllBrowsingDataMock: vi.fn(),
   captureErrorMock: vi.fn(),
   invokeMock: vi.fn(),
+  messageMock: vi.fn(),
 }));
 
 vi.mock("solid-js/store", () => ({
@@ -37,6 +39,10 @@ vi.mock("@/lib/tauri-bridge", () => ({
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  message: messageMock,
 }));
 
 vi.mock("@tauri-apps/plugin-updater", () => ({
@@ -69,14 +75,29 @@ describe("updaterStore install flow", () => {
     clearAllBrowsingDataMock.mockReset();
     captureErrorMock.mockReset();
     invokeMock.mockReset();
-    invokeMock.mockResolvedValue({
-      mcpDrained: true,
-      terminalsDrained: true,
-      providerRuntimeDrained: true,
-      claudeMemoryDrained: true,
-      handleReleased: true,
-      lockedNodePath: null,
-      elapsedMs: 10,
+    messageMock.mockReset();
+    messageMock.mockResolvedValue(undefined);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "updater_install_preflight") {
+        return {
+          installReady: true,
+          currentAppPath: "/Applications/SerenDesktop.app",
+          reason: null,
+          remediation: null,
+        };
+      }
+      if (command === "updater_pre_install") {
+        return {
+          mcpDrained: true,
+          terminalsDrained: true,
+          providerRuntimeDrained: true,
+          claudeMemoryDrained: true,
+          handleReleased: true,
+          lockedNodePath: null,
+          elapsedMs: 10,
+        };
+      }
+      return undefined;
     });
     // Vitest sets import.meta.env.DEV=true; the prod-only code paths under
     // test would otherwise short-circuit through isDevRuntime().
@@ -161,11 +182,52 @@ describe("updaterStore install flow", () => {
     await updaterStore.checkForUpdates();
     await updaterStore.installAvailableUpdate();
 
+    expect(invokeMock).toHaveBeenCalledWith("updater_install_preflight");
     expect(invokeMock).toHaveBeenCalledWith("updater_pre_install");
     expect(downloadAndInstallMock).toHaveBeenCalledOnce();
-    expect(invokeMock.mock.invocationCallOrder[0]).toBeLessThan(
+    const preInstallCallIndex = invokeMock.mock.calls.findIndex(
+      (call) => call[0] === "updater_pre_install",
+    );
+    expect(invokeMock.mock.invocationCallOrder[preInstallCallIndex]).toBeLessThan(
       downloadAndInstallMock.mock.invocationCallOrder[0],
     );
+  });
+
+  it("blocks macOS updater installs when running from a mounted DMG (#2273)", async () => {
+    isTauriRuntimeMock.mockReturnValue(true);
+    const downloadAndInstallMock = vi.fn(async () => {});
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "updater_install_preflight") {
+        return {
+          installReady: false,
+          currentAppPath: "/Volumes/SerenDesktop/SerenDesktop.app",
+          reason: "SerenDesktop is running from a mounted installer volume.",
+          remediation:
+            "Move SerenDesktop to /Applications, eject the installer disk image, reopen Seren, then install the update.",
+        };
+      }
+      throw new Error(`unexpected invoke: ${command}`);
+    });
+    checkMock.mockResolvedValue({
+      version: "3.51.7",
+      downloadAndInstall: downloadAndInstallMock,
+    });
+
+    const { updaterStore } = await import("@/stores/updater.store");
+
+    await updaterStore.checkForUpdates();
+    await updaterStore.installAvailableUpdate();
+
+    expect(downloadAndInstallMock).not.toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledOnce();
+    expect(invokeMock).toHaveBeenCalledWith("updater_install_preflight");
+    expect(mockStoreState.status).toBe("error");
+    expect(mockStoreState.error).toContain("/Applications");
+    expect(captureErrorMock).toHaveBeenCalledWith(expect.any(Error), {
+      type: "updater",
+      phase: "install_preflight",
+      currentAppPath: "/Volumes/SerenDesktop/SerenDesktop.app",
+    });
   });
 
   it("continues install when pre-install handle release times out", async () => {
@@ -175,14 +237,24 @@ describe("updaterStore install flow", () => {
     // may still succeed if the kernel flushes the handle by the time NSIS
     // gets there.
     isTauriRuntimeMock.mockReturnValue(true);
-    invokeMock.mockResolvedValue({
-      mcpDrained: true,
-      terminalsDrained: true,
-      providerRuntimeDrained: true,
-      claudeMemoryDrained: true,
-      handleReleased: false,
-      lockedNodePath: "C:\\Users\\u\\AppData\\Local\\SerenDesktop\\embedded-runtime\\win32-x64\\node\\node.exe",
-      elapsedMs: 15000,
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "updater_install_preflight") {
+        return {
+          installReady: true,
+          currentAppPath: null,
+          reason: null,
+          remediation: null,
+        };
+      }
+      return {
+        mcpDrained: true,
+        terminalsDrained: true,
+        providerRuntimeDrained: true,
+        claudeMemoryDrained: true,
+        handleReleased: false,
+        lockedNodePath: "C:\\Users\\u\\AppData\\Local\\SerenDesktop\\embedded-runtime\\win32-x64\\node\\node.exe",
+        elapsedMs: 15000,
+      };
     });
     const downloadAndInstallMock = vi.fn(async () => {});
     checkMock.mockResolvedValue({

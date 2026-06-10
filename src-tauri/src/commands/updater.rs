@@ -2,9 +2,9 @@
 // ABOUTME: Drains Seren-owned child processes, blocks new spawns, and waits for Windows file handles to release.
 
 use serde::Serialize;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "windows")]
 use std::time::Duration;
 use std::time::Instant;
@@ -45,6 +45,102 @@ pub struct PreInstallReport {
     pub handle_released: bool,
     pub locked_node_path: Option<String>,
     pub elapsed_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallPreflightReport {
+    pub install_ready: bool,
+    pub current_app_path: Option<String>,
+    pub reason: Option<String>,
+    pub remediation: Option<String>,
+}
+
+const MACOS_DMG_REASON: &str = "SerenDesktop is running from a mounted installer volume.";
+const MACOS_DMG_REMEDIATION: &str = "Move SerenDesktop to /Applications, eject the installer disk image, reopen Seren, then install the update.";
+
+/// Check whether the updater can safely replace the running app bundle before
+/// downloading the update payload. On macOS, running directly from a mounted
+/// DMG makes Tauri's bundle swap hit `EXDEV` because the current app is under
+/// `/Volumes/*` and the updater's temp backup is on the system data volume.
+#[tauri::command]
+pub async fn updater_install_preflight() -> Result<InstallPreflightReport, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("failed to resolve current executable: {e}"))?;
+        return Ok(macos_install_preflight_for_exe_path(&exe_path));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(InstallPreflightReport::ready(None))
+    }
+}
+
+impl InstallPreflightReport {
+    fn ready(current_app_path: Option<String>) -> Self {
+        Self {
+            install_ready: true,
+            current_app_path,
+            reason: None,
+            remediation: None,
+        }
+    }
+
+    fn blocked(
+        current_app_path: Option<String>,
+        reason: impl Into<String>,
+        remediation: impl Into<String>,
+    ) -> Self {
+        Self {
+            install_ready: false,
+            current_app_path,
+            reason: Some(reason.into()),
+            remediation: Some(remediation.into()),
+        }
+    }
+}
+
+fn macos_install_preflight_for_exe_path(exe_path: &Path) -> InstallPreflightReport {
+    let current_app_path = app_bundle_path_from_exe_path(exe_path);
+
+    if current_app_path
+        .as_ref()
+        .is_some_and(|path| is_mounted_macos_volume_path(path))
+    {
+        return InstallPreflightReport::blocked(
+            current_app_path.clone(),
+            MACOS_DMG_REASON,
+            MACOS_DMG_REMEDIATION,
+        );
+    }
+
+    InstallPreflightReport::ready(current_app_path)
+}
+
+fn app_bundle_path_from_exe_path(exe_path: &Path) -> Option<String> {
+    let normalized = exe_path.to_string_lossy().replace('\\', "/");
+    let mut search_start = 0;
+    let mut app_bundle_path = None;
+
+    while let Some(relative_index) = normalized[search_start..].find(".app") {
+        let app_end = search_start + relative_index + ".app".len();
+        let ends_component = normalized
+            .as_bytes()
+            .get(app_end)
+            .is_none_or(|byte| *byte == b'/');
+        if ends_component {
+            app_bundle_path = Some(normalized[..app_end].to_string());
+        }
+        search_start = app_end;
+    }
+
+    app_bundle_path
+}
+
+fn is_mounted_macos_volume_path(path: &str) -> bool {
+    path == "/Volumes" || path.starts_with("/Volumes/")
 }
 
 /// Drain every Seren-owned child process tree and wait until the bundled
@@ -237,5 +333,47 @@ mod tests {
         // Re-engaging after release works (a second update attempt).
         guard.engage();
         assert!(guard.is_engaged());
+    }
+
+    #[test]
+    fn macos_install_preflight_blocks_mounted_dmg_bundle() {
+        let report = macos_install_preflight_for_exe_path(Path::new(
+            "/Volumes/SerenDesktop/SerenDesktop.app/Contents/MacOS/Seren",
+        ));
+
+        assert!(!report.install_ready);
+        assert_eq!(
+            report.current_app_path.as_deref(),
+            Some("/Volumes/SerenDesktop/SerenDesktop.app")
+        );
+        assert_eq!(report.reason.as_deref(), Some(MACOS_DMG_REASON));
+        assert_eq!(report.remediation.as_deref(), Some(MACOS_DMG_REMEDIATION));
+    }
+
+    #[test]
+    fn macos_install_preflight_allows_applications_bundle() {
+        let report = macos_install_preflight_for_exe_path(Path::new(
+            "/Applications/SerenDesktop.app/Contents/MacOS/Seren",
+        ));
+
+        assert!(report.install_ready);
+        assert_eq!(
+            report.current_app_path.as_deref(),
+            Some("/Applications/SerenDesktop.app")
+        );
+        assert!(report.reason.is_none());
+        assert!(report.remediation.is_none());
+    }
+
+    #[test]
+    fn app_bundle_path_resolves_from_nested_resource_paths() {
+        let path = app_bundle_path_from_exe_path(Path::new(
+            "/Volumes/SerenDesktop/SerenDesktop.app/Contents/Resources/embedded-runtime/darwin-arm64/node/bin/node",
+        ));
+
+        assert_eq!(
+            path.as_deref(),
+            Some("/Volumes/SerenDesktop/SerenDesktop.app")
+        );
     }
 }
