@@ -1,5 +1,5 @@
 # ABOUTME: Signs Windows PE binaries in place with signtool using the eSigner CKA-loaded EV cert (#2276).
-# ABOUTME: Replaces CodeSignTool batch_sign (100-file/batch cap); enumerates signables under roots, signs in batches, fails loud if any file is left unsigned.
+# ABOUTME: Takes signables from -Root/-File/-ListFile, skips already-signed, signs in throttled batches (#2282), fails loud if any file is left unsigned.
 
 [CmdletBinding()]
 param(
@@ -9,9 +9,16 @@ param(
   [string[]]$Root = @(),
   # Explicit files to sign (in addition to anything found under -Root).
   [string[]]$File = @(),
+  # Newline-delimited file produced by scripts/windows-signables.ts — the
+  # discovered embedded-runtime signable set. Each non-empty line is a path.
+  [string]$ListFile = "",
   # Files per signtool invocation — amortizes process startup while staying well
   # under the Windows command-line length limit.
   [int]$BatchSize = 50,
+  # Seconds to pause between batches. Each signtool call signs one cloud hash per
+  # file, so bursting the whole payload trips SSL.com's per-minute rate limit
+  # (#2282). Pausing between batches holds the request rate under that ceiling.
+  [int]$DelaySeconds = 0,
   [int]$MaxRetries = 3
 )
 
@@ -52,13 +59,44 @@ foreach ($r in $Root) {
     if ($signableExt -contains $_.Extension.ToLower()) { $targets.Add($_.FullName) }
   }
 }
+if ($ListFile) {
+  if (-not (Test-Path -LiteralPath $ListFile)) {
+    Write-Host "::error::ListFile not found: $ListFile"
+    exit 1
+  }
+  Get-Content -LiteralPath $ListFile | ForEach-Object {
+    $line = $_.Trim()
+    if (-not $line) { return }
+    if (-not (Test-Path -LiteralPath $line)) {
+      Write-Host "::error::Listed signable not found: $line"
+      exit 1
+    }
+    $targets.Add((Resolve-Path -LiteralPath $line).Path)
+  }
+}
 
 $targets = @($targets | Sort-Object -Unique)
 if ($targets.Count -eq 0) {
-  Write-Host "::error::No signable files found under roots [$($Root -join ', ')] / files [$($File -join ', ')]."
+  Write-Host "::error::No signable files found under roots [$($Root -join ', ')] / files [$($File -join ', ')] / list [$ListFile]."
   exit 1
 }
-Write-Host "Signing $($targets.Count) file(s) in batches of $BatchSize..."
+
+# Skip files that already carry a valid Authenticode signature — Smart App
+# Control honors any valid signature regardless of publisher, so re-signing
+# them only burns cloud signatures against the rate limit (#2282).
+$discovered = $targets.Count
+$targets = @($targets | Where-Object {
+  (Get-AuthenticodeSignature -FilePath $_).Status -ne "Valid"
+})
+$skipped = $discovered - $targets.Count
+if ($skipped -gt 0) {
+  Write-Host "Skipping $skipped already-validly-signed file(s)."
+}
+if ($targets.Count -eq 0) {
+  Write-Host "All $discovered discovered file(s) already validly signed; nothing to do."
+  exit 0
+}
+Write-Host "Signing $($targets.Count) file(s) in batches of $BatchSize (delay ${DelaySeconds}s between batches)..."
 
 # signtool signs each file by sending only its hash to the SSL.com cloud (one op
 # per file). Retry each batch for transient cloud/timestamp failures.
@@ -79,6 +117,10 @@ for ($i = 0; $i -lt $targets.Count; $i += $BatchSize) {
     Start-Sleep -Seconds (5 * $attempt)
   }
   Write-Host "  signed $([Math]::Min($i + $BatchSize, $targets.Count))/$($targets.Count)"
+  # Throttle between batches (not after the last) to stay under the rate limit.
+  if ($DelaySeconds -gt 0 -and ($i + $BatchSize) -lt $targets.Count) {
+    Start-Sleep -Seconds $DelaySeconds
+  }
 }
 
 # Fail loud if the signer silently dropped any file (the #2223 guarantee): every
