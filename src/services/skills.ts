@@ -17,6 +17,7 @@ import {
 import { log } from "@/lib/logger";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import {
+  computeBytesHash,
   computeContentHash,
   getSkillPath,
   humanizeSkillName,
@@ -64,7 +65,11 @@ export function isAuthStatus(status: number | undefined): boolean {
 
 interface ExtraFile {
   path: string;
-  content: string;
+  /**
+   * Base64 of the raw file bytes. Carried end-to-end so binary payload
+   * files survive install without a lossy UTF-8 round-trip (#2297).
+   */
+  contentB64: string;
 }
 
 interface UpstreamSkillBundle {
@@ -154,10 +159,9 @@ function remoteRevisionFromBundle(bundle: SkillBundle): RemoteSkillRevision {
   };
 }
 
-function decodeBase64Text(value: string): string {
+function base64ToBytes(value: string): Uint8Array {
   const binary = atob(value);
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
 /**
@@ -183,7 +187,7 @@ async function collectPayloadFiles(
 function bundleFilesToExtraFiles(files: SkillBundleFile[] = []): ExtraFile[] {
   return files.map((file) => ({
     path: file.path,
-    content: decodeBase64Text(file.content_b64),
+    contentB64: file.content_b64,
   }));
 }
 
@@ -516,16 +520,14 @@ async function fetchSerenSkills(skipCache = false): Promise<Skill[]> {
 
 function buildManagedFileMap(
   skillMdHash: string,
-  payloadFiles: Array<{ path: string; content: string; hash?: string }>,
+  payloadFiles: Array<{ path: string; hash: string }>,
 ): Record<string, string> {
   const managedFiles: Record<string, string> = {
     "SKILL.md": skillMdHash,
   };
 
   for (const file of payloadFiles) {
-    if (file.hash) {
-      managedFiles[file.path] = file.hash;
-    }
+    managedFiles[file.path] = file.hash;
   }
 
   return managedFiles;
@@ -757,11 +759,13 @@ async function computeUpstreamSyncState(
   payloadFiles: ExtraFile[],
 ): Promise<SkillSyncState> {
   const skillMdHash = await computeContentHash(skillMd);
+  // Hash the decoded bytes, not a text round-trip: for valid UTF-8 the
+  // digest is identical, and binary payload files get a faithful hash
+  // instead of one built on U+FFFD-mangled content (#2297).
   const payloadWithHashes = await Promise.all(
     payloadFiles.map(async (file) => ({
       path: file.path,
-      content: file.content,
-      hash: await computeContentHash(file.content),
+      hash: await computeBytesHash(base64ToBytes(file.contentB64)),
     })),
   );
 
@@ -1432,6 +1436,25 @@ export const skills = {
   },
 
   /**
+   * Read a relative file from an installed skill directory as base64 of
+   * its raw bytes. Binary-safe counterpart of readFile (#2297).
+   */
+  async readFileB64(
+    skill: InstalledSkill,
+    relativePath: string,
+  ): Promise<string | null> {
+    if (!isTauriRuntime()) {
+      return null;
+    }
+
+    return invoke<string | null>("read_skill_file_b64", {
+      skillsDir: skill.skillsDir,
+      slug: skill.dirName,
+      relativePath,
+    });
+  },
+
+  /**
    * Determine the sync status for an upstream-managed installed skill.
    */
   async inspectSyncStatus(
@@ -1448,26 +1471,38 @@ export const skills = {
       const managedPaths = Object.keys(skill.syncState?.managedFiles ?? {});
 
       if (skill.syncState) {
+        // Payload files are hashed from raw bytes: a text read would fail
+        // outright (or mangle) binary files like pptx templates (#2297).
         const results = await Promise.all(
           managedPaths.map(async (path) => {
-            const content =
-              path === "SKILL.md"
-                ? await this.readContent(skill)
-                : await this.readFile(skill, path);
-            return { path, content };
+            if (path === "SKILL.md") {
+              const content = await this.readContent(skill);
+              return {
+                path,
+                hash:
+                  content === null ? null : await computeContentHash(content),
+              };
+            }
+            const contentB64 = await this.readFileB64(skill, path);
+            return {
+              path,
+              hash:
+                contentB64 === null
+                  ? null
+                  : await computeBytesHash(base64ToBytes(contentB64)),
+            };
           }),
         );
 
-        for (const { path, content } of results) {
-          if (content === null) {
+        for (const { path, hash } of results) {
+          if (hash === null) {
             localManagedState[path] = null;
             missingManagedFiles.push(path);
             continue;
           }
 
-          const contentHash = await computeContentHash(content);
-          localManagedState[path] = contentHash;
-          if (contentHash !== skill.syncState.managedFiles[path]) {
+          localManagedState[path] = hash;
+          if (hash !== skill.syncState.managedFiles[path]) {
             changedLocalFiles.push(path);
           }
         }
