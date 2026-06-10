@@ -421,13 +421,31 @@ jobs:
         env:
           NO_STRIP: "true"
         run: pnpm tauri build --verbose --target ${{ matrix.target }} --bundles deb,appimage
-      - name: Build Tauri app (unsigned, other)
-        if: matrix.os != 'macos-latest' && !startsWith(matrix.os, 'ubuntu')
+      # Single signed Windows build. The signCommand overlay makes the bundler
+      # itself sign at the only correct points in its pipeline (#2294):
+      # Seren.exe AFTER bundle-type patching, the NSIS plugin DLLs (incl.
+      # nsis_tauri_utils.dll) on build-local COPIES so the hash-pinned cache
+      # stays pristine, the uninstaller via the !uninstfinalize hook, and the
+      # setup .exe after makensis. The previous build->sign->rebuild dance
+      # could never work: every rebuild re-patched the exe (stripping its
+      # signature) and restored the mis-hashed plugin cache from upstream.
+      # The overlay lives outside tauri.conf.json so contributor Windows
+      # builds never attempt to sign. The wrapper reads WINDOWS_SIGN_THUMBPRINT
+      # from the eSigner CKA step via GITHUB_ENV.
+      - name: Build Tauri app (signed, Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         env:
-          # On the Windows signing path the embedded runtime was already staged
-          # and EV-signed above; skip re-preparation so the build does not
-          # overwrite the signed binaries with fresh unsigned downloads (#2235).
-          SEREN_TAURI_SKIP_PREP: ${{ (matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true') && '1' || '' }}
+          # The embedded runtime was already staged and EV-signed above; skip
+          # re-preparation so the build does not overwrite the signed binaries
+          # with fresh unsigned downloads (#2235).
+          SEREN_TAURI_SKIP_PREP: "1"
+        shell: pwsh
+        run: |
+          pnpm tsx scripts/print-windows-sign-overlay.ts "$env:GITHUB_WORKSPACE" > sign-overlay.json
+          Get-Content sign-overlay.json
+          pnpm tauri build --target ${{ matrix.target }} --config sign-overlay.json
+      - name: Build Tauri app (unsigned, other)
+        if: matrix.os != 'macos-latest' && !startsWith(matrix.os, 'ubuntu') && !(matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true')
         run: pnpm tauri build --target ${{ matrix.target }}
       - name: Build Tauri app (unsigned, macOS without signing)
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING != 'true'
@@ -656,61 +674,6 @@ jobs:
           echo "Files in $BUNDLE_DIR:"
           ls -la "$BUNDLE_DIR/"
 
-      # makensis compiles the main Seren.exe AND the NSIS helper DLLs (System.dll,
-      # nsExec.dll, nsDialogs.dll, nsis_tauri_utils.dll) INTO the setup .exe. The
-      # helper DLLs live in the tauri-bundler NSIS cache and are extracted to
-      # %TEMP%\nsXXXX.tmp and loaded at install time, so Smart App Control blocks
-      # them when unsigned regardless of the outer installer's signature
-      # (#2237 / #2230). The main binary is likewise blocked if unsigned. The
-      # first `tauri build` above produced both; EV-sign the compiled Seren.exe
-      # and the cached helper DLLs in place, then rebuild so makensis embeds the
-      # signed copies.
-      - name: Sign app binary and NSIS helper DLLs (Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        shell: pwsh
-        run: |
-          $appExe  = "src-tauri/target/${{ matrix.target }}/release/Seren.exe"
-          $plugins = Join-Path $env:LOCALAPPDATA "tauri\NSIS\Plugins"
-          if (-not (Test-Path $appExe)) {
-            Write-Host "::error::Compiled app binary not found at $appExe."
-            exit 1
-          }
-          if (-not (Test-Path $plugins)) {
-            Write-Host "::error::Tauri NSIS plugins cache not found at $plugins after build — cannot sign helper DLLs (#2237)."
-            exit 1
-          }
-          ./scripts/sign-windows-payload.ps1 `
-            -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT `
-            -File $appExe `
-            -Root $plugins
-
-      # Rebuild so makensis recompiles the installer with the now-signed helper
-      # DLLs. Cargo reuses the pass-1 target dir and SEREN_TAURI_SKIP_PREP keeps
-      # the already-signed embedded runtime in place, so this pass only re-bundles.
-      - name: Rebuild with signed NSIS helper DLLs (Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        env:
-          SEREN_TAURI_SKIP_PREP: "1"
-        run: pnpm tauri build --target ${{ matrix.target }}
-
-      # EV-sign the NSIS setup .exe in place. signtool touches only the file we
-      # point it at, so the loose .nsis.zip / .sig updater artifacts in the same
-      # directory are left untouched — no move-aside/copy-back dance needed (the
-      # CodeSignTool batch_sign path signed a whole directory and required it).
-      - name: Sign Windows NSIS installer
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        shell: pwsh
-        run: |
-          $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
-          $setup = Get-ChildItem -Path $nsisDir -Filter "*-setup.exe" | Select-Object -First 1
-          if (-not $setup) {
-            Write-Host "::error::No NSIS *-setup.exe found in $nsisDir to sign."
-            exit 1
-          }
-          ./scripts/sign-windows-payload.ps1 `
-            -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT `
-            -File $setup.FullName
-
       # Verify Windows code signing on the NSIS setup .exe AND every shipped
       # .exe inside the installed app payload. The prior check only validated
       # the outer setup .exe, which left bundled Seren.exe + sidecars unsigned
@@ -740,11 +703,10 @@ jobs:
           Write-Host "NSIS setup .exe is properly signed."
 
       # The .nsis.zip updater bundle is what pendingUpdate.downloadAndInstall()
-      # consumes — NOT the public setup .exe. Tauri builds the .nsis.zip during
-      # `tauri build`, zipping the setup .exe BEFORE our post-build EV signing
-      # runs, so the installer inside the bundle is unsigned even though the
-      # loose setup .exe got signed. Rebuild the bundle from the now-signed
-      # setup .exe and re-sign the .nsis.zip.sig with the Tauri updater key —
+      # consumes — NOT the public setup .exe. With signCommand the bundler signs
+      # the setup .exe before zipping, so the bundle should already contain the
+      # signed installer; this re-pack from the loose signed setup .exe is kept
+      # as a guarantee until a green release proves it redundant (#2294). It
       # mirrors the macOS .app.tar.gz re-pack/re-sign pattern above (#2236).
       - name: Re-pack and re-sign .nsis.zip updater bundle (Windows)
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
