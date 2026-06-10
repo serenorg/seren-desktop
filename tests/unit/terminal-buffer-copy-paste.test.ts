@@ -60,3 +60,45 @@ describe("TerminalBuffer — system Edit > Copy via DOM selection mirror (#2091)
     expect(terminalBufferTsx).toMatch(/setBaseAndExtent|addRange/);
   });
 });
+
+describe("TerminalBuffer — terminal selection owns browser copy (#2279)", () => {
+  it("suppresses browser-native selection on the canvas surface while drag-selecting terminal cells", () => {
+    // The canvas renderer owns its own cell-range selection. If the
+    // browser's native selection gesture also starts, WebKit/Chromium can
+    // select the entire page and Copy reads unrelated footer/status text.
+    expect(terminalBufferTsx).toMatch(/const preventNativeSelection\s*=/);
+    expect(terminalBufferTsx).toMatch(/onSelectStart=\{preventNativeSelection\}/);
+    expect(terminalBufferTsx).toMatch(/class="[^"]*select-none/);
+    expect(terminalBufferTsx).toMatch(
+      /const onSurfaceMouseDown[\s\S]*e\.preventDefault\(\)[\s\S]*setSelection\(\{ anchor: cell, head: cell \}\)/,
+    );
+  });
+
+  it("handles browser copy events by writing the terminal cell selection, not the native DOM selection", () => {
+    // The hidden DOM mirror makes app-menu Copy fire; this handler makes
+    // the terminal selection authoritative even if the browser selection
+    // would otherwise point at stale page text.
+    expect(terminalBufferTsx).toMatch(/const handleCopy\s*=/);
+    expect(terminalBufferTsx).toMatch(
+      /clipboardData\?\.setData\("text\/plain",\s*text\)/,
+    );
+    expect(terminalBufferTsx).toMatch(/onCopy=\{\(e\) => handleCopy\(e\)\}/);
+  });
+
+  it("labels copy and paste shortcuts by platform without changing Ctrl+C interrupt semantics", () => {
+    // macOS users see Cmd-based shortcuts; Windows/Linux users see the
+    // terminal-safe Ctrl+Shift+C copy chord. Ctrl+C remains reserved for
+    // SIGINT in handleKeyDown.
+    expect(terminalBufferTsx).toMatch(/const isMacPlatform\s*=/);
+    expect(terminalBufferTsx).toMatch(/const copyShortcutLabel\s*=/);
+    expect(terminalBufferTsx).toContain("Ctrl+Shift+C");
+    expect(terminalBufferTsx).toContain("Ctrl+Shift+V");
+    expect(terminalBufferTsx).toMatch(/shortcut:\s*copyShortcutLabel\(\)/);
+    expect(terminalBufferTsx).toMatch(/const isTerminalPasteChord\s*=/);
+    expect(terminalBufferTsx).toMatch(/navigator\.clipboard\.readText\(\)/);
+    expect(terminalBufferTsx).toMatch(/await writePromptText\(text\)/);
+    expect(terminalBufferTsx).toMatch(
+      /event\.ctrlKey && !event\.shiftKey && \(k === "c" \|\| k === "C"\)/,
+    );
+  });
+});

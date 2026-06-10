@@ -321,6 +321,16 @@ function selectAllGrid(grid: GridSnapshot): SelectionRange {
   };
 }
 
+const isMacPlatform = (): boolean => {
+  if (typeof navigator === "undefined") return false;
+  return /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+};
+
+const copyShortcutLabel = (): string =>
+  isMacPlatform() ? "⌘C" : "Ctrl+Shift+C";
+const pasteShortcutLabel = (): string =>
+  isMacPlatform() ? "⌘V" : "Ctrl+Shift+V";
+
 /**
  * Best-effort clipboard write. Tauri's webview generally exposes the
  * Async Clipboard API, but some platforms / configurations don't, so
@@ -1150,6 +1160,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
 
   const onWindowMouseMove = (e: MouseEvent) => {
     if (!dragAnchor) return;
+    e.preventDefault();
     const cell = canvasMouseToCell(e);
     if (!cell) return;
     if (cell.row !== dragAnchor.row || cell.col !== dragAnchor.col) {
@@ -1158,7 +1169,8 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     setSelection({ anchor: dragAnchor, head: cell });
   };
 
-  const onWindowMouseUp = () => {
+  const onWindowMouseUp = (e?: MouseEvent) => {
+    e?.preventDefault();
     window.removeEventListener("mousemove", onWindowMouseMove);
     window.removeEventListener("mouseup", onWindowMouseUp);
     if (!dragMoved) {
@@ -1168,6 +1180,17 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     }
     dragAnchor = null;
     dragMoved = false;
+  };
+
+  const stopTerminalSelectionDrag = () => {
+    window.removeEventListener("mousemove", onWindowMouseMove);
+    window.removeEventListener("mouseup", onWindowMouseUp);
+    dragAnchor = null;
+    dragMoved = false;
+  };
+
+  const preventNativeSelection = (event: Event) => {
+    event.preventDefault();
   };
 
   const onSurfaceMouseDown = (e: MouseEvent) => {
@@ -1199,6 +1222,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       return;
     }
     if (e.button !== 0) return; // left button only for selection
+    e.preventDefault();
     dragAnchor = cell;
     dragMoved = false;
     setSelection({ anchor: cell, head: cell });
@@ -1566,16 +1590,22 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     if (!mirror) return;
     const docSel = window.getSelection();
     if (!docSel) return;
-    if (!sel || !g) {
+    const clearMirroredDomSelection = () => {
+      const mirroredNode = mirror.firstChild;
+      const ownsSelection =
+        !!mirroredNode && docSel.containsNode(mirroredNode, true);
       mirror.textContent = "";
-      if (mirror.firstChild && docSel.containsNode(mirror.firstChild, true)) {
+      if (ownsSelection) {
         docSel.removeAllRanges();
       }
+    };
+    if (!sel || !g) {
+      clearMirroredDomSelection();
       return;
     }
     const text = selectionText(g, sel);
     if (!text) {
-      mirror.textContent = "";
+      clearMirroredDomSelection();
       return;
     }
     mirror.textContent = text;
@@ -1594,6 +1624,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
    */
   const openContextMenu = (event: MouseEvent) => {
     event.preventDefault();
+    stopTerminalSelectionDrag();
     setCtxMenu({ x: event.clientX, y: event.clientY });
   };
 
@@ -1608,7 +1639,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     return [
       {
         label: "Copy",
-        shortcut: "⌘C",
+        shortcut: copyShortcutLabel(),
         disabled: !hasSelection,
         onClick: () => {
           if (!sel || !g) return;
@@ -1617,7 +1648,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       },
       {
         label: "Paste",
-        shortcut: "⌘V",
+        shortcut: pasteShortcutLabel(),
         disabled: !running,
         onClick: () => {
           void (async () => {
@@ -1647,6 +1678,16 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
         },
       },
     ];
+  };
+
+  const handleCopy = (event: ClipboardEvent) => {
+    const sel = selection();
+    const g = grid();
+    if (!sel || !g) return;
+    const text = selectionText(g, sel);
+    if (!text) return;
+    event.clipboardData?.setData("text/plain", text);
+    event.preventDefault();
   };
 
   /**
@@ -1684,6 +1725,27 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       const g = grid();
       if (sel && g) {
         await writeClipboard(selectionText(g, sel));
+      }
+      return;
+    }
+
+    // Windows/Linux terminal paste chord. macOS Cmd+V is intentionally
+    // left to the browser paste event so denied async-clipboard reads can
+    // still fall back to the platform paste path.
+    const isTerminalPasteChord =
+      !isMacPlatform() &&
+      (k === "v" || k === "V") &&
+      event.ctrlKey &&
+      event.shiftKey;
+    if (isTerminalPasteChord) {
+      event.preventDefault();
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          await writePromptText(text);
+        }
+      } catch {
+        // Clipboard read may be denied; the context-menu paste path still works.
       }
       return;
     }
@@ -1971,7 +2033,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
                   Focus on mousedown so users can type without Tab-ing in. */}
               <div
                 ref={surfaceRef}
-                class="flex-1 min-h-0 overflow-hidden bg-[#090b0f] outline-none cursor-text"
+                class="flex-1 min-h-0 overflow-hidden bg-[#090b0f] outline-none cursor-text select-none"
                 classList={{
                   // Themed frame: drop-shadow + sky-400 glow only on the
                   // claude CLI surface so plain Terminal threads keep their
@@ -2000,11 +2062,13 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
                 // biome-ignore lint/a11y/noNoninteractiveTabindex: terminal surfaces are interactive widgets that own their keyboard model (matches xterm.js, vscode terminal pattern)
                 tabIndex={0}
                 onKeyDown={(e) => void handleKeyDown(e)}
+                onCopy={(e) => handleCopy(e)}
                 onPaste={(e) => void handlePaste(e)}
                 onMouseDown={onSurfaceMouseDown}
                 onMouseMove={onSurfaceMouseMoveTracking}
                 onWheel={onSurfaceWheel}
                 onContextMenu={openContextMenu}
+                onSelectStart={preventNativeSelection}
               >
                 <canvas ref={canvasRef} class="block pointer-events-none" />
                 {/* Hidden DOM mirror of the canvas selection. The system
@@ -2023,6 +2087,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
                     top: "0",
                     "white-space": "pre",
                     "user-select": "text",
+                    "-webkit-user-select": "text",
                   }}
                 />
               </div>
