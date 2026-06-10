@@ -820,6 +820,23 @@ jobs:
           Write-Host "All binaries inside the .nsis.zip updater bundle are validly signed."
           Remove-Item -Path $extractDir -Recurse -Force
 
+      # createUpdaterArtifacts emits a second, duplicate installer copy under
+      # bundle/nsis-updater/ that nothing ships — the installer uploads from
+      # bundle/nsis/*.exe and the updater from bundle/nsis/*.nsis.zip. That copy
+      # is never EV-signed, so drop it before the coverage audit rather than
+      # spend a signature on a dead artifact (#2289).
+      - name: Drop unshipped nsis-updater byproduct (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $dir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis-updater"
+          if (Test-Path -LiteralPath $dir) {
+            Write-Host "Removing unshipped Tauri byproduct: $dir"
+            Remove-Item -LiteralPath $dir -Recurse -Force
+          } else {
+            Write-Host "No nsis-updater directory present; nothing to drop."
+          }
+
       # Recursive Authenticode check over every loose .exe/.dll the Tauri build
       # emits under bundle/. Now that the embedded runtime is EV-signed pre-build
       # (#2235), any unsigned/invalid file here is a real regression — a missed
