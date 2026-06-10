@@ -4738,18 +4738,23 @@ export const agentStore = {
       try {
         await providerService.cancelPrompt(session.info.id);
       } catch (err) {
-        // Cooperative cancel did not reach/stop the agent — the provider_cancel
-        // RPC failed or timed out, which means the runtime socket is likely
-        // stale or the runtime is unresponsive. Drop the socket so the
-        // escalation reconnects fresh, then hard-terminate: provider_terminate
-        // unconditionally kills the child process tree, so the user's Stop
-        // actually stops the agent instead of leaving it running behind an
-        // idle-looking UI. #2301.
+        // Cooperative cancel did not reach/stop the agent. Escalate to a hard
+        // terminate: provider_terminate unconditionally kills the child process
+        // tree, so the user's Stop actually stops the agent instead of leaving
+        // it running behind an idle-looking UI. #2301.
+        const message = err instanceof Error ? err.message : String(err);
         console.warn(
           "[AgentStore] abortTurn cancelPrompt failed; escalating to terminate:",
           err,
         );
-        disconnectLocalProviderRuntime();
+        // Only drop the socket when the failure looks like an unresponsive
+        // runtime (RPC timeout / dead socket) — a stale socket must be
+        // replaced before the terminate can land. For a logical error (e.g.
+        // "Session not found") the socket is healthy, so dropping it would
+        // needlessly reject other sessions' in-flight RPCs. #2306
+        if (/timed out|not connected|disconnected/i.test(message)) {
+          disconnectLocalProviderRuntime();
+        }
         await this.terminateSession(session.info.id).catch((termErr) => {
           console.error(
             "[AgentStore] abortTurn terminate escalation failed:",

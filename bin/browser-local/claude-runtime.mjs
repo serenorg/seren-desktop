@@ -2074,9 +2074,19 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       // roundtrip, or its stdout reader stalled). A cooperative cancel that
       // is silently swallowed leaves the agent running past a "successful"
       // cancel. Hard-kill the child tree so the cancel actually stops the
-      // agent, mirroring terminateSession. The session is no longer reusable
-      // afterward; the child's exit listener tears it down. #2301.
+      // agent, mirroring terminateSession. #2301
+      //
+      // The child is now dead: its exit listener emits the authoritative
+      // "terminated" status and deletes the session, so don't emit a
+      // misleading "ready" here (the session is not reusable). Reject the
+      // pending prompt and return. #2306
       killChildTree(session.process);
+      emit("provider://error", {
+        sessionId,
+        error: "Task cancelled",
+      });
+      rejectCurrentPrompt(session, new Error("Task cancelled"));
+      return;
     }
 
     session.status = "ready";
