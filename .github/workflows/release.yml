@@ -1120,7 +1120,13 @@ jobs:
             `aws s3 cp '${payloadS3}' (Join-Path $work 'windows-e2e-payload.zip')`,
             "Expand-Archive -LiteralPath (Join-Path $work 'windows-e2e-payload.zip') -DestinationPath $work -Force",
             `$secretNames = @(${secretNames.map((name) => `'${name}'`).join(",")})`,
-            `foreach ($name in $secretNames) { $parameterName = '${env.WINDOWS_E2E_SECRET_PARAMETER_PREFIX}/' + $name; $value = aws ssm get-parameter --with-decryption --name $parameterName --query 'Parameter.Value' --output text 2>$null; if ($LASTEXITCODE -eq 0 -and $value -and $value -ne 'None') { [Environment]::SetEnvironmentVariable($name, $value, 'Process') } }`,
+            // The aws call runs under Windows PowerShell 5.1, where native
+            // stderr through a 2>$null redirect becomes a NativeCommandError
+            // that EAP=Stop turns terminating — a missing parameter killed the
+            // whole script before the guard ran (#2320). Scope EAP=Continue
+            // around the call so missing parameters degrade to the guarded
+            // skip they were designed for.
+            `foreach ($name in $secretNames) { $parameterName = '${env.WINDOWS_E2E_SECRET_PARAMETER_PREFIX}/' + $name; $value = & { $ErrorActionPreference = 'Continue'; aws ssm get-parameter --with-decryption --name $parameterName --query 'Parameter.Value' --output text 2>$null }; if ($LASTEXITCODE -eq 0 -and $value -and $value -ne 'None') { [Environment]::SetEnvironmentVariable($name, $value, 'Process') } }`,
             "[Environment]::SetEnvironmentVariable('SEREN_E2E_API_BASE', 'https://api.serendb.com', 'Process')",
             "Set-Location $work",
             "corepack enable",
