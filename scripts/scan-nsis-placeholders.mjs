@@ -37,12 +37,26 @@ function scan(file) {
   const text = readFileSync(file, "utf8");
   const findings = [];
   const lines = text.split(/\r?\n/);
+  // Inside `!macro name param1 param2` ... `!macroend`, NSIS references the
+  // declared parameters as ${param1} — lowercase tokens that are correct NSIS,
+  // not missed bundler substitutions. tauri-bundler ships utils.nsh verbatim
+  // with such macros (SetShortcutTarget shortcut target, ...), so declared
+  // parameters must not be flagged within their macro body (#2310).
+  let macroParams = null;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
-    if (line.trimStart().startsWith(";")) continue;
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith(";")) continue;
+    const macroStart = trimmed.match(/^!macro\s+\S+\s*(.*)$/i);
+    if (macroStart) {
+      macroParams = new Set(macroStart[1].split(/\s+/).filter(Boolean));
+    } else if (/^!macroend\b/i.test(trimmed)) {
+      macroParams = null;
+    }
     for (const match of line.matchAll(SUSPECT_PATTERN)) {
       const token = match[0];
       if (ALLOWED_UNRESOLVED.has(token)) continue;
+      if (macroParams?.has(token.slice(2, -1))) continue;
       findings.push({ line: i + 1, token, context: line.trim() });
     }
   }

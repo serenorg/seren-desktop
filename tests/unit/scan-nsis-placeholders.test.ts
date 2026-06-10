@@ -80,4 +80,59 @@ describe("scan-nsis-placeholders", () => {
 
     expect(result.status).toBe(0);
   });
+
+  it("allows declared macro parameters inside the macro body (#2310)", () => {
+    // tauri-bundler ships utils.nsh verbatim (never handlebars-rendered);
+    // its macros reference declared params as ${param} — legitimate NSIS.
+    writeFileSync(
+      join(tmp, "utils.nsh"),
+      [
+        "!macro SetShortcutTarget shortcut target",
+        "  ${IPersistFile::Load} $1 '(\"${shortcut}\", ${STGM_READWRITE})'",
+        '  ${IShellLink::SetPath} $0 \'(w "${target}")\'',
+        '  ${IPersistFile::Save} $1 \'("${shortcut}",1)\'',
+        "!macroend",
+        "!macro UnpinShortcut shortcut",
+        "  ${IPersistFile::Load} $1 '(\"${shortcut}\", ${STGM_READ})'",
+        "!macroend",
+      ].join("\n"),
+    );
+
+    const result = runScanner(tmp);
+
+    expect(result.status).toBe(0);
+  });
+
+  it("still fails on undeclared lowercase tokens inside a macro body", () => {
+    writeFileSync(
+      join(tmp, "utils.nsh"),
+      [
+        "!macro CheckIfAppIsRunning executableName productName",
+        'MessageBox MB_OK "${product_name} is running! Click OK to kill it"',
+        "!macroend",
+      ].join("\n"),
+    );
+
+    const result = runScanner(tmp);
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("${product_name}");
+  });
+
+  it("stops allowing macro parameters after !macroend", () => {
+    writeFileSync(
+      join(tmp, "utils.nsh"),
+      [
+        "!macro UnpinShortcut shortcut",
+        '  Pin::Unpin "${shortcut}"',
+        "!macroend",
+        'Run "${shortcut}"',
+      ].join("\n"),
+    );
+
+    const result = runScanner(tmp);
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("line 4");
+  });
 });
