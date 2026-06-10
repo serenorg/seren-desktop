@@ -10,6 +10,7 @@ import {
 } from "@/lib/agent-output-validation";
 import { shouldLogAgentRuntimeEvent } from "@/lib/agent-runtime-debug";
 import {
+  disconnectLocalProviderRuntime,
   isLocalProviderRuntime,
   onRuntimeEvent,
 } from "@/lib/browser-local-runtime";
@@ -4737,7 +4738,24 @@ export const agentStore = {
       try {
         await providerService.cancelPrompt(session.info.id);
       } catch (err) {
-        console.warn("[AgentStore] abortTurn cancelPrompt failed:", err);
+        // Cooperative cancel did not reach/stop the agent — the provider_cancel
+        // RPC failed or timed out, which means the runtime socket is likely
+        // stale or the runtime is unresponsive. Drop the socket so the
+        // escalation reconnects fresh, then hard-terminate: provider_terminate
+        // unconditionally kills the child process tree, so the user's Stop
+        // actually stops the agent instead of leaving it running behind an
+        // idle-looking UI. #2301.
+        console.warn(
+          "[AgentStore] abortTurn cancelPrompt failed; escalating to terminate:",
+          err,
+        );
+        disconnectLocalProviderRuntime();
+        await this.terminateSession(session.info.id).catch((termErr) => {
+          console.error(
+            "[AgentStore] abortTurn terminate escalation failed:",
+            termErr,
+          );
+        });
       }
     }
     this.setTurnInFlight(threadId, false);

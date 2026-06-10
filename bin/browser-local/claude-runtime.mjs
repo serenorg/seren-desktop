@@ -2055,15 +2055,29 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       return;
     }
 
-    await sendControlRequest(
-      session,
-      {
-        subtype: "interrupt",
-      },
-      10_000,
-    ).catch(() => {
-      // Best-effort interrupt only.
-    });
+    let interrupted = false;
+    try {
+      await sendControlRequest(
+        session,
+        {
+          subtype: "interrupt",
+        },
+        10_000,
+      );
+      interrupted = true;
+    } catch {
+      // Cooperative interrupt was not acknowledged — escalate below.
+    }
+
+    if (!interrupted) {
+      // The CLI did not honor the interrupt (hung, blocked on a tool/MCP
+      // roundtrip, or its stdout reader stalled). A cooperative cancel that
+      // is silently swallowed leaves the agent running past a "successful"
+      // cancel. Hard-kill the child tree so the cancel actually stops the
+      // agent, mirroring terminateSession. The session is no longer reusable
+      // afterward; the child's exit listener tears it down. #2301.
+      killChildTree(session.process);
+    }
 
     session.status = "ready";
     emit("provider://error", {
