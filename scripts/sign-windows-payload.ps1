@@ -84,9 +84,11 @@ if ($targets.Count -eq 0) {
 # Skip files that already carry a valid Authenticode signature — Smart App
 # Control honors any valid signature regardless of publisher, so re-signing
 # them only burns cloud signatures against the rate limit (#2282).
+# -LiteralPath, not -FilePath: the runtime ships binaries like "[.exe" whose
+# brackets -FilePath would mis-parse as a wildcard pattern (#2286).
 $discovered = $targets.Count
 $targets = @($targets | Where-Object {
-  (Get-AuthenticodeSignature -FilePath $_).Status -ne "Valid"
+  (Get-AuthenticodeSignature -LiteralPath $_).Status -ne "Valid"
 })
 $skipped = $discovered - $targets.Count
 if ($skipped -gt 0) {
@@ -127,7 +129,7 @@ for ($i = 0; $i -lt $targets.Count; $i += $BatchSize) {
 # target must carry a Valid Authenticode signature before we proceed.
 $unsigned = @()
 foreach ($t in $targets) {
-  $sig = Get-AuthenticodeSignature -FilePath $t
+  $sig = Get-AuthenticodeSignature -LiteralPath $t
   if ($sig.Status -ne "Valid") { $unsigned += "$t : $($sig.Status)" }
 }
 if ($unsigned.Count -gt 0) {
