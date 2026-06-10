@@ -763,6 +763,9 @@ export function createGeminiRuntime({ emit, runtimeMode = "provider-runtime" }) 
         createdAt: session.createdAt,
         agentSessionId: session.agentSessionId,
         timeoutSecs: session.timeoutSecs,
+        // OS PID of the agent child, so Rust can force-kill this one session
+        // when the cooperative cancel/terminate RPCs are unreachable. #2313
+        pid: session.process?.pid ?? null,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

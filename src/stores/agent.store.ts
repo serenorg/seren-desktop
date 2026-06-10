@@ -4752,10 +4752,38 @@ export const agentStore = {
         // replaced before the terminate can land. For a logical error (e.g.
         // "Session not found") the socket is healthy, so dropping it would
         // needlessly reject other sessions' in-flight RPCs. #2306
+        let forceKilled = false;
         if (/timed out|not connected|disconnected/i.test(message)) {
           disconnectLocalProviderRuntime();
+          // The runtime WS is unreachable, so the terminate RPC below cannot
+          // land either. Force-kill the agent's process directly via Rust —
+          // the only escalation that works when the runtime can't process
+          // RPCs. The Rust descendant-of-runtime guard keeps this safe even if
+          // the PID is stale, and only the targeted session dies. #2313
+          const pid = session.info.pid;
+          if (pid != null) {
+            forceKilled = await providerService
+              .forceKillSession(pid)
+              .catch((killErr) => {
+                console.error(
+                  "[AgentStore] abortTurn force-kill failed:",
+                  killErr,
+                );
+                return false;
+              });
+            if (forceKilled) {
+              console.warn(
+                `[AgentStore] abortTurn force-killed agent pid=${pid}`,
+              );
+            }
+          }
         }
-        await this.terminateSession(session.info.id).catch((termErr) => {
+        // If we force-killed the agent, the provider_terminate RPC would only
+        // time out against the wedged runtime — skip it and clean up local
+        // state only. Otherwise attempt the normal cooperative terminate. #2313
+        await this.terminateSession(session.info.id, {
+          skipProviderKill: forceKilled,
+        }).catch((termErr) => {
           console.error(
             "[AgentStore] abortTurn terminate escalation failed:",
             termErr,

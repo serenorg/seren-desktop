@@ -1,6 +1,7 @@
 // ABOUTME: Provider runtime service for spawning and communicating with coding agents.
 // ABOUTME: Resolves the active runtime transport dynamically so browser modes can degrade cleanly.
 
+import { invoke } from "@tauri-apps/api/core";
 import {
   isLocalProviderRuntime,
   onRuntimeEvent,
@@ -8,6 +9,7 @@ import {
 } from "@/lib/browser-local-runtime";
 import type { McpServerConfig } from "@/lib/mcp/types";
 import { runtimeHasCapability } from "@/lib/runtime";
+import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 // ============================================================================
 // Types
@@ -50,6 +52,12 @@ export interface AgentSessionInfo {
   agentSessionId?: string;
   /** Prompt timeout in seconds. Undefined means unlimited (no timeout). */
   timeoutSecs?: number;
+  /**
+   * OS PID of the agent child process. Lets the Rust core force-kill this one
+   * session when the provider-runtime WebSocket is unreachable. Null when the
+   * runtime could not report a PID. #2313
+   */
+  pid?: number | null;
 }
 
 export interface AgentInfo {
@@ -367,6 +375,19 @@ export async function cancelPrompt(sessionId: string): Promise<void> {
  */
 export async function terminateSession(sessionId: string): Promise<void> {
   return invokeProvider("provider_terminate", { sessionId });
+}
+
+/**
+ * Force-kill a single agent session's child process by PID via the Rust core,
+ * bypassing the (possibly unreachable) provider-runtime WebSocket. This is the
+ * last-resort Stop escalation: it is the only path that lands when the runtime
+ * itself can no longer process RPCs. Rust applies a descendant-of-runtime guard
+ * so a stale/reused PID is never killed. Returns true if the process was
+ * killed, false if refused or unavailable. No-op outside the native runtime.
+ */
+export async function forceKillSession(pid: number): Promise<boolean> {
+  if (!isTauriRuntime()) return false;
+  return invoke<boolean>("provider_force_kill_session", { pid });
 }
 
 /**
