@@ -1281,17 +1281,28 @@ export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" 
       const interruptTurnId = session.activeTurnId;
       session.activeTurnId = null;
 
-      await sendRequest(
-        session,
-        "turn/interrupt",
-        {
-          threadId: session.agentSessionId,
-          turnId: interruptTurnId,
-        },
-        10_000,
-      ).catch(() => {
-        // Best-effort interrupt only.
-      });
+      let interrupted = false;
+      try {
+        await sendRequest(
+          session,
+          "turn/interrupt",
+          {
+            threadId: session.agentSessionId,
+            turnId: interruptTurnId,
+          },
+          10_000,
+        );
+        interrupted = true;
+      } catch {
+        // Interrupt not acknowledged — escalate below.
+      }
+
+      if (!interrupted) {
+        // turn/interrupt was not honored (Codex hung or unresponsive). Hard-
+        // kill the child tree so the cancel actually stops the agent, mirroring
+        // terminateSession and the Claude cancel path. #2304.
+        killChildTree(session.process);
+      }
     }
 
     session.status = "ready";
