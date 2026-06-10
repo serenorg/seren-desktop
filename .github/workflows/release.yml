@@ -13,9 +13,11 @@ permissions:
   contents: write
   id-token: write
 
-# Prevent multiple releases from running simultaneously
+# Serialize ALL release runs (constant group, not per-tag) so two tags cannot
+# sign in parallel and stack signing bursts on the shared SSL.com credential,
+# which trips its per-minute rate limit (#2282). Queued runs wait, never cancel.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 env:
@@ -386,13 +388,21 @@ jobs:
           CARGO_BUILD_TARGET: ${{ matrix.target }}
         run: pnpm prepare:tauri-build
 
+      # Discover the signable set with the tested cross-platform selector, then
+      # sign it throttled to stay under SSL.com's per-minute rate limit (#2282).
+      # The embedded runtime is the only large payload, so it carries the throttle;
+      # the per-file installer/helper signings below stay unthrottled (tiny sets).
       - name: Sign embedded runtime (Windows)
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         shell: pwsh
         run: |
+          pnpm tsx scripts/windows-signables.ts `
+            src-tauri/embedded-runtime src-tauri/mcp-servers > sign-targets.txt
           ./scripts/sign-windows-payload.ps1 `
             -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT `
-            -Root src-tauri/embedded-runtime, src-tauri/mcp-servers
+            -ListFile sign-targets.txt `
+            -BatchSize 10 `
+            -DelaySeconds 30
 
       # Build the app (with signing for macOS when certificates available)
       # Note: APPLE_ID/PASSWORD/TEAM_ID removed to prevent Tauri's internal notarization
