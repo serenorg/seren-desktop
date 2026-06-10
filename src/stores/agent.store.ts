@@ -4776,6 +4776,13 @@ export const agentStore = {
                 `[AgentStore] abortTurn force-killed agent pid=${pid}`,
               );
             }
+          } else {
+            // Runtime is unreachable AND we have no PID to fall back on, so the
+            // agent cannot be force-killed. Surface it so the rare
+            // unstoppable-agent case is diagnosable rather than silent. #2316
+            console.warn(
+              "[AgentStore] abortTurn: runtime unreachable and no agent PID available; cannot force-kill this session",
+            );
           }
         }
         // If we force-killed the agent, the provider_terminate RPC would only

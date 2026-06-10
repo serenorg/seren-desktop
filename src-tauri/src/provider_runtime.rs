@@ -570,10 +570,19 @@ fn parent_pid(pid: u32) -> Option<u32> {
     #[cfg(unix)]
     {
         // `ps -o ppid= -p <pid>` prints just the parent PID (macOS + Linux).
-        let output = std::process::Command::new("ps")
+        let output = match std::process::Command::new("ps")
             .args(["-o", "ppid=", "-p", &pid.to_string()])
             .output()
-            .ok()?;
+        {
+            Ok(output) => output,
+            // A failure to run `ps` (not merely empty output for a dead PID)
+            // means the ancestry guard can't verify and will refuse the kill —
+            // log it so a silently-unstoppable agent is diagnosable. #2316
+            Err(err) => {
+                log::warn!("[ProviderRuntime] parent_pid: `ps` failed for pid={pid}: {err}");
+                return None;
+            }
+        };
         String::from_utf8_lossy(&output.stdout)
             .trim()
             .parse::<u32>()
@@ -587,11 +596,19 @@ fn parent_pid(pid: u32) -> Option<u32> {
             "(Get-CimInstance Win32_Process -Filter 'ProcessId={}').ParentProcessId",
             pid
         );
-        let output = std::process::Command::new("powershell")
+        let output = match std::process::Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .output()
-            .ok()?;
+        {
+            Ok(output) => output,
+            Err(err) => {
+                log::warn!(
+                    "[ProviderRuntime] parent_pid: `powershell` failed for pid={pid}: {err}"
+                );
+                return None;
+            }
+        };
         String::from_utf8_lossy(&output.stdout)
             .trim()
             .parse::<u32>()
