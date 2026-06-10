@@ -404,6 +404,20 @@ jobs:
             -BatchSize 10 `
             -DelaySeconds 30
 
+      # makensis embeds the stock NSIS plugins ($PLUGINSDIR: System.dll,
+      # nsExec.dll, StartMenu.dll, nsDialogs.dll) from the bundler's NSIS
+      # toolset cache, NOT from the signed build-local copies — the copy is
+      # only on the plugin search path for additional/nsis_tauri_utils.dll
+      # (tauri#14147; fixed upstream in tauri#15422 but unreleased, and
+      # upstream's sign list misses nsExec.dll, which installer-hooks.nsh
+      # uses). Seed the cache exactly as the bundler would and EV-sign the
+      # stock plugin DLLs in place; they are not hash-pinned, so the
+      # signatures survive the build (#2299).
+      - name: Stage signed NSIS toolset (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: ./scripts/stage-signed-nsis-toolset.ps1
+
       # Build the app (with signing for macOS when certificates available)
       # Note: APPLE_ID/PASSWORD/TEAM_ID removed to prevent Tauri's internal notarization
       # Notarization is handled separately with polling in the "Notarize macOS app" step
@@ -422,13 +436,14 @@ jobs:
           NO_STRIP: "true"
         run: pnpm tauri build --verbose --target ${{ matrix.target }} --bundles deb,appimage
       # Single signed Windows build. The signCommand overlay makes the bundler
-      # itself sign at the only correct points in its pipeline (#2294):
-      # Seren.exe AFTER bundle-type patching, the NSIS plugin DLLs (incl.
-      # nsis_tauri_utils.dll) on build-local COPIES so the hash-pinned cache
-      # stays pristine, the uninstaller via the !uninstfinalize hook, and the
-      # setup .exe after makensis. The previous build->sign->rebuild dance
-      # could never work: every rebuild re-patched the exe (stripping its
-      # signature) and restored the mis-hashed plugin cache from upstream.
+      # itself sign at the correct points in its pipeline (#2294): Seren.exe
+      # AFTER bundle-type patching, nsis_tauri_utils.dll on the build-local
+      # plugin copy (the only plugin makensis takes from that copy — the stock
+      # plugins come from the pre-signed toolset cache staged above, #2299),
+      # the uninstaller via the !uninstfinalize hook, and the setup .exe after
+      # makensis. The previous build->sign->rebuild dance could never work:
+      # every rebuild re-patched the exe (stripping its signature) and
+      # restored the mis-hashed plugin cache from upstream.
       # The overlay lives outside tauri.conf.json so contributor Windows
       # builds never attempt to sign. The wrapper reads WINDOWS_SIGN_THUMBPRINT
       # from the eSigner CKA step via GITHUB_ENV.

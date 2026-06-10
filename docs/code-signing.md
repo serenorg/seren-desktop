@@ -125,26 +125,35 @@ the artifact that embeds it is produced:
    portable tree, the bundled Python DLLs/`.pyd`, sidecars under
    `embedded-runtime/`, and `mcp-servers/**/*.node`. These are signed *before*
    `tauri build` so the signatures land inside both the NSIS installer and the
-   `.nsis.zip` updater bundle. Files are flattened into one staging directory
-   (`scripts/flatten-windows-signables.mjs`) and signed in a single SSL.com
-   `batch_sign` to avoid the per-file TOTP throttle, then copied back via the
-   manifest (`scripts/restore-windows-signables.mjs`).
+   `.nsis.zip` updater bundle. The signable set is discovered by
+   `scripts/print-windows-signables.ts` and signed in place by
+   `scripts/sign-windows-payload.ps1` (signtool + eSigner CKA, throttled
+   batches under SSL.com's rate limit, `#2282`).
 
-2. **NSIS helper DLLs** (`#2237`) — `System.dll`, `nsExec.dll`, `nsDialogs.dll`,
-   and `nsis_tauri_utils.dll` ship inside the `tauri-bundler` NSIS cache
-   (`%LOCALAPPDATA%\tauri\NSIS\Plugins`) and `makensis` compiles them *into* the
-   setup `.exe`; at install they are extracted to `%TEMP%\nsXXXX.tmp` and loaded.
-   We do not depend on an upstream tauri change: the first `tauri build`
-   populates the cache, we sign those DLLs in place (reusing the same
-   flatten/restore scripts), and a second `tauri build` (with
-   `SEREN_TAURI_SKIP_PREP=1`, so the already-signed runtime is untouched and
-   cargo reuses its target dir) recompiles the installer with the signed copies.
+2. **NSIS stock plugin DLLs** (`#2237`, `#2299`) — `System.dll`, `nsExec.dll`,
+   `StartMenu.dll`, and `nsDialogs.dll` ship inside the `tauri-bundler` NSIS
+   toolset cache (`%LOCALAPPDATA%\tauri\NSIS\Plugins`) and `makensis` compiles
+   them *into* the setup `.exe`; at install they are extracted to
+   `%TEMP%\nsXXXX.tmp` and loaded. The bundler's own `signCommand` pipeline
+   signs build-local *copies* of these, but makensis never reads stock plugins
+   from that copy (tauri#14147 — fixed upstream in tauri#15422, unreleased, and
+   upstream's sign list misses `nsExec.dll`, which `installer-hooks.nsh` uses).
+   `scripts/stage-signed-nsis-toolset.ps1` therefore seeds the toolset cache
+   exactly as the bundler would (same pinned URL/SHA1, including the
+   hash-pinned `nsis_tauri_utils.dll`, which stays unsigned in the cache so the
+   bundler does not re-download it) and EV-signs the stock plugin DLLs in
+   place before the build. `nsis_tauri_utils.dll` itself is signed by the
+   bundler on the build-local copy, the one plugin dir makensis does take from
+   the copy.
 
-3. **Outer setup `.exe` and `.nsis.zip`** — the setup `.exe` is signed
-   post-build with SSL.com eSigner. Because Tauri builds the `.nsis.zip` from
-   the *unsigned* setup `.exe` during the build, the updater bundle is re-packed
-   from the signed `.exe` and its `.nsis.zip.sig` re-signed with the Tauri
-   updater key (`#2236`).
+3. **Seren.exe, the uninstaller, and the setup `.exe`** (`#2294`) — signed by
+   the bundler itself via a CI-only `signCommand` config overlay
+   (`scripts/print-windows-sign-overlay.ts`) at the only correct points in its
+   pipeline: the main exe after bundle-type patching, the uninstaller via the
+   `!uninstfinalize` hook, and the setup `.exe` after makensis. Because Tauri
+   builds the `.nsis.zip` updater bundle during the same pipeline, the bundle
+   is re-packed from the signed `.exe` and its `.nsis.zip.sig` re-signed with
+   the Tauri updater key (`#2236`).
 
 ### Verification gates (release CI, hard-fail)
 
