@@ -729,7 +729,7 @@ jobs:
           }
           foreach ($file in $nsisFiles) {
             Write-Host "Checking signature for: $($file.FullName)"
-            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            $sig = Get-AuthenticodeSignature -LiteralPath $file.FullName
             if ($sig.Status -eq "Valid") {
               Write-Host "  Valid signature: $($sig.SignerCertificate.Subject)"
             } else {
@@ -762,7 +762,7 @@ jobs:
             exit 1
           }
           # The setup .exe must already be EV-signed (verified in the step above).
-          $sig = Get-AuthenticodeSignature -FilePath $setup.FullName
+          $sig = Get-AuthenticodeSignature -LiteralPath $setup.FullName
           if ($sig.Status -ne "Valid") {
             Write-Host "::error::Refusing to pack an unsigned setup .exe into the updater bundle: $($sig.Status)"
             exit 1
@@ -805,7 +805,7 @@ jobs:
           }
           $unsigned = @()
           foreach ($f in $files) {
-            $sig = Get-AuthenticodeSignature -FilePath $f.FullName
+            $sig = Get-AuthenticodeSignature -LiteralPath $f.FullName
             if ($sig.Status -eq "Valid") {
               Write-Host "  Valid: $($f.Name)"
             } else {
@@ -853,7 +853,7 @@ jobs:
           $unsignedFiles = @()
           $validFiles = @()
           Get-ChildItem -Path $bundleRoot -Recurse -Include "*.exe","*.dll" -File | ForEach-Object {
-            $sig = Get-AuthenticodeSignature -FilePath $_.FullName
+            $sig = Get-AuthenticodeSignature -LiteralPath $_.FullName
             if ($sig.Status -eq "Valid") {
               $validFiles += $_.FullName
             } else {
@@ -911,7 +911,7 @@ jobs:
           Write-Host "Embedded binaries to verify: $($bins.Count)"
           $unsigned = @()
           foreach ($b in $bins) {
-            $sig = Get-AuthenticodeSignature -FilePath $b.FullName
+            $sig = Get-AuthenticodeSignature -LiteralPath $b.FullName
             if ($sig.Status -ne "Valid") {
               $unsigned += [PSCustomObject]@{
                 Path = $b.FullName.Substring($extractDir.Length).TrimStart("/\")
