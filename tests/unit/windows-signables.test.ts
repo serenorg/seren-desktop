@@ -103,17 +103,23 @@ describe("flatten-windows-signables", () => {
     }
   });
 
-  it("flat names preserve the original extension so the signer recognizes file type", () => {
+  it("flat names use signer-supported extensions while preserving original manifest paths", () => {
     const root = join(tmp, "runtime");
     write(join(root, "node.exe"));
     write(join(root, "a.dll"));
     write(join(root, "b.node"));
+    write(join(root, "_ssl.pyd"));
 
     run(FLATTEN, [staging, manifestPath, root]);
 
-    for (const entry of readManifest()) {
-      expect(entry.flat.endsWith(entry.original.slice(entry.original.lastIndexOf(".")))).toBe(true);
-    }
+    const stagedByOriginal = new Map(
+      readManifest().map((entry) => [entry.original.slice(root.length + 1), entry.flat]),
+    );
+
+    expect(stagedByOriginal.get("node.exe")?.endsWith(".exe")).toBe(true);
+    expect(stagedByOriginal.get("a.dll")?.endsWith(".dll")).toBe(true);
+    expect(stagedByOriginal.get("b.node")?.endsWith(".dll")).toBe(true);
+    expect(stagedByOriginal.get("_ssl.pyd")?.endsWith(".dll")).toBe(true);
   });
 
   it("merges multiple roots into one staging dir", () => {
