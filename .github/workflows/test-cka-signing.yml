@@ -31,9 +31,15 @@ jobs:
           Move-Item -Destination "eSigner_CKA_Installer.exe" -Path "eSigner_CKA_Setup\*.exe"
           New-Item -ItemType Directory -Force -Path $installDir | Out-Null
           Start-Process ".\eSigner_CKA_Installer.exe" -ArgumentList '/CURRENTUSER','/VERYSILENT','/SUPPRESSMSGBOXES',"/DIR=$installDir" -Wait
-          if (Test-Path ".\setup\vc_redist.x64.exe") {
-            Start-Process ".\setup\vc_redist.x86.exe" -ArgumentList "/install","/q" -Wait
-            Start-Process ".\setup\vc_redist.x64.exe" -ArgumentList "/install","/q" -Wait
+          Write-Host "=== installDir contents ==="
+          Get-ChildItem -Path $installDir -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName | Write-Host
+          Write-Host "=== CWD .\setup contents (if any) ==="
+          Get-ChildItem -Path ".\setup" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName | Write-Host
+          # Install every bundled VC++ redist we can find (the eSigner KSP links
+          # against them); search installDir and CWD.
+          Get-ChildItem -Path $installDir,"." -Recurse -Filter "vc_redist*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "Installing redist: $($_.FullName)"
+            Start-Process $_.FullName -ArgumentList "/install","/quiet","/norestart" -Wait
           }
           $registerKsp = Get-ChildItem -Path $installDir -Recurse -Filter "RegisterKSP.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $registerKsp) {
@@ -58,6 +64,8 @@ jobs:
           Write-Host "Loaded EV certificate: $($cert.Subject) [$($cert.Thumbprint)] HasPrivateKey=$($cert.HasPrivateKey)"
 
       - name: Sign a dummy PE with the real signing script
+        id: dosign
+        continue-on-error: true
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path test-sign | Out-Null
@@ -69,3 +77,24 @@ jobs:
             $s = Get-AuthenticodeSignature -FilePath $_.FullName
             Write-Host "$($_.Name): $($s.Status) — $($s.SignerCertificate.Subject)"
           }
+
+      - name: Dump eSigner KSP logs
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $logRoot = Join-Path $env:APPDATA "eSignerCKA"
+          Write-Host "=== eSigner KSP log tree ($logRoot) ==="
+          if (Test-Path $logRoot) {
+            Get-ChildItem -Path $logRoot -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "---- $($_.FullName) ----"
+              if (-not $_.PSIsContainer -and $_.Length -lt 200000) {
+                Get-Content -Path $_.FullName -ErrorAction SilentlyContinue | Write-Host
+              }
+            }
+          } else {
+            Write-Host "No eSignerCKA appdata directory found."
+          }
+
+      - name: Fail if signing failed
+        if: ${{ steps.dosign.outcome != 'success' }}
+        run: exit 1
