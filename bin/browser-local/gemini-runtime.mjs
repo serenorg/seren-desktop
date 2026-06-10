@@ -330,6 +330,27 @@ function resolveCurrentPrompt(session) {
   pending.resolve();
 }
 
+// Resolve true once `pendingPrompt` is no longer the session's active prompt
+// (the agent settled the turn — resolve or reject clears currentPrompt), or
+// false if `timeoutMs` elapses first. Used to detect whether a cooperative
+// cancel actually stopped the turn before escalating to a hard kill.
+function waitForPromptToClear(session, pendingPrompt, timeoutMs) {
+  if (session.currentPrompt !== pendingPrompt) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const deadline = setTimeout(() => {
+      clearInterval(poll);
+      resolve(false);
+    }, timeoutMs);
+    const poll = setInterval(() => {
+      if (session.currentPrompt !== pendingPrompt) {
+        clearInterval(poll);
+        clearTimeout(deadline);
+        resolve(true);
+      }
+    }, 100);
+  });
+}
+
 function handleResponse(session, payload) {
   const pending = session.pendingRequests.get(String(payload.id));
   if (!pending) return;
@@ -865,12 +886,26 @@ export function createGeminiRuntime({ emit, runtimeMode = "provider-runtime" }) 
       throw new Error(`No Gemini session: ${sessionId}`);
     }
 
+    const pendingPrompt = session.currentPrompt;
+
     // ACP `session/cancel` is a notification (no id, no response).
     writeMessage(session, {
       jsonrpc: "2.0",
       method: "session/cancel",
       params: { sessionId: session.agentSessionId ?? sessionId },
     });
+
+    // The notification has no acknowledgement. Give the agent a short grace
+    // window to actually stop — its own turn-end clears currentPrompt. If the
+    // turn is still active after the window the agent ignored the cancel, so
+    // hard-kill the child tree to guarantee it stops, mirroring the Claude and
+    // Codex cancel paths. #2304.
+    if (pendingPrompt) {
+      const settled = await waitForPromptToClear(session, pendingPrompt, 10_000);
+      if (!settled) {
+        killChildTree(session.process);
+      }
+    }
 
     session.status = "ready";
     emit("provider://error", { sessionId, error: "Task cancelled" });
