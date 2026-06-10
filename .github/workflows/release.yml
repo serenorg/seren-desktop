@@ -322,53 +322,59 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-      # Windows: stage + EV-sign the embedded runtime payload BEFORE `tauri build`
-      # so the signatures are baked into the NSIS installer AND the .nsis.zip
-      # updater bundle (#2235). The unsigned node.exe / Git-for-Windows binaries
-      # / Python DLLs / sidecars are what Smart App Control blocks once extracted
-      # to %LOCALAPPDATA%\SerenDesktop\embedded-runtime on the user's machine.
-      #
-      # We stage the runtime here, flatten every signable into one directory, run
-      # a single SSL.com batch_sign (its per-file TOTP throttle makes per-dir
-      # signing prohibitively slow), copy the signed files back, then build with
-      # SEREN_TAURI_SKIP_PREP so the build does not re-download and clobber them.
+      # Windows: load the SSL.com EV code-signing certificate into the runner's
+      # certificate store via eSigner CKA (Cloud Key Adapter). Once loaded,
+      # signtool signs any number of files in place with no per-file OTP and no
+      # batch-size cap — unlike CodeSignTool batch_sign, which rejects >100 files
+      # per call and so could not sign the ~700-file embedded runtime (#2276).
+      - name: Setup eSigner CKA (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        env:
+          ES_USERNAME: ${{ secrets.ES_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
+        run: |
+          $installDir = Join-Path $env:USERPROFILE "eSignerCKA"
+          $masterKey  = Join-Path $installDir "master.key"
+          Invoke-WebRequest -Uri "https://github.com/SSLcom/eSignerCKA/releases/download/v1.0.7/SSL.COM-eSigner-CKA_1.0.7.zip" -OutFile eSigner_CKA_Setup.zip
+          Expand-Archive -Force eSigner_CKA_Setup.zip
+          Remove-Item eSigner_CKA_Setup.zip
+          Move-Item -Destination "eSigner_CKA_Installer.exe" -Path "eSigner_CKA_Setup\*.exe"
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          ./eSigner_CKA_Installer.exe /CURRENTUSER /VERYSILENT /SUPPRESSMSGBOXES /DIR="$installDir" | Out-Null
+          $cka = Join-Path $installDir "eSignerCKATool.exe"
+          & $cka config -mode "PRODUCTION" -user "$env:ES_USERNAME" -pass "$env:ES_PASSWORD" -totp "$env:ES_TOTP_SECRET" -key "$masterKey" -r
+          & $cka unload
+          & $cka load
+          $cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Select-Object -First 1
+          if (-not $cert) {
+            Write-Host "::error::eSigner CKA did not load a code-signing certificate into the store."
+            exit 1
+          }
+          "WINDOWS_SIGN_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          Write-Host "Loaded EV certificate: $($cert.Subject) [$($cert.Thumbprint)]"
+
+      # Stage the embedded runtime (node / Git-for-Windows / Python / playwright
+      # sidecars) and EV-sign it in place BEFORE `tauri build` so the signatures
+      # are baked into the NSIS installer AND the .nsis.zip updater bundle
+      # (#2235). These are the binaries Smart App Control blocks once extracted to
+      # %LOCALAPPDATA%\SerenDesktop\embedded-runtime on the user's machine. The
+      # build then runs with SEREN_TAURI_SKIP_PREP so it does not re-download and
+      # clobber the signed files.
       - name: Stage embedded runtime for signing (Windows)
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         env:
           CARGO_BUILD_TARGET: ${{ matrix.target }}
         run: pnpm prepare:tauri-build
 
-      - name: Flatten embedded runtime signables (Windows)
+      - name: Sign embedded runtime (Windows)
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         shell: pwsh
         run: |
-          node scripts/flatten-windows-signables.mjs `
-            sign-staging/unsigned `
-            sign-staging/manifest.json `
-            src-tauri/embedded-runtime `
-            src-tauri/mcp-servers
-
-      - name: Batch-sign embedded runtime (Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        uses: sslcom/esigner-codesign@v1.3.2
-        with:
-          command: batch_sign
-          username: ${{ secrets.ES_USERNAME }}
-          password: ${{ secrets.ES_PASSWORD }}
-          credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
-          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
-          dir_path: sign-staging/unsigned
-          output_path: sign-staging/signed
-          environment_name: PROD
-          malware_block: true
-
-      - name: Restore signed embedded runtime (Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        shell: pwsh
-        run: |
-          node scripts/restore-windows-signables.mjs `
-            sign-staging/signed `
-            sign-staging/manifest.json
+          ./scripts/sign-windows-payload.ps1 `
+            -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT `
+            -Root src-tauri/embedded-runtime, src-tauri/mcp-servers
 
       # Build the app (with signing for macOS when certificates available)
       # Note: APPLE_ID/PASSWORD/TEAM_ID removed to prevent Tauri's internal notarization
@@ -622,56 +628,33 @@ jobs:
           echo "Files in $BUNDLE_DIR:"
           ls -la "$BUNDLE_DIR/"
 
-      # The NSIS helper DLLs (System.dll, nsExec.dll, nsDialogs.dll,
-      # nsis_tauri_utils.dll) ship inside the tauri-bundler NSIS cache and
-      # makensis compiles them INTO the setup .exe. At install they are
-      # extracted to %TEMP%\nsXXXX.tmp and loaded, so Smart App Control blocks
+      # makensis compiles the main Seren.exe AND the NSIS helper DLLs (System.dll,
+      # nsExec.dll, nsDialogs.dll, nsis_tauri_utils.dll) INTO the setup .exe. The
+      # helper DLLs live in the tauri-bundler NSIS cache and are extracted to
+      # %TEMP%\nsXXXX.tmp and loaded at install time, so Smart App Control blocks
       # them when unsigned regardless of the outer installer's signature
-      # (#2237 / #2230). The first `tauri build` above populated the cache; sign
-      # those DLLs in place, then rebuild so makensis embeds the signed copies.
-      # This is the fix we own — no upstream tauri dependency.
-      - name: Flatten NSIS helper DLLs for signing (Windows)
+      # (#2237 / #2230). The main binary is likewise blocked if unsigned. The
+      # first `tauri build` above produced both; EV-sign the compiled Seren.exe
+      # and the cached helper DLLs in place, then rebuild so makensis embeds the
+      # signed copies.
+      - name: Sign app binary and NSIS helper DLLs (Windows)
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         shell: pwsh
         run: |
-          $nsisCache = Join-Path $env:LOCALAPPDATA "tauri\NSIS"
-          if (-not (Test-Path $nsisCache)) {
-            Write-Host "::error::Tauri NSIS cache not found at $nsisCache after build — cannot sign helper DLLs (#2237)."
+          $appExe  = "src-tauri/target/${{ matrix.target }}/release/Seren.exe"
+          $plugins = Join-Path $env:LOCALAPPDATA "tauri\NSIS\Plugins"
+          if (-not (Test-Path $appExe)) {
+            Write-Host "::error::Compiled app binary not found at $appExe."
             exit 1
           }
-          $plugins = Join-Path $nsisCache "Plugins"
-          node scripts/flatten-windows-signables.mjs `
-            nsis-plugin-staging/unsigned `
-            nsis-plugin-staging/manifest.json `
-            $plugins
-          $count = @(Get-Content nsis-plugin-staging/manifest.json | ConvertFrom-Json).Count
-          if ($count -eq 0) {
-            Write-Host "::error::No NSIS plugin DLLs found under $plugins — nothing to sign (#2237)."
+          if (-not (Test-Path $plugins)) {
+            Write-Host "::error::Tauri NSIS plugins cache not found at $plugins after build — cannot sign helper DLLs (#2237)."
             exit 1
           }
-          Write-Host "Found $count NSIS helper DLL(s) to sign."
-
-      - name: Batch-sign NSIS helper DLLs (Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        uses: sslcom/esigner-codesign@v1.3.2
-        with:
-          command: batch_sign
-          username: ${{ secrets.ES_USERNAME }}
-          password: ${{ secrets.ES_PASSWORD }}
-          credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
-          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
-          dir_path: nsis-plugin-staging/unsigned
-          output_path: nsis-plugin-staging/signed
-          environment_name: PROD
-          malware_block: true
-
-      - name: Restore signed NSIS helper DLLs to cache (Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        shell: pwsh
-        run: |
-          node scripts/restore-windows-signables.mjs `
-            nsis-plugin-staging/signed `
-            nsis-plugin-staging/manifest.json
+          ./scripts/sign-windows-payload.ps1 `
+            -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT `
+            -File $appExe `
+            -Root $plugins
 
       # Rebuild so makensis recompiles the installer with the now-signed helper
       # DLLs. Cargo reuses the pass-1 target dir and SEREN_TAURI_SKIP_PREP keeps
@@ -682,76 +665,23 @@ jobs:
           SEREN_TAURI_SKIP_PREP: "1"
         run: pnpm tauri build --target ${{ matrix.target }}
 
-      # Move updater artifacts (.sig, .nsis.zip) out of NSIS dir before code signing
-      # so SSL.com's batch_sign doesn't choke on non-exe files
-      - name: Move updater artifacts before code signing
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        shell: pwsh
-        run: |
-          $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
-          $tempDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis-updater-temp"
-          New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
-          Get-ChildItem -Path $nsisDir -Exclude "*.exe" | ForEach-Object {
-            Move-Item -Path $_.FullName -Destination $tempDir -Force
-            Write-Host "Moved aside: $($_.Name)"
-          }
-
-      # Windows: Sign executables with SSL.com eSigner (cloud EV code signing)
-      # Sign NSIS installer (.exe) - output to temp dir then copy back
-      # (workaround: action's override flag doesn't work, same-dir output fails)
+      # EV-sign the NSIS setup .exe in place. signtool touches only the file we
+      # point it at, so the loose .nsis.zip / .sig updater artifacts in the same
+      # directory are left untouched — no move-aside/copy-back dance needed (the
+      # CodeSignTool batch_sign path signed a whole directory and required it).
       - name: Sign Windows NSIS installer
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        uses: sslcom/esigner-codesign@v1.3.2
-        with:
-          command: batch_sign
-          username: ${{ secrets.ES_USERNAME }}
-          password: ${{ secrets.ES_PASSWORD }}
-          credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
-          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
-          dir_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis
-          output_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis-signed
-          environment_name: PROD
-          malware_block: true
-
-      # Copy signed files back to original location
-      - name: Copy signed NSIS installer
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        shell: pwsh
-        run: |
-          $signedDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis-signed"
-          $targetDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
-
-          if (-not (Test-Path $signedDir)) {
-            Write-Host "Signed output directory not found: $signedDir"
-            exit 1
-          }
-
-          $signedExes = @(Get-ChildItem -Path $signedDir -Filter "*.exe")
-          if ($signedExes.Count -eq 0) {
-            Write-Host "No signed .exe files found in $signedDir — CodeSignTool likely failed silently (check the 'Sign Windows NSIS installer' step log)."
-            exit 1
-          }
-
-          Write-Host "Copying signed files from $signedDir to $targetDir"
-          foreach ($file in $signedExes) {
-            Copy-Item -Path $file.FullName -Destination $targetDir -Force
-            Write-Host "Copied: $($file.Name)"
-          }
-
-      # Restore updater artifacts (.sig, .nsis.zip) back to NSIS dir
-      - name: Restore updater artifacts after code signing
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         shell: pwsh
         run: |
           $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
-          $tempDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis-updater-temp"
-          if (Test-Path $tempDir) {
-            Get-ChildItem -Path $tempDir | ForEach-Object {
-              Move-Item -Path $_.FullName -Destination $nsisDir -Force
-              Write-Host "Restored: $($_.Name)"
-            }
-            Remove-Item -Path $tempDir -Force
+          $setup = Get-ChildItem -Path $nsisDir -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $setup) {
+            Write-Host "::error::No NSIS *-setup.exe found in $nsisDir to sign."
+            exit 1
           }
+          ./scripts/sign-windows-payload.ps1 `
+            -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT `
+            -File $setup.FullName
 
       # Verify Windows code signing on the NSIS setup .exe AND every shipped
       # .exe inside the installed app payload. The prior check only validated
