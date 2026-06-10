@@ -1064,6 +1064,35 @@ jobs:
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # The e2e host is a shared box that other tooling stops to save cost.
+      # SendCommand against a stopped instance fails with InvalidInstanceId
+      # (v3.52.9, #2318) — start it if needed and wait for the SSM agent to
+      # report Online before staging work on it.
+      - name: Ensure Windows e2e host is running
+        shell: bash
+        run: |
+          set -euo pipefail
+          state="$(aws ec2 describe-instances --instance-ids "$WINDOWS_E2E_INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' --output text)"
+          echo "Instance state: $state"
+          if [ "$state" != "running" ]; then
+            aws ec2 start-instances --instance-ids "$WINDOWS_E2E_INSTANCE_ID" >/dev/null
+            aws ec2 wait instance-running --instance-ids "$WINDOWS_E2E_INSTANCE_ID"
+            echo "Instance started."
+          fi
+          deadline=$((SECONDS + 600))
+          until [ "$(aws ssm describe-instance-information \
+            --filters "Key=InstanceIds,Values=$WINDOWS_E2E_INSTANCE_ID" \
+            --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null)" = "Online" ]; do
+            if [ "$SECONDS" -gt "$deadline" ]; then
+              echo "::error::Timed out waiting for the SSM agent to come online on the Windows e2e host."
+              exit 1
+            fi
+            echo "Waiting for SSM agent..."
+            sleep 15
+          done
+          echo "SSM agent online."
+
       - name: Stage Windows e2e payload in S3
         id: stage
         shell: bash
