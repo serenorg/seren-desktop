@@ -5,6 +5,8 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { openExternalLink } from "@/lib/external-link";
 import {
   formatDuration,
+  formatMeetingDate,
+  formatTime,
   meetingTitle,
   STATUS_LABELS,
 } from "@/lib/meeting-format";
@@ -235,6 +237,10 @@ export function MeetingDetail(props: MeetingDetailProps) {
               <span>{STATUS_LABELS[props.meeting.status]}</span>
               <span class="font-mono tabular-nums">
                 {formatDuration(props.meeting)}
+              </span>
+              <span>
+                {formatMeetingDate(props.meeting.startedAt)} ·{" "}
+                {formatTime(props.meeting.startedAt)}
               </span>
               <span>{props.meeting.sourceApp ?? "Desktop"}</span>
             </div>
