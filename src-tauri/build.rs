@@ -1,4 +1,6 @@
 fn main() {
+    embed_windows_common_controls_manifest();
+
     // Pass the target triple to the compiled code for sidecar binary discovery
     println!(
         "cargo:rustc-env=TARGET={}",
@@ -53,5 +55,34 @@ fn main() {
         println!("cargo:rustc-env=BUILT_RUST_VERSION=unknown");
     }
 
-    tauri_build::build()
+    run_tauri_build()
+}
+
+fn embed_windows_common_controls_manifest() {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    if target_os != "windows" || target_env != "msvc" {
+        return;
+    }
+
+    let manifest_path =
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("common-controls-v6.manifest");
+    let manifest = manifest_path.display();
+
+    println!("cargo:rerun-if-changed={manifest}");
+    println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+    println!("cargo:rustc-link-arg=/MANIFESTINPUT:{manifest}");
+}
+
+fn run_tauri_build() {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    if target_os == "windows" && target_env == "msvc" {
+        let windows = tauri_build::WindowsAttributes::new_without_app_manifest();
+        let attributes = tauri_build::Attributes::new().windows_attributes(windows);
+        tauri_build::try_build(attributes).expect("failed to run Tauri build script");
+    } else {
+        tauri_build::build();
+    }
 }
