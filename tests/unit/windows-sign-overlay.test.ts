@@ -155,20 +155,32 @@ describe("sign-windows-payload.ps1 thumbprint resolution", () => {
     return { out: `${r.stdout}\n${r.stderr}`, status: r.status ?? 1 };
   }
 
-  it.runIf(runnable)("fails fast with a clear error when no thumbprint is provided", () => {
-    const { out, status } = runSigner({});
-    expect(status).toBe(1);
-    expect(out).toContain("WINDOWS_SIGN_THUMBPRINT");
-    // Must fail on input validation, not deep in signtool discovery.
-    expect(out).not.toContain("signtool");
-  });
+  // Per-test timeout absorbs pwsh cold-start on CI runners (~5–7s on a fresh
+  // Linux runner vs ~400ms once warm). Default vitest 5s ceiling tripped #2362.
+  const pwshTimeout = 30_000;
 
-  it.runIf(runnable)("accepts the thumbprint from WINDOWS_SIGN_THUMBPRINT (signCommand passes no -Thumbprint)", () => {
-    const { out, status } = runSigner({ WINDOWS_SIGN_THUMBPRINT: "933C679D86D0ACAF531B37A4D12C0B360EB4815C" });
-    // Proceeds past validation; on non-Windows it then fails at signtool
-    // discovery — proving the env thumbprint was accepted.
-    expect(status).toBe(1);
-    expect(out).toContain("signtool");
-    expect(out).not.toContain("WINDOWS_SIGN_THUMBPRINT");
-  });
+  it.runIf(runnable)(
+    "fails fast with a clear error when no thumbprint is provided",
+    () => {
+      const { out, status } = runSigner({});
+      expect(status).toBe(1);
+      expect(out).toContain("WINDOWS_SIGN_THUMBPRINT");
+      // Must fail on input validation, not deep in signtool discovery.
+      expect(out).not.toContain("signtool");
+    },
+    pwshTimeout,
+  );
+
+  it.runIf(runnable)(
+    "accepts the thumbprint from WINDOWS_SIGN_THUMBPRINT (signCommand passes no -Thumbprint)",
+    () => {
+      const { out, status } = runSigner({ WINDOWS_SIGN_THUMBPRINT: "933C679D86D0ACAF531B37A4D12C0B360EB4815C" });
+      // Proceeds past validation; on non-Windows it then fails at signtool
+      // discovery — proving the env thumbprint was accepted.
+      expect(status).toBe(1);
+      expect(out).toContain("signtool");
+      expect(out).not.toContain("WINDOWS_SIGN_THUMBPRINT");
+    },
+    pwshTimeout,
+  );
 });
