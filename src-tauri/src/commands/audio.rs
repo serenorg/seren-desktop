@@ -186,12 +186,45 @@ fn claim_publish_slot(meeting_id: &str) -> Option<PublishGuard> {
     Some(PublishGuard(meeting_id.to_string()))
 }
 
+// Body bodies can be megabytes; cap before they ride into telemetry.
+const PUBLISH_FAIL_BODY_LIMIT: usize = 2_048;
+
+// Emit a structured "publish failed" event the frontend listens for to call
+// captureSupportError, which opens a serenorg/seren-desktop bug ticket from
+// the existing support telemetry pipeline. #2343.
+fn emit_notes_publish_failed(
+    app: &AppHandle,
+    meeting_id: &str,
+    status: Option<u16>,
+    body: &str,
+) {
+    let trimmed = if body.len() > PUBLISH_FAIL_BODY_LIMIT {
+        &body[..PUBLISH_FAIL_BODY_LIMIT]
+    } else {
+        body
+    };
+    if let Err(err) = app.emit(
+        "meeting://notes-publish-failed",
+        serde_json::json!({
+            "meetingId": meeting_id,
+            "status": status,
+            "body": trimmed,
+        }),
+    ) {
+        log::warn!("[meeting] emit notes-publish-failed for {meeting_id}: {err}");
+    }
+}
+
 // Auto-publish the finalized meeting (notes + action items + transcript) to
 // seren-notes so the UI can render a "Chat with meeting notes" link. Runs in
 // its own task so a slow gateway never blocks notes-ready from rendering.
 // Always re-publishes — a Regenerate-after-publish overwrites the link to
 // point at the new content. Skips silently when the user isn't signed in;
 // the local UI shows the login CTA based on authStore.
+//
+// Emits `meeting://notes-publish-failed` (status + body) on a terminal
+// failure so the frontend can route it through captureSupportError and open
+// a bug ticket automatically. #2343.
 async fn spawn_seren_notes_publish(
     app: AppHandle,
     meeting_id: String,
@@ -229,12 +262,29 @@ async fn spawn_seren_notes_publish(
     .await
     {
         Ok(id) => id,
-        Err(err) => {
+        Err(crate::audio::seren_notes_publish::PublishError::NotAuthenticated) => {
+            // UI surfaces this via the existing "Login to SerenDB" CTA.
             log::info!(
-                "[meeting] seren-notes publish skipped or failed for {}: {}",
-                meeting_id,
-                err
+                "[meeting] seren-notes publish skipped for {} (not authenticated)",
+                meeting_id
             );
+            return;
+        }
+        Err(crate::audio::seren_notes_publish::PublishError::Server { status, body }) => {
+            log::warn!(
+                "[meeting] seren-notes publish failed for {} with {status} after retries",
+                meeting_id
+            );
+            emit_notes_publish_failed(&app, &meeting_id, Some(status), &body);
+            return;
+        }
+        Err(crate::audio::seren_notes_publish::PublishError::Other(msg)) => {
+            log::warn!(
+                "[meeting] seren-notes publish failed for {}: {}",
+                meeting_id,
+                msg
+            );
+            emit_notes_publish_failed(&app, &meeting_id, None, &msg);
             return;
         }
     };
@@ -266,6 +316,55 @@ async fn spawn_seren_notes_publish(
             err
         );
     }
+}
+
+// User-triggered republish: re-runs the same publish path the auto-flow
+// uses when notes finalize. Idempotent under PublishGuard — if a publish is
+// already in flight for this meeting, the spawned call no-ops without
+// double-posting. The frontend `Publish to Seren Notes` button calls this
+// after a 5xx-after-retry left the meeting without a `seren_notes_id`. #2343.
+#[tauri::command]
+pub async fn republish_meeting_to_seren_notes(
+    app: AppHandle,
+    meeting_id: String,
+) -> Result<(), String> {
+    let lookup = meeting_id.clone();
+    let meeting = run_db(app.clone(), move |conn| select_meeting(conn, &lookup))
+        .await?
+        .ok_or_else(|| "meeting not found".to_string())?;
+    if meeting.notes_markdown.is_none() {
+        return Err("meeting has no notes yet".to_string());
+    }
+    let notes_markdown = meeting.notes_markdown.clone().unwrap_or_default();
+    let action_items: Vec<String> = meeting
+        .notes_struct_json
+        .as_deref()
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+        .and_then(|v| {
+            v.get("action_items")
+                .or_else(|| v.get("actionItems"))
+                .cloned()
+        })
+        .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+        .unwrap_or_default();
+    let transcript_app = app.clone();
+    let transcript_id = meeting_id.clone();
+    let segments = run_db(transcript_app, move |conn| {
+        select_transcript_segments(conn, &transcript_id)
+    })
+    .await?;
+    let transcript = assemble_transcript(segments);
+    tauri::async_runtime::spawn(async move {
+        spawn_seren_notes_publish(
+            app,
+            meeting_id,
+            notes_markdown,
+            action_items,
+            transcript,
+        )
+        .await;
+    });
+    Ok(())
 }
 
 #[tauri::command]

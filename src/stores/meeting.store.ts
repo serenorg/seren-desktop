@@ -4,6 +4,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createStore } from "solid-js/store";
 import { formatTime } from "@/lib/meeting-format";
+import { captureSupportError } from "@/lib/support/hook";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import {
   type CaptureStopOutcome,
@@ -19,6 +20,7 @@ import {
   type MeetingTemplate,
   meetingAutodetect,
   reconcileMeetingSpeakers,
+  republishMeetingToSerenNotes,
   selectMeetingSkills,
   setMeetingRoutedSkill,
   startMeetingCapture as startBackendCapture,
@@ -72,6 +74,7 @@ let transcriptUnlisten: UnlistenFn | null = null;
 let statusUnlisten: UnlistenFn | null = null;
 let levelUnlisten: UnlistenFn | null = null;
 let segmentsUpdatedUnlisten: UnlistenFn | null = null;
+let notesPublishFailedUnlisten: UnlistenFn | null = null;
 let trayToggleUnlisten: (() => void) | null = null;
 
 let autoDetectTimer: number | null = null;
@@ -290,6 +293,33 @@ async function startMeetingEventListeners(): Promise<void> {
     },
   );
 
+  // A terminal seren-notes publish failure (5xx after the backend retry
+  // budget) lands here. Surface a banner so the user can republish, and
+  // route the same failure through captureSupportError so the existing
+  // support telemetry pipeline opens a serenorg/seren-desktop bug ticket
+  // (per `feedback_support_pipeline.md` — console.warn is local-only). #2343.
+  notesPublishFailedUnlisten = await listen<{
+    meetingId: string;
+    status: number | null;
+    body: string;
+  }>("meeting://notes-publish-failed", (event) => {
+    const { meetingId, status, body } = event.payload;
+    setMeetingState(
+      "error",
+      "Couldn't publish meeting notes to Seren Notes. Use the Publish to Seren Notes button to try again.",
+    );
+    void captureSupportError({
+      kind: "seren_notes_publish_failed",
+      message: `seren-notes publish failed for meeting ${meetingId}${status !== null ? ` with HTTP ${status}` : ""}`,
+      http: {
+        method: "POST",
+        url: "https://api.serendb.com/publishers/seren-notes/notes",
+        ...(status !== null ? { status } : {}),
+        body,
+      },
+    });
+  });
+
   // The tray menu's Start/Stop action toggles capture through the same flow.
   trayToggleUnlisten = await onTrayToggleCapture(() => {
     void toggleCaptureFromTray();
@@ -301,11 +331,13 @@ function stopMeetingEventListeners(): void {
   statusUnlisten?.();
   levelUnlisten?.();
   segmentsUpdatedUnlisten?.();
+  notesPublishFailedUnlisten?.();
   trayToggleUnlisten?.();
   transcriptUnlisten = null;
   statusUnlisten = null;
   levelUnlisten = null;
   segmentsUpdatedUnlisten = null;
+  notesPublishFailedUnlisten = null;
   trayToggleUnlisten = null;
 }
 
@@ -692,6 +724,25 @@ function clearError(): void {
   setMeetingState("error", null);
 }
 
+// Manual retry path for a publish that failed after the backend retry
+// budget. Calls the backend command (idempotent under PublishGuard); a
+// `meeting://notes-published` or `meeting://notes-publish-failed` event
+// reconciles the UI. #2343.
+async function republishToSerenNotes(meeting: Meeting): Promise<void> {
+  if (!isTauriRuntime()) return;
+  setMeetingState("error", null);
+  try {
+    await republishMeetingToSerenNotes(meeting.id);
+  } catch (error) {
+    setMeetingState(
+      "error",
+      error instanceof Error
+        ? error.message
+        : "Failed to republish meeting notes",
+    );
+  }
+}
+
 // Rename a saved meeting. Persists the new title, then updates the list row and
 // the active selection so the change shows immediately; the backend also emits
 // meeting://status, which reconciles any other surface.
@@ -850,6 +901,7 @@ export const meetingStore = {
   getMeetingSkillCandidates,
   routeMeetingToSkill,
   regenerateNotes,
+  republishToSerenNotes,
   renameMeeting,
   deleteMeeting,
   clearError,

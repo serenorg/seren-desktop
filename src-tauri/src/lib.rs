@@ -818,6 +818,7 @@ pub fn run() {
             commands::audio::stop_meeting_capture,
             commands::audio::reconcile_meeting_speakers,
             commands::audio::generate_meeting_notes,
+            commands::audio::republish_meeting_to_seren_notes,
             commands::audio::get_meeting_transcript_text,
             commands::audio::select_meeting_skills,
             commands::audio::list_meeting_templates,

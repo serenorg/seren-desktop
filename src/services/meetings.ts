@@ -254,6 +254,17 @@ export function getMeetingTranscriptText(meetingId: string): Promise<string> {
   return invoke("get_meeting_transcript_text", { meetingId });
 }
 
+/**
+ * Re-run the seren-notes publish for a meeting whose previous publish failed
+ * (5xx after the backend retry budget) or never ran (auto-publish dropped
+ * before the link landed). Idempotent under the per-meeting PublishGuard:
+ * if a publish is already in flight, this no-ops on the backend without
+ * double-posting. #2343.
+ */
+export function republishMeetingToSerenNotes(meetingId: string): Promise<void> {
+  return invoke("republish_meeting_to_seren_notes", { meetingId });
+}
+
 export function selectMeetingSkills(skills: SkillRef[]): Promise<string[]> {
   return invoke("select_meeting_skills", { skills });
 }
