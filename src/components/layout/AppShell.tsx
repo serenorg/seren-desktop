@@ -742,7 +742,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
               <AgentTasksPanel onClose={handleCloseSlidePanel} />
             </Match>
             <Match when={slidePanel() === "sessions"}>
-              <SessionPanel onClose={handleCloseSlidePanel} />
+              <SessionPanel />
             </Match>
             <Match when={slidePanel() === "meetings"}>
               <MeetingPanel />
