@@ -464,6 +464,22 @@ export async function revealInFileManager(path: string): Promise<void> {
   throw new Error("File system operations require a local runtime");
 }
 
+/**
+ * Open a file with the operating system's default application.
+ */
+export async function openPathWithDefaultApp(path: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("open_path_with_default_app", { path });
+    return;
+  }
+  if (isBrowserLocalRuntime()) {
+    await runtimeInvoke("open_path_with_default_app", { path });
+    return;
+  }
+  throw new Error("File system operations require a local runtime");
+}
+
 // ============================================================================
 // Provider API Key Management
 // ============================================================================

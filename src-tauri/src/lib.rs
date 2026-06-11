@@ -779,6 +779,7 @@ pub fn run() {
             files::delete_path,
             files::rename_path,
             files::reveal_in_file_manager,
+            files::open_path_with_default_app,
             // Shell command execution (requires frontend approval)
             shell::execute_shell_command,
             shell::execute_shell_command_streaming,

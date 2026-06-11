@@ -24,6 +24,7 @@ import {
   openFolder,
   saveTab,
 } from "@/lib/files/service";
+import { isSupportedImageFile } from "@/lib/images/file-types";
 import { editorStore } from "@/stores/editor.store";
 import { fileTreeState, setNodes, setSelectedPath } from "@/stores/fileTree";
 import {
@@ -142,11 +143,7 @@ export const EditorPanel: Component = () => {
   // Check if current file is an image
   const isImageFile = createMemo(() => {
     const path = activeFilePath();
-    if (!path) return false;
-    const ext = path.toLowerCase().split(".").pop();
-    return ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"].includes(
-      ext || "",
-    );
+    return path ? isSupportedImageFile(path) : false;
   });
 
   // Check if current file is a PDF
