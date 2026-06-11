@@ -29,6 +29,8 @@ export interface Meeting {
   notesStructJson: string | null;
   failureReason?: string | null;
   captureDiagnosticsJson?: string | null;
+  /** UUID of the auto-published seren-notes entry, when one exists. */
+  serenNotesId?: string | null;
   createdAt: number;
   updatedAt: number;
 }

@@ -151,6 +151,7 @@ pub struct Meeting {
     pub notes_struct_json: Option<String>,
     pub failure_reason: Option<String>,
     pub capture_diagnostics_json: Option<String>,
+    pub seren_notes_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

@@ -139,6 +139,103 @@ fn set_meeting_notes_record(
     Ok(())
 }
 
+fn set_meeting_seren_notes_id_record(
+    conn: &Connection,
+    id: &str,
+    seren_notes_id: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE meetings
+         SET seren_notes_id = ?1,
+             updated_at = ?2
+         WHERE id = ?3",
+        params![seren_notes_id, now_ms(), id],
+    )?;
+    mark_sync_upsert(conn, "meetings", id)?;
+    Ok(())
+}
+
+// Auto-publish the finalized meeting (notes + action items + transcript) to
+// seren-notes so the UI can render a "Chat with meeting notes" link. Runs in
+// its own task so a slow gateway never blocks notes-ready from rendering.
+// Skips silently when the user isn't signed in or the meeting has already
+// been published — the local UI handles both states from authStore and
+// `meeting.serenNotesId`.
+async fn spawn_seren_notes_publish(
+    app: AppHandle,
+    meeting_id: String,
+    notes_markdown: String,
+    action_items: Vec<String>,
+    transcript: String,
+) {
+    let lookup_id = meeting_id.clone();
+    let meeting = match run_db(app.clone(), move |conn| select_meeting(conn, &lookup_id)).await {
+        Ok(Some(m)) => m,
+        Ok(None) => return,
+        Err(err) => {
+            log::warn!(
+                "[meeting] seren-notes publish skipped for {}: select_meeting failed: {}",
+                meeting_id,
+                err
+            );
+            return;
+        }
+    };
+    if meeting.seren_notes_id.is_some() {
+        return;
+    }
+    let content = crate::audio::seren_notes_publish::build_publish_content(
+        &notes_markdown,
+        &action_items,
+        &transcript,
+    );
+    let note_id = match crate::audio::seren_notes_publish::publish_meeting_notes(
+        &app,
+        &meeting.title,
+        &content,
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(err) => {
+            log::info!(
+                "[meeting] seren-notes publish skipped or failed for {}: {}",
+                meeting_id,
+                err
+            );
+            return;
+        }
+    };
+    let store_id = meeting_id.clone();
+    let stored_note_id = note_id.clone();
+    if let Err(err) = run_db(app.clone(), move |conn| {
+        set_meeting_seren_notes_id_record(conn, &store_id, &stored_note_id)
+    })
+    .await
+    {
+        log::warn!(
+            "[meeting] persist seren-notes id failed for {}: {}",
+            meeting_id,
+            err
+        );
+        return;
+    }
+    emit_meeting_status_by_id(&app, &meeting_id).await;
+    if let Err(err) = app.emit(
+        "meeting://notes-published",
+        serde_json::json!({
+            "meetingId": meeting_id,
+            "serenNotesId": note_id,
+        }),
+    ) {
+        log::warn!(
+            "[meeting] emit meeting://notes-published failed for {}: {}",
+            meeting_id,
+            err
+        );
+    }
+}
+
 #[tauri::command]
 pub async fn set_meeting_routed_skill(
     app: AppHandle,
@@ -635,6 +732,25 @@ pub async fn generate_meeting_notes(
     })
     .await?;
     emit_meeting_status_by_id(&app, &lookup).await;
+
+    // Fire-and-forget seren-notes auto-publish so the UI gets a
+    // "Chat with meeting notes" link without blocking notes-ready render.
+    let publish_app = app.clone();
+    let publish_id = lookup.clone();
+    let publish_markdown = parsed.markdown.clone();
+    let publish_action_items = parsed.structured.action_items.clone();
+    let publish_transcript = transcript.clone();
+    tauri::async_runtime::spawn(async move {
+        spawn_seren_notes_publish(
+            publish_app,
+            publish_id,
+            publish_markdown,
+            publish_action_items,
+            publish_transcript,
+        )
+        .await;
+    });
+
     Ok(parsed)
 }
 
@@ -797,9 +913,9 @@ pub fn insert_meeting(conn: &Connection, meeting: NewMeeting) -> Result<Meeting>
             id, title, source_app, started_at, ended_at, status, template_id,
             routed_skill_slug, agent_conversation_id, notes_markdown,
             notes_struct_json, failure_reason, capture_diagnostics_json,
-            created_at, updated_at
+            seren_notes_id, created_at, updated_at
          )
-         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL, NULL, NULL, NULL, NULL, NULL, ?7, ?7)",
+         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?7, ?7)",
         params![
             meeting.id,
             meeting.title,
@@ -820,7 +936,7 @@ pub fn select_meeting(conn: &Connection, id: &str) -> Result<Option<Meeting>> {
         "SELECT id, title, source_app, started_at, ended_at, status, template_id,
                 routed_skill_slug, agent_conversation_id, notes_markdown,
                 notes_struct_json, failure_reason, capture_diagnostics_json,
-                created_at, updated_at
+                seren_notes_id, created_at, updated_at
          FROM meetings
          WHERE id = ?1",
         params![id],
@@ -834,7 +950,7 @@ pub fn select_meetings(conn: &Connection, limit: i32) -> Result<Vec<Meeting>> {
         "SELECT id, title, source_app, started_at, ended_at, status, template_id,
                 routed_skill_slug, agent_conversation_id, notes_markdown,
                 notes_struct_json, failure_reason, capture_diagnostics_json,
-                created_at, updated_at
+                seren_notes_id, created_at, updated_at
          FROM meetings
          ORDER BY started_at DESC
          LIMIT ?1",
@@ -1023,8 +1139,9 @@ fn row_to_meeting(row: &rusqlite::Row<'_>) -> Result<Meeting> {
         notes_struct_json: row.get(10)?,
         failure_reason: row.get(11)?,
         capture_diagnostics_json: row.get(12)?,
-        created_at: row.get(13)?,
-        updated_at: row.get(14)?,
+        seren_notes_id: row.get(13)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
     })
 }
 
