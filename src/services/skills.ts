@@ -32,6 +32,8 @@ import {
   resolveSkillDisplayName,
   resolveSkillSlug,
   type Skill,
+  type SkillInstallOptions,
+  type SkillInstallProgress,
   type SkillScope,
   type SkillSource,
   type SkillSyncState,
@@ -79,8 +81,13 @@ interface ExtraFile {
 interface UpstreamSkillBundle {
   skillMd: string;
   payloadFiles: ExtraFile[];
+  payloadTotalBytes: number;
   remoteRevision: RemoteSkillRevision | null;
 }
+
+type DownloadedSkillBundle = SkillBundle & {
+  payloadTotalBytes?: number;
+};
 
 export interface InstallResult {
   installed: InstalledSkill;
@@ -515,6 +522,18 @@ async function downloadSkillBundleFilePayload(
 /** Per-file fetch fan-out cap for the split download flow. */
 const SPLIT_DOWNLOAD_CONCURRENCY = 4;
 
+function progressPercent(downloadedBytes: number, totalBytes: number): number {
+  if (totalBytes <= 0) return 0;
+  return Math.min(Math.round((downloadedBytes / totalBytes) * 100), 100);
+}
+
+function emitInstallProgress(
+  options: SkillInstallOptions | undefined,
+  progress: SkillInstallProgress,
+): void {
+  options?.onProgress?.(progress);
+}
+
 /**
  * Fetch every manifest file body with bounded concurrency and assemble
  * the `SkillBundle.files` shape the install pipeline consumes. Each file
@@ -525,10 +544,48 @@ const SPLIT_DOWNLOAD_CONCURRENCY = 4;
 async function fetchManifestFiles(
   slug: string,
   manifest: SkillBundleManifest,
+  options?: SkillInstallOptions,
 ): Promise<SkillBundleFile[]> {
   const metas = manifest.files ?? [];
   const files: SkillBundleFile[] = new Array(metas.length);
+  const totalBytes = metas.reduce((sum, meta) => sum + meta.size_bytes, 0);
+  const completedByIndex = new Set<number>();
+  let downloadedBytes = 0;
+  let filesCompleted = 0;
+  let nextProgressIndex = 0;
   let next = 0;
+
+  emitInstallProgress(options, {
+    stage: "downloading",
+    downloadedBytes: 0,
+    totalBytes,
+    progressPercent: 0,
+    filesCompleted: 0,
+    filesTotal: metas.length,
+    message:
+      totalBytes > 0
+        ? `Downloading 0 of ${metas.length} payload files`
+        : "Downloading skill payload files",
+  });
+
+  const emitContiguousCompletedProgress = (currentFile?: string) => {
+    while (completedByIndex.has(nextProgressIndex)) {
+      const meta = metas[nextProgressIndex];
+      downloadedBytes += meta.size_bytes;
+      filesCompleted += 1;
+      nextProgressIndex += 1;
+      emitInstallProgress(options, {
+        stage: "downloading",
+        downloadedBytes,
+        totalBytes,
+        progressPercent: progressPercent(downloadedBytes, totalBytes),
+        filesCompleted,
+        filesTotal: metas.length,
+        currentFile,
+        message: `Downloading ${filesCompleted} of ${metas.length} payload files`,
+      });
+    }
+  };
 
   const workers = Array.from(
     { length: Math.min(SPLIT_DOWNLOAD_CONCURRENCY, metas.length) },
@@ -549,6 +606,8 @@ async function fetchManifestFiles(
           mode: payload.mode,
           is_binary: payload.is_binary,
         };
+        completedByIndex.add(index);
+        emitContiguousCompletedProgress(payload.path);
       }
     },
   );
@@ -556,7 +615,10 @@ async function fetchManifestFiles(
   return files;
 }
 
-async function downloadSkillBundle(slug: string): Promise<SkillBundle> {
+async function downloadSkillBundle(
+  slug: string,
+  options?: SkillInstallOptions,
+): Promise<DownloadedSkillBundle> {
   try {
     return await downloadSkillBundleSingleShot(slug);
   } catch (error) {
@@ -565,13 +627,15 @@ async function downloadSkillBundle(slug: string): Promise<SkillBundle> {
       `[Skills] Single-shot download of ${slug} failed with 500; using split download fallback`,
     );
     const manifest = await downloadSkillBundleManifest(slug);
-    const files = await fetchManifestFiles(slug, manifest);
+    const files = await fetchManifestFiles(slug, manifest, options);
     return {
       skill: manifest.skill,
       version: manifest.version,
       skill_md: manifest.skill_md,
       manifest: manifest.manifest,
       content_hash: manifest.content_hash,
+      payloadTotalBytes:
+        manifest.files?.reduce((sum, meta) => sum + meta.size_bytes, 0) ?? 0,
       files,
     };
   }
@@ -934,18 +998,22 @@ async function logInstallFailure(
   }
 }
 
-async function fetchUpstreamSkillBundle(skill: {
-  sourceUrl?: string;
-  slug?: string;
-}): Promise<UpstreamSkillBundle | null> {
+async function fetchUpstreamSkillBundle(
+  skill: {
+    sourceUrl?: string;
+    slug?: string;
+  },
+  options?: SkillInstallOptions,
+): Promise<UpstreamSkillBundle | null> {
   const slug =
     skill.slug ??
     (skill.sourceUrl ? skillSlugFromSourceUrl(skill.sourceUrl) : null);
   if (!slug) return null;
-  const bundle = await downloadSkillBundle(slug);
+  const bundle = await downloadSkillBundle(slug, options);
   return {
     skillMd: bundle.skill_md,
     payloadFiles: bundleFilesToExtraFiles(bundle.files),
+    payloadTotalBytes: bundle.payloadTotalBytes ?? 0,
     remoteRevision: remoteRevisionFromBundle(bundle),
   };
 }
@@ -1434,6 +1502,7 @@ export const skills = {
     content: string,
     scope: SkillScope,
     projectRoot: string | null,
+    options?: SkillInstallOptions,
   ): Promise<InstalledSkill> {
     if (!isTauriRuntime()) {
       throw new Error("Skills can only be installed in the desktop app");
@@ -1455,14 +1524,16 @@ export const skills = {
     let installContent = content;
     let extraFiles: ExtraFile[] = [];
     let extraFilesJson: string | undefined;
+    let payloadTotalBytes = 0;
     let syncState: SkillSyncState | null = null;
     if (skill.source === "seren" && skill.sourceUrl) {
-      const bundle = await fetchUpstreamSkillBundle(skill);
+      const bundle = await fetchUpstreamSkillBundle(skill, options);
       if (!bundle) {
         throw new Error("Unable to fetch upstream skill content");
       }
       installContent = bundle.skillMd;
       extraFiles = bundle.payloadFiles;
+      payloadTotalBytes = bundle.payloadTotalBytes;
       if (extraFiles.length > 0) {
         extraFilesJson = JSON.stringify(extraFiles);
         log.info(
@@ -1480,6 +1551,16 @@ export const skills = {
         extraFiles,
       );
     }
+
+    emitInstallProgress(options, {
+      stage: "installing",
+      downloadedBytes: payloadTotalBytes,
+      totalBytes: payloadTotalBytes,
+      progressPercent: payloadTotalBytes > 0 ? 100 : 0,
+      filesCompleted: extraFiles.length,
+      filesTotal: extraFiles.length,
+      message: "Installing skill files",
+    });
 
     const path = await invoke<string>("install_skill", {
       skillsDir,

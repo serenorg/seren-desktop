@@ -169,6 +169,23 @@ export interface SkillSyncStatus {
   error?: string;
 }
 
+export type SkillInstallProgressStage = "downloading" | "installing";
+
+export interface SkillInstallProgress {
+  stage: SkillInstallProgressStage;
+  downloadedBytes: number;
+  totalBytes: number;
+  progressPercent: number;
+  filesCompleted: number;
+  filesTotal: number;
+  currentFile?: string;
+  message: string;
+}
+
+export interface SkillInstallOptions {
+  onProgress?: (progress: SkillInstallProgress) => void;
+}
+
 /**
  * Scope where a skill is installed.
  */
