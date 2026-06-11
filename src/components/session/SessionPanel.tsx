@@ -15,11 +15,8 @@ import type { SessionEnvironment } from "@/types/session";
 import { SessionStatusBadge } from "./SessionStatusBadge";
 import { SessionTimeline } from "./SessionTimeline";
 
-interface SessionPanelProps {
-  onClose?: () => void;
-}
-
-export const SessionPanel: Component<SessionPanelProps> = (props) => {
+// SlidePanel chrome owns Close + backdrop dismissal — no SessionPanel props (#2352).
+export const SessionPanel: Component = () => {
   const [showCreate, setShowCreate] = createSignal(false);
   const [newTitle, setNewTitle] = createSignal("");
   const [newEnv, setNewEnv] = createSignal<SessionEnvironment>("browser");
@@ -91,30 +88,6 @@ export const SessionPanel: Component<SessionPanelProps> = (props) => {
           >
             {showCreate() ? "Cancel" : "+ New"}
           </button>
-          <Show when={props.onClose}>
-            <button
-              type="button"
-              class="p-1 text-muted-foreground hover:text-foreground transition-colors rounded"
-              onClick={props.onClose}
-              title="Close panel"
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                role="img"
-                aria-label="Close"
-              >
-                <path
-                  d="M4 4l8 8M12 4l-8 8"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                />
-              </svg>
-            </button>
-          </Show>
         </div>
       </div>
 
