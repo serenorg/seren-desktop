@@ -638,6 +638,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
       (meeting) => meeting.status === "capturing",
     );
 
+  // Live-capture signal for the titlebar so a recording stays visible after the
+  // meeting drawer is closed (#2335). The capture lifecycle lives in this shell,
+  // so the indicator persists for the whole session, not just while the panel is open.
+  const meetingRecording = () =>
+    meetingStore.state.meetings.some(
+      (meeting) => meeting.status === "capturing",
+    );
+
   return (
     <div class="flex flex-col h-screen bg-background text-foreground">
       <Titlebar
@@ -645,6 +653,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
         onToggleMeetings={handleToggleMeetings}
         onToggleSkills={handleToggleSkills}
         onToggleSettings={handleToggleSettings}
+        meetingRecording={meetingRecording()}
         recordPromptVisible={recordPromptVisible()}
         recordPromptSourceApp={meetingStore.state.autoDetectSourceApp}
         onRecordConversation={() => void meetingStore.acceptAutoDetect()}

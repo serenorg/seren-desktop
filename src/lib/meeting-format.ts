@@ -21,8 +21,22 @@ export function formatDuration(meeting: Meeting): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+// Auto-generated titles carry seconds so two captures started in the same
+// clock-minute stay distinguishable in the list (#2335). formatTime keeps minute
+// precision for the duration/status surfaces that don't need disambiguation.
+function formatTimeWithSeconds(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 export function meetingTitle(meeting: Meeting): string {
-  return meeting.title.trim() || `Meeting ${formatTime(meeting.startedAt)}`;
+  return (
+    meeting.title.trim() ||
+    `Meeting ${formatTimeWithSeconds(meeting.startedAt)}`
+  );
 }
 
 export const STATUS_LABELS: Record<Meeting["status"], string> = {

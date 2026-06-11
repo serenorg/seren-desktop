@@ -24,6 +24,26 @@ interface MeetingDetailProps {
   onRequestDelete?: (meeting: Meeting) => void;
 }
 
+function PencilGlyph() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M11.1 2.9a1.2 1.2 0 0 1 1.7 1.7l-6.8 6.8-2.3.6.6-2.3 6.8-6.8Z"
+        stroke="currentColor"
+        stroke-width="1.3"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
 function TrashGlyph() {
   return (
     <svg
@@ -92,8 +112,26 @@ export function MeetingDetail(props: MeetingDetailProps) {
   );
   const [regenerating, setRegenerating] = createSignal(false);
   const [highlightedSeq, setHighlightedSeq] = createSignal<number | null>(null);
+  const [editingTitle, setEditingTitle] = createSignal(false);
+  const [titleDraft, setTitleDraft] = createSignal("");
 
   const rows = new Map<number, HTMLElement>();
+
+  const startEditingTitle = () => {
+    // Edit the raw stored title (blank for an auto-named meeting), not the
+    // "Meeting HH:MM:SS" fallback, so the placeholder guides a real name.
+    setTitleDraft(props.meeting.title);
+    setEditingTitle(true);
+  };
+
+  // Persist the draft, then leave edit mode. Guarded so Enter (which exits edit
+  // mode) and the unmount blur that follows don't both fire a rename.
+  const commitTitle = async () => {
+    if (!editingTitle()) return;
+    const draft = titleDraft();
+    setEditingTitle(false);
+    await meetingStore.renameMeeting(props.meeting, draft);
+  };
 
   onMount(async () => {
     let builtins: MeetingTemplate[] = [];
@@ -153,9 +191,44 @@ export function MeetingDetail(props: MeetingDetailProps) {
       <div class="mb-5">
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
-            <h3 class="truncate text-[18px] font-semibold tracking-normal">
-              {meetingTitle(props.meeting)}
-            </h3>
+            <Show
+              when={editingTitle()}
+              fallback={
+                <div class="group flex max-w-full items-center gap-1.5">
+                  <h3 class="truncate text-[18px] font-semibold tracking-normal">
+                    {meetingTitle(props.meeting)}
+                  </h3>
+                  <button
+                    type="button"
+                    class="shrink-0 rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover:opacity-70"
+                    onClick={startEditingTitle}
+                    title="Rename meeting"
+                    aria-label="Rename meeting"
+                  >
+                    <PencilGlyph />
+                  </button>
+                </div>
+              }
+            >
+              <input
+                ref={(el) => queueMicrotask(() => el.focus())}
+                class="w-full h-9 rounded-md border border-border bg-surface-1 px-2.5 text-[18px] font-semibold text-foreground focus:outline-none focus:border-primary/60"
+                value={titleDraft()}
+                placeholder={meetingTitle(props.meeting)}
+                aria-label="Meeting title"
+                onInput={(event) => setTitleDraft(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void commitTitle();
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    setEditingTitle(false);
+                  }
+                }}
+                onBlur={() => void commitTitle()}
+              />
+            </Show>
             <div class="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
               <span>{STATUS_LABELS[props.meeting.status]}</span>
               <span class="font-mono tabular-nums">

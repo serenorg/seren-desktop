@@ -115,6 +115,10 @@ export function updateMeetingNotes(
   });
 }
 
+export function updateMeetingTitle(id: string, title: string): Promise<void> {
+  return invoke("update_meeting_title", { id, title });
+}
+
 export function setMeetingRoutedSkill(
   id: string,
   routedSkillSlug?: string | null,
