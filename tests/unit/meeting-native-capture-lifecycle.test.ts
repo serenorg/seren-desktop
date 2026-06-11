@@ -69,6 +69,7 @@ vi.mock("@/services/meetings", async (importOriginal) => ({
   getTranscriptSegments: m.getTranscriptSegments,
   isMeetingCaptureActive: m.isMeetingCaptureActive,
 }));
+vi.mock("@/services/orchestrator", () => ({ orchestrate: vi.fn() }));
 vi.mock("@/services/tray", () => ({
   setTrayRecording: m.setTrayRecording,
   onTrayToggleCapture: vi.fn(() => () => {}),
@@ -77,6 +78,12 @@ vi.mock("@/stores/settings.store", () => ({
   settingsStore: {
     get: (key: string) => key === "meetingAudioPrimed",
     set: vi.fn(),
+  },
+}));
+vi.mock("@/stores/conversation.store", () => ({
+  conversationStore: {
+    createConversationWithModel: vi.fn(async () => ({ id: "c1" })),
+    setActiveConversation: vi.fn(),
   },
 }));
 vi.mock("@/stores/provider.store", () => ({
