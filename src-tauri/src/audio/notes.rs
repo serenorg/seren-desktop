@@ -127,6 +127,11 @@ pub const TRANSCRIPT_CHAR_BUDGET: usize = 24_000;
 /// chunks, then reduced into a single set of notes — so a 60-minute meeting won't
 /// exceed the model's context. Returns parsed notes even when the model omits the
 /// JSON block (parser fails safe).
+///
+/// Long-meeting resilience (#2366): a 1+ hour meeting yields ~5-15 chunks; if
+/// any single chunk's LLM call returned empty content, the old `?` propagation
+/// nuked the whole meeting. Now we collect every chunk's result and only fail
+/// the whole pass when every chunk failed — see [`collect_resilient_partials`].
 pub async fn generate_notes(
     app: &tauri::AppHandle,
     model: String,
@@ -139,14 +144,50 @@ pub async fn generate_notes(
     }
 
     let chunks = chunk_transcript_by_chars(transcript, TRANSCRIPT_CHAR_BUDGET);
-    let mut partials = Vec::with_capacity(chunks.len());
-    for chunk in chunks.iter() {
-        let partial =
-            generate_notes_single(app, model.clone(), chunk, template_prompt, vocabulary).await?;
-        partials.push(partial);
+    let total_chunks = chunks.len();
+    let mut results = Vec::with_capacity(total_chunks);
+    for (idx, chunk) in chunks.iter().enumerate() {
+        let result =
+            generate_notes_single(app, model.clone(), chunk, template_prompt, vocabulary).await;
+        if let Err(err) = &result {
+            log::warn!(
+                "[meeting] notes chunk {} of {total_chunks} failed ({err}); continuing with remaining chunks",
+                idx + 1,
+            );
+        }
+        results.push(result);
     }
+    let partials = collect_resilient_partials(results)?;
 
     reduce_partials(app, model, partials, template_prompt, vocabulary).await
+}
+
+/// Resilience helper for the chunked notes pass and the reduce-pass re-chunk.
+/// Returns the surviving `Ok` partials when any chunk succeeded; returns the
+/// first `Err` only when **every** chunk failed. The chunked notes pipeline
+/// used to `?`-abort on the first failing chunk, which lost the entire
+/// meeting whenever one chunk hit an upstream blip; this helper makes the
+/// pipeline degrade to a partial summary rather than total data loss. #2366.
+pub fn collect_resilient_partials(
+    results: Vec<Result<ParsedNotes, String>>,
+) -> Result<Vec<ParsedNotes>, String> {
+    let mut partials = Vec::with_capacity(results.len());
+    let mut first_error: Option<String> = None;
+    for result in results {
+        match result {
+            Ok(notes) => partials.push(notes),
+            Err(err) => {
+                if first_error.is_none() {
+                    first_error = Some(err);
+                }
+            }
+        }
+    }
+    if partials.is_empty() {
+        Err(first_error.unwrap_or_else(|| "no chunks produced notes".to_string()))
+    } else {
+        Ok(partials)
+    }
 }
 
 /// Reduce N partial notes into one. If the combined sections exceed
@@ -171,8 +212,15 @@ async fn reduce_partials(
     for _ in 0..MAX_REDUCE_ROUNDS {
         let combined = combine_partials_text(&partials);
         if partials.len() <= 1 || combined.chars().count() <= TRANSCRIPT_CHAR_BUDGET {
-            return generate_notes_single(app, model, &combined, &reduce_template, vocabulary)
-                .await;
+            return finalize_reduce(
+                app,
+                model,
+                &combined,
+                &reduce_template,
+                vocabulary,
+                &partials,
+            )
+            .await;
         }
         let sub_chunks = chunk_transcript_by_chars(&combined, TRANSCRIPT_CHAR_BUDGET);
         if sub_chunks.len() >= partials.len() {
@@ -181,20 +229,93 @@ async fn reduce_partials(
                 partials.len(),
                 sub_chunks.len(),
             );
-            return generate_notes_single(app, model, &combined, &reduce_template, vocabulary)
-                .await;
+            return finalize_reduce(
+                app,
+                model,
+                &combined,
+                &reduce_template,
+                vocabulary,
+                &partials,
+            )
+            .await;
         }
-        let mut next = Vec::with_capacity(sub_chunks.len());
+        let mut sub_results = Vec::with_capacity(sub_chunks.len());
         for chunk in sub_chunks.iter() {
-            next.push(
+            sub_results.push(
                 generate_notes_single(app, model.clone(), chunk, &reduce_template, vocabulary)
-                    .await?,
+                    .await,
             );
         }
-        partials = next;
+        partials = collect_resilient_partials(sub_results)?;
     }
     let combined = combine_partials_text(&partials);
-    generate_notes_single(app, model, &combined, &reduce_template, vocabulary).await
+    finalize_reduce(
+        app,
+        model,
+        &combined,
+        &reduce_template,
+        vocabulary,
+        &partials,
+    )
+    .await
+}
+
+/// Final-reduce wrapper: tries one model call to produce a single coherent
+/// note set. If that returns "no content" or fails, falls back to a notes
+/// object synthesized from the partials so the user still gets the per-
+/// section markdown plus a union of action items and fields — instead of
+/// the all-or-nothing failure that #2366 surfaced.
+async fn finalize_reduce(
+    app: &tauri::AppHandle,
+    model: String,
+    combined: &str,
+    reduce_template: &str,
+    vocabulary: &[String],
+    partials: &[ParsedNotes],
+) -> Result<ParsedNotes, String> {
+    match generate_notes_single(app, model, combined, reduce_template, vocabulary).await {
+        Ok(notes) => Ok(notes),
+        Err(err) => {
+            log::warn!(
+                "[meeting] reduce pass failed ({err}); returning combined per-section notes"
+            );
+            Ok(notes_from_partials(combined, partials))
+        }
+    }
+}
+
+/// Synthesize a ParsedNotes from the chunked partials when the reduce model
+/// call fails. The markdown is the already-rendered combined per-section
+/// text; action items are unioned (de-duped by trimmed text) and fields are
+/// merged (first-write-wins to preserve earliest-section evidence).
+fn notes_from_partials(combined: &str, partials: &[ParsedNotes]) -> ParsedNotes {
+    let mut action_items: Vec<String> = Vec::new();
+    let mut seen_actions: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut summaries: Vec<String> = Vec::new();
+    let mut fields: BTreeMap<String, Value> = BTreeMap::new();
+    for partial in partials {
+        if !partial.structured.summary.trim().is_empty() {
+            summaries.push(partial.structured.summary.trim().to_string());
+        }
+        for item in &partial.structured.action_items {
+            let key = item.trim().to_string();
+            if key.is_empty() || !seen_actions.insert(key.clone()) {
+                continue;
+            }
+            action_items.push(key);
+        }
+        for (key, value) in &partial.structured.fields {
+            fields.entry(key.clone()).or_insert_with(|| value.clone());
+        }
+    }
+    ParsedNotes {
+        markdown: combined.to_string(),
+        structured: StructuredNotes {
+            summary: summaries.join(" / "),
+            action_items,
+            fields,
+        },
+    }
 }
 
 const MAX_REDUCE_ROUNDS: usize = 4;
@@ -461,5 +582,116 @@ mod tests {
         assert!(!combined.contains("Section action items"));
         assert!(!combined.contains("Section fields"));
         assert!(combined.contains("# Just markdown"));
+    }
+
+    fn sample_partial(label: &str) -> ParsedNotes {
+        ParsedNotes {
+            markdown: format!("# {label}"),
+            structured: StructuredNotes {
+                summary: format!("{label} summary"),
+                action_items: vec![format!("{label} action")],
+                fields: BTreeMap::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn collect_resilient_partials_drops_empty_failures_when_some_chunks_succeed() {
+        // The #2366 shape: chunk 2 of a long meeting returns "no content";
+        // chunks 1 and 3 succeed. Old behavior `?`-aborted on chunk 2 and lost
+        // the whole meeting. New behavior returns the two surviving partials.
+        let results = vec![
+            Ok(sample_partial("A")),
+            Err("chat completion returned no content".to_string()),
+            Ok(sample_partial("C")),
+        ];
+
+        let partials = collect_resilient_partials(results).expect("survivors");
+
+        assert_eq!(partials.len(), 2);
+        assert_eq!(partials[0].markdown, "# A");
+        assert_eq!(partials[1].markdown, "# C");
+    }
+
+    #[test]
+    fn collect_resilient_partials_surfaces_first_error_when_every_chunk_failed() {
+        // All-empty case must still error out so the user sees a failure
+        // banner instead of an empty notes panel.
+        let results: Vec<Result<ParsedNotes, String>> = vec![
+            Err("chat completion returned no content".to_string()),
+            Err("chat completion upstream 429: rate limited".to_string()),
+        ];
+
+        let err = collect_resilient_partials(results).expect_err("all-fail surfaces error");
+
+        assert_eq!(err, "chat completion returned no content");
+    }
+
+    #[test]
+    fn collect_resilient_partials_passes_through_all_successful_chunks() {
+        let results = vec![Ok(sample_partial("A")), Ok(sample_partial("B"))];
+
+        let partials = collect_resilient_partials(results).expect("all-ok passes");
+
+        assert_eq!(partials.len(), 2);
+    }
+
+    #[test]
+    fn notes_from_partials_unions_action_items_and_fields_for_fallback() {
+        // When the final reduce-pass model call returns empty, we synthesize
+        // notes from the partials so the user keeps per-section content plus a
+        // de-duped union of action items / merged fields — instead of total
+        // data loss (#2366).
+        let mut fields_a = BTreeMap::new();
+        fields_a.insert("company".to_string(), serde_json::json!("Acme"));
+        let mut fields_b = BTreeMap::new();
+        fields_b.insert("owner".to_string(), serde_json::json!("Jane"));
+        fields_b.insert("company".to_string(), serde_json::json!("Other")); // dup key — first wins
+
+        let partials = vec![
+            ParsedNotes {
+                markdown: "# A".into(),
+                structured: StructuredNotes {
+                    summary: "Discovery".into(),
+                    action_items: vec!["Send recap".into(), "Send recap".into()], // dup
+                    fields: fields_a,
+                },
+            },
+            ParsedNotes {
+                markdown: "# B".into(),
+                structured: StructuredNotes {
+                    summary: "Pricing".into(),
+                    action_items: vec!["Confirm budget".into()],
+                    fields: fields_b,
+                },
+            },
+        ];
+
+        let combined = "# A\n\n# B";
+        let fallback = notes_from_partials(combined, &partials);
+
+        assert_eq!(fallback.markdown, combined);
+        assert_eq!(fallback.structured.summary, "Discovery / Pricing");
+        assert_eq!(
+            fallback.structured.action_items,
+            vec!["Send recap".to_string(), "Confirm budget".to_string()]
+        );
+        assert_eq!(
+            fallback
+                .structured
+                .fields
+                .get("company")
+                .and_then(Value::as_str),
+            Some("Acme"),
+            "first-write-wins for duplicate keys"
+        );
+        assert_eq!(
+            fallback
+                .structured
+                .fields
+                .get("owner")
+                .and_then(Value::as_str),
+            Some("Jane")
+        );
     }
 }
