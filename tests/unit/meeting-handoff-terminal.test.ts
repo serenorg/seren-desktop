@@ -36,11 +36,6 @@ vi.mock("@/services/meetings", async (importOriginal) => ({
   listMeetingTemplates: m.listMeetingTemplates,
 }));
 vi.mock("@/services/orchestrator", () => ({ orchestrate: m.orchestrate }));
-vi.mock("@/services/captureWidget", () => ({
-  closeCaptureWidget: vi.fn(),
-  openCaptureWidget: vi.fn(),
-  onWidgetStopRequest: vi.fn(() => () => {}),
-}));
 vi.mock("@/services/tray", () => ({
   setTrayRecording: vi.fn(),
   onTrayToggleCapture: vi.fn(() => () => {}),

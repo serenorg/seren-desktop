@@ -6,11 +6,6 @@ import { createStore } from "solid-js/store";
 import { formatTime } from "@/lib/meeting-format";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import {
-  closeCaptureWidget,
-  onWidgetStopRequest,
-  openCaptureWidget,
-} from "@/services/captureWidget";
-import {
   type CaptureStopOutcome,
   createMeeting,
   deleteMeeting as deleteMeetingRecord,
@@ -76,7 +71,6 @@ let transcriptUnlisten: UnlistenFn | null = null;
 let statusUnlisten: UnlistenFn | null = null;
 let levelUnlisten: UnlistenFn | null = null;
 let segmentsUpdatedUnlisten: UnlistenFn | null = null;
-let widgetStopUnlisten: (() => void) | null = null;
 let trayToggleUnlisten: (() => void) | null = null;
 
 let autoDetectTimer: number | null = null;
@@ -87,9 +81,9 @@ const AUTO_DETECT_POLL_MS = 5_000;
 // so a double-trigger can't launch two mic streams for the same session.
 let isStarting = false;
 
-// Stops in flight, keyed by meeting id. Two stop sources (widget + panel, tray +
-// panel) can fire near-simultaneously and both pass the status check, double-
-// running notes + the agent handoff. This guard makes the second a no-op (#2162).
+// Stops in flight, keyed by meeting id. Two stop sources (tray + panel) can
+// fire near-simultaneously and both pass the status check, double-running notes
+// + the agent handoff. This guard makes the second a no-op (#2162).
 const processingMeetings = new Set<string>();
 
 interface CaptureLevelEvent {
@@ -295,15 +289,6 @@ async function startMeetingEventListeners(): Promise<void> {
     },
   );
 
-  // The floating widget's Stop button can't run the notes/handoff flow in its
-  // own webview, so it asks the main window to stop the capture it owns.
-  widgetStopUnlisten = await onWidgetStopRequest((meetingId) => {
-    const meeting = meetingState.meetings.find((item) => item.id === meetingId);
-    if (meeting && meeting.status === "capturing") {
-      void stopAndProcess(meeting);
-    }
-  });
-
   // The tray menu's Start/Stop action toggles capture through the same flow.
   trayToggleUnlisten = await onTrayToggleCapture(() => {
     void toggleCaptureFromTray();
@@ -315,13 +300,11 @@ function stopMeetingEventListeners(): void {
   statusUnlisten?.();
   levelUnlisten?.();
   segmentsUpdatedUnlisten?.();
-  widgetStopUnlisten?.();
   trayToggleUnlisten?.();
   transcriptUnlisten = null;
   statusUnlisten = null;
   levelUnlisten = null;
   segmentsUpdatedUnlisten = null;
-  widgetStopUnlisten = null;
   trayToggleUnlisten = null;
 }
 
@@ -334,7 +317,6 @@ async function startCapture(meeting: Meeting): Promise<boolean> {
       meetingId: meeting.id,
     });
   } catch (error) {
-    void closeCaptureWidget();
     void setTrayRecording(false);
     const reason = captureStartupFailureReason(error);
     console.error(
@@ -350,7 +332,6 @@ async function startCapture(meeting: Meeting): Promise<boolean> {
     return false;
   }
   setMeetingState("captureLevel", 0);
-  void openCaptureWidget(meeting.id);
   void setTrayRecording(true);
   return true;
 }
@@ -435,7 +416,6 @@ async function reconcileStaleCaptures(): Promise<void> {
           () => false,
         );
         if (active) {
-          void openCaptureWidget(meeting.id);
           void setTrayRecording(true);
           reattached = true;
           if (!meetingState.activeMeeting) {
@@ -466,7 +446,6 @@ async function stopCapture(
   meetingId: string,
 ): Promise<CaptureStopOutcome | null> {
   setMeetingState("captureLevel", 0);
-  void closeCaptureWidget();
   void setTrayRecording(false);
   if (isTauriRuntime()) {
     return await stopBackendCapture(meetingId);
@@ -514,8 +493,8 @@ async function resolveTemplatePrompt(
 
 // End capture, generate Tier-1 notes, then hand off to a tagged skill if one is
 // installed. With no meeting skill, it stops at notes (Granola parity). A single
-// in-flight guard per meeting keeps two near-simultaneous stop sources (widget,
-// tray, panel) from double-running notes + the agent handoff (#2162).
+// in-flight guard per meeting keeps two near-simultaneous stop sources (tray,
+// panel) from double-running notes + the agent handoff (#2162).
 async function stopAndProcess(meeting: Meeting): Promise<void> {
   if (processingMeetings.has(meeting.id)) return;
   processingMeetings.add(meeting.id);

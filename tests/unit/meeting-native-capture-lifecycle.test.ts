@@ -45,8 +45,6 @@ const m = vi.hoisted(() => ({
   listMeetings: vi.fn(async (): Promise<Meeting[]> => []),
   getTranscriptSegments: vi.fn(async () => []),
   isMeetingCaptureActive: vi.fn(async () => false),
-  closeCaptureWidget: vi.fn(),
-  openCaptureWidget: vi.fn(),
   setTrayRecording: vi.fn(),
 }));
 
@@ -70,11 +68,6 @@ vi.mock("@/services/meetings", async (importOriginal) => ({
   listMeetings: m.listMeetings,
   getTranscriptSegments: m.getTranscriptSegments,
   isMeetingCaptureActive: m.isMeetingCaptureActive,
-}));
-vi.mock("@/services/captureWidget", () => ({
-  closeCaptureWidget: m.closeCaptureWidget,
-  openCaptureWidget: m.openCaptureWidget,
-  onWidgetStopRequest: vi.fn(() => () => {}),
 }));
 vi.mock("@/services/tray", () => ({
   setTrayRecording: m.setTrayRecording,
@@ -127,13 +120,12 @@ describe("meetingStore native capture lifecycle (#2225)", () => {
     meetingStore.clearError();
   });
 
-  it("starts capture through Rust only and never calls the WebView mic path", async () => {
+  it("starts capture through Rust and the tray indicator only", async () => {
     m.listMeetings.mockResolvedValue([meeting()]);
 
     await meetingStore.requestCaptureStart(meeting());
 
     expect(m.startMeetingCapture).toHaveBeenCalledWith("m1");
-    expect(m.openCaptureWidget).toHaveBeenCalledWith("m1");
     expect(m.setTrayRecording).toHaveBeenCalledWith(true);
   });
 
@@ -165,6 +157,7 @@ describe("meetingStore native capture lifecycle (#2225)", () => {
     await meetingStore.reconcileStaleCaptures();
 
     expect(m.isMeetingCaptureActive).toHaveBeenCalledWith("active");
+    expect(m.setTrayRecording).toHaveBeenCalledWith(true);
     expect(m.updateMeetingStatus).not.toHaveBeenCalledWith(
       "active",
       "failed",

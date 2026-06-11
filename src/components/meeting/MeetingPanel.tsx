@@ -59,7 +59,7 @@ export function MeetingPanel(props: MeetingPanelProps) {
   const [pendingDelete, setPendingDelete] = createSignal<Meeting | null>(null);
   const [deleting, setDeleting] = createSignal(false);
 
-  // The capture lifecycle (event listeners, auto-detect, widget/tray relays)
+  // The capture lifecycle (event listeners, auto-detect, tray relay)
   // lives in AppShell so it survives this panel unmounting on close. The panel
   // only refreshes its own list when it opens.
   onMount(() => {

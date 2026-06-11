@@ -583,7 +583,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     void restoreEditorSessions();
 
     // Meeting capture lifecycle lives here, in the always-mounted shell, so the
-    // widget Stop relay, tray toggle, and transcript listeners survive the
+    // tray toggle and transcript listeners survive the
     // MeetingPanel unmounting when its slide panel closes. Started once per app
     // session; torn down on shell cleanup.
     void meetingStore.startMeetingEventListeners();

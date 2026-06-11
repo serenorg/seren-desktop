@@ -9,8 +9,6 @@ const m = vi.hoisted(() => ({
   updateMeetingStatus: vi.fn(async () => {}),
   listMeetings: vi.fn(async (): Promise<Meeting[]> => []),
   getTranscriptSegments: vi.fn(async () => []),
-  closeCaptureWidget: vi.fn(),
-  openCaptureWidget: vi.fn(),
   setTrayRecording: vi.fn(),
 }));
 
@@ -25,11 +23,6 @@ vi.mock("@/services/meetings", async (importOriginal) => ({
   updateMeetingStatus: m.updateMeetingStatus,
   listMeetings: m.listMeetings,
   getTranscriptSegments: m.getTranscriptSegments,
-}));
-vi.mock("@/services/captureWidget", () => ({
-  closeCaptureWidget: m.closeCaptureWidget,
-  openCaptureWidget: m.openCaptureWidget,
-  onWidgetStopRequest: vi.fn(() => () => {}),
 }));
 vi.mock("@/services/tray", () => ({
   setTrayRecording: m.setTrayRecording,
@@ -99,8 +92,6 @@ describe("meetingStore capture startup failure visibility (#2209)", () => {
     expect(m.startMeetingCapture).toHaveBeenCalledWith("m1");
     expect(m.stopMeetingCapture).not.toHaveBeenCalled();
     expect(m.updateMeetingStatus).not.toHaveBeenCalled();
-    expect(m.openCaptureWidget).not.toHaveBeenCalled();
-    expect(m.closeCaptureWidget).toHaveBeenCalled();
     expect(m.setTrayRecording).toHaveBeenCalledWith(false);
     expect(meetingStore.state.error).toContain("Microphone access is blocked");
     expect(consoleInfo).toHaveBeenCalledWith(
