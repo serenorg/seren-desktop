@@ -1,5 +1,5 @@
 // ABOUTME: Regression test for #2158 — a handed-off meeting must reach done/failed, not sit at agent_running forever.
-// ABOUTME: Drives the real stopAndProcess -> runHandoff flow with the agent run mocked.
+// ABOUTME: Drives user-triggered routeMeetingToSkill (#2346) with the agent run mocked.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -97,7 +97,10 @@ describe("meetingStore handoff terminal status (#2158)", () => {
   it("sets done after the agent run resolves", async () => {
     m.orchestrate.mockResolvedValueOnce(undefined);
 
-    await meetingStore.stopAndProcess(meeting());
+    await meetingStore.routeMeetingToSkill(
+      meeting({ status: "notes_ready" }),
+      "s",
+    );
 
     expect(m.orchestrate).toHaveBeenCalledTimes(1);
     // Terminal transition carries no ended_at so the capture-end time survives (#2174).
@@ -107,7 +110,10 @@ describe("meetingStore handoff terminal status (#2158)", () => {
   it("sets failed when the agent run rejects", async () => {
     m.orchestrate.mockRejectedValueOnce(new Error("boom"));
 
-    await meetingStore.stopAndProcess(meeting());
+    await meetingStore.routeMeetingToSkill(
+      meeting({ status: "notes_ready" }),
+      "s",
+    );
 
     expect(m.updateMeetingStatus).toHaveBeenCalledWith(
       "m1",

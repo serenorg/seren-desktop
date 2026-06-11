@@ -1,5 +1,5 @@
-// ABOUTME: Regression test for #2162 — concurrent stop sources must not double-run notes + agent handoff.
-// ABOUTME: Two near-simultaneous stops (tray/panel) for one meeting should process it once.
+// ABOUTME: Regression test for #2162 — concurrent stop sources must not double-run notes generation.
+// ABOUTME: Two near-simultaneous stops (tray/panel) for one meeting should process it once. Routing is user-triggered (#2346).
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -102,7 +102,8 @@ describe("meetingStore concurrent stop guard (#2162)", () => {
     ]);
 
     expect(m.generateMeetingNotes).toHaveBeenCalledTimes(1);
-    expect(m.orchestrate).toHaveBeenCalledTimes(1);
+    // Routing is now user-triggered, so a stop does not invoke the agent (#2346).
+    expect(m.orchestrate).not.toHaveBeenCalled();
   });
 
   it("allows a fresh stop after the first one finishes", async () => {
@@ -110,6 +111,6 @@ describe("meetingStore concurrent stop guard (#2162)", () => {
     await meetingStore.stopAndProcess(meeting());
 
     expect(m.generateMeetingNotes).toHaveBeenCalledTimes(2);
-    expect(m.orchestrate).toHaveBeenCalledTimes(2);
+    expect(m.orchestrate).not.toHaveBeenCalled();
   });
 });

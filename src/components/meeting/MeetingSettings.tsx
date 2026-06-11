@@ -180,20 +180,6 @@ export function MeetingSettings() {
       </section>
 
       <section>
-        <FieldLabel hint="Slug of the installed meeting skill to use when several match.">
-          Default routing skill
-        </FieldLabel>
-        <input
-          class="h-8 w-full rounded-md border border-border bg-surface-1 px-2.5 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/60"
-          placeholder="e.g. glide/affinity-proposals (blank = first match)"
-          value={settingsStore.get("meetingDefaultSkill")}
-          onInput={(event) =>
-            settingsStore.set("meetingDefaultSkill", event.currentTarget.value)
-          }
-        />
-      </section>
-
-      <section>
         <label class="flex items-center justify-between gap-3 cursor-pointer">
           <FieldLabel hint="Clean up filler and punctuation in notes and dictation.">
             AI cleanup
