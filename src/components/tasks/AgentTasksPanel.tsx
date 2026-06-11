@@ -29,11 +29,8 @@ import { providerStore } from "@/stores/provider.store";
 import { threadStore } from "@/stores/thread.store";
 import { AgentTaskItem } from "./AgentTaskItem";
 
-interface AgentTasksPanelProps {
-  onClose?: () => void;
-}
-
-export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
+// SlidePanel chrome owns Close + backdrop dismissal — no AgentTasksPanel props (#2354).
+export const AgentTasksPanel: Component = () => {
   type RunMode = "cloud" | "local";
   const [runMode, setRunMode] = createSignal<RunMode>("cloud");
   const [publisherSlug, setPublisherSlug] = createSignal("");
@@ -155,28 +152,6 @@ export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
             </span>
           </Show>
         </div>
-        <Show when={props.onClose}>
-          <button
-            type="button"
-            class="p-1 text-muted-foreground hover:text-foreground transition-colors"
-            onClick={props.onClose}
-          >
-            <svg
-              class="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <title>Close panel</title>
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
-        </Show>
       </div>
 
       {/* Run Agent Form */}
