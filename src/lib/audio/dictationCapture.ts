@@ -72,6 +72,10 @@ export async function startDictationCapture(
 
   let buffer: number[] = [];
   let quietSamples = 0;
+  // True once the current buffer has seen any frame above the speech threshold.
+  // Pure-silence buffers are dropped instead of uploaded — whisper-1 hallucinates
+  // Korean MBC sign-offs and "Thank you." on non-speech audio (#2349).
+  let bufferHasSpeech = false;
   // Serialized chain of transcription work; stop() awaits this before the tail.
   let pending: Promise<void> = Promise.resolve();
   let transcript = "";
@@ -99,8 +103,11 @@ export async function startDictationCapture(
   const flush = () => {
     if (buffer.length < minFlushSamples) return;
     const frame = buffer;
+    const hadSpeech = bufferHasSpeech;
     buffer = [];
     quietSamples = 0;
+    bufferHasSpeech = false;
+    if (!hadSpeech) return;
     queueTranscription(frame);
   };
 
@@ -112,6 +119,7 @@ export async function startDictationCapture(
       quietSamples += channel.length;
     } else {
       quietSamples = 0;
+      bufferHasSpeech = true;
     }
 
     if (
@@ -135,10 +143,13 @@ export async function startDictationCapture(
 
   const stop = async (): Promise<string> => {
     processor.onaudioprocess = null;
-    // Flush whatever remains, even if shorter than the usual minimum.
-    if (buffer.length > 0) {
+    // Flush whatever remains, even if shorter than the usual minimum — but only
+    // when the tail buffer actually contains speech. Sending pure silence here
+    // is the dominant source of the slow stop-to-result tail (#2349).
+    if (buffer.length > 0 && bufferHasSpeech) {
       const frame = buffer;
       buffer = [];
+      bufferHasSpeech = false;
       queueTranscription(frame);
     }
     processor.disconnect();

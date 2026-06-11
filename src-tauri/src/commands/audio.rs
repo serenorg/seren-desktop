@@ -2,7 +2,7 @@
 // ABOUTME: Stores meetings and transcript segments without persisting raw audio.
 
 use crate::audio::capture::to_mono_16k;
-use crate::audio::chunker::Chunk;
+use crate::audio::chunker::{Chunk, ChunkCfg, chunk as chunk_pcm};
 use crate::audio::cleanup::{build_cleanup_prompt, build_transform_prompt};
 use crate::audio::detect::{MeetingAutodetectResult, meeting_detection, probe_audio_activity};
 use crate::audio::llm::{CompletionRequest, complete};
@@ -820,6 +820,10 @@ pub fn meeting_autodetect() -> MeetingAutodetectResult {
 // --- Dictation (shares the transcribe + cleanup engines with Meeting Mode) --
 
 /// Transcribe a single dictation chunk; returns "" for silence rather than erroring.
+///
+/// VAD-gated (#2349): silent buffers never reach whisper-1, which hallucinates
+/// Korean MBC news sign-offs and "Thank you." on non-speech audio. Reuses the
+/// Meeting-Mode chunker so dictation and meeting share one tested speech filter.
 #[tauri::command]
 pub async fn transcribe_pcm(
     app: AppHandle,
@@ -828,16 +832,20 @@ pub async fn transcribe_pcm(
     sample_rate: u32,
 ) -> Result<String, String> {
     let normalized = to_mono_16k(&samples, channels.max(1), sample_rate);
-    if normalized.is_empty() {
+    let Some(speech) = extract_dictation_speech(normalized) else {
         return Ok(String::new());
-    }
+    };
     let chunk = Chunk {
         start_ms: 0,
         end_ms: 0,
-        samples: normalized,
+        samples: speech,
     };
     let transcriber = GatewayTranscriber::new(app);
-    match transcribe_chunk_with_retry(&transcriber, &chunk, RetryConfig::default()).await {
+    let cfg = RetryConfig {
+        retry_on_empty: false,
+        ..RetryConfig::default()
+    };
+    match transcribe_chunk_with_retry(&transcriber, &chunk, cfg).await {
         Ok(segments) => Ok(segments
             .into_iter()
             .map(|segment| segment.text)
@@ -846,6 +854,32 @@ pub async fn transcribe_pcm(
         Err(TranscribeError::Empty) => Ok(String::new()),
         Err(err) => Err(err.to_string()),
     }
+}
+
+/// VAD-filter dictation PCM: returns `None` when no speech is detected, else the
+/// concatenated speech samples (trimmed silence at the edges and between turns).
+///
+/// Shares the Meeting-Mode energy threshold and silence cutoff. `min_window_ms`
+/// is lowered to 100 ms so single-syllable dictation words ("Hi", "no") still
+/// pass the gate — Meeting Mode's 250 ms default is tuned for full utterances.
+fn extract_dictation_speech(samples: Vec<i16>) -> Option<Vec<i16>> {
+    if samples.is_empty() {
+        return None;
+    }
+    let cfg = ChunkCfg {
+        min_window_ms: 100,
+        ..ChunkCfg::default()
+    };
+    let chunks = chunk_pcm(&samples, cfg);
+    if chunks.is_empty() {
+        return None;
+    }
+    let total: usize = chunks.iter().map(|chunk| chunk.samples.len()).sum();
+    let mut speech = Vec::with_capacity(total);
+    for chunk in chunks {
+        speech.extend(chunk.samples);
+    }
+    Some(speech)
 }
 
 /// Polish dictated text through the shared cleanup engine + custom vocabulary.
@@ -1553,6 +1587,34 @@ mod tests {
         };
 
         assert_eq!(stop_capture_failure_reason(&summary, 1, 1), None);
+    }
+
+    #[test]
+    fn dictation_vad_gate_drops_pure_silence_before_whisper() {
+        // #2349: silent dictation buffers must not reach whisper-1, which
+        // hallucinates Korean MBC sign-offs ("MBC 뉴스 …입니다") and "Thank you."
+        // on non-speech audio. The gate is the same VAD Meeting Mode runs.
+        // 1s @ 16kHz of dead silence — what a near-mute mic produces between
+        // partial flushes.
+        let silence = vec![0i16; 16_000];
+
+        assert!(extract_dictation_speech(silence).is_none());
+    }
+
+    #[test]
+    fn dictation_vad_gate_preserves_speech_samples() {
+        // A buffer with real signal above the VAD threshold must pass through.
+        // ~1.5s @ 16kHz of square-wave PCM (well above the 350 RMS threshold) —
+        // matches a normal dictation flush window.
+        let speech: Vec<i16> = (0..24_000)
+            .map(|i| if i % 16 < 8 { 8_000 } else { -8_000 })
+            .collect();
+
+        let extracted = extract_dictation_speech(speech).expect("speech must pass the gate");
+        assert!(
+            !extracted.is_empty(),
+            "speech samples must survive the VAD gate"
+        );
     }
 
     #[test]
