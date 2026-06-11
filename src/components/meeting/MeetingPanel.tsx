@@ -16,9 +16,7 @@ import { createMeeting, type Meeting } from "@/services/meetings";
 import { meetingStore } from "@/stores/meeting.store";
 import { settingsStore } from "@/stores/settings.store";
 
-interface MeetingPanelProps {
-  onClose: () => void;
-}
+// SlidePanel chrome owns Close + backdrop dismissal — no MeetingPanel props.
 
 function MicGlyph() {
   return (
@@ -51,7 +49,7 @@ function StopGlyph() {
   );
 }
 
-export function MeetingPanel(props: MeetingPanelProps) {
+export function MeetingPanel() {
   const [starting, setStarting] = createSignal(false);
   const [stopping, setStopping] = createSignal(false);
   const [title, setTitle] = createSignal("");
@@ -140,51 +138,29 @@ export function MeetingPanel(props: MeetingPanelProps) {
               {meetingStore.state.meetings.length} saved
             </div>
           </div>
-          <div class="flex items-center gap-1.5">
-            <button
-              type="button"
-              class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-surface-2 hover:bg-surface-3 transition-colors"
-              classList={{
-                "text-primary": showSettings(),
-                "text-muted-foreground hover:text-foreground": !showSettings(),
-              }}
-              onClick={() => setShowSettings((value) => !value)}
-              title="Meeting settings"
+          {/* Close X is supplied by the shared SlidePanel chrome (#2345). */}
+          <button
+            type="button"
+            class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-surface-2 hover:bg-surface-3 transition-colors"
+            classList={{
+              "text-primary": showSettings(),
+              "text-muted-foreground hover:text-foreground": !showSettings(),
+            }}
+            onClick={() => setShowSettings((value) => !value)}
+            title="Meeting settings"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              aria-label="Settings"
+              role="img"
             >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-label="Settings"
-                role="img"
-              >
-                <path d="M8 5.5A2.5 2.5 0 1 0 8 10.5 2.5 2.5 0 0 0 8 5.5Zm0 1.2a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6Z" />
-                <path d="M7.3 1.5a.7.7 0 0 1 1.4 0l.1.9c.4.1.8.3 1.1.5l.8-.5a.7.7 0 0 1 1 1l-.5.8c.2.3.4.7.5 1.1l.9.1a.7.7 0 0 1 0 1.4l-.9.1c-.1.4-.3.8-.5 1.1l.5.8a.7.7 0 0 1-1 1l-.8-.5c-.3.2-.7.4-1.1.5l-.1.9a.7.7 0 0 1-1.4 0l-.1-.9c-.4-.1-.8-.3-1.1-.5l-.8.5a.7.7 0 0 1-1-1l.5-.8c-.2-.3-.4-.7-.5-1.1l-.9-.1a.7.7 0 0 1 0-1.4l.9-.1c.1-.4.3-.8.5-1.1l-.5-.8a.7.7 0 0 1 1-1l.8.5c.3-.2.7-.4 1.1-.5l.1-.9Z" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              class="w-7 h-7 flex items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground hover:text-foreground hover:bg-surface-3 transition-colors"
-              onClick={props.onClose}
-              title="Close"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M4 4l8 8M12 4l-8 8"
-                  stroke="currentColor"
-                  stroke-width="1.4"
-                  stroke-linecap="round"
-                />
-              </svg>
-            </button>
-          </div>
+              <path d="M8 5.5A2.5 2.5 0 1 0 8 10.5 2.5 2.5 0 0 0 8 5.5Zm0 1.2a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6Z" />
+              <path d="M7.3 1.5a.7.7 0 0 1 1.4 0l.1.9c.4.1.8.3 1.1.5l.8-.5a.7.7 0 0 1 1 1l-.5.8c.2.3.4.7.5 1.1l.9.1a.7.7 0 0 1 0 1.4l-.9.1c-.1.4-.3.8-.5 1.1l.5.8a.7.7 0 0 1-1 1l-.8-.5c-.3.2-.7.4-1.1.5l-.1.9a.7.7 0 0 1-1.4 0l-.1-.9c-.4-.1-.8-.3-1.1-.5l-.8.5a.7.7 0 0 1-1-1l.5-.8c-.2-.3-.4-.7-.5-1.1l-.9-.1a.7.7 0 0 1 0-1.4l.9-.1c.1-.4.3-.8.5-1.1l-.5-.8a.7.7 0 0 1 1-1l.8.5c.3-.2.7-.4 1.1-.5l.1-.9Z" />
+            </svg>
+          </button>
         </div>
       </header>
 
