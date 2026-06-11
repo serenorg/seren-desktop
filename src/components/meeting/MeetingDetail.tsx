@@ -2,6 +2,7 @@
 // ABOUTME: AI notes render muted; transcript shows Me bright / Them muted with jump-to-source.
 
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { openExternalLink } from "@/lib/external-link";
 import {
   formatDuration,
   meetingTitle,
@@ -16,6 +17,7 @@ import {
   type StructuredNotes,
   type TranscriptSegment,
 } from "@/services/meetings";
+import { authStore, requestSignInModal } from "@/stores/auth.store";
 import { meetingStore } from "@/stores/meeting.store";
 import { settingsStore } from "@/stores/settings.store";
 
@@ -309,6 +311,43 @@ export function MeetingDetail(props: MeetingDetailProps) {
               innerHTML={renderMarkdown(markdown())}
             />
           )}
+        </Show>
+        <Show when={props.meeting.notesMarkdown}>
+          <Show
+            when={props.meeting.serenNotesId}
+            fallback={
+              <Show when={!authStore.isAuthenticated}>
+                <div class="mt-2 text-[12px] text-muted-foreground">
+                  <button
+                    type="button"
+                    class="text-primary hover:underline focus:outline-none focus:underline"
+                    onClick={() => requestSignInModal()}
+                  >
+                    Login to SerenDB to chat with your meeting notes
+                  </button>
+                </div>
+              </Show>
+            }
+          >
+            {(serenNotesId) => {
+              const url = `https://notes.serendb.com/notes/${serenNotesId()}`;
+              return (
+                <div class="mt-2 text-[12px] text-muted-foreground">
+                  Chat with meeting notes:{" "}
+                  <button
+                    type="button"
+                    class="text-primary hover:underline focus:outline-none focus:underline break-all"
+                    onClick={() => {
+                      void openExternalLink(url);
+                    }}
+                    title="Open this meeting on notes.serendb.com"
+                  >
+                    {url}
+                  </button>
+                </div>
+              );
+            }}
+          </Show>
         </Show>
       </section>
 

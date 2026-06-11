@@ -650,6 +650,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             notes_struct_json TEXT,
             failure_reason TEXT,
             capture_diagnostics_json TEXT,
+            seren_notes_id TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             FOREIGN KEY (agent_conversation_id) REFERENCES conversations(id)
@@ -726,6 +727,16 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             [],
         )
         .ok();
+    }
+
+    // Migration: add seren-notes id link to meetings for existing DBs. Nullable
+    // so historical rows remain valid; populated only when auto-publish lands.
+    let has_seren_notes_id: bool = conn
+        .prepare("SELECT seren_notes_id FROM meetings LIMIT 1")
+        .is_ok();
+    if !has_seren_notes_id {
+        conn.execute("ALTER TABLE meetings ADD COLUMN seren_notes_id TEXT", [])
+            .ok();
     }
 
     // Migration: add agent conversation columns if they don't exist (for existing DBs)
