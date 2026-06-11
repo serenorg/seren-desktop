@@ -561,19 +561,27 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
     const refreshed =
       meetingState.meetings.find((m) => m.id === meeting.id) ?? null;
     await setActiveMeeting(refreshed);
-
-    await runHandoff(meeting);
   } finally {
     processingMeetings.delete(meeting.id);
   }
 }
 
-async function runHandoff(meeting: Meeting): Promise<void> {
-  // No transcript means nothing to hand off — guards a notes/transcribe failure
-  // from auto-invoking a skill with an empty prompt (#2159).
-  const transcript = await getMeetingTranscriptText(meeting.id).catch(() => "");
-  if (!transcript.trim()) return;
+interface MeetingSkillCandidate {
+  slug: string;
+  name: string;
+  description: string;
+  tags: string[];
+}
 
+// Match the current transcript + notes against installed meeting skills. The
+// detail view uses this to populate the per-transcript "Route to skill" picker
+// once notes are ready (#2346). Returns an empty list on classifier failure so
+// the UI can fall back to "no matching skills" instead of breaking.
+async function getMeetingSkillCandidates(
+  meeting: Meeting,
+): Promise<MeetingSkillCandidate[]> {
+  const transcript = await getMeetingTranscriptText(meeting.id).catch(() => "");
+  if (!transcript.trim()) return [];
   const skillRefs = skillsStore.enabledSkills.map((skill) => ({
     slug: skill.slug,
     name: skill.name,
@@ -581,23 +589,41 @@ async function runHandoff(meeting: Meeting): Promise<void> {
     tags: skill.tags ?? [],
     path: skill.path,
   }));
-
   let meetingSlugs: string[] = [];
   try {
     meetingSlugs = await selectMeetingSkills(skillRefs);
   } catch {
     meetingSlugs = [];
   }
-  if (meetingSlugs.length === 0) return;
+  return meetingSlugs
+    .map((slug) => skillRefs.find((skill) => skill.slug === slug))
+    .filter((skill): skill is (typeof skillRefs)[number] => skill !== undefined)
+    .map((skill) => ({
+      slug: skill.slug,
+      name: skill.name,
+      description: skill.description,
+      tags: skill.tags,
+    }));
+}
 
-  const defaultSlug = settingsStore.get("meetingDefaultSkill");
-  const chosenSlug =
-    defaultSlug && meetingSlugs.includes(defaultSlug)
-      ? defaultSlug
-      : meetingSlugs[0];
-  const chosen = skillRefs.find((skill) => skill.slug === chosenSlug);
-  if (!chosen) return;
-
+// User-triggered handoff. Creates the chat conversation, marks the meeting as
+// routed, and orchestrates the transcript through the chosen skill. Replaces
+// the previous auto-handoff so the user controls when (and to which skill) a
+// transcript becomes a conversation (#2346).
+async function routeMeetingToSkill(
+  meeting: Meeting,
+  slug: string,
+): Promise<void> {
+  const transcript = await getMeetingTranscriptText(meeting.id).catch(() => "");
+  if (!transcript.trim()) {
+    setMeetingState("error", "No transcript available to route.");
+    return;
+  }
+  const chosen = skillsStore.enabledSkills.find((skill) => skill.slug === slug);
+  if (!chosen) {
+    setMeetingState("error", `Skill ${slug} is not installed.`);
+    return;
+  }
   const notes =
     meetingState.meetings.find((m) => m.id === meeting.id)?.notesMarkdown ?? "";
 
@@ -605,13 +631,14 @@ async function runHandoff(meeting: Meeting): Promise<void> {
     `Meeting: ${meeting.title}`.slice(0, 80),
     providerStore.activeModel,
   );
-  await setMeetingRoutedSkill(meeting.id, chosenSlug, conversation.id);
+  await setMeetingRoutedSkill(meeting.id, slug, conversation.id);
   await updateMeetingStatus(meeting.id, "agent_running");
   await loadMeetings();
 
+  const tags = chosen.tags ?? [];
   const prompt = [
     `Process this completed meeting using the ${chosen.name} meeting skill` +
-      (chosen.tags.length ? ` (tags: ${chosen.tags.join(", ")})` : "") +
+      (tags.length ? ` (tags: ${tags.join(", ")})` : "") +
       ".",
     notes ? `Meeting notes:\n${notes}` : "",
     transcript ? `Transcript:\n${transcript}` : "",
@@ -622,10 +649,9 @@ async function runHandoff(meeting: Meeting): Promise<void> {
   conversationStore.setActiveConversation(conversation.id);
   try {
     await orchestrate(conversation.id, prompt);
-    // The agent finished: drive the status machine to a terminal state so the
-    // meeting doesn't sit at `agent_running` forever (#2158). Pass no ended_at
-    // so the capture-end timestamp set at stop survives instead of being
-    // overwritten with the agent-finish time (#2174).
+    // Drive the status to a terminal state so the meeting doesn't sit at
+    // `agent_running` forever (#2158). Pass no ended_at so the capture-end
+    // timestamp set at stop survives instead of being overwritten (#2174).
     await updateMeetingStatus(meeting.id, "done");
   } catch (error) {
     const reason = `Agent handoff failed: ${meetingErrorMessage(error)}`;
@@ -821,6 +847,8 @@ export const meetingStore = {
   reconcileStaleCaptures,
   stopCapture,
   stopAndProcess,
+  getMeetingSkillCandidates,
+  routeMeetingToSkill,
   regenerateNotes,
   renameMeeting,
   deleteMeeting,

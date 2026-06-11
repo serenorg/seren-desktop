@@ -1,7 +1,14 @@
 // ABOUTME: Meeting detail "notes canvas": rendered notes, template picker, regenerate, transcript.
 // ABOUTME: AI notes render muted; transcript shows Me bright / Them muted with jump-to-source.
 
-import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onMount,
+  Show,
+} from "solid-js";
 import { openExternalLink } from "@/lib/external-link";
 import {
   formatDuration,
@@ -118,6 +125,11 @@ export function MeetingDetail(props: MeetingDetailProps) {
   const [highlightedSeq, setHighlightedSeq] = createSignal<number | null>(null);
   const [editingTitle, setEditingTitle] = createSignal(false);
   const [titleDraft, setTitleDraft] = createSignal("");
+  const [skillCandidates, setSkillCandidates] = createSignal<
+    { slug: string; name: string }[]
+  >([]);
+  const [selectedSkillSlug, setSelectedSkillSlug] = createSignal("");
+  const [routing, setRouting] = createSignal(false);
 
   const rows = new Map<number, HTMLElement>();
 
@@ -187,6 +199,47 @@ export function MeetingDetail(props: MeetingDetailProps) {
       await meetingStore.regenerateNotes(props.meeting, selectedTemplate());
     } finally {
       setRegenerating(false);
+    }
+  };
+
+  // Re-resolve skill candidates whenever notes settle on a new meeting so the
+  // picker stays accurate as the user switches between rows (#2346). The
+  // classifier needs the transcript text, which only exists after notes_ready.
+  createEffect(() => {
+    const status = props.meeting.status;
+    if (status !== "notes_ready" && status !== "done" && status !== "failed") {
+      setSkillCandidates([]);
+      setSelectedSkillSlug("");
+      return;
+    }
+    const meeting = props.meeting;
+    void (async () => {
+      const candidates = await meetingStore.getMeetingSkillCandidates(meeting);
+      setSkillCandidates(
+        candidates.map((c) => ({ slug: c.slug, name: c.name })),
+      );
+      const previous = selectedSkillSlug();
+      if (!candidates.some((c) => c.slug === previous)) {
+        setSelectedSkillSlug(candidates[0]?.slug ?? "");
+      }
+    })();
+  });
+
+  const routeDisabled = () =>
+    routing() ||
+    !isTauriRuntime() ||
+    !selectedSkillSlug() ||
+    !props.meeting.notesMarkdown ||
+    props.meeting.status === "agent_running";
+
+  const routeTranscript = async () => {
+    const slug = selectedSkillSlug();
+    if (!slug || routing()) return;
+    setRouting(true);
+    try {
+      await meetingStore.routeMeetingToSkill(props.meeting, slug);
+    } finally {
+      setRouting(false);
     }
   };
 
@@ -298,6 +351,48 @@ export function MeetingDetail(props: MeetingDetailProps) {
           {regenerating() ? "Regenerating…" : "Regenerate"}
         </button>
       </div>
+
+      <Show when={props.meeting.notesMarkdown}>
+        <div class="mb-4 flex items-center gap-2">
+          <span class="text-[12px] text-muted-foreground">Route to skill</span>
+          <Show
+            when={skillCandidates().length > 0}
+            fallback={
+              <span class="text-[12px] text-muted-foreground italic">
+                No matching meeting skill installed.
+              </span>
+            }
+          >
+            <select
+              class="h-7 rounded-md border border-border bg-surface-1 px-2 text-[12px] text-foreground focus:outline-none focus:border-primary/60"
+              value={selectedSkillSlug()}
+              onChange={(event) =>
+                setSelectedSkillSlug(event.currentTarget.value)
+              }
+            >
+              <For each={skillCandidates()}>
+                {(skill) => <option value={skill.slug}>{skill.name}</option>}
+              </For>
+            </select>
+            <button
+              type="button"
+              class="h-7 px-2.5 rounded-md border border-primary/40 bg-primary/10 text-[12px] text-primary hover:bg-primary/15 disabled:opacity-60"
+              onClick={routeTranscript}
+              disabled={routeDisabled()}
+              title="Process this transcript through the selected skill"
+            >
+              {routing() ? "Routing…" : "Route transcript"}
+            </button>
+          </Show>
+          <Show when={props.meeting.routedSkillSlug}>
+            {(slug) => (
+              <span class="text-[11px] text-muted-foreground">
+                Routed to {slug()}
+              </span>
+            )}
+          </Show>
+        </div>
+      </Show>
 
       <section class="mb-6">
         <div class="mb-2 text-[12px] font-medium text-muted-foreground">
