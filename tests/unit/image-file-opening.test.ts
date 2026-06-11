@@ -2,6 +2,8 @@
 // ABOUTME: Guards shared image extension support and default-app bridge delegation.
 
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { openImageInDefaultViewer } from "@/lib/files/service";
 import { isSupportedImageFile } from "@/lib/images/file-types";
 import { openPathWithDefaultApp } from "@/lib/tauri-bridge";
@@ -32,6 +34,27 @@ describe("image file opening", () => {
 
     expect(openPathWithDefaultApp).toHaveBeenCalledWith(
       "/Users/me/Pictures/photo.jpg",
+    );
+  });
+
+  it("registers the browser-local default-app opener fallback", () => {
+    const dialogsSource = readFileSync(
+      resolve("bin/browser-local/dialogs.mjs"),
+      "utf-8",
+    );
+    const desktopSource = readFileSync(
+      resolve("bin/seren-desktop.mjs"),
+      "utf-8",
+    );
+
+    expect(dialogsSource).toContain(
+      "export async function openPathWithDefaultApp",
+    );
+    expect(dialogsSource).toContain('execStrict("open", [path])');
+    expect(dialogsSource).toContain('execStrict("xdg-open", [path])');
+    expect(dialogsSource).toContain("Start-Process -LiteralPath $args[0]");
+    expect(desktopSource).toContain(
+      'registerHandler("open_path_with_default_app", openPathWithDefaultApp)',
     );
   });
 });
