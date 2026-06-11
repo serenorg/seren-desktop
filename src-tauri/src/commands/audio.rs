@@ -186,6 +186,17 @@ fn claim_publish_slot(meeting_id: &str) -> Option<PublishGuard> {
     Some(PublishGuard(meeting_id.to_string()))
 }
 
+/// Non-claiming peek used by the user-triggered republish to return a
+/// friendly error instead of silently dropping when an auto-publish is
+/// still in flight for this meeting. #2358.
+fn publish_slot_is_held(meeting_id: &str) -> bool {
+    publishing_meetings()
+        .lock()
+        .ok()
+        .map(|set| set.contains(meeting_id))
+        .unwrap_or(false)
+}
+
 // Body bodies can be megabytes; cap before they ride into telemetry.
 const PUBLISH_FAIL_BODY_LIMIT: usize = 2_048;
 
@@ -319,15 +330,22 @@ async fn spawn_seren_notes_publish(
 }
 
 // User-triggered republish: re-runs the same publish path the auto-flow
-// uses when notes finalize. Idempotent under PublishGuard — if a publish is
-// already in flight for this meeting, the spawned call no-ops without
-// double-posting. The frontend `Publish to Seren Notes` button calls this
-// after a 5xx-after-retry left the meeting without a `seren_notes_id`. #2343.
+// uses when notes finalize. Surfaces a clear Err when an auto-publish for
+// the same meeting is still mid-retry (otherwise `spawn_seren_notes_publish`
+// would silently drop the click — #2358). The frontend `Publish to Seren
+// Notes` button calls this after a 5xx-after-retry left the meeting
+// without a `seren_notes_id`. #2343.
 #[tauri::command]
 pub async fn republish_meeting_to_seren_notes(
     app: AppHandle,
     meeting_id: String,
 ) -> Result<(), String> {
+    if publish_slot_is_held(&meeting_id) {
+        return Err(
+            "A publish is already in progress for this meeting. Hold on a moment and try again."
+                .to_string(),
+        );
+    }
     let lookup = meeting_id.clone();
     let meeting = run_db(app.clone(), move |conn| select_meeting(conn, &lookup))
         .await?
@@ -1419,6 +1437,31 @@ mod tests {
         assert!(
             claim_publish_slot("meeting-publish-slot-a").is_some(),
             "claim succeeds again after the guard drops — regenerate can re-publish"
+        );
+    }
+
+    // The user-triggered republish path's protection against silent drops
+    // when an auto-publish is mid-retry hinges on `publish_slot_is_held`
+    // observing the same set the guard mutates, *without* consuming the
+    // slot. Pin both the observation and the non-consumption. #2358.
+    #[test]
+    fn publish_slot_peek_reports_held_without_consuming_it() {
+        let key = "meeting-slot-peek";
+        assert!(!publish_slot_is_held(key), "free at start");
+        let guard = claim_publish_slot(key).expect("first claim");
+        assert!(
+            publish_slot_is_held(key),
+            "peek must see the live guard so republish can error out"
+        );
+        // Peeking must NOT consume the slot — the auto-publish still holds it.
+        assert!(
+            publish_slot_is_held(key),
+            "peek is non-consuming; the guard still owns the slot"
+        );
+        drop(guard);
+        assert!(
+            !publish_slot_is_held(key),
+            "peek reports free after the guard drops"
         );
     }
 

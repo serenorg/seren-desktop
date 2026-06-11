@@ -75,7 +75,15 @@ let statusUnlisten: UnlistenFn | null = null;
 let levelUnlisten: UnlistenFn | null = null;
 let segmentsUpdatedUnlisten: UnlistenFn | null = null;
 let notesPublishFailedUnlisten: UnlistenFn | null = null;
+let notesPublishedUnlisten: UnlistenFn | null = null;
 let trayToggleUnlisten: (() => void) | null = null;
+
+// Substring marker on the publish-failed banner so the published-success
+// listener clears only the banner it set, never a concurrent error from a
+// different surface (e.g. notes generation failure). #2359.
+const PUBLISH_FAILED_BANNER_MARKER = "Publish to Seren Notes";
+const PUBLISH_FAILED_BANNER =
+  "Couldn't publish meeting notes to Seren Notes. Use the Publish to Seren Notes button to try again.";
 
 let autoDetectTimer: number | null = null;
 let autoDetectDismissed = false;
@@ -304,10 +312,7 @@ async function startMeetingEventListeners(): Promise<void> {
     body: string;
   }>("meeting://notes-publish-failed", (event) => {
     const { meetingId, status, body } = event.payload;
-    setMeetingState(
-      "error",
-      "Couldn't publish meeting notes to Seren Notes. Use the Publish to Seren Notes button to try again.",
-    );
+    setMeetingState("error", PUBLISH_FAILED_BANNER);
     void captureSupportError({
       kind: "seren_notes_publish_failed",
       message: `seren-notes publish failed for meeting ${meetingId}${status !== null ? ` with HTTP ${status}` : ""}`,
@@ -318,6 +323,20 @@ async function startMeetingEventListeners(): Promise<void> {
         body,
       },
     });
+  });
+
+  // Successful (re)publish clears the failed-banner we set above, so the
+  // user doesn't see "couldn't publish" lingering after the manual retry
+  // worked. Substring check on the marker keeps us from clearing a banner
+  // that came from a different surface (e.g. notes generation). #2359.
+  notesPublishedUnlisten = await listen<{
+    meetingId: string;
+    serenNotesId: string;
+  }>("meeting://notes-published", () => {
+    const current = meetingState.error;
+    if (current?.includes(PUBLISH_FAILED_BANNER_MARKER)) {
+      setMeetingState("error", null);
+    }
   });
 
   // The tray menu's Start/Stop action toggles capture through the same flow.
@@ -332,12 +351,14 @@ function stopMeetingEventListeners(): void {
   levelUnlisten?.();
   segmentsUpdatedUnlisten?.();
   notesPublishFailedUnlisten?.();
+  notesPublishedUnlisten?.();
   trayToggleUnlisten?.();
   transcriptUnlisten = null;
   statusUnlisten = null;
   levelUnlisten = null;
   segmentsUpdatedUnlisten = null;
   notesPublishFailedUnlisten = null;
+  notesPublishedUnlisten = null;
   trayToggleUnlisten = null;
 }
 
