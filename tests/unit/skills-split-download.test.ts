@@ -181,6 +181,40 @@ describe("split-download fallback (#2296)", () => {
     );
   });
 
+  it("reports byte-aware progress while split-downloading payload files", async () => {
+    const onProgress = vi.fn();
+
+    await skills.install(catalogSkill, "", "seren", null, { onProgress });
+
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "downloading",
+        downloadedBytes: 0,
+        totalBytes: PPTX_BYTES.length + SCRIPT_TEXT.length,
+        progressPercent: 0,
+        filesCompleted: 0,
+        filesTotal: 2,
+      }),
+    );
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "downloading",
+        downloadedBytes: PPTX_BYTES.length,
+        totalBytes: PPTX_BYTES.length + SCRIPT_TEXT.length,
+        filesCompleted: 1,
+        filesTotal: 2,
+      }),
+    );
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "installing",
+        downloadedBytes: PPTX_BYTES.length + SCRIPT_TEXT.length,
+        totalBytes: PPTX_BYTES.length + SCRIPT_TEXT.length,
+        progressPercent: 100,
+      }),
+    );
+  });
+
   it("serves content preview from the manifest without fetching file bodies", async () => {
     const content = await skills.fetchContent(catalogSkill);
     expect(content).toBe(SKILL_MD);

@@ -27,6 +27,7 @@ import {
 import type {
   InstalledSkill,
   Skill,
+  SkillInstallProgress,
   SkillScope,
   SkillSyncStatus,
 } from "@/lib/skills";
@@ -109,6 +110,75 @@ const SettingsIcon: Component = () => (
   </svg>
 );
 
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), 3);
+  return `${(bytes / k ** index).toFixed(1)} ${sizes[index]}`;
+}
+
+const SkillInstallProgressBar: Component<{
+  progress: SkillInstallProgress;
+  compact?: boolean;
+}> = (props) => {
+  const determinate = () => props.progress.totalBytes > 0;
+  const statusLabel = () => {
+    if (props.progress.stage === "installing") return "Installing";
+    if (!determinate()) return "Downloading";
+    return `${formatBytes(props.progress.downloadedBytes)} / ${formatBytes(
+      props.progress.totalBytes,
+    )}`;
+  };
+
+  return (
+    <div
+      class={
+        props.compact
+          ? "flex flex-col gap-1 min-w-[120px]"
+          : "flex flex-col gap-1 w-full min-w-[120px]"
+      }
+    >
+      <div class="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+        <span class="truncate">{props.progress.message}</span>
+        <span class="shrink-0">
+          {determinate() ? `${props.progress.progressPercent}%` : statusLabel()}
+        </span>
+      </div>
+      <div
+        role="progressbar"
+        aria-label="Skill install progress"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow={
+          determinate() ? props.progress.progressPercent : undefined
+        }
+        class="w-full h-[4px] bg-white/10 rounded-full overflow-hidden"
+        title={
+          determinate()
+            ? `${formatBytes(props.progress.downloadedBytes)} / ${formatBytes(
+                props.progress.totalBytes,
+              )}`
+            : props.progress.message
+        }
+      >
+        <div
+          class={`${
+            props.progress.stage === "installing"
+              ? "updater-bar-installing"
+              : "updater-bar-downloading"
+          } h-full rounded-full transition-all duration-300`}
+          style={{
+            width: determinate()
+              ? `${props.progress.progressPercent}%`
+              : "100%",
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
 export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const [activeFilter, setActiveFilter] = createSignal<Filter>("all");
   const [searchQuery, setSearchQuery] = createSignal("");
@@ -127,6 +197,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const [actionInProgress, setActionInProgress] = createSignal<string | null>(
     null,
   );
+  const [installProgressBySkill, setInstallProgressBySkill] = createSignal<
+    Record<string, SkillInstallProgress | undefined>
+  >({});
   const [refreshStatus, setRefreshStatus] = createSignal<string | null>(null);
   const [installWarning, setInstallWarning] = createSignal<{
     slug: string;
@@ -304,6 +377,34 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     status: SkillSyncStatus | null | undefined,
   ) => {
     setSyncStatuses((current) => ({ ...current, [path]: status }));
+  };
+
+  const installProgressFor = (skillId: string) =>
+    installProgressBySkill()[skillId] ?? null;
+
+  const setInstallProgressFor = (
+    skillId: string,
+    progress: SkillInstallProgress,
+  ) => {
+    setInstallProgressBySkill((current) => ({
+      ...current,
+      [skillId]: progress,
+    }));
+  };
+
+  const clearInstallProgressFor = (skillId: string) => {
+    setInstallProgressBySkill((current) => {
+      const next = { ...current };
+      delete next[skillId];
+      return next;
+    });
+  };
+
+  const installButtonLabel = (skillId: string): string => {
+    if (actionInProgress() !== skillId) return "Install";
+    return installProgressFor(skillId)?.stage === "downloading"
+      ? "Downloading..."
+      : "Installing...";
   };
 
   const loadSyncStatus = async (skill: InstalledSkill) => {
@@ -600,6 +701,15 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     scope: SkillScope = "seren",
   ) => {
     setActionInProgress(skill.id);
+    setInstallProgressFor(skill.id, {
+      stage: "downloading",
+      downloadedBytes: 0,
+      totalBytes: 0,
+      progressPercent: 0,
+      filesCompleted: 0,
+      filesTotal: 0,
+      message: "Preparing skill download",
+    });
     setInstallWarning(null);
     setInstallError(null);
     try {
@@ -607,7 +717,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       if (!content) {
         throw new Error(`No SKILL.md content available for ${skill.slug}`);
       }
-      const installed = await skillsStore.install(skill, content, scope);
+      const installed = await skillsStore.install(skill, content, scope, {
+        onProgress: (progress) => setInstallProgressFor(skill.id, progress),
+      });
       await loadSyncStatus(installed);
       // Catalog install used to auto-attach the skill to the active thread
       // here. We removed that side effect: skills are tools-on-demand, not
@@ -630,6 +742,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       });
     } finally {
       setActionInProgress(null);
+      clearInstallProgressFor(skill.id);
     }
   };
 
@@ -1589,6 +1702,16 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             </span>
                           </Show>
                         </div>
+                        <Show when={installProgressFor(skill.id)}>
+                          {(progress) => (
+                            <div class="mt-2 max-w-[260px]">
+                              <SkillInstallProgressBar
+                                progress={progress()}
+                                compact
+                              />
+                            </div>
+                          )}
+                        </Show>
                       </div>
 
                       {/* Install button */}
@@ -1603,7 +1726,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                           disabled={installing()}
                           title="Install this skill locally"
                         >
-                          {installing() ? "Installing..." : "Install"}
+                          {installButtonLabel(skill.id)}
                         </button>
                       </div>
                     </div>
@@ -1651,6 +1774,15 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                           </Show>
 
                           <div class="mt-2.5 flex items-center gap-2 flex-wrap">
+                            <Show when={installProgressFor(skill.id)}>
+                              {(progress) => (
+                                <div class="basis-full">
+                                  <SkillInstallProgressBar
+                                    progress={progress()}
+                                  />
+                                </div>
+                              )}
+                            </Show>
                             <button
                               type="button"
                               class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-[12px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40 disabled:cursor-default"
@@ -1658,7 +1790,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                               disabled={installing()}
                               title="Install this skill locally"
                             >
-                              {installing() ? "Installing..." : "Install"}
+                              {installButtonLabel(skill.id)}
                             </button>
                             <Show when={ownsSkill(skill)}>
                               <button

@@ -12,6 +12,7 @@ import {
   type InstalledSkill,
   isSkillCompatibleWithHost,
   type Skill,
+  type SkillInstallOptions,
   type SkillScope,
   type SkillsState,
 } from "@/lib/skills";
@@ -968,6 +969,7 @@ export const skillsStore = {
     skill: Skill,
     content: string,
     scope: SkillScope,
+    options?: SkillInstallOptions,
   ): Promise<InstalledSkill> {
     const key = `${scope}:${skill.slug}`;
     const inflight = activeInstallPromises.get(key);
@@ -982,6 +984,7 @@ export const skillsStore = {
         content,
         scope,
         projectRoot,
+        options,
       );
 
       // Drop any prior entry sharing the install path before appending so a
