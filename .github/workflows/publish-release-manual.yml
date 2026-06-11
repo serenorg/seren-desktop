@@ -1,0 +1,514 @@
+# ABOUTME: Manual override for publishing already-built release artifacts.
+# ABOUTME: Lets operators publish a green build run when the e2e gate itself is broken.
+
+name: Publish Release Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Release workflow run ID to publish artifacts from"
+        required: true
+      tag:
+        description: "Release tag to publish (for example, v3.52.9)"
+        required: true
+
+permissions:
+  actions: read
+  contents: write
+  id-token: write
+
+# Serialize with the primary release workflow because this job mutates the
+# GitHub release, versioned R2 paths, and the root updater latest.json.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts from release run
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Publish release
+        uses: actions/github-script@v9
+        with:
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tagName = '${{ inputs.tag }}';
+            const artifactsDir = 'artifacts';
+            const targetCommitish = tagName;
+
+            const findReleaseForTag = async () => {
+              try {
+                const { data } = await github.rest.repos.getReleaseByTag({
+                  owner,
+                  repo,
+                  tag: tagName
+                });
+                console.log(`Resolved canonical release by tag ${tagName}: ${data.id} (draft=${data.draft})`);
+                return data;
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+              }
+
+              const expectedName = `Seren Desktop ${tagName}`;
+              const releases = await github.paginate(github.rest.repos.listReleases, {
+                owner,
+                repo,
+                per_page: 100
+              });
+              const fallback = releases.find((release) =>
+                release.tag_name === tagName || release.name === expectedName
+              );
+              if (!fallback) {
+                throw new Error(`No existing draft or published release found for tag ${tagName}`);
+              }
+              console.log(`Resolved release by listing releases for ${tagName}: ${fallback.id} (draft=${fallback.draft})`);
+              return fallback;
+            };
+
+            const syncArtifactsToRelease = async (release) => {
+              const releaseId = release.id;
+              console.log(`Syncing artifacts to release ID ${releaseId} for tag ${tagName}`);
+
+              const existingAssets = await github.rest.repos.listReleaseAssets({
+                owner,
+                repo,
+                release_id: releaseId
+              });
+              const existingNames = new Set(existingAssets.data.map((asset) => asset.name));
+
+              const uploadAsset = async (filePath, fileName) => {
+                if (existingNames.has(fileName)) {
+                  console.log(`Skipping ${fileName} on release ${releaseId} - already exists`);
+                  return;
+                }
+
+                const content = fs.readFileSync(filePath);
+                await github.rest.repos.uploadReleaseAsset({
+                  owner,
+                  repo,
+                  release_id: releaseId,
+                  name: fileName,
+                  data: content
+                });
+                existingNames.add(fileName);
+              };
+
+              const walkDir = async (dir) => {
+                const files = fs.readdirSync(dir);
+                for (const file of files) {
+                  const filePath = path.join(dir, file);
+                  const stat = fs.statSync(filePath);
+                  if (stat.isDirectory()) {
+                    await walkDir(filePath);
+                  } else {
+                    console.log(`Uploading to release ${releaseId}: ${filePath}`);
+                    await uploadAsset(filePath, file);
+                  }
+                }
+              };
+
+              await walkDir(artifactsDir);
+            };
+
+            const uploadTarget = await findReleaseForTag();
+            await syncArtifactsToRelease(uploadTarget);
+
+            const publishTarget = await findReleaseForTag();
+            if (publishTarget.id !== uploadTarget.id) {
+              console.log(`Canonical release changed from ${uploadTarget.id} to ${publishTarget.id}; syncing artifacts to the latest canonical release`);
+              await syncArtifactsToRelease(publishTarget);
+            }
+
+            const isProductionTag = tagName.startsWith('v');
+            const hasWindowsArtifact = fs.existsSync(artifactsDir)
+              && fs.readdirSync(artifactsDir).some((entry) => {
+                const dir = path.join(artifactsDir, entry);
+                if (!fs.statSync(dir).isDirectory()) return false;
+                return fs.readdirSync(dir).some((f) => f.endsWith('-setup.exe'));
+              });
+            const windowsSignedClaim = isProductionTag && hasWindowsArtifact
+              ? 'Windows builds are EV code signed. If you still see a SmartScreen warning, click "More info" -> "Run anyway"; reputation builds with installs.'
+              : 'Windows artifacts in this release are NOT EV code signed.';
+            const noteMarker = '<!-- WINDOWS_SIGNING_NOTE -->';
+            if (publishTarget.body && publishTarget.body.includes(noteMarker)) {
+              const updatedBody = publishTarget.body.replace(noteMarker, windowsSignedClaim);
+              console.log(`Resolving Windows signing note: tag=${tagName} hasWindowsArtifact=${hasWindowsArtifact}`);
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: publishTarget.id,
+                body: updatedBody,
+              });
+              publishTarget.body = updatedBody;
+            }
+
+            if (publishTarget.draft) {
+              console.log(`Setting release ${publishTarget.id} to published (non-draft) and binding tag ${tagName}`);
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: publishTarget.id,
+                draft: false,
+                tag_name: tagName,
+                target_commitish: targetCommitish
+              });
+              console.log('Release published successfully!');
+            } else if (publishTarget.tag_name !== tagName) {
+              console.log(`Release ${publishTarget.id} is published but tagged ${publishTarget.tag_name}; rebinding to ${tagName}`);
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: publishTarget.id,
+                tag_name: tagName,
+                target_commitish: targetCommitish
+              });
+            } else {
+              console.log(`Release ${publishTarget.id} for tag ${tagName} is already published; skipping undraft`);
+            }
+
+      - name: Setup AWS CLI for R2
+        run: |
+          pip install awscli
+
+      - name: Upload updater artifacts to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          TAG="${{ inputs.tag }}"
+
+          for platform_dir in artifacts/update-*; do
+            if [ -d "$platform_dir" ]; then
+              platform=$(basename "$platform_dir" | sed 's/update-//')
+              echo "Uploading $platform artifacts..."
+
+              for file in "$platform_dir"/*; do
+                if [ -f "$file" ]; then
+                  filename=$(basename "$file")
+                  aws s3 cp "$file" "s3://${R2_BUCKET}/${TAG}/${filename}" \
+                    --endpoint-url="${AWS_ENDPOINT_URL}"
+                  echo "Uploaded: ${TAG}/${filename}"
+                fi
+              done
+            fi
+          done
+
+      - name: Generate latest.json for updater (R2)
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const tag = '${{ inputs.tag }}';
+            const version = tag.replace(/^v/, '');
+            const baseUrl = '${{ secrets.R2_PUBLIC_URL }}/' + tag;
+
+            const platforms = [
+              'darwin-aarch64',
+              'darwin-x86_64',
+              'windows-x86_64',
+              'linux-x86_64',
+              'linux-aarch64'
+            ];
+
+            const manifest = {
+              version,
+              notes: `Release ${tag}`,
+              pub_date: new Date().toISOString(),
+              platforms: {}
+            };
+
+            for (const platform of platforms) {
+              const dir = path.join('artifacts', `update-${platform}`);
+              if (!fs.existsSync(dir)) {
+                console.log(`No update artifact for ${platform}, skipping`);
+                continue;
+              }
+
+              const files = fs.readdirSync(dir);
+              const sigFile = files.find(f => f.endsWith('.sig'));
+              const bundleFile = files.find(f => !f.endsWith('.sig'));
+
+              if (!sigFile || !bundleFile) {
+                console.log(`Missing sig or bundle for ${platform}: sig=${sigFile}, bundle=${bundleFile}`);
+                continue;
+              }
+
+              const signature = fs.readFileSync(path.join(dir, sigFile), 'utf8').trim();
+
+              manifest.platforms[platform] = {
+                signature,
+                url: `${baseUrl}/${bundleFile}`
+              };
+
+              console.log(`Added platform ${platform}: ${bundleFile}`);
+            }
+
+            fs.writeFileSync('artifacts/latest.json', JSON.stringify(manifest, null, 2));
+            console.log('Generated latest.json:', JSON.stringify(manifest, null, 2));
+
+      - name: Upload latest.json to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          aws s3 cp artifacts/latest.json "s3://${R2_BUCKET}/latest.json" \
+            --endpoint-url="${AWS_ENDPOINT_URL}" \
+            --content-type "application/json"
+          echo "Uploaded latest.json to R2"
+
+      - name: Generate latest.json for updater (GitHub)
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const tag = '${{ inputs.tag }}';
+            const version = tag.replace(/^v/, '');
+            const baseUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${tag}`;
+
+            const platforms = [
+              'darwin-aarch64',
+              'darwin-x86_64',
+              'windows-x86_64',
+              'linux-x86_64',
+              'linux-aarch64'
+            ];
+
+            const manifest = {
+              version,
+              notes: `Release ${tag}`,
+              pub_date: new Date().toISOString(),
+              platforms: {}
+            };
+
+            for (const platform of platforms) {
+              const dir = path.join('artifacts', `update-${platform}`);
+              if (!fs.existsSync(dir)) {
+                console.log(`No update artifact for ${platform}, skipping`);
+                continue;
+              }
+
+              const files = fs.readdirSync(dir);
+              const sigFile = files.find((f) => f.endsWith('.sig'));
+              const bundleFile = files.find((f) => !f.endsWith('.sig'));
+
+              if (!sigFile || !bundleFile) {
+                console.log(`Missing sig or bundle for ${platform}: sig=${sigFile}, bundle=${bundleFile}`);
+                continue;
+              }
+
+              const signature = fs.readFileSync(path.join(dir, sigFile), 'utf8').trim();
+
+              manifest.platforms[platform] = {
+                signature,
+                url: `${baseUrl}/${bundleFile}`
+              };
+
+              console.log(`Added platform ${platform}: ${bundleFile}`);
+            }
+
+            fs.writeFileSync('artifacts/latest-github.json', JSON.stringify(manifest, null, 2));
+            console.log('Generated latest-github.json:', JSON.stringify(manifest, null, 2));
+
+      - name: Upload latest.json to GitHub release
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tagName = '${{ inputs.tag }}';
+
+            const findReleaseForTag = async () => {
+              try {
+                const { data } = await github.rest.repos.getReleaseByTag({
+                  owner,
+                  repo,
+                  tag: tagName
+                });
+                console.log(`Resolved release by tag ${tagName}: ${data.id}`);
+                return data;
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+
+              const expectedName = `Seren Desktop ${tagName}`;
+              const releases = await github.paginate(github.rest.repos.listReleases, {
+                owner,
+                repo,
+                per_page: 100
+              });
+              const fallback = releases.find((release) =>
+                release.tag_name === tagName || release.name === expectedName
+              );
+              if (!fallback) {
+                throw new Error(`No release found for tag ${tagName}`);
+              }
+              console.log(`Resolved release by listing releases for ${tagName}: ${fallback.id}`);
+              return fallback;
+            };
+
+            const release = await findReleaseForTag();
+
+            const existingAssets = await github.rest.repos.listReleaseAssets({
+              owner,
+              repo,
+              release_id: release.id
+            });
+
+            const stale = existingAssets.data.find((a) => a.name === 'latest.json');
+            if (stale) {
+              console.log(`Deleting stale latest.json asset ${stale.id} on release ${release.id}`);
+              await github.rest.repos.deleteReleaseAsset({
+                owner,
+                repo,
+                asset_id: stale.id
+              });
+            }
+
+            const content = fs.readFileSync('artifacts/latest-github.json');
+            await github.rest.repos.uploadReleaseAsset({
+              owner,
+              repo,
+              release_id: release.id,
+              name: 'latest.json',
+              data: content
+            });
+
+            console.log(`Uploaded latest.json to GitHub release ${release.id} for tag ${tagName}`);
+
+      - name: Upload installer files to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          TAG="${{ inputs.tag }}"
+
+          find artifacts -name "*.dmg" -type f | while read file; do
+            filename=$(basename "$file")
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${TAG}/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-apple-diskimage"
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-apple-diskimage"
+
+            if echo "$filename" | grep -q "aarch64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_aarch64.dmg" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/x-apple-diskimage"
+            elif echo "$filename" | grep -q "x64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_x64.dmg" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/x-apple-diskimage"
+            fi
+            echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
+          done
+
+          find artifacts -name "*-setup.exe" -type f | while read file; do
+            filename=$(basename "$file")
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${TAG}/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-msdownload"
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-msdownload"
+
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_x64-setup.exe" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-msdownload"
+            echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
+          done
+
+          find artifacts -name "*.AppImage" -type f | while read file; do
+            filename=$(basename "$file")
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${TAG}/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-executable"
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-executable"
+
+            if echo "$filename" | grep -Eq "aarch64|arm64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_arm64.AppImage" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/x-executable"
+            elif echo "$filename" | grep -Eq "amd64|x86_64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_amd64.AppImage" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/x-executable"
+            fi
+            echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
+          done
+
+          find artifacts -name "*.deb" -type f | while read file; do
+            filename=$(basename "$file")
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${TAG}/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/vnd.debian.binary-package"
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/vnd.debian.binary-package"
+
+            if echo "$filename" | grep -Eq "arm64|aarch64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_arm64.deb" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/vnd.debian.binary-package"
+            elif echo "$filename" | grep -Eq "amd64|x86_64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_amd64.deb" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/vnd.debian.binary-package"
+            fi
+            echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
+          done
+
+      - name: Prune old releases from R2 (keep last 5)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          VERSIONS=$(aws s3 ls "s3://${R2_BUCKET}/" --endpoint-url="${AWS_ENDPOINT_URL}" \
+            | grep 'PRE v' | awk '{print $2}' | sed 's|/$||' \
+            | sed 's/^v//' | sort -t. -k1,1rn -k2,2rn -k3,3rn | sed 's/^/v/')
+
+          KEEP=5
+          COUNT=0
+          for ver in $VERSIONS; do
+            COUNT=$((COUNT + 1))
+            if [ $COUNT -le $KEEP ]; then
+              echo "Keeping: $ver"
+            else
+              echo "Pruning: $ver"
+              aws s3 rm "s3://${R2_BUCKET}/${ver}/" --recursive --endpoint-url="${AWS_ENDPOINT_URL}"
+            fi
+          done

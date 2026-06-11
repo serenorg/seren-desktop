@@ -1,15 +1,22 @@
 // ABOUTME: Guardrail for the Windows release gate added for #2265.
 // ABOUTME: Prevents the release workflow from drifting back to build-only certification.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = process.cwd();
+const manualPublishWorkflowPath = join(
+  root,
+  ".github/workflows/publish-release-manual.yml",
+);
 const releaseWorkflow = readFileSync(
   join(root, ".github/workflows/release.yml"),
   "utf8",
 );
+const manualPublishWorkflow = existsSync(manualPublishWorkflowPath)
+  ? readFileSync(manualPublishWorkflowPath, "utf8")
+  : "";
 const runner = readFileSync(join(root, "scripts/windows-e2e-app.ps1"), "utf8");
 const probe = readFileSync(join(root, "scripts/windows-e2e-app.mjs"), "utf8");
 
@@ -85,5 +92,20 @@ describe("Windows production e2e release gate", () => {
       expect(probe).toContain(required);
     }
     expect(probe).toContain("SEREN_WINDOWS_E2E_OK");
+  });
+
+  it("has a manual publish override for already-built release artifacts", () => {
+    expect(existsSync(manualPublishWorkflowPath)).toBe(true);
+    expect(manualPublishWorkflow).toContain("workflow_dispatch:");
+    expect(manualPublishWorkflow).toContain("run_id:");
+    expect(manualPublishWorkflow).toContain("tag:");
+    expect(manualPublishWorkflow).toContain("actions/download-artifact@v8");
+    expect(manualPublishWorkflow).toContain("run-id: ${{ inputs.run_id }}");
+    expect(manualPublishWorkflow).toContain(
+      "github-token: ${{ secrets.GITHUB_TOKEN }}",
+    );
+    expect(manualPublishWorkflow).toContain("WINDOWS_SIGNING_NOTE");
+    expect(manualPublishWorkflow).toContain("latest.json");
+    expect(manualPublishWorkflow).not.toContain("windows-app-e2e");
   });
 });
