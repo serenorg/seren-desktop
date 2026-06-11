@@ -44,6 +44,9 @@ pub struct RetryConfig {
     pub max_attempts: usize,
     pub initial_backoff_ms: u64,
     pub max_backoff_ms: u64,
+    /// When false, an empty response is not retried — silence is a terminal
+    /// outcome for callers that already VAD-gate their input (dictation, #2349).
+    pub retry_on_empty: bool,
 }
 
 impl Default for RetryConfig {
@@ -52,6 +55,7 @@ impl Default for RetryConfig {
             max_attempts: 3,
             initial_backoff_ms: 250,
             max_backoff_ms: 2_000,
+            retry_on_empty: true,
         }
     }
 }
@@ -81,7 +85,12 @@ where
     for attempt in 1..=attempts {
         match transcriber.transcribe(chunk).await {
             Ok(segments) if has_text(&segments) => return Ok(segments),
-            Ok(_) => last_error = TranscribeError::Empty,
+            Ok(_) => {
+                if !cfg.retry_on_empty {
+                    return Err(TranscribeError::Empty);
+                }
+                last_error = TranscribeError::Empty;
+            }
             Err(err) => last_error = err,
         }
 
@@ -473,6 +482,7 @@ mod tests {
             max_attempts: 3,
             initial_backoff_ms: 0,
             max_backoff_ms: 0,
+            retry_on_empty: true,
         }
     }
 
@@ -498,6 +508,27 @@ mod tests {
 
         assert_eq!(result.unwrap(), text_segment("eventually"));
         assert_eq!(transcriber.attempts(), 3);
+    }
+
+    #[tokio::test]
+    async fn transcribe_chunk_does_not_retry_empty_when_disabled() {
+        // #2349: dictation VAD-gates its input, so an empty whisper response is a
+        // terminal "silence" outcome — three retries waste round-trips and amplify
+        // hallucination risk on already-marginal audio.
+        let transcriber = Arc::new(FakeTranscriber::new(vec![Ok(text_segment("   "))]));
+        let cfg = RetryConfig {
+            retry_on_empty: false,
+            ..cfg()
+        };
+
+        let result = transcribe_chunk_with_retry(&transcriber, &chunk(), cfg).await;
+
+        assert_eq!(result.unwrap_err(), TranscribeError::Empty);
+        assert_eq!(
+            transcriber.attempts(),
+            1,
+            "empty response must not retry when retry_on_empty=false"
+        );
     }
 
     #[tokio::test]
