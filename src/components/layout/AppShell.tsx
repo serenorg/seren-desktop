@@ -745,7 +745,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
               <SessionPanel onClose={handleCloseSlidePanel} />
             </Match>
             <Match when={slidePanel() === "meetings"}>
-              <MeetingPanel onClose={handleCloseSlidePanel} />
+              <MeetingPanel />
             </Match>
             <Match when={slidePanel() === "skills"}>
               <SkillsExplorer panelMode />
