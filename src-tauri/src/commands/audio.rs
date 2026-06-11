@@ -155,12 +155,43 @@ fn set_meeting_seren_notes_id_record(
     Ok(())
 }
 
+// Tracks meetings that have a publish task in flight so a Regenerate
+// triggered before the first publish lands cannot interleave: a second
+// publish racing the first would write its id, then the first would
+// overwrite with a different (now-stale) id pointing at orphaned content.
+// Per-meeting serialization — short-lived; drops on task end via PublishGuard.
+fn publishing_meetings() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+struct PublishGuard(String);
+
+impl Drop for PublishGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = publishing_meetings().lock() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+/// Try to claim the publish slot for a meeting id. Returns the guard on
+/// success; None if a publish is already in flight for the same id.
+fn claim_publish_slot(meeting_id: &str) -> Option<PublishGuard> {
+    let mut set = publishing_meetings().lock().ok()?;
+    if !set.insert(meeting_id.to_string()) {
+        return None;
+    }
+    Some(PublishGuard(meeting_id.to_string()))
+}
+
 // Auto-publish the finalized meeting (notes + action items + transcript) to
 // seren-notes so the UI can render a "Chat with meeting notes" link. Runs in
 // its own task so a slow gateway never blocks notes-ready from rendering.
-// Skips silently when the user isn't signed in or the meeting has already
-// been published — the local UI handles both states from authStore and
-// `meeting.serenNotesId`.
+// Always re-publishes — a Regenerate-after-publish overwrites the link to
+// point at the new content. Skips silently when the user isn't signed in;
+// the local UI shows the login CTA based on authStore.
 async fn spawn_seren_notes_publish(
     app: AppHandle,
     meeting_id: String,
@@ -168,6 +199,10 @@ async fn spawn_seren_notes_publish(
     action_items: Vec<String>,
     transcript: String,
 ) {
+    let _slot = match claim_publish_slot(&meeting_id) {
+        Some(slot) => slot,
+        None => return,
+    };
     let lookup_id = meeting_id.clone();
     let meeting = match run_db(app.clone(), move |conn| select_meeting(conn, &lookup_id)).await {
         Ok(Some(m)) => m,
@@ -181,9 +216,6 @@ async fn spawn_seren_notes_publish(
             return;
         }
     };
-    if meeting.seren_notes_id.is_some() {
-        return;
-    }
     let content = crate::audio::seren_notes_publish::build_publish_content(
         &notes_markdown,
         &action_items,
@@ -1239,6 +1271,22 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         setup_schema(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn publish_slot_blocks_overlapping_claims_for_same_meeting() {
+        let slot = claim_publish_slot("meeting-publish-slot-a").expect("first claim");
+        assert!(
+            claim_publish_slot("meeting-publish-slot-a").is_none(),
+            "second claim for the same meeting must fail while the first guard lives"
+        );
+        let other = claim_publish_slot("meeting-publish-slot-b").expect("other meeting still free");
+        drop(other);
+        drop(slot);
+        assert!(
+            claim_publish_slot("meeting-publish-slot-a").is_some(),
+            "claim succeeds again after the guard drops — regenerate can re-publish"
+        );
     }
 
     fn meeting(id: &str) -> NewMeeting {

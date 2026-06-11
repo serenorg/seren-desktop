@@ -1015,12 +1015,21 @@ struct MeetingRow {
     row_version: i64,
 }
 
+/// Extract the optional seren-notes id stashed in a meeting sync payload. The
+/// id lives inside the JSONB payload because adding it as a first-class
+/// column on the cloud Postgres requires a separate seren-core deploy. Pure
+/// helper so the carry-through is unit-testable without a Postgres mock.
+pub fn seren_notes_id_from_payload(payload: &Value) -> Option<String> {
+    payload.get("seren_notes_id")?.as_str().map(str::to_string)
+}
+
 fn load_meeting(conn: &Connection, id: &str) -> rusqlite::Result<Option<MeetingRow>> {
     conn.query_row(
         "SELECT id, title, source_app, started_at, ended_at, status, template_id,
                 routed_skill_slug, agent_conversation_id, notes_markdown, notes_struct_json,
                 CASE WHEN deleted_at IS NULL THEN NULL ELSE deleted_at END, deleted_at,
-                created_at, updated_at, row_version, failure_reason, capture_diagnostics_json
+                created_at, updated_at, row_version, failure_reason, capture_diagnostics_json,
+                seren_notes_id
          FROM meetings
          WHERE id = ?1",
         params![id],
@@ -1029,6 +1038,7 @@ fn load_meeting(conn: &Connection, id: &str) -> rusqlite::Result<Option<MeetingR
             let payload = checked_payload(json!({
                 "failure_reason": row.get::<_, Option<String>>(16)?,
                 "capture_diagnostics_json": parse_json_opt(row.get::<_, Option<String>>(17)?),
+                "seren_notes_id": row.get::<_, Option<String>>(18)?,
             }))
             .map_err(to_sqlite_invalid)?;
             Ok(MeetingRow {
@@ -1449,9 +1459,9 @@ fn apply_remote_meeting(conn: &Connection, row: PgRow) -> rusqlite::Result<()> {
             id, title, source_app, started_at, ended_at, status, template_id,
             routed_skill_slug, agent_conversation_id, notes_markdown,
             notes_struct_json, failure_reason, capture_diagnostics_json,
-            created_at, updated_at, row_version, synced_at, deleted_at
+            seren_notes_id, created_at, updated_at, row_version, synced_at, deleted_at
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, NULL)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, NULL)
          ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             source_app = excluded.source_app,
@@ -1464,6 +1474,7 @@ fn apply_remote_meeting(conn: &Connection, row: PgRow) -> rusqlite::Result<()> {
             notes_struct_json = excluded.notes_struct_json,
             failure_reason = excluded.failure_reason,
             capture_diagnostics_json = excluded.capture_diagnostics_json,
+            seren_notes_id = excluded.seren_notes_id,
             updated_at = excluded.updated_at,
             row_version = excluded.row_version,
             synced_at = excluded.synced_at,
@@ -1483,6 +1494,7 @@ fn apply_remote_meeting(conn: &Connection, row: PgRow) -> rusqlite::Result<()> {
             value_to_string_opt(pg_get::<Option<Value>>(&row, "notes_struct_json")?.as_ref()),
             value_opt_str(&payload, "failure_reason"),
             value_to_string_opt(payload.get("capture_diagnostics_json")),
+            seren_notes_id_from_payload(&payload),
             pg_get::<i64>(&row, "created_at")?,
             pg_get::<i64>(&row, "updated_at")?,
             pg_get::<i64>(&row, "row_version")?,
@@ -1633,6 +1645,34 @@ mod tests {
                 "history sync schema must not contain {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn seren_notes_id_round_trips_through_payload() {
+        let payload = json!({
+            "failure_reason": null,
+            "capture_diagnostics_json": null,
+            "seren_notes_id": "276a4660-e16b-4934-97c6-a1ade2426653",
+        });
+        assert_eq!(
+            seren_notes_id_from_payload(&payload).as_deref(),
+            Some("276a4660-e16b-4934-97c6-a1ade2426653")
+        );
+    }
+
+    #[test]
+    fn seren_notes_id_absent_payload_returns_none() {
+        let payload = json!({
+            "failure_reason": "boom",
+            "capture_diagnostics_json": null,
+        });
+        assert!(seren_notes_id_from_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn seren_notes_id_null_payload_field_returns_none() {
+        let payload = json!({ "seren_notes_id": null });
+        assert!(seren_notes_id_from_payload(&payload).is_none());
     }
 
     #[test]
