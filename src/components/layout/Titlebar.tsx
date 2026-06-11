@@ -13,6 +13,8 @@ interface TitlebarProps {
   onToggleMeetings: () => void;
   onToggleSkills: () => void;
   onToggleSettings: () => void;
+  /** A meeting capture is live; show the recording indicator on the button. */
+  meetingRecording?: boolean;
   recordPromptVisible?: boolean;
   recordPromptSourceApp?: string | null;
   onRecordConversation?: () => void;
@@ -157,11 +159,27 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         <button
           type="button"
           data-testid="titlebar-meetings-button"
-          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
+          class="relative flex items-center justify-center w-7 h-7 border-none rounded-md cursor-pointer transition-all duration-100 active:scale-95"
+          classList={{
+            "bg-transparent text-muted-foreground hover:bg-surface-2 hover:text-foreground":
+              !props.meetingRecording,
+            "text-success bg-success/10 meeting-recording-glow":
+              props.meetingRecording,
+          }}
           onClick={props.onToggleMeetings}
-          title="Meetings"
+          title={
+            props.meetingRecording
+              ? "Recording in progress — open Meetings to stop"
+              : "Meetings"
+          }
+          aria-label={
+            props.meetingRecording ? "Recording in progress" : "Meetings"
+          }
         >
           <MeetingsIcon />
+          <Show when={props.meetingRecording}>
+            <span class="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-success ring-2 ring-surface-1 animate-pulse" />
+          </Show>
         </button>
 
         <button

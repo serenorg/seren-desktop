@@ -25,6 +25,7 @@ import {
   stopMeetingCapture as stopBackendCapture,
   type TranscriptSegment,
   updateMeetingStatus,
+  updateMeetingTitle,
 } from "@/services/meetings";
 import { orchestrate } from "@/services/orchestrator";
 import { onTrayToggleCapture, setTrayRecording } from "@/services/tray";
@@ -665,6 +666,34 @@ function clearError(): void {
   setMeetingState("error", null);
 }
 
+// Rename a saved meeting. Persists the new title, then updates the list row and
+// the active selection so the change shows immediately; the backend also emits
+// meeting://status, which reconciles any other surface.
+async function renameMeeting(meeting: Meeting, title: string): Promise<void> {
+  const trimmed = title.trim();
+  if (trimmed === meeting.title) return;
+  if (!isTauriRuntime()) return;
+  try {
+    await updateMeetingTitle(meeting.id, trimmed);
+    setMeetingState("meetings", (meetings) =>
+      meetings.map((item) =>
+        item.id === meeting.id ? { ...item, title: trimmed } : item,
+      ),
+    );
+    if (meetingState.activeMeeting?.id === meeting.id) {
+      setMeetingState("activeMeeting", {
+        ...meetingState.activeMeeting,
+        title: trimmed,
+      });
+    }
+  } catch (error) {
+    setMeetingState(
+      "error",
+      error instanceof Error ? error.message : "Failed to rename meeting",
+    );
+  }
+}
+
 async function deleteMeeting(meeting: Meeting): Promise<void> {
   if (!isTauriRuntime()) return;
   setMeetingState("error", null);
@@ -793,6 +822,7 @@ export const meetingStore = {
   stopCapture,
   stopAndProcess,
   regenerateNotes,
+  renameMeeting,
   deleteMeeting,
   clearError,
   startAutoDetect,

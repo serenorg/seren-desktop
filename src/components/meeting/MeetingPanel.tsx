@@ -214,6 +214,12 @@ export function MeetingPanel(props: MeetingPanelProps) {
             placeholder="Meeting title"
             value={title()}
             onInput={(event) => setTitle(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void startManualCapture();
+              }
+            }}
             disabled={activeCapture() !== undefined}
           />
           <Show
