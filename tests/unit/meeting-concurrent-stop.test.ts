@@ -1,5 +1,5 @@
 // ABOUTME: Regression test for #2162 — concurrent stop sources must not double-run notes + agent handoff.
-// ABOUTME: Two near-simultaneous stops (widget/tray/panel) for one meeting should process it once.
+// ABOUTME: Two near-simultaneous stops (tray/panel) for one meeting should process it once.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -36,11 +36,6 @@ vi.mock("@/services/meetings", async (importOriginal) => ({
   listMeetingTemplates: m.listMeetingTemplates,
 }));
 vi.mock("@/services/orchestrator", () => ({ orchestrate: m.orchestrate }));
-vi.mock("@/services/captureWidget", () => ({
-  closeCaptureWidget: vi.fn(),
-  openCaptureWidget: vi.fn(),
-  onWidgetStopRequest: vi.fn(() => () => {}),
-}));
 vi.mock("@/services/tray", () => ({
   setTrayRecording: vi.fn(),
   onTrayToggleCapture: vi.fn(() => () => {}),
@@ -100,7 +95,7 @@ describe("meetingStore concurrent stop guard (#2162)", () => {
   });
 
   it("processes a meeting once when two stops fire near-simultaneously", async () => {
-    // Two stop sources race for the same meeting (e.g. widget relay + panel).
+    // Two stop sources race for the same meeting (e.g. tray relay + panel).
     await Promise.all([
       meetingStore.stopAndProcess(meeting()),
       meetingStore.stopAndProcess(meeting()),

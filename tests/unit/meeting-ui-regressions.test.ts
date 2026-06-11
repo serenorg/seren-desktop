@@ -1,7 +1,7 @@
 // ABOUTME: Source-level guards for Meeting Mode usability regressions from #2228.
 // ABOUTME: Keeps capture controls reachable and transcript review out of the narrow sidebar layout.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -42,27 +42,21 @@ describe("Meeting Mode transcript layout (#2228)", () => {
   });
 });
 
-describe("Meeting capture widget behavior (#2228)", () => {
-  it("positions the widget near the top-right and keeps its timer reactive", () => {
-    const widgetService = source("src/services/captureWidget.ts");
-    const widget = source("src/components/meeting/CaptureWidget.tsx");
+describe("Meeting capture controls (#2325)", () => {
+  it("does not create a separate floating capture widget", () => {
+    const index = source("src/index.tsx");
+    const store = source("src/stores/meeting.store.ts");
 
-    expect(widgetService).toContain("captureWidgetPosition");
-    expect(widgetService).toContain("currentMonitor");
-    expect(widgetService).toContain("WIDGET_MARGIN");
-    expect(widgetService).toContain("x:");
-    expect(widgetService).toContain("y:");
-    expect(widget).toContain("const [tick, setTick]");
-    expect(widget).toContain("tick();");
-    expect(widget).toContain('data-tauri-drag-region');
-  });
-
-  it("renders as a compact widget instead of a screen-sized floating panel (#2231)", () => {
-    const widget = source("src/components/meeting/CaptureWidget.tsx");
-
-    expect(widget).not.toContain("h-screen w-screen");
-    expect(widget).toContain("h-full w-full");
-    expect(widget).toContain("overflow-hidden");
+    expect(index).not.toContain("CaptureWidget");
+    expect(index).not.toContain("widget=1");
+    expect(store).not.toContain("openCaptureWidget");
+    expect(store).not.toContain("onWidgetStopRequest");
+    expect(
+      existsSync(resolve(repoRoot, "src/services/captureWidget.ts")),
+    ).toBe(false);
+    expect(
+      existsSync(resolve(repoRoot, "src/components/meeting/CaptureWidget.tsx")),
+    ).toBe(false);
   });
 });
 
