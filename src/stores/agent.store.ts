@@ -799,6 +799,8 @@ export interface ActiveSession {
   streamingContentReplay?: boolean;
   /** Stable replay assistant message id for chunk/message boundaries. */
   streamingContentMessageId?: string;
+  /** Stable SQLite row id for the in-flight assistant draft for this turn. */
+  assistantDraftMessageId?: string;
   /** Timestamp for current streaming thinking chunk buffer (ms epoch). */
   streamingThinkingTimestamp?: number;
   /** Buffered replay user text that may arrive as multiple chunks. */
@@ -1195,17 +1197,63 @@ function persistAgentMessage(
   // never stamped with producer provenance.
   const provider =
     msg.type === "user" ? null : (msg.provider ?? sessionAgentType);
-  saveMessage(
-    msg.id,
-    conversationId,
-    msg.type === "user" ? "user" : "assistant",
-    msg.content,
-    null,
-    msg.timestamp,
-    serializeAgentMessageMetadata(msg),
-    provider,
-  ).catch((error) =>
-    console.warn("[AgentStore] Failed to persist agent message:", error),
+  const queueKey = `${conversationId}:${msg.id}`;
+  const previous = messagePersistQueues.get(queueKey) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(() =>
+      saveMessage(
+        msg.id,
+        conversationId,
+        msg.type === "user" ? "user" : "assistant",
+        msg.content,
+        null,
+        msg.timestamp,
+        serializeAgentMessageMetadata(msg),
+        provider,
+      ),
+    );
+  messagePersistQueues.set(queueKey, next);
+  next
+    .catch((error) =>
+      console.warn("[AgentStore] Failed to persist agent message:", error),
+    )
+    .finally(() => {
+      if (messagePersistQueues.get(queueKey) === next) {
+        messagePersistQueues.delete(queueKey);
+      }
+    });
+}
+
+function persistStreamingAssistantDraft(sessionId: string): void {
+  const session = state.sessions[sessionId];
+  if (!session?.conversationId || !session.streamingContent) return;
+  if (session.streamingContentReplay === true) return;
+
+  const draftContent = scrubAgentMarkup(session.streamingContent);
+  if (
+    draftContent.length === 0 ||
+    isGeneratedPromptPrimer(draftContent) ||
+    session.isSkippingSkillContext
+  ) {
+    return;
+  }
+
+  const draftMessageId = session.assistantDraftMessageId ?? crypto.randomUUID();
+  if (!session.assistantDraftMessageId) {
+    setState("sessions", sessionId, "assistantDraftMessageId", draftMessageId);
+  }
+
+  persistAgentMessage(
+    session.conversationId,
+    {
+      id: draftMessageId,
+      type: "assistant",
+      content: draftContent,
+      timestamp: session.streamingContentTimestamp ?? Date.now(),
+      provider: session.info.agentType,
+    },
+    session.info.agentType,
   );
 }
 
@@ -1386,6 +1434,7 @@ const pendingSessionEvents = new Map<string, AgentEvent[]>();
 /** Guard against concurrent auto-recovery spawns in sendPrompt (per-session). */
 const recoveryInFlightMap = new Map<string, Promise<string | null>>();
 const LEGACY_CLAUDE_LOCAL_SESSION_ID_RE = /^session-\d+$/;
+const messagePersistQueues = new Map<string, Promise<void>>();
 
 // Chunk accumulation buffers — plain JS, not reactive.
 // Flushed to the SolidJS store at CHUNK_FLUSH_MS intervals to reduce
@@ -1481,6 +1530,7 @@ function flushChunkBuf(sessionId: string): void {
         buf.content,
       ),
     );
+    persistStreamingAssistantDraft(sessionId);
     buf.content = "";
   }
   if (buf.thinking) {
@@ -5101,6 +5151,7 @@ export const agentStore = {
     setState("sessions", sessionId, "streamingContentTimestamp", undefined);
     setState("sessions", sessionId, "streamingContentReplay", undefined);
     setState("sessions", sessionId, "streamingContentMessageId", undefined);
+    setState("sessions", sessionId, "assistantDraftMessageId", undefined);
     setState("sessions", sessionId, "streamingThinking", "");
     setState("sessions", sessionId, "streamingThinkingTimestamp", undefined);
     setState("sessions", sessionId, "pendingUserMessage", "");
@@ -5748,6 +5799,7 @@ export const agentStore = {
         }
         this.flushPendingUserMessage(sessionId);
         this.finalizeStreamingContent(sessionId, { isReplay: isHistoryReplay });
+        setState("sessions", sessionId, "assistantDraftMessageId", undefined);
 
         // Turn finalized successfully → clear the thread's in-flight signal,
         // the inline error state (if any), and the restart timer. #1631.
@@ -6967,6 +7019,7 @@ export const agentStore = {
         setState("sessions", sessionId, "streamingContentTimestamp", undefined);
         setState("sessions", sessionId, "streamingContentReplay", undefined);
         setState("sessions", sessionId, "streamingContentMessageId", undefined);
+        setState("sessions", sessionId, "assistantDraftMessageId", undefined);
         setState("sessions", sessionId, "promptStartTime", undefined);
         return;
       }
@@ -6983,6 +7036,7 @@ export const agentStore = {
         setState("sessions", sessionId, "streamingContentTimestamp", undefined);
         setState("sessions", sessionId, "streamingContentReplay", undefined);
         setState("sessions", sessionId, "streamingContentMessageId", undefined);
+        setState("sessions", sessionId, "assistantDraftMessageId", undefined);
         setState("sessions", sessionId, "promptStartTime", undefined);
         return;
       }
@@ -6998,7 +7052,10 @@ export const agentStore = {
       const safeContent = finalOutputValidation.safeDisplayText;
 
       const message: AgentMessage = {
-        id: session.streamingContentMessageId ?? crypto.randomUUID(),
+        id:
+          session.assistantDraftMessageId ??
+          session.streamingContentMessageId ??
+          crypto.randomUUID(),
         type: "assistant",
         content: safeContent,
         timestamp: session.streamingContentTimestamp ?? Date.now(),
@@ -7057,6 +7114,7 @@ export const agentStore = {
       setState("sessions", sessionId, "streamingContentTimestamp", undefined);
       setState("sessions", sessionId, "streamingContentReplay", undefined);
       setState("sessions", sessionId, "streamingContentMessageId", undefined);
+      setState("sessions", sessionId, "assistantDraftMessageId", undefined);
       // Clear the start time
       setState("sessions", sessionId, "promptStartTime", undefined);
     }

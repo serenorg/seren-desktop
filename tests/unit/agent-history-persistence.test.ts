@@ -113,8 +113,8 @@ describe("agent message persistence guards", () => {
       finalizeIdx,
       agentStoreSource.indexOf("async forkConversation(", finalizeIdx),
     );
-    expect(finalizeBody).toContain(
-      "id: session.streamingContentMessageId ?? crypto.randomUUID()",
+    expect(finalizeBody).toMatch(
+      /id:\s*session\.assistantDraftMessageId\s*\?\?\s*session\.streamingContentMessageId\s*\?\?\s*crypto\.randomUUID\(\)/,
     );
   });
 
