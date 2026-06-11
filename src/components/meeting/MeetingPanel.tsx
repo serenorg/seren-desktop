@@ -7,6 +7,7 @@ import { MeetingDetail } from "@/components/meeting/MeetingDetail";
 import { MeetingSettings } from "@/components/meeting/MeetingSettings";
 import {
   formatDuration,
+  formatMeetingDate,
   formatTime,
   meetingTitle,
   STATUS_LABELS,
@@ -313,7 +314,10 @@ export function MeetingPanel(props: MeetingPanelProps) {
                         {meetingTitle(meeting)}
                       </div>
                       <div class="mt-1 flex items-center justify-between gap-2 text-[11px]">
-                        <span>{formatTime(meeting.startedAt)}</span>
+                        <span>
+                          {formatMeetingDate(meeting.startedAt)} ·{" "}
+                          {formatTime(meeting.startedAt)}
+                        </span>
                         <span>{STATUS_LABELS[meeting.status]}</span>
                       </div>
                     </button>

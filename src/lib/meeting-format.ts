@@ -10,6 +10,38 @@ export function formatTime(ms: number): string {
   });
 }
 
+// Compact date label for list rows and the detail meta row. Recent meetings
+// collapse to Today/Yesterday so the row stays scannable; older ones get a
+// calendar date, including the year when it differs from the current year so a
+// January meeting from last year is not mistaken for this year (#2344).
+export function formatMeetingDate(
+  ms: number,
+  now: number = Date.now(),
+): string {
+  const day = new Date(ms);
+  const today = new Date(now);
+  const sameDay =
+    day.getFullYear() === today.getFullYear() &&
+    day.getMonth() === today.getMonth() &&
+    day.getDate() === today.getDate();
+  if (sameDay) return "Today";
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (
+    day.getFullYear() === yesterday.getFullYear() &&
+    day.getMonth() === yesterday.getMonth() &&
+    day.getDate() === yesterday.getDate()
+  ) {
+    return "Yesterday";
+  }
+  const sameYear = day.getFullYear() === today.getFullYear();
+  return day.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: sameYear ? undefined : "numeric",
+  });
+}
+
 export function formatDuration(meeting: Meeting): string {
   const end = meeting.endedAt ?? Date.now();
   const totalSeconds = Math.max(
