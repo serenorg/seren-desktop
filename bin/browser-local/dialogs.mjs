@@ -2,6 +2,7 @@
 // ABOUTME: Uses platform CLI tools so the local browser mode stays dependency-light.
 
 import { execFile } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
 import { platform } from "node:os";
 import { dirname } from "node:path";
 
@@ -21,6 +22,30 @@ function exec(command, args) {
       resolve(stdout.trim());
     });
   });
+}
+
+function execStrict(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout: 60_000 }, (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(stdout.trim());
+    });
+  });
+}
+
+function assertOpenableFile(path) {
+  if (!path || typeof path !== "string") {
+    throw new Error("Path is required");
+  }
+  if (!existsSync(path)) {
+    throw new Error(`Path does not exist: ${path}`);
+  }
+  if (!statSync(path).isFile()) {
+    throw new Error(`Path is not a file: ${path}`);
+  }
 }
 
 export async function openFolderDialog() {
@@ -125,6 +150,32 @@ export async function revealInFileManager({ path }) {
 
   if (os === "win32") {
     await exec("explorer", [`/select,${path}`]);
+    return;
+  }
+
+  throw new Error(`Unsupported platform: ${os}`);
+}
+
+export async function openPathWithDefaultApp({ path }) {
+  assertOpenableFile(path);
+
+  if (os === "darwin") {
+    await execStrict("open", [path]);
+    return;
+  }
+
+  if (os === "linux") {
+    await execStrict("xdg-open", [path]);
+    return;
+  }
+
+  if (os === "win32") {
+    await execStrict("powershell", [
+      "-NoProfile",
+      "-Command",
+      "Start-Process -LiteralPath $args[0]",
+      path,
+    ]);
     return;
   }
 

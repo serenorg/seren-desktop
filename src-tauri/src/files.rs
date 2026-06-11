@@ -167,6 +167,24 @@ pub fn reveal_in_file_manager(app: tauri::AppHandle, path: String) -> Result<(),
         .map_err(|e| format!("Failed to reveal in file manager: {}", e))
 }
 
+/// Open a file with the operating system's default application.
+#[tauri::command]
+pub fn open_path_with_default_app(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let resolved = expand_tilde(&path)?;
+
+    if !resolved.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+    if resolved.is_dir() {
+        return Err(format!("Path is a directory: {}", path));
+    }
+
+    app.opener()
+        .open_path(resolved.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| format!("Failed to open file with default app: {}", e))
+}
+
 /// Defence-in-depth guard (GH #1584): reject writes whose resolved path
 /// still contains a literal `~` segment. Before GH #1583 landed, an
 /// unexpanded `~/foo` would fall back to `Path::new("~/foo")` and resolve

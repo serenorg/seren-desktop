@@ -17,6 +17,7 @@ import {
   setInlineEditHandler,
 } from "@/lib/editor";
 import { saveTab } from "@/lib/files/service";
+import { isSupportedImageFile } from "@/lib/images/file-types";
 import { authStore } from "@/stores/auth.store";
 import { editorStore } from "@/stores/editor.store";
 import { setSelectedPath } from "@/stores/fileTree";
@@ -172,11 +173,7 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
   // Check if current file is an image
   const isImageFile = createMemo(() => {
     const path = activeFilePath();
-    if (!path) return false;
-    const ext = path.toLowerCase().split(".").pop();
-    return ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"].includes(
-      ext || "",
-    );
+    return path ? isSupportedImageFile(path) : false;
   });
 
   // Check if current file is a PDF

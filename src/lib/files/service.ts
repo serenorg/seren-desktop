@@ -13,6 +13,7 @@ import {
   isDirectory as isDirectoryBridge,
   isTauriRuntime,
   listDirectory as listDirectoryBridge,
+  openPathWithDefaultApp as openPathWithDefaultAppBridge,
   pathExists as pathExistsBridge,
   readFile as readFileBridge,
   renamePath as renamePathBridge,
@@ -107,6 +108,13 @@ export async function renamePath(
  */
 export async function revealInFileManager(path: string): Promise<void> {
   return revealInFileManagerBridge(path);
+}
+
+/**
+ * Open an image file with the operating system's default image viewer.
+ */
+export async function openImageInDefaultViewer(path: string): Promise<void> {
+  return openPathWithDefaultAppBridge(path);
 }
 
 async function openDialog(

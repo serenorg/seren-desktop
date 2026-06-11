@@ -11,6 +11,7 @@ import { createProviderHandlers } from "./browser-local/providers.mjs";
 import {
   openFileDialog,
   openFolderDialog,
+  openPathWithDefaultApp,
   revealInFileManager,
   saveFileDialog,
 } from "./browser-local/dialogs.mjs";
@@ -230,6 +231,7 @@ function registerBrowserLocalHandlers() {
   registerHandler("open_file_dialog", openFileDialog);
   registerHandler("save_file_dialog", saveFileDialog);
   registerHandler("reveal_in_file_manager", revealInFileManager);
+  registerHandler("open_path_with_default_app", openPathWithDefaultApp);
 
   const providerHandlers = createProviderHandlers({
     emit,
