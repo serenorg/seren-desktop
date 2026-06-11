@@ -4,9 +4,43 @@
 use crate::auth::{authenticated_request, has_stored_credentials};
 use reqwest::Client;
 use serde_json::Value;
+use std::time::Duration;
 use tauri::AppHandle;
 
 const PUBLISH_URL: &str = "https://api.serendb.com/publishers/seren-notes/notes";
+// seren-notes is scale-to-zero — the first 5xx on a cold publisher is almost
+// always cold-start warm-up, not a real failure. Two retries with widening
+// backoff (2s, then 4s) give the worker time to come up before we declare a
+// real outage and route the user to the support pipeline. Keep this in sync
+// with the `Publish to Seren Notes` button copy in MeetingDetail. #2343.
+const RETRY_BACKOFFS: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(4)];
+
+/// Outcome of a publish attempt. Distinguishes a missing-credentials skip
+/// (silent — UI shows the Login CTA) from a terminal server failure that
+/// should be surfaced to the user and routed through the support pipeline
+/// for a serenorg/seren-desktop bug ticket. #2343.
+#[derive(Debug)]
+pub enum PublishError {
+    NotAuthenticated,
+    /// The Gateway returned a 5xx (or the second attempt did). `status` is
+    /// the HTTP status code from the final attempt; `body` is the response
+    /// body, truncated by the caller before going into telemetry.
+    Server { status: u16, body: String },
+    /// Any other failure — network drop, malformed response, missing id.
+    Other(String),
+}
+
+impl PublishError {
+    pub fn into_message(self) -> String {
+        match self {
+            PublishError::NotAuthenticated => "not authenticated".to_string(),
+            PublishError::Server { status, body } => {
+                format!("seren-notes publish returned {status}: {body}")
+            }
+            PublishError::Other(msg) => msg,
+        }
+    }
+}
 
 /// Assemble the single markdown body posted to seren-notes. Always carries
 /// notes, action items, and the per-speaker transcript, in that order, so the
@@ -97,13 +131,19 @@ fn is_uuid(s: &str) -> bool {
 /// using the user's existing access token. Short-circuits with a clear error
 /// when no credentials are stored — callers handle that case by skipping the
 /// publish silently and letting the UI render the "Login to SerenDB" CTA.
+///
+/// On a 5xx the attempt is retried up to `RETRY_BACKOFFS.len()` times with
+/// widening backoff to absorb scale-to-zero cold starts. A 5xx surviving
+/// every retry returns `PublishError::Server`, which the caller surfaces to
+/// the UI (toast + republish CTA) and emits as a captureSupportError so the
+/// support pipeline opens a serenorg/seren-desktop bug ticket. #2343.
 pub async fn publish_meeting_notes(
     app: &AppHandle,
     title: &str,
     content: &str,
-) -> Result<String, String> {
+) -> Result<String, PublishError> {
     if !has_stored_credentials(app) {
-        return Err("not authenticated".to_string());
+        return Err(PublishError::NotAuthenticated);
     }
     let client = Client::new();
     let body = serde_json::json!({
@@ -112,24 +152,65 @@ pub async fn publish_meeting_notes(
         "format": "markdown",
     })
     .to_string();
-    let response = authenticated_request(app, &client, |c, token| {
+
+    let mut last_server: Option<(u16, String)> = None;
+    let attempts = RETRY_BACKOFFS.len() + 1;
+    for attempt in 0..attempts {
+        match attempt_publish(app, &client, &body).await {
+            Ok(id) => return Ok(id),
+            Err(PublishError::Server { status, body: srv }) => {
+                last_server = Some((status, srv));
+                if let Some(delay) = RETRY_BACKOFFS.get(attempt).copied() {
+                    log::warn!(
+                        "[meeting] seren-notes publish 5xx={status} (attempt {}/{attempts}); retrying in {:?} (cold-start expected)",
+                        attempt + 1,
+                        delay,
+                    );
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    let (status, body) = last_server
+        .expect("retry loop only exits via Ok, non-Server Err, or after surfacing a Server status");
+    Err(PublishError::Server { status, body })
+}
+
+async fn attempt_publish(
+    app: &AppHandle,
+    client: &Client,
+    body: &str,
+) -> Result<String, PublishError> {
+    let response = authenticated_request(app, client, |c, token| {
         c.post(PUBLISH_URL)
             .header("Content-Type", "application/json")
             .bearer_auth(token)
-            .body(body.clone())
+            .body(body.to_string())
     })
-    .await?;
+    .await
+    .map_err(PublishError::Other)?;
     let status = response.status();
     let text = response
         .text()
         .await
-        .map_err(|err| format!("seren-notes read body failed: {err}"))?;
+        .map_err(|err| PublishError::Other(format!("seren-notes read body failed: {err}")))?;
+    if status.is_server_error() {
+        return Err(PublishError::Server {
+            status: status.as_u16(),
+            body: text,
+        });
+    }
     if !status.is_success() {
-        return Err(format!("seren-notes publish returned {status}: {text}"));
+        return Err(PublishError::Other(format!(
+            "seren-notes publish returned {status}: {text}"
+        )));
     }
     let value: Value = serde_json::from_str(&text)
-        .map_err(|err| format!("seren-notes response was not JSON: {err}"))?;
-    extract_note_id(&value).ok_or_else(|| "seren-notes response missing note id".to_string())
+        .map_err(|err| PublishError::Other(format!("seren-notes response was not JSON: {err}")))?;
+    extract_note_id(&value)
+        .ok_or_else(|| PublishError::Other("seren-notes response missing note id".to_string()))
 }
 
 #[cfg(test)]
@@ -230,5 +311,34 @@ mod tests {
     fn extract_note_id_returns_none_when_id_missing() {
         let value = json!({"data": {"title": "n", "content": "c"}});
         assert_eq!(extract_note_id(&value), None);
+    }
+
+    // The captureSupportError telemetry payload echoes the publish error's
+    // message verbatim; this test pins the wire shape so a future refactor
+    // can't quietly break the support pipeline's signature dedupe. #2343.
+    #[test]
+    fn publish_error_server_into_message_includes_status_for_support_signature() {
+        let err = PublishError::Server {
+            status: 503,
+            body: "upstream cold start".to_string(),
+        };
+        let msg = err.into_message();
+        assert!(msg.contains("503"), "expected status in message: {msg}");
+        assert!(
+            msg.contains("upstream cold start"),
+            "expected body in message: {msg}"
+        );
+    }
+
+    // Cold-start absorption requires *more than one* retry — a single retry
+    // is not enough to reach a warm worker. Pin the minimum retry count so a
+    // tuning revert can't quietly drop the budget back to one. #2343.
+    #[test]
+    fn retry_budget_is_at_least_two_attempts_for_cold_start() {
+        assert!(
+            RETRY_BACKOFFS.len() >= 2,
+            "scale-to-zero seren-notes needs at least two retries before declaring a real outage; got {}",
+            RETRY_BACKOFFS.len()
+        );
     }
 }

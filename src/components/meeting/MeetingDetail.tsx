@@ -122,6 +122,7 @@ export function MeetingDetail(props: MeetingDetailProps) {
     props.meeting.templateId ?? settingsStore.get("meetingTemplateId"),
   );
   const [regenerating, setRegenerating] = createSignal(false);
+  const [republishing, setRepublishing] = createSignal(false);
   const [highlightedSeq, setHighlightedSeq] = createSignal<number | null>(null);
   const [editingTitle, setEditingTitle] = createSignal(false);
   const [titleDraft, setTitleDraft] = createSignal("");
@@ -240,6 +241,19 @@ export function MeetingDetail(props: MeetingDetailProps) {
       await meetingStore.routeMeetingToSkill(props.meeting, slug);
     } finally {
       setRouting(false);
+    }
+  };
+
+  // Manual republish for #2343. The backend uses PublishGuard so a
+  // double-click can't double-post; the button is also disabled while a
+  // call is in flight to keep the surface honest.
+  const republish = async () => {
+    if (republishing()) return;
+    setRepublishing(true);
+    try {
+      await meetingStore.republishToSerenNotes(props.meeting);
+    } finally {
+      setRepublishing(false);
     }
   };
 
@@ -417,14 +431,32 @@ export function MeetingDetail(props: MeetingDetailProps) {
           <Show
             when={props.meeting.serenNotesId}
             fallback={
-              <Show when={!authStore.isAuthenticated}>
-                <div class="mt-2 text-[12px] text-muted-foreground">
+              <Show
+                when={authStore.isAuthenticated}
+                fallback={
+                  <div class="mt-2 text-[12px] text-muted-foreground">
+                    <button
+                      type="button"
+                      class="text-primary hover:underline focus:outline-none focus:underline"
+                      onClick={() => requestSignInModal()}
+                    >
+                      Login to SerenDB to chat with your meeting notes
+                    </button>
+                  </div>
+                }
+              >
+                {/* Authenticated but no published id — the auto-publish
+                  hit a 5xx after retry, the prior session was offline, or
+                  the user signed in after notes finalized. Manual retry. */}
+                <div class="mt-2 flex items-center gap-2">
                   <button
                     type="button"
-                    class="text-primary hover:underline focus:outline-none focus:underline"
-                    onClick={() => requestSignInModal()}
+                    class="h-7 px-2.5 rounded-md border border-primary/40 bg-primary/10 text-[12px] text-primary hover:bg-primary/15 disabled:opacity-60"
+                    onClick={republish}
+                    disabled={republishing() || !isTauriRuntime()}
+                    title="Publish these notes to notes.serendb.com"
                   >
-                    Login to SerenDB to chat with your meeting notes
+                    {republishing() ? "Publishing…" : "Publish to Seren Notes"}
                   </button>
                 </div>
               </Show>
