@@ -1051,14 +1051,14 @@ jobs:
 
       - name: Configure AWS credentials with OIDC role
         if: env.WINDOWS_E2E_AWS_ROLE_ARN != ''
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.WINDOWS_E2E_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Configure AWS credentials with access keys
         if: env.WINDOWS_E2E_AWS_ROLE_ARN == ''
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
