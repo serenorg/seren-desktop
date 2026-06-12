@@ -349,6 +349,32 @@ describe("paired runtime — prompt pipeline", () => {
     expect(dedup).toEqual(["planning", "executing", "reviewing", "idle"]);
   });
 
+  it("keeps status 'prompting' for the whole pipeline so the composer stays frozen (#2372)", async () => {
+    await h.paired.sendPrompt({ sessionId: "paired-1", prompt: "do it" });
+    const frames = eventsFor(h.emitted, "provider://session-status").map(
+      (e) => ({
+        status: e.payload.status as string,
+        state:
+          (e.payload as { paired?: { state?: string } }).paired?.state ?? null,
+      }),
+    );
+    // Every frame emitted while a phase is active must carry "prompting" —
+    // a mid-turn "ready" re-enables Send (#2372).
+    for (const frame of frames) {
+      if (
+        frame.state === "planning" ||
+        frame.state === "executing" ||
+        frame.state === "reviewing"
+      ) {
+        expect(frame, JSON.stringify(frame)).toMatchObject({
+          status: "prompting",
+        });
+      }
+    }
+    // The turn must end on a ready frame.
+    expect(frames[frames.length - 1].status).toBe("ready");
+  });
+
   it("suppresses replayed inner history chunks (DB transcript is authoritative)", async () => {
     h.wrappedEmit("provider://message-chunk", {
       sessionId: h.inner.spawnSession.mock.calls[0][0].localSessionId,
@@ -579,5 +605,36 @@ describe("paired runtime — terminate", () => {
     expect(statuses.length).toBe(1);
     expect(statuses[0].payload.status).toBe("terminated");
     expect(h.paired.hasSession("paired-1")).toBe(false);
+  });
+
+  it("never leaks inner session ids when inner terminations emit during teardown (#2373)", async () => {
+    const h = createHarness();
+    await spawnPaired(h);
+    h.emitted.length = 0;
+
+    // Real runtimes emit a terminated status for each inner session while
+    // terminateSession is in flight — those must stay intercepted.
+    h.inner.terminateSession.mockImplementation(
+      async ({ sessionId }: { sessionId: string }) => {
+        h.wrappedEmit("provider://session-status", {
+          sessionId,
+          status: "terminated",
+        });
+        h.innerSessions.delete(sessionId);
+      },
+    );
+
+    await h.paired.terminateSession({ sessionId: "paired-1" });
+    const leaked = h.emitted.filter(
+      (e) =>
+        typeof e.payload.sessionId === "string" &&
+        e.payload.sessionId !== "paired-1",
+    );
+    expect(leaked).toEqual([]);
+    // Exactly one terminated status reaches the frontend: the paired one.
+    const terminated = eventsFor(h.emitted, "provider://session-status").filter(
+      (e) => e.payload.status === "terminated",
+    );
+    expect(terminated.length).toBe(1);
   });
 });

@@ -214,6 +214,9 @@ export function createPairedRuntime({ emit, inner }) {
     if (!route) return false;
     const paired = pairedSessions.get(route.pairedId);
     if (!paired) return false;
+    // Teardown in flight: swallow every inner emission so raw inner session
+    // ids never reach the frontend during terminate (#2373).
+    if (paired.terminating) return true;
     const roleState = paired.roles[route.role];
 
     switch (channel) {
@@ -442,14 +445,18 @@ export function createPairedRuntime({ emit, inner }) {
       };
     } catch (error) {
       paired.terminating = true;
+      // Terminate before dropping the route entries so teardown emissions
+      // from the inner runtimes stay intercepted (#2373).
       for (const role of Object.values(paired.roles)) {
         if (!role.innerSessionId) continue;
-        innerToPaired.delete(role.innerSessionId);
         try {
           await inner.terminateSession({ sessionId: role.innerSessionId });
         } catch {
           // Best-effort teardown — the inner spawn may never have registered.
         }
+      }
+      for (const role of Object.values(paired.roles)) {
+        if (role.innerSessionId) innerToPaired.delete(role.innerSessionId);
       }
       pairedSessions.delete(pairedId);
       const message = error instanceof Error ? error.message : String(error);
@@ -495,6 +502,11 @@ export function createPairedRuntime({ emit, inner }) {
 
     paired.cancelRequested = false;
     paired.currentPrompt = {};
+    // The whole pipeline is one turn from the frontend's perspective. The
+    // composer's Send gate reads info.status, so every status frame emitted
+    // during a phase must carry "prompting" — a mid-turn "ready" re-enables
+    // Send and the second submit collides with this turn (#2372).
+    paired.status = "prompting";
     const usage = { input_tokens: 0, output_tokens: 0 };
     let contextWindow;
 
@@ -512,7 +524,6 @@ export function createPairedRuntime({ emit, inner }) {
       }
 
       setPhase(paired, "planning", "planner");
-      emitPairedStatus(paired, "prompting");
       const planText = await runRoleTurn(
         paired,
         "planner",
@@ -546,6 +557,7 @@ export function createPairedRuntime({ emit, inner }) {
       collectMeta("planner");
 
       paired.currentPrompt = null;
+      paired.status = "ready";
       setPhase(paired, "idle", null);
       emit("provider://prompt-complete", {
         sessionId: paired.id,
@@ -561,6 +573,7 @@ export function createPairedRuntime({ emit, inner }) {
       const message = error instanceof Error ? error.message : String(error);
       const wasCancelled =
         paired.cancelRequested || message.includes("Task cancelled");
+      paired.status = "ready";
       paired.state = "idle";
       paired.activeRole = null;
       if (wasCancelled) {
@@ -589,6 +602,7 @@ export function createPairedRuntime({ emit, inner }) {
       }
     }
 
+    paired.status = "ready";
     paired.state = "idle";
     paired.activeRole = null;
     emit("provider://error", {
@@ -601,17 +615,24 @@ export function createPairedRuntime({ emit, inner }) {
   async function terminateSession({ sessionId }) {
     const paired = requirePaired(sessionId);
     paired.terminating = true;
-    pairedSessions.delete(sessionId);
 
+    // Inner runtimes emit their own terminated statuses while teardown is
+    // in flight. Keep the route entries (and the paired record) alive until
+    // both inner sessions are down so those emits stay intercepted — the
+    // terminating flag swallows them (#2373).
     for (const role of Object.values(paired.roles)) {
       if (!role.innerSessionId) continue;
-      innerToPaired.delete(role.innerSessionId);
       try {
         await inner.terminateSession({ sessionId: role.innerSessionId });
       } catch {
         // Best-effort: one inner session may already be gone.
       }
     }
+
+    for (const role of Object.values(paired.roles)) {
+      if (role.innerSessionId) innerToPaired.delete(role.innerSessionId);
+    }
+    pairedSessions.delete(sessionId);
 
     emit("provider://session-status", {
       sessionId: paired.id,
