@@ -1,0 +1,790 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Seren Desktop Agent Launcher Mockup</title>
+    <style>
+      :root {
+        --background: #0a0e17;
+        --surface-0: #0f1623;
+        --surface-1: #151d2e;
+        --surface-2: #1c2640;
+        --surface-3: #243049;
+        --foreground: #e2e8f0;
+        --muted: #94a3b8;
+        --border: rgba(148, 163, 184, 0.1);
+        --border-strong: rgba(148, 163, 184, 0.25);
+        --primary: #38bdf8;
+        --purple: #a855f7;
+        color-scheme: dark;
+        font-family:
+          "General Sans", "DM Sans", -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #050812;
+        color: var(--foreground);
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .window {
+        width: 100vw;
+        min-height: 100vh;
+        background: var(--background);
+        overflow: hidden;
+      }
+
+      .traffic {
+        height: 58px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding: 0 22px;
+        background: #333;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.32);
+      }
+
+      .traffic span {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+      }
+
+      .red {
+        background: #ff5f57;
+      }
+
+      .yellow {
+        background: #ffbd2e;
+      }
+
+      .green {
+        background: #28c840;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: 552px minmax(0, 1fr);
+        min-height: calc(100vh - 58px);
+      }
+
+      .sidebar {
+        position: relative;
+        min-height: 0;
+        background: var(--surface-0);
+        border-right: 1px solid var(--border);
+      }
+
+      .tabbar {
+        height: 78px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 30px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .tab,
+      .tab-dashed,
+      .mini-icon {
+        display: inline-grid;
+        place-items: center;
+        border-radius: 8px;
+        color: #a8b4c7;
+      }
+
+      .tab {
+        width: 52px;
+        height: 48px;
+        border: 1px solid rgba(56, 189, 248, 0.48);
+        background: rgba(56, 189, 248, 0.12);
+        color: var(--primary);
+        font-size: 24px;
+      }
+
+      .tab-dashed {
+        width: 52px;
+        height: 48px;
+        border: 1px dashed rgba(148, 163, 184, 0.14);
+        font-size: 28px;
+      }
+
+      .mini-icon {
+        width: 40px;
+        height: 40px;
+        margin-left: 22px;
+        font-size: 23px;
+      }
+
+      .folderbar {
+        height: 96px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 30px 0 46px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .folder {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        font-size: 28px;
+        letter-spacing: 0;
+      }
+
+      .menu-icon {
+        color: #a8b4c7;
+        font-size: 30px;
+      }
+
+      .new-button {
+        margin: 18px 30px 24px;
+        height: 74px;
+        width: calc(100% - 60px);
+        border: 1px solid rgba(56, 189, 248, 0.38);
+        border-radius: 20px;
+        background: rgba(56, 189, 248, 0.12);
+        color: var(--primary);
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        padding: 0 28px;
+        font-size: 28px;
+      }
+
+      .launcher {
+        position: absolute;
+        top: 290px;
+        left: 30px;
+        right: 14px;
+        max-height: calc(100vh - 315px);
+        overflow-y: auto;
+        padding: 28px 26px;
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        background: #1d2943;
+        box-shadow: 12px 16px 32px rgba(0, 0, 0, 0.24);
+      }
+
+      .launcher::-webkit-scrollbar {
+        width: 12px;
+      }
+
+      .launcher::-webkit-scrollbar-thumb {
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.14);
+      }
+
+      .section-label {
+        margin: 4px 0 20px;
+        color: #8b98af;
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .divider {
+        height: 1px;
+        margin: 20px 0 28px;
+        background: rgba(148, 163, 184, 0.12);
+      }
+
+      .launcher-row {
+        width: 100%;
+        min-height: 82px;
+        display: grid;
+        grid-template-columns: 42px minmax(0, 1fr) auto;
+        gap: 22px;
+        align-items: center;
+        border: 0;
+        border-radius: 14px;
+        background: transparent;
+        color: var(--foreground);
+        padding: 10px 0;
+        text-align: left;
+      }
+
+      .emoji {
+        width: 42px;
+        text-align: center;
+        font-size: 30px;
+      }
+
+      .cli-emoji {
+        position: relative;
+        width: 42px;
+        height: 42px;
+        display: inline-grid;
+        place-items: center;
+        border-radius: 9px;
+        background: rgba(10, 14, 23, 0.36);
+        font-size: 26px;
+      }
+
+      .cli-emoji::after {
+        content: ">_";
+        position: absolute;
+        right: -10px;
+        bottom: -5px;
+        padding: 2px 5px;
+        border-radius: 4px;
+        border: 1px solid rgba(148, 163, 184, 0.15);
+        background: var(--surface-2);
+        color: #a8b4c7;
+        font-family: "JetBrains Mono", "SF Mono", monospace;
+        font-size: 11px;
+      }
+
+      .row-title {
+        display: block;
+        color: var(--foreground);
+        font-size: 27px;
+        font-weight: 500;
+        line-height: 1.24;
+      }
+
+      .row-subtitle {
+        display: block;
+        max-width: 295px;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 23px;
+        line-height: 1.46;
+      }
+
+      .chip {
+        justify-self: end;
+        border-radius: 999px;
+        padding: 6px 12px 7px;
+        border: 1px solid rgba(56, 189, 248, 0.42);
+        background: rgba(56, 189, 248, 0.12);
+        color: var(--primary);
+        font-size: 21px;
+        font-weight: 650;
+        letter-spacing: 0.03em;
+        white-space: nowrap;
+      }
+
+      .chip.subscription {
+        border-color: rgba(168, 85, 247, 0.58);
+        background: rgba(168, 85, 247, 0.16);
+        color: #d8b4fe;
+      }
+
+      .chip.cli {
+        border-color: rgba(148, 163, 184, 0.12);
+        background: rgba(148, 163, 184, 0.08);
+        color: #a8b4c7;
+      }
+
+      .main {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .chat-header {
+        height: 54px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .chat-title {
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .chat-subtitle {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .active-agent {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .chat-body {
+        flex: 1;
+        padding: 22px 24px;
+      }
+
+      .message {
+        max-width: 820px;
+        padding: 16px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .message strong {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 8px;
+      }
+
+      .message p {
+        margin: 0;
+        color: #dbe5f2;
+        font-size: 14px;
+        line-height: 1.58;
+      }
+
+      .message ul {
+        margin: 0;
+        padding-left: 18px;
+        color: #dbe5f2;
+        font-size: 14px;
+        line-height: 1.58;
+      }
+
+      .handoff {
+        max-width: 820px;
+        margin: 4px 0;
+        padding: 11px 0;
+        border-bottom: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .handoff strong {
+        color: var(--foreground);
+        font-weight: 650;
+      }
+
+      .composer {
+        padding: 14px;
+        border-top: 1px solid var(--border);
+        background: var(--surface-1);
+      }
+
+      .composer-box {
+        height: 84px;
+        border: 1px solid var(--border-strong);
+        border-radius: 10px;
+        background: var(--background);
+        color: var(--foreground);
+        padding: 14px;
+        font-size: 14px;
+      }
+
+      .composer-toolbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 10px;
+      }
+
+      .composer-toolbar-left,
+      .composer-toolbar-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .composer-toolbar-left {
+        flex: 1;
+        flex-wrap: wrap;
+      }
+
+      .composer-toolbar-right {
+        flex-shrink: 0;
+      }
+
+      .role-model-select {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        max-width: 230px;
+        height: 34px;
+        padding: 0 10px;
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        background: var(--surface-2);
+        color: var(--foreground);
+        font-size: 12px;
+        line-height: 1;
+      }
+
+      .role-model-select .role {
+        color: var(--muted);
+        font-weight: 650;
+        flex-shrink: 0;
+        white-space: nowrap;
+      }
+
+      .role-model-select .model {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .effort-select {
+        max-width: 180px;
+      }
+
+      .toolbar-chip {
+        display: inline-flex;
+        align-items: center;
+        height: 34px;
+        padding: 0 10px;
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        border-radius: 8px;
+        background: rgba(148, 163, 184, 0.06);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .send {
+        height: 34px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 8px;
+        background: #10b981;
+        color: white;
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      @media (max-width: 760px) {
+        .traffic {
+          height: 40px;
+          gap: 10px;
+          padding: 0 14px;
+        }
+
+        .traffic span {
+          width: 13px;
+          height: 13px;
+        }
+
+        .workspace {
+          display: block;
+          min-height: calc(100vh - 40px);
+        }
+
+        .sidebar {
+          min-height: calc(100vh - 40px);
+          border-right: 0;
+        }
+
+        .tabbar {
+          height: 54px;
+          padding: 0 18px;
+          gap: 8px;
+        }
+
+        .tab,
+        .tab-dashed {
+          width: 40px;
+          height: 38px;
+          font-size: 20px;
+        }
+
+        .mini-icon {
+          margin-left: 16px;
+          width: 30px;
+          height: 30px;
+          font-size: 16px;
+        }
+
+        .folderbar {
+          height: 70px;
+          padding: 0 24px;
+        }
+
+        .folder {
+          font-size: 20px;
+          gap: 10px;
+        }
+
+        .new-button {
+          height: 54px;
+          margin: 14px 20px 18px;
+          width: calc(100% - 40px);
+          border-radius: 14px;
+          font-size: 20px;
+          padding: 0 22px;
+        }
+
+        .launcher {
+          position: static;
+          margin: 0 20px 20px;
+          max-height: none;
+          padding: 20px 20px 22px;
+          border-radius: 18px;
+        }
+
+        .section-label {
+          font-size: 15px;
+          margin-bottom: 14px;
+        }
+
+        .launcher-row {
+          min-height: 70px;
+          grid-template-columns: 34px minmax(0, 1fr);
+          gap: 16px;
+          padding: 9px 0;
+        }
+
+        .emoji {
+          width: 34px;
+          font-size: 24px;
+        }
+
+        .cli-emoji {
+          width: 34px;
+          height: 34px;
+          font-size: 22px;
+        }
+
+        .row-title {
+          font-size: 20px;
+        }
+
+        .row-subtitle {
+          max-width: none;
+          font-size: 16px;
+          line-height: 1.42;
+        }
+
+        .chip {
+          grid-column: 2;
+          justify-self: start;
+          font-size: 14px;
+          margin-top: 4px;
+          padding: 4px 9px;
+        }
+
+        .main {
+          display: none;
+        }
+
+      }
+    </style>
+  </head>
+  <body>
+    <div class="window">
+      <div class="traffic" aria-hidden="true">
+        <span class="red"></span>
+        <span class="yellow"></span>
+        <span class="green"></span>
+      </div>
+
+      <div class="workspace">
+        <aside class="sidebar" aria-label="Seren Desktop launcher">
+          <div class="tabbar">
+            <div class="tab">1</div>
+            <div class="tab-dashed">+</div>
+            <div class="mini-icon">▯</div>
+            <div class="mini-icon">▱</div>
+          </div>
+
+          <div class="folderbar">
+            <div class="folder">
+              <span aria-hidden="true">▱</span>
+              <span>seren-desktop</span>
+            </div>
+            <div class="menu-icon">≡</div>
+          </div>
+
+          <button class="new-button" type="button">
+            <span aria-hidden="true">＋</span>
+            <span>New</span>
+          </button>
+
+          <div class="launcher">
+            <div class="section-label">Chat</div>
+            <button class="launcher-row" type="button">
+              <span class="emoji">💬</span>
+              <span>
+                <span class="row-title">Seren Agent</span>
+                <span class="row-subtitle">Seren models + local tools</span>
+              </span>
+              <span class="chip">Pay-as-you-go</span>
+            </button>
+            <button class="launcher-row" type="button">
+              <span class="emoji">🔒</span>
+              <span>
+                <span class="row-title">Seren Agent (Private)</span>
+                <span class="row-subtitle">
+                  Private SerenModels · AWS Bedrock &amp; Azure
+                </span>
+              </span>
+              <span class="chip">Pay-as-you-go</span>
+            </button>
+
+            <div class="divider"></div>
+            <div class="section-label">Coding agents</div>
+            <button class="launcher-row" type="button">
+              <span class="emoji">🤖</span>
+              <span>
+                <span class="row-title">Claude Code</span>
+                <span class="row-subtitle">
+                  Anthropic · chat-style coding agent
+                </span>
+              </span>
+              <span class="chip subscription">Subscription</span>
+            </button>
+            <button class="launcher-row" type="button">
+              <span class="emoji">⚡</span>
+              <span>
+                <span class="row-title">Codex</span>
+                <span class="row-subtitle">
+                  OpenAI · chat-style coding agent
+                </span>
+              </span>
+              <span class="chip subscription">Subscription</span>
+            </button>
+            <button class="launcher-row" type="button">
+              <span class="emoji">⚡</span>
+              <span>
+                <span class="row-title">Claude + Codex</span>
+                <span class="row-subtitle">
+                  Anthropic + OpenAI · paired coding agents
+                </span>
+              </span>
+              <span class="chip subscription">Subscription</span>
+            </button>
+            <button class="launcher-row" type="button">
+              <span class="emoji">✨</span>
+              <span>
+                <span class="row-title">Gemini</span>
+                <span class="row-subtitle">
+                  Google · chat-style coding agent
+                </span>
+              </span>
+              <span class="chip subscription">Subscription</span>
+            </button>
+
+            <div class="divider"></div>
+            <div class="section-label">Command line</div>
+            <button class="launcher-row" type="button">
+              <span class="cli-emoji">🤖</span>
+              <span>
+                <span class="row-title">Claude Code</span>
+                <span class="row-subtitle">Runs claude in a terminal pane</span>
+              </span>
+              <span class="chip cli">CLI</span>
+            </button>
+            <button class="launcher-row" type="button">
+              <span class="cli-emoji">⚡</span>
+              <span>
+                <span class="row-title">Codex</span>
+                <span class="row-subtitle">Runs codex in a terminal pane</span>
+              </span>
+              <span class="chip cli">CLI</span>
+            </button>
+
+            <div class="divider"></div>
+            <div class="section-label">Shell</div>
+            <button class="launcher-row" type="button">
+              <span class="emoji">▸</span>
+              <span>
+                <span class="row-title">Terminal</span>
+                <span class="row-subtitle">Plain shell at project root</span>
+              </span>
+            </button>
+          </div>
+        </aside>
+
+        <main class="main" aria-label="Chat preview">
+          <header class="chat-header">
+            <div>
+              <div class="chat-title">Claude + Codex</div>
+              <div class="chat-subtitle">seren-desktop</div>
+            </div>
+            <div class="active-agent">Claude planning</div>
+          </header>
+          <section class="chat-body">
+            <article class="message">
+              <strong>Setup</strong>
+              <ul>
+                <li>Claude is planner and reviewer.</li>
+                <li>Codex is executor for code edits, commands, and tests.</li>
+                <li>
+                  Planner: Claude Default · currently Fable 5. Executor: Codex
+                  Recommended · currently GPT-5.5.
+                </li>
+                <li>
+                  Planner effort: High. Executor effort: Medium. Change either
+                  from the bottom row.
+                </li>
+                <li>Handoffs appear inline when ownership changes.</li>
+              </ul>
+            </article>
+            <article class="message">
+              <strong>Claude</strong>
+              <p>
+                I am reading the request and drafting the implementation plan
+                before handing off the edit pass.
+              </p>
+            </article>
+            <div class="handoff">
+              <strong>Handoff:</strong> Claude handed off to Codex to make the
+              approved code changes.
+            </div>
+            <article class="message">
+              <strong>Codex</strong>
+              <p>
+                I am applying the changes in the workspace and will return the
+                diff, tests run, and any follow-up risks.
+              </p>
+            </article>
+          </section>
+          <footer class="composer">
+            <div class="composer-box">Message...</div>
+            <div class="composer-toolbar">
+              <div class="composer-toolbar-left">
+                <button class="role-model-select" type="button">
+                  <span class="role">Planner</span>
+                  <span class="model">Claude Default · Fable 5</span>
+                  <span aria-hidden="true">⌄</span>
+                </button>
+                <button class="role-model-select" type="button">
+                  <span class="role">Executor</span>
+                  <span class="model">Codex Recommended · GPT-5.5</span>
+                  <span aria-hidden="true">⌄</span>
+                </button>
+                <button class="role-model-select effort-select" type="button">
+                  <span class="role">Planner effort</span>
+                  <span class="model">High</span>
+                  <span aria-hidden="true">⌄</span>
+                </button>
+                <button class="role-model-select effort-select" type="button">
+                  <span class="role">Executor effort</span>
+                  <span class="model">Medium</span>
+                  <span aria-hidden="true">⌄</span>
+                </button>
+                <span class="toolbar-chip">Auto approvals</span>
+                <span class="toolbar-chip">Skills</span>
+              </div>
+              <div class="composer-toolbar-right">
+                <button class="send" type="button">Send</button>
+              </div>
+            </div>
+          </footer>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

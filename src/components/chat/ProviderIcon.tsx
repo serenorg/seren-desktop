@@ -36,6 +36,7 @@ const GLYPHS: Record<string, string> = {
   openai: "\u{26A1}", // ⚡ lightning bolt — OpenAI / Codex family
   codex: "\u{26A1}", // ⚡ lightning bolt
   gemini: "\u{2728}", // ✨ sparkles
+  "claude-codex": "\u{1F91D}", // 🤝 handshake — paired Claude + Codex
 };
 
 export function providerGlyph(provider: string): string {

@@ -89,7 +89,7 @@ export const ThreadTabBar: Component = () => {
   };
 
   const handleNewAgent = async (
-    agentType: "claude-code" | "codex" | "gemini",
+    agentType: "claude-code" | "codex" | "gemini" | "claude-codex",
   ) => {
     setShowNewMenu(false);
     const cwd = fileTreeState.rootPath;
@@ -102,6 +102,7 @@ export const ThreadTabBar: Component = () => {
       return providerGlyph(thread.provider ?? "seren");
     if (thread.agentType === "codex") return "⚡";
     if (thread.agentType === "gemini") return "✨";
+    if (thread.agentType === "claude-codex") return "🤝";
     return "🤖";
   };
 
@@ -272,6 +273,31 @@ export const ThreadTabBar: Component = () => {
                   ⚡
                 </span>
                 <div class="flex-1 min-w-0 font-medium">Codex</div>
+                <Chip variant="subscription">Subscription</Chip>
+              </button>
+            </Show>
+            <Show
+              when={
+                allowsClaudeAgent(authStore.privateChatPolicy) &&
+                allowsCodexAgent(authStore.privateChatPolicy)
+              }
+            >
+              <button
+                type="button"
+                data-testid="new-claude-codex-agent"
+                class="flex items-center gap-2.5 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                onClick={() => handleNewAgent("claude-codex")}
+                disabled={!fileTreeState.rootPath}
+                title={
+                  !fileTreeState.rootPath
+                    ? "Open a folder first to use agents"
+                    : undefined
+                }
+              >
+                <span class="text-[13px] w-[18px] text-center shrink-0">
+                  🤝
+                </span>
+                <div class="flex-1 min-w-0 font-medium">Claude + Codex</div>
                 <Chip variant="subscription">Subscription</Chip>
               </button>
             </Show>

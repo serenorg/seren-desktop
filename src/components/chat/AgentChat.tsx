@@ -97,6 +97,8 @@ import {
 } from "./composerToolbarClasses";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
+import { PairedEffortSelector } from "./PairedEffortSelector";
+import { PairedModelSelector } from "./PairedModelSelector";
 import { PlanHeader } from "./PlanHeader";
 import { SkillsButton } from "./SkillsButton";
 import { SlashCommandPopup } from "./SlashCommandPopup";
@@ -460,7 +462,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     if (
       threadType === "codex" ||
       threadType === "claude-code" ||
-      threadType === "gemini"
+      threadType === "gemini" ||
+      threadType === "claude-codex"
     ) {
       return threadType;
     }
@@ -468,11 +471,29 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     if (
       sessionAgent === "codex" ||
       sessionAgent === "claude-code" ||
-      sessionAgent === "gemini"
+      sessionAgent === "gemini" ||
+      sessionAgent === "claude-codex"
     ) {
       return sessionAgent;
     }
     return agentStore.selectedAgentType;
+  });
+  const isPairedThread = createMemo(() => lockedAgentType() === "claude-codex");
+  // Compact paired-workflow stage for the thread header (#2368).
+  const pairedHeaderState = createMemo(() => {
+    if (!isPairedThread()) return null;
+    switch (threadSession()?.paired?.state) {
+      case "planning":
+        return "Claude planning";
+      case "executing":
+        return "Codex editing";
+      case "reviewing":
+        return "Claude reviewing";
+      case "waiting-approval":
+        return "Waiting for approval";
+      default:
+        return "Idle";
+    }
   });
   const lockedAgentName = () => {
     switch (lockedAgentType()) {
@@ -480,6 +501,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         return "Codex";
       case "gemini":
         return "Gemini";
+      case "claude-codex":
+        return "Claude + Codex";
       default:
         return "Claude Code";
     }
@@ -1296,8 +1319,31 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       case "assistant": {
         const normalized = extractAgentThinkingMarkup(message.content);
         const visibleContent = normalized.content;
+        // Paired threads label every assistant-visible message with the
+        // producing agent so Jill never has to infer who is talking (#2368).
+        const pairedAttribution = () => {
+          if (!isPairedThread()) return null;
+          switch (message.provider) {
+            case "claude-code":
+              return "Claude";
+            case "codex":
+              return "Codex";
+            case "seren":
+              return "Seren";
+            default:
+              return null;
+          }
+        };
         return (
           <article class="chat-message-row group/msg relative px-5 py-4 border-b border-surface-2 [contain:layout]">
+            <Show when={pairedAttribution()}>
+              <div
+                class="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground"
+                data-testid="paired-attribution"
+              >
+                {pairedAttribution()}
+              </div>
+            </Show>
             <Show when={normalized.thinking}>
               <div class={visibleContent ? "mb-3" : ""}>
                 <ThinkingBlock thinking={normalized.thinking} />
@@ -1404,6 +1450,23 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           </div>
         ) : null;
 
+      case "handoff":
+        // Lightweight paired-workflow activity line: ownership change
+        // between Claude and Codex, scannable but part of the transcript.
+        return (
+          <div
+            class="chat-message-row px-5 py-2 border-b border-surface-2 flex items-center gap-2"
+            data-testid="paired-handoff"
+          >
+            <span class="text-[12px]" aria-hidden="true">
+              {"\u{1F91D}"}
+            </span>
+            <span class="text-xs text-muted-foreground italic">
+              {message.content}
+            </span>
+          </div>
+        );
+
       case "error":
         return (
           <article class="chat-message-row px-5 py-3 border-b border-surface-2">
@@ -1466,26 +1529,43 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       {/* Plan Header */}
       <PlanHeader />
 
+      {/* Paired workflow header — thread title + compact active stage (#2368) */}
+      <Show when={isPairedThread()}>
+        <div
+          class="flex items-center justify-between px-4 py-1.5 border-b border-surface-3 bg-surface-1"
+          data-testid="paired-thread-header"
+        >
+          <span class="text-xs font-medium text-foreground">
+            {"\u{1F91D}"} Claude + Codex
+          </span>
+          <span class="text-[11px] text-muted-foreground">
+            {pairedHeaderState()}
+          </span>
+        </div>
+      </Show>
+
       {/* Action Buttons Header */}
       <Show when={threadMessages().length > 0}>
         <div class="flex items-center justify-end gap-2 px-4 py-2 border-b border-surface-3">
-          <button
-            type="button"
-            class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() =>
-              compactConversation(
-                settingsStore.get("autoCompactPreserveMessages"),
-              )
-            }
-            disabled={threadSession()?.isCompacting}
-            title={
-              threadSession()?.isCompacting
-                ? "Compacting..."
-                : "Compact older messages"
-            }
-          >
-            {threadSession()?.isCompacting ? "Compacting..." : "Compact"}
-          </button>
+          <Show when={!isPairedThread()}>
+            <button
+              type="button"
+              class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() =>
+                compactConversation(
+                  settingsStore.get("autoCompactPreserveMessages"),
+                )
+              }
+              disabled={threadSession()?.isCompacting}
+              title={
+                threadSession()?.isCompacting
+                  ? "Compacting..."
+                  : "Compact older messages"
+              }
+            >
+              {threadSession()?.isCompacting ? "Compacting..." : "Compact"}
+            </button>
+          </Show>
           <button
             type="button"
             class="bg-transparent border border-border text-muted-foreground p-1.5 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
@@ -1736,7 +1816,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               ? "Codex"
               : agentType === "gemini"
                 ? "Gemini"
-                : "Claude Code";
+                : agentType === "claude-codex"
+                  ? "Claude + Codex"
+                  : "Claude Code";
           const reason = agentStore.agentFallbackReason;
           const title =
             reason === "prompt_too_long"
@@ -1982,10 +2064,34 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     <ThreadProviderSwitcher threadId={threadId()} />
                   )}
                 </Show>
-                <AgentModelSelector session={threadSession()} />
-                <AgentModeSelector session={threadSession()} />
-                <AgentFastModeSelector session={threadSession()} />
-                <AgentEffortSelector session={threadSession()} />
+                <Show
+                  when={isPairedThread()}
+                  fallback={
+                    <>
+                      <AgentModelSelector session={threadSession()} />
+                      <AgentModeSelector session={threadSession()} />
+                      <AgentFastModeSelector session={threadSession()} />
+                      <AgentEffortSelector session={threadSession()} />
+                    </>
+                  }
+                >
+                  <PairedModelSelector
+                    session={threadSession()}
+                    pairedRole="planner"
+                  />
+                  <PairedModelSelector
+                    session={threadSession()}
+                    pairedRole="executor"
+                  />
+                  <PairedEffortSelector
+                    session={threadSession()}
+                    pairedRole="planner"
+                  />
+                  <PairedEffortSelector
+                    session={threadSession()}
+                    pairedRole="executor"
+                  />
+                </Show>
                 <SkillsButton
                   recentSkill={recentSkill()}
                   onLaunch={() => {
