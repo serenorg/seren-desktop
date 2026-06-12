@@ -12,6 +12,7 @@ import { createClaudeRuntime } from "./claude-runtime.mjs";
 import { createGeminiRuntime } from "./gemini-runtime.mjs";
 import { providerLogPrefix } from "./logging.mjs";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
+import { createPairedRuntime, PAIRED_AGENT_TYPE } from "./paired-runtime.mjs";
 
 function isAuthError(message) {
   const lower = String(message).toLowerCase();
@@ -979,8 +980,17 @@ function attachProcessListeners(
   });
 }
 
-export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" }) {
+export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-runtime" }) {
   const sessions = new Map();
+  // Paired-thread interceptor (#2368): events from inner Claude/Codex
+  // sessions that belong to a paired `claude-codex` thread are remapped to
+  // the paired session id (with role attribution) before reaching the
+  // frontend. Non-paired sessions pass through untouched.
+  let pairedRuntime = null;
+  const emit = (channel, payload) => {
+    if (pairedRuntime?.interceptEmit(channel, payload)) return;
+    rawEmit(channel, payload);
+  };
   const codexLogPrefix = providerLogPrefix("codex", runtimeMode);
   const agentRegistry = createBrowserLocalAgentRegistry({ emit });
   const claudeRuntime = createClaudeRuntime({ emit, runtimeMode });
@@ -1035,6 +1045,10 @@ export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" 
       networkEnabled,
       timeoutSecs,
     } = params;
+
+    if (agentType === PAIRED_AGENT_TYPE) {
+      return pairedRuntime.spawnSession(params);
+    }
 
     if (agentType === "claude-code") {
       return claudeRuntime.spawnSession(params);
@@ -1215,6 +1229,9 @@ export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" 
   async function sendPrompt({ sessionId, prompt, context }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (pairedRuntime.hasSession(sessionId)) {
+        return pairedRuntime.sendPrompt({ sessionId, prompt, context });
+      }
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.sendPrompt({ sessionId, prompt, context });
       }
@@ -1273,6 +1290,9 @@ export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" 
   async function cancelPrompt({ sessionId }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (pairedRuntime.hasSession(sessionId)) {
+        return pairedRuntime.cancelPrompt({ sessionId });
+      }
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.cancelPrompt({ sessionId });
       }
@@ -1320,6 +1340,9 @@ export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" 
   async function terminateSession({ sessionId }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (pairedRuntime.hasSession(sessionId)) {
+        return pairedRuntime.terminateSession({ sessionId });
+      }
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.terminateSession({ sessionId });
       }
@@ -1354,12 +1377,16 @@ export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" 
       })),
       ...(await claudeRuntime.listSessions()),
       ...(await geminiRuntime.listSessions()),
+      ...(await pairedRuntime.listSessions()),
     ];
   }
 
   async function setPermissionMode({ sessionId, mode }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (pairedRuntime.hasSession(sessionId)) {
+        return pairedRuntime.setPermissionMode({ sessionId, mode });
+      }
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.setPermissionMode({ sessionId, mode });
       }
@@ -1373,6 +1400,13 @@ export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" 
   async function respondToPermission({ sessionId, requestId, optionId }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (pairedRuntime.hasSession(sessionId)) {
+        return pairedRuntime.respondToPermission({
+          sessionId,
+          requestId,
+          optionId,
+        });
+      }
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.respondToPermission({ sessionId, requestId, optionId });
       }
@@ -1417,6 +1451,12 @@ export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" 
   async function listRemoteSessions({ agentType, cwd, cursor }) {
     if (agentType === "claude-code") {
       return claudeRuntime.listRemoteSessions({ cwd, cursor });
+    }
+
+    if (agentType === PAIRED_AGENT_TYPE) {
+      // Paired threads resume from the conversation row's composite
+      // agent_session_id, not from a remote session listing.
+      return { sessions: [], nextCursor: null };
     }
 
     if (agentType === "gemini") {
@@ -1505,9 +1545,12 @@ export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" 
     });
   }
 
-  async function setSessionModel({ sessionId, modelId }) {
+  async function setSessionModel({ sessionId, modelId, role }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (pairedRuntime.hasSession(sessionId)) {
+        return pairedRuntime.setSessionModel({ sessionId, modelId, role });
+      }
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.setModel({ sessionId, modelId });
       }
@@ -1540,9 +1583,17 @@ export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" 
     return setPermissionMode({ sessionId, mode });
   }
 
-  async function updateSessionConfigOption({ sessionId, configId, valueId }) {
+  async function updateSessionConfigOption({ sessionId, configId, valueId, role }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (pairedRuntime.hasSession(sessionId)) {
+        return pairedRuntime.updateSessionConfigOption({
+          sessionId,
+          configId,
+          valueId,
+          role,
+        });
+      }
       if (geminiRuntime.hasSession(sessionId)) {
         // Gemini exposes no config options today — silently no-op.
         return null;
@@ -1568,6 +1619,23 @@ export function createProviderHandlers({ emit, runtimeMode = "provider-runtime" 
     });
     return null;
   }
+
+  // Created last so the paired coordinator can drive the handler functions
+  // above as its inner runtime (hoisted declarations). It receives the RAW
+  // emit — its own events must not re-enter the interceptor.
+  pairedRuntime = createPairedRuntime({
+    emit: rawEmit,
+    inner: {
+      spawnSession,
+      sendPrompt,
+      cancelPrompt,
+      terminateSession,
+      setSessionModel,
+      updateSessionConfigOption,
+      setPermissionMode,
+      respondToPermission,
+    },
+  });
 
   return {
     spawnSession,

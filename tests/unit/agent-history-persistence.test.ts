@@ -11,13 +11,13 @@ const agentStoreSource = readFileSync(
 );
 
 describe("agent message persistence guards", () => {
-  it("persistAgentMessage only stores user and assistant types", () => {
+  it("persistAgentMessage only stores user, assistant, and handoff types", () => {
     const fnStart = agentStoreSource.indexOf(
       "function persistAgentMessage(",
     );
-    const fnBody = agentStoreSource.slice(fnStart, fnStart + 600);
+    const fnBody = agentStoreSource.slice(fnStart, fnStart + 700);
     expect(fnBody).toContain(
-      'if (msg.type !== "user" && msg.type !== "assistant") return',
+      'if (msg.type !== "user" && msg.type !== "assistant" && msg.type !== "handoff")',
     );
   });
 
@@ -59,8 +59,11 @@ describe("agent message persistence guards", () => {
     expect(callOffsets.length).toBeGreaterThan(0);
     for (const offset of callOffsets) {
       const callWindow = agentStoreSource.slice(offset, offset + 300);
+      // Paired-workflow transcript events (setup declaration, handoffs) are
+      // produced by Seren itself, so a literal "seren" producer satisfies
+      // the explicit-producer rule (#2368).
       expect(
-        /agentType|AgentType/.test(callWindow),
+        /agentType|AgentType|"seren"/.test(callWindow),
         `call at offset ${offset} does not pass an agent type within 300 chars: ${callWindow.slice(0, 120)}…`,
       ).toBe(true);
     }

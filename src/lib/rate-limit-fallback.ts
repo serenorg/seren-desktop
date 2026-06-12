@@ -148,6 +148,7 @@ const DEFAULT_SEREN_MODELS: Record<AgentType, string> = {
   "claude-code": "arcee-ai/trinity-large-thinking",
   codex: "arcee-ai/trinity-large-thinking",
   gemini: "google/gemini-2.5-pro",
+  "claude-codex": "arcee-ai/trinity-large-thinking",
 };
 
 /**

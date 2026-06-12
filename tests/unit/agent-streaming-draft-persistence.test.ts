@@ -43,7 +43,7 @@ describe("#2333 — live assistant stream drafts are recoverable after reload", 
       "finalizeStreamingContent(sessionId: string",
     );
     expect(finalizeIdx).toBeGreaterThan(0);
-    const finalizeBody = agentStoreSource.slice(finalizeIdx, finalizeIdx + 4200);
+    const finalizeBody = agentStoreSource.slice(finalizeIdx, finalizeIdx + 5200);
     expect(finalizeBody).toMatch(
       /id:\s*session\.assistantDraftMessageId\s*\?\?\s*session\.streamingContentMessageId\s*\?\?\s*crypto\.randomUUID\(\)/,
     );

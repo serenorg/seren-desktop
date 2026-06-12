@@ -148,3 +148,97 @@ describe("ThreadSidebar — JSX text uses real · char, never literal \\u00B7", 
     expect(sidebarTsx).not.toMatch(/\\u00B7/i);
   });
 });
+
+describe("ThreadSidebar — Seren Agent clarification + Claude + Codex row (#2368)", () => {
+  it("keeps a single Seren Agent Chat row with Pay-as-you-go", () => {
+    const rows = sidebarTsx.match(/data-testid="new-seren-chat"/g) ?? [];
+    expect(rows.length).toBe(1);
+  });
+
+  it("Seren Agent subtitle declares Seren models + local tools", () => {
+    expect(sidebarTsx).toContain("Seren models + local tools");
+  });
+
+  it("does NOT add a separate 'Seren Agent + Tools' row", () => {
+    expect(sidebarTsx).not.toContain("Seren Agent + Tools");
+  });
+
+  it("renders Claude + Codex in the Coding agents section with Subscription", () => {
+    expect(sidebarTsx).toContain('data-testid="new-claude-codex-agent"');
+    const row = sidebarTsx.slice(
+      sidebarTsx.indexOf('data-testid="new-claude-codex-agent"'),
+      sidebarTsx.indexOf('data-testid="new-claude-codex-agent"') + 1200,
+    );
+    expect(row).toContain("Claude + Codex");
+    expect(row).toContain("Anthropic + OpenAI · paired coding agents");
+    expect(row).toMatch(/>\s*Subscription\s*</);
+    // Inside the Coding agents section (after its label, before Command line).
+    const codingIdx = sidebarTsx.indexOf(">Coding agents<");
+    const cliIdx = sidebarTsx.indexOf(">Command line<");
+    const rowIdx = sidebarTsx.indexOf('data-testid="new-claude-codex-agent"');
+    expect(rowIdx).toBeGreaterThan(codingIdx);
+    expect(rowIdx).toBeLessThan(cliIdx);
+  });
+
+  it("Claude + Codex routes through the native coding-agent path", () => {
+    expect(sidebarTsx).toContain('handleNewAgent("claude-codex")');
+  });
+
+  it("Claude + Codex gates on BOTH Claude and Codex org policies + availability", () => {
+    const gate = sidebarTsx.slice(
+      sidebarTsx.indexOf("const showPairedAgent"),
+      sidebarTsx.indexOf("const showPairedAgent") + 400,
+    );
+    expect(gate).toContain("allowsClaudeAgent(authStore.privateChatPolicy)");
+    expect(gate).toContain("allowsCodexAgent(authStore.privateChatPolicy)");
+    expect(gate).toContain("claudeAvailable()");
+    expect(gate).toContain("codexAvailable()");
+  });
+
+  it("Seren Agent still creates a chat thread (no agent_type stamp)", () => {
+    const handler = sidebarTsx.slice(
+      sidebarTsx.indexOf("const handleNewChat"),
+      sidebarTsx.indexOf("const handleNewPrivateChat"),
+    );
+    expect(handler).toContain("createChatThreadWithOptions");
+    expect(handler).not.toContain("createAgentThread");
+    expect(handler).not.toContain("agentType");
+  });
+
+  it("ThreadTabBar +New menu carries the same Claude + Codex row", () => {
+    expect(tabBarTsx).toContain('data-testid="new-claude-codex-agent"');
+    expect(tabBarTsx).toContain('handleNewAgent("claude-codex")');
+  });
+});
+
+describe("AgentChat — paired thread surfaces (#2368)", () => {
+  const agentChatTsx = readFileSync(
+    resolve("src/components/chat/AgentChat.tsx"),
+    "utf-8",
+  );
+
+  it("renders role-scoped Planner/Executor model + effort selectors in the composer bottom row", () => {
+    const toolbarIdx = agentChatTsx.indexOf("COMPOSER_TOOLBAR_LEFT_GROUP_CLASSES}");
+    const toolbar = agentChatTsx.slice(toolbarIdx, toolbarIdx + 2500);
+    expect(toolbar).toContain('pairedRole="planner"');
+    expect(toolbar).toContain('pairedRole="executor"');
+    expect(toolbar).toContain("PairedModelSelector");
+    expect(toolbar).toContain("PairedEffortSelector");
+  });
+
+  it("shows the compact paired header states", () => {
+    expect(agentChatTsx).toContain('"Claude planning"');
+    expect(agentChatTsx).toContain('"Codex editing"');
+    expect(agentChatTsx).toContain('"Claude reviewing"');
+    expect(agentChatTsx).toContain('"Waiting for approval"');
+  });
+
+  it("renders handoff events as inline transcript activity lines", () => {
+    expect(agentChatTsx).toContain('case "handoff"');
+    expect(agentChatTsx).toContain('data-testid="paired-handoff"');
+  });
+
+  it("labels assistant messages with Claude / Codex / Seren attribution", () => {
+    expect(agentChatTsx).toContain('data-testid="paired-attribution"');
+  });
+});

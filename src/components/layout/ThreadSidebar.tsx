@@ -127,7 +127,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     if (!root) return null;
     return root.split("/").pop() || root;
   };
-  const primaryChatLauncherDescription = createMemo(() => "Seren models chat");
+  const primaryChatLauncherDescription = createMemo(
+    () => "Seren models + local tools",
+  );
 
   const handleClickOutside = (e: MouseEvent) => {
     const target = e.target as Node;
@@ -212,7 +214,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   };
 
   const handleNewAgent = async (
-    agentType: "claude-code" | "codex" | "gemini",
+    agentType: "claude-code" | "codex" | "gemini" | "claude-codex",
   ) => {
     setShowLauncher(false);
     const cwd = fileTreeState.rootPath;
@@ -409,11 +411,24 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   const showGeminiAgent = createMemo(
     () => allowsGeminiAgent(authStore.privateChatPolicy) && geminiAvailable(),
   );
+  // Paired Claude + Codex needs both CLIs' org-policy gates; CLI install and
+  // login flow through the existing subscription setup toasts on spawn.
+  const showPairedAgent = createMemo(
+    () =>
+      allowsClaudeAgent(authStore.privateChatPolicy) &&
+      allowsCodexAgent(authStore.privateChatPolicy) &&
+      claudeAvailable() &&
+      codexAvailable(),
+  );
   const hasChatSection = createMemo(
     () => showSerenChat() || showSerenPrivate(),
   );
   const hasAgentSection = createMemo(
-    () => showClaudeAgent() || showCodexAgent() || showGeminiAgent(),
+    () =>
+      showClaudeAgent() ||
+      showCodexAgent() ||
+      showPairedAgent() ||
+      showGeminiAgent(),
   );
   const hasCliSection = createMemo(() => claudeAvailable() || codexAvailable());
 
@@ -653,6 +668,27 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                     <div class="font-medium">Codex</div>
                     <div class="text-[11px] text-muted-foreground">
                       OpenAI · chat-style coding agent
+                    </div>
+                  </div>
+                  <LauncherChip variant="subscription">
+                    Subscription
+                  </LauncherChip>
+                </button>
+              </Show>
+              <Show when={showPairedAgent()}>
+                <button
+                  type="button"
+                  data-testid="new-claude-codex-agent"
+                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                  onClick={() => void handleNewAgent("claude-codex")}
+                >
+                  <span class="text-[14px] w-[22px] text-center shrink-0">
+                    {"\u{1F91D}"}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">Claude + Codex</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      Anthropic + OpenAI · paired coding agents
                     </div>
                   </div>
                   <LauncherChip variant="subscription">
@@ -936,7 +972,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                                   ? "\u26A1"
                                   : thread.agentType === "gemini"
                                     ? "\u2728"
-                                    : "\u{1F916}"}
+                                    : thread.agentType === "claude-codex"
+                                      ? "\u{1F91D}"
+                                      : "\u{1F916}"}
                               </span>
                             </Show>
                           </div>
