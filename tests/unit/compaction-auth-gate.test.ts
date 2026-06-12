@@ -98,30 +98,40 @@ describe("#1639 — refreshAccessToken pairs clearAuthState + requestSignInModal
     );
   });
 
-  it("clears auth state AND requests the sign-in modal when no refresh token is available", () => {
+  it("maps missing refresh token to terminal failure", () => {
     const noTokenIdx = authServiceSource.indexOf("if (!refreshToken)");
     expect(noTokenIdx).toBeGreaterThan(0);
     const blockAfter = authServiceSource.slice(noTokenIdx, noTokenIdx + 200);
-    expect(blockAfter).toContain("clearAuthState()");
-    expect(blockAfter).toContain("requestSignInModal()");
+    expect(blockAfter).toContain('return "terminal-failure"');
   });
 
-  it("clears auth state AND requests the sign-in modal on 401 from refresh endpoint", () => {
+  it("maps 401 from refresh endpoint to terminal failure", () => {
     const refreshFnIdx = authServiceSource.indexOf(
-      "async function refreshAccessToken",
+      "async function performRefreshAccessToken",
     );
     const fnBody = authServiceSource.slice(refreshFnIdx, refreshFnIdx + 1400);
     const clear401Match = /response\??\.status === 401/.exec(fnBody);
     const clear401Idx = clear401Match?.index ?? -1;
     expect(clear401Idx).toBeGreaterThan(0);
     const afterClear = fnBody.slice(clear401Idx, clear401Idx + 300);
-    expect(afterClear).toContain("clearAuthState()");
-    expect(afterClear).toContain("requestSignInModal()");
+    expect(afterClear).toContain('return "terminal-failure"');
+  });
+
+  it("clears auth state AND requests the sign-in modal for terminal refresh failures", () => {
+    const refreshFnIdx = authServiceSource.indexOf(
+      "async function refreshAccessToken",
+    );
+    const fnBody = authServiceSource.slice(refreshFnIdx, refreshFnIdx + 900);
+    const terminalIdx = fnBody.indexOf('outcome === "terminal-failure"');
+    expect(terminalIdx).toBeGreaterThan(0);
+    const terminalBlock = fnBody.slice(terminalIdx, terminalIdx + 220);
+    expect(terminalBlock).toContain("clearAuthState()");
+    expect(terminalBlock).toContain("requestSignInModal()");
   });
 
   it("does NOT trigger the modal on network errors (user may be offline)", () => {
     const refreshFnIdx = authServiceSource.indexOf(
-      "async function refreshAccessToken",
+      "async function performRefreshAccessToken",
     );
     const fnBody = authServiceSource.slice(refreshFnIdx, refreshFnIdx + 1400);
     const catchBlock = fnBody.indexOf("} catch {");

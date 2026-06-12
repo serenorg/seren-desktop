@@ -9,6 +9,7 @@ const {
   clearSerenApiKeyMock,
   isTauriRuntimeMock,
   isLoggedInMock,
+  hasStoredTokenMock,
   createApiKeyMock,
   authLogoutMock,
   initializeGatewayMock,
@@ -34,6 +35,7 @@ const {
     }),
     isTauriRuntimeMock: vi.fn(() => false),
     isLoggedInMock: vi.fn(async () => true),
+    hasStoredTokenMock: vi.fn(async () => true),
     createApiKeyMock: vi.fn(async () => "seren-api-key-fresh"),
     authLogoutMock: vi.fn(async () => {}),
     initializeGatewayMock: vi.fn(async () => {}),
@@ -59,6 +61,7 @@ vi.mock("@/lib/tauri-bridge", () => ({
 
 vi.mock("@/services/auth", () => ({
   isLoggedIn: isLoggedInMock,
+  hasStoredToken: hasStoredTokenMock,
   createApiKey: createApiKeyMock,
   logout: authLogoutMock,
 }));
@@ -117,6 +120,7 @@ describe("auth.store #1613 — API key before isAuthenticated flips", () => {
     vi.clearAllMocks();
     eventListeners.clear();
     isTauriRuntimeMock.mockReturnValue(false);
+    hasStoredTokenMock.mockResolvedValue(true);
     runtimeHasCapabilityMock.mockReturnValue(false);
     resetAuthStore();
   });

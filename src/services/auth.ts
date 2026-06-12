@@ -14,6 +14,7 @@ import {
   clearToken,
   getRefreshToken,
   getToken,
+  isTauriRuntime,
   storeDefaultOrganizationId,
   storeRefreshToken,
   storeToken,
@@ -30,6 +31,14 @@ export interface AuthError {
 interface RefreshAccessTokenOptions {
   promptOnFailure?: boolean;
 }
+
+type RefreshAccessTokenOutcome =
+  | "success"
+  | "terminal-failure"
+  | "transient-failure";
+
+let refreshAccessTokenInFlight: Promise<RefreshAccessTokenOutcome> | null =
+  null;
 
 // Client-side login rate limiting (exponential backoff)
 const loginRateLimit = {
@@ -134,13 +143,38 @@ export async function refreshAccessToken(
   options: RefreshAccessTokenOptions = {},
 ): Promise<boolean> {
   const { promptOnFailure = true } = options;
-  const refreshToken = await getRefreshToken();
-  if (!refreshToken) {
+  if (!refreshAccessTokenInFlight) {
+    refreshAccessTokenInFlight = performRefreshAccessToken().finally(() => {
+      refreshAccessTokenInFlight = null;
+    });
+  }
+
+  const outcome = await refreshAccessTokenInFlight;
+  if (outcome === "terminal-failure") {
     clearAuthState();
     if (promptOnFailure) {
       requestSignInModal();
     }
-    return false;
+  }
+
+  return outcome === "success";
+}
+
+async function performRefreshAccessToken(): Promise<RefreshAccessTokenOutcome> {
+  if (isTauriRuntime()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const refreshed = await invoke<boolean>("refresh_session");
+      return refreshed ? "success" : "terminal-failure";
+    } catch {
+      // Network/IPC errors should not clear credentials or force a sign-in.
+      return "transient-failure";
+    }
+  }
+
+  const refreshToken = await getRefreshToken();
+  if (!refreshToken) {
+    return "terminal-failure";
   }
 
   try {
@@ -154,22 +188,19 @@ export async function refreshAccessToken(
       if (response?.status === 401) {
         await clearToken();
         await clearRefreshToken();
-        clearAuthState();
-        if (promptOnFailure) {
-          requestSignInModal();
-        }
+        return "terminal-failure";
       }
-      return false;
+      return "transient-failure";
     }
 
     await storeToken(data.data.access_token);
     if (data.data.refresh_token) {
       await storeRefreshToken(data.data.refresh_token);
     }
-    return true;
+    return "success";
   } catch {
     // Network error - don't clear tokens, don't prompt login
-    return false;
+    return "transient-failure";
   }
 }
 

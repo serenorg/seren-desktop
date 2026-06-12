@@ -172,6 +172,19 @@ fn clear_refresh_token(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn refresh_session(app: tauri::AppHandle) -> Result<bool, String> {
+    match auth::refresh_access_token(&app).await {
+        Ok(_) => Ok(true),
+        Err(error)
+            if error == "No refresh token available" || error.starts_with("Session expired") =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[tauri::command]
 fn get_setting(
     app: tauri::AppHandle,
     store: String,
@@ -762,6 +775,7 @@ pub fn run() {
             store_refresh_token,
             get_refresh_token,
             clear_refresh_token,
+            refresh_session,
             get_setting,
             set_setting,
             store_provider_key,
