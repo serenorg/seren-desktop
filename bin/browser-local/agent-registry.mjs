@@ -756,6 +756,49 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         launchLoginCommand(resolved !== "claude" ? resolved : "claude");
       },
     },
+    "claude-codex": {
+      type: "claude-codex",
+      name: "Claude + Codex",
+      description: "Paired workflow — Claude plans and reviews, Codex executes",
+      command: "claude",
+      async getAvailability() {
+        const claudeInstalled = await isCommandAvailable("claude");
+        const codexInstalled = await isCommandAvailable("codex");
+        const missing = [
+          ...(claudeInstalled ? [] : ["Claude Code"]),
+          ...(codexInstalled ? [] : ["Codex"]),
+        ];
+        return {
+          type: "claude-codex",
+          name: "Claude + Codex",
+          description:
+            "Paired workflow — Claude plans and reviews, Codex executes",
+          command: "claude",
+          available: true,
+          ...(missing.length === 0
+            ? {}
+            : {
+                unavailableReason: `${missing.join(" and ")} CLI${missing.length > 1 ? "s are" : " is"} not installed yet. Seren can install ${missing.length > 1 ? "them" : "it"} automatically on first launch.`,
+              }),
+        };
+      },
+      async canSpawn() {
+        return true;
+      },
+      async ensureCli() {
+        // Both CLIs back the paired workflow; ensure each before spawn.
+        const claudeBin = await definitions["claude-code"].ensureCli();
+        await definitions.codex.ensureCli();
+        return claudeBin;
+      },
+      launchLogin() {
+        // The paired runtime forwards login-required events with the INNER
+        // agent type, so automatic login targets the right CLI. A manual
+        // paired login starts with the planner; the executor's own
+        // login-required event follows if Codex also needs auth.
+        definitions["claude-code"].launchLogin();
+      },
+    },
     gemini: {
       type: "gemini",
       name: "Gemini",
