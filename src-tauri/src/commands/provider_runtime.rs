@@ -255,7 +255,8 @@ pub async fn switch_thread_provider(
 /// runtime binding. Adding a new external agent on either side without
 /// updating the other will cause threads bound to that agent to route
 /// to the wrong shell.
-pub(crate) const NATIVE_AGENT_PROVIDERS: &[&str] = &["claude-code", "codex", "gemini"];
+pub(crate) const NATIVE_AGENT_PROVIDERS: &[&str] =
+    &["claude-code", "codex", "gemini", "claude-codex"];
 
 /// SQL CASE expression that derives a thread's effective `kind` from
 /// `provider_session_runtime.provider`, falling back to the stored
@@ -267,7 +268,7 @@ pub(crate) const NATIVE_AGENT_PROVIDERS: &[&str] = &["claude-code", "codex", "ge
 /// test in this module asserts that invariant.
 pub(crate) const DERIVED_KIND_CASE_SQL: &str = "CASE \
      WHEN psr.provider IS NULL THEN c.kind \
-     WHEN psr.provider IN ('claude-code', 'codex', 'gemini') THEN 'agent' \
+     WHEN psr.provider IN ('claude-code', 'codex', 'gemini', 'claude-codex') THEN 'agent' \
      ELSE 'chat' \
      END";
 

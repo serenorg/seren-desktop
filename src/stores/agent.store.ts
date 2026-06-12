@@ -393,6 +393,9 @@ const CLAUDE_1M_TIER_CAPABLE_MODELS = new Set([
 function defaultContextWindowFor(agentType: string, modelId?: string): number {
   if (agentType === "codex") return 1_000_000;
   if (agentType === "gemini") return 1_000_000;
+  // Paired threads gauge against the planner (Claude defaults to the 1M
+  // tier); the runtime-reported contextWindow corrects this per turn.
+  if (agentType === "claude-codex") return 1_000_000;
   if (agentType === "claude-code" && modelId) {
     if (/\[1m\]$/i.test(modelId)) {
       const stripped = modelId.replace(/\[1m\]$/i, "").replace(/-\d{8}$/, "");
@@ -452,6 +455,10 @@ import type {
   AgentType,
   DiffEvent,
   DiffProposalEvent,
+  PairedRole,
+  PairedSpawnConfig,
+  PairedStatus,
+  PairedTranscriptEvent,
   PermissionRequestEvent,
   PlanEntry,
   RemoteSessionInfo,
@@ -749,11 +756,20 @@ export interface AgentCompactedSummary {
 interface AgentConversationMetadata {
   pendingBootstrapPromptContext?: string;
   pendingBootstrapMessages?: AgentMessage[];
+  /** Pinned Planner/Executor model + effort choices for paired threads. */
+  pairedConfig?: PairedSpawnConfig;
 }
 
 export interface AgentMessage {
   id: string;
-  type: "user" | "assistant" | "thought" | "tool" | "diff" | "error";
+  type:
+    | "user"
+    | "assistant"
+    | "thought"
+    | "tool"
+    | "diff"
+    | "error"
+    | "handoff";
   content: string;
   timestamp: number;
   toolCallId?: string;
@@ -836,6 +852,10 @@ export interface ActiveSession {
   userSelectedModelId?: string;
   /** Available models reported by the agent */
   availableModels?: AgentModelInfo[];
+  /** Paired Claude + Codex workflow status (claude-codex sessions only). */
+  paired?: PairedStatus;
+  /** Producing agent for the current streaming buffer in a paired thread. */
+  pairedStreamProvider?: string;
   /** Currently selected mode ID (if agent supports mode selection) */
   currentModeId?: string;
   /** Available modes reported by the agent */
@@ -955,6 +975,8 @@ export function agentDisplayName(agentType?: string): string {
       return "Claude Code";
     case "gemini":
       return "Gemini";
+    case "claude-codex":
+      return "Claude + Codex";
     default:
       return agentType ?? "Agent";
   }
@@ -987,6 +1009,8 @@ function formatForkBootstrapMessage(message: AgentMessage): string | null {
       const summary = path ? `Modified ${path}` : content;
       return summary ? `DIFF: ${truncateBootstrapText(summary)}` : null;
     }
+    case "handoff":
+      return content ? `SYSTEM: ${truncateBootstrapText(content)}` : null;
     case "thought":
       return null;
   }
@@ -1165,17 +1189,30 @@ function serializeAgentConversationMetadata(
 ): string | null {
   return metadata.pendingBootstrapPromptContext ||
     (metadata.pendingBootstrapMessages &&
-      metadata.pendingBootstrapMessages.length > 0)
+      metadata.pendingBootstrapMessages.length > 0) ||
+    metadata.pairedConfig
     ? JSON.stringify(metadata)
     : null;
 }
 
 function serializeAgentMessageMetadata(msg: AgentMessage): string | null {
+  if (msg.type === "handoff") {
+    return JSON.stringify({ v: 1, paired_handoff: true });
+  }
   if (!msg.finalOutputValidation) return null;
   return JSON.stringify({
     v: 1,
     final_output_validation: msg.finalOutputValidation,
   });
+}
+
+function isPairedHandoffMetadata(metadata: string | null | undefined): boolean {
+  if (!metadata) return false;
+  try {
+    return JSON.parse(metadata)?.paired_handoff === true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1188,7 +1225,10 @@ function persistAgentMessage(
   msg: AgentMessage,
   sessionAgentType: string | null,
 ): void {
-  if (msg.type !== "user" && msg.type !== "assistant") return;
+  // Handoff activity lines persist as assistant rows with a metadata marker
+  // so the paired transcript survives restarts (#2368).
+  if (msg.type !== "user" && msg.type !== "assistant" && msg.type !== "handoff")
+    return;
   // Producer provenance: prefer an explicit value on the message, otherwise
   // fall back to the agent type of the session that produced this turn —
   // which the caller passes in explicitly so we never walk `state.sessions`
@@ -1251,7 +1291,7 @@ function persistStreamingAssistantDraft(sessionId: string): void {
       type: "assistant",
       content: draftContent,
       timestamp: session.streamingContentTimestamp ?? Date.now(),
-      provider: session.info.agentType,
+      provider: session.pairedStreamProvider ?? session.info.agentType,
     },
     session.info.agentType,
   );
@@ -1273,7 +1313,12 @@ async function loadPersistedAgentHistory(
 
     const messages: AgentMessage[] = stored.map((m) => ({
       id: m.id,
-      type: m.role === "user" ? ("user" as const) : ("assistant" as const),
+      type:
+        m.role === "user"
+          ? ("user" as const)
+          : isPairedHandoffMetadata(m.metadata)
+            ? ("handoff" as const)
+            : ("assistant" as const),
       content: m.content,
       timestamp: m.timestamp,
       provider: m.provider ?? undefined,
@@ -1435,6 +1480,9 @@ const pendingSessionEvents = new Map<string, AgentEvent[]>();
 const recoveryInFlightMap = new Map<string, Promise<string | null>>();
 const LEGACY_CLAUDE_LOCAL_SESSION_ID_RE = /^session-\d+$/;
 const messagePersistQueues = new Map<string, Promise<void>>();
+
+/** Last pairedConfig JSON written per conversation, to skip no-op DB writes. */
+const pairedConfigPersisted = new Map<string, string>();
 
 // Chunk accumulation buffers — plain JS, not reactive.
 // Flushed to the SolidJS store at CHUNK_FLUSH_MS intervals to reduce
@@ -2498,6 +2546,8 @@ export const agentStore = {
       bootstrapPromptContext?: string;
       initialModelId?: string;
       initialPermissionMode?: string;
+      /** Pinned Planner/Executor model + effort for paired threads. */
+      paired?: PairedSpawnConfig;
       /** Warm-standby spawns are invisible to the UI — no session-selector
        *  entry, events buffered not rendered, does not steal active focus. */
       role?: "serving" | "standby";
@@ -2514,7 +2564,9 @@ export const agentStore = {
         ? "Codex Agent"
         : resolvedAgentType === "gemini"
           ? "Gemini Agent"
-          : "Claude Code Agent");
+          : resolvedAgentType === "claude-codex"
+            ? "Claude + Codex"
+            : "Claude Code Agent");
 
     // Prevent concurrent spawns for the same conversation. Internal retries
     // (initRetryAttempt > 0) are allowed through because they are sequential
@@ -2758,7 +2810,9 @@ export const agentStore = {
               ? providerService.ensureCodexCli
               : resolvedAgentType === "gemini"
                 ? providerService.ensureGeminiCli
-                : null;
+                : resolvedAgentType === "claude-codex"
+                  ? providerService.ensurePairedCli
+                  : null;
 
         if (ensureFn) {
           console.log("[AgentStore] Ensuring CLI is installed...");
@@ -2839,8 +2893,12 @@ export const agentStore = {
           terminatedSessionIds.delete(localSessionId);
         }
 
+        // Paired threads seed the Claude planner with the same default effort
+        // a direct Claude Code thread would get; per-role overrides ride in
+        // opts.paired.
         const reasoningEffort =
-          resolvedAgentType === "claude-code"
+          resolvedAgentType === "claude-code" ||
+          resolvedAgentType === "claude-codex"
             ? settingsStore.settings.claudeReasoningEffort
             : undefined;
 
@@ -2863,6 +2921,7 @@ export const agentStore = {
           // The post-spawn setModel below remains a safety net for mid-session
           // picker changes. See #1635.
           opts?.initialModelId,
+          opts?.paired,
         );
         console.log("[AgentStore] Spawn result:", info);
         expectedReadySessionId = info.id;
@@ -2896,6 +2955,7 @@ export const agentStore = {
                 pendingBootstrapMessages: opts?.bootstrapPromptContext
                   ? opts?.restoredMessages
                   : undefined,
+                pairedConfig: opts?.paired,
               }) ?? undefined,
             );
           } catch (error) {
@@ -3304,7 +3364,8 @@ export const agentStore = {
     const agentType: AgentType =
       convo.agent_type === "codex" ||
       convo.agent_type === "claude-code" ||
-      convo.agent_type === "gemini"
+      convo.agent_type === "gemini" ||
+      convo.agent_type === "claude-codex"
         ? (convo.agent_type as AgentType)
         : state.selectedAgentType;
     const convoMetadata = parseAgentConversationMetadata(convo.agent_metadata);
@@ -3354,6 +3415,7 @@ export const agentStore = {
         bootstrapPromptContext: pendingBootstrapPromptContext,
         initialModelId: convo.agent_model_id ?? undefined,
         initialPermissionMode: convo.agent_permission_mode ?? undefined,
+        paired: convoMetadata.pairedConfig,
       });
       if (freshSessionId) {
         clearSpawnFailures(conversationId);
@@ -3430,6 +3492,7 @@ export const agentStore = {
       bootstrapPromptContext: bootstrapPromptContextForSpawn,
       initialModelId: convo.agent_model_id ?? undefined,
       initialPermissionMode: convo.agent_permission_mode ?? undefined,
+      paired: convoMetadata.pairedConfig,
     });
 
     // Legacy Claude conversations can reference session IDs that no longer
@@ -3881,6 +3944,17 @@ export const agentStore = {
     const mode = opts?.mode ?? "reactive";
     const session = state.sessions[sessionId];
     if (!session || session.isCompacting) {
+      return { outcome: "skipped_nothing_to_compact" };
+    }
+
+    // Paired Claude + Codex threads span two inner sessions; the standby
+    // swap, fork, and restoreSessionSettings machinery here assumes one.
+    // The planner's 1M window makes overflow rare — skip rather than risk
+    // a half-restored pair (#2368).
+    if (session.info.agentType === "claude-codex") {
+      console.info(
+        "[AgentStore] Compaction skipped for paired Claude + Codex thread",
+      );
       return { outcome: "skipped_nothing_to_compact" };
     }
 
@@ -5412,6 +5486,95 @@ export const agentStore = {
     }
   },
 
+  /**
+   * Role-scoped model selection for paired Claude + Codex threads (#2368).
+   * The runtime applies the change to that role's inner session only and
+   * echoes a refreshed paired status, which updates the selectors and
+   * persists the pin via persistPairedConfig.
+   */
+  async setPairedModel(
+    role: PairedRole,
+    modelId: string,
+    forSessionId?: string,
+  ) {
+    const sessionId = forSessionId ?? state.activeSessionId;
+    if (!sessionId || !state.sessions[sessionId]) return;
+    try {
+      await providerService.setModel(sessionId, modelId, role);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[AgentStore] Failed to set paired model:", error);
+      setState("sessions", sessionId, "error", message);
+    }
+  },
+
+  /** Role-scoped config (reasoning effort) for paired threads (#2368). */
+  async setPairedConfigOption(
+    role: PairedRole,
+    configId: string,
+    valueId: string,
+    forSessionId?: string,
+  ) {
+    const sessionId = forSessionId ?? state.activeSessionId;
+    if (!sessionId || !state.sessions[sessionId]) return;
+    try {
+      await providerService.setConfigOption(sessionId, configId, valueId, role);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[AgentStore] Failed to set paired config option:", error);
+      setState("sessions", sessionId, "error", message);
+    }
+  },
+
+  /**
+   * Persist pinned paired model/effort choices into the conversation row's
+   * agent_metadata so they restore when the thread reopens. Merge-writes so
+   * pending-bootstrap metadata is preserved; skips no-op writes.
+   */
+  persistPairedConfig(sessionId: string, paired: PairedStatus) {
+    const session = state.sessions[sessionId];
+    const conversationId = session?.conversationId;
+    if (!conversationId) return;
+
+    const roleConfig = (
+      role: PairedStatus["planner"],
+    ): { modelId?: string; effort?: string } | undefined => {
+      const config = {
+        ...(role.pinnedModelId ? { modelId: role.pinnedModelId } : {}),
+        ...(role.pinnedEffort ? { effort: role.pinnedEffort } : {}),
+      };
+      return Object.keys(config).length > 0 ? config : undefined;
+    };
+    const planner = roleConfig(paired.planner);
+    const executor = roleConfig(paired.executor);
+    const pairedConfig: PairedSpawnConfig | undefined =
+      planner || executor
+        ? {
+            ...(planner ? { planner } : {}),
+            ...(executor ? { executor } : {}),
+          }
+        : undefined;
+
+    const serialized = JSON.stringify(pairedConfig ?? null);
+    if (pairedConfigPersisted.get(conversationId) === serialized) return;
+    pairedConfigPersisted.set(conversationId, serialized);
+
+    void (async () => {
+      const convo = await getAgentConversation(conversationId);
+      const metadata = parseAgentConversationMetadata(
+        convo?.agent_metadata ?? null,
+      );
+      metadata.pairedConfig = pairedConfig;
+      await setAgentConversationMetadataDb(
+        conversationId,
+        serializeAgentConversationMetadata(metadata),
+      );
+    })().catch((error) => {
+      pairedConfigPersisted.delete(conversationId);
+      console.warn("[AgentStore] Failed to persist paired config:", error);
+    });
+  },
+
   async respondToPermission(requestId: string, optionId: string) {
     const permission = state.pendingPermissions.find(
       (p) => p.requestId === requestId,
@@ -5690,6 +5853,10 @@ export const agentStore = {
     }
 
     switch (event.type) {
+      case "pairedEvent":
+        this.handlePairedTranscriptEvent(sessionId, event.data);
+        break;
+
       case "messageChunk":
         this.handleMessageChunk(
           sessionId,
@@ -5699,6 +5866,7 @@ export const agentStore = {
           {
             replay: event.data.replay === true,
             messageId: event.data.messageId,
+            agentProvider: event.data.agentProvider,
           },
         );
         break;
@@ -6012,6 +6180,7 @@ export const agentStore = {
           if (
             sess &&
             sess.role === "serving" &&
+            sess.info.agentType !== "claude-codex" &&
             !sess.standbySessionId &&
             !sess.isCompacting &&
             !sess.predictiveCompactInFlight &&
@@ -6460,13 +6629,32 @@ export const agentStore = {
     text: string,
     isThought?: boolean,
     timestamp?: number,
-    meta?: { replay?: boolean; messageId?: string },
+    meta?: { replay?: boolean; messageId?: string; agentProvider?: string },
   ) {
     let session = state.sessions[sessionId];
     if (!session) return;
 
     // Skip replay assistant/thought chunks when we have restored messages.
     if (session.skipHistoryReplay) return;
+
+    // Paired threads interleave Claude and Codex output in one stream. A
+    // producer change is a message boundary: land the previous agent's
+    // buffer (attributed to it) before accumulating the next one. #2368.
+    const agentProvider = meta?.agentProvider;
+    if (agentProvider && session.pairedStreamProvider !== agentProvider) {
+      const buf = chunkBufs.get(sessionId);
+      if (
+        session.streamingContent ||
+        session.streamingThinking ||
+        buf?.content ||
+        buf?.thinking
+      ) {
+        this.finalizeStreamingContent(sessionId);
+      }
+      setState("sessions", sessionId, "pairedStreamProvider", agentProvider);
+      session = state.sessions[sessionId];
+      if (!session) return;
+    }
 
     const isReplayChunk = meta?.replay === true;
     const messageId = isReplayChunk ? meta?.messageId : undefined;
@@ -6539,6 +6727,59 @@ export const agentStore = {
         }, CHUNK_FLUSH_MS),
       );
     }
+  },
+
+  /**
+   * Paired-thread transcript events (#2368): the setup declaration (stable,
+   * updated in place when models/effort change) and inline handoff activity
+   * lines. Both persist so the workflow stays visible in thread history.
+   */
+  handlePairedTranscriptEvent(sessionId: string, data: PairedTranscriptEvent) {
+    const session = state.sessions[sessionId];
+    if (!session) return;
+
+    // Land any in-flight streaming first so the event appears after the
+    // message that produced it.
+    this.finalizeStreamingContent(sessionId);
+
+    if (data.kind === "handoff") {
+      const handoff: AgentMessage = {
+        id: data.messageId,
+        type: "handoff",
+        content: data.text,
+        timestamp: Date.now(),
+        provider: "seren",
+      };
+      setState("sessions", sessionId, "messages", (msgs) => [...msgs, handoff]);
+      if (session.conversationId)
+        persistAgentMessage(session.conversationId, handoff, "seren");
+      return;
+    }
+
+    // Declaration: stable per-conversation id so refreshes (model/effort
+    // changes, resume) update the original transcript message in place —
+    // including its persisted SQLite row, which upserts by id.
+    const declarationId = `paired-declaration-${session.conversationId}`;
+    const existingIndex = session.messages.findIndex(
+      (m) => m.id === declarationId,
+    );
+    const message: AgentMessage = {
+      id: declarationId,
+      type: "assistant",
+      content: data.text,
+      timestamp:
+        existingIndex >= 0
+          ? session.messages[existingIndex].timestamp
+          : Date.now(),
+      provider: "seren",
+    };
+    if (existingIndex >= 0) {
+      setState("sessions", sessionId, "messages", existingIndex, message);
+    } else {
+      setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
+    }
+    if (session.conversationId)
+      persistAgentMessage(session.conversationId, message, "seren");
   },
 
   enqueueToolEvent(
@@ -6920,6 +7161,11 @@ export const agentStore = {
       setState("sessions", sessionId, "configOptions", data.configOptions);
     }
 
+    if (data?.paired) {
+      setState("sessions", sessionId, "paired", data.paired);
+      this.persistPairedConfig(sessionId, data.paired);
+    }
+
     if (status === "ready") {
       // Clear stale error banner when session recovers — a ready session has
       // no persistent error to surface. Error messages in chat history remain.
@@ -6975,6 +7221,10 @@ export const agentStore = {
     const session = state.sessions[sessionId];
     if (!session) return;
 
+    // Producer attribution for paired threads — the finalized message
+    // belongs to the agent whose chunks filled the buffer (#2368).
+    const pairedProvider = session.pairedStreamProvider;
+
     // Finalize thinking content if any
     if (session.streamingThinking) {
       const thinkingMessage: AgentMessage = {
@@ -6982,6 +7232,7 @@ export const agentStore = {
         type: "thought",
         content: session.streamingThinking,
         timestamp: session.streamingThinkingTimestamp ?? Date.now(),
+        ...(pairedProvider ? { provider: pairedProvider } : {}),
       };
       setState("sessions", sessionId, "messages", (msgs) => [
         ...msgs,
@@ -7061,6 +7312,7 @@ export const agentStore = {
         timestamp: session.streamingContentTimestamp ?? Date.now(),
         duration,
         finalOutputValidation,
+        ...(pairedProvider ? { provider: pairedProvider } : {}),
       };
       verboseRuntimeConsole.debug(
         "[AgentRuntime] Adding assistant message to session:",

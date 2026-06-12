@@ -25,6 +25,8 @@ export function providerDisplayName(
       return "Codex";
     case "gemini":
       return "Gemini";
+    case "claude-codex":
+      return "Claude + Codex";
     default: {
       // Title-case the raw id so unknown providers still render legibly.
       // Drop empty segments so a leading, trailing, or repeated separator

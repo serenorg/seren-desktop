@@ -24,11 +24,16 @@ import { isTauriRuntime } from "@/lib/tauri-bridge";
 // `commands::chat`. The two language sides drift silently otherwise: a
 // thread bound to the new agent stays `kind='chat'` in the DB and
 // routes to the chat shell.
-export type AgentType = "claude-code" | "codex" | "gemini";
+export type AgentType = "claude-code" | "codex" | "gemini" | "claude-codex";
 export type UnlistenFn = () => void;
 
-export function supportsConversationFork(_agentType: AgentType): boolean {
-  return true;
+/** Roles inside a paired `claude-codex` thread (#2368). */
+export type PairedRole = "planner" | "executor";
+
+export function supportsConversationFork(agentType: AgentType): boolean {
+  // Paired threads span two inner sessions; forking one coherent copy is
+  // not supported.
+  return agentType !== "claude-codex";
 }
 
 export function supportsNativeProviderFork(agentType: AgentType): boolean {
@@ -93,6 +98,8 @@ export interface MessageChunkEvent {
   timestamp?: number;
   /** True when this chunk was emitted from session history replay. */
   replay?: boolean;
+  /** Producing agent inside a paired thread (claude-code | codex). */
+  agentProvider?: string;
 }
 
 export interface ToolCallEvent {
@@ -190,6 +197,62 @@ export interface PermissionRequestEvent {
   options: PermissionOption[];
 }
 
+/** Paired workflow stage shown in the thread header (#2368). */
+export type PairedState =
+  | "idle"
+  | "planning"
+  | "executing"
+  | "reviewing"
+  | "waiting-approval";
+
+export interface PairedRoleStatus {
+  role: PairedRole;
+  /** Plain-language agent name shown to the user: "Claude" or "Codex". */
+  label: string;
+  agentType: AgentType;
+  /** Stable float-forward label, e.g. "Claude Default" / "Codex Recommended". */
+  defaultModelLabel: string;
+  models?: {
+    currentModelId: string;
+    availableModels: Array<{
+      modelId: string;
+      name: string;
+      description?: string;
+    }>;
+  };
+  configOptions?: SessionConfigOption[];
+  /** Explicit user pick; null while floating on the provider default. */
+  pinnedModelId?: string | null;
+  pinnedEffort?: string | null;
+  /** Inline status, e.g. pinned-model fallback or next-session effort timing. */
+  notice?: string | null;
+}
+
+export interface PairedStatus {
+  state: PairedState;
+  activeRole: PairedRole | null;
+  planner: PairedRoleStatus;
+  executor: PairedRoleStatus;
+}
+
+/** Transcript-level paired workflow event: setup declaration or handoff. */
+export interface PairedTranscriptEvent {
+  sessionId: string;
+  kind: "declaration" | "handoff";
+  messageId: string;
+  text: string;
+  from?: string;
+  to?: string;
+  /** Update the existing declaration message instead of appending. */
+  replace?: boolean;
+}
+
+/** Per-role spawn configuration restored from the conversation row. */
+export interface PairedSpawnConfig {
+  planner?: { modelId?: string; effort?: string };
+  executor?: { modelId?: string; effort?: string };
+}
+
 export interface SessionStatusEvent {
   sessionId: string;
   status: SessionStatus;
@@ -197,6 +260,8 @@ export interface SessionStatusEvent {
   agentSessionId?: string;
   /** Session configuration options (e.g., reasoning effort). */
   configOptions?: SessionConfigOption[];
+  /** Paired Claude + Codex workflow status, present on paired sessions. */
+  paired?: PairedStatus;
   agentInfo?: {
     name: string;
     version: string;
@@ -266,6 +331,7 @@ export interface LoginRequiredEvent {
 
 // Union type for all provider runtime events
 export type AgentEvent =
+  | { type: "pairedEvent"; data: PairedTranscriptEvent }
   | { type: "messageChunk"; data: MessageChunkEvent }
   | { type: "toolCall"; data: ToolCallEvent }
   | { type: "toolResult"; data: ToolResultEvent }
@@ -326,6 +392,7 @@ export async function spawnAgent(
   mcpServers?: McpServerConfig[],
   reasoningEffort?: string,
   initialModelId?: string,
+  paired?: PairedSpawnConfig,
 ): Promise<AgentSessionInfo> {
   return invokeProvider<AgentSessionInfo>(
     "provider_spawn",
@@ -343,6 +410,7 @@ export async function spawnAgent(
       mcpServers: mcpServers ?? null,
       reasoningEffort: reasoningEffort ?? null,
       initialModelId: initialModelId ?? null,
+      paired: paired ?? null,
     },
     { timeoutMs: 120_000 },
   );
@@ -439,27 +507,36 @@ export async function listRemoteSessions(
 }
 
 /**
- * Set the AI model for an agent runtime session.
+ * Set the AI model for an agent runtime session. Paired sessions require a
+ * role so only that role's inner session is touched.
  */
 export async function setModel(
   sessionId: string,
   modelId: string,
+  role?: PairedRole,
 ): Promise<void> {
-  return invokeProvider("provider_set_session_model", { sessionId, modelId });
+  return invokeProvider("provider_set_session_model", {
+    sessionId,
+    modelId,
+    role: role ?? null,
+  });
 }
 
 /**
- * Set a session configuration option (e.g., reasoning effort).
+ * Set a session configuration option (e.g., reasoning effort). Paired
+ * sessions require a role so only that role's inner session is touched.
  */
 export async function setConfigOption(
   sessionId: string,
   configId: string,
   valueId: string,
+  role?: PairedRole,
 ): Promise<void> {
   return invokeProvider("provider_update_session_config_option", {
     sessionId,
     configId,
     valueId,
+    role: role ?? null,
   });
 }
 
@@ -543,6 +620,16 @@ export async function ensureGeminiCli(): Promise<string> {
 }
 
 /**
+ * Ensure both CLIs backing the paired Claude + Codex workflow are installed.
+ * Returns the bin directory path containing the claude binary.
+ */
+export async function ensurePairedCli(): Promise<string> {
+  return invokeProvider<string>("provider_ensure_agent_cli", {
+    agentType: "claude-codex",
+  });
+}
+
+/**
  * Check if a specific agent binary is available in PATH.
  */
 export async function checkAgentAvailable(
@@ -566,6 +653,7 @@ export async function launchLogin(agentType: AgentType): Promise<void> {
 // ============================================================================
 
 const EVENT_SUFFIXES = {
+  pairedEvent: "paired-event",
   messageChunk: "message-chunk",
   toolCall: "tool-call",
   toolResult: "tool-result",
@@ -655,6 +743,12 @@ export async function subscribeToSession(
   }
 
   return collectRuntimeSubscriptions([
+    subscribeToEvent<PairedTranscriptEvent>(
+      "pairedEvent",
+      createHandler<{ type: "pairedEvent"; data: PairedTranscriptEvent }>(
+        "pairedEvent",
+      ),
+    ),
     subscribeToEvent<MessageChunkEvent>(
       "messageChunk",
       createHandler<{ type: "messageChunk"; data: MessageChunkEvent }>(
@@ -734,6 +828,9 @@ export async function subscribeToAllEvents(
   callback: (event: AgentEvent) => void,
 ): Promise<UnlistenFn> {
   return collectRuntimeSubscriptions([
+    subscribeToEvent<PairedTranscriptEvent>("pairedEvent", (data) =>
+      callback({ type: "pairedEvent", data }),
+    ),
     subscribeToEvent<MessageChunkEvent>("messageChunk", (data) =>
       callback({ type: "messageChunk", data }),
     ),
