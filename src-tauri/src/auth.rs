@@ -14,8 +14,49 @@ const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 /// Global mutex to prevent concurrent refresh attempts from multiple workers.
 static REFRESH_LOCK: OnceLock<TokioMutex<()>> = OnceLock::new();
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RefreshLockDecision {
+    UseStoredAccessToken,
+    RefreshWithToken,
+    MissingRefreshToken,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RefreshUnauthorizedDecision {
+    UseStoredAccessToken,
+    ExpireSession,
+}
+
 fn refresh_mutex() -> &'static TokioMutex<()> {
     REFRESH_LOCK.get_or_init(|| TokioMutex::new(()))
+}
+
+pub(crate) fn decide_after_refresh_lock(
+    requested_refresh_token: Option<&str>,
+    stored_refresh_token: Option<&str>,
+    stored_access_token: Option<&str>,
+) -> RefreshLockDecision {
+    if requested_refresh_token != stored_refresh_token && stored_access_token.is_some() {
+        return RefreshLockDecision::UseStoredAccessToken;
+    }
+
+    if stored_refresh_token.is_some() {
+        return RefreshLockDecision::RefreshWithToken;
+    }
+
+    RefreshLockDecision::MissingRefreshToken
+}
+
+pub(crate) fn decide_after_refresh_unauthorized(
+    posted_refresh_token: &str,
+    stored_refresh_token: Option<&str>,
+    stored_access_token: Option<&str>,
+) -> RefreshUnauthorizedDecision {
+    if stored_refresh_token != Some(posted_refresh_token) && stored_access_token.is_some() {
+        return RefreshUnauthorizedDecision::UseStoredAccessToken;
+    }
+
+    RefreshUnauthorizedDecision::ExpireSession
 }
 
 /// Read the current access token from the encrypted store.
@@ -81,16 +122,21 @@ fn clear_tokens(app: &tauri::AppHandle) -> Result<(), String> {
 ///
 /// Uses a global mutex to prevent concurrent refresh storms from multiple workers.
 pub async fn refresh_access_token(app: &tauri::AppHandle) -> Result<String, String> {
+    let requested_refresh_token = get_refresh_token(app)?;
     let _guard = refresh_mutex().lock().await;
 
-    // After acquiring the lock, check if another caller already refreshed.
-    // If the token in the store is different from what the caller used,
-    // the refresh already happened — just return the new token.
-    // (Callers should compare with their stale token if they want to skip.)
-
-    let refresh_token = match get_refresh_token(app)? {
-        Some(rt) => rt,
-        None => {
+    let stored_refresh_token = get_refresh_token(app)?;
+    let stored_access_token = get_access_token(app).ok();
+    match decide_after_refresh_lock(
+        requested_refresh_token.as_deref(),
+        stored_refresh_token.as_deref(),
+        stored_access_token.as_deref(),
+    ) {
+        RefreshLockDecision::UseStoredAccessToken => {
+            log::debug!("[auth] Refresh token already rotated; reusing stored access token");
+            return Ok(stored_access_token.expect("decision requires stored access token"));
+        }
+        RefreshLockDecision::MissingRefreshToken => {
             // No refresh token means never-signed-in or already-logged-out,
             // not session expiry. Emitting auth:session-expired here turned
             // every signed-out Gateway call into a spurious sign-in-modal
@@ -98,7 +144,10 @@ pub async fn refresh_access_token(app: &tauri::AppHandle) -> Result<String, Stri
             let _ = clear_tokens(app);
             return Err("No refresh token available".to_string());
         }
-    };
+        RefreshLockDecision::RefreshWithToken => {}
+    }
+
+    let refresh_token = stored_refresh_token.expect("decision requires stored refresh token");
 
     let client = reqwest::Client::new();
     let response = client
@@ -110,6 +159,20 @@ pub async fn refresh_access_token(app: &tauri::AppHandle) -> Result<String, Stri
         .map_err(|e| format!("Token refresh network error: {}", e))?;
 
     if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        let latest_refresh_token = get_refresh_token(app)?;
+        let latest_access_token = get_access_token(app).ok();
+        if decide_after_refresh_unauthorized(
+            &refresh_token,
+            latest_refresh_token.as_deref(),
+            latest_access_token.as_deref(),
+        ) == RefreshUnauthorizedDecision::UseStoredAccessToken
+        {
+            log::debug!(
+                "[auth] Refresh endpoint rejected stale refresh token after another refresh won"
+            );
+            return Ok(latest_access_token.expect("decision requires stored access token"));
+        }
+
         let _ = clear_tokens(app);
         let _ = app.emit("auth:session-expired", ());
         return Err("Session expired — please sign in again".to_string());
@@ -140,6 +203,62 @@ pub async fn refresh_access_token(app: &tauri::AppHandle) -> Result<String, Stri
 
     log::debug!("[auth] Token refreshed successfully");
     Ok(new_access_token.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RefreshLockDecision, RefreshUnauthorizedDecision, decide_after_refresh_lock,
+        decide_after_refresh_unauthorized,
+    };
+
+    #[test]
+    fn lock_decision_reuses_access_token_after_refresh_token_rotation() {
+        assert_eq!(
+            decide_after_refresh_lock(
+                Some("refresh-token-before-lock"),
+                Some("refresh-token-after-lock"),
+                Some("fresh-access-token"),
+            ),
+            RefreshLockDecision::UseStoredAccessToken,
+        );
+    }
+
+    #[test]
+    fn lock_decision_posts_when_refresh_token_is_unchanged() {
+        assert_eq!(
+            decide_after_refresh_lock(
+                Some("refresh-token-before-lock"),
+                Some("refresh-token-before-lock"),
+                Some("stale-access-token"),
+            ),
+            RefreshLockDecision::RefreshWithToken,
+        );
+    }
+
+    #[test]
+    fn unauthorized_decision_preserves_session_after_losing_external_race() {
+        assert_eq!(
+            decide_after_refresh_unauthorized(
+                "posted-refresh-token",
+                Some("newer-refresh-token"),
+                Some("fresh-access-token"),
+            ),
+            RefreshUnauthorizedDecision::UseStoredAccessToken,
+        );
+    }
+
+    #[test]
+    fn unauthorized_decision_expires_session_for_unchanged_refresh_token() {
+        assert_eq!(
+            decide_after_refresh_unauthorized(
+                "posted-refresh-token",
+                Some("posted-refresh-token"),
+                Some("stale-access-token"),
+            ),
+            RefreshUnauthorizedDecision::ExpireSession,
+        );
+    }
 }
 
 /// Make an authenticated HTTP request with automatic 401 refresh and retry.

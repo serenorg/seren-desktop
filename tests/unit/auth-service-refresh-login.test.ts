@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   clearToken: vi.fn<() => Promise<void>>(),
   clearRefreshToken: vi.fn<() => Promise<void>>(),
   clearDefaultOrganizationId: vi.fn<() => Promise<void>>(),
+  isTauriRuntime: vi.fn<() => boolean>(),
+  invoke: vi.fn(),
   clearAuthState: vi.fn<() => void>(),
   requestSignInModal: vi.fn<() => void>(),
 }));
@@ -32,6 +34,7 @@ vi.mock("@/lib/tauri-bridge", () => ({
   clearToken: mocks.clearToken,
   clearRefreshToken: mocks.clearRefreshToken,
   clearDefaultOrganizationId: mocks.clearDefaultOrganizationId,
+  isTauriRuntime: mocks.isTauriRuntime,
 }));
 
 vi.mock("@/stores/auth.store", () => ({
@@ -39,10 +42,25 @@ vi.mock("@/stores/auth.store", () => ({
   requestSignInModal: mocks.requestSignInModal,
 }));
 
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mocks.invoke,
+}));
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("auth service refresh during login validation", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    mocks.isTauriRuntime.mockReturnValue(false);
   });
 
   it("uses a valid refresh token before declaring the user signed out", async () => {
@@ -77,6 +95,34 @@ describe("auth service refresh during login validation", () => {
     expect(mocks.storeRefreshToken).toHaveBeenCalledWith("fresh-refresh-token");
     expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2);
     expect(mocks.clearToken).not.toHaveBeenCalled();
+    expect(mocks.clearAuthState).not.toHaveBeenCalled();
+    expect(mocks.requestSignInModal).not.toHaveBeenCalled();
+  });
+
+  it("shares concurrent Tauri refresh calls through one backend invoke", async () => {
+    mocks.isTauriRuntime.mockReturnValue(true);
+    const refresh = deferred<boolean>();
+    mocks.invoke.mockReturnValue(refresh.promise);
+
+    const { refreshAccessToken } = await import("@/services/auth");
+
+    const callers = [
+      refreshAccessToken(),
+      refreshAccessToken({ promptOnFailure: false }),
+      refreshAccessToken(),
+    ];
+    await vi.waitFor(() => {
+      expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).toHaveBeenCalledWith("refresh_session");
+
+    refresh.resolve(true);
+
+    await expect(Promise.all(callers)).resolves.toEqual([true, true, true]);
+    expect(mocks.getRefreshToken).not.toHaveBeenCalled();
+    expect(mocks.refreshToken).not.toHaveBeenCalled();
     expect(mocks.clearAuthState).not.toHaveBeenCalled();
     expect(mocks.requestSignInModal).not.toHaveBeenCalled();
   });

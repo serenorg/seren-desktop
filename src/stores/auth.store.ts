@@ -14,6 +14,7 @@ import {
 import {
   logout as authLogout,
   createApiKey,
+  hasStoredToken,
   isLoggedIn,
 } from "@/services/auth";
 import { initializeGateway, resetGateway } from "@/services/mcp-gateway";
@@ -57,6 +58,7 @@ const [state, setState] = createStore<AuthState>({
 });
 
 let authBindingsInitialized = false;
+let authEpoch = 0;
 
 /**
  * Ensure we have a Seren API key for MCP authentication.
@@ -128,20 +130,33 @@ async function initializeMcpInBackground(): Promise<void> {
   }
 }
 
-async function loadPrivateChatPolicy(): Promise<void> {
+async function loadPrivateChatPolicy(): Promise<OrganizationPrivateChatPolicy | null> {
   try {
-    const policy = await getDefaultOrganizationPrivateChatPolicy();
-    setState("privateChatPolicy", policy);
+    return await getDefaultOrganizationPrivateChatPolicy();
   } catch (error) {
     console.warn("[Auth Store] Failed to load private chat policy:", error);
-    setState("privateChatPolicy", null);
+    return null;
   }
 }
 
-async function activateAuthenticatedSession(user?: User): Promise<void> {
-  await loadPrivateChatPolicy();
+function authEpochChanged(expectedEpoch: number | undefined): boolean {
+  return expectedEpoch !== undefined && expectedEpoch !== authEpoch;
+}
+
+async function activateAuthenticatedSession(
+  user?: User,
+  expectedEpoch?: number,
+): Promise<boolean> {
+  const privateChatPolicy = await loadPrivateChatPolicy();
+  if (authEpochChanged(expectedEpoch)) {
+    return false;
+  }
 
   const hasApiKey = await ensureApiKey();
+  if (authEpochChanged(expectedEpoch)) {
+    return false;
+  }
+
   if (!hasApiKey) {
     console.warn("[Auth Store] Could not ensure API key - MCP may not work");
   }
@@ -149,15 +164,23 @@ async function activateAuthenticatedSession(user?: User): Promise<void> {
   setState({
     ...(user !== undefined ? { user } : {}),
     isAuthenticated: true,
+    privateChatPolicy,
     signInModalRequested: false,
   });
 
   // Initialize MCP Gateway in background (non-blocking)
   void initializeMcpInBackground();
+  return true;
 }
 
-export async function restoreAuthenticatedSession(): Promise<void> {
-  await activateAuthenticatedSession();
+export async function restoreAuthenticatedSession(
+  expectedEpoch: number = authEpoch,
+): Promise<boolean> {
+  if (!(await hasStoredToken())) {
+    return false;
+  }
+
+  return activateAuthenticatedSession(undefined, expectedEpoch);
 }
 
 async function resetSkillsCatalog(): Promise<void> {
@@ -213,6 +236,8 @@ export async function setAuthenticated(user: User): Promise<void> {
  * Cleans up MCP Gateway state and stored credentials.
  */
 export async function logout(): Promise<void> {
+  authEpoch += 1;
+
   // Reset MCP Gateway state
   await resetGateway();
 
@@ -248,6 +273,7 @@ export async function logout(): Promise<void> {
  * see #1661).
  */
 export function clearAuthState(): void {
+  authEpoch += 1;
   void resetSkillsCatalog();
   setState({
     isAuthenticated: false,
@@ -294,8 +320,9 @@ export async function initAuthRuntimeBindings(): Promise<void> {
     verboseRuntimeConsole.debug(
       "[Auth Store] Token refreshed event from backend",
     );
+    const restoreEpoch = authEpoch;
     try {
-      await restoreAuthenticatedSession();
+      await restoreAuthenticatedSession(restoreEpoch);
     } catch (error) {
       console.warn(
         "[Auth Store] Failed to restore auth state after backend refresh:",
