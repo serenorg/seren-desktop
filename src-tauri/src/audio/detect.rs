@@ -37,6 +37,37 @@ pub fn any_input_device_running(states: impl IntoIterator<Item = bool>) -> bool 
     states.into_iter().any(|running| running)
 }
 
+/// Whether any buffer in a raw CoreAudio `AudioBufferList` carries at least
+/// one channel. `mBuffers` is pointer-aligned, so the first entry starts at
+/// byte 8 on 64-bit targets — the four bytes after `mNumberBuffers` are
+/// zero-filled padding, and a parser that reads channel counts at byte 4
+/// sees zero for every device. #2378.
+#[cfg(any(target_os = "macos", test))]
+fn buffer_list_has_channels(bytes: &[u8]) -> bool {
+    #[repr(C)]
+    struct AudioBuffer {
+        _number_channels: u32,
+        _data_byte_size: u32,
+        _data: *mut std::ffi::c_void,
+    }
+    #[repr(C)]
+    struct AudioBufferList {
+        _number_buffers: u32,
+        _buffers: [AudioBuffer; 1],
+    }
+
+    let read_u32 = |at: usize| {
+        bytes
+            .get(at..at + std::mem::size_of::<u32>())
+            .and_then(|slice| slice.try_into().ok())
+            .map(u32::from_ne_bytes)
+            .unwrap_or(0)
+    };
+    let base = std::mem::offset_of!(AudioBufferList, _buffers);
+    let stride = std::mem::size_of::<AudioBuffer>();
+    (0..read_u32(0) as usize).any(|i| read_u32(base + i * stride) > 0)
+}
+
 pub fn meeting_detection(activity: AudioActivity) -> MeetingAutodetectResult {
     if should_start_capture(activity.clone()) {
         return MeetingAutodetectResult {
@@ -303,32 +334,20 @@ mod platform_audio {
         if status != NO_ERR {
             return false;
         }
-        // AudioBufferList: u32 mNumberBuffers, followed by mNumberBuffers
-        // AudioBuffer structs { u32 mNumberChannels; u32 mDataByteSize;
-        // *mut c_void mData; }. We only need to know if any buffer has at
-        // least one channel, so reach into the first u32 of each entry.
-        let m_number_buffers = u32::from_ne_bytes(
-            buffer
-                .get(..4)
-                .and_then(|s| s.try_into().ok())
-                .unwrap_or([0, 0, 0, 0]),
-        );
-        if m_number_buffers == 0 {
-            return false;
-        }
-        let buffer_struct_size = std::mem::size_of::<u32>() * 2 + std::mem::size_of::<*mut c_void>();
-        for i in 0..m_number_buffers as usize {
-            let offset = std::mem::size_of::<u32>() + i * buffer_struct_size;
-            let Some(slice) = buffer.get(offset..offset + 4) else {
-                break;
-            };
-            let channels =
-                u32::from_ne_bytes(slice.try_into().unwrap_or([0, 0, 0, 0]));
-            if channels > 0 {
-                return true;
-            }
-        }
-        false
+        buffer.truncate(io_size as usize);
+        super::buffer_list_has_channels(&buffer)
+    }
+
+    /// Count devices that pass the input-stream probe against the live
+    /// CoreAudio HAL — the byte-layout parser regression (#2378) was only
+    /// observable on real hardware, so the opt-in test below exists to
+    /// re-verify on a Mac.
+    #[cfg(test)]
+    pub(super) fn input_capable_device_count() -> usize {
+        list_all_audio_device_ids()
+            .into_iter()
+            .filter(|device_id| device_has_input_streams(*device_id))
+            .count()
     }
 
     fn audio_object_u32(
@@ -526,5 +545,51 @@ mod tests {
     fn any_input_device_running_is_false_for_an_empty_device_list() {
         let empty: [bool; 0] = [];
         assert!(!any_input_device_running(empty));
+    }
+
+    /// Mirrors the 64-bit CoreAudio wire layout: u32 buffer count, four
+    /// bytes of alignment padding, then 16-byte `AudioBuffer` entries.
+    fn audio_buffer_list_bytes(channel_counts: &[u32]) -> Vec<u8> {
+        let mut bytes = vec![0_u8; 8 + channel_counts.len() * 16];
+        bytes[..4].copy_from_slice(&(channel_counts.len() as u32).to_ne_bytes());
+        for (i, channels) in channel_counts.iter().enumerate() {
+            let at = 8 + i * 16;
+            bytes[at..at + 4].copy_from_slice(&channels.to_ne_bytes());
+        }
+        bytes
+    }
+
+    #[test]
+    fn buffer_list_channels_are_read_past_the_alignment_padding() {
+        // The #2378 regression: a one-buffer mono input device. The four
+        // zero bytes at offset 4 are padding — reading channel counts there
+        // reports every device as input-less.
+        assert!(buffer_list_has_channels(&audio_buffer_list_bytes(&[1])));
+    }
+
+    #[test]
+    fn buffer_list_with_only_zero_channel_buffers_has_no_channels() {
+        assert!(!buffer_list_has_channels(&audio_buffer_list_bytes(&[0])));
+    }
+
+    #[test]
+    fn buffer_list_scans_every_buffer_for_channels() {
+        assert!(buffer_list_has_channels(&audio_buffer_list_bytes(&[0, 2])));
+    }
+
+    #[test]
+    fn buffer_list_parsing_tolerates_empty_and_truncated_payloads() {
+        assert!(!buffer_list_has_channels(&[]));
+        // Header claims one buffer but the entry bytes are missing.
+        assert!(!buffer_list_has_channels(&1_u32.to_ne_bytes()));
+    }
+
+    /// Run manually on a Mac with audio hardware:
+    /// `cargo test --manifest-path src-tauri/Cargo.toml live_coreaudio -- --ignored`
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires macOS audio hardware"]
+    fn live_coreaudio_probe_sees_input_capable_devices() {
+        assert!(platform_audio::input_capable_device_count() > 0);
     }
 }
