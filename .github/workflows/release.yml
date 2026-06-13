@@ -1187,6 +1187,7 @@ jobs:
             "pnpm exec playwright install chromium",
             "Write-Host '[windows-e2e:ssm] Running Windows app harness'",
             "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows-e2e-app.ps1 -InstallerPath (Join-Path $work 'SerenDesktop-setup.exe') -ProbeTimeoutSeconds 1800",
+            "if ($LASTEXITCODE -ne 0) { throw \"Windows app harness failed with exit code $LASTEXITCODE\" }",
             ];
           process.stdout.write(JSON.stringify({ commands }, null, 2));
           NODE
