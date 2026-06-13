@@ -10,7 +10,9 @@ param(
 
   [int]$StartupTimeoutSeconds = 120,
 
-  [int]$InstallerTimeoutSeconds = 180
+  [int]$InstallerTimeoutSeconds = 180,
+
+  [int]$ProbeTimeoutSeconds = 1800
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +21,11 @@ Set-StrictMode -Version Latest
 function Fail([string]$Message) {
   Write-Host "::error::$Message"
   exit 1
+}
+
+function Write-Stage([string]$Message) {
+  $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+  Write-Host "[windows-e2e] $timestamp $Message"
 }
 
 function Require-Env([string[]]$Names) {
@@ -90,13 +97,23 @@ function Clear-DownloadMarksUnder([string]$Root) {
   }
 }
 
-function Invoke-ProcessWithTimeout([string]$FilePath, [string[]]$ArgumentList, [int]$TimeoutSeconds, [string]$Label) {
-  $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru
+function Invoke-ProcessWithTimeout([string]$FilePath, [string[]]$ArgumentList, [int]$TimeoutSeconds, [string]$Label, [switch]$NoNewWindow) {
+  Write-Stage "Starting ${Label} with ${TimeoutSeconds}s timeout"
+  $startArgs = @{
+    FilePath = $FilePath
+    ArgumentList = $ArgumentList
+    PassThru = $true
+  }
+  if ($NoNewWindow) {
+    $startArgs.NoNewWindow = $true
+  }
+  $process = Start-Process @startArgs
   $timeoutMs = [int]([Math]::Min([int]::MaxValue, [int64]$TimeoutSeconds * 1000))
   if (-not $process.WaitForExit($timeoutMs)) {
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     Fail "$Label timed out after ${TimeoutSeconds}s and was killed."
   }
+  Write-Stage "${Label} exited with code $($process.ExitCode)"
   return $process.ExitCode
 }
 
@@ -139,6 +156,7 @@ function Find-RequiredFile([string]$Root, [string]$Filter, [string]$Label) {
   return $match.FullName
 }
 
+Write-Stage "Validating required production e2e environment"
 Require-Env @(
   "SEREN_E2E_EMAIL",
   "SEREN_E2E_PASSWORD",
@@ -156,17 +174,19 @@ if (-not [string]::IsNullOrWhiteSpace($env:SEREN_E2E_API_BASE) -and $env:SEREN_E
 $env:SEREN_E2E_API_BASE = "https://api.serendb.com"
 $env:SEREN_E2E_CDP_ENDPOINT = "http://127.0.0.1:$RemoteDebugPort"
 
+Write-Stage "Preparing installer artifact"
 $resolvedInstaller = (Resolve-Path -LiteralPath $InstallerPath).Path
 Clear-DownloadMark $resolvedInstaller "Windows NSIS installer"
 Require-SignedOrExplicitPrArtifact $resolvedInstaller "Windows NSIS installer"
 
+Write-Stage "Cleaning existing Seren processes and install directory"
 Get-Process -Name "Seren" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $InstallDir) {
   Remove-Item -LiteralPath $InstallDir -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-Write-Host "Installing SerenDesktop into $InstallDir"
+Write-Stage "Installing SerenDesktop into $InstallDir"
 $installArgs = @("/S", "/D=$InstallDir")
 $installExitCode = Invoke-ProcessWithTimeout $resolvedInstaller $installArgs $InstallerTimeoutSeconds "NSIS installer"
 if ($installExitCode -ne 0) {
@@ -176,6 +196,7 @@ if ($AllowUnsignedPrArtifact) {
   Clear-DownloadMarksUnder $InstallDir
 }
 
+Write-Stage "Validating installed app payload"
 $appExe = Join-Path $InstallDir "Seren.exe"
 if (-not (Test-Path -LiteralPath $appExe)) {
   Write-DirectorySnapshot $InstallDir
@@ -187,6 +208,7 @@ $runtimeRoot = Join-Path $InstallDir "embedded-runtime"
 if (-not (Test-Path -LiteralPath $runtimeRoot)) {
   Fail "Installed app is missing embedded-runtime at $runtimeRoot"
 }
+Write-Stage "Validating bundled runtime"
 $nodeExe = Find-RequiredFile $runtimeRoot "node.exe" "bundled node.exe"
 $npmCmd = Find-RequiredFile $runtimeRoot "npm.cmd" "bundled npm.cmd"
 $providerRuntime = Find-RequiredFile $runtimeRoot "provider-runtime.mjs" "provider-runtime.mjs"
@@ -202,16 +224,19 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($npmVersion)) {
 Write-Host "Bundled runtime verified: node=$nodeVersion npm=$npmVersion providerRuntime=$providerRuntime"
 
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$RemoteDebugPort --remote-allow-origins=*"
-Write-Host "Launching Seren.exe with WebView2 remote debugging on port $RemoteDebugPort"
+Write-Stage "Launching Seren.exe with WebView2 remote debugging on port $RemoteDebugPort"
 $app = Start-Process -FilePath $appExe -PassThru
 
 try {
+  Write-Stage "Waiting for WebView2 CDP endpoint"
   Wait-ForCdp -Port $RemoteDebugPort -TimeoutSeconds $StartupTimeoutSeconds
-  node "$PSScriptRoot/windows-e2e-app.mjs"
-  if ($LASTEXITCODE -ne 0) {
-    Fail "Windows app e2e script failed with exit code $LASTEXITCODE"
+  Write-Stage "Running Node app e2e probe"
+  $probeExitCode = Invoke-ProcessWithTimeout "node" @("$PSScriptRoot/windows-e2e-app.mjs") $ProbeTimeoutSeconds "Windows app e2e probe" -NoNewWindow
+  if ($probeExitCode -ne 0) {
+    Fail "Windows app e2e script failed with exit code $probeExitCode"
   }
 } finally {
+  Write-Stage "Cleaning up Seren processes"
   if ($null -ne $app -and -not $app.HasExited) {
     Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
   }

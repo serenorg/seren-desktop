@@ -1161,8 +1161,10 @@ jobs:
             `$work = Join-Path $env:TEMP '${workName}'`,
             "if (Test-Path $work) { Remove-Item -LiteralPath $work -Recurse -Force }",
             "New-Item -ItemType Directory -Force -Path $work | Out-Null",
+            "Write-Host '[windows-e2e:ssm] Downloading staged installer and payload'",
             `Invoke-WebRequest -Uri ${psString(env.INSTALLER_URL)} -OutFile (Join-Path $work 'SerenDesktop-setup.exe')`,
             `Invoke-WebRequest -Uri ${psString(env.PAYLOAD_URL)} -OutFile (Join-Path $work 'windows-e2e-payload.zip')`,
+            "Write-Host '[windows-e2e:ssm] Expanding e2e payload'",
             "Expand-Archive -LiteralPath (Join-Path $work 'windows-e2e-payload.zip') -DestinationPath $work -Force",
             `$secretNames = @(${secretNames.map((name) => `'${name}'`).join(",")})`,
             // The aws call runs under Windows PowerShell 5.1, where native
@@ -1171,16 +1173,21 @@ jobs:
             // whole script before the guard ran (#2320). Scope EAP=Continue
             // around the call so missing parameters degrade to the guarded
             // skip they were designed for.
+            "Write-Host '[windows-e2e:ssm] Hydrating e2e secrets from SSM Parameter Store'",
             `foreach ($name in $secretNames) { $parameterName = '${env.WINDOWS_E2E_SECRET_PARAMETER_PREFIX}/' + $name; $value = & { $ErrorActionPreference = 'Continue'; aws ssm get-parameter --with-decryption --name $parameterName --query 'Parameter.Value' --output text 2>$null }; if ($LASTEXITCODE -eq 0 -and $value -and $value -ne 'None') { [Environment]::SetEnvironmentVariable($name, $value, 'Process') } }`,
             "[Environment]::SetEnvironmentVariable('SEREN_E2E_API_BASE', 'https://api.serendb.com', 'Process')",
             "[Environment]::SetEnvironmentVariable('SEREN_E2E_RELEASE_RUN', '1', 'Process')",
             "Set-Location $work",
+            "Write-Host '[windows-e2e:ssm] Enabling Corepack'",
             "corepack enable",
             "corepack prepare pnpm@9 --activate",
+            "Write-Host '[windows-e2e:ssm] Installing npm dependencies'",
             "pnpm install --frozen-lockfile",
+            "Write-Host '[windows-e2e:ssm] Installing Playwright Chromium'",
             "pnpm exec playwright install chromium",
-            "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows-e2e-app.ps1 -InstallerPath (Join-Path $work 'SerenDesktop-setup.exe')",
-          ];
+            "Write-Host '[windows-e2e:ssm] Running Windows app harness'",
+            "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows-e2e-app.ps1 -InstallerPath (Join-Path $work 'SerenDesktop-setup.exe') -ProbeTimeoutSeconds 1800",
+            ];
           process.stdout.write(JSON.stringify({ commands }, null, 2));
           NODE
           command_id="$(aws ssm send-command \
