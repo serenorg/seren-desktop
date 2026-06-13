@@ -39,8 +39,8 @@ describe("#1657 — claudeSessionExists pre-flight before --resume", () => {
   });
 
   it("agent.store imports claudeSessionExists from the service module", () => {
-    expect(agentStoreSource).toContain(
-      'import { claudeSessionExists } from "@/services/claudeMemory"',
+    expect(agentStoreSource).toMatch(
+      /import\s*\{[\s\S]*?claudeSessionExists[\s\S]*?\}\s*from\s*"@\/services\/claudeMemory"/,
     );
   });
 
