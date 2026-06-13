@@ -71,6 +71,7 @@ export interface AgentInfo {
   description: string;
   command: string;
   available: boolean;
+  authenticated?: boolean;
   unavailableReason?: string;
 }
 
@@ -636,6 +637,17 @@ export async function checkAgentAvailable(
   agentType: AgentType,
 ): Promise<boolean> {
   return invokeProvider<boolean>("provider_check_agent_available", {
+    agentType,
+  });
+}
+
+/**
+ * Check whether a specific agent has local subscription credentials available.
+ */
+export async function checkAgentAuthenticated(
+  agentType: AgentType,
+): Promise<boolean> {
+  return invokeProvider<boolean>("provider_check_agent_authenticated", {
     agentType,
   });
 }

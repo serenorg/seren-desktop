@@ -103,6 +103,10 @@ function registerProviderHandlers() {
     "provider_check_agent_available",
     providerHandlers.checkAgentAvailable,
   );
+  registerHandler(
+    "provider_check_agent_authenticated",
+    providerHandlers.checkAgentAuthenticated,
+  );
   registerHandler("provider_ensure_agent_cli", providerHandlers.ensureAgentCli);
   registerHandler("provider_launch_login", providerHandlers.launchLogin);
   registerHandler(
