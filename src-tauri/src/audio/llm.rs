@@ -63,9 +63,9 @@ pub async fn complete(app: &AppHandle, request: CompletionRequest) -> Result<Str
             .await
             {
                 Ok(content) => Ok(content),
-                Err(err) if is_provider_auth_error(&err) => {
+                Err(err) if is_provider_fallback_error(&err) => {
                     log::warn!(
-                        "[audio-llm] provider one-shot auth failed; retrying via SerenModels fallback: {err}"
+                        "[audio-llm] provider one-shot unavailable (auth/capacity); retrying via SerenModels fallback: {err}"
                     );
                     complete_via_seren_models(
                         app,
@@ -265,6 +265,18 @@ fn seren_models_fallback_model(requested_model: &str) -> String {
     SEREN_MODELS_SUMMARIZATION_MODEL.to_string()
 }
 
+/// A provider one-shot error that should retry on the wallet-billed SerenModels
+/// fallback instead of failing the prompt. Covers two classes:
+/// the provider isn't authenticated, or the provider's subscription has no
+/// remaining capacity (quota/rate-limit). A long meeting that exhausts the
+/// user's Claude/Codex/Gemini subscription mid-pass must still produce notes,
+/// and must not keep hammering a throttled subscription that also serves the
+/// user's interactive chat. Non-capacity safety errors (e.g. a tool-call abort)
+/// are deliberately excluded so they still fail closed. #2397.
+fn is_provider_fallback_error(error: &str) -> bool {
+    is_provider_auth_error(error) || is_provider_capacity_error(error)
+}
+
 fn is_provider_auth_error(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     lower.contains("authentication required")
@@ -273,6 +285,26 @@ fn is_provider_auth_error(error: &str) -> bool {
         || lower.contains("login required")
         || lower.contains("not logged in")
         || lower.contains("please run /login")
+}
+
+/// Detect provider subscription quota/rate-limit/capacity exhaustion. The
+/// underlying CLIs surface these as free-form strings, so match on the
+/// substrings the major providers use for HTTP 429 / usage-limit conditions.
+fn is_provider_capacity_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("rate limit")
+        || lower.contains("rate-limit")
+        || lower.contains("ratelimit")
+        || lower.contains("too many requests")
+        || lower.contains("quota")
+        || lower.contains("usage limit")
+        || lower.contains("usage_limit")
+        || lower.contains("insufficient_quota")
+        || lower.contains("resource exhausted")
+        || lower.contains("resource_exhausted")
+        || lower.contains("overloaded")
+        || lower.contains("capacity")
+        || lower.contains("429")
 }
 
 #[cfg(test)]
@@ -354,5 +386,50 @@ mod tests {
             "provider one-shot attempted a tool call; toolless completion aborted"
         ));
         assert!(!is_provider_auth_error("Provider runtime socket closed before prompt completed."));
+    }
+
+    #[test]
+    fn provider_capacity_error_detection_covers_common_quota_shapes() {
+        for error in [
+            "Rate limit exceeded. Please try again later.",
+            "429 Too Many Requests",
+            "You have hit your usage limit for this model",
+            "insufficient_quota: you exceeded your current quota",
+            "RESOURCE_EXHAUSTED: Quota exceeded for gemini",
+            "Anthropic API error: overloaded_error",
+            "Server is at capacity, retry shortly",
+        ] {
+            assert!(
+                is_provider_capacity_error(error),
+                "expected capacity error: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_capacity_error_does_not_match_safety_or_transport_errors() {
+        // A tool-call/permission abort is a non-capacity safety error and MUST
+        // fail closed, never fall back. Transport closes are not capacity.
+        assert!(!is_provider_capacity_error(
+            "provider one-shot attempted a tool call; toolless completion aborted"
+        ));
+        assert!(!is_provider_capacity_error(
+            "Provider runtime socket closed before prompt completed."
+        ));
+        assert!(!is_provider_capacity_error("provider one-shot returned no content"));
+    }
+
+    #[test]
+    fn fallback_predicate_covers_auth_and_capacity_but_not_safety() {
+        assert!(is_provider_fallback_error("not logged in"));
+        assert!(is_provider_fallback_error("429 Too Many Requests"));
+        assert!(is_provider_fallback_error("usage limit reached"));
+        // Safety / transport failures fail closed (no SerenModels fallback).
+        assert!(!is_provider_fallback_error(
+            "provider one-shot attempted a tool call; toolless completion aborted"
+        ));
+        assert!(!is_provider_fallback_error(
+            "Provider runtime socket closed before prompt completed."
+        ));
     }
 }
