@@ -125,13 +125,29 @@ export function useVoiceInput(
         return;
       }
 
-      const transcript = settingsStore.get("voiceCleanupEnabled")
-        ? await cleanupDictationText(
+      // Cleanup only polishes already-captured speech. If the LLM cleanup
+      // throws (empty provider completion, a fail-closed tool/permission abort
+      // on Codex/Gemini, or transport failure) or returns nothing, fall back to
+      // the raw transcript — never discard the user's words because the polish
+      // step failed. #2403.
+      let transcript = trimmed;
+      if (settingsStore.get("voiceCleanupEnabled")) {
+        try {
+          const cleaned = await cleanupDictationText(
             trimmed,
             providerStore.resolvedModel(),
             settingsStore.get("voiceCustomVocabulary"),
-          )
-        : trimmed;
+          );
+          if (cleaned.trim()) {
+            transcript = cleaned;
+          }
+        } catch (err) {
+          console.warn(
+            "[VoiceInput] cleanup failed; inserting raw transcript:",
+            err,
+          );
+        }
+      }
 
       if (transcript.trim()) {
         onTranscript(transcript.trim());
