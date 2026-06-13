@@ -111,6 +111,39 @@ describe("Windows production e2e release gate", () => {
     expect(probe).toContain("SEREN_WINDOWS_E2E_OK");
   });
 
+  it("certifies every shipped agent journey, not one env-selected type (#2375)", () => {
+    // The harness iterates a journey list; it must not regress to a single
+    // SEREN_E2E_AGENT_TYPE spawn.
+    expect(probe).toContain("AGENT_JOURNEYS");
+    expect(probe).toContain("SEREN_E2E_AGENT_JOURNEYS");
+    expect(probe).toContain("runSingleAgentJourney");
+    expect(probe).toContain("runPairedJourney");
+    for (const journey of ["codex", "claude-code", "claude-codex"]) {
+      expect(probe).toContain(journey);
+    }
+  });
+
+  it("asserts the paired pipeline structurally, not by marker text (#2375)", () => {
+    // Claude reframes the prompt into a plan and the reviewer summarizes, so
+    // the literal marker cannot survive the paired pipeline — coverage is the
+    // declaration + two handoffs + single prompt-complete + held status.
+    expect(probe).toContain("provider://paired-event");
+    expect(probe).toContain("declaration");
+    expect(probe).toContain("handoff");
+    expect(probe).toContain("provider://prompt-complete");
+    // Guards the #2372 mid-turn "ready" regression on Windows.
+    expect(probe).toContain("prompting");
+    expect(probe).toMatch(/planning.*executing.*reviewing/s);
+  });
+
+  it("surfaces an unauthenticated CLI as a distinct login failure (#2375)", () => {
+    // An expired or unprovisioned credential must read as a login problem, not
+    // a generic spawn/timeout failure.
+    expect(probe).toContain("AgentAuthError");
+    expect(probe).toContain("not authenticated");
+    expect(probe).toContain("provider://error");
+  });
+
   it("has a manual publish override for already-built release artifacts", () => {
     expect(existsSync(manualPublishWorkflowPath)).toBe(true);
     expect(manualPublishWorkflow).toContain("workflow_dispatch:");

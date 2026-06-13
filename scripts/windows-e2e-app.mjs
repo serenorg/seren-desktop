@@ -17,7 +17,18 @@ const GITHUB_PASSWORD = requiredEnv("SEREN_E2E_GITHUB_PASSWORD");
 const GITHUB_PAT = requiredEnv("SEREN_E2E_GITHUB_PAT");
 const GITHUB_TOTP_SECRET = process.env.SEREN_E2E_GITHUB_TOTP_SECRET ?? "";
 const OAUTH_PROVIDER = process.env.SEREN_E2E_OAUTH_PROVIDER ?? "github";
-const AGENT_TYPE = process.env.SEREN_E2E_AGENT_TYPE ?? "codex";
+// The paired workflow ships as one agent type backed by two CLIs. Declared
+// locally because the e2e payload only bundles this script — never bin/.
+const PAIRED_AGENT_TYPE = "claude-codex";
+// Every shipped subscription coding-agent journey is certified, not one
+// env-selected type (#2375). Override with a comma list for ad-hoc runs.
+const AGENT_JOURNEYS = (
+  process.env.SEREN_E2E_AGENT_JOURNEYS ??
+  `codex,claude-code,${PAIRED_AGENT_TYPE}`
+)
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 const AGENT_CWD = process.env.SEREN_E2E_AGENT_CWD ?? process.cwd();
 const PROMPT_TEXT =
   process.env.SEREN_E2E_AGENT_PROMPT ??
@@ -392,52 +403,272 @@ function assistantText(buffer, marker, sessionId) {
     .join("");
 }
 
-async function exerciseAgentRuntime(page) {
-  const config = await tauriInvoke(page, "provider_runtime_get_config");
-  assert(config?.apiBaseUrl && config?.wsBaseUrl && config?.token, "provider runtime config missing fields");
-  const ws = await connectProviderRuntime(config);
-  const buffer = createRuntimeBuffer(ws);
+const SINGLE_PROMPT_TIMEOUT_MS = 240_000;
+// The paired pipeline is three inner turns (plan → execute → review), so it
+// needs a wider ceiling than a single prompt.
+const PAIRED_PROMPT_TIMEOUT_MS = 600_000;
+
+// Both the Claude and Codex runtimes collapse auth failures to this text
+// (claude-runtime/providers.mjs isAuthError). Detecting it lets an expired or
+// unprovisioned credential read as "login expired" instead of a generic
+// spawn/timeout failure (#2375).
+const AUTH_FAILURE_PATTERNS = [
+  "authentication required",
+  "run the login flow",
+  "please run /login",
+  "login required",
+  "not logged in",
+  "please login",
+  "please sign in",
+  "session expired",
+  "re-authenticate",
+  "invalid api key",
+];
+
+function isAuthFailureMessage(message) {
+  const lower = String(message ?? "").toLowerCase();
+  return AUTH_FAILURE_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+class AgentAuthError extends Error {}
+
+function authError(journey, detail) {
+  return new AgentAuthError(
+    `${journey} CLI is installed but not authenticated on the Windows e2e host ` +
+      `(login expired or never provisioned). Refresh the credential via the ` +
+      `WINDOWS_E2E_SECRET_PARAMETER_PREFIX SSM mechanism. Detail: ${detail}`,
+  );
+}
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Timed out after ${ms}ms waiting for ${label}`)),
+      ms,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// A raw spawn/prompt failure carries a generic message; the runtime also emits
+// a provider://error with the auth text. Promote either signal to a distinct
+// AgentAuthError so the job names the credential gap, not a timeout (#2375).
+function classifyJourneyError(journey, error, buffer, marker, sessionIds) {
+  if (error instanceof AgentAuthError) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  if (isAuthFailureMessage(message)) return authError(journey, message);
+  const ids = sessionIds.filter(Boolean);
+  const authEvent = buffer
+    .slice(marker)
+    .find(
+      (event) =>
+        event.method === "provider://error" &&
+        ids.includes(event.params?.sessionId) &&
+        isAuthFailureMessage(event.params?.error),
+    );
+  if (authEvent) return authError(journey, String(authEvent.params.error));
+  return error instanceof Error ? error : new Error(message);
+}
+
+async function runSingleAgentJourney(ws, buffer, agentType) {
+  const localSessionId = randomUUID();
+  const marker = buffer.mark();
   let session;
   try {
-    const available = await rpc(ws, "provider_check_agent_available", { agentType: AGENT_TYPE });
-    assert(available === true, `${AGENT_TYPE} is not available on the Windows e2e host`);
+    const available = await rpc(ws, "provider_check_agent_available", {
+      agentType,
+    });
+    assert(available === true, `${agentType} is not available on the Windows e2e host`);
     session = await rpc(ws, "provider_spawn", {
-      agentType: AGENT_TYPE,
+      agentType,
       cwd: AGENT_CWD,
-      localSessionId: randomUUID(),
+      localSessionId,
       resumeAgentSessionId: null,
       sandboxMode: "workspace-write",
       apiKey: null,
-      approvalPolicy: AGENT_TYPE === "codex" ? "never" : "on-request",
+      approvalPolicy: agentType === "codex" ? "never" : "on-request",
       searchEnabled: false,
       networkEnabled: true,
       timeoutSecs: 120,
     });
-    assert(session?.id, "provider_spawn did not return a local session id");
-    const marker = buffer.mark();
-    await rpc(ws, "provider_prompt", {
-      sessionId: session.id,
-      prompt: PROMPT_TEXT,
-      context: null,
-    });
+    assert(session?.id, `${agentType} provider_spawn did not return a local session id`);
+    // The prompt RPC resolves only when the turn completes (or rejects on an
+    // auth/runtime error), so the wait bounds the whole turn.
+    await withTimeout(
+      rpc(ws, "provider_prompt", {
+        sessionId: session.id,
+        prompt: PROMPT_TEXT,
+        context: null,
+      }),
+      SINGLE_PROMPT_TIMEOUT_MS,
+      `${agentType} prompt`,
+    );
     await buffer.waitFor(
       (message) =>
         message.method === "provider://prompt-complete" &&
         message.params?.sessionId === session.id &&
         message.params?.historyReplay !== true,
-      240_000,
+      30_000,
       marker,
     );
     const text = assistantText(buffer, marker, session.id);
     assert(
       text.includes("SEREN_WINDOWS_E2E_OK"),
-      `Agent response did not include expected marker. Text=${text.slice(0, 500)}`,
+      `${agentType} response did not include expected marker. Text=${text.slice(0, 500)}`,
     );
-    console.log(`[windows-e2e] ${AGENT_TYPE} stream-json runtime prompt completed`);
+    console.log(`[windows-e2e] ${agentType} stream-json runtime prompt completed`);
+  } catch (error) {
+    throw classifyJourneyError(agentType, error, buffer, marker, [
+      localSessionId,
+      session?.id,
+    ]);
   } finally {
     if (session?.id) {
       await rpc(ws, "provider_terminate", { sessionId: session.id }).catch(() => {});
     }
+  }
+}
+
+async function runPairedJourney(ws, buffer) {
+  const localSessionId = randomUUID();
+  const marker = buffer.mark();
+  let session;
+  try {
+    const available = await rpc(ws, "provider_check_agent_available", {
+      agentType: PAIRED_AGENT_TYPE,
+    });
+    assert(available === true, `${PAIRED_AGENT_TYPE} is not available on the Windows e2e host`);
+    session = await rpc(ws, "provider_spawn", {
+      agentType: PAIRED_AGENT_TYPE,
+      cwd: AGENT_CWD,
+      localSessionId,
+      resumeAgentSessionId: null,
+      sandboxMode: "workspace-write",
+      apiKey: null,
+      // "never" keeps the Codex executor from stalling on an approval that no
+      // operator is present to grant during the headless run.
+      approvalPolicy: "never",
+      searchEnabled: false,
+      networkEnabled: true,
+      timeoutSecs: 120,
+    });
+    assert(session?.id, "paired provider_spawn did not return a local session id");
+
+    // The setup declaration is the first paired transcript event, emitted at
+    // spawn for a fresh thread. Role model/effort echoes refresh it in place
+    // (replace=true) — those refreshes are expected, the append is not.
+    const declarations = buffer
+      .slice(marker)
+      .filter(
+        (event) =>
+          event.method === "provider://paired-event" &&
+          event.params?.sessionId === session.id &&
+          event.params?.kind === "declaration",
+      );
+    assert(
+      declarations.length >= 1,
+      "paired session did not emit a setup declaration at spawn",
+    );
+    assert(
+      declarations[0].params?.replace !== true,
+      "first paired declaration must be an append, not a replace",
+    );
+    assert(
+      declarations.slice(1).every((event) => event.params?.replace === true),
+      "paired declaration refreshes after the first must replace in place",
+    );
+
+    const promptMark = buffer.mark();
+    await withTimeout(
+      rpc(ws, "provider_prompt", {
+        sessionId: session.id,
+        prompt: PROMPT_TEXT,
+        context: null,
+      }),
+      PAIRED_PROMPT_TIMEOUT_MS,
+      "claude-codex paired prompt",
+    );
+
+    const turnEvents = buffer.slice(promptMark);
+    const completes = turnEvents.filter(
+      (event) =>
+        event.method === "provider://prompt-complete" &&
+        event.params?.sessionId === session.id,
+    );
+    assert(
+      completes.length === 1,
+      `paired turn must emit exactly one prompt-complete, got ${completes.length}`,
+    );
+
+    const handoffs = turnEvents.filter(
+      (event) =>
+        event.method === "provider://paired-event" &&
+        event.params?.sessionId === session.id &&
+        event.params?.kind === "handoff",
+    );
+    assert(handoffs.length === 2, `paired turn must emit two handoffs, got ${handoffs.length}`);
+    assert(
+      handoffs[0].params?.from === "Claude" && handoffs[0].params?.to === "Codex",
+      "first paired handoff must be Claude → Codex",
+    );
+    assert(
+      handoffs[1].params?.from === "Codex" && handoffs[1].params?.to === "Claude",
+      "second paired handoff must be Codex → Claude",
+    );
+
+    // Every status frame emitted while a phase is active must carry
+    // "prompting"; a mid-turn "ready" re-enables Send and collides the next
+    // submit with this turn (#2372). The trailing idle frame is "ready".
+    const phaseFrames = turnEvents.filter(
+      (event) =>
+        event.method === "provider://session-status" &&
+        event.params?.sessionId === session.id &&
+        ["planning", "executing", "reviewing"].includes(
+          event.params?.paired?.state,
+        ),
+    );
+    assert(
+      phaseFrames.length > 0,
+      "paired turn emitted no active-phase status frames",
+    );
+    assert(
+      phaseFrames.every((event) => event.params?.status === "prompting"),
+      `paired turn must hold status "prompting" across phases (#2372); saw ${phaseFrames
+        .map((event) => `${event.params?.paired?.state}:${event.params?.status}`)
+        .join(",")}`,
+    );
+
+    console.log(
+      `[windows-e2e] ${PAIRED_AGENT_TYPE} paired pipeline verified: declaration + 2 handoffs + single prompt-complete, prompting held across phases`,
+    );
+  } catch (error) {
+    throw classifyJourneyError(PAIRED_AGENT_TYPE, error, buffer, marker, [
+      localSessionId,
+      session?.id,
+    ]);
+  } finally {
+    if (session?.id) {
+      await rpc(ws, "provider_terminate", { sessionId: session.id }).catch(() => {});
+    }
+  }
+}
+
+async function exerciseAgentRuntime(page) {
+  const config = await tauriInvoke(page, "provider_runtime_get_config");
+  assert(config?.apiBaseUrl && config?.wsBaseUrl && config?.token, "provider runtime config missing fields");
+  const ws = await connectProviderRuntime(config);
+  const buffer = createRuntimeBuffer(ws);
+  try {
+    for (const journey of AGENT_JOURNEYS) {
+      if (journey === PAIRED_AGENT_TYPE) {
+        await runPairedJourney(ws, buffer);
+      } else {
+        await runSingleAgentJourney(ws, buffer, journey);
+      }
+    }
+    console.log(`[windows-e2e] all agent journeys verified: ${AGENT_JOURNEYS.join(", ")}`);
+  } finally {
     ws.close();
   }
 }
