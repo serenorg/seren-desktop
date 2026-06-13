@@ -304,13 +304,20 @@ pub async fn complete_oneshot(
         )
         .await?;
 
+        // Gemini's model is fixed by the `--model` flag at spawn time; the
+        // runtime's set_session_model is a no-op against the running process,
+        // so the Gemini one-shot intentionally runs on the agent's default
+        // model. For Claude/Codex, setting the model is best-effort: Codex
+        // rejects an unknown model id with a hard error, but a toolless
+        // summarization does not need an exact model — log and proceed on the
+        // agent default rather than failing the whole completion. #2398.
         if agent_type != "gemini" {
             if let Some(model) = request
                 .model
                 .as_deref()
                 .filter(|model| !model.trim().is_empty())
             {
-                provider_request(
+                if let Err(err) = provider_request(
                     &mut socket,
                     SET_MODEL_ONESHOT_REQUEST_ID,
                     "provider_set_session_model",
@@ -319,7 +326,12 @@ pub async fn complete_oneshot(
                         "modelId": model,
                     }),
                 )
-                .await?;
+                .await
+                {
+                    log::warn!(
+                        "[provider-one-shot] set_session_model({model}) failed; continuing on agent default model: {err}"
+                    );
+                }
             }
         }
 
@@ -486,38 +498,61 @@ async fn collect_provider_prompt(
             continue;
         }
 
-        match method {
-            "provider://message-chunk" => {
-                if params
-                    .get("isThought")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
-                if let Some(text) = params.get("text").and_then(Value::as_str) {
-                    content.push_str(text);
-                }
-            }
-            "provider://prompt-complete" => {}
-            "provider://tool-call" => {
-                return Err(
-                    "provider one-shot attempted a tool call; toolless completion aborted"
-                        .to_string(),
-                );
-            }
-            "provider://error" => {
-                return Err(params
-                    .get("error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Local provider runtime error.")
-                    .to_string());
-            }
-            _ => {}
+        match classify_oneshot_provider_event(method, &params) {
+            Ok(Some(text)) => content.push_str(&text),
+            Ok(None) => {}
+            Err(message) => return Err(message),
         }
     }
 
     Err("Provider runtime socket closed before prompt completed.".to_string())
+}
+
+/// Decide how a `provider://` event affects a toolless one-shot completion.
+/// `Ok(Some(text))` appends assistant text, `Ok(None)` is ignored, and `Err`
+/// fails the completion.
+///
+/// Tool calls AND permission requests both fail closed. The three agents
+/// diverge here: Claude `plan` mode auto-denies a tool attempt and continues,
+/// but Codex `ask` mode and Gemini `plan` mode instead emit
+/// `provider://permission-request` and block on a `respondToPermission` RPC
+/// that the headless one-shot never sends — without this the Codex/Gemini
+/// one-shot hangs until the socket/spawn timeout. Failing closed on the
+/// permission request (then terminating the ephemeral session) makes all three
+/// agents behave identically: no tool execution, no approval UI. #2398.
+fn classify_oneshot_provider_event(
+    method: &str,
+    params: &Value,
+) -> Result<Option<String>, String> {
+    match method {
+        "provider://message-chunk" => {
+            if params
+                .get("isThought")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                return Ok(None);
+            }
+            Ok(params
+                .get("text")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string))
+        }
+        "provider://prompt-complete" => Ok(None),
+        "provider://tool-call" => {
+            Err("provider one-shot attempted a tool call; toolless completion aborted".to_string())
+        }
+        "provider://permission-request" => Err(
+            "provider one-shot requested tool approval; toolless completion aborted".to_string(),
+        ),
+        "provider://error" => Err(params
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("Local provider runtime error.")
+            .to_string()),
+        _ => Ok(None),
+    }
 }
 
 fn build_provider_prompt(system: Option<&str>, prompt: &str) -> String {
@@ -648,5 +683,99 @@ fn map_provider_event(method: &str, payload: &Value) -> Option<WorkerEvent> {
             rlm_steps: None,
         }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oneshot_appends_assistant_text_and_ignores_thoughts() {
+        assert_eq!(
+            classify_oneshot_provider_event(
+                "provider://message-chunk",
+                &json!({ "sessionId": "oneshot-x", "text": "hello" }),
+            ),
+            Ok(Some("hello".to_string()))
+        );
+        // Thinking chunks and empty text never contribute to the completion.
+        assert_eq!(
+            classify_oneshot_provider_event(
+                "provider://message-chunk",
+                &json!({ "text": "scratch", "isThought": true }),
+            ),
+            Ok(None)
+        );
+        assert_eq!(
+            classify_oneshot_provider_event("provider://message-chunk", &json!({ "text": "" })),
+            Ok(None)
+        );
+        assert_eq!(
+            classify_oneshot_provider_event("provider://prompt-complete", &json!({})),
+            Ok(None)
+        );
+        assert_eq!(
+            classify_oneshot_provider_event("provider://session-status", &json!({})),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn oneshot_fails_closed_on_tool_call_and_permission_request() {
+        // Both the Claude tool-call path and the Codex(ask)/Gemini(plan)
+        // permission-request path must fail closed instead of hanging on an
+        // approval the headless one-shot can never answer. #2398.
+        let tool = classify_oneshot_provider_event(
+            "provider://tool-call",
+            &json!({ "toolCallId": "t1", "title": "Run command" }),
+        )
+        .expect_err("tool-call must fail closed");
+        assert!(tool.contains("toolless completion aborted"), "{tool}");
+
+        let permission = classify_oneshot_provider_event(
+            "provider://permission-request",
+            &json!({ "requestId": "r1", "options": [] }),
+        )
+        .expect_err("permission-request must fail closed");
+        assert!(
+            permission.contains("toolless completion aborted"),
+            "{permission}"
+        );
+    }
+
+    #[test]
+    fn oneshot_surfaces_provider_error_string_for_classification() {
+        // The raw error string must pass through so audio::llm can classify
+        // capacity vs auth vs safety for fallback. #2397/#2398.
+        assert_eq!(
+            classify_oneshot_provider_event(
+                "provider://error",
+                &json!({ "sessionId": "oneshot-x", "error": "Rate limit exceeded" }),
+            ),
+            Err("Rate limit exceeded".to_string())
+        );
+        assert_eq!(
+            classify_oneshot_provider_event("provider://error", &json!({})),
+            Err("Local provider runtime error.".to_string())
+        );
+    }
+
+    #[test]
+    fn oneshot_permission_mode_is_plan_or_ask_per_agent() {
+        // Claude plan auto-denies tools; Gemini plan and Codex ask emit a
+        // permission-request that the collector fails closed on. No agent
+        // gets an auto-approving mode in a one-shot.
+        assert_eq!(provider_oneshot_permission_mode("claude-code"), "plan");
+        assert_eq!(provider_oneshot_permission_mode("gemini"), "plan");
+        assert_eq!(provider_oneshot_permission_mode("codex"), "ask");
+        assert_eq!(provider_oneshot_permission_mode("unknown"), "ask");
+    }
+
+    #[test]
+    fn build_provider_prompt_prepends_system_when_present() {
+        assert_eq!(build_provider_prompt(Some("SYS"), "BODY"), "SYS\n\nBODY");
+        assert_eq!(build_provider_prompt(Some("  "), "BODY"), "BODY");
+        assert_eq!(build_provider_prompt(None, "BODY"), "BODY");
     }
 }
