@@ -71,6 +71,9 @@ describe("Windows production e2e release gate", () => {
     expect(runner).toContain("Unblock-File");
     expect(runner).toContain("InstallerTimeoutSeconds");
     expect(runner).toContain("ProbeTimeoutSeconds");
+    expect(runner).toContain("Get-DefaultInstallDir");
+    expect(runner).toContain("systemprofile");
+    expect(runner).toContain("SerenDesktopE2E");
     expect(runner).toContain("WaitForExit");
     expect(runner).toContain("Write-Stage");
     expect(runner).toContain("Windows app e2e probe");
@@ -95,6 +98,8 @@ describe("Windows production e2e release gate", () => {
     expect(releaseGate).toContain("[windows-e2e:ssm] Installing npm dependencies");
     expect(releaseGate).toContain("[windows-e2e:ssm] Running Windows app harness");
     expect(releaseGate).toContain("-ProbeTimeoutSeconds 1800");
+    expect(releaseGate).toContain("$LASTEXITCODE");
+    expect(releaseGate).toContain("Windows app harness failed with exit code");
     expect(releaseGate).not.toContain("-AllowUnsignedPrArtifact");
     expect(releaseGate).not.toContain("SEREN_E2E_UNSIGNED_PR_RUN");
   });

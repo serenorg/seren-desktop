@@ -6,7 +6,7 @@ param(
 
   [int]$RemoteDebugPort = 9222,
 
-  [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "SerenDesktopE2E"),
+  [string]$InstallDir = "",
 
   [int]$StartupTimeoutSeconds = 120,
 
@@ -26,6 +26,15 @@ function Fail([string]$Message) {
 function Write-Stage([string]$Message) {
   $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
   Write-Host "[windows-e2e] $timestamp $Message"
+}
+
+function Get-DefaultInstallDir() {
+  $localAppData = [Environment]::GetEnvironmentVariable("LOCALAPPDATA")
+  $systemDrive = if ([string]::IsNullOrWhiteSpace($env:SystemDrive)) { "C:" } else { $env:SystemDrive }
+  if ([string]::IsNullOrWhiteSpace($localAppData) -or $localAppData -like "*\Windows\system32\config\systemprofile\AppData\Local") {
+    return (Join-Path $systemDrive "SerenDesktopE2E")
+  }
+  return (Join-Path $localAppData "SerenDesktopE2E")
 }
 
 function Require-Env([string[]]$Names) {
@@ -173,6 +182,11 @@ if (-not [string]::IsNullOrWhiteSpace($env:SEREN_E2E_API_BASE) -and $env:SEREN_E
 }
 $env:SEREN_E2E_API_BASE = "https://api.serendb.com"
 $env:SEREN_E2E_CDP_ENDPOINT = "http://127.0.0.1:$RemoteDebugPort"
+
+if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+  $InstallDir = Get-DefaultInstallDir
+}
+Write-Stage "Using Windows e2e install directory $InstallDir"
 
 Write-Stage "Preparing installer artifact"
 $resolvedInstaller = (Resolve-Path -LiteralPath $InstallerPath).Path
