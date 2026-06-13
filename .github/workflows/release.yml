@@ -1110,19 +1110,34 @@ jobs:
             scripts/windows-e2e-app.ps1 \
             scripts/windows-e2e-app.mjs
           prefix="release-windows-e2e/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
-          aws s3 cp "$installer" "s3://${WINDOWS_E2E_S3_BUCKET}/${prefix}/SerenDesktop-setup.exe"
-          aws s3 cp "$payload" "s3://${WINDOWS_E2E_S3_BUCKET}/${prefix}/windows-e2e-payload.zip"
+          installer_s3="s3://${WINDOWS_E2E_S3_BUCKET}/${prefix}/SerenDesktop-setup.exe"
+          payload_s3="s3://${WINDOWS_E2E_S3_BUCKET}/${prefix}/windows-e2e-payload.zip"
+          aws s3 cp "$installer" "$installer_s3"
+          aws s3 cp "$payload" "$payload_s3"
+          installer_url="$(aws s3 presign "$installer_s3" --expires-in 7200)"
+          payload_url="$(aws s3 presign "$payload_s3" --expires-in 7200)"
           echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          {
+            echo "installer_url<<EOF"
+            echo "$installer_url"
+            echo "EOF"
+            echo "payload_url<<EOF"
+            echo "$payload_url"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Run full Windows app e2e on AWS host
         id: ssm
         shell: bash
         env:
           S3_PREFIX: ${{ steps.stage.outputs.prefix }}
+          INSTALLER_URL: ${{ steps.stage.outputs.installer_url }}
+          PAYLOAD_URL: ${{ steps.stage.outputs.payload_url }}
         run: |
           set -euo pipefail
           node <<'NODE' > "$RUNNER_TEMP/windows-e2e-commands.json"
           const env = process.env;
+          const psString = (value) => `'${String(value).replaceAll("'", "''")}'`;
           const secretNames = [
             "SEREN_E2E_EMAIL",
             "SEREN_E2E_PASSWORD",
@@ -1136,17 +1151,18 @@ jobs:
             "SEREN_E2E_AGENT_TYPE",
             "SEREN_E2E_AGENT_CWD",
           ];
+          if (!env.INSTALLER_URL || !env.PAYLOAD_URL) {
+            throw new Error("Missing presigned Windows e2e payload URL(s)");
+          }
           const workName = `seren-release-windows-e2e-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`;
-          const installerS3 = `s3://${env.WINDOWS_E2E_S3_BUCKET}/${env.S3_PREFIX}/SerenDesktop-setup.exe`;
-          const payloadS3 = `s3://${env.WINDOWS_E2E_S3_BUCKET}/${env.S3_PREFIX}/windows-e2e-payload.zip`;
           const commands = [
             "$ErrorActionPreference = 'Stop'",
             "$ProgressPreference = 'SilentlyContinue'",
             `$work = Join-Path $env:TEMP '${workName}'`,
             "if (Test-Path $work) { Remove-Item -LiteralPath $work -Recurse -Force }",
             "New-Item -ItemType Directory -Force -Path $work | Out-Null",
-            `aws s3 cp '${installerS3}' (Join-Path $work 'SerenDesktop-setup.exe')`,
-            `aws s3 cp '${payloadS3}' (Join-Path $work 'windows-e2e-payload.zip')`,
+            `Invoke-WebRequest -Uri ${psString(env.INSTALLER_URL)} -OutFile (Join-Path $work 'SerenDesktop-setup.exe')`,
+            `Invoke-WebRequest -Uri ${psString(env.PAYLOAD_URL)} -OutFile (Join-Path $work 'windows-e2e-payload.zip')`,
             "Expand-Archive -LiteralPath (Join-Path $work 'windows-e2e-payload.zip') -DestinationPath $work -Force",
             `$secretNames = @(${secretNames.map((name) => `'${name}'`).join(",")})`,
             // The aws call runs under Windows PowerShell 5.1, where native
@@ -1157,6 +1173,7 @@ jobs:
             // skip they were designed for.
             `foreach ($name in $secretNames) { $parameterName = '${env.WINDOWS_E2E_SECRET_PARAMETER_PREFIX}/' + $name; $value = & { $ErrorActionPreference = 'Continue'; aws ssm get-parameter --with-decryption --name $parameterName --query 'Parameter.Value' --output text 2>$null }; if ($LASTEXITCODE -eq 0 -and $value -and $value -ne 'None') { [Environment]::SetEnvironmentVariable($name, $value, 'Process') } }`,
             "[Environment]::SetEnvironmentVariable('SEREN_E2E_API_BASE', 'https://api.serendb.com', 'Process')",
+            "[Environment]::SetEnvironmentVariable('SEREN_E2E_RELEASE_RUN', '1', 'Process')",
             "Set-Location $work",
             "corepack enable",
             "corepack prepare pnpm@9 --activate",
