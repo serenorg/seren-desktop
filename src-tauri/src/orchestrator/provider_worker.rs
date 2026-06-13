@@ -240,6 +240,36 @@ pub async fn list_provider_agents(app: &AppHandle) -> Result<Vec<ProviderAgentSt
     serde_json::from_value(result).map_err(|err| format!("Invalid provider agent list: {err}"))
 }
 
+/// Prefix that marks an ephemeral, one-shot-owned provider session. A one-shot
+/// only ever spawns and terminates a session carrying this prefix; it never
+/// borrows or releases a serving/standby chat session. #2399.
+const ONESHOT_LOCAL_SESSION_PREFIX: &str = "oneshot-";
+
+/// True when `session_id` names an ephemeral session created by a one-shot.
+/// The terminate in [`complete_oneshot`] is gated on this so a one-shot can
+/// never cancel a serving/standby chat session.
+fn is_ephemeral_oneshot_session(session_id: &str) -> bool {
+    session_id.starts_with(ONESHOT_LOCAL_SESSION_PREFIX)
+}
+
+/// Run one toolless prompt on a fresh, ephemeral provider session and return
+/// the assistant text.
+///
+/// Ownership states for a provider session touched by a one-shot:
+/// - **Ephemeral** — spawned and owned by this call (`oneshot-<uuid>`); the
+///   only state reachable today. Safe to prompt and to terminate.
+/// - **Borrowed standby** — a warm session lent to a one-shot. No reuse path
+///   exists yet; when added it must serialize prompts and never share context
+///   with the live chat session.
+/// - **Serving chat** — an interactive chat session. A one-shot must NEVER
+///   prompt, cancel, or terminate it.
+/// - **Released/terminated** — torn down. Release is idempotent/best-effort.
+///
+/// Every one-shot currently spawns and tears down its own Ephemeral session and
+/// never borrows. The terminate below enforces the invariant for any future
+/// reuse: it fires only for the Ephemeral session this call created, so a
+/// one-shot can never cancel a Serving/Borrowed chat session. Streamed events
+/// are already isolated by `sessionId` in [`collect_provider_prompt`]. #2399.
 pub async fn complete_oneshot(
     app: &AppHandle,
     request: ProviderOneShotRequest,
@@ -254,7 +284,7 @@ pub async fn complete_oneshot(
     let agent_type = request.agent_type.clone();
     let state: tauri::State<'_, crate::provider_runtime::ProviderRuntimeState> = app.state();
     let mut socket = connect_authenticated_provider_socket(app, &state).await?;
-    let local_session_id = format!("oneshot-{}", uuid::Uuid::new_v4());
+    let local_session_id = format!("{ONESHOT_LOCAL_SESSION_PREFIX}{}", uuid::Uuid::new_v4());
     let cwd = provider_oneshot_cwd(app)?;
 
     let mut spawn_params = json!({
@@ -291,6 +321,12 @@ pub async fn complete_oneshot(
         .filter(|id| !id.trim().is_empty())
         .ok_or_else(|| "provider one-shot spawn returned no session id".to_string())?
         .to_string();
+
+    // We own — and may terminate — this session only if spawn echoed back the
+    // ephemeral id we asked it to create. If a future reuse path ever returns a
+    // borrowed/serving session id instead, we must not terminate it.
+    let owns_ephemeral_session =
+        session_id == local_session_id && is_ephemeral_oneshot_session(&session_id);
 
     let completion_result = async {
         provider_request(
@@ -344,15 +380,27 @@ pub async fn complete_oneshot(
     }
     .await;
 
-    if let Err(err) = provider_request(
-        &mut socket,
-        TERMINATE_ONESHOT_REQUEST_ID,
-        "provider_terminate",
-        json!({ "sessionId": session_id }),
-    )
-    .await
-    {
-        log::warn!("[provider-one-shot] failed to terminate ephemeral session: {err}");
+    // Release: terminate ONLY the ephemeral session this call created. A
+    // one-shot must never cancel a serving/standby chat session, so if spawn
+    // ever returned a non-ephemeral id we leave it alone. Terminate is
+    // best-effort (warn-on-error) so a double-release or runtime restart can't
+    // surface as a hard failure. #2399.
+    if owns_ephemeral_session {
+        if let Err(err) = provider_request(
+            &mut socket,
+            TERMINATE_ONESHOT_REQUEST_ID,
+            "provider_terminate",
+            json!({ "sessionId": session_id }),
+        )
+        .await
+        {
+            log::warn!("[provider-one-shot] failed to terminate ephemeral session: {err}");
+        }
+    } else {
+        log::warn!(
+            "[provider-one-shot] spawn returned non-ephemeral session id {session_id:?}; \
+             not terminating (one-shots never cancel serving/standby chat sessions)"
+        );
     }
 
     let content = completion_result?;
@@ -777,5 +825,30 @@ mod tests {
         assert_eq!(build_provider_prompt(Some("SYS"), "BODY"), "SYS\n\nBODY");
         assert_eq!(build_provider_prompt(Some("  "), "BODY"), "BODY");
         assert_eq!(build_provider_prompt(None, "BODY"), "BODY");
+    }
+
+    #[test]
+    fn only_ephemeral_oneshot_sessions_are_terminable() {
+        // The terminate guard fires only for the ephemeral id a one-shot
+        // created. Serving/standby chat session ids (raw uuids, codex thread
+        // ids, chat-* ids) must be rejected so a one-shot can never cancel a
+        // live chat session. #2399.
+        assert!(is_ephemeral_oneshot_session(
+            "oneshot-7b1f3c2a-0000-4a1b-9c2d-1234567890ab"
+        ));
+        assert!(is_ephemeral_oneshot_session(&format!(
+            "{ONESHOT_LOCAL_SESSION_PREFIX}abc"
+        )));
+        for serving in [
+            "7b1f3c2a-0000-4a1b-9c2d-1234567890ab",
+            "chat-12345",
+            "thread_abc123",
+            "",
+        ] {
+            assert!(
+                !is_ephemeral_oneshot_session(serving),
+                "serving/standby id must not be terminable: {serving:?}"
+            );
+        }
     }
 }
