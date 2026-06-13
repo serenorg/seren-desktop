@@ -68,12 +68,29 @@ describe("Windows production e2e release gate", () => {
   it("installs and probes the signed Windows app instead of running a browser mock", () => {
     expect(runner).toContain("Get-AuthenticodeSignature");
     expect(runner).toContain("/S");
+    expect(runner).toContain("Unblock-File");
+    expect(runner).toContain("InstallerTimeoutSeconds");
+    expect(runner).toContain("WaitForExit");
     expect(runner).toContain("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
     expect(runner).toContain("node.exe");
     expect(runner).toContain("npm.cmd");
     expect(runner).toContain("windows-e2e-app.mjs");
     expect(probe).toContain("connectOverCDP");
     expect(probe).toContain("__TAURI_INTERNALS__");
+  });
+
+  it("keeps unsigned PR artifact mode explicit and forbidden for release runs", () => {
+    expect(runner).toContain("[switch]$AllowUnsignedPrArtifact");
+    expect(runner).toContain("SEREN_E2E_UNSIGNED_PR_RUN");
+    expect(runner).toContain("SEREN_E2E_RELEASE_RUN");
+    expect(runner).toContain("is forbidden for release Windows e2e runs");
+
+    const releaseGate = workflowJob("windows-app-e2e");
+    expect(releaseGate).toContain("aws s3 presign");
+    expect(releaseGate).toContain("Invoke-WebRequest -Uri");
+    expect(releaseGate).toContain("SEREN_E2E_RELEASE_RUN");
+    expect(releaseGate).not.toContain("-AllowUnsignedPrArtifact");
+    expect(releaseGate).not.toContain("SEREN_E2E_UNSIGNED_PR_RUN");
   });
 
   it("covers the required production journeys", () => {
