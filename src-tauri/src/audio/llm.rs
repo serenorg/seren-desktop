@@ -12,7 +12,7 @@ use crate::orchestrator::provider_worker::{
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 const PUBLISHER_SLUG: &str = "seren-models";
 const AUTO_MODEL_ID: &str = "auto";
-const DEFAULT_SEREN_MODELS_MODEL: &str = "anthropic/claude-sonnet-4";
+const SEREN_MODELS_SUMMARIZATION_MODEL: &str = "anthropic/claude-haiku-4.5";
 
 /// A single chat-completion request routed through the user's selected model.
 pub struct CompletionRequest {
@@ -240,16 +240,8 @@ fn agent_model_for_request(agent_type: &str, requested_model: &str) -> Option<St
 }
 
 fn seren_models_fallback_model(requested_model: &str) -> String {
-    let trimmed = requested_model.trim();
-    if is_seren_models_catalog_id(trimmed) {
-        trimmed.to_string()
-    } else {
-        DEFAULT_SEREN_MODELS_MODEL.to_string()
-    }
-}
-
-fn is_seren_models_catalog_id(model: &str) -> bool {
-    !model.is_empty() && !model.eq_ignore_ascii_case(AUTO_MODEL_ID) && model.contains('/')
+    let _ = requested_model;
+    SEREN_MODELS_SUMMARIZATION_MODEL.to_string()
 }
 
 #[cfg(test)]
@@ -277,29 +269,39 @@ mod tests {
     }
 
     #[test]
-    fn route_falls_back_to_catalog_model_for_auto_and_cli_ids_without_auth() {
+    fn route_uses_summarization_model_for_auto_and_cli_ids_without_auth() {
         assert_eq!(
             resolve_completion_route_from_agents(&[], AUTO_MODEL_ID),
             CompletionRoute::SerenModels {
-                model: DEFAULT_SEREN_MODELS_MODEL.to_string(),
+                model: SEREN_MODELS_SUMMARIZATION_MODEL.to_string(),
             }
         );
         assert_eq!(
             resolve_completion_route_from_agents(&[], "claude-opus-4-8"),
             CompletionRoute::SerenModels {
-                model: DEFAULT_SEREN_MODELS_MODEL.to_string(),
+                model: SEREN_MODELS_SUMMARIZATION_MODEL.to_string(),
             }
         );
     }
 
     #[test]
-    fn route_preserves_catalog_ids_only_on_gateway_fallback() {
+    fn route_uses_summarization_model_for_catalog_ids_on_gateway_fallback() {
         assert_eq!(
             resolve_completion_route_from_agents(&[], "openai/gpt-5"),
             CompletionRoute::SerenModels {
-                model: "openai/gpt-5".to_string(),
+                model: SEREN_MODELS_SUMMARIZATION_MODEL.to_string(),
             }
         );
+        assert_eq!(
+            resolve_completion_route_from_agents(&[], "anthropic/claude-opus-4.6"),
+            CompletionRoute::SerenModels {
+                model: SEREN_MODELS_SUMMARIZATION_MODEL.to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn route_does_not_send_catalog_ids_to_local_agents() {
         let agents = vec![agent("codex", true)];
         assert_eq!(
             resolve_completion_route_from_agents(&agents, "openai/gpt-5"),
