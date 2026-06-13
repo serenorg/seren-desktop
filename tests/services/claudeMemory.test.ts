@@ -58,6 +58,7 @@ import {
   ensureClaudeMemoryProvisioned,
   getClaudeMemoryStatus,
   migrateExistingClaudeMemory,
+  renderClaudeMemoryMd,
   startClaudeMemoryInterceptor,
   stopClaudeMemoryInterceptor,
   waitForDatabaseReady,
@@ -426,11 +427,41 @@ describe("startClaudeMemoryInterceptor wiring", () => {
     settingsState.claudeMemoryProjectId = "p";
     settingsState.claudeMemoryBranchId = "b";
     settingsState.claudeMemoryDatabaseName = "d";
-    invokeMock.mockResolvedValue({ persisted: 7, failures: 2 });
+    invokeMock.mockResolvedValue({
+      persisted: 7,
+      failures: 2,
+      rendered: 3,
+      render_failures: 1,
+    });
 
     const report = await migrateExistingClaudeMemory();
-    expect(report).toEqual({ persisted: 7, failures: 2 });
+    expect(report).toEqual({
+      persisted: 7,
+      failures: 2,
+      rendered: 3,
+      render_failures: 1,
+    });
     expect(invokeMock).toHaveBeenCalledWith("claude_memory_migrate_existing", {
+      projectId: "p",
+      branchId: "b",
+      databaseName: "d",
+    });
+  });
+
+  it("render provisions then forwards the project cwd to the Tauri render command", async () => {
+    settingsState.claudeMemoryProjectId = "p";
+    settingsState.claudeMemoryBranchId = "b";
+    settingsState.claudeMemoryDatabaseName = "d";
+    invokeMock.mockResolvedValue(
+      "/home/a/.claude/projects/-home-a-proj/memory/MEMORY.md",
+    );
+
+    const path = await renderClaudeMemoryMd("/home/a/proj");
+    expect(path).toBe(
+      "/home/a/.claude/projects/-home-a-proj/memory/MEMORY.md",
+    );
+    expect(invokeMock).toHaveBeenCalledWith("claude_memory_render_memory_md", {
+      projectCwd: "/home/a/proj",
       projectId: "p",
       branchId: "b",
       databaseName: "d",
@@ -444,7 +475,12 @@ describe("startClaudeMemoryInterceptor wiring", () => {
     const migrated = await migrateExistingClaudeMemory();
     expect(started).toEqual({ running: false, watching_root: null });
     expect(status).toEqual({ running: false, watching_root: null });
-    expect(migrated).toEqual({ persisted: 0, failures: 0 });
+    expect(migrated).toEqual({
+      persisted: 0,
+      failures: 0,
+      rendered: 0,
+      render_failures: 0,
+    });
     expect(invokeMock).not.toHaveBeenCalled();
     expect(databasesMock.listProjects).not.toHaveBeenCalled();
   });

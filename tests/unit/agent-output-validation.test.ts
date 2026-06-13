@@ -211,6 +211,37 @@ describe("#1987 Verified Agent Output", () => {
     });
   });
 
+  it("credits Claude auto-memory intercepts as out-of-band database write evidence", () => {
+    const report = validateFinalOutput({
+      finalText: "I saved the memory record to the database.",
+      evidence: {
+        diffs: [],
+        tools: [
+          {
+            id: "claude-memory-1",
+            name: "claude_memory_interceptor",
+            title: "Claude Memory Interceptor",
+            kind: "database",
+            status: "completed",
+            result:
+              "Persisted Claude memory to claude_agent_preferences; memory_md=/Users/a/.claude/projects/-Users-a-proj/memory/MEMORY.md",
+            isError: false,
+          },
+        ],
+      },
+    });
+
+    expect(report.safeDisplayText).toBe(
+      "I saved the memory record to the database.",
+    );
+    expect(report.canStoreMemory).toBe(true);
+    expect(report.claims[0]).toMatchObject({
+      kind: "db_persisted",
+      status: "verified",
+      evidenceToolCallIds: ["claude-memory-1"],
+    });
+  });
+
   it("validates browser claims against browser-tool evidence", () => {
     const successReport = validateFinalOutput({
       finalText: "I took a screenshot of the website.",

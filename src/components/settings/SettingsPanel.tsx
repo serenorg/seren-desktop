@@ -145,16 +145,16 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     setClaudeMemoryMessage(null);
     try {
       const report = await migrateExistingClaudeMemory();
-      const { persisted, failures } = report;
-      if (persisted === 0 && failures === 0) {
+      const { persisted, failures, rendered, render_failures } = report;
+      if (persisted === 0 && failures === 0 && render_failures === 0) {
         setClaudeMemoryMessage("No plaintext memory files found.");
-      } else if (failures === 0) {
+      } else if (failures === 0 && render_failures === 0) {
         setClaudeMemoryMessage(
-          `Pushed ${persisted} file${persisted === 1 ? "" : "s"} to SerenDB.`,
+          `Pushed ${persisted} file${persisted === 1 ? "" : "s"} to SerenDB and refreshed ${rendered} MEMORY.md index${rendered === 1 ? "" : "es"}.`,
         );
       } else {
         setClaudeMemoryMessage(
-          `Pushed ${persisted}, left ${failures} on disk (cloud write failed — will retry).`,
+          `Pushed ${persisted}, left ${failures} on disk, and hit ${render_failures} MEMORY.md refresh failure${render_failures === 1 ? "" : "s"}.`,
         );
       }
     } catch (err) {

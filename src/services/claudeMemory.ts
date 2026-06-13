@@ -197,6 +197,8 @@ export interface ClaudeMemoryStatus {
 export interface ClaudeMemoryMigrationReport {
   persisted: number;
   failures: number;
+  rendered: number;
+  render_failures: number;
 }
 
 export interface ClaudeMemoryProjectIdentity {
@@ -214,6 +216,8 @@ export interface InterceptSuccessEvent {
   path: string;
   name: string | null;
   memory_type: string;
+  rendered_memory_md: string | null;
+  render_error: string | null;
 }
 
 export interface InterceptFailureEvent {
@@ -369,14 +373,15 @@ export async function getClaudeMemoryStatus(): Promise<ClaudeMemoryStatus> {
 
 /**
  * Walk every existing Claude memory directory and push any pre-existing `.md`
- * files to SerenDB. Returns persisted + failures counts. Files whose cloud
- * write fails are left on disk so the live watcher can retry later.
+ * files to SerenDB. Returns persisted, cloud-write failures, refreshed
+ * MEMORY.md indexes, and refresh failures. Files whose cloud write fails are
+ * left on disk so the live watcher can retry later.
  *
  * Provisions the SerenDB project/database/table first if needed.
  */
 export async function migrateExistingClaudeMemory(): Promise<ClaudeMemoryMigrationReport> {
   if (!isTauriRuntime()) {
-    return { persisted: 0, failures: 0 };
+    return { persisted: 0, failures: 0, rendered: 0, render_failures: 0 };
   }
   const provisioning = await ensureClaudeMemoryProvisioned();
   return invoke<ClaudeMemoryMigrationReport>("claude_memory_migrate_existing", {
@@ -422,7 +427,7 @@ export async function claudeSessionExists(
 }
 
 /**
- * Render `~/.claude/projects/<encoded(projectCwd)>/MEMORY.md` from the
+ * Render `~/.claude/projects/<encoded(projectCwd)>/memory/MEMORY.md` from the
  * `claude_agent_preferences` SerenDB table, so Claude Code reads fresh
  * content at the start of its next session.
  */
