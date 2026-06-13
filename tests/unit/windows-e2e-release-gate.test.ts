@@ -70,7 +70,10 @@ describe("Windows production e2e release gate", () => {
     expect(runner).toContain("/S");
     expect(runner).toContain("Unblock-File");
     expect(runner).toContain("InstallerTimeoutSeconds");
+    expect(runner).toContain("ProbeTimeoutSeconds");
     expect(runner).toContain("WaitForExit");
+    expect(runner).toContain("Write-Stage");
+    expect(runner).toContain("Windows app e2e probe");
     expect(runner).toContain("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
     expect(runner).toContain("node.exe");
     expect(runner).toContain("npm.cmd");
@@ -89,6 +92,9 @@ describe("Windows production e2e release gate", () => {
     expect(releaseGate).toContain("aws s3 presign");
     expect(releaseGate).toContain("Invoke-WebRequest -Uri");
     expect(releaseGate).toContain("SEREN_E2E_RELEASE_RUN");
+    expect(releaseGate).toContain("[windows-e2e:ssm] Installing npm dependencies");
+    expect(releaseGate).toContain("[windows-e2e:ssm] Running Windows app harness");
+    expect(releaseGate).toContain("-ProbeTimeoutSeconds 1800");
     expect(releaseGate).not.toContain("-AllowUnsignedPrArtifact");
     expect(releaseGate).not.toContain("SEREN_E2E_UNSIGNED_PR_RUN");
   });
