@@ -208,6 +208,12 @@ YOU MUST ALWAYS find the root cause. NEVER fix symptoms or add workarounds.
 
 Complete this BEFORE writing any fix.
 
+## Verifying External Capabilities
+
+- NEVER assert what a third-party service, API, model host, or CLI can or cannot do from memory or training knowledge. Vendor catalogs and features change constantly (e.g. AWS Bedrock's model lineup, what a CLI accepts as a backend).
+- Before claiming something is impossible, unsupported, or "won't work", VERIFY against the live service, official docs, or a web search — and state what you checked.
+- "I guessed without checking" is a failure. When unsure, say so and verify first. A confidently wrong capability claim is worse than admitting you need to check.
+
 ---
 
 ## Common Commands
