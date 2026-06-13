@@ -73,8 +73,7 @@ pub async fn claude_memory_start(
 ) -> Result<ClaudeMemoryStatus, String> {
     let config = build_config(project_id, branch_id, database_name)?;
 
-    let join =
-        tokio::task::spawn_blocking(move || claude_memory::start_watcher(app, config));
+    let join = tokio::task::spawn_blocking(move || claude_memory::start_watcher(app, config));
     let root = match tokio::time::timeout(CLAUDE_MEMORY_START_TIMEOUT, join).await {
         Ok(Ok(Ok(path))) => path,
         Ok(Ok(Err(e))) => return Err(e),
@@ -160,10 +159,7 @@ pub async fn claude_memory_migrate_existing(
 /// <id>` and surfaces a "Claude Code request failed" error event before the
 /// recovery fallback kicks in (#1657).
 #[tauri::command]
-pub fn claude_session_exists(
-    project_cwd: String,
-    session_id: String,
-) -> Result<bool, String> {
+pub fn claude_session_exists(project_cwd: String, session_id: String) -> Result<bool, String> {
     let root = claude_memory::claude_projects_root()?;
     Ok(claude_memory::session_jsonl_path(&root, Path::new(&project_cwd), &session_id).is_file())
 }
@@ -185,7 +181,7 @@ pub fn claude_memory_get_project_identity(
     })
 }
 
-/// Render `~/.claude/projects/<encoded(project_cwd)>/MEMORY.md` from the
+/// Render `~/.claude/projects/<encoded(project_cwd)>/memory/MEMORY.md` from the
 /// `claude_agent_preferences` table in SerenDB. The frontend calls this when
 /// a project is opened so Claude Code reads fresh content next session.
 #[tauri::command]

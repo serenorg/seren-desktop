@@ -54,6 +54,25 @@ describe("#1625 — agent spawnSession bootstraps Seren memory context", () => {
     );
     expect(spawnWindow).toContain("memory bootstrap failed (non-fatal)");
   });
+
+  it("spawnSession refreshes Claude Code MEMORY.md before starting a Claude-backed session", () => {
+    expect(agentStoreSource).toContain("renderClaudeMemoryMd");
+    expect(agentStoreSource).toContain("refreshClaudeMemoryMdBeforeSpawn(");
+    const spawnSessionStart = agentStoreSource.indexOf("async spawnSession(");
+    const refreshCall = agentStoreSource.indexOf(
+      "await refreshClaudeMemoryMdBeforeSpawn(",
+      spawnSessionStart,
+    );
+    const providerSpawnCall = agentStoreSource.indexOf(
+      "const info = await providerService.spawnAgent(",
+      spawnSessionStart,
+    );
+    expect(refreshCall).toBeGreaterThan(spawnSessionStart);
+    expect(providerSpawnCall).toBeGreaterThan(refreshCall);
+    expect(agentStoreSource).toContain(
+      "CLAUDE_MEMORY_RENDER_BEFORE_SPAWN_TIMEOUT_MS",
+    );
+  });
 });
 
 describe("#1625 — finalizeStreamingContent extracts assistant turns to memory", () => {
@@ -80,6 +99,24 @@ describe("#1625 — finalizeStreamingContent extracts assistant turns to memory"
     expect(agentStoreSource).toContain(
       "this.finalizeStreamingContent(sessionId, { isReplay: isHistoryReplay })",
     );
+  });
+
+  it("final output validation includes scoped Claude auto-memory DB evidence", () => {
+    expect(agentStoreSource).toContain('listen<ClaudeMemoryInterceptSuccessEvent>(');
+    expect(agentStoreSource).toContain('"claude-memory-intercepted"');
+    expect(agentStoreSource).toContain("claudeMemoryWriteEvidence");
+    expect(agentStoreSource).toContain("buildAgentFinalizationEvidence(session)");
+    expect(agentStoreSource).toContain('name: "claude_memory_interceptor"');
+  });
+
+  it("Claude auto-memory event matching normalizes Windows paths", () => {
+    const helperStart = agentStoreSource.indexOf(
+      "function encodeClaudeProjectDirForPath(",
+    );
+    expect(helperStart).toBeGreaterThan(0);
+    const helperWindow = agentStoreSource.slice(helperStart, helperStart + 800);
+    expect(helperWindow).toContain('replace(/\\\\/g, "/")');
+    expect(helperWindow).toContain('replace(/:/g, "")');
   });
 });
 

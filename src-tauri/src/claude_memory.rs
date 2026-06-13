@@ -2,7 +2,7 @@
 // ABOUTME: Watches ~/.claude/projects/*/memory/ and INSERTs each file as a row in
 // ABOUTME: claude_agent_preferences. Storage is a separate SerenDB project from user memory.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -86,6 +86,8 @@ pub struct InterceptSuccessEvent {
     pub path: String,
     pub name: Option<String>,
     pub memory_type: String,
+    pub rendered_memory_md: Option<String>,
+    pub render_error: Option<String>,
 }
 
 /// Event emitted when the cloud write fails; the file is left on disk so the
@@ -156,7 +158,13 @@ pub fn encode_project_dir(cwd: &Path) -> String {
     let sanitized = resolved.trim_start_matches('/').replace(':', "");
     let normalized: String = sanitized
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     format!("-{normalized}")
 }
@@ -351,7 +359,11 @@ pub fn parse_memory_file(contents: &str) -> ParsedMemoryFile {
         }
         if let Some((key, value)) = line.split_once(':') {
             let key = key.trim().to_lowercase();
-            let value = value.trim().trim_matches('"').trim_matches('\'').to_string();
+            let value = value
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string();
             if !value.is_empty() {
                 map.insert(key, value);
             }
@@ -444,7 +456,7 @@ pub fn build_select_preferences_sql(project_path: &str) -> String {
 // MEMORY.md rendering
 // ---------------------------------------------------------------------------
 
-/// Atomically refresh `MEMORY.md` so its auto-index reflects the latest
+/// Atomically refresh `memory/MEMORY.md` so its auto-index reflects the latest
 /// SerenDB rows while preserving any hand-curated content the user wrote
 /// outside the marker block.
 ///
@@ -463,10 +475,11 @@ pub fn write_rendered_memory_md(
     claude_project_dir: &Path,
     auto_index_body: &str,
 ) -> Result<PathBuf, String> {
-    fs::create_dir_all(claude_project_dir)
-        .map_err(|e| format!("failed to create claude project dir: {e}"))?;
+    let memory_dir = claude_project_dir.join("memory");
+    fs::create_dir_all(&memory_dir)
+        .map_err(|e| format!("failed to create claude memory dir: {e}"))?;
 
-    let final_path = claude_project_dir.join(RENDERED_INDEX_FILENAME);
+    let final_path = memory_dir.join(RENDERED_INDEX_FILENAME);
     let block = format!(
         "{AUTO_INDEX_BEGIN}\n{}\n{AUTO_INDEX_END}",
         auto_index_body.trim_matches('\n')
@@ -477,11 +490,9 @@ pub fn write_rendered_memory_md(
         Err(_) => format!("# Claude Memory\n\n{block}\n"),
     };
 
-    let tmp_path = claude_project_dir.join(format!("{RENDERED_INDEX_FILENAME}.tmp"));
-    fs::write(&tmp_path, &merged)
-        .map_err(|e| format!("failed to write temp MEMORY.md: {e}"))?;
-    fs::rename(&tmp_path, &final_path)
-        .map_err(|e| format!("failed to finalize MEMORY.md: {e}"))?;
+    let tmp_path = memory_dir.join(format!("{RENDERED_INDEX_FILENAME}.tmp"));
+    fs::write(&tmp_path, &merged).map_err(|e| format!("failed to write temp MEMORY.md: {e}"))?;
+    fs::rename(&tmp_path, &final_path).map_err(|e| format!("failed to finalize MEMORY.md: {e}"))?;
     Ok(final_path)
 }
 
@@ -519,7 +530,10 @@ pub fn render_preferences_as_markdown(rows: &[Vec<serde_json::Value>]) -> String
     let mut sections: BTreeMap<String, Vec<(String, String, String)>> = BTreeMap::new();
     for row in rows {
         let pref_key = row.first().and_then(|v| v.as_str()).unwrap_or("");
-        let pref_type = row.get(1).and_then(|v| v.as_str()).unwrap_or("uncategorized");
+        let pref_type = row
+            .get(1)
+            .and_then(|v| v.as_str())
+            .unwrap_or("uncategorized");
         let description = row.get(2).and_then(|v| v.as_str()).unwrap_or("");
         let source_file = row
             .get(4)
@@ -527,10 +541,11 @@ pub fn render_preferences_as_markdown(rows: &[Vec<serde_json::Value>]) -> String
             .filter(|s| !s.is_empty())
             .map(String::from)
             .unwrap_or_else(|| format!("{pref_key}.md"));
-        sections
-            .entry(pref_type.to_string())
-            .or_default()
-            .push((pref_key.to_string(), source_file, description.to_string()));
+        sections.entry(pref_type.to_string()).or_default().push((
+            pref_key.to_string(),
+            source_file,
+            description.to_string(),
+        ));
     }
 
     let mut out = String::new();
@@ -545,7 +560,9 @@ pub fn render_preferences_as_markdown(rows: &[Vec<serde_json::Value>]) -> String
             if description.is_empty() {
                 out.push_str(&format!("- [{source_file}]({source_file})\n"));
             } else {
-                out.push_str(&format!("- [{source_file}]({source_file}) — {description}\n"));
+                out.push_str(&format!(
+                    "- [{source_file}]({source_file}) — {description}\n"
+                ));
             }
         }
     }
@@ -697,8 +714,8 @@ pub async fn process_memory_file(
         return Ok(ProcessOutcome::Skipped);
     }
 
-    let contents = fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let contents =
+        fs::read_to_string(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
     if contents.trim().is_empty() {
         return Ok(ProcessOutcome::Skipped);
     }
@@ -744,7 +761,7 @@ pub async fn process_memory_file(
     })
 }
 
-/// Render `MEMORY.md` for a given Claude project directory by SELECTing all
+/// Render `memory/MEMORY.md` for a given Claude project directory by SELECTing all
 /// preference rows from SerenDB and formatting them as Markdown.
 pub async fn render_memory_md_from_db(
     client: &SerenDbSqlClient,
@@ -947,25 +964,34 @@ async fn handle_event(app: &AppHandle, path: PathBuf, config: &SerenDbConfig) {
                 path.display()
             );
 
+            let mut rendered_memory_md = None;
+            let mut render_error = None;
+
             // Refresh MEMORY.md so the agent that wrote this file can see
             // its entry appear in the index — closing the feedback gap that
             // caused the "memory write vanished" loop. Failures here MUST
             // NOT mask the successful intercept (the row is already in
             // SerenDB); we only log them.
             if let Some(claude_project_dir) = claude_project_dir_for_memory_file(&path) {
-                if let Err(e) =
-                    render_memory_md_from_db(&client, config, &claude_project_dir).await
-                {
-                    log::warn!(
-                        "[ClaudeMemory] persisted {} but MEMORY.md refresh failed: {e}",
-                        path.display()
-                    );
+                match render_memory_md_from_db(&client, config, &claude_project_dir).await {
+                    Ok(rendered_path) => {
+                        rendered_memory_md = Some(rendered_path.to_string_lossy().to_string());
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "[ClaudeMemory] persisted {} but MEMORY.md refresh failed: {e}",
+                            path.display()
+                        );
+                        render_error = Some(e);
+                    }
                 }
             } else {
-                log::warn!(
+                let message = format!(
                     "[ClaudeMemory] persisted {} but could not derive claude project dir for MEMORY.md refresh",
                     path.display()
                 );
+                log::warn!("{message}");
+                render_error = Some(message);
             }
 
             let _ = app.emit(
@@ -974,6 +1000,8 @@ async fn handle_event(app: &AppHandle, path: PathBuf, config: &SerenDbConfig) {
                     path: path.to_string_lossy().to_string(),
                     name,
                     memory_type,
+                    rendered_memory_md,
+                    render_error,
                 },
             );
         }
@@ -1014,8 +1042,9 @@ pub async fn migrate_existing_files(
     }
 
     let mut report = MigrationReport::default();
-    let project_dirs = fs::read_dir(&root)
-        .map_err(|e| format!("failed to read claude projects root: {e}"))?;
+    let mut projects_to_render = BTreeSet::new();
+    let project_dirs =
+        fs::read_dir(&root).map_err(|e| format!("failed to read claude projects root: {e}"))?;
 
     for entry in project_dirs.flatten() {
         let memory_dir = entry.path().join("memory");
@@ -1032,7 +1061,18 @@ pub async fn migrate_existing_files(
                 continue;
             }
             match process_memory_file(&path, &client, config).await {
-                Ok(ProcessOutcome::Persisted { .. }) => report.persisted += 1,
+                Ok(ProcessOutcome::Persisted { .. }) => {
+                    report.persisted += 1;
+                    if let Some(claude_project_dir) = claude_project_dir_for_memory_file(&path) {
+                        projects_to_render.insert(claude_project_dir);
+                    } else {
+                        report.render_failures += 1;
+                        log::warn!(
+                            "[ClaudeMemory] migration persisted {} but could not derive claude project dir for MEMORY.md refresh",
+                            path.display()
+                        );
+                    }
+                }
                 Ok(ProcessOutcome::Skipped) => {}
                 Err(e) => {
                     log::warn!(
@@ -1045,10 +1085,28 @@ pub async fn migrate_existing_files(
         }
     }
 
+    for claude_project_dir in projects_to_render {
+        match render_memory_md_from_db(&client, config, &claude_project_dir).await {
+            Ok(path) => {
+                report.rendered += 1;
+                log::info!("[ClaudeMemory] migration refreshed {}", path.display());
+            }
+            Err(e) => {
+                report.render_failures += 1;
+                log::warn!(
+                    "[ClaudeMemory] migration could not refresh MEMORY.md for {}: {e}",
+                    claude_project_dir.display()
+                );
+            }
+        }
+    }
+
     log::info!(
-        "[ClaudeMemory] migration finished: persisted={} failures={}",
+        "[ClaudeMemory] migration finished: persisted={} failures={} rendered={} render_failures={}",
         report.persisted,
-        report.failures
+        report.failures,
+        report.rendered,
+        report.render_failures
     );
     Ok(report)
 }
@@ -1057,6 +1115,8 @@ pub async fn migrate_existing_files(
 pub struct MigrationReport {
     pub persisted: usize,
     pub failures: usize,
+    pub rendered: usize,
+    pub render_failures: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -1227,7 +1287,10 @@ mod tests {
     #[test]
     fn derive_pref_key_strips_md_extension() {
         let path = Path::new("/some/dir/feedback_smoke_test.md");
-        assert_eq!(derive_pref_key(path), Some("feedback_smoke_test".to_string()));
+        assert_eq!(
+            derive_pref_key(path),
+            Some("feedback_smoke_test".to_string())
+        );
     }
 
     #[test]
@@ -1238,8 +1301,8 @@ mod tests {
         // refreshed; everything else (headings, notes, prose) survives.
         let tmp = TempDir::new().expect("tempdir");
         let dir = tmp.path().join("-proj");
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("MEMORY.md");
+        fs::create_dir_all(dir.join("memory")).unwrap();
+        let path = dir.join("memory").join("MEMORY.md");
         let existing = "# Seren Desktop Memory\n\n## Critical Lessons\n\
             - hand-written note that must survive a re-render\n\n\
             <!-- BEGIN AUTO-INDEX -->\nstale auto content\n<!-- END AUTO-INDEX -->\n\n\
@@ -1259,7 +1322,7 @@ mod tests {
             !merged.contains("stale auto content"),
             "stale content inside markers MUST be replaced"
         );
-        assert!(!dir.join("MEMORY.md.tmp").exists());
+        assert!(!dir.join("memory").join("MEMORY.md.tmp").exists());
     }
 
     #[test]
@@ -1270,8 +1333,8 @@ mod tests {
         // overwriting it.
         let tmp = TempDir::new().expect("tempdir");
         let dir = tmp.path().join("-proj");
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("MEMORY.md");
+        fs::create_dir_all(dir.join("memory")).unwrap();
+        let path = dir.join("memory").join("MEMORY.md");
         let existing = "# Seren Desktop Memory\n\n## Critical Lessons\n- must survive\n";
         fs::write(&path, existing).unwrap();
 
@@ -1292,13 +1355,44 @@ mod tests {
         // intercepted file path so it can call render_memory_md_from_db
         // without depending on outside state. The dir is always the file's
         // grandparent (parent is the `memory/` subdir).
-        let path =
-            Path::new("/home/a/.claude/projects/-Users-x-foo/memory/feedback_test.md");
+        let path = Path::new("/home/a/.claude/projects/-Users-x-foo/memory/feedback_test.md");
         assert_eq!(
             claude_project_dir_for_memory_file(path),
             Some(PathBuf::from("/home/a/.claude/projects/-Users-x-foo"))
         );
         assert_eq!(claude_project_dir_for_memory_file(Path::new("/")), None);
+    }
+
+    #[test]
+    fn write_rendered_memory_md_targets_memory_subdir_and_replaces_stale_index() {
+        let tmp = TempDir::new().expect("tempdir");
+        let dir = tmp.path().join("-proj");
+
+        let first = write_rendered_memory_md(
+            &dir,
+            "## Feedback\n- [stale.md](stale.md) — stale description\n",
+        )
+        .unwrap();
+        assert_eq!(first, dir.join("memory").join("MEMORY.md"));
+        let first_modified = fs::metadata(&first).unwrap().modified().unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let second = write_rendered_memory_md(
+            &dir,
+            "## Feedback\n- [current.md](current.md) — current description\n",
+        )
+        .unwrap();
+        let second_modified = fs::metadata(&second).unwrap().modified().unwrap();
+        let rendered = fs::read_to_string(&second).unwrap();
+
+        assert!(rendered.contains("current description"));
+        assert!(!rendered.contains("stale description"));
+        assert!(
+            second_modified >= first_modified,
+            "MEMORY.md mtime must not go backwards after a refresh"
+        );
+        assert!(!dir.join("MEMORY.md").exists());
     }
 
     // ---- SQL builder tests (the heart of the #1509 storage rebuild) ------
@@ -1348,14 +1442,8 @@ mod tests {
 
     #[test]
     fn build_upsert_preference_sql_handles_null_description() {
-        let sql = build_upsert_preference_sql(
-            "-proj",
-            "no_desc",
-            "feedback",
-            None,
-            "body",
-            "no_desc.md",
-        );
+        let sql =
+            build_upsert_preference_sql("-proj", "no_desc", "feedback", None, "body", "no_desc.md");
         // None description must serialize as the literal NULL keyword,
         // not as a quoted empty string.
         assert!(sql.contains(", NULL,"));
@@ -1433,9 +1521,7 @@ mod integration {
     fn require_env(name: &str) -> String {
         match std::env::var(name) {
             Ok(v) if !v.trim().is_empty() => v,
-            _ => panic!(
-                "{name} is not set — SerenDB SQL roundtrip test requires live credentials"
-            ),
+            _ => panic!("{name} is not set — SerenDB SQL roundtrip test requires live credentials"),
         }
     }
 

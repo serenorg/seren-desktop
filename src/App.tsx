@@ -306,7 +306,7 @@ function App() {
           if (settingsStore.get("claudeMemoryMigrateOnStartup")) {
             const report = await migrateExistingClaudeMemory();
             console.info(
-              `[ClaudeMemory] startup migration: persisted=${report.persisted} failures=${report.failures}`,
+              `[ClaudeMemory] startup migration: persisted=${report.persisted} failures=${report.failures} rendered=${report.rendered} render_failures=${report.render_failures}`,
             );
             if (report.failures > 0) {
               await notifyUser(
@@ -315,6 +315,13 @@ function App() {
                 } could not be pushed to SerenDB yet and ${
                   report.failures === 1 ? "was" : "were"
                 } left on disk. The interceptor will retry automatically on the next write, or you can retry now from Settings → Code Indexing → Claude Code Auto-Memory → Migrate Existing Files.`,
+              );
+            }
+            if (report.render_failures > 0) {
+              await notifyUser(
+                `${report.render_failures} Claude memory index refresh${
+                  report.render_failures === 1 ? "" : "es"
+                } failed after migration. The database write succeeded, but Claude Code may read stale MEMORY.md content until the next successful refresh.`,
               );
             }
           }

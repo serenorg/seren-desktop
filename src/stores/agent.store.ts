@@ -5,7 +5,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createStore, produce } from "solid-js/store";
 import {
   extractEvidenceFromAgentMessages,
+  type FinalizationEvidence,
   type FinalOutputValidationReport,
+  type ToolEvidence,
   validateFinalOutput,
 } from "@/lib/agent-output-validation";
 import { shouldLogAgentRuntimeEvent } from "@/lib/agent-runtime-debug";
@@ -439,7 +441,11 @@ import {
   type UnifiedConversationRow,
 } from "@/lib/tauri-bridge";
 import { refreshAccessToken } from "@/services/auth";
-import { claudeSessionExists } from "@/services/claudeMemory";
+import {
+  type InterceptSuccessEvent as ClaudeMemoryInterceptSuccessEvent,
+  claudeSessionExists,
+  renderClaudeMemoryMd,
+} from "@/services/claudeMemory";
 import {
   bootstrapMemoryContext,
   processAssistantResponseMemory,
@@ -489,7 +495,12 @@ let cliScanRejectedUnsub: (() => void) | null = null;
  *  the schema is reconciled. #1829. */
 let syntheticSchemaDriftUnsub: (() => void) | null = null;
 
+/** Set once we've subscribed to Rust Claude memory intercept events. */
+let claudeMemoryInterceptedListener: Promise<UnlistenFn> | null = null;
+
 let sessionResetGeneration = 0;
+const CLAUDE_MEMORY_EVIDENCE_LIMIT = 20;
+const CLAUDE_MEMORY_RENDER_BEFORE_SPAWN_TIMEOUT_MS = 15_000;
 
 function disposeTauriListener(
   listener: Promise<UnlistenFn> | null,
@@ -517,6 +528,10 @@ function disposeAgentStoreSideChannelListeners(): void {
 
   syntheticSchemaDriftUnsub?.();
   syntheticSchemaDriftUnsub = null;
+
+  const claudeMemoryListener = claudeMemoryInterceptedListener;
+  claudeMemoryInterceptedListener = null;
+  disposeTauriListener(claudeMemoryListener, "claude-memory intercepted");
 }
 
 /** Commit an agent list into the store + settle the selected-agent fallback.
@@ -643,6 +658,47 @@ function subscribeToProviderRuntimeRestarted(): void {
             );
           }
         })();
+      }
+    },
+  );
+}
+
+function subscribeToClaudeMemoryIntercepts(): void {
+  if (claudeMemoryInterceptedListener) return;
+  claudeMemoryInterceptedListener = listen<ClaudeMemoryInterceptSuccessEvent>(
+    "claude-memory-intercepted",
+    (event) => {
+      const payload = event.payload;
+      if (!payload?.path) return;
+
+      for (const [sessionId, session] of Object.entries(state.sessions)) {
+        if (!usesClaudeMemory(session.info.agentType)) continue;
+        if (!isClaudeMemoryPathForCwd(payload.path, session.cwd)) continue;
+
+        const evidence: ToolEvidence = {
+          id: `claude-memory:${sessionId}:${Date.now()}:${payload.path}`,
+          name: "claude_memory_interceptor",
+          title: "Claude Memory Interceptor",
+          kind: "database",
+          status: "completed",
+          result: [
+            "Persisted Claude memory to claude_agent_preferences",
+            `source=${payload.path}`,
+            payload.rendered_memory_md
+              ? `memory_md=${payload.rendered_memory_md}`
+              : null,
+            payload.render_error
+              ? `render_error=${payload.render_error}`
+              : null,
+          ]
+            .filter((part): part is string => Boolean(part))
+            .join("; "),
+          isError: false,
+        };
+
+        setState("sessions", sessionId, "claudeMemoryWriteEvidence", (prev) =>
+          [...(prev ?? []), evidence].slice(-CLAUDE_MEMORY_EVIDENCE_LIMIT),
+        );
       }
     },
   );
@@ -938,6 +994,8 @@ export interface ActiveSession {
   /** Queued prompts awaiting dispatch when the session returns to ready.
    *  Lives in the store (not the component) so background threads still drain. */
   pendingPrompts: string[];
+  /** Scoped out-of-band DB write evidence from the Rust Claude memory watcher. */
+  claudeMemoryWriteEvidence?: ToolEvidence[];
   /**
    * Serving = the session the user is talking to. Standby = a warm
    * replacement session being seeded via predictive compaction — invisible
@@ -1084,6 +1142,91 @@ function filterDroppedPromptRecoveryMessages(
       !isSessionDeathMessage(message.content)
     );
   });
+}
+
+function usesClaudeMemory(agentType: AgentType): boolean {
+  return agentType === "claude-code" || agentType === "claude-codex";
+}
+
+function encodeClaudeProjectDirForPath(cwd: string): string {
+  const normalized = cwd
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/:/g, "");
+  return `-${normalized
+    .split("")
+    .map((char) => (/[A-Za-z0-9-]/.test(char) ? char : "-"))
+    .join("")}`;
+}
+
+function isClaudeMemoryPathForCwd(path: string, cwd: string): boolean {
+  const encoded = encodeClaudeProjectDirForPath(cwd);
+  return path.replace(/\\/g, "/").split("/").includes(encoded);
+}
+
+function buildAgentFinalizationEvidence(
+  session: ActiveSession,
+): FinalizationEvidence {
+  const evidence = extractEvidenceFromAgentMessages(session.messages);
+  const memoryEvidence = session.claudeMemoryWriteEvidence ?? [];
+  if (memoryEvidence.length === 0) {
+    return evidence;
+  }
+  return {
+    ...evidence,
+    tools: [...evidence.tools, ...memoryEvidence],
+  };
+}
+
+async function refreshClaudeMemoryMdBeforeSpawn(
+  cwd: string,
+  agentType: AgentType,
+  hasSerenApiKey: boolean,
+): Promise<void> {
+  if (!usesClaudeMemory(agentType)) return;
+  if (!hasSerenApiKey) return;
+  if (!settingsStore.get("claudeMemoryInterceptEnabled")) return;
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const renderPromise = renderClaudeMemoryMd(cwd).catch((error) => {
+    if (timedOut) {
+      console.warn(
+        "[AgentStore] Claude memory index refresh failed after spawn-time timeout:",
+        error,
+      );
+      return null;
+    }
+    throw error;
+  });
+  const timeoutPromise = new Promise<"timeout">((resolve) => {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      resolve("timeout");
+    }, CLAUDE_MEMORY_RENDER_BEFORE_SPAWN_TIMEOUT_MS);
+  });
+
+  try {
+    const result = await Promise.race([renderPromise, timeoutPromise]);
+    if (result === "timeout") {
+      console.warn(
+        `[AgentStore] Claude memory index refresh timed out after ${CLAUDE_MEMORY_RENDER_BEFORE_SPAWN_TIMEOUT_MS}ms; spawning with existing MEMORY.md.`,
+      );
+      return;
+    }
+    if (result) {
+      console.info("[AgentStore] Refreshed Claude memory index:", result);
+    }
+  } catch (error) {
+    console.warn(
+      "[AgentStore] Claude memory index refresh before spawn failed:",
+      error,
+    );
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 function mergeRecoveryMessages(
@@ -2381,6 +2524,7 @@ export const agentStore = {
     // at runtime. Pre-#1829 the runtime emitted this event but no consumer
     // existed in the TS layer, so the gate was one-way.
     subscribeToSyntheticTranscriptSchemaDrift();
+    subscribeToClaudeMemoryIntercepts();
 
     const backoffMs = [0, 1_000, 2_000, 4_000, 8_000];
     for (let attempt = 0; attempt < backoffMs.length; attempt++) {
@@ -2901,6 +3045,12 @@ export const agentStore = {
           resolvedAgentType === "claude-codex"
             ? settingsStore.settings.claudeReasoningEffort
             : undefined;
+
+        await refreshClaudeMemoryMdBeforeSpawn(
+          cwd,
+          resolvedAgentType,
+          Boolean(apiKey),
+        );
 
         console.log("[AgentStore] Spawning agent process...");
         const info = await providerService.spawnAgent(
@@ -5189,6 +5339,7 @@ export const agentStore = {
 
     // Track when the prompt started for duration calculation
     setState("sessions", sessionId, "promptStartTime", Date.now());
+    setState("sessions", sessionId, "claudeMemoryWriteEvidence", []);
     // Clear any prior cancel flag — user is submitting a new prompt.
     setState("sessions", sessionId, "cancelRequested", undefined);
     // Store the prompt so we can retry after compaction if needed
@@ -7298,7 +7449,7 @@ export const agentStore = {
         : undefined;
       const finalOutputValidation = validateFinalOutput({
         finalText: scrubbed,
-        evidence: extractEvidenceFromAgentMessages(session.messages),
+        evidence: buildAgentFinalizationEvidence(session),
       });
       const safeContent = finalOutputValidation.safeDisplayText;
 
