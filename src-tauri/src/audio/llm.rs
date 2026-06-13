@@ -48,7 +48,10 @@ pub async fn complete(app: &AppHandle, request: CompletionRequest) -> Result<Str
 
     match resolve_completion_route(app, &request.model).await {
         CompletionRoute::ProviderAgent { agent_type, model } => {
-            complete_oneshot(
+            let fallback_model = seren_models_fallback_model(&request.model);
+            let fallback_system = request.system.clone();
+            let fallback_prompt = request.prompt.clone();
+            match complete_oneshot(
                 app,
                 ProviderOneShotRequest {
                     agent_type,
@@ -58,6 +61,24 @@ pub async fn complete(app: &AppHandle, request: CompletionRequest) -> Result<Str
                 },
             )
             .await
+            {
+                Ok(content) => Ok(content),
+                Err(err) if is_provider_auth_error(&err) => {
+                    log::warn!(
+                        "[audio-llm] provider one-shot auth failed; retrying via SerenModels fallback: {err}"
+                    );
+                    complete_via_seren_models(
+                        app,
+                        CompletionRequest {
+                            model: fallback_model,
+                            system: fallback_system,
+                            prompt: fallback_prompt,
+                        },
+                    )
+                    .await
+                }
+                Err(err) => Err(err),
+            }
         }
         CompletionRoute::SerenModels { model } => {
             complete_via_seren_models(
@@ -244,6 +265,16 @@ fn seren_models_fallback_model(requested_model: &str) -> String {
     SEREN_MODELS_SUMMARIZATION_MODEL.to_string()
 }
 
+fn is_provider_auth_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("authentication required")
+        || lower.contains("auth required")
+        || lower.contains("invalid api key")
+        || lower.contains("login required")
+        || lower.contains("not logged in")
+        || lower.contains("please run /login")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,5 +341,18 @@ mod tests {
                 model: None,
             }
         );
+    }
+
+    #[test]
+    fn provider_auth_error_detection_is_narrow() {
+        assert!(is_provider_auth_error(
+            "Agent authentication required. Run the login flow and try again."
+        ));
+        assert!(is_provider_auth_error("Invalid API key"));
+        assert!(is_provider_auth_error("not logged in"));
+        assert!(!is_provider_auth_error(
+            "provider one-shot attempted a tool call; toolless completion aborted"
+        ));
+        assert!(!is_provider_auth_error("Provider runtime socket closed before prompt completed."));
     }
 }
