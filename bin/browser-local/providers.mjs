@@ -1440,6 +1440,10 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     return agentRegistry.checkAgentAvailable(agentType);
   }
 
+  async function checkAgentAuthenticated({ agentType }) {
+    return agentRegistry.checkAgentAuthenticated(agentType);
+  }
+
   async function ensureAgentCli({ agentType }) {
     return agentRegistry.ensureAgentCli(agentType);
   }
@@ -1648,6 +1652,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     respondToDiffProposal,
     getAvailableAgents,
     checkAgentAvailable,
+    checkAgentAuthenticated,
     ensureAgentCli,
     launchLogin,
     listRemoteSessions,

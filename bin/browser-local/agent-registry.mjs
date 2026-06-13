@@ -223,6 +223,77 @@ async function isCommandAvailable(command) {
   }
 }
 
+function hasAnyCredentialPath(paths) {
+  return paths.some((candidate) => {
+    try {
+      return existsSync(candidate);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function hasClaudeCredentials() {
+  const home = os.homedir();
+  const appData = process.env.APPDATA;
+  return hasAnyCredentialPath([
+    path.join(home, ".claude", ".credentials.json"),
+    path.join(home, ".claude.json"),
+    ...(appData
+      ? [
+          path.join(appData, "Claude", ".credentials.json"),
+          path.join(appData, "Claude", "credentials.json"),
+        ]
+      : []),
+  ]);
+}
+
+function hasCodexCredentials() {
+  const home = os.homedir();
+  const appData = process.env.APPDATA;
+  return Boolean(process.env.OPENAI_API_KEY) || hasAnyCredentialPath([
+    path.join(home, ".codex", "auth.json"),
+    path.join(home, ".codex", "credentials.json"),
+    ...(appData
+      ? [
+          path.join(appData, "Codex", "auth.json"),
+          path.join(appData, "OpenAI", "Codex", "auth.json"),
+        ]
+      : []),
+  ]);
+}
+
+function hasGeminiCredentials() {
+  const home = os.homedir();
+  const appData = process.env.APPDATA;
+  return Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) ||
+    hasAnyCredentialPath([
+      path.join(home, ".gemini", "oauth_creds.json"),
+      path.join(home, ".gemini", "credentials.json"),
+      ...(appData
+        ? [
+            path.join(appData, "gemini", "oauth_creds.json"),
+            path.join(appData, "Google", "Gemini", "oauth_creds.json"),
+          ]
+        : []),
+    ]);
+}
+
+function isAgentAuthenticated(agentType) {
+  switch (agentType) {
+    case "claude-code":
+      return hasClaudeCredentials();
+    case "codex":
+      return hasCodexCredentials();
+    case "gemini":
+      return hasGeminiCredentials();
+    case "claude-codex":
+      return hasClaudeCredentials() && hasCodexCredentials();
+    default:
+      return false;
+  }
+}
+
 /**
  * Resolve the path to npm-cli.js relative to the running Node.js binary.
  * This bypasses shell wrapper shims that break execFile() on macOS/Linux
@@ -690,6 +761,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
           description: "OpenAI Codex via direct App Server integration",
           command: "codex",
           available: true,
+          authenticated: isAgentAuthenticated("codex"),
           ...(installed
             ? {}
             : {
@@ -731,6 +803,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
           description: "Anthropic Claude Code via direct provider runtime",
           command: "claude",
           available: true,
+          authenticated: isAgentAuthenticated("claude-code"),
           ...(installed
             ? {}
             : {
@@ -775,6 +848,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
             "Paired workflow — Claude plans and reviews, Codex executes",
           command: "claude",
           available: true,
+          authenticated: isAgentAuthenticated("claude-codex"),
           ...(missing.length === 0
             ? {}
             : {
@@ -818,6 +892,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
           description: "Google Gemini via gemini-cli (Agent Client Protocol)",
           command: "gemini",
           available: true,
+          authenticated: isAgentAuthenticated("gemini"),
           ...(installed
             ? {}
             : {
@@ -939,6 +1014,11 @@ export function createBrowserLocalAgentRegistry({ emit }) {
 
     async checkAgentAvailable(agentType) {
       return getDefinition(agentType).canSpawn();
+    },
+
+    async checkAgentAuthenticated(agentType) {
+      getDefinition(agentType);
+      return isAgentAuthenticated(agentType);
     },
 
     async ensureAgentCli(agentType) {
