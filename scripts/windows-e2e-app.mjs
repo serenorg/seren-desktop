@@ -97,8 +97,39 @@ async function findSerenPage(browser) {
   );
 }
 
+async function resolveCdpEndpoint(endpoint) {
+  const versionUrl = `${endpoint.replace(/\/$/, "")}/json/version`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(versionUrl, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const version = await response.json();
+    if (
+      typeof version.webSocketDebuggerUrl === "string" &&
+      version.webSocketDebuggerUrl.trim() !== ""
+    ) {
+      console.log(`[windows-e2e] resolved CDP websocket endpoint from ${versionUrl}`);
+      return version.webSocketDebuggerUrl;
+    }
+    throw new Error("missing webSocketDebuggerUrl");
+  } catch (error) {
+    console.warn(
+      `[windows-e2e] unable to resolve CDP websocket endpoint from ${versionUrl}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return endpoint;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function connectToApp() {
-  const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
+  const cdpEndpoint = await resolveCdpEndpoint(CDP_ENDPOINT);
+  const browser = await chromium.connectOverCDP(cdpEndpoint, { timeout: 120_000 });
   const page = await findSerenPage(browser);
   const browserErrors = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
@@ -425,18 +456,42 @@ const AUTH_FAILURE_PATTERNS = [
   "invalid api key",
 ];
 
+const AGENT_PROCESS_EXIT_PATTERNS = [
+  "app server stopped before request completed",
+  "worker thread dropped while prompt was active",
+];
+
 function isAuthFailureMessage(message) {
   const lower = String(message ?? "").toLowerCase();
   return AUTH_FAILURE_PATTERNS.some((pattern) => lower.includes(pattern));
 }
 
+function isAgentProcessExitMessage(message) {
+  const lower = String(message ?? "").toLowerCase();
+  return AGENT_PROCESS_EXIT_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
 class AgentAuthError extends Error {}
+class AgentProvisioningError extends Error {}
 
 function authError(journey, detail) {
   return new AgentAuthError(
     `${journey} CLI is installed but not authenticated on the Windows e2e host ` +
       `(login expired or never provisioned). Refresh the credential via the ` +
-      `WINDOWS_E2E_SECRET_PARAMETER_PREFIX SSM mechanism. Detail: ${detail}`,
+      `WINDOWS_E2E_SECRET_PARAMETER_PREFIX SSM mechanism. If the harness runs ` +
+      `as a scheduled-task user, ensure SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI ` +
+      `or SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64 hydrates that temporary profile. ` +
+      `Detail: ${detail}`,
+  );
+}
+
+function provisioningError(journey, detail) {
+  return new AgentProvisioningError(
+    `${journey} CLI exited before completing the Windows e2e prompt. Verify ` +
+      `the scheduled-task user received agent credentials via ` +
+      `SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI or ` +
+      `SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64, and check provider-runtime logs ` +
+      `for a real process crash. Detail: ${detail}`,
   );
 }
 
@@ -456,18 +511,28 @@ function withTimeout(promise, ms, label) {
 // AgentAuthError so the job names the credential gap, not a timeout (#2375).
 function classifyJourneyError(journey, error, buffer, marker, sessionIds) {
   if (error instanceof AgentAuthError) return error;
+  if (error instanceof AgentProvisioningError) return error;
   const message = error instanceof Error ? error.message : String(error);
   if (isAuthFailureMessage(message)) return authError(journey, message);
+  if (isAgentProcessExitMessage(message)) return provisioningError(journey, message);
   const ids = sessionIds.filter(Boolean);
-  const authEvent = buffer
+  const journeyEvents = buffer
     .slice(marker)
-    .find(
+    .filter(
       (event) =>
         event.method === "provider://error" &&
-        ids.includes(event.params?.sessionId) &&
-        isAuthFailureMessage(event.params?.error),
+        ids.includes(event.params?.sessionId),
     );
+  const authEvent = journeyEvents.find((event) =>
+    isAuthFailureMessage(event.params?.error),
+  );
   if (authEvent) return authError(journey, String(authEvent.params.error));
+  const processExitEvent = journeyEvents.find((event) =>
+    isAgentProcessExitMessage(event.params?.error),
+  );
+  if (processExitEvent) {
+    return provisioningError(journey, String(processExitEvent.params.error));
+  }
   return error instanceof Error ? error : new Error(message);
 }
 
