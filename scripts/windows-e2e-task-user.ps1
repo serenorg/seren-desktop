@@ -267,6 +267,85 @@ function Convert-EnvFlag([string]`$Value, [bool]`$Default) {
   return @("1", "true", "yes", "on") -contains `$Value.Trim().ToLowerInvariant()
 }
 
+function Test-AnyCredentialPath([string[]]`$Paths) {
+  foreach (`$candidate in `$Paths) {
+    if (-not [string]::IsNullOrWhiteSpace(`$candidate) -and (Test-Path -LiteralPath `$candidate -PathType Leaf)) {
+      return `$true
+    }
+  }
+  return `$false
+}
+
+function Get-ConfiguredAgentJourneys() {
+  `$configured = Get-EnvValue "SEREN_E2E_AGENT_JOURNEYS"
+  if ([string]::IsNullOrWhiteSpace(`$configured)) {
+    return @("codex", "claude-code", "claude-codex")
+  }
+  return @(
+    `$configured.Split(",") |
+      ForEach-Object { `$_.Trim().ToLowerInvariant() } |
+      Where-Object { -not [string]::IsNullOrWhiteSpace(`$_) } |
+      Select-Object -Unique
+  )
+}
+
+function Get-MissingAgentCredentialNames() {
+  `$journeys = @(Get-ConfiguredAgentJourneys)
+  `$requiresClaude = `$journeys -contains "claude-code" -or `$journeys -contains "claude-codex"
+  `$requiresCodex = `$journeys -contains "codex" -or `$journeys -contains "claude-codex"
+  `$home = [Environment]::GetEnvironmentVariable("USERPROFILE")
+  `$appData = [Environment]::GetEnvironmentVariable("APPDATA")
+  `$missing = @()
+
+  if (`$requiresClaude) {
+    `$claudePaths = @(
+      (Join-Path `$home ".claude\.credentials.json"),
+      (Join-Path `$home ".claude.json")
+    )
+    if (-not [string]::IsNullOrWhiteSpace(`$appData)) {
+      `$claudePaths += @(
+        (Join-Path `$appData "Claude\.credentials.json"),
+        (Join-Path `$appData "Claude\credentials.json")
+      )
+    }
+    if (-not (Test-AnyCredentialPath `$claudePaths)) {
+      `$missing += "Claude Code (.claude/.credentials.json or equivalent)"
+    }
+  }
+
+  if (`$requiresCodex) {
+    `$codexHasEnvKey = -not [string]::IsNullOrWhiteSpace((Get-EnvValue "OPENAI_API_KEY"))
+    `$codexPaths = @(
+      (Join-Path `$home ".codex\auth.json"),
+      (Join-Path `$home ".codex\credentials.json")
+    )
+    if (-not [string]::IsNullOrWhiteSpace(`$appData)) {
+      `$codexPaths += @(
+        (Join-Path `$appData "Codex\auth.json"),
+        (Join-Path `$appData "OpenAI\Codex\auth.json")
+      )
+    }
+    if (-not `$codexHasEnvKey -and -not (Test-AnyCredentialPath `$codexPaths)) {
+      `$missing += "Codex (.codex/auth.json or equivalent)"
+    }
+  }
+
+  return `$missing
+}
+
+function Assert-AgentCredentialsPresent() {
+  `$credentialsRequired = Convert-EnvFlag (Get-EnvValue "SEREN_E2E_AGENT_CREDENTIALS_REQUIRED") `$true
+  if (-not `$credentialsRequired) {
+    Write-TaskLog "Skipping agent credential validation because SEREN_E2E_AGENT_CREDENTIALS_REQUIRED is false"
+    return
+  }
+  `$missing = @(Get-MissingAgentCredentialNames)
+  if (`$missing.Count -gt 0) {
+    throw "Windows e2e agent credential archive did not provision required CLI credential file(s): `$(`$missing -join ', '). Store a profile-root zip at `$secretPrefix/SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI or `$secretPrefix/SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64. The archive should expand directly into USERPROFILE without an extra top-level folder."
+  }
+  Write-TaskLog "Validated agent CLI credentials for configured journey(s)"
+}
+
 function Import-AgentCredentialArchive() {
   `$archiveS3Uri = Get-EnvValue "SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI"
   `$archiveB64 = Get-EnvValue "SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64"
@@ -293,6 +372,7 @@ function Import-AgentCredentialArchive() {
   Expand-Archive -LiteralPath `$archivePath -DestinationPath `$env:USERPROFILE -Force
   Remove-Item -LiteralPath `$archivePath -Force -ErrorAction SilentlyContinue
   Write-TaskLog "Imported agent credential archive into temporary user profile"
+  Assert-AgentCredentialsPresent
 }
 
 try {

@@ -545,6 +545,15 @@ async function runSingleAgentJourney(ws, buffer, agentType) {
       agentType,
     });
     assert(available === true, `${agentType} is not available on the Windows e2e host`);
+    const authenticated = await rpc(ws, "provider_check_agent_authenticated", {
+      agentType,
+    });
+    if (authenticated !== true) {
+      throw authError(
+        agentType,
+        "provider_check_agent_authenticated returned false before prompt",
+      );
+    }
     session = await rpc(ws, "provider_spawn", {
       agentType,
       cwd: AGENT_CWD,
@@ -604,6 +613,15 @@ async function runPairedJourney(ws, buffer) {
       agentType: PAIRED_AGENT_TYPE,
     });
     assert(available === true, `${PAIRED_AGENT_TYPE} is not available on the Windows e2e host`);
+    const authenticated = await rpc(ws, "provider_check_agent_authenticated", {
+      agentType: PAIRED_AGENT_TYPE,
+    });
+    if (authenticated !== true) {
+      throw authError(
+        PAIRED_AGENT_TYPE,
+        "provider_check_agent_authenticated returned false before prompt",
+      );
+    }
     session = await rpc(ws, "provider_spawn", {
       agentType: PAIRED_AGENT_TYPE,
       cwd: AGENT_CWD,
