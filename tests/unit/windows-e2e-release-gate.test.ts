@@ -18,6 +18,10 @@ const manualPublishWorkflow = existsSync(manualPublishWorkflowPath)
   ? readFileSync(manualPublishWorkflowPath, "utf8")
   : "";
 const runner = readFileSync(join(root, "scripts/windows-e2e-app.ps1"), "utf8");
+const taskUserRunner = readFileSync(
+  join(root, "scripts/windows-e2e-task-user.ps1"),
+  "utf8",
+);
 const probe = readFileSync(join(root, "scripts/windows-e2e-app.mjs"), "utf8");
 
 function workflowJob(name: string): string {
@@ -82,11 +86,53 @@ describe("Windows production e2e release gate", () => {
     expect(runner).toContain("msedgewebview2.exe");
     expect(runner).toContain("query session");
     expect(runner).toContain("quser");
+    expect(runner).toContain("{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}");
+    expect(runner).toContain("WebView2 runtime detected");
     expect(runner).toContain("node.exe");
     expect(runner).toContain("npm.cmd");
     expect(runner).toContain("windows-e2e-app.mjs");
     expect(probe).toContain("connectOverCDP");
+    expect(probe).toContain("webSocketDebuggerUrl");
+    expect(probe).toContain("120_000");
     expect(probe).toContain("__TAURI_INTERNALS__");
+  });
+
+  it("runs the Windows app harness as a temporary scheduled-task user", () => {
+    expect(releaseWorkflow).toContain("scripts/windows-e2e-task-user.ps1");
+    expect(releaseWorkflow).toContain(
+      "[windows-e2e:ssm] Running Windows app harness as scheduled task user",
+    );
+    expect(taskUserRunner).toContain("Register-ScheduledTask");
+    expect(taskUserRunner).toContain("Start-ScheduledTask");
+    expect(taskUserRunner).toContain("Get-ScheduledTaskInfo");
+    expect(taskUserRunner).toContain("Unregister-ScheduledTask");
+    expect(taskUserRunner).toContain("net user");
+    expect(taskUserRunner).toContain("Administrators");
+    expect(taskUserRunner).toContain("SEREN_E2E_RELEASE_RUN");
+    expect(taskUserRunner).toContain("AllowUnsignedPrArtifact");
+    expect(taskUserRunner).toContain("AllowMissingAgentCredentials");
+    expect(taskUserRunner).toContain("SEREN_E2E_UNSIGNED_PR_RUN");
+    expect(taskUserRunner).toContain("SerenDesktopE2E");
+    expect(taskUserRunner).toContain("-InstallDir");
+    expect(taskUserRunner).toContain("InstallerTimeoutSeconds = 600");
+    expect(taskUserRunner).toContain("windows-e2e-app.ps1");
+    expect(taskUserRunner).toContain("Windows app scheduled-task harness failed");
+    expect(taskUserRunner).toContain("Stop-E2EProcessTree");
+    expect(taskUserRunner).toContain("node.exe");
+    expect(taskUserRunner).toContain("Invoke-CleanupWithTimeout");
+    expect(taskUserRunner).toContain("Start-Job");
+    expect(taskUserRunner).toContain("SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI");
+    expect(taskUserRunner).toContain("SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64");
+    expect(taskUserRunner).toContain("SEREN_E2E_AGENT_CREDENTIALS_REQUIRED");
+    expect(taskUserRunner).toContain("Expand-Archive");
+    expect(taskUserRunner).toContain("AWS_METADATA_SERVICE_TIMEOUT");
+    expect(taskUserRunner).toContain("--cli-connect-timeout");
+    expect(taskUserRunner).toContain("--cli-read-timeout");
+    expect(taskUserRunner).toContain("Start-Job");
+    expect(taskUserRunner).toContain("Wait-Job");
+    expect(taskUserRunner).toContain("Stop-Job");
+    expect(taskUserRunner).toContain("pnpm install");
+    expect(taskUserRunner).toContain("1200");
   });
 
   it("keeps unsigned PR artifact mode explicit and forbidden for release runs", () => {
@@ -98,13 +144,16 @@ describe("Windows production e2e release gate", () => {
     const releaseGate = workflowJob("windows-app-e2e");
     expect(releaseGate).toContain("aws s3 presign");
     expect(releaseGate).toContain("Invoke-WebRequest -Uri");
-    expect(releaseGate).toContain("SEREN_E2E_RELEASE_RUN");
-    expect(releaseGate).toContain("[windows-e2e:ssm] Installing npm dependencies");
-    expect(releaseGate).toContain("[windows-e2e:ssm] Running Windows app harness");
+    expect(releaseGate).toContain(
+      "[windows-e2e:ssm] Running Windows app harness as scheduled task user",
+    );
     expect(releaseGate).toContain("-ProbeTimeoutSeconds 1800");
     expect(releaseGate).toContain("$LASTEXITCODE");
-    expect(releaseGate).toContain("Windows app harness failed with exit code");
+    expect(releaseGate).toContain(
+      "Windows app scheduled-task harness failed with exit code",
+    );
     expect(releaseGate).not.toContain("-AllowUnsignedPrArtifact");
+    expect(releaseGate).not.toContain("-AllowMissingAgentCredentials");
     expect(releaseGate).not.toContain("SEREN_E2E_UNSIGNED_PR_RUN");
   });
 
@@ -155,8 +204,11 @@ describe("Windows production e2e release gate", () => {
     // An expired or unprovisioned credential must read as a login problem, not
     // a generic spawn/timeout failure.
     expect(probe).toContain("AgentAuthError");
+    expect(probe).toContain("AgentProvisioningError");
     expect(probe).toContain("not authenticated");
     expect(probe).toContain("provider://error");
+    expect(probe).toContain("app server stopped before request completed");
+    expect(probe).toContain("SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI");
   });
 
   it("has a manual publish override for already-built release artifacts", () => {

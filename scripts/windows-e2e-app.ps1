@@ -81,6 +81,29 @@ function Require-SignedOrExplicitPrArtifact([string]$Path, [string]$Label) {
   Write-Host "::warning::$Label Authenticode validation skipped for explicit unsigned PR artifact run: $Path"
 }
 
+function Get-WebView2RuntimeVersion() {
+  $runtimeClientId = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+  $candidatePaths = @(
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$runtimeClientId",
+    "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$runtimeClientId",
+    "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\$runtimeClientId"
+  )
+  foreach ($path in $candidatePaths) {
+    try {
+      if (-not (Test-Path -LiteralPath $path)) {
+        continue
+      }
+      $runtime = Get-ItemProperty -LiteralPath $path -ErrorAction Stop
+      if (-not [string]::IsNullOrWhiteSpace($runtime.pv) -and $runtime.pv -ne "0.0.0.0") {
+        return "$($runtime.pv) ($path)"
+      }
+    } catch {
+      Write-Host "::warning::Unable to inspect WebView2 runtime registry key ${path}: $($_.Exception.Message)"
+    }
+  }
+  return $null
+}
+
 function Clear-DownloadMark([string]$Path, [string]$Label) {
   if (-not (Test-Path -LiteralPath $Path)) {
     Fail "$Label not found: $Path"
@@ -271,6 +294,12 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($npmVersion)) {
   Fail "Bundled npm.cmd did not execute successfully"
 }
 Write-Host "Bundled runtime verified: node=$nodeVersion npm=$npmVersion providerRuntime=$providerRuntime"
+
+$webView2Runtime = Get-WebView2RuntimeVersion
+if ([string]::IsNullOrWhiteSpace($webView2Runtime)) {
+  Fail "Microsoft Edge WebView2 Runtime is not installed. The Windows app cannot create a WebView2/CDP endpoint without the Evergreen Runtime."
+}
+Write-Stage "WebView2 runtime detected: $webView2Runtime"
 
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$RemoteDebugPort --remote-allow-origins=*"
 Write-Stage "Launching Seren.exe with WebView2 remote debugging on port $RemoteDebugPort"
