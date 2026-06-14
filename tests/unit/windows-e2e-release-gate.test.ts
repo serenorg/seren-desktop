@@ -124,6 +124,11 @@ describe("Windows production e2e release gate", () => {
     expect(taskUserRunner).toContain("SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI");
     expect(taskUserRunner).toContain("SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64");
     expect(taskUserRunner).toContain("SEREN_E2E_AGENT_CREDENTIALS_REQUIRED");
+    expect(taskUserRunner).toContain("Assert-AgentCredentialsPresent");
+    expect(taskUserRunner).toContain("did not provision required CLI credential file");
+    expect(taskUserRunner).toContain("without an extra top-level folder");
+    expect(taskUserRunner).toContain(".codex\\auth.json");
+    expect(taskUserRunner).toContain(".claude\\.credentials.json");
     expect(taskUserRunner).toContain("Expand-Archive");
     expect(taskUserRunner).toContain("AWS_METADATA_SERVICE_TIMEOUT");
     expect(taskUserRunner).toContain("--cli-connect-timeout");
@@ -205,6 +210,10 @@ describe("Windows production e2e release gate", () => {
     // a generic spawn/timeout failure.
     expect(probe).toContain("AgentAuthError");
     expect(probe).toContain("AgentProvisioningError");
+    expect(probe).toContain("provider_check_agent_authenticated");
+    expect(probe).toContain(
+      "provider_check_agent_authenticated returned false before prompt",
+    );
     expect(probe).toContain("not authenticated");
     expect(probe).toContain("provider://error");
     expect(probe).toContain("app server stopped before request completed");
