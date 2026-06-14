@@ -78,6 +78,10 @@ describe("Windows production e2e release gate", () => {
     expect(runner).toContain("Write-Stage");
     expect(runner).toContain("Windows app e2e probe");
     expect(runner).toContain("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
+    expect(runner).toContain("Write-WindowsLaunchDiagnostics");
+    expect(runner).toContain("msedgewebview2.exe");
+    expect(runner).toContain("query session");
+    expect(runner).toContain("quser");
     expect(runner).toContain("node.exe");
     expect(runner).toContain("npm.cmd");
     expect(runner).toContain("windows-e2e-app.mjs");
