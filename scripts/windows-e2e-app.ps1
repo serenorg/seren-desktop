@@ -139,10 +139,43 @@ function Write-DirectorySnapshot([string]$Root) {
     Write-Host
 }
 
-function Wait-ForCdp([int]$Port, [int]$TimeoutSeconds) {
+function Write-WindowsLaunchDiagnostics([System.Diagnostics.Process]$AppProcess) {
+  Write-Stage "Collecting Windows launch diagnostics"
+  if ($null -ne $AppProcess) {
+    try {
+      $AppProcess.Refresh()
+      Write-Host "Seren process: pid=$($AppProcess.Id) exited=$($AppProcess.HasExited) exitCode=$(if ($AppProcess.HasExited) { $AppProcess.ExitCode } else { '<running>' })"
+    } catch {
+      Write-Host "::warning::Unable to refresh Seren process state: $($_.Exception.Message)"
+    }
+  }
+
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -in @("Seren.exe", "msedgewebview2.exe") } |
+    Select-Object ProcessId, ParentProcessId, SessionId, Name, CommandLine |
+    Format-List |
+    Out-String |
+    Write-Host
+
+  Write-Host "Windows identity:"
+  & { $ErrorActionPreference = "Continue"; whoami 2>&1 } | Out-String | Write-Host
+  Write-Host "Windows sessions:"
+  & { $ErrorActionPreference = "Continue"; query session 2>&1 } | Out-String | Write-Host
+  Write-Host "Logged-on users:"
+  & { $ErrorActionPreference = "Continue"; quser 2>&1 } | Out-String | Write-Host
+}
+
+function Wait-ForCdp([int]$Port, [int]$TimeoutSeconds, [System.Diagnostics.Process]$AppProcess) {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   $url = "http://127.0.0.1:$Port/json/version"
   do {
+    if ($null -ne $AppProcess) {
+      $AppProcess.Refresh()
+      if ($AppProcess.HasExited) {
+        Write-WindowsLaunchDiagnostics $AppProcess
+        Fail "Seren.exe exited before WebView2 CDP became available. ExitCode=$($AppProcess.ExitCode)"
+      }
+    }
     try {
       $response = Invoke-RestMethod -Uri $url -Method Get -TimeoutSec 2
       if ($response.webSocketDebuggerUrl) {
@@ -153,7 +186,9 @@ function Wait-ForCdp([int]$Port, [int]$TimeoutSeconds) {
     }
   } while ((Get-Date) -lt $deadline)
 
-  Fail "Timed out waiting for WebView2 remote debugging endpoint at $url"
+  $webViewCount = @(Get-Process -Name "msedgewebview2" -ErrorAction SilentlyContinue).Count
+  Write-WindowsLaunchDiagnostics $AppProcess
+  Fail "Timed out waiting for WebView2 remote debugging endpoint at $url. msedgewebview2 process count=$webViewCount"
 }
 
 function Find-RequiredFile([string]$Root, [string]$Filter, [string]$Label) {
@@ -243,7 +278,7 @@ $app = Start-Process -FilePath $appExe -PassThru
 
 try {
   Write-Stage "Waiting for WebView2 CDP endpoint"
-  Wait-ForCdp -Port $RemoteDebugPort -TimeoutSeconds $StartupTimeoutSeconds
+  Wait-ForCdp -Port $RemoteDebugPort -TimeoutSeconds $StartupTimeoutSeconds -AppProcess $app
   Write-Stage "Running Node app e2e probe"
   $probeExitCode = Invoke-ProcessWithTimeout "node" @("$PSScriptRoot/windows-e2e-app.mjs") $ProbeTimeoutSeconds "Windows app e2e probe" -NoNewWindow
   if ($probeExitCode -ne 0) {
