@@ -50,7 +50,7 @@
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@monaco-editor/loader": "^1.7.0",
-    "@playwright/mcp": "^0.0.75",
+    "@playwright/mcp": "^0.0.76",
     "@tailwindcss/vite": "4",
     "@tanstack/solid-query": "^5.100.14",
     "@tauri-apps/api": "^2",
