@@ -1064,6 +1064,65 @@ jobs:
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # Verify the box's journey inputs exist in Parameter Store BEFORE we start
+      # the host or send the SSM command. A missing parameter otherwise only
+      # surfaces inside the on-box harness, ~an hour into the run (v3.55.3, the
+      # missing agent credential archive). Mirror the on-box agent-backend logic
+      # so a misconfiguration fails here in seconds.
+      - name: Preflight Windows e2e box prerequisites
+        shell: bash
+        run: |
+          # Not 'set -e': this is a best-effort early check. If the runner's role
+          # cannot read Parameter Store (the box uses its own role), we must fail
+          # OPEN — skip with a warning, never block the release on the preflight's
+          # own permission gap.
+          set -uo pipefail
+          prefix="${WINDOWS_E2E_SECRET_PARAMETER_PREFIX%/}"
+          required=(
+            SEREN_E2E_EMAIL SEREN_E2E_PASSWORD
+            SEREN_E2E_HISTORY_PROJECT_ID SEREN_E2E_HISTORY_BRANCH_ID SEREN_E2E_HISTORY_DATABASE_NAME
+            SEREN_E2E_GITHUB_USERNAME SEREN_E2E_GITHUB_PASSWORD SEREN_E2E_GITHUB_PAT SEREN_E2E_GITHUB_TOTP_SECRET
+          )
+          agent=(
+            SEREN_E2E_AGENT_CREDENTIALS_REQUIRED
+            SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64
+            SEREN_E2E_AGENT_USE_BEDROCK SEREN_E2E_AGENT_MODEL
+          )
+          names=()
+          for n in "${required[@]}" "${agent[@]}"; do names+=("$prefix/$n"); done
+          json="$(aws ssm get-parameters --with-decryption --names "${names[@]}" --output json 2>/dev/null)"
+          if [ -z "$json" ]; then
+            echo "::warning::Could not query SSM Parameter Store for the e2e preflight (permissions or transport); skipping."
+            exit 0
+          fi
+          present() { printf '%s' "$json" | jq -e --arg n "$prefix/$1" '.Parameters[]|select(.Name==$n)' >/dev/null 2>&1; }
+          val()     { printf '%s' "$json" | jq -r  --arg n "$prefix/$1" '(.Parameters[]|select(.Name==$n)|.Value) // ""'; }
+          is_truthy() {
+            case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+              1|true|yes|on) return 0 ;; *) return 1 ;;
+            esac
+          }
+          fail=()
+          for n in "${required[@]}"; do present "$n" || fail+=("$n"); done
+          # Agent backend: a credentialed run needs an archive; a Bedrock run does
+          # not. Both flags default to true when unset, matching the on-box harness.
+          creds_required="$(val SEREN_E2E_AGENT_CREDENTIALS_REQUIRED)"
+          if is_truthy "${creds_required:-1}"; then
+            if ! present SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI && ! present SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64; then
+              fail+=("agent credential archive (SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI or _B64) - credentials are required")
+            fi
+          else
+            use_bedrock="$(val SEREN_E2E_AGENT_USE_BEDROCK)"
+            if is_truthy "${use_bedrock:-1}" && ! present SEREN_E2E_AGENT_MODEL; then
+              fail+=("SEREN_E2E_AGENT_MODEL - the Bedrock backend needs a model id")
+            fi
+          fi
+          if [ "${#fail[@]}" -gt 0 ]; then
+            printf '::error::Windows e2e box prerequisite(s) missing under %s: %s\n' "$prefix" "${fail[*]}"
+            exit 1
+          fi
+          echo "Windows e2e box prerequisites present."
+
       # The e2e host is a shared box that other tooling stops to save cost.
       # SendCommand against a stopped instance fails with InvalidInstanceId
       # (v3.52.9, #2318) — start it if needed and wait for the SSM agent to
@@ -1159,7 +1218,15 @@ jobs:
             `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows-e2e-task-user.ps1 -InstallerPath (Join-Path $work 'SerenDesktop-setup.exe') -WorkDir $work -SecretParameterPrefix ${psString(env.WINDOWS_E2E_SECRET_PARAMETER_PREFIX)} -ProbeTimeoutSeconds 1800 -TaskTimeoutSeconds 3600`,
             "if ($LASTEXITCODE -ne 0) { throw \"Windows app scheduled-task harness failed with exit code $LASTEXITCODE\" }",
             ];
-          process.stdout.write(JSON.stringify({ commands }, null, 2));
+          // executionTimeout bounds the whole on-box command. It must exceed the
+          // harness's own budget: the scheduled-task wait (TaskTimeoutSeconds + 60
+          // = 3660s) plus the pre-task per-step timeouts (corepack/pnpm/playwright
+          // ~2100s worst case). The default 3600s killed valid runs before the
+          // harness finished. The harness now fails fast on a dead task (#2431),
+          // so this large value is only a backstop, never the normal bound.
+          process.stdout.write(
+            JSON.stringify({ commands, executionTimeout: ["6000"] }, null, 2),
+          );
           NODE
           command_id="$(aws ssm send-command \
             --instance-ids "$WINDOWS_E2E_INSTANCE_ID" \
@@ -1170,7 +1237,9 @@ jobs:
             --output text)"
           echo "command_id=$command_id" >> "$GITHUB_OUTPUT"
           echo "SSM command: $command_id"
-          deadline=$((SECONDS + 3600))
+          # Poll past the SSM executionTimeout (6000s) so the on-box command, not
+          # the runner, decides the verdict and we capture its stdout/stderr.
+          deadline=$((SECONDS + 6300))
           while true; do
             status="$(aws ssm get-command-invocation \
               --command-id "$command_id" \

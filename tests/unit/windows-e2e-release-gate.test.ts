@@ -55,6 +55,24 @@ describe("Windows production e2e release gate", () => {
     );
   });
 
+  it("preflights box prerequisites before the SSM command and bounds the run above the on-box budget (#2432)", () => {
+    const job = workflowJob("windows-app-e2e");
+    // The fast preflight must exist and run before the SSM command is sent, so a
+    // missing parameter fails in seconds rather than after the full SSM budget.
+    expect(job).toContain("Preflight Windows e2e box prerequisites");
+    const preflightAt = job.indexOf("Preflight Windows e2e box prerequisites");
+    const sendAt = job.indexOf("aws ssm send-command");
+    expect(preflightAt).toBeGreaterThanOrEqual(0);
+    expect(sendAt).toBeGreaterThanOrEqual(0);
+    expect(preflightAt).toBeLessThan(sendAt);
+    // The SSM doc and the runner poll deadline must both exceed the on-box wait
+    // budget (TaskTimeoutSeconds + 60 = 3660s) plus pre-task overhead, so a valid
+    // slow run is not killed by the harness before it finishes.
+    expect(job).toContain('executionTimeout: ["6000"]');
+    expect(job).toContain("SECONDS + 6300");
+    expect(job).not.toContain("deadline=$((SECONDS + 3600))");
+  });
+
   it("requires real production credentials and a live history-sync tenant", () => {
     for (const required of [
       "SEREN_E2E_EMAIL",
