@@ -395,7 +395,11 @@ try {
     "SEREN_E2E_AGENT_PROMPT",
     "SEREN_E2E_AGENT_CREDENTIALS_REQUIRED",
     "SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI",
-    "SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64"
+    "SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64",
+    "SEREN_E2E_AGENT_MODEL",
+    "SEREN_E2E_AGENT_USE_BEDROCK",
+    "SEREN_E2E_AGENT_BEDROCK_REGION",
+    "SEREN_E2E_AGENT_SMALL_FAST_MODEL"
   )
   foreach (`$name in `$secretNames) {
     `$parameterName = "`$secretPrefix/`$name"
@@ -412,6 +416,27 @@ try {
   }
   if (`$allowMissingAgentCredentials) {
     [Environment]::SetEnvironmentVariable("SEREN_E2E_AGENT_CREDENTIALS_REQUIRED", "0", "Process")
+  }
+  # Bedrock-backed agent journeys (claude-code): authenticate via the EC2
+  # instance role instead of a stored login file. The runtime always forwards
+  # --model, so the spawned model id (SEREN_E2E_AGENT_MODEL, read by the probe)
+  # must be a Bedrock inference-profile id; ANTHROPIC_SMALL_FAST_MODEL covers the
+  # CLI's background small-model calls, which --model does not override.
+  if (Convert-EnvFlag (Get-EnvValue "SEREN_E2E_AGENT_USE_BEDROCK") `$true) {
+    `$bedrockRegion = Get-EnvValue "SEREN_E2E_AGENT_BEDROCK_REGION"
+    if ([string]::IsNullOrWhiteSpace(`$bedrockRegion)) { `$bedrockRegion = "us-east-1" }
+    `$bedrockModel = Get-EnvValue "SEREN_E2E_AGENT_MODEL"
+    if ([string]::IsNullOrWhiteSpace(`$bedrockModel)) { `$bedrockModel = "us.anthropic.claude-opus-4-6-v1" }
+    `$bedrockSmallModel = Get-EnvValue "SEREN_E2E_AGENT_SMALL_FAST_MODEL"
+    if ([string]::IsNullOrWhiteSpace(`$bedrockSmallModel)) { `$bedrockSmallModel = "us.anthropic.claude-haiku-4-5-20251001-v1:0" }
+    [Environment]::SetEnvironmentVariable("CLAUDE_CODE_USE_BEDROCK", "1", "Process")
+    [Environment]::SetEnvironmentVariable("AWS_REGION", `$bedrockRegion, "Process")
+    [Environment]::SetEnvironmentVariable("ANTHROPIC_MODEL", `$bedrockModel, "Process")
+    [Environment]::SetEnvironmentVariable("ANTHROPIC_SMALL_FAST_MODEL", `$bedrockSmallModel, "Process")
+    [Environment]::SetEnvironmentVariable("SEREN_E2E_AGENT_MODEL", `$bedrockModel, "Process")
+    # Bedrock uses the AWS credential chain; no Claude login file is required.
+    [Environment]::SetEnvironmentVariable("SEREN_E2E_AGENT_CREDENTIALS_REQUIRED", "0", "Process")
+    Write-TaskLog "Configured Bedrock agent backend: region=`$bedrockRegion model=`$bedrockModel small=`$bedrockSmallModel"
   }
   Import-AgentCredentialArchive
 

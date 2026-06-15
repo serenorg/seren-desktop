@@ -30,6 +30,10 @@ const AGENT_JOURNEYS = (
   .map((value) => value.trim())
   .filter(Boolean);
 const AGENT_CWD = process.env.SEREN_E2E_AGENT_CWD ?? process.cwd();
+// Pin the spawn model when set (e.g. a Bedrock inference-profile id for the
+// Bedrock-backed claude-code journey). The runtime always forwards --model, so
+// this is the only lever that reaches the CLI; unset means runtime default.
+const AGENT_MODEL = process.env.SEREN_E2E_AGENT_MODEL?.trim() || null;
 const PROMPT_TEXT =
   process.env.SEREN_E2E_AGENT_PROMPT ??
   "Reply with exactly SEREN_WINDOWS_E2E_OK and no other text.";
@@ -565,6 +569,7 @@ async function runSingleAgentJourney(ws, buffer, agentType) {
       searchEnabled: false,
       networkEnabled: true,
       timeoutSecs: 120,
+      initialModelId: AGENT_MODEL ?? undefined,
     });
     assert(session?.id, `${agentType} provider_spawn did not return a local session id`);
     // The prompt RPC resolves only when the turn completes (or rejects on an

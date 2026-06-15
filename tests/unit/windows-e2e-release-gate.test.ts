@@ -23,6 +23,10 @@ const taskUserRunner = readFileSync(
   "utf8",
 );
 const probe = readFileSync(join(root, "scripts/windows-e2e-app.mjs"), "utf8");
+const agentRegistry = readFileSync(
+  join(root, "bin/browser-local/agent-registry.mjs"),
+  "utf8",
+);
 
 function workflowJob(name: string): string {
   const start = releaseWorkflow.indexOf(`  ${name}:`);
@@ -152,6 +156,22 @@ describe("Windows production e2e release gate", () => {
     // The brittle LastRunTime-vs-startedAt break condition is gone.
     expect(taskUserRunner).not.toContain("LastRunTime -gt");
     expect(taskUserRunner).not.toContain("$startedAt");
+  });
+
+  it("authenticates the claude-code journey via Bedrock without a login file (#2433)", () => {
+    // Bedrock authenticates the Claude Code CLI through the AWS credential chain,
+    // so the auth gate must treat Claude as authenticated when
+    // CLAUDE_CODE_USE_BEDROCK is set, rather than requiring a login file.
+    expect(agentRegistry).toContain("CLAUDE_CODE_USE_BEDROCK");
+    expect(agentRegistry).toContain("isClaudeBedrockConfigured");
+    // The harness configures the Bedrock backend (region + models) and the probe
+    // forwards the model id as the spawn --model (the runtime always passes
+    // --model, which overrides ANTHROPIC_MODEL).
+    expect(taskUserRunner).toContain("CLAUDE_CODE_USE_BEDROCK");
+    expect(taskUserRunner).toContain("ANTHROPIC_SMALL_FAST_MODEL");
+    expect(taskUserRunner).toContain("SEREN_E2E_AGENT_USE_BEDROCK");
+    expect(probe).toContain("SEREN_E2E_AGENT_MODEL");
+    expect(probe).toContain("initialModelId");
   });
 
   it("keeps unsigned PR artifact mode explicit and forbidden for release runs", () => {
