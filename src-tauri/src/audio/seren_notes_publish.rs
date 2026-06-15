@@ -4,6 +4,7 @@
 use crate::auth::{authenticated_request, has_stored_credentials};
 use reqwest::Client;
 use serde_json::Value;
+use std::future::Future;
 use std::time::Duration;
 use tauri::AppHandle;
 
@@ -22,10 +23,15 @@ const RETRY_BACKOFFS: [Duration; 2] = [Duration::from_secs(2), Duration::from_se
 #[derive(Debug)]
 pub enum PublishError {
     NotAuthenticated,
-    /// The Gateway returned a 5xx (or the second attempt did). `status` is
-    /// the HTTP status code from the final attempt; `body` is the response
-    /// body, truncated by the caller before going into telemetry.
-    Server { status: u16, body: String },
+    /// The Gateway transport or upstream publisher returned a retryable
+    /// cold-start/server status, or an upstream publisher returned a terminal
+    /// error status inside the Gateway envelope. `status` is the real status
+    /// code surfaced to the UI/support pipeline; `body` is truncated by the
+    /// caller before going into telemetry.
+    Server {
+        status: u16,
+        body: String,
+    },
     /// Any other failure — network drop, malformed response, missing id.
     Other(String),
 }
@@ -127,16 +133,75 @@ fn is_uuid(s: &str) -> bool {
     true
 }
 
+fn publisher_proxy_envelope(value: &Value) -> Option<&serde_json::Map<String, Value>> {
+    let Value::Object(map) = value else {
+        return None;
+    };
+    if map.contains_key("status") && map.contains_key("body") {
+        return Some(map);
+    }
+    match map.get("data") {
+        Some(Value::Object(data)) if data.contains_key("status") && data.contains_key("body") => {
+            Some(data)
+        }
+        _ => None,
+    }
+}
+
+fn status_value_to_u16(value: &Value) -> Option<u16> {
+    if let Some(status) = value.as_u64() {
+        return u16::try_from(status).ok();
+    }
+    value.as_str()?.parse::<u16>().ok()
+}
+
+fn publisher_status(value: &Value) -> Option<u16> {
+    publisher_proxy_envelope(value)
+        .and_then(|envelope| envelope.get("status"))
+        .and_then(status_value_to_u16)
+}
+
+fn publisher_body_text(value: &Value, fallback: &str) -> String {
+    publisher_proxy_envelope(value)
+        .and_then(|envelope| envelope.get("body"))
+        .map(|body| {
+            body.as_str()
+                .map(String::from)
+                .unwrap_or_else(|| body.to_string())
+        })
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn is_retryable_publish_status(status: u16) -> bool {
+    status == 408 || (500..=599).contains(&status)
+}
+
+fn parse_publish_response_body(text: &str) -> Result<String, PublishError> {
+    let value: Value = serde_json::from_str(text)
+        .map_err(|err| PublishError::Other(format!("seren-notes response was not JSON: {err}")))?;
+    if let Some(status) = publisher_status(&value) {
+        if status >= 400 {
+            return Err(PublishError::Server {
+                status,
+                body: publisher_body_text(&value, text),
+            });
+        }
+    }
+    extract_note_id(&value)
+        .ok_or_else(|| PublishError::Other("seren-notes response missing note id".to_string()))
+}
+
 /// POST the assembled note to seren-notes via the Gateway publisher proxy
 /// using the user's existing access token. Short-circuits with a clear error
 /// when no credentials are stored — callers handle that case by skipping the
 /// publish silently and letting the UI render the "Login to SerenDB" CTA.
 ///
-/// On a 5xx the attempt is retried up to `RETRY_BACKOFFS.len()` times with
-/// widening backoff to absorb scale-to-zero cold starts. A 5xx surviving
-/// every retry returns `PublishError::Server`, which the caller surfaces to
-/// the UI (toast + republish CTA) and emits as a captureSupportError so the
-/// support pipeline opens a serenorg/seren-desktop bug ticket. #2343.
+/// On a transport/inner 408 or 5xx the attempt is retried up to
+/// `RETRY_BACKOFFS.len()` times with widening backoff to absorb scale-to-zero
+/// cold starts. A retryable status surviving every retry returns
+/// `PublishError::Server`, which the caller surfaces to the UI (toast +
+/// republish CTA) and emits as a captureSupportError so the support pipeline
+/// opens a serenorg/seren-desktop bug ticket. #2343.
 pub async fn publish_meeting_notes(
     app: &AppHandle,
     title: &str,
@@ -153,16 +218,30 @@ pub async fn publish_meeting_notes(
     })
     .to_string();
 
+    publish_with_retry(&RETRY_BACKOFFS, || attempt_publish(app, &client, &body)).await
+}
+
+async fn publish_with_retry<F, Fut>(
+    backoffs: &[Duration],
+    mut attempt_publish: F,
+) -> Result<String, PublishError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<String, PublishError>>,
+{
     let mut last_server: Option<(u16, String)> = None;
-    let attempts = RETRY_BACKOFFS.len() + 1;
+    let attempts = backoffs.len() + 1;
     for attempt in 0..attempts {
-        match attempt_publish(app, &client, &body).await {
+        match attempt_publish().await {
             Ok(id) => return Ok(id),
             Err(PublishError::Server { status, body: srv }) => {
+                if !is_retryable_publish_status(status) {
+                    return Err(PublishError::Server { status, body: srv });
+                }
                 last_server = Some((status, srv));
-                if let Some(delay) = RETRY_BACKOFFS.get(attempt).copied() {
+                if let Some(delay) = backoffs.get(attempt).copied() {
                     log::warn!(
-                        "[meeting] seren-notes publish 5xx={status} (attempt {}/{attempts}); retrying in {:?} (cold-start expected)",
+                        "[meeting] seren-notes publish retryable status={status} (attempt {}/{attempts}); retrying in {:?} (cold-start expected)",
                         attempt + 1,
                         delay,
                     );
@@ -196,7 +275,7 @@ async fn attempt_publish(
         .text()
         .await
         .map_err(|err| PublishError::Other(format!("seren-notes read body failed: {err}")))?;
-    if status.is_server_error() {
+    if status.as_u16() == 408 || status.is_server_error() {
         return Err(PublishError::Server {
             status: status.as_u16(),
             body: text,
@@ -207,16 +286,17 @@ async fn attempt_publish(
             "seren-notes publish returned {status}: {text}"
         )));
     }
-    let value: Value = serde_json::from_str(&text)
-        .map_err(|err| PublishError::Other(format!("seren-notes response was not JSON: {err}")))?;
-    extract_note_id(&value)
-        .ok_or_else(|| PublishError::Other("seren-notes response missing note id".to_string()))
+    parse_publish_response_body(&text)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     #[test]
     fn build_publish_content_contains_all_three_sections_in_order() {
@@ -311,6 +391,109 @@ mod tests {
     fn extract_note_id_returns_none_when_id_missing() {
         let value = json!({"data": {"title": "n", "content": "c"}});
         assert_eq!(extract_note_id(&value), None);
+    }
+
+    #[test]
+    fn parse_publish_response_body_returns_server_for_inner_408() {
+        let text = json!({
+            "data": {
+                "status": 408,
+                "body": {"error": "publisher cold start timeout"},
+                "cost": "0"
+            }
+        })
+        .to_string();
+        match parse_publish_response_body(&text) {
+            Err(PublishError::Server { status, body }) => {
+                assert_eq!(status, 408);
+                assert!(body.contains("publisher cold start timeout"));
+            }
+            other => panic!("expected inner 408 server error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_publish_response_body_returns_server_for_inner_503() {
+        let text = json!({
+            "data": {
+                "status": 503,
+                "body": "upstream unavailable",
+                "cost": "0"
+            }
+        })
+        .to_string();
+        match parse_publish_response_body(&text) {
+            Err(PublishError::Server { status, body }) => {
+                assert_eq!(status, 503);
+                assert_eq!(body, "upstream unavailable");
+            }
+            other => panic!("expected inner 503 server error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_publish_response_body_extracts_note_id_for_2xx_envelope() {
+        let text = json!({
+            "data": {
+                "status": 201,
+                "body": {"data": {"id": "276a4660-e16b-4934-97c6-a1ade2426653"}},
+                "cost": "0"
+            }
+        })
+        .to_string();
+        let note_id = parse_publish_response_body(&text).expect("2xx envelope note id");
+        assert_eq!(note_id, "276a4660-e16b-4934-97c6-a1ade2426653");
+    }
+
+    #[tokio::test]
+    async fn publish_with_retry_retries_full_budget_on_inner_408() {
+        let backoffs = [Duration::ZERO; RETRY_BACKOFFS.len()];
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let seen_attempts = attempts.clone();
+        let result = publish_with_retry(&backoffs, move || {
+            let seen_attempts = seen_attempts.clone();
+            async move {
+                seen_attempts.fetch_add(1, Ordering::SeqCst);
+                Err(PublishError::Server {
+                    status: 408,
+                    body: "publisher cold start timeout".to_string(),
+                })
+            }
+        })
+        .await;
+
+        match result {
+            Err(PublishError::Server { status, .. }) => assert_eq!(status, 408),
+            other => panic!("expected exhausted inner 408 retries, got {other:?}"),
+        }
+        assert_eq!(attempts.load(Ordering::SeqCst), RETRY_BACKOFFS.len() + 1);
+    }
+
+    #[tokio::test]
+    async fn publish_with_retry_does_not_retry_non_retryable_inner_4xx() {
+        let backoffs = [Duration::ZERO; RETRY_BACKOFFS.len()];
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let seen_attempts = attempts.clone();
+        let result = publish_with_retry(&backoffs, move || {
+            let seen_attempts = seen_attempts.clone();
+            async move {
+                seen_attempts.fetch_add(1, Ordering::SeqCst);
+                Err(PublishError::Server {
+                    status: 401,
+                    body: "unauthorized".to_string(),
+                })
+            }
+        })
+        .await;
+
+        match result {
+            Err(PublishError::Server { status, body }) => {
+                assert_eq!(status, 401);
+                assert_eq!(body, "unauthorized");
+            }
+            other => panic!("expected terminal inner 401, got {other:?}"),
+        }
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 
     // The captureSupportError telemetry payload echoes the publish error's
