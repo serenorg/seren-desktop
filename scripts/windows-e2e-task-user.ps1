@@ -161,7 +161,6 @@ $password = New-TemporaryPassword
 $taskScriptPath = Join-Path $resolvedWorkDir "windows-e2e-task.ps1"
 $taskLogPath = Join-Path $resolvedWorkDir "windows-e2e-task.log"
 $e2eInstallDir = Join-Path $env:SystemDrive "SerenDesktopE2E"
-$startedAt = Get-Date
 
 try {
   Write-Stage "Creating temporary Windows user $qualifiedUserName"
@@ -475,16 +474,31 @@ try {
   Start-ScheduledTask -TaskName $taskName
   $deadline = (Get-Date).AddSeconds($TaskTimeoutSeconds + 60)
   $lastStatus = ""
+  # LastTaskResult of a task that has not yet produced a run result. Once the
+  # action runs to completion this becomes the action's exit code, so it is the
+  # reliable "the task finished" signal. LastRunTime is not: it lags and can sit
+  # at its own sentinel after a fast run, which previously let the loop spin to
+  # the full deadline on a task that had already failed in seconds.
+  $taskNeverRanResult = 267011  # SCHED_S_TASK_HAS_NOT_RUN (0x00041303)
+  $observedRunning = $false
   do {
     Start-Sleep -Seconds 5
     $task = Get-ScheduledTask -TaskName $taskName
     $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName
+    if ($task.State -eq "Running") {
+      $observedRunning = $true
+    }
     $status = "state=$($task.State) lastResult=$($taskInfo.LastTaskResult)"
     if ($status -ne $lastStatus) {
       Write-Stage "Scheduled task $status"
       $lastStatus = $status
     }
-    if ($taskInfo.LastRunTime -gt $startedAt.AddSeconds(-10) -and $task.State -ne "Running") {
+    # Done once the task is no longer Running and we have evidence it actually
+    # ran — either we caught it in the Running state, or it has recorded a run
+    # result other than the never-ran sentinel.
+    $taskFinished = $task.State -ne "Running" -and
+      ($observedRunning -or $taskInfo.LastTaskResult -ne $taskNeverRanResult)
+    if ($taskFinished) {
       break
     }
   } while ((Get-Date) -lt $deadline)
