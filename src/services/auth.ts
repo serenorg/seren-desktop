@@ -35,7 +35,8 @@ interface RefreshAccessTokenOptions {
 type RefreshAccessTokenOutcome =
   | "success"
   | "terminal-failure"
-  | "transient-failure";
+  | "transient-failure"
+  | "unauthenticated";
 
 let refreshAccessTokenInFlight: Promise<RefreshAccessTokenOutcome> | null =
   null;
@@ -151,16 +152,32 @@ export async function refreshAccessToken(
 
   const outcome = await refreshAccessTokenInFlight;
   if (outcome === "terminal-failure") {
+    // A real session existed and the refresh token was rejected — escalate.
     clearAuthState();
     if (promptOnFailure) {
       requestSignInModal();
     }
+  } else if (outcome === "unauthenticated") {
+    // No refresh token means never-signed-in or already-logged-out, not
+    // session expiry. Clear any stale frontend state but NEVER raise the
+    // "session expired" modal — otherwise every signed-out Gateway 401 pops a
+    // spurious sign-in prompt. Mirrors the Rust-side guard in auth.rs (#1860).
+    clearAuthState();
   }
 
   return outcome === "success";
 }
 
 async function performRefreshAccessToken(): Promise<RefreshAccessTokenOutcome> {
+  // With no refresh token there is no session to refresh — this is
+  // never-signed-in or already-logged-out, not an expired session. Surface it
+  // distinctly so the caller never raises the "session expired" modal for a
+  // signed-out user (the Rust side already makes this distinction; see #1860).
+  const refreshToken = await getRefreshToken();
+  if (!refreshToken) {
+    return "unauthenticated";
+  }
+
   if (isTauriRuntime()) {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -170,11 +187,6 @@ async function performRefreshAccessToken(): Promise<RefreshAccessTokenOutcome> {
       // Network/IPC errors should not clear credentials or force a sign-in.
       return "transient-failure";
     }
-  }
-
-  const refreshToken = await getRefreshToken();
-  if (!refreshToken) {
-    return "terminal-failure";
   }
 
   try {

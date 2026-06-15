@@ -98,11 +98,23 @@ describe("#1639 — refreshAccessToken pairs clearAuthState + requestSignInModal
     );
   });
 
-  it("maps missing refresh token to terminal failure", () => {
+  it("maps a missing refresh token to unauthenticated, not session expiry (#2445)", () => {
     const noTokenIdx = authServiceSource.indexOf("if (!refreshToken)");
     expect(noTokenIdx).toBeGreaterThan(0);
     const blockAfter = authServiceSource.slice(noTokenIdx, noTokenIdx + 200);
-    expect(blockAfter).toContain('return "terminal-failure"');
+    expect(blockAfter).toContain('return "unauthenticated"');
+  });
+
+  it("never raises the sign-in modal for the unauthenticated outcome (#2445)", () => {
+    const refreshFnIdx = authServiceSource.indexOf(
+      "async function refreshAccessToken",
+    );
+    const fnBody = authServiceSource.slice(refreshFnIdx, refreshFnIdx + 1300);
+    const unauthIdx = fnBody.indexOf('outcome === "unauthenticated"');
+    expect(unauthIdx).toBeGreaterThan(0);
+    const unauthBlock = fnBody.slice(unauthIdx, unauthIdx + 400);
+    expect(unauthBlock).toContain("clearAuthState()");
+    expect(unauthBlock).not.toContain("requestSignInModal()");
   });
 
   it("maps 401 from refresh endpoint to terminal failure", () => {

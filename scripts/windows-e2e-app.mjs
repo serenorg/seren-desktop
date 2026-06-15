@@ -146,19 +146,39 @@ async function connectToApp() {
   return { browser, page, browserErrors };
 }
 
+// The app exposes the same "Sign In" text/labels on three surfaces: the
+// titlebar button, the account slide-panel form, and the session-expired
+// modal form (z-1000, rendered last). Global `getByLabel`/`.last()` selectors
+// race across all three, so bind every interaction to a single form (#2445).
+async function dismissSessionExpiredModal(page) {
+  const dialog = page.locator('[role="dialog"][aria-modal="true"]');
+  if (await dialog.isVisible().catch(() => false)) {
+    await dialog
+      .getByRole("button", { name: /^Dismiss$/ })
+      .click({ timeout: 5_000 })
+      .catch(() => {});
+  }
+}
+
 async function signIn(page) {
   await tauriInvoke(page, "clear_token").catch(() => {});
   await tauriInvoke(page, "clear_refresh_token").catch(() => {});
 
+  // A signed-out session must not surface the "session expired" modal (#2445);
+  // dismiss it if a prior build still does so the panel form is the only one.
+  await dismissSessionExpiredModal(page);
+
   const emailInput = page.getByLabel("Email");
-  if (!(await emailInput.isVisible({ timeout: 5_000 }).catch(() => false))) {
+  if (!(await emailInput.isVisible().catch(() => false))) {
     const signInButton = page.getByRole("button", { name: /^Sign In$/ }).first();
     await signInButton.click({ timeout: 10_000 });
   }
 
-  await page.getByLabel("Email").fill(EMAIL);
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: /^Sign In$/ }).last().click();
+  // Scope to the one sign-in form so the submit is unambiguous.
+  const form = page.locator("form").filter({ has: page.getByLabel("Email") });
+  await form.getByLabel("Email").fill(EMAIL);
+  await form.getByLabel("Password").fill(PASSWORD);
+  await form.getByRole("button", { name: /^Sign In$/ }).click();
 
   const token = await waitUntil(
     "stored production auth token",

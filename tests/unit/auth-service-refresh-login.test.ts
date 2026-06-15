@@ -101,6 +101,7 @@ describe("auth service refresh during login validation", () => {
 
   it("shares concurrent Tauri refresh calls through one backend invoke", async () => {
     mocks.isTauriRuntime.mockReturnValue(true);
+    mocks.getRefreshToken.mockResolvedValue("valid-refresh-token");
     const refresh = deferred<boolean>();
     mocks.invoke.mockReturnValue(refresh.promise);
 
@@ -121,9 +122,67 @@ describe("auth service refresh during login validation", () => {
     refresh.resolve(true);
 
     await expect(Promise.all(callers)).resolves.toEqual([true, true, true]);
-    expect(mocks.getRefreshToken).not.toHaveBeenCalled();
+    // The token-presence gate runs once for the deduped in-flight refresh.
+    expect(mocks.getRefreshToken).toHaveBeenCalledTimes(1);
     expect(mocks.refreshToken).not.toHaveBeenCalled();
     expect(mocks.clearAuthState).not.toHaveBeenCalled();
+    expect(mocks.requestSignInModal).not.toHaveBeenCalled();
+  });
+
+  it("never raises the sign-in modal for a signed-out user (Tauri, no refresh token)", async () => {
+    mocks.isTauriRuntime.mockReturnValue(true);
+    mocks.getRefreshToken.mockResolvedValue(null);
+
+    const { refreshAccessToken } = await import("@/services/auth");
+
+    await expect(refreshAccessToken()).resolves.toBe(false);
+
+    // No session to refresh: the backend is never invoked and the
+    // "session expired" modal must stay closed.
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(mocks.requestSignInModal).not.toHaveBeenCalled();
+    expect(mocks.clearAuthState).toHaveBeenCalledTimes(1);
+  });
+
+  it("never raises the sign-in modal for a signed-out user (browser, no refresh token)", async () => {
+    mocks.isTauriRuntime.mockReturnValue(false);
+    mocks.getRefreshToken.mockResolvedValue(null);
+
+    const { refreshAccessToken } = await import("@/services/auth");
+
+    await expect(refreshAccessToken()).resolves.toBe(false);
+
+    expect(mocks.refreshToken).not.toHaveBeenCalled();
+    expect(mocks.requestSignInModal).not.toHaveBeenCalled();
+    expect(mocks.clearAuthState).toHaveBeenCalledTimes(1);
+  });
+
+  it("raises the sign-in modal when a present refresh token is rejected (genuine expiry)", async () => {
+    mocks.isTauriRuntime.mockReturnValue(true);
+    mocks.getRefreshToken.mockResolvedValue("expired-refresh-token");
+    mocks.invoke.mockResolvedValue(false);
+
+    const { refreshAccessToken } = await import("@/services/auth");
+
+    await expect(refreshAccessToken()).resolves.toBe(false);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("refresh_session");
+    expect(mocks.clearAuthState).toHaveBeenCalledTimes(1);
+    expect(mocks.requestSignInModal).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not raise the modal on genuine expiry when prompting is disabled", async () => {
+    mocks.isTauriRuntime.mockReturnValue(true);
+    mocks.getRefreshToken.mockResolvedValue("expired-refresh-token");
+    mocks.invoke.mockResolvedValue(false);
+
+    const { refreshAccessToken } = await import("@/services/auth");
+
+    await expect(
+      refreshAccessToken({ promptOnFailure: false }),
+    ).resolves.toBe(false);
+
+    expect(mocks.clearAuthState).toHaveBeenCalledTimes(1);
     expect(mocks.requestSignInModal).not.toHaveBeenCalled();
   });
 });
