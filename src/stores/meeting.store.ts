@@ -3,7 +3,11 @@
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createStore } from "solid-js/store";
-import { formatTime } from "@/lib/meeting-format";
+import {
+  formatTime,
+  isMeetingProcessingStatus,
+  isMeetingReadyStatus,
+} from "@/lib/meeting-format";
 import { captureSupportError } from "@/lib/support/hook";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import {
@@ -56,6 +60,8 @@ interface MeetingState {
    * honors the gate, not just the panel button.
    */
   primingRequest: Meeting | null;
+  /** Most recent meeting that became reviewable while the user was elsewhere. */
+  reviewReadyMeetingId: string | null;
 }
 
 const [meetingState, setMeetingState] = createStore<MeetingState>({
@@ -68,6 +74,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   autoDetectSuggested: false,
   autoDetectSourceApp: null,
   primingRequest: null,
+  reviewReadyMeetingId: null,
 });
 
 let transcriptUnlisten: UnlistenFn | null = null;
@@ -240,6 +247,21 @@ function appendLiveSegment(segment: TranscriptSegment): void {
   });
 }
 
+function trackReadyTransition(next: Meeting): void {
+  const previous = meetingState.meetings.find(
+    (meeting) => meeting.id === next.id,
+  );
+  if (isMeetingReadyStatus(next.status)) {
+    if (previous && !isMeetingReadyStatus(previous.status)) {
+      setMeetingState("reviewReadyMeetingId", next.id);
+    }
+    return;
+  }
+  if (meetingState.reviewReadyMeetingId === next.id) {
+    setMeetingState("reviewReadyMeetingId", null);
+  }
+}
+
 async function startMeetingEventListeners(): Promise<void> {
   stopMeetingEventListeners();
   if (!isTauriRuntime()) return;
@@ -255,6 +277,7 @@ async function startMeetingEventListeners(): Promise<void> {
   );
 
   statusUnlisten = await listen<Meeting>("meeting://status", (event) => {
+    trackReadyTransition(event.payload);
     setMeetingState("meetings", (meetings) => {
       const next = meetings.some((meeting) => meeting.id === event.payload.id)
         ? meetings.map((meeting) =>
@@ -447,7 +470,7 @@ async function cancelPriming(): Promise<void> {
 // At startup, backend capture may still be active even though the renderer
 // reloaded. Reattach to that live capture; fail only rows whose backend registry
 // is gone or whose post-capture processing cannot survive restart.
-const STALE_STATUSES = new Set([
+const STALE_STATUSES = new Set<Meeting["status"]>([
   "pending_capture",
   "capturing",
   "transcribing",
@@ -479,6 +502,26 @@ async function reconcileStaleCaptures(): Promise<void> {
         }
       }
       changed = true;
+      if (isMeetingProcessingStatus(meeting.status)) {
+        if (meeting.notesMarkdown?.trim()) {
+          await updateMeetingStatus(meeting.id, "notes_ready", null).catch(
+            () => {},
+          );
+          continue;
+        }
+        const transcript = await getMeetingTranscriptText(meeting.id).catch(
+          () => "",
+        );
+        if (transcript.trim()) {
+          await updateMeetingStatus(
+            meeting.id,
+            "transcript_ready",
+            null,
+            "Seren restarted before meeting notes finished. Your transcript is ready to view.",
+          ).catch(() => {});
+          continue;
+        }
+      }
       await updateMeetingStatus(
         meeting.id,
         "failed",
@@ -903,6 +946,15 @@ function resetAutoDetectDismissal(): void {
   autoDetectDismissed = false;
 }
 
+function acknowledgeReviewReady(meetingId?: string): void {
+  if (
+    meetingId === undefined ||
+    meetingState.reviewReadyMeetingId === meetingId
+  ) {
+    setMeetingState("reviewReadyMeetingId", null);
+  }
+}
+
 export const meetingStore = {
   get state(): MeetingState {
     return meetingState;
@@ -931,4 +983,5 @@ export const meetingStore = {
   acceptAutoDetect,
   dismissAutoDetect,
   resetAutoDetectDismissal,
+  acknowledgeReviewReady,
 };

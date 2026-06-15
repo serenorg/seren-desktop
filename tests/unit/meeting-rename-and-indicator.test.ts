@@ -63,3 +63,28 @@ describe("Titlebar recording indicator when the drawer is closed (#2335)", () =>
     expect(source("src/styles.css")).toContain("meeting-recording-glow");
   });
 });
+
+describe("Meeting generation and ready indicators (#2439)", () => {
+  it("drives the titlebar through recording, processing, and ready states", () => {
+    const titlebar = source("src/components/layout/Titlebar.tsx");
+    const appShell = source("src/components/layout/AppShell.tsx");
+
+    expect(titlebar).toContain("meetingProcessing");
+    expect(titlebar).toContain("meetingReady");
+    expect(titlebar).toContain("Generating meeting notes");
+    expect(titlebar).toContain("Transcript ready to view");
+    expect(appShell).toContain("meetingProcessing={meetingProcessing()}");
+    expect(appShell).toContain("meetingReady={meetingReady()}");
+  });
+
+  it("surfaces generation and ready states inside the Meetings drawer", () => {
+    const panel = source("src/components/meeting/MeetingPanel.tsx");
+    const detail = source("src/components/meeting/MeetingDetail.tsx");
+
+    expect(panel).toContain("activeProcessing");
+    expect(panel).toContain("reviewReadyMeeting");
+    expect(panel).toContain("meetingProcessingLabel");
+    expect(detail).toContain("meetingReadyLabel");
+    expect(detail).toContain("Generating notes from the saved transcript.");
+  });
+});

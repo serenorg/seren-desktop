@@ -44,6 +44,7 @@ import { PublishSkillModal } from "@/components/sidebar/PublishSkillModal";
 import { PublishVersionModal } from "@/components/sidebar/PublishVersionModal";
 import { SkillsExplorer } from "@/components/sidebar/SkillsExplorer";
 import { AgentTasksPanel } from "@/components/tasks/AgentTasksPanel";
+import { isMeetingProcessingStatus } from "@/lib/meeting-format";
 import { shortcuts } from "@/lib/shortcuts";
 import type { InstalledSkill } from "@/lib/skills";
 import {
@@ -645,6 +646,11 @@ export const AppShell: Component<AppShellProps> = (props) => {
     meetingStore.state.meetings.some(
       (meeting) => meeting.status === "capturing",
     );
+  const meetingProcessing = () =>
+    meetingStore.state.meetings.some((meeting) =>
+      isMeetingProcessingStatus(meeting.status),
+    );
+  const meetingReady = () => meetingStore.state.reviewReadyMeetingId !== null;
 
   return (
     <div class="flex flex-col h-screen bg-background text-foreground">
@@ -654,6 +660,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
         onToggleSkills={handleToggleSkills}
         onToggleSettings={handleToggleSettings}
         meetingRecording={meetingRecording()}
+        meetingProcessing={meetingProcessing()}
+        meetingReady={meetingReady()}
         recordPromptVisible={recordPromptVisible()}
         recordPromptSourceApp={meetingStore.state.autoDetectSourceApp}
         onRecordConversation={() => void meetingStore.acceptAutoDetect()}

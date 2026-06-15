@@ -74,10 +74,34 @@ export function meetingTitle(meeting: Meeting): string {
 export const STATUS_LABELS: Record<Meeting["status"], string> = {
   pending_capture: "Starting",
   capturing: "Capturing",
-  transcribing: "Transcribing",
+  transcribing: "Generating notes",
   transcript_ready: "Transcript ready",
   notes_ready: "Notes ready",
   agent_running: "Agent running",
   done: "Done",
   failed: "Failed",
 };
+
+export function isMeetingProcessingStatus(status: Meeting["status"]): boolean {
+  return status === "transcribing" || status === "agent_running";
+}
+
+export function isMeetingReadyStatus(status: Meeting["status"]): boolean {
+  return (
+    status === "transcript_ready" ||
+    status === "notes_ready" ||
+    status === "done"
+  );
+}
+
+export function meetingProcessingLabel(status: Meeting["status"]): string {
+  return status === "agent_running"
+    ? "Routing transcript through skill"
+    : "Generating notes from transcript";
+}
+
+export function meetingReadyLabel(status: Meeting["status"]): string {
+  return status === "transcript_ready"
+    ? "Transcript ready to view"
+    : "Notes ready to view";
+}
