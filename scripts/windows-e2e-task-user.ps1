@@ -425,10 +425,15 @@ try {
   if (Convert-EnvFlag (Get-EnvValue "SEREN_E2E_AGENT_USE_BEDROCK") `$true) {
     `$bedrockRegion = Get-EnvValue "SEREN_E2E_AGENT_BEDROCK_REGION"
     if ([string]::IsNullOrWhiteSpace(`$bedrockRegion)) { `$bedrockRegion = "us-east-1" }
+    # Only the global Opus 4.6 inference profile carries Bedrock quota in this
+    # account (4.32B tokens/day); the us.* profiles and every Haiku/Sonnet
+    # profile are provisioned at 0 and throttle on the first call. Use the
+    # global profile for both the main and small-fast model - the e2e is one
+    # short prompt, so the small-fast model just needs a quota-bearing id.
     `$bedrockModel = Get-EnvValue "SEREN_E2E_AGENT_MODEL"
-    if ([string]::IsNullOrWhiteSpace(`$bedrockModel)) { `$bedrockModel = "us.anthropic.claude-opus-4-6-v1" }
+    if ([string]::IsNullOrWhiteSpace(`$bedrockModel)) { `$bedrockModel = "global.anthropic.claude-opus-4-6-v1" }
     `$bedrockSmallModel = Get-EnvValue "SEREN_E2E_AGENT_SMALL_FAST_MODEL"
-    if ([string]::IsNullOrWhiteSpace(`$bedrockSmallModel)) { `$bedrockSmallModel = "us.anthropic.claude-haiku-4-5-20251001-v1:0" }
+    if ([string]::IsNullOrWhiteSpace(`$bedrockSmallModel)) { `$bedrockSmallModel = "global.anthropic.claude-opus-4-6-v1" }
     [Environment]::SetEnvironmentVariable("CLAUDE_CODE_USE_BEDROCK", "1", "Process")
     [Environment]::SetEnvironmentVariable("AWS_REGION", `$bedrockRegion, "Process")
     [Environment]::SetEnvironmentVariable("ANTHROPIC_MODEL", `$bedrockModel, "Process")
