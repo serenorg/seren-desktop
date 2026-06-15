@@ -1072,11 +1072,14 @@ jobs:
       - name: Preflight Windows e2e box prerequisites
         shell: bash
         run: |
-          # Not 'set -e': this is a best-effort early check. If the runner's role
-          # cannot read Parameter Store (the box uses its own role), we must fail
-          # OPEN — skip with a warning, never block the release on the preflight's
-          # own permission gap.
+          # This is a best-effort early check. If the runner's role cannot read
+          # Parameter Store (the box uses its own role), we must fail OPEN — skip
+          # with a warning, never block the release on the preflight's own
+          # permission gap. GitHub's default 'shell: bash' runs with -e already
+          # set, so 'set +e' is required: otherwise a non-zero SSM probe (e.g.
+          # AccessDenied, exit 254) aborts the step before the fail-open below.
           set -uo pipefail
+          set +e
           prefix="${WINDOWS_E2E_SECRET_PARAMETER_PREFIX%/}"
           required=(
             SEREN_E2E_EMAIL SEREN_E2E_PASSWORD
