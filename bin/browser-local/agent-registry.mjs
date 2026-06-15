@@ -233,7 +233,21 @@ function hasAnyCredentialPath(paths) {
   });
 }
 
+function isClaudeBedrockConfigured() {
+  const value = process.env.CLAUDE_CODE_USE_BEDROCK;
+  if (value == null) {
+    return false;
+  }
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
 function hasClaudeCredentials() {
+  // Bedrock authenticates the Claude Code CLI through the AWS credential chain
+  // (instance role / AWS_* env), not a login file. When CLAUDE_CODE_USE_BEDROCK
+  // is set, treat Claude as authenticated rather than looking for a profile.
+  if (isClaudeBedrockConfigured()) {
+    return true;
+  }
   const home = os.homedir();
   const appData = process.env.APPDATA;
   return hasAnyCredentialPath([
