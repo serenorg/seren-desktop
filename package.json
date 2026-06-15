@@ -71,7 +71,7 @@
     "solid-js": "^1.9.13",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "4",
-    "thirdweb": "^5.120.0",
+    "thirdweb": "^5.120.1",
     "ws": "^8.21.0"
   },
   "devDependencies": {
