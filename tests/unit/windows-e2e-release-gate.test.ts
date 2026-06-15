@@ -140,6 +140,20 @@ describe("Windows production e2e release gate", () => {
     expect(taskUserRunner).toContain("1200");
   });
 
+  it("detects a finished scheduled task immediately instead of spinning to the deadline (#2431)", () => {
+    // A fast-failed task must surface in ~seconds, not burn the full SSM/runner
+    // budget. The completion check must not depend on Get-ScheduledTaskInfo
+    // LastRunTime updating (it lags and can sit at its sentinel after a quick
+    // run); it latches on the Running state and the never-ran result sentinel.
+    expect(taskUserRunner).toContain("267011");
+    expect(taskUserRunner).toContain("SCHED_S_TASK_HAS_NOT_RUN");
+    expect(taskUserRunner).toContain("observedRunning");
+    expect(taskUserRunner).toContain("taskFinished");
+    // The brittle LastRunTime-vs-startedAt break condition is gone.
+    expect(taskUserRunner).not.toContain("LastRunTime -gt");
+    expect(taskUserRunner).not.toContain("$startedAt");
+  });
+
   it("keeps unsigned PR artifact mode explicit and forbidden for release runs", () => {
     expect(runner).toContain("[switch]$AllowUnsignedPrArtifact");
     expect(runner).toContain("SEREN_E2E_UNSIGNED_PR_RUN");
