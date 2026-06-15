@@ -7,6 +7,7 @@ const services = vi.hoisted(() => ({
   updateMeetingStatus: vi.fn(async () => {}),
   listMeetings: vi.fn(async (): Promise<Meeting[]> => []),
   isMeetingCaptureActive: vi.fn(async () => false),
+  getMeetingTranscriptText: vi.fn(async (_id: string) => ""),
 }));
 
 vi.mock("@/lib/tauri-bridge", async (importOriginal) => ({
@@ -18,6 +19,7 @@ vi.mock("@/services/meetings", async (importOriginal) => ({
   updateMeetingStatus: services.updateMeetingStatus,
   listMeetings: services.listMeetings,
   isMeetingCaptureActive: services.isMeetingCaptureActive,
+  getMeetingTranscriptText: services.getMeetingTranscriptText,
 }));
 vi.mock("@/stores/settings.store", () => ({
   settingsStore: { get: () => false, set: vi.fn() },
@@ -50,8 +52,10 @@ describe("meetingStore priming cancel + reconcile (#2160)", () => {
     services.updateMeetingStatus.mockClear();
     services.listMeetings.mockReset();
     services.isMeetingCaptureActive.mockReset();
+    services.getMeetingTranscriptText.mockReset();
     services.listMeetings.mockResolvedValue([]);
     services.isMeetingCaptureActive.mockResolvedValue(false);
+    services.getMeetingTranscriptText.mockResolvedValue("");
   });
 
   it("cancelPriming marks the stashed pending meeting failed", async () => {
@@ -73,7 +77,7 @@ describe("meetingStore priming cancel + reconcile (#2160)", () => {
     expect(services.listMeetings).toHaveBeenCalled();
   });
 
-  it("reconcileStaleCaptures fails leftover mid-pipeline rows, leaves terminal ones", async () => {
+  it("reconcileStaleCaptures preserves usable transcripts and fails true zombies", async () => {
     services.listMeetings.mockResolvedValueOnce([
       meeting({ id: "pending", status: "pending_capture" }),
       meeting({ id: "cap", status: "capturing" }),
@@ -82,11 +86,15 @@ describe("meetingStore priming cancel + reconcile (#2160)", () => {
       meeting({ id: "done1", status: "done" }),
       meeting({ id: "notes", status: "notes_ready" }),
     ]);
+    services.getMeetingTranscriptText.mockImplementation(async (id: string) =>
+      id === "trans" ? "saved transcript" : "",
+    );
 
     await meetingStore.reconcileStaleCaptures();
 
-    // Fail every mid-pipeline zombie, with no ended_at so a captured row keeps
-    // its capture-end time (#2174).
+    // Fail true mid-pipeline zombies, with no ended_at so a captured row keeps
+    // its capture-end time (#2174). A stopped meeting with transcript text is
+    // reviewable even if notes generation was interrupted (#2440).
     expect(services.isMeetingCaptureActive).toHaveBeenCalledWith("cap");
     expect(services.updateMeetingStatus).toHaveBeenCalledWith(
       "cap",
@@ -94,7 +102,7 @@ describe("meetingStore priming cancel + reconcile (#2160)", () => {
       null,
       expect.stringContaining("without an active backend capture"),
     );
-    for (const id of ["pending", "trans", "agent"]) {
+    for (const id of ["pending", "agent"]) {
       expect(services.updateMeetingStatus).toHaveBeenCalledWith(
         id,
         "failed",
@@ -102,6 +110,12 @@ describe("meetingStore priming cancel + reconcile (#2160)", () => {
         expect.stringContaining("Seren restarted"),
       );
     }
+    expect(services.updateMeetingStatus).toHaveBeenCalledWith(
+      "trans",
+      "transcript_ready",
+      null,
+      expect.stringContaining("transcript is ready"),
+    );
     // Terminal/resting rows are left alone.
     for (const id of ["done1", "notes"]) {
       expect(services.updateMeetingStatus).not.toHaveBeenCalledWith(

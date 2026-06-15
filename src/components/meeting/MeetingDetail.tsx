@@ -14,6 +14,10 @@ import {
   formatDuration,
   formatMeetingDate,
   formatTime,
+  isMeetingProcessingStatus,
+  isMeetingReadyStatus,
+  meetingProcessingLabel,
+  meetingReadyLabel,
   meetingTitle,
   STATUS_LABELS,
 } from "@/lib/meeting-format";
@@ -165,6 +169,13 @@ export function MeetingDetail(props: MeetingDetailProps) {
   );
 
   const segments = () => meetingStore.state.liveSegments;
+  const processing = () => isMeetingProcessingStatus(props.meeting.status);
+  const ready = () => isMeetingReadyStatus(props.meeting.status);
+  const notesActionBusy = () =>
+    regenerating() ||
+    processing() ||
+    props.meeting.status === "pending_capture" ||
+    props.meeting.status === "capturing";
   const deleteDisabled = () =>
     props.meeting.status === "pending_capture" ||
     props.meeting.status === "capturing" ||
@@ -342,6 +353,18 @@ export function MeetingDetail(props: MeetingDetailProps) {
             </div>
           )}
         </Show>
+        <Show when={processing()}>
+          <div class="mt-3 flex items-center gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-[12px] leading-5 text-warning">
+            <span class="h-2 w-2 rounded-full bg-warning animate-pulse" />
+            <span>{meetingProcessingLabel(props.meeting.status)}.</span>
+          </div>
+        </Show>
+        <Show when={!processing() && ready()}>
+          <div class="mt-3 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 p-3 text-[12px] leading-5 text-primary">
+            <span class="h-2 w-2 rounded-full bg-primary" />
+            <span>{meetingReadyLabel(props.meeting.status)}.</span>
+          </div>
+        </Show>
       </div>
 
       <div class="mb-4 flex items-center gap-2">
@@ -359,7 +382,7 @@ export function MeetingDetail(props: MeetingDetailProps) {
           type="button"
           class="h-7 px-2.5 rounded-md border border-primary/40 bg-primary/10 text-[12px] text-primary hover:bg-primary/15 disabled:opacity-60"
           onClick={regenerate}
-          disabled={regenerating() || !isTauriRuntime()}
+          disabled={notesActionBusy() || !isTauriRuntime()}
           title="Regenerate notes with the selected template"
         >
           {regenerating() ? "Regenerating…" : "Regenerate"}
@@ -416,7 +439,16 @@ export function MeetingDetail(props: MeetingDetailProps) {
           when={props.meeting.notesMarkdown}
           fallback={
             <div class="min-h-[88px] rounded-md border border-border bg-surface-0/50 p-3 text-[13px] text-muted-foreground">
-              Notes will appear here after capture.
+              <Show
+                when={processing()}
+                fallback={
+                  props.meeting.status === "transcript_ready"
+                    ? "Transcript is ready below. Regenerate notes when you want a notes summary."
+                    : "Notes will appear here after capture."
+                }
+              >
+                Generating notes from the saved transcript.
+              </Show>
             </div>
           }
         >
@@ -517,7 +549,9 @@ export function MeetingDetail(props: MeetingDetailProps) {
           when={segments().length > 0}
           fallback={
             <div class="rounded-md border border-border bg-surface-0/50 p-3 text-[13px] text-muted-foreground">
-              No transcript yet.
+              {processing()
+                ? "Transcript chunks will appear here as they finish."
+                : "No transcript yet."}
             </div>
           }
         >

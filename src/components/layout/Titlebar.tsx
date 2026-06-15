@@ -15,6 +15,10 @@ interface TitlebarProps {
   onToggleSettings: () => void;
   /** A meeting capture is live; show the recording indicator on the button. */
   meetingRecording?: boolean;
+  /** A stopped meeting is generating transcript-derived notes or routing. */
+  meetingProcessing?: boolean;
+  /** A meeting finished processing and is ready for review. */
+  meetingReady?: boolean;
   recordPromptVisible?: boolean;
   recordPromptSourceApp?: string | null;
   onRecordConversation?: () => void;
@@ -66,6 +70,19 @@ function MeetingsIcon() {
 }
 
 export const Titlebar: Component<TitlebarProps> = (props) => {
+  const meetingButtonState = () => {
+    if (props.meetingRecording) return "Recording in progress";
+    if (props.meetingProcessing) return "Generating meeting notes";
+    if (props.meetingReady) return "Transcript ready to view";
+    return "Meetings";
+  };
+  const meetingButtonActive = () =>
+    props.meetingRecording || props.meetingProcessing || props.meetingReady;
+  const meetingButtonTitle = () =>
+    meetingButtonActive()
+      ? `${meetingButtonState()} — open Meetings`
+      : "Meetings";
+
   return (
     <div
       class="relative flex items-center justify-between h-[var(--titlebar-height,40px)] px-3 bg-surface-1 border-b border-border shrink-0 select-none"
@@ -162,23 +179,34 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
           class="relative flex items-center justify-center w-7 h-7 border-none rounded-md cursor-pointer transition-all duration-100 active:scale-95"
           classList={{
             "bg-transparent text-muted-foreground hover:bg-surface-2 hover:text-foreground":
-              !props.meetingRecording,
+              !meetingButtonActive(),
             "text-success bg-success/10 meeting-recording-glow":
               props.meetingRecording,
+            "text-warning bg-warning/10":
+              !props.meetingRecording && props.meetingProcessing,
+            "text-primary bg-primary/10":
+              !props.meetingRecording &&
+              !props.meetingProcessing &&
+              props.meetingReady,
           }}
           onClick={props.onToggleMeetings}
-          title={
-            props.meetingRecording
-              ? "Recording in progress — open Meetings to stop"
-              : "Meetings"
-          }
-          aria-label={
-            props.meetingRecording ? "Recording in progress" : "Meetings"
-          }
+          title={meetingButtonTitle()}
+          aria-label={meetingButtonState()}
         >
           <MeetingsIcon />
-          <Show when={props.meetingRecording}>
-            <span class="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-success ring-2 ring-surface-1 animate-pulse" />
+          <Show when={meetingButtonActive()}>
+            <span
+              class="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-surface-1"
+              classList={{
+                "bg-success animate-pulse": props.meetingRecording,
+                "bg-warning animate-pulse":
+                  !props.meetingRecording && props.meetingProcessing,
+                "bg-primary":
+                  !props.meetingRecording &&
+                  !props.meetingProcessing &&
+                  props.meetingReady,
+              }}
+            />
           </Show>
         </button>
 

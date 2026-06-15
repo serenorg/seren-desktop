@@ -9,6 +9,10 @@ import {
   formatDuration,
   formatMeetingDate,
   formatTime,
+  isMeetingProcessingStatus,
+  isMeetingReadyStatus,
+  meetingProcessingLabel,
+  meetingReadyLabel,
   meetingTitle,
   STATUS_LABELS,
 } from "@/lib/meeting-format";
@@ -70,6 +74,16 @@ export function MeetingPanel() {
       (meeting) => meeting.status === "capturing",
     ),
   );
+  const activeProcessing = createMemo(() =>
+    meetingStore.state.meetings.find((meeting) =>
+      isMeetingProcessingStatus(meeting.status),
+    ),
+  );
+  const reviewReadyMeeting = createMemo(() => {
+    const id = meetingStore.state.reviewReadyMeetingId;
+    if (!id) return undefined;
+    return meetingStore.state.meetings.find((meeting) => meeting.id === id);
+  });
 
   const activeMeeting = () => meetingStore.state.activeMeeting;
   const template = () => settingsStore.get("meetingTemplateId");
@@ -79,6 +93,10 @@ export function MeetingPanel() {
     return meeting
       ? `Delete "${meetingTitle(meeting)}"? Notes and transcript segments will be permanently removed.`
       : "";
+  };
+  const openMeeting = (meeting: Meeting) => {
+    meetingStore.acknowledgeReviewReady(meeting.id);
+    void meetingStore.setActiveMeeting(meeting);
   };
 
   // Create the meeting, then hand off to the store's gate. The store decides
@@ -239,6 +257,42 @@ export function MeetingPanel() {
             </div>
           )}
         </Show>
+        <Show when={activeProcessing()}>
+          {(meeting) => (
+            <div class="mt-3 flex items-center gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
+              <span class="h-2 w-2 rounded-full bg-warning animate-pulse" />
+              <span class="min-w-0 flex-1 truncate">
+                {meetingProcessingLabel(meeting().status)} for{" "}
+                {meetingTitle(meeting())}
+              </span>
+              <button
+                type="button"
+                class="shrink-0 text-warning/90 hover:text-warning hover:underline"
+                onClick={() => openMeeting(meeting())}
+              >
+                View transcript
+              </button>
+            </div>
+          )}
+        </Show>
+        <Show when={!activeProcessing() && reviewReadyMeeting()}>
+          {(meeting) => (
+            <div class="mt-3 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-[12px] text-primary">
+              <span class="h-2 w-2 rounded-full bg-primary" />
+              <span class="min-w-0 flex-1 truncate">
+                {meetingReadyLabel(meeting().status)} for{" "}
+                {meetingTitle(meeting())}
+              </span>
+              <button
+                type="button"
+                class="shrink-0 text-primary/90 hover:text-primary hover:underline"
+                onClick={() => openMeeting(meeting())}
+              >
+                Open
+              </button>
+            </div>
+          )}
+        </Show>
       </div>
 
       <Show when={meetingStore.state.error}>
@@ -282,9 +336,7 @@ export function MeetingPanel() {
                         "bg-surface-2 text-foreground": selected(),
                         "text-muted-foreground": !selected(),
                       }}
-                      onClick={() =>
-                        void meetingStore.setActiveMeeting(meeting)
-                      }
+                      onClick={() => openMeeting(meeting)}
                     >
                       <div class="text-[13px] font-medium truncate">
                         {meetingTitle(meeting)}
@@ -294,7 +346,23 @@ export function MeetingPanel() {
                           {formatMeetingDate(meeting.startedAt)} ·{" "}
                           {formatTime(meeting.startedAt)}
                         </span>
-                        <span>{STATUS_LABELS[meeting.status]}</span>
+                        <span
+                          class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium"
+                          classList={{
+                            "border-warning/30 bg-warning/10 text-warning":
+                              isMeetingProcessingStatus(meeting.status),
+                            "border-primary/30 bg-primary/10 text-primary":
+                              isMeetingReadyStatus(meeting.status),
+                            "border-destructive/30 bg-destructive/10 text-destructive":
+                              meeting.status === "failed",
+                            "border-border bg-surface-1 text-muted-foreground":
+                              !isMeetingProcessingStatus(meeting.status) &&
+                              !isMeetingReadyStatus(meeting.status) &&
+                              meeting.status !== "failed",
+                          }}
+                        >
+                          {STATUS_LABELS[meeting.status]}
+                        </span>
                       </div>
                     </button>
                   );
