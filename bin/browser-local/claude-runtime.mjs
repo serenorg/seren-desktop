@@ -55,7 +55,9 @@ function resolveClaudeBinary() {
     const appData = process.env.APPDATA ?? "";
     const nodeDir = path.dirname(process.execPath);
     const candidates = [
-      // Native installer (install.ps1) places binary here
+      // Native installer (install.ps1) places the binary here
+      path.join(home, ".local", "bin", "claude.exe"),
+      // Older native installer location
       path.join(home, ".claude", "bin", "claude.exe"),
       // Legacy/alternate location
       ...(appData ? [path.join(appData, "Claude", "claude.exe")] : []),
@@ -856,6 +858,28 @@ function sendControlRequest(session, request, timeoutMs = 30_000) {
       request,
     });
   });
+}
+
+// A brand-new user's first-ever claude invocation does one-time init (fresh
+// profile, fetching the dynamic command/plugin catalog over the network) that
+// runs several times slower than a warm run — measured up to ~9s on a cold
+// Windows host versus ~2s warm. The default per-request window was too tight
+// for that cold path and timed out the spawn (#2452/#2454), so the initialize
+// handshake gets a wider budget and one retry before the session is abandoned.
+const INITIALIZE_TIMEOUT_MS = 60_000;
+
+async function sendInitializeWithRetry(session) {
+  const request = { subtype: "initialize", hooks: null };
+  try {
+    return await sendControlRequest(session, request, INITIALIZE_TIMEOUT_MS);
+  } catch (error) {
+    console.error(
+      `${session.logPrefix ?? "[claude]"} initialize handshake timed out after ${
+        INITIALIZE_TIMEOUT_MS / 1000
+      }s; retrying once: ${error.message}`,
+    );
+    return sendControlRequest(session, request, INITIALIZE_TIMEOUT_MS);
+  }
 }
 
 function buildClaudeArgs({
@@ -1910,14 +1934,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     attachProcessListeners(emit, sessions, session, exitPromises);
 
     try {
-      const initResult = await sendControlRequest(
-        session,
-        {
-          subtype: "initialize",
-          hooks: null,
-        },
-        20_000,
-      );
+      const initResult = await sendInitializeWithRetry(session);
 
       session.availableModelRecords = augmentWithLegacyOpus(
         normalizeModelRecords(initResult),
