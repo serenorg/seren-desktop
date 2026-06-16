@@ -24,7 +24,7 @@ const DEFAULT_MCP_GATEWAY_URL =
 const LMSTUDIO_AGENT_TYPE = "lmstudio";
 const MAX_TOOL_ITERATIONS = 25;
 const TOOLS_UNSUPPORTED_NOTICE =
-  "_This model doesn't support tool calls, so local file access and Seren tools are off for this chat._\n\n";
+  "_This LM Studio model doesn't support tool calls, so local file access and Seren tools are off for this model._\n\n";
 
 const FILE_TOOLS = [
   {
@@ -481,6 +481,35 @@ export function normalizeOpenAiToolName(name) {
     .slice(0, 64) || "tool";
 }
 
+function toolIncompatibleModelIds(session) {
+  if (!(session.toolIncompatibleModelIds instanceof Set)) {
+    session.toolIncompatibleModelIds = new Set();
+  }
+  return session.toolIncompatibleModelIds;
+}
+
+function modelToolStateKey(modelId) {
+  return typeof modelId === "string" ? modelId.trim() : "";
+}
+
+export function isLmStudioModelToolIncompatible(
+  session,
+  modelId = session.currentModelId,
+) {
+  const key = modelToolStateKey(modelId);
+  return key.length > 0 && toolIncompatibleModelIds(session).has(key);
+}
+
+export function markLmStudioModelToolIncompatible(
+  session,
+  modelId = session.currentModelId,
+) {
+  const key = modelToolStateKey(modelId);
+  if (key.length > 0) {
+    toolIncompatibleModelIds(session).add(key);
+  }
+}
+
 function uniqueToolName(name, used) {
   const base = normalizeOpenAiToolName(name);
   let candidate = base;
@@ -771,13 +800,16 @@ async function streamOpenAiResponse({ session, body, signal, onContent }) {
  * Run one chat completion, degrading gracefully when the loaded model rejects
  * tool definitions. Tool-capable models keep full tool calling; models whose
  * chat template can't render tools (common for community local builds) drop
- * tools for the rest of the session and retry, so the user always gets a reply
- * instead of a silent empty response.
+ * tools for that model and retry, so the user always gets a reply instead of a
+ * silent empty response.
  */
 async function runChatCompletion({ session, tools, signal, onContent }) {
-  const useTools = tools.length > 0 && !session.toolsDisabled;
+  const requestModelId = session.currentModelId;
+  const useTools =
+    tools.length > 0 &&
+    !isLmStudioModelToolIncompatible(session, requestModelId);
   const baseBody = {
-    model: session.currentModelId,
+    model: requestModelId,
     messages: session.messages,
     stream: true,
   };
@@ -799,9 +831,9 @@ async function runChatCompletion({ session, tools, signal, onContent }) {
       throw error;
     }
 
-    session.toolsDisabled = true;
+    markLmStudioModelToolIncompatible(session, requestModelId);
     console.warn(
-      `${session.logPrefix} model "${session.currentModelId}" rejected tool definitions (${message}); retrying without tools for this session.`,
+      `${session.logPrefix} model "${requestModelId}" rejected tool definitions (${message}); retrying without tools for this model.`,
     );
     // One-time, honest notice so the user understands why tools are inactive.
     // Emitted to the UI only (not pushed into session.messages), so it never
@@ -1083,7 +1115,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
       pendingPermissions: new Map(),
       approvedForSession: new Set(),
       messages: [],
-      toolsDisabled: false,
+      toolIncompatibleModelIds: new Set(),
       loadedModelKey: null,
       loadedModelIdentifier: null,
       loadedBySession: false,

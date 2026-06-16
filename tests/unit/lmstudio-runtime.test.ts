@@ -8,10 +8,12 @@ import * as lmStudioRuntime from "../../bin/browser-local/lmstudio-runtime.mjs";
 
 const {
   buildLmsExecInvocation,
+  isLmStudioModelToolIncompatible,
   isLoopbackLmStudioBaseUrl,
   isToolIncompatibilityError,
   lmStudioHttpBaseUrl,
   lmStudioWsBaseUrl,
+  markLmStudioModelToolIncompatible,
   normalizeLmStudioBaseUrl,
   normalizeOpenAiToolName,
   normalizeToolCalls,
@@ -22,8 +24,22 @@ const {
     args: string[],
     platform?: NodeJS.Platform,
   ) => { command: string; args: string[] };
+  isLmStudioModelToolIncompatible: (
+    session: {
+      currentModelId?: string;
+      toolIncompatibleModelIds?: Set<string>;
+    },
+    modelId?: string,
+  ) => boolean;
   isLoopbackLmStudioBaseUrl: (value: string) => boolean;
   isToolIncompatibilityError: (message: unknown) => boolean;
+  markLmStudioModelToolIncompatible: (
+    session: {
+      currentModelId?: string;
+      toolIncompatibleModelIds?: Set<string>;
+    },
+    modelId?: string,
+  ) => void;
   reasoningTextFromDelta: (delta: unknown) => string;
   lmStudioHttpBaseUrl: (value: string) => string;
   lmStudioWsBaseUrl: (value: string) => string;
@@ -118,6 +134,31 @@ describe("LM Studio runtime helpers", () => {
     expect(isToolIncompatibilityError(null)).toBe(false);
   });
 
+  it("scopes tool incompatibility to the selected LM Studio model", () => {
+    const session = {
+      currentModelId: "gemma-4-12b-obliterated",
+      toolIncompatibleModelIds: new Set<string>(),
+    };
+
+    expect(isLmStudioModelToolIncompatible(session)).toBe(false);
+    markLmStudioModelToolIncompatible(session);
+    expect(isLmStudioModelToolIncompatible(session)).toBe(true);
+
+    session.currentModelId = "qwen/qwen3.5-9b";
+    expect(isLmStudioModelToolIncompatible(session)).toBe(false);
+    markLmStudioModelToolIncompatible(session);
+    expect(isLmStudioModelToolIncompatible(session)).toBe(true);
+
+    session.currentModelId = "mistral/tool-capable";
+    markLmStudioModelToolIncompatible(session, "gemma-4-12b-obliterated");
+    expect(isLmStudioModelToolIncompatible(session)).toBe(false);
+
+    session.currentModelId = "gemma-4-12b-obliterated";
+    expect(
+      isLmStudioModelToolIncompatible(session, "gemma-4-12b-obliterated"),
+    ).toBe(true);
+  });
+
   it("runs Windows lms command shims through cmd.exe", () => {
     expect(
       buildLmsExecInvocation("C:\\Users\\me\\.lmstudio\\bin\\lms.cmd", [
@@ -173,7 +214,13 @@ describe("LM Studio runtime wiring", () => {
     // Streamed `event: error` frames must throw, not be swallowed into an empty
     // completion; tool-incompatible models must drop tools and retry.
     expect(runtimeSource).toContain("throwIfErrorPayload");
-    expect(runtimeSource).toContain("session.toolsDisabled = true");
+    expect(runtimeSource).toContain(
+      "markLmStudioModelToolIncompatible(session, requestModelId)",
+    );
+    expect(runtimeSource).toContain(
+      "const requestModelId = session.currentModelId",
+    );
+    expect(runtimeSource).toContain("toolIncompatibleModelIds: new Set()");
     expect(runtimeSource).toContain("runChatCompletion");
   });
 
