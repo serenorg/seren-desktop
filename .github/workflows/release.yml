@@ -749,7 +749,13 @@ jobs:
           Remove-Item -Path "$($zip.FullName).sig" -Force -ErrorAction SilentlyContinue
           # Compress-Archive stores the file at the archive root by basename,
           # matching the layout Tauri's updater expects.
-          Compress-Archive -Path $setup.FullName -DestinationPath $zip.FullName -CompressionLevel Optimal -Force
+          # NoCompression (Stored, method 0) is REQUIRED: tauri-plugin-updater
+          # builds the Windows `zip` crate with default-features = false, so its
+          # extractor has no Deflate codec and can only read Stored entries.
+          # Tauri's bundler emits the .nsis.zip Stored for this reason; a Deflate
+          # re-pack (-CompressionLevel Optimal) ships an archive the updater
+          # rejects with "Compression method not supported" (#2479).
+          Compress-Archive -Path $setup.FullName -DestinationPath $zip.FullName -CompressionLevel NoCompression -Force
           Write-Host "Re-signing $($zip.Name) with the Tauri updater key..."
           pnpm tauri signer sign -k "$env:TAURI_SIGNING_PRIVATE_KEY" -p "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" $zip.FullName
           if (-not (Test-Path "$($zip.FullName).sig")) {
@@ -759,9 +765,10 @@ jobs:
           Write-Host "Re-packed and re-signed the .nsis.zip updater bundle."
 
       # Verify the re-packed updater bundle on the actual bytes the updater will
-      # deliver: extract it and confirm every .exe/.dll inside reports a Valid
-      # Authenticode signature. We have been bitten before by Tauri repacking
-      # artifacts and losing signatures, so this is a hard gate (#2236).
+      # deliver: (1) every entry is Stored-compressed, and (2) every .exe/.dll
+      # inside reports a Valid Authenticode signature. We have been bitten before
+      # by Tauri repacking artifacts and losing signatures (#2236) and by a
+      # Deflate re-pack the updater cannot extract (#2479), so this is a hard gate.
       - name: Verify .nsis.zip updater bundle signatures (Windows)
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         shell: pwsh
@@ -772,6 +779,52 @@ jobs:
             Write-Host "No .nsis.zip to verify — skipping."
             exit 0
           }
+
+          # Hard gate: the .nsis.zip MUST be Stored (compression method 0).
+          # tauri-plugin-updater builds the Windows `zip` crate with
+          # default-features = false, so its extractor has no Deflate codec and
+          # fails any compressed entry with "Compression method not supported" at
+          # install time — invisible until a user tries to upgrade (#2479). Walk
+          # the Zip central directory and assert every entry uses method 0.
+          $bytes = [System.IO.File]::ReadAllBytes($zip.FullName)
+          $eocd = -1
+          for ($i = $bytes.Length - 22; $i -ge 0; $i--) {
+            if ($bytes[$i] -eq 0x50 -and $bytes[$i + 1] -eq 0x4B -and $bytes[$i + 2] -eq 0x05 -and $bytes[$i + 3] -eq 0x06) {
+              $eocd = $i; break
+            }
+          }
+          if ($eocd -lt 0) {
+            Write-Host "::error::Could not locate End Of Central Directory in $($zip.Name); cannot verify compression method."
+            exit 1
+          }
+          $entryCount = [BitConverter]::ToUInt16($bytes, $eocd + 10)
+          $cdOffset = [BitConverter]::ToUInt32($bytes, $eocd + 16)
+          if ($cdOffset -eq [uint32]::MaxValue) {
+            Write-Host "::error::$($zip.Name) uses Zip64; the updater bundle is unexpectedly large — investigate before shipping."
+            exit 1
+          }
+          $p = [int]$cdOffset
+          $notStored = @()
+          for ($e = 0; $e -lt $entryCount; $e++) {
+            if (-not ($bytes[$p] -eq 0x50 -and $bytes[$p + 1] -eq 0x4B -and $bytes[$p + 2] -eq 0x01 -and $bytes[$p + 3] -eq 0x02)) {
+              Write-Host "::error::Malformed central directory entry $e in $($zip.Name)."
+              exit 1
+            }
+            $method = [BitConverter]::ToUInt16($bytes, $p + 10)
+            $nameLen = [BitConverter]::ToUInt16($bytes, $p + 28)
+            $extraLen = [BitConverter]::ToUInt16($bytes, $p + 30)
+            $commentLen = [BitConverter]::ToUInt16($bytes, $p + 32)
+            $name = [System.Text.Encoding]::ASCII.GetString($bytes, $p + 46, $nameLen)
+            if ($method -ne 0) { $notStored += "$name (method=$method)" }
+            $p += 46 + $nameLen + $extraLen + $commentLen
+          }
+          if ($notStored.Count -gt 0) {
+            Write-Host "::error::.nsis.zip updater bundle is NOT Stored-compressed; the Windows updater cannot extract it (#2479):"
+            $notStored | ForEach-Object { Write-Host "    $_" }
+            exit 1
+          }
+          Write-Host "Updater bundle compression verified: all $entryCount entries Stored (method 0)."
+
           $extractDir = Join-Path $env:RUNNER_TEMP "nsis-zip-verify"
           if (Test-Path $extractDir) { Remove-Item -Path $extractDir -Recurse -Force }
           Expand-Archive -Path $zip.FullName -DestinationPath $extractDir -Force
