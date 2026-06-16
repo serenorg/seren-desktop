@@ -1,12 +1,24 @@
 // ABOUTME: Critical tests for opening image files in the OS default viewer.
 // ABOUTME: Guards shared image extension support and default-app bridge delegation.
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { openImageInDefaultViewer } from "@/lib/files/service";
-import { isSupportedImageFile } from "@/lib/images/file-types";
-import { openPathWithDefaultApp } from "@/lib/tauri-bridge";
+import {
+  openFileInTab,
+  openImageInDefaultViewer,
+  readImageAsDataUrl,
+} from "@/lib/files/service";
+import {
+  imageMimeType,
+  isSupportedImageFile,
+} from "@/lib/images/file-types";
+import {
+  openPathWithDefaultApp,
+  readFile,
+  readFileBase64,
+} from "@/lib/tauri-bridge";
+import { closeAllTabs, tabsState } from "@/stores/tabs";
 
 vi.mock("@/lib/tauri-bridge", async () => {
   const actual = await vi.importActual<typeof import("@/lib/tauri-bridge")>(
@@ -15,7 +27,14 @@ vi.mock("@/lib/tauri-bridge", async () => {
   return {
     ...actual,
     openPathWithDefaultApp: vi.fn(),
+    readFile: vi.fn(),
+    readFileBase64: vi.fn(),
   };
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  closeAllTabs();
 });
 
 describe("image file opening", () => {
@@ -35,6 +54,53 @@ describe("image file opening", () => {
     expect(openPathWithDefaultApp).toHaveBeenCalledWith(
       "/Users/me/Pictures/photo.jpg",
     );
+  });
+
+  it("maps supported image extensions to data-URL MIME types", () => {
+    expect(imageMimeType("/Users/me/photo.PNG")).toBe("image/png");
+    expect(imageMimeType("/Users/me/photo.jpeg")).toBe("image/jpeg");
+    expect(imageMimeType("/Users/me/photo.jpe")).toBe("image/jpeg");
+    expect(imageMimeType("/Users/me/icon.svg")).toBe("image/svg+xml");
+    expect(imageMimeType("C:\\Users\\me\\live.HEIC")).toBe("image/heic");
+    expect(imageMimeType("/Users/me/notes/readme.md")).toBeNull();
+  });
+
+  it("builds a data URL for an image from its base64 bytes", async () => {
+    vi.mocked(readFileBase64).mockResolvedValue("QUJD");
+
+    const url = await readImageAsDataUrl("/Users/me/Pictures/photo.png");
+
+    expect(readFileBase64).toHaveBeenCalledWith("/Users/me/Pictures/photo.png");
+    expect(url).toBe("data:image/png;base64,QUJD");
+  });
+
+  it("opens image tabs without reading them as text (would throw on binary)", async () => {
+    // read_file does a UTF-8 read and throws on binary data; the fix must not
+    // call it, or the tab never opens and the click silently does nothing.
+    vi.mocked(readFile).mockRejectedValue(
+      new Error("stream did not contain valid UTF-8"),
+    );
+
+    await expect(
+      openFileInTab("/Users/me/Pictures/photo.png"),
+    ).resolves.toBeUndefined();
+
+    expect(readFile).not.toHaveBeenCalled();
+    expect(
+      tabsState.tabs.some((t) => t.filePath === "/Users/me/Pictures/photo.png"),
+    ).toBe(true);
+  });
+
+  it("reads non-image files as text content", async () => {
+    vi.mocked(readFile).mockResolvedValue("hello world");
+
+    await openFileInTab("/Users/me/notes/readme.md");
+
+    expect(readFile).toHaveBeenCalledWith("/Users/me/notes/readme.md");
+    const tab = tabsState.tabs.find(
+      (t) => t.filePath === "/Users/me/notes/readme.md",
+    );
+    expect(tab?.content).toBe("hello world");
   });
 
   it("registers the browser-local default-app opener fallback", () => {

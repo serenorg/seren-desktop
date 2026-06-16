@@ -5,6 +5,7 @@ import {
   isBrowserLocalRuntime,
   runtimeInvoke,
 } from "@/lib/browser-local-runtime";
+import { imageMimeType, isSupportedImageFile } from "@/lib/images/file-types";
 import { createSkillsSymlink } from "@/lib/skills/paths";
 import {
   createDirectory as createDirectoryBridge,
@@ -15,6 +16,7 @@ import {
   listDirectory as listDirectoryBridge,
   openPathWithDefaultApp as openPathWithDefaultAppBridge,
   pathExists as pathExistsBridge,
+  readFileBase64 as readFileBase64Bridge,
   readFile as readFileBridge,
   renamePath as renamePathBridge,
   revealInFileManager as revealInFileManagerBridge,
@@ -115,6 +117,17 @@ export async function revealInFileManager(path: string): Promise<void> {
  */
 export async function openImageInDefaultViewer(path: string): Promise<void> {
   return openPathWithDefaultAppBridge(path);
+}
+
+/**
+ * Read an image file as a `data:` URL for in-app preview. Reads the bytes via
+ * the base64 bridge (which resolves `~` and reads binary safely on every
+ * platform) so the viewer never depends on asset-protocol path resolution.
+ */
+export async function readImageAsDataUrl(path: string): Promise<string> {
+  const base64 = await readFileBase64Bridge(path);
+  const mime = imageMimeType(path) ?? "application/octet-stream";
+  return `data:${mime};base64,${base64}`;
 }
 
 async function openDialog(
@@ -268,6 +281,13 @@ export async function openFileInTab(
   // Non-greedy + end-anchor preserves Windows drive letters like C:\foo.md.
   const path = stripLineAnchor(rawPath);
   const cwd = (options.cwd ?? fileDirname(path)).replace(/\/+$/, "") || "/";
+  // Image files are rendered by ImageViewer, which loads their bytes itself.
+  // They are binary, so reading them as UTF-8 text here throws and the tab
+  // would never open — clicking an image link would silently do nothing.
+  if (isSupportedImageFile(path)) {
+    openTab(path, "", cwd);
+    return;
+  }
   const content = await readFile(path);
   openTab(path, content, cwd);
 }
