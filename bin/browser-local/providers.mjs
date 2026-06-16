@@ -8,12 +8,99 @@ import {
   createBrowserLocalAgentRegistry,
   resolveInstalledCodexBinary,
 } from "./agent-registry.mjs";
-import { createClaudeRuntime } from "./claude-runtime.mjs";
-import { createGeminiRuntime } from "./gemini-runtime.mjs";
-import { createLmStudioRuntime } from "./lmstudio-runtime.mjs";
 import { providerLogPrefix } from "./logging.mjs";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
-import { createPairedRuntime, PAIRED_AGENT_TYPE } from "./paired-runtime.mjs";
+
+// Agent runtimes are loaded in isolation (#2457). Each runtime module is
+// imported dynamically inside try/catch so that one agent failing to load — a
+// missing optional dependency, a broken native binding, a throwing module —
+// cannot crash the provider runtime or disable the other agents. A runtime that
+// fails to load or instantiate is replaced with an unavailable stub that owns
+// no sessions and throws a clear, per-agent error only when that agent is used.
+async function loadAgentRuntimeModule(label, importer) {
+  try {
+    return { module: await importer(), error: null };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`[provider-runtime] ${label} runtime failed to load: ${reason}`);
+    return { module: null, error: reason };
+  }
+}
+
+const claudeRuntimeModule = await loadAgentRuntimeModule(
+  "claude-code",
+  () => import("./claude-runtime.mjs"),
+);
+const geminiRuntimeModule = await loadAgentRuntimeModule(
+  "gemini",
+  () => import("./gemini-runtime.mjs"),
+);
+const lmStudioRuntimeModule = await loadAgentRuntimeModule(
+  "lmstudio",
+  () => import("./lmstudio-runtime.mjs"),
+);
+const pairedRuntimeModule = await loadAgentRuntimeModule(
+  "claude-codex",
+  () => import("./paired-runtime.mjs"),
+);
+
+// Needed for synchronous dispatch before the paired runtime is instantiated;
+// fall back to the known identifier if the module failed to load so dispatch
+// still recognizes the type and routes it to the unavailable stub.
+const PAIRED_AGENT_TYPE =
+  pairedRuntimeModule.module?.PAIRED_AGENT_TYPE ?? "claude-codex";
+
+export function createUnavailableRuntime(label, reason) {
+  const detail = reason ? `: ${reason}` : "";
+  const unavailable = async () => {
+    throw new Error(`The ${label} agent is unavailable${detail}`);
+  };
+  return {
+    // Sync predicates must never force a load: an unavailable runtime owns no
+    // sessions, so routing skips it and the other agents are unaffected.
+    hasSession: () => false,
+    interceptEmit: () => false,
+    listSessions: async () => [],
+    spawnSession: unavailable,
+    sendPrompt: unavailable,
+    cancelPrompt: unavailable,
+    terminateSession: unavailable,
+    setPermissionMode: unavailable,
+    respondToPermission: unavailable,
+    listRemoteSessions: unavailable,
+    setModel: unavailable,
+    setSessionModel: unavailable,
+    setConfigOption: unavailable,
+    updateSessionConfigOption: unavailable,
+    forkSession: unavailable,
+    buildSyntheticTranscript: unavailable,
+    testConnection: unavailable,
+    startServer: unavailable,
+    stopServer: unavailable,
+  };
+}
+
+function instantiateAgentRuntime(label, loaded, factoryName, args) {
+  if (!loaded.module) {
+    return createUnavailableRuntime(label, loaded.error);
+  }
+  const factory = loaded.module[factoryName];
+  if (typeof factory !== "function") {
+    return createUnavailableRuntime(
+      label,
+      `${factoryName} export missing from ${label} runtime`,
+    );
+  }
+  try {
+    return factory(args);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[provider-runtime] ${label} runtime failed to initialize: ${reason}`,
+    );
+    return createUnavailableRuntime(label, reason);
+  }
+}
 
 function isAuthError(message) {
   const lower = String(message).toLowerCase();
@@ -994,9 +1081,24 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
   };
   const codexLogPrefix = providerLogPrefix("codex", runtimeMode);
   const agentRegistry = createBrowserLocalAgentRegistry({ emit });
-  const claudeRuntime = createClaudeRuntime({ emit, runtimeMode });
-  const geminiRuntime = createGeminiRuntime({ emit, runtimeMode });
-  const lmStudioRuntime = createLmStudioRuntime({ emit, runtimeMode });
+  const claudeRuntime = instantiateAgentRuntime(
+    "claude-code",
+    claudeRuntimeModule,
+    "createClaudeRuntime",
+    { emit, runtimeMode },
+  );
+  const geminiRuntime = instantiateAgentRuntime(
+    "gemini",
+    geminiRuntimeModule,
+    "createGeminiRuntime",
+    { emit, runtimeMode },
+  );
+  const lmStudioRuntime = instantiateAgentRuntime(
+    "lmstudio",
+    lmStudioRuntimeModule,
+    "createLmStudioRuntime",
+    { emit, runtimeMode },
+  );
 
   async function withTemporaryCodexSession(cwd, callback) {
     const processHandle = spawnCodexProcess(cwd);
@@ -1668,19 +1770,24 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
   // Created last so the paired coordinator can drive the handler functions
   // above as its inner runtime (hoisted declarations). It receives the RAW
   // emit — its own events must not re-enter the interceptor.
-  pairedRuntime = createPairedRuntime({
-    emit: rawEmit,
-    inner: {
-      spawnSession,
-      sendPrompt,
-      cancelPrompt,
-      terminateSession,
-      setSessionModel,
-      updateSessionConfigOption,
-      setPermissionMode,
-      respondToPermission,
+  pairedRuntime = instantiateAgentRuntime(
+    "claude-codex",
+    pairedRuntimeModule,
+    "createPairedRuntime",
+    {
+      emit: rawEmit,
+      inner: {
+        spawnSession,
+        sendPrompt,
+        cancelPrompt,
+        terminateSession,
+        setSessionModel,
+        updateSessionConfigOption,
+        setPermissionMode,
+        respondToPermission,
+      },
     },
-  });
+  );
 
   return {
     spawnSession,

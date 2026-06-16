@@ -63,6 +63,11 @@ function main(): void {
     readFileSync(path.join(repoRoot, "package.json"), "utf8"),
   ) as { dependencies?: Record<string, string> };
   const wsVersion = rootPackageJson.dependencies?.ws ?? "^8.19.0";
+  // lmstudio-runtime.mjs statically imports @lmstudio/sdk at provider-runtime
+  // startup (provider-runtime.mjs -> providers.mjs -> lmstudio-runtime.mjs), so
+  // the package must be present in the bundle or the runtime exits before it
+  // becomes ready (#2456).
+  const lmstudioSdkVersion = rootPackageJson.dependencies?.["@lmstudio/sdk"] ?? "1.5.0";
 
   rmSync(destDir, { recursive: true, force: true });
   mkdirSync(destDir, { recursive: true });
@@ -84,6 +89,7 @@ function main(): void {
         version: "0.1.0",
         type: "module",
         dependencies: {
+          "@lmstudio/sdk": lmstudioSdkVersion,
           ws: wsVersion,
         },
       },
@@ -108,6 +114,7 @@ function main(): void {
       {
         builtAt: new Date().toISOString(),
         dependencies: {
+          "@lmstudio/sdk": lmstudioSdkVersion,
           ws: wsVersion,
         },
       },
