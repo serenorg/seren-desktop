@@ -15,6 +15,7 @@ const {
   normalizeLmStudioBaseUrl,
   normalizeOpenAiToolName,
   normalizeToolCalls,
+  reasoningTextFromDelta,
 } = lmStudioRuntime as {
   buildLmsExecInvocation: (
     command: string,
@@ -23,6 +24,7 @@ const {
   ) => { command: string; args: string[] };
   isLoopbackLmStudioBaseUrl: (value: string) => boolean;
   isToolIncompatibilityError: (message: unknown) => boolean;
+  reasoningTextFromDelta: (delta: unknown) => string;
   lmStudioHttpBaseUrl: (value: string) => string;
   lmStudioWsBaseUrl: (value: string) => string;
   normalizeLmStudioBaseUrl: (value: string) => string;
@@ -84,6 +86,18 @@ describe("LM Studio runtime helpers", () => {
       "read_file",
       "write_file",
     ]);
+  });
+
+  it("extracts reasoning-model thinking from streaming deltas", () => {
+    // Qwen3.5 / DeepSeek-R1 emit `reasoning_content`; some builds use `reasoning`.
+    expect(reasoningTextFromDelta({ reasoning_content: "thinking" })).toBe(
+      "thinking",
+    );
+    expect(reasoningTextFromDelta({ reasoning: "thinking" })).toBe("thinking");
+    // Non-reasoning deltas (plain content) yield no thinking text.
+    expect(reasoningTextFromDelta({ content: "hello" })).toBe("");
+    expect(reasoningTextFromDelta({})).toBe("");
+    expect(reasoningTextFromDelta(null)).toBe("");
   });
 
   it("detects tool-incompatibility failures and ignores unrelated errors", () => {
@@ -161,5 +175,10 @@ describe("LM Studio runtime wiring", () => {
     expect(runtimeSource).toContain("throwIfErrorPayload");
     expect(runtimeSource).toContain("session.toolsDisabled = true");
     expect(runtimeSource).toContain("runChatCompletion");
+  });
+
+  it("surfaces reasoning-model thinking as thought chunks", () => {
+    expect(runtimeSource).toContain("reasoningTextFromDelta");
+    expect(runtimeSource).toContain("isThought: true");
   });
 });
