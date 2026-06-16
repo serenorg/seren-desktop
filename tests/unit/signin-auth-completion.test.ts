@@ -21,6 +21,15 @@ describe("SignIn auth completion", () => {
     expect(source).toContain('setPhase("credentials")');
   });
 
+  it("surfaces raw Tauri string errors instead of only Error instances", () => {
+    const source = readSource("src/components/auth/SignIn.tsx");
+
+    expect(source).toContain('typeof err === "string"');
+    expect(source).toContain('authErrorMessage(err, "Social sign-in failed")');
+    expect(source).toContain('authErrorMessage(err, "Login failed")');
+    expect(source).toContain('authErrorMessage(err, "Sign-in setup failed")');
+  });
+
   it("main account sign-in waits for authStore activation before closing", () => {
     const appSource = readSource("src/App.tsx");
     const shellSource = readSource("src/components/layout/AppShell.tsx");

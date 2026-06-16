@@ -187,4 +187,55 @@ describe("social login", () => {
     expect(storeDefaultOrganizationIdMock).not.toHaveBeenCalled();
     expect(unlisten).toHaveBeenCalledTimes(1);
   });
+
+  it("times out abandoned browser flows and unregisters the callback listener", async () => {
+    const unlisten = vi.fn();
+    let resolveInvoke: (() => void) | undefined;
+    listenMock.mockResolvedValue(unlisten);
+    invokeMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveInvoke = resolve;
+        }),
+    );
+
+    const promise = startSocialLogin("google");
+    await waitForInvoke();
+
+    vi.useFakeTimers();
+    try {
+      resolveInvoke?.();
+      const assertion = expect(promise).rejects.toThrow(
+        "Social sign-in timed out. Close the browser tab and try again.",
+      );
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(appFetchMock).not.toHaveBeenCalled();
+    expect(storeTokenMock).not.toHaveBeenCalled();
+    expect(storeRefreshTokenMock).not.toHaveBeenCalled();
+    expect(storeDefaultOrganizationIdMock).not.toHaveBeenCalled();
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates native string failures and unregisters the callback listener", async () => {
+    const unlisten = vi.fn();
+    listenMock.mockResolvedValue(unlisten);
+    invokeMock.mockRejectedValue(
+      "Social login unexpectedly routed through console.serendb.com",
+    );
+
+    await expect(startSocialLogin("google")).rejects.toBe(
+      "Social login unexpectedly routed through console.serendb.com",
+    );
+
+    expect(appFetchMock).not.toHaveBeenCalled();
+    expect(storeTokenMock).not.toHaveBeenCalled();
+    expect(storeRefreshTokenMock).not.toHaveBeenCalled();
+    expect(storeDefaultOrganizationIdMock).not.toHaveBeenCalled();
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
 });
