@@ -57,7 +57,10 @@ interface SkillsExplorerProps {
 
 type Filter = "all" | "installed" | "needs-sync";
 
-const SKILL_CREATOR_SLUG = "skill-creator";
+// Catalog slugs are `${org}-${skillName}`, so the seren-org skill at
+// seren/skill-creator/SKILL.md is published as `seren-skill-creator`. The bare
+// folder name 404s against the gateway — keep the org prefix (seren-desktop#2486).
+const SKILL_CREATOR_SLUG = "seren-skill-creator";
 const SKILL_CREATOR_SOURCE_URL = `seren-skills:${SKILL_CREATOR_SLUG}`;
 
 const PlayIcon: Component = () => (
