@@ -29,6 +29,16 @@ interface SignInProps {
   onSuccess: () => Promise<void> | void;
 }
 
+// Tauri `invoke` rejects with the raw `Err` string payload, not an `Error`, so
+// surface string rejections too instead of collapsing every failure into the
+// generic fallback. Keeping the real cause visible is what makes social/login
+// failures diagnosable.
+function authErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "string" && err.trim()) return err;
+  return fallback;
+}
+
 export const SignIn: Component<SignInProps> = (props) => {
   const [email, setEmail] = createSignal("");
   const [password, setPassword] = createSignal("");
@@ -45,7 +55,7 @@ export const SignIn: Component<SignInProps> = (props) => {
     try {
       await props.onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign-in setup failed");
+      setError(authErrorMessage(err, "Sign-in setup failed"));
       setPhase("credentials");
     }
   };
@@ -57,7 +67,7 @@ export const SignIn: Component<SignInProps> = (props) => {
     try {
       await startSocialLogin(provider);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Social sign-in failed");
+      setError(authErrorMessage(err, "Social sign-in failed"));
       setPhase("credentials");
       return;
     }
@@ -84,7 +94,7 @@ export const SignIn: Component<SignInProps> = (props) => {
     try {
       await login(email(), password());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(authErrorMessage(err, "Login failed"));
       setPhase("credentials");
       return;
     }
