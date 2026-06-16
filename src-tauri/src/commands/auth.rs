@@ -7,6 +7,8 @@ use url::Url;
 
 const CLIENT_ID: &str = "seren-desktop";
 const REDIRECT_URI: &str = "http://127.0.0.1:8787/auth/callback";
+const CONSOLE_HOST: &str = "console.serendb.com";
+const CONSOLE_CLI_LOGIN_PATH: &str = "/login/cli";
 
 #[tauri::command]
 pub async fn start_social_login(
@@ -34,7 +36,7 @@ fn validate_authorize_url(auth_url: &str, provider: &str) -> Result<Url, String>
     if !is_secure {
         return Err("Social login URL must use HTTPS".to_string());
     }
-    if url.host_str() == Some("console.serendb.com") {
+    if url.host_str() == Some(CONSOLE_HOST) {
         return Err("Social login must not route through console.serendb.com".to_string());
     }
 
@@ -95,15 +97,106 @@ async fn resolve_provider_redirect(auth_url: &Url) -> Result<Option<String>, Str
         .and_then(|value| value.to_str().ok())
         .ok_or("Social login redirect missing Location header")?;
 
-    if location.contains("console.serendb.com") {
-        return Err("Social login unexpectedly routed through console.serendb.com".to_string());
-    }
+    Ok(Some(validate_provider_redirect(auth_url, location)?))
+}
 
+fn validate_provider_redirect(auth_url: &Url, location: &str) -> Result<String, String> {
     let location_url =
         Url::parse(location).map_err(|e| format!("Invalid social login redirect: {}", e))?;
     if location_url.scheme() != "https" {
         return Err("Unexpected social login redirect scheme".to_string());
     }
 
-    Ok(Some(location.to_string()))
+    if location_url.host_str() == Some(CONSOLE_HOST) {
+        validate_console_cli_redirect(auth_url, &location_url)?;
+    }
+
+    Ok(location.to_string())
+}
+
+fn validate_console_cli_redirect(auth_url: &Url, location_url: &Url) -> Result<(), String> {
+    if location_url.path() != CONSOLE_CLI_LOGIN_PATH {
+        return Err("Social login unexpectedly routed through console.serendb.com".to_string());
+    }
+
+    require_matching_query_param(auth_url, location_url, "state")?;
+    require_matching_query_param(auth_url, location_url, "redirect_uri")?;
+    require_matching_query_param(auth_url, location_url, "code_challenge")?;
+    require_matching_query_param(auth_url, location_url, "client_id")?;
+    Ok(())
+}
+
+fn require_matching_query_param(
+    source_url: &Url,
+    redirect_url: &Url,
+    key: &str,
+) -> Result<(), String> {
+    let source_value =
+        query_param(source_url, key).ok_or_else(|| format!("Social login URL missing {}", key))?;
+    let redirect_value = query_param(redirect_url, key)
+        .ok_or_else(|| format!("Social login redirect missing {}", key))?;
+
+    if redirect_value != source_value {
+        return Err(format!("Social login redirect {} mismatch", key));
+    }
+
+    Ok(())
+}
+
+fn query_param(url: &Url, key: &str) -> Option<String> {
+    url.query_pairs()
+        .find_map(|(name, value)| (name == key).then(|| value.into_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_authorize_url() -> Url {
+        validate_authorize_url(
+            "https://api.serendb.com/oauth2/authorize?client_id=seren-desktop&response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%3A8787%2Fauth%2Fcallback&state=audit-state&code_challenge=audit-challenge&code_challenge_method=S256&provider=google",
+            "google",
+        )
+        .expect("valid authorize URL")
+    }
+
+    #[test]
+    fn allows_trusted_console_cli_redirect_that_preserves_pkce_params() {
+        let auth_url = valid_authorize_url();
+        let redirect = "https://console.serendb.com/login/cli?state=audit-state&redirect_uri=http%3A%2F%2F127.0.0.1%3A8787%2Fauth%2Fcallback&code_challenge=audit-challenge&client_id=seren-desktop";
+
+        assert_eq!(
+            validate_provider_redirect(&auth_url, redirect).expect("trusted redirect"),
+            redirect
+        );
+    }
+
+    #[test]
+    fn rejects_console_redirects_outside_cli_login() {
+        let auth_url = valid_authorize_url();
+
+        let error = validate_provider_redirect(
+            &auth_url,
+            "https://console.serendb.com/login?state=audit-state&redirect_uri=http%3A%2F%2F127.0.0.1%3A8787%2Fauth%2Fcallback&code_challenge=audit-challenge&client_id=seren-desktop",
+        )
+        .expect_err("unexpected console path must be rejected");
+
+        assert_eq!(
+            error,
+            "Social login unexpectedly routed through console.serendb.com"
+        );
+    }
+
+    #[test]
+    fn rejects_console_cli_redirect_with_mismatched_state() {
+        let auth_url = valid_authorize_url();
+
+        let error = validate_provider_redirect(
+            &auth_url,
+            "https://console.serendb.com/login/cli?state=other-state&redirect_uri=http%3A%2F%2F127.0.0.1%3A8787%2Fauth%2Fcallback&code_challenge=audit-challenge&client_id=seren-desktop",
+        )
+        .expect_err("state mismatch must be rejected");
+
+        assert_eq!(error, "Social login redirect state mismatch");
+    }
 }
