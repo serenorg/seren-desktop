@@ -10,12 +10,19 @@ const manualPublishWorkflowPath = join(
   root,
   ".github/workflows/publish-release-manual.yml",
 );
+const esignerPreflightWorkflowPath = join(
+  root,
+  ".github/workflows/esigner-cka-preflight.yml",
+);
 const releaseWorkflow = readFileSync(
   join(root, ".github/workflows/release.yml"),
   "utf8",
 );
 const manualPublishWorkflow = existsSync(manualPublishWorkflowPath)
   ? readFileSync(manualPublishWorkflowPath, "utf8")
+  : "";
+const esignerPreflightWorkflow = existsSync(esignerPreflightWorkflowPath)
+  ? readFileSync(esignerPreflightWorkflowPath, "utf8")
   : "";
 const runner = readFileSync(join(root, "scripts/windows-e2e-app.ps1"), "utf8");
 const taskUserRunner = readFileSync(
@@ -111,6 +118,27 @@ describe("Windows production e2e release gate", () => {
     expect(unloadAt).toBeGreaterThan(configAt);
     expect(loadAt).toBeGreaterThan(unloadAt);
     expect(certCheckAt).toBeGreaterThan(loadAt);
+  });
+
+  it("keeps the eSigner CKA auth preflight manual and side-effect free (#2485)", () => {
+    expect(existsSync(esignerPreflightWorkflowPath)).toBe(true);
+    expect(esignerPreflightWorkflow).toContain("workflow_dispatch:");
+    expect(esignerPreflightWorkflow).toContain("runs-on: windows-latest");
+    expect(esignerPreflightWorkflow).toContain("ES_USERNAME");
+    expect(esignerPreflightWorkflow).toContain("ES_PASSWORD");
+    expect(esignerPreflightWorkflow).toContain("ES_TOTP_SECRET");
+    expect(esignerPreflightWorkflow).toContain("eSignerCKATool.exe");
+    expect(esignerPreflightWorkflow).toContain('Invoke-EsignerCka "config/login"');
+    expect(esignerPreflightWorkflow).toContain('Invoke-EsignerCka "unload"');
+    expect(esignerPreflightWorkflow).toContain('Invoke-EsignerCka "load"');
+    expect(esignerPreflightWorkflow).toContain("Cert:\\CurrentUser\\My");
+    expect(esignerPreflightWorkflow).toContain("code-signing certificate");
+    expect(esignerPreflightWorkflow).not.toContain("actions/checkout");
+    expect(esignerPreflightWorkflow).not.toContain("softprops/action-gh-release");
+    expect(esignerPreflightWorkflow).not.toContain("aws s3 cp");
+    expect(esignerPreflightWorkflow).not.toContain("R2_BUCKET");
+    expect(esignerPreflightWorkflow).not.toContain("latest.json");
+    expect(esignerPreflightWorkflow).not.toContain("tauri build");
   });
 
   it("installs and probes the signed Windows app instead of running a browser mock", () => {
