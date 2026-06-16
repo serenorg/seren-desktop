@@ -47,7 +47,10 @@ import { fileTreeState } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
 
-const SEREN_BOUNTY_SLUG = "seren-bounty";
+// Catalog slugs are `${org}-${skillName}`, so the seren-org skill at
+// seren/seren-bounty/SKILL.md is published as `seren-seren-bounty`. The bare
+// folder name 404s against the gateway — keep the org prefix (seren-desktop#2486).
+const SEREN_BOUNTY_SLUG = "seren-seren-bounty";
 const SEREN_BOUNTY_SOURCE_URL = `seren-skills:${SEREN_BOUNTY_SLUG}`;
 
 interface BountyDetailProps {
