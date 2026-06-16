@@ -62,6 +62,7 @@ describe("providerDisplayName", () => {
     expect(providerDisplayName("claude-code")).toBe("Claude Code");
     expect(providerDisplayName("codex")).toBe("Codex");
     expect(providerDisplayName("gemini")).toBe("Gemini");
+    expect(providerDisplayName("lmstudio")).toBe("LM Studio");
   });
 
   it("falls back to a title-cased label for unknown ids", () => {

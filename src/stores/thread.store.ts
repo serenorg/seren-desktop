@@ -217,7 +217,8 @@ function mapSessionStatusToThread(status: SessionStatus): ThreadStatus {
  * Auto-detect the best available agent.
  * If preferChat is set, always returns chat.
  * Otherwise respects `agentStore.selectedAgentType` as the user's preference,
- * then falls back to availability order: claude-code > codex > gemini > chat.
+ * then falls back to availability order:
+ * claude-code > codex > gemini > lmstudio > chat.
  */
 function getBestAgent():
   | { kind: "agent"; agentType: AgentType }
@@ -225,24 +226,35 @@ function getBestAgent():
   if (state.preferChat) return { kind: "chat" };
 
   const agents = agentStore.availableAgents;
+  const canAutoSelectAgent = (agent: (typeof agents)[number]) =>
+    agent.available && (agent.type !== "lmstudio" || agent.authenticated);
 
   // Prefer the user's selected agent type if available
   const preferred = agents.find(
-    (a) => a.type === agentStore.selectedAgentType && a.available,
+    (a) => a.type === agentStore.selectedAgentType && canAutoSelectAgent(a),
   );
   if (preferred) {
     return { kind: "agent", agentType: preferred.type as AgentType };
   }
 
   // Fall back to availability order
-  const claude = agents.find((a) => a.type === "claude-code" && a.available);
+  const claude = agents.find(
+    (a) => a.type === "claude-code" && canAutoSelectAgent(a),
+  );
   if (claude) return { kind: "agent", agentType: "claude-code" };
 
-  const codex = agents.find((a) => a.type === "codex" && a.available);
+  const codex = agents.find((a) => a.type === "codex" && canAutoSelectAgent(a));
   if (codex) return { kind: "agent", agentType: "codex" };
 
-  const gemini = agents.find((a) => a.type === "gemini" && a.available);
+  const gemini = agents.find(
+    (a) => a.type === "gemini" && canAutoSelectAgent(a),
+  );
   if (gemini) return { kind: "agent", agentType: "gemini" };
+
+  const lmStudio = agents.find(
+    (a) => a.type === "lmstudio" && canAutoSelectAgent(a),
+  );
+  if (lmStudio) return { kind: "agent", agentType: "lmstudio" };
 
   return { kind: "chat" };
 }

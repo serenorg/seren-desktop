@@ -31,9 +31,11 @@ import {
   allowsClaudeAgent,
   allowsCodexAgent,
   allowsGeminiAgent,
+  allowsLmStudioAgent,
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
 } from "@/services/organization-policy";
+import type { AgentType } from "@/services/providers";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { editorSessionStore } from "@/stores/editor.sessions";
@@ -213,9 +215,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     );
   };
 
-  const handleNewAgent = async (
-    agentType: "claude-code" | "codex" | "gemini" | "claude-codex",
-  ) => {
+  const handleNewAgent = async (agentType: AgentType) => {
     setShowLauncher(false);
     const cwd = fileTreeState.rootPath;
     if (!cwd) return;
@@ -343,7 +343,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
   // Right-aligned chip telling the user *what surface / how it's billed*.
   const LauncherChip: Component<{
-    variant: "paid" | "subscription" | "cli";
+    variant: "paid" | "subscription" | "local" | "cli";
     children: string;
   }> = (chipProps) => {
     const tone = () =>
@@ -351,7 +351,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         ? "bg-primary/10 text-primary/90 border-primary/25"
         : chipProps.variant === "subscription"
           ? "bg-purple-500/12 text-purple-300 border-purple-500/30"
-          : "bg-surface-3 text-muted-foreground border-border";
+          : chipProps.variant === "local"
+            ? "bg-emerald-500/12 text-emerald-300 border-emerald-500/30"
+            : "bg-surface-3 text-muted-foreground border-border";
     return (
       <span
         class={`text-[10px] font-semibold tracking-[0.04em] px-1.5 py-0.5 rounded-full border whitespace-nowrap ${tone()}`}
@@ -396,6 +398,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   const geminiAvailable = createMemo(() =>
     agentStore.availableAgents.some((a) => a.type === "gemini" && a.available),
   );
+  const lmStudioAvailable = createMemo(() =>
+    agentStore.availableAgents.some(
+      (a) => a.type === "lmstudio" && a.available,
+    ),
+  );
   const showSerenChat = createMemo(() =>
     allowsSerenPublicModels(authStore.privateChatPolicy),
   );
@@ -410,6 +417,10 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   );
   const showGeminiAgent = createMemo(
     () => allowsGeminiAgent(authStore.privateChatPolicy) && geminiAvailable(),
+  );
+  const showLmStudioAgent = createMemo(
+    () =>
+      allowsLmStudioAgent(authStore.privateChatPolicy) && lmStudioAvailable(),
   );
   // Paired Claude + Codex needs both CLIs' org-policy gates; CLI install and
   // login flow through the existing subscription setup toasts on spawn.
@@ -428,7 +439,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       showClaudeAgent() ||
       showCodexAgent() ||
       showPairedAgent() ||
-      showGeminiAgent(),
+      showGeminiAgent() ||
+      showLmStudioAgent(),
   );
   const hasCliSection = createMemo(() => claudeAvailable() || codexAvailable());
 
@@ -717,6 +729,25 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                   </LauncherChip>
                 </button>
               </Show>
+              <Show when={showLmStudioAgent()}>
+                <button
+                  type="button"
+                  data-testid="new-lmstudio-agent"
+                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                  onClick={() => void handleNewAgent("lmstudio")}
+                >
+                  <span class="text-[14px] w-[22px] text-center shrink-0">
+                    {"\u{1F5A5}\uFE0F"}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">LM Studio Agent</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      Local models · OpenAI-compatible HTTP
+                    </div>
+                  </div>
+                  <LauncherChip variant="local">Local</LauncherChip>
+                </button>
+              </Show>
 
               {/* ---------- Command line ---------- */}
               <Show
@@ -974,7 +1005,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                                     ? "\u2728"
                                     : thread.agentType === "claude-codex"
                                       ? "\u{1F91D}"
-                                      : "\u{1F916}"}
+                                      : thread.agentType === "lmstudio"
+                                        ? "\u{1F5A5}\uFE0F"
+                                        : "\u{1F916}"}
                               </span>
                             </Show>
                           </div>

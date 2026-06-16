@@ -206,12 +206,15 @@ fn choose_authenticated_agent(
     };
 
     if let Some(preferred) = preferred_agent_for_model(requested_model) {
+        if preferred == "lmstudio" {
+            return Some(preferred.to_string());
+        }
         if is_authenticated(preferred) {
             return Some(preferred.to_string());
         }
     }
 
-    ["claude-code", "codex", "gemini"]
+    ["claude-code", "codex", "gemini", "lmstudio"]
         .into_iter()
         .find(|agent_type| is_authenticated(agent_type))
         .map(str::to_string)
@@ -229,6 +232,9 @@ fn preferred_agent_for_model(model: &str) -> Option<&'static str> {
     if bare.starts_with("gemini-") {
         return Some("gemini");
     }
+    if normalized.starts_with("lmstudio/") || bare.starts_with("lmstudio-") {
+        return Some("lmstudio");
+    }
     if bare.starts_with("gpt-")
         || bare.starts_with("o1")
         || bare.starts_with("o3")
@@ -241,11 +247,25 @@ fn preferred_agent_for_model(model: &str) -> Option<&'static str> {
 
 fn agent_model_for_request(agent_type: &str, requested_model: &str) -> Option<String> {
     let trimmed = requested_model.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case(AUTO_MODEL_ID) || trimmed.contains('/') {
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case(AUTO_MODEL_ID) {
         return None;
     }
 
     let lower = trimmed.to_ascii_lowercase();
+    if agent_type == "lmstudio" {
+        if let Some((prefix, model)) = trimmed.split_once('/') {
+            if prefix.eq_ignore_ascii_case("lmstudio") && !model.trim().is_empty() {
+                return Some(model.trim().to_string());
+            }
+            return None;
+        }
+        return Some(trimmed.to_string());
+    }
+
+    if trimmed.contains('/') {
+        return None;
+    }
+
     let compatible = match agent_type {
         "claude-code" => lower.starts_with("claude-"),
         "codex" => {
@@ -376,6 +396,17 @@ mod tests {
     }
 
     #[test]
+    fn route_keeps_explicit_lmstudio_models_local() {
+        assert_eq!(
+            resolve_completion_route_from_agents(&[], "lmstudio/qwen2.5-coder-14b"),
+            CompletionRoute::ProviderAgent {
+                agent_type: "lmstudio".to_string(),
+                model: Some("qwen2.5-coder-14b".to_string()),
+            }
+        );
+    }
+
+    #[test]
     fn provider_auth_error_detection_is_narrow() {
         assert!(is_provider_auth_error(
             "Agent authentication required. Run the login flow and try again."
@@ -385,7 +416,9 @@ mod tests {
         assert!(!is_provider_auth_error(
             "provider one-shot attempted a tool call; toolless completion aborted"
         ));
-        assert!(!is_provider_auth_error("Provider runtime socket closed before prompt completed."));
+        assert!(!is_provider_auth_error(
+            "Provider runtime socket closed before prompt completed."
+        ));
     }
 
     #[test]
@@ -416,7 +449,9 @@ mod tests {
         assert!(!is_provider_capacity_error(
             "Provider runtime socket closed before prompt completed."
         ));
-        assert!(!is_provider_capacity_error("provider one-shot returned no content"));
+        assert!(!is_provider_capacity_error(
+            "provider one-shot returned no content"
+        ));
     }
 
     #[test]

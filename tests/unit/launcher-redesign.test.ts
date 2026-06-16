@@ -30,6 +30,7 @@ describe("ThreadSidebar — stable testids on every row (#1832)", () => {
     "new-claude-agent",
     "new-codex-agent",
     "new-gemini-agent",
+    "new-lmstudio-agent",
     "new-claude-cli",
     "new-codex-cli",
     "new-terminal",
@@ -54,6 +55,14 @@ describe("ThreadSidebar — chip vocabulary (#1832)", () => {
     expect(chips.length).toBeGreaterThanOrEqual(3);
   });
 
+  it("uses 'Local' for LM Studio", () => {
+    const lmStudioRow = sidebarTsx.slice(
+      sidebarTsx.indexOf('data-testid="new-lmstudio-agent"'),
+      sidebarTsx.indexOf('data-testid="new-lmstudio-agent"') + 1200,
+    );
+    expect(lmStudioRow).toMatch(/>\s*Local\s*</);
+  });
+
   it("uses 'CLI' chip for the two CLI rows", () => {
     const chips = sidebarTsx.match(/>\s*CLI\s*</g) ?? [];
     expect(chips.length).toBeGreaterThanOrEqual(2);
@@ -73,12 +82,13 @@ describe("ThreadSidebar — Seren Private subtitle clarifies AWS Bedrock & Azure
 });
 
 describe("ThreadSidebar — gating preserved (#1832)", () => {
-  it("retains all five org-policy gates", () => {
+  it("retains all org-policy gates", () => {
     expect(sidebarTsx).toContain("allowsSerenPublicModels(authStore.privateChatPolicy)");
     expect(sidebarTsx).toContain("allowsSerenPrivateAgent(authStore.privateChatPolicy)");
     expect(sidebarTsx).toContain("allowsClaudeAgent(authStore.privateChatPolicy)");
     expect(sidebarTsx).toContain("allowsCodexAgent(authStore.privateChatPolicy)");
     expect(sidebarTsx).toContain("allowsGeminiAgent(authStore.privateChatPolicy)");
+    expect(sidebarTsx).toContain("allowsLmStudioAgent(authStore.privateChatPolicy)");
   });
 });
 
@@ -105,6 +115,7 @@ describe("ThreadSidebar — dispatch preserved (#1832)", () => {
     expect(sidebarTsx).toContain('handleNewAgent("claude-code")');
     expect(sidebarTsx).toContain('handleNewAgent("codex")');
     expect(sidebarTsx).toContain('handleNewAgent("gemini")');
+    expect(sidebarTsx).toContain('handleNewAgent("lmstudio")');
   });
 
   it("CLI rows dispatch via createTerminalThread with the correct title and command", () => {
@@ -132,12 +143,18 @@ describe("ThreadTabBar — chip vocabulary on the secondary +New menu (#1832)", 
     expect(chips.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("retains the same five org-policy gates as the sidebar", () => {
+  it("retains existing org-policy gates", () => {
     expect(tabBarTsx).toContain("allowsSerenPublicModels(authStore.privateChatPolicy)");
     expect(tabBarTsx).toContain("allowsSerenPrivateAgent(authStore.privateChatPolicy)");
     expect(tabBarTsx).toContain("allowsClaudeAgent(authStore.privateChatPolicy)");
     expect(tabBarTsx).toContain("allowsCodexAgent(authStore.privateChatPolicy)");
     expect(tabBarTsx).toContain("allowsGeminiAgent(authStore.privateChatPolicy)");
+  });
+
+  it("does not add LM Studio to the secondary top-tab +New menu", () => {
+    expect(tabBarTsx).not.toContain('data-testid="new-lmstudio-agent"');
+    expect(tabBarTsx).not.toContain('handleNewAgent("lmstudio")');
+    expect(tabBarTsx).not.toContain("allowsLmStudioAgent");
   });
 });
 
@@ -208,6 +225,24 @@ describe("ThreadSidebar — Seren Agent clarification + Claude + Codex row (#236
   it("ThreadTabBar +New menu carries the same Claude + Codex row", () => {
     expect(tabBarTsx).toContain('data-testid="new-claude-codex-agent"');
     expect(tabBarTsx).toContain('handleNewAgent("claude-codex")');
+  });
+});
+
+describe("ThreadSidebar — LM Studio local agent row (#2444)", () => {
+  it("renders LM Studio in Coding agents with local copy and dispatch", () => {
+    expect(sidebarTsx).toContain('data-testid="new-lmstudio-agent"');
+    const row = sidebarTsx.slice(
+      sidebarTsx.indexOf('data-testid="new-lmstudio-agent"'),
+      sidebarTsx.indexOf('data-testid="new-lmstudio-agent"') + 1200,
+    );
+    expect(row).toContain("LM Studio Agent");
+    expect(row).toContain("Local models · OpenAI-compatible HTTP");
+    expect(row).toContain('handleNewAgent("lmstudio")');
+    const codingIdx = sidebarTsx.indexOf(">Coding agents<");
+    const cliIdx = sidebarTsx.indexOf(">Command line<");
+    const rowIdx = sidebarTsx.indexOf('data-testid="new-lmstudio-agent"');
+    expect(rowIdx).toBeGreaterThan(codingIdx);
+    expect(rowIdx).toBeLessThan(cliIdx);
   });
 });
 

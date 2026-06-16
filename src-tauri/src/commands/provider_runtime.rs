@@ -138,7 +138,13 @@ pub async fn switch_thread_provider(
                     status = 'active',
                     bootstrap_context = excluded.bootstrap_context,
                     updated_at = excluded.updated_at",
-                params![thread_id, target_provider, target_model, bootstrap_context, now],
+                params![
+                    thread_id,
+                    target_provider,
+                    target_model,
+                    bootstrap_context,
+                    now
+                ],
             )?;
 
             // Mirror compatibility columns so existing read paths that have
@@ -243,7 +249,7 @@ pub async fn switch_thread_provider(
     }
 }
 
-/// The external-agent runtimes (claude-code / codex / gemini) that own
+/// The external-agent runtimes (claude-code / codex / gemini / lmstudio) that own
 /// their own native session and render through `AgentChat`, vs a
 /// chat-routed provider (seren / seren-private / anthropic / openai)
 /// that renders through `ChatContent`.
@@ -256,7 +262,7 @@ pub async fn switch_thread_provider(
 /// updating the other will cause threads bound to that agent to route
 /// to the wrong shell.
 pub(crate) const NATIVE_AGENT_PROVIDERS: &[&str] =
-    &["claude-code", "codex", "gemini", "claude-codex"];
+    &["claude-code", "codex", "gemini", "claude-codex", "lmstudio"];
 
 /// SQL CASE expression that derives a thread's effective `kind` from
 /// `provider_session_runtime.provider`, falling back to the stored
@@ -268,7 +274,7 @@ pub(crate) const NATIVE_AGENT_PROVIDERS: &[&str] =
 /// test in this module asserts that invariant.
 pub(crate) const DERIVED_KIND_CASE_SQL: &str = "CASE \
      WHEN psr.provider IS NULL THEN c.kind \
-     WHEN psr.provider IN ('claude-code', 'codex', 'gemini', 'claude-codex') THEN 'agent' \
+     WHEN psr.provider IN ('claude-code', 'codex', 'gemini', 'claude-codex', 'lmstudio') THEN 'agent' \
      ELSE 'chat' \
      END";
 
@@ -331,7 +337,8 @@ mod tests {
         now: i64,
     ) -> Result<(), String> {
         use rusqlite::OptionalExtension;
-        conn.execute_batch("BEGIN IMMEDIATE").map_err(|e| e.to_string())?;
+        conn.execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| e.to_string())?;
         let inner = (|| -> rusqlite::Result<()> {
             let exists: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM conversations WHERE id = ?1",
@@ -370,7 +377,13 @@ mod tests {
                     status = 'active',
                     bootstrap_context = excluded.bootstrap_context,
                     updated_at = excluded.updated_at",
-                params![thread_id, target_provider, target_model, bootstrap_context, now],
+                params![
+                    thread_id,
+                    target_provider,
+                    target_model,
+                    bootstrap_context,
+                    now
+                ],
             )?;
             // Mirror compat columns. See production path for the rationale.
             let target_kind = if super::is_native_agent_provider(target_provider) {
@@ -378,8 +391,11 @@ mod tests {
             } else {
                 "chat"
             };
-            let target_agent_type: Option<&str> =
-                if target_kind == "agent" { Some(target_provider) } else { None };
+            let target_agent_type: Option<&str> = if target_kind == "agent" {
+                Some(target_provider)
+            } else {
+                None
+            };
             conn.execute(
                 "UPDATE conversations
                  SET kind = ?1,
@@ -410,9 +426,7 @@ mod tests {
                 conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
                 Ok(())
             }
-            Err(rusqlite::Error::InvalidParameterName(s))
-                if s == "__seren__thread_not_found" =>
-            {
+            Err(rusqlite::Error::InvalidParameterName(s)) if s == "__seren__thread_not_found" => {
                 let _ = conn.execute_batch("ROLLBACK");
                 Err("thread_not_found".to_string())
             }
@@ -654,17 +668,8 @@ mod tests {
         let conn = open();
 
         // No conversation seeded — the guard must reject before any write.
-        let err = try_perform_switch(
-            &conn,
-            "ghost",
-            "seren",
-            Some("m"),
-            None,
-            None,
-            None,
-            2000,
-        )
-        .unwrap_err();
+        let err = try_perform_switch(&conn, "ghost", "seren", Some("m"), None, None, None, 2000)
+            .unwrap_err();
         assert_eq!(err, "thread_not_found");
 
         // Transaction must have rolled back, so no orphan runtime row exists.
@@ -719,8 +724,8 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 1);
 
-        let (provider, model, bootstrap, updated_at): (String, String, Option<String>, i64) =
-            conn.query_row(
+        let (provider, model, bootstrap, updated_at): (String, String, Option<String>, i64) = conn
+            .query_row(
                 "SELECT provider, model, bootstrap_context, updated_at
                  FROM provider_session_runtime WHERE thread_id = 't1'",
                 [],
@@ -872,7 +877,14 @@ mod tests {
     fn read_conv_compat(
         conn: &Connection,
         thread_id: &str,
-    ) -> (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>) {
+    ) -> (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
         conn.query_row(
             "SELECT kind, agent_type, agent_session_id, agent_model_id,
                     selected_provider, selected_model
@@ -972,14 +984,8 @@ mod tests {
         )
         .unwrap();
 
-        let (
-            kind,
-            agent_type,
-            agent_session_id,
-            agent_model_id,
-            selected_provider,
-            selected_model,
-        ) = read_conv_compat(&conn, "t1");
+        let (kind, agent_type, agent_session_id, agent_model_id, selected_provider, selected_model) =
+            read_conv_compat(&conn, "t1");
         assert_eq!(kind, "chat");
         // agent_type cleared so the chat shell does not see a stale agent
         // hint that could route it into AgentChat.
@@ -992,7 +998,10 @@ mod tests {
         // not pick up a stale value from a now-chat row.
         assert_eq!(agent_model_id, None);
         assert_eq!(selected_provider, Some("seren".to_string()));
-        assert_eq!(selected_model, Some("anthropic/claude-sonnet-4".to_string()));
+        assert_eq!(
+            selected_model,
+            Some("anthropic/claude-sonnet-4".to_string())
+        );
         // agent_cwd cleared on the chat branch for the same coherence reason.
         assert_eq!(read_agent_cwd(&conn, "t1"), None);
     }
@@ -1060,7 +1069,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(read_agent_cwd(&conn, "t1"), Some("/tmp/new-proj".to_string()));
+        assert_eq!(
+            read_agent_cwd(&conn, "t1"),
+            Some("/tmp/new-proj".to_string())
+        );
     }
 
     #[test]
@@ -1111,8 +1123,17 @@ mod tests {
         )
         .unwrap();
 
-        try_perform_switch(&conn, "t1", "codex", Some("codex-mid"), None, None, None, 2000)
-            .unwrap();
+        try_perform_switch(
+            &conn,
+            "t1",
+            "codex",
+            Some("codex-mid"),
+            None,
+            None,
+            None,
+            2000,
+        )
+        .unwrap();
 
         let (kind, agent_type, agent_session_id, agent_model_id, _, _) =
             read_conv_compat(&conn, "t1");

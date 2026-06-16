@@ -29,6 +29,7 @@ export interface OrganizationPrivateModelsPolicy {
   allow_claude_agent?: boolean;
   allow_codex_agent?: boolean;
   allow_gemini_agent?: boolean;
+  allow_lmstudio_agent?: boolean;
   allow_cloud_agent_launch?: boolean;
   model_id?: string | null;
   fallback_models?: string[] | null;
@@ -88,6 +89,14 @@ export function allowsGeminiAgent(
   policy: OrganizationPrivateModelsPolicy | null | undefined,
 ): boolean {
   return policy?.allow_gemini_agent ?? true;
+}
+
+export function allowsLmStudioAgent(
+  policy: OrganizationPrivateModelsPolicy | null | undefined,
+): boolean {
+  return (
+    !policy?.disable_local_agents && (policy?.allow_lmstudio_agent ?? true)
+  );
 }
 
 export function allowsCloudAgentLaunch(
