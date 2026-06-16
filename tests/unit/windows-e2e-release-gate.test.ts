@@ -240,6 +240,7 @@ describe("Windows production e2e release gate", () => {
       "PROVIDER_CONFIG_TIMEOUT_MS",
       "PROVIDER_WS_OPEN_TIMEOUT_MS",
       "PROVIDER_RPC_TIMEOUT_MS",
+      "PROVIDER_ENSURE_CLI_TIMEOUT_MS",
       "PROVIDER_SPAWN_TIMEOUT_MS",
       "PROVIDER_TERMINATE_TIMEOUT_MS",
       "rpcWithTimeout",
@@ -253,6 +254,30 @@ describe("Windows production e2e release gate", () => {
     ]) {
       expect(probe).toContain(required);
     }
+  });
+
+  it("provisions agent CLIs before checking release-gate availability (#2481)", () => {
+    // A Bedrock-backed Claude run still needs a launchable local Claude Code
+    // binary. The release probe must use the same install contract as the
+    // desktop spawn path before it asks whether the provider can launch.
+    expect(probe).toContain("provider_ensure_agent_cli");
+    expect(probe).toContain("ensureAgentCli");
+    expect(probe).toContain("ensuring provider CLI");
+    expect(probe).toContain("provider CLI ready");
+
+    const singleJourneyStart = probe.indexOf("async function runSingleAgentJourney");
+    const pairedJourneyStart = probe.indexOf("async function runPairedJourney");
+    expect(singleJourneyStart).toBeGreaterThanOrEqual(0);
+    expect(pairedJourneyStart).toBeGreaterThanOrEqual(0);
+
+    const singleJourney = probe.slice(singleJourneyStart, pairedJourneyStart);
+    const pairedJourney = probe.slice(pairedJourneyStart);
+    expect(singleJourney.indexOf("ensureAgentCli")).toBeLessThan(
+      singleJourney.indexOf("provider_check_agent_available"),
+    );
+    expect(pairedJourney.indexOf("ensureAgentCli")).toBeLessThan(
+      pairedJourney.indexOf("provider_check_agent_available"),
+    );
   });
 
   it("certifies every shipped agent journey, not one env-selected type (#2375)", () => {
