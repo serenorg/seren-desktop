@@ -627,6 +627,18 @@ export function normalizeToolCalls(accumulator) {
     .filter((call) => call.function.name);
 }
 
+/**
+ * Extract reasoning text from an OpenAI-compatible streaming delta (or a
+ * non-streamed message). LM Studio exposes a reasoning model's chain of thought
+ * as `reasoning_content`; some builds use `reasoning`. Returns "" when neither
+ * is present so non-reasoning models are unaffected.
+ */
+export function reasoningTextFromDelta(delta) {
+  if (typeof delta?.reasoning_content === "string") return delta.reasoning_content;
+  if (typeof delta?.reasoning === "string") return delta.reasoning;
+  return "";
+}
+
 function throwIfErrorPayload(payload) {
   if (payload?.error == null) return;
   const detail = payload.error?.message ?? payload.error;
@@ -679,6 +691,8 @@ async function streamOpenAiResponse({ session, body, signal, onContent }) {
     const payload = await response.json();
     throwIfErrorPayload(payload);
     const message = payload?.choices?.[0]?.message ?? {};
+    const reasoning = reasoningTextFromDelta(message);
+    if (reasoning.length > 0) onContent(reasoning, { isThought: true });
     if (message.content) onContent(message.content);
     return {
       content: message.content ?? "",
@@ -710,6 +724,15 @@ async function streamOpenAiResponse({ session, body, signal, onContent }) {
     if (!choice) return;
     if (choice.finish_reason) stopReason = choice.finish_reason;
     const delta = choice.delta ?? {};
+    // Reasoning models (Qwen3.5, DeepSeek-R1, gpt-oss) stream their chain of
+    // thought as `reasoning_content` before any `content`. Surface it as a
+    // thought chunk so the UI shows live "thinking…" instead of a blank,
+    // hung-looking reply. Reasoning is display-only — never added to `content`,
+    // so it does not re-enter the model's context on later turns.
+    const reasoning = reasoningTextFromDelta(delta);
+    if (reasoning.length > 0) {
+      onContent(reasoning, { isThought: true });
+    }
     if (typeof delta.content === "string" && delta.content.length > 0) {
       content += delta.content;
       onContent(delta.content);
@@ -946,10 +969,11 @@ async function sendPromptToLmStudio(session, prompt, context) {
         session,
         tools,
         signal: abortController.signal,
-        onContent: (text) => {
+        onContent: (text, options) => {
           session.emit("provider://message-chunk", {
             sessionId: session.id,
             text,
+            ...(options?.isThought ? { isThought: true } : {}),
           });
         },
       });
