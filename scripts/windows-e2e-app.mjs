@@ -542,6 +542,7 @@ const PAIRED_PROMPT_TIMEOUT_MS = 600_000;
 const PROVIDER_CONFIG_TIMEOUT_MS = 30_000;
 const PROVIDER_WS_OPEN_TIMEOUT_MS = 30_000;
 const PROVIDER_RPC_TIMEOUT_MS = 60_000;
+const PROVIDER_ENSURE_CLI_TIMEOUT_MS = 600_000;
 const PROVIDER_SPAWN_TIMEOUT_MS = 150_000;
 const PROVIDER_TERMINATE_TIMEOUT_MS = 15_000;
 
@@ -564,6 +565,9 @@ const AUTH_FAILURE_PATTERNS = [
 
 const AGENT_PROCESS_EXIT_PATTERNS = [
   "app server stopped before request completed",
+  "cli not found",
+  "failed to install",
+  "not recognized as the name",
   "worker thread dropped while prompt was active",
 ];
 
@@ -593,8 +597,9 @@ function authError(journey, detail) {
 
 function provisioningError(journey, detail) {
   return new AgentProvisioningError(
-    `${journey} CLI exited before completing the Windows e2e prompt. Verify ` +
-      `the scheduled-task user received agent credentials via ` +
+    `${journey} CLI could not be installed, launched, or kept alive long ` +
+      `enough to complete the Windows e2e prompt. Verify the scheduled-task ` +
+      `user can resolve the CLI binary and received agent credentials via ` +
       `SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI or ` +
       `SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64, and check provider-runtime logs ` +
       `for a real process crash. Detail: ${detail}`,
@@ -655,6 +660,23 @@ function summarizeProviderRuntimeEvents(buffer, marker, sessionIds) {
   return events.length > 0 ? events.join(" | ") : "<no provider runtime events captured>";
 }
 
+async function ensureAgentCli(ws, agentType) {
+  try {
+    logStage(`${agentType} ensuring provider CLI`);
+    const resolved = await rpcWithTimeout(
+      ws,
+      "provider_ensure_agent_cli",
+      { agentType },
+      PROVIDER_ENSURE_CLI_TIMEOUT_MS,
+      `${agentType} CLI install`,
+    );
+    logStage(`${agentType} provider CLI ready: ${String(resolved || "<unknown>")}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw provisioningError(agentType, message);
+  }
+}
+
 // A raw spawn/prompt failure carries a generic message; the runtime also emits
 // a provider://error with the auth text. Promote either signal to a distinct
 // AgentAuthError so the job names the credential gap, not a timeout (#2375).
@@ -700,6 +722,7 @@ async function runSingleAgentJourney(ws, buffer, agentType) {
   let session;
   try {
     logStage(`${agentType} journey starting`);
+    await ensureAgentCli(ws, agentType);
     logStage(`${agentType} checking provider availability`);
     const available = await rpcWithTimeout(
       ws,
@@ -806,6 +829,7 @@ async function runPairedJourney(ws, buffer) {
   let session;
   try {
     logStage(`${PAIRED_AGENT_TYPE} journey starting`);
+    await ensureAgentCli(ws, PAIRED_AGENT_TYPE);
     logStage(`${PAIRED_AGENT_TYPE} checking provider availability`);
     const available = await rpcWithTimeout(
       ws,
