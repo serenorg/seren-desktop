@@ -91,6 +91,28 @@ describe("Windows production e2e release gate", () => {
     expect(probe).toContain("https://api.serendb.com");
   });
 
+  it("fails eSigner CKA login/load commands at their native failure point (#2483)", () => {
+    const buildJob = workflowJob("build");
+    expect(buildJob).toContain("function Invoke-EsignerCka");
+    expect(buildJob).toContain("eSignerCKATool.exe not found");
+    expect(buildJob).toContain("eSigner CKA config/login failed");
+    expect(buildJob).toContain(
+      "Validate or rotate ES_USERNAME, ES_PASSWORD, and ES_TOTP_SECRET",
+    );
+    expect(buildJob).toContain('Invoke-EsignerCka "config/login"');
+    expect(buildJob).toContain('Invoke-EsignerCka "unload"');
+    expect(buildJob).toContain('Invoke-EsignerCka "load"');
+
+    const configAt = buildJob.indexOf('Invoke-EsignerCka "config/login"');
+    const unloadAt = buildJob.indexOf('Invoke-EsignerCka "unload"');
+    const loadAt = buildJob.indexOf('Invoke-EsignerCka "load"');
+    const certCheckAt = buildJob.indexOf("eSigner CKA did not load");
+    expect(configAt).toBeGreaterThanOrEqual(0);
+    expect(unloadAt).toBeGreaterThan(configAt);
+    expect(loadAt).toBeGreaterThan(unloadAt);
+    expect(certCheckAt).toBeGreaterThan(loadAt);
+  });
+
   it("installs and probes the signed Windows app instead of running a browser mock", () => {
     expect(runner).toContain("Get-AuthenticodeSignature");
     expect(runner).toContain("/S");
