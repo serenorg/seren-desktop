@@ -1,12 +1,14 @@
-// ABOUTME: Critical tests for opening image files in the OS default viewer.
-// ABOUTME: Guards shared image extension support and default-app bridge delegation.
+// ABOUTME: Critical tests for opening image and PDF files in the editor viewers.
+// ABOUTME: Guards binary tabs opening without a text read and bridge delegation.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { isPdfFile } from "@/lib/files/file-types";
 import {
   openFileInTab,
   openImageInDefaultViewer,
+  readFileBytes,
   readImageAsDataUrl,
 } from "@/lib/files/service";
 import {
@@ -122,5 +124,38 @@ describe("image file opening", () => {
     expect(desktopSource).toContain(
       'registerHandler("open_path_with_default_app", openPathWithDefaultApp)',
     );
+  });
+});
+
+describe("pdf file opening", () => {
+  it("detects pdf paths case-insensitively", () => {
+    expect(isPdfFile("/Users/me/docs/report.pdf")).toBe(true);
+    expect(isPdfFile("C:\\Users\\me\\Report.PDF")).toBe(true);
+    expect(isPdfFile("/Users/me/notes/readme.md")).toBe(false);
+  });
+
+  it("opens pdf tabs without reading them as text (would throw on binary)", async () => {
+    vi.mocked(readFile).mockRejectedValue(
+      new Error("stream did not contain valid UTF-8"),
+    );
+
+    await expect(
+      openFileInTab("/Users/me/docs/report.pdf"),
+    ).resolves.toBeUndefined();
+
+    expect(readFile).not.toHaveBeenCalled();
+    expect(
+      tabsState.tabs.some((t) => t.filePath === "/Users/me/docs/report.pdf"),
+    ).toBe(true);
+  });
+
+  it("reads file bytes from base64 for binary viewers", async () => {
+    // "ABC" -> base64 "QUJD"
+    vi.mocked(readFileBase64).mockResolvedValue("QUJD");
+
+    const bytes = await readFileBytes("/Users/me/docs/report.pdf");
+
+    expect(readFileBase64).toHaveBeenCalledWith("/Users/me/docs/report.pdf");
+    expect(Array.from(bytes)).toEqual([65, 66, 67]);
   });
 });

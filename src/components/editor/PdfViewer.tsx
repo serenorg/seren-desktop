@@ -8,6 +8,7 @@ import {
   createSignal,
   onCleanup,
 } from "solid-js";
+import { readFileBytes } from "@/lib/files/service";
 
 // Set up the worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -63,9 +64,11 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
       }
       pdfDoc = null;
 
-      // Load PDF using a file:// URL (v6 getDocument takes init parameters).
-      const url = `file://${path}`;
-      loadingTask = pdfjsLib.getDocument({ url });
+      // Read the bytes through the bridge (resolves `~`, reads binary safely)
+      // and hand them to pdf.js directly. A hand-built `file://` URL does not
+      // expand `~` and is malformed for Windows drive paths.
+      const data = await readFileBytes(path);
+      loadingTask = pdfjsLib.getDocument({ data });
       pdfDoc = await loadingTask.promise;
 
       setTotalPages(pdfDoc.numPages);

@@ -5,6 +5,7 @@ import {
   isBrowserLocalRuntime,
   runtimeInvoke,
 } from "@/lib/browser-local-runtime";
+import { isPdfFile } from "@/lib/files/file-types";
 import { imageMimeType, isSupportedImageFile } from "@/lib/images/file-types";
 import { createSkillsSymlink } from "@/lib/skills/paths";
 import {
@@ -128,6 +129,21 @@ export async function readImageAsDataUrl(path: string): Promise<string> {
   const base64 = await readFileBase64Bridge(path);
   const mime = imageMimeType(path) ?? "application/octet-stream";
   return `data:${mime};base64,${base64}`;
+}
+
+/**
+ * Read a file as raw bytes for binary viewers. Goes through the base64 bridge
+ * (which resolves `~` and reads binary safely on every platform) and decodes
+ * client-side, so the viewer never depends on `file://`/asset path formats.
+ */
+export async function readFileBytes(path: string): Promise<Uint8Array> {
+  const base64 = await readFileBase64Bridge(path);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 async function openDialog(
@@ -281,10 +297,11 @@ export async function openFileInTab(
   // Non-greedy + end-anchor preserves Windows drive letters like C:\foo.md.
   const path = stripLineAnchor(rawPath);
   const cwd = (options.cwd ?? fileDirname(path)).replace(/\/+$/, "") || "/";
-  // Image files are rendered by ImageViewer, which loads their bytes itself.
-  // They are binary, so reading them as UTF-8 text here throws and the tab
-  // would never open — clicking an image link would silently do nothing.
-  if (isSupportedImageFile(path)) {
+  // Image and PDF files are rendered by dedicated viewers that load their
+  // bytes themselves. They are binary, so reading them as UTF-8 text here
+  // throws and the tab would never open — clicking the link would silently
+  // do nothing.
+  if (isSupportedImageFile(path) || isPdfFile(path)) {
     openTab(path, "", cwd);
     return;
   }
