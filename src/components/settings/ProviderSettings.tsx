@@ -28,23 +28,43 @@ import {
   startOAuthFlow,
 } from "@/services/oauth";
 import { allowsSerenPublicModels } from "@/services/organization-policy";
+import {
+  startLmStudioServer,
+  stopLmStudioServer,
+  testLmStudioConnection,
+} from "@/services/providers";
 import { authStore } from "@/stores/auth.store";
 import { providerStore } from "@/stores/provider.store";
+import { settingsStore } from "@/stores/settings.store";
+
+function isLoopbackUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl.trim());
+    return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
 
 export const ProviderSettings: Component = () => {
-  if (
-    !allowsSerenPublicModels(authStore.privateChatPolicy) ||
-    (authStore.privateChatPolicy?.disable_external_model_providers &&
-      authStore.privateChatPolicy?.disable_seren_models)
-  ) {
+  const cloudProvidersAllowed =
+    allowsSerenPublicModels(authStore.privateChatPolicy) &&
+    !(
+      authStore.privateChatPolicy?.disable_external_model_providers &&
+      authStore.privateChatPolicy?.disable_seren_models
+    );
+  const localAgentsAllowed =
+    authStore.privateChatPolicy?.disable_local_agents !== true;
+
+  if (!localAgentsAllowed && !cloudProvidersAllowed) {
     return (
       <section>
         <h3 class="m-0 mb-2 text-[1.3rem] font-semibold text-foreground">
           AI Providers
         </h3>
         <p class="m-0 text-muted-foreground leading-normal">
-          Your organization does not allow the standard Seren Agent lane, so
-          local provider configuration is disabled by policy.
+          Your organization does not allow standard Seren providers or local
+          agents, so provider configuration is disabled by policy.
         </p>
       </section>
     );
@@ -58,6 +78,16 @@ export const ProviderSettings: Component = () => {
     null,
   );
   const [oauthError, setOauthError] = createSignal<string | null>(null);
+  const [lmStudioBusy, setLmStudioBusy] = createSignal<
+    "test" | "start" | "stop" | null
+  >(null);
+  const [lmStudioStatus, setLmStudioStatus] = createSignal<string | null>(null);
+  const [lmStudioError, setLmStudioError] = createSignal<string | null>(null);
+
+  const lmStudioBaseUrl = () =>
+    settingsStore.settings.lmStudioBaseUrl || "http://localhost:1234";
+  const lmStudioApiKey = () => settingsStore.settings.lmStudioApiKey || "";
+  const lmStudioLifecycleEnabled = () => isLoopbackUrl(lmStudioBaseUrl());
 
   // Listen for OAuth callbacks
   onMount(async () => {
@@ -170,6 +200,55 @@ export const ProviderSettings: Component = () => {
     providerStore.setActiveProvider(providerId);
   };
 
+  const handleLmStudioTest = async () => {
+    setLmStudioBusy("test");
+    setLmStudioStatus(null);
+    setLmStudioError(null);
+    try {
+      const result = await testLmStudioConnection(
+        lmStudioBaseUrl(),
+        lmStudioApiKey(),
+      );
+      if (result.ok) {
+        setLmStudioStatus(result.message);
+      } else {
+        setLmStudioError(result.message);
+      }
+    } catch (err) {
+      setLmStudioError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLmStudioBusy(null);
+    }
+  };
+
+  const handleLmStudioStart = async () => {
+    setLmStudioBusy("start");
+    setLmStudioStatus(null);
+    setLmStudioError(null);
+    try {
+      await startLmStudioServer(lmStudioBaseUrl(), lmStudioApiKey());
+      setLmStudioStatus("LM Studio server started.");
+    } catch (err) {
+      setLmStudioError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLmStudioBusy(null);
+    }
+  };
+
+  const handleLmStudioStop = async () => {
+    setLmStudioBusy("stop");
+    setLmStudioStatus(null);
+    setLmStudioError(null);
+    try {
+      await stopLmStudioServer(lmStudioBaseUrl());
+      setLmStudioStatus("LM Studio server stopped.");
+    } catch (err) {
+      setLmStudioError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLmStudioBusy(null);
+    }
+  };
+
   const unconfiguredProviders = () =>
     CONFIGURABLE_PROVIDERS.filter(
       (p) => !providerStore.configuredProviders.includes(p),
@@ -180,229 +259,324 @@ export const ProviderSettings: Component = () => {
       <h3 class="m-0 mb-2 text-[1.3rem] font-semibold text-foreground">
         AI Providers
       </h3>
-      <p class="m-0 mb-6 text-muted-foreground leading-normal">
-        Connect your own account to use models directly from Anthropic, OpenAI,
-        or Google. Seren Models is always available with your SerenBucks
-        balance.
-      </p>
+      <Show when={cloudProvidersAllowed}>
+        <p class="m-0 mb-6 text-muted-foreground leading-normal">
+          Connect your own account to use models directly from Anthropic,
+          OpenAI, or Google. Seren Models is always available with your
+          SerenBucks balance.
+        </p>
 
-      {/* Configured Providers List */}
-      <div class="flex flex-col gap-2 mb-6">
-        <For each={providerStore.configuredProviders}>
-          {(providerId) => {
-            const config = PROVIDER_CONFIGS[providerId];
-            const authType = providerStore.getAuthType(providerId);
-            return (
-              <div class="flex items-center justify-between px-4 py-3 bg-surface-1/50 border border-border-medium rounded-lg transition-[border-color] duration-150 hover:border-border-strong">
-                <div class="flex flex-col gap-1 min-w-0 flex-1">
-                  <div class="flex items-center gap-2">
-                    <span class="font-medium text-foreground">
-                      {config.name}
-                    </span>
-                    <Show when={providerId === "seren"}>
-                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-primary/20 text-primary/70">
-                        Default
-                      </span>
-                    </Show>
-                    <Show when={providerId === providerStore.activeProvider}>
-                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-success/20 text-success">
-                        Active
-                      </span>
-                    </Show>
-                    <Show when={authType === "oauth"}>
-                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-primary/20 text-primary">
-                        Signed In
-                      </span>
-                    </Show>
-                  </div>
-                  <span class="text-xs text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
-                    {config.description}
-                  </span>
-                </div>
-                <div class="flex items-center gap-2 ml-4">
-                  <Show when={providerId !== providerStore.activeProvider}>
-                    <button
-                      type="button"
-                      class="px-3 py-1.5 bg-transparent border border-accent text-accent rounded text-[13px] cursor-pointer transition-all duration-150 hover:bg-accent hover:text-white"
-                      onClick={() => handleActivateProvider(providerId)}
-                    >
-                      Use
-                    </button>
-                  </Show>
-                  <Show when={providerId !== "seren"}>
-                    <button
-                      type="button"
-                      class="w-7 h-7 flex items-center justify-center bg-transparent border border-border-strong text-muted-foreground rounded text-base cursor-pointer transition-all duration-150 hover:bg-destructive/10 hover:border-destructive/50 hover:text-destructive"
-                      onClick={() => handleRemoveProvider(providerId)}
-                      title="Remove provider"
-                    >
-                      x
-                    </button>
-                  </Show>
-                </div>
-              </div>
-            );
-          }}
-        </For>
-      </div>
-
-      {/* Add New Provider */}
-      <Show when={unconfiguredProviders().length > 0}>
-        <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
-          Add Provider
-        </h4>
-
-        {/* OAuth Error Display */}
-        <Show when={oauthError()}>
-          <div class="mt-3 px-3.5 py-2.5 bg-destructive/10 border border-destructive/30 rounded-md text-destructive text-[13px]">
-            {oauthError()}
-          </div>
-        </Show>
-
-        {/* Quick OAuth Sign-in Buttons */}
-        <div class="flex flex-col gap-2.5 mt-3">
-          <For each={unconfiguredProviders().filter((p) => supportsOAuth(p))}>
+        {/* Configured Providers List */}
+        <div class="flex flex-col gap-2 mb-6">
+          <For each={providerStore.configuredProviders}>
             {(providerId) => {
               const config = PROVIDER_CONFIGS[providerId];
-              const isInProgress = () => oauthInProgress() === providerId;
+              const authType = providerStore.getAuthType(providerId);
               return (
-                <button
-                  type="button"
-                  class={`flex items-center justify-center gap-2.5 px-5 py-3 border rounded-lg text-sm font-medium cursor-pointer transition-all duration-150 hover:not-disabled:-translate-y-px active:not-disabled:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed ${
-                    providerId === "openai"
-                      ? "bg-[#10a37f] border-[#10a37f] text-white hover:not-disabled:bg-[#0d8a6a] hover:not-disabled:border-[#0d8a6a]"
-                      : "bg-surface-1/50 border-border-strong text-foreground"
-                  }`}
-                  onClick={() => handleOAuthSignIn(providerId)}
-                  disabled={isInProgress() || !config.oauth?.clientId}
-                >
-                  <Show
-                    when={isInProgress()}
-                    fallback={`Sign in with ${config.name}`}
-                  >
-                    Connecting...
-                  </Show>
-                </button>
+                <div class="flex items-center justify-between px-4 py-3 bg-surface-1/50 border border-border-medium rounded-lg transition-[border-color] duration-150 hover:border-border-strong">
+                  <div class="flex flex-col gap-1 min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium text-foreground">
+                        {config.name}
+                      </span>
+                      <Show when={providerId === "seren"}>
+                        <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-primary/20 text-primary/70">
+                          Default
+                        </span>
+                      </Show>
+                      <Show when={providerId === providerStore.activeProvider}>
+                        <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-success/20 text-success">
+                          Active
+                        </span>
+                      </Show>
+                      <Show when={authType === "oauth"}>
+                        <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-primary/20 text-primary">
+                          Signed In
+                        </span>
+                      </Show>
+                    </div>
+                    <span class="text-xs text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+                      {config.description}
+                    </span>
+                  </div>
+                  <div class="flex items-center gap-2 ml-4">
+                    <Show when={providerId !== providerStore.activeProvider}>
+                      <button
+                        type="button"
+                        class="px-3 py-1.5 bg-transparent border border-accent text-accent rounded text-[13px] cursor-pointer transition-all duration-150 hover:bg-accent hover:text-white"
+                        onClick={() => handleActivateProvider(providerId)}
+                      >
+                        Use
+                      </button>
+                    </Show>
+                    <Show when={providerId !== "seren"}>
+                      <button
+                        type="button"
+                        class="w-7 h-7 flex items-center justify-center bg-transparent border border-border-strong text-muted-foreground rounded text-base cursor-pointer transition-all duration-150 hover:bg-destructive/10 hover:border-destructive/50 hover:text-destructive"
+                        onClick={() => handleRemoveProvider(providerId)}
+                        title="Remove provider"
+                      >
+                        x
+                      </button>
+                    </Show>
+                  </div>
+                </div>
               );
             }}
           </For>
         </div>
 
-        <div class="flex items-center my-5 gap-4 before:content-[''] before:flex-1 before:h-px before:bg-border-strong after:content-[''] after:flex-1 after:h-px after:bg-border-strong">
-          <span class="text-muted-foreground text-xs uppercase tracking-[0.5px]">
-            or use API key
-          </span>
-        </div>
+        {/* Add New Provider */}
+        <Show when={unconfiguredProviders().length > 0}>
+          <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
+            Add Provider
+          </h4>
 
-        <div class="mt-4">
-          <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
-            <label class="flex flex-col gap-0.5 flex-1">
-              <span class="text-[0.95rem] font-medium text-foreground">
-                Provider
-              </span>
-              <span class="text-[0.8rem] text-muted-foreground">
-                Select a provider to configure with API key
-              </span>
-            </label>
-            <select
-              aria-label="Select provider"
-              value={selectedProvider() || ""}
-              onChange={(e) => {
-                const value = e.currentTarget.value;
-                setSelectedProvider(value ? (value as ProviderId) : null);
-                setApiKeyInput("");
-                providerStore.clearValidationError();
-              }}
-              class="min-w-[180px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] cursor-pointer focus:outline-none focus:border-accent"
-            >
-              <option value="">Select provider...</option>
-              <For
-                each={unconfiguredProviders().filter((p) => supportsApiKey(p))}
-              >
-                {(providerId) => (
-                  <option value={providerId}>
-                    {PROVIDER_CONFIGS[providerId].name}
-                  </option>
-                )}
-              </For>
-            </select>
-          </div>
+          {/* OAuth Error Display */}
+          <Show when={oauthError()}>
+            <div class="mt-3 px-3.5 py-2.5 bg-destructive/10 border border-destructive/30 rounded-md text-destructive text-[13px]">
+              {oauthError()}
+            </div>
+          </Show>
 
-          <Show when={selectedProvider()}>
-            {(provider) => {
-              const config = () => PROVIDER_CONFIGS[provider()];
-              return (
-                <>
-                  <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
-                    <label class="flex flex-col gap-0.5 flex-1">
-                      <span class="text-[0.95rem] font-medium text-foreground">
-                        API Key
-                      </span>
-                      <span class="text-[0.8rem] text-muted-foreground">
-                        Your {config().name} API key.{" "}
-                        <a
-                          href={config().docsUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="text-accent no-underline hover:underline"
-                        >
-                          Get one here
-                        </a>
-                      </span>
-                    </label>
-                    <div class="flex gap-2">
-                      <input
-                        type={showKey() ? "text" : "password"}
-                        class="flex-1 min-w-[250px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded text-foreground text-[13px] font-mono focus:outline-none focus:border-accent placeholder:text-muted-foreground placeholder:font-sans"
-                        value={apiKeyInput()}
-                        onInput={(e) => {
-                          setApiKeyInput(e.currentTarget.value);
-                          providerStore.clearValidationError();
-                        }}
-                        placeholder={
-                          config().apiKeyPlaceholder || "Enter API key..."
-                        }
-                      />
-                      <button
-                        type="button"
-                        class="px-3 py-2 bg-surface-1/50 border border-border-strong rounded text-muted-foreground text-[13px] cursor-pointer transition-colors duration-150 whitespace-nowrap hover:bg-border-medium"
-                        onClick={() => setShowKey(!showKey())}
-                        title={showKey() ? "Hide API key" : "Show API key"}
-                      >
-                        {showKey() ? "Hide" : "Show"}
-                      </button>
-                    </div>
-                  </div>
-
-                  <Show when={providerStore.validationError}>
-                    <div class="mt-2 px-3 py-2 bg-destructive/10 border border-destructive/30 rounded text-destructive text-[13px]">
-                      {providerStore.validationError}
-                    </div>
-                  </Show>
-
+          {/* Quick OAuth Sign-in Buttons */}
+          <div class="flex flex-col gap-2.5 mt-3">
+            <For each={unconfiguredProviders().filter((p) => supportsOAuth(p))}>
+              {(providerId) => {
+                const config = PROVIDER_CONFIGS[providerId];
+                const isInProgress = () => oauthInProgress() === providerId;
+                return (
                   <button
                     type="button"
-                    class="mt-4 px-5 py-2.5 bg-accent border-none rounded-md text-white text-sm font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-primary/85 disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={handleAddApiKey}
-                    disabled={
-                      !apiKeyInput().trim() || providerStore.isValidating
-                    }
+                    class={`flex items-center justify-center gap-2.5 px-5 py-3 border rounded-lg text-sm font-medium cursor-pointer transition-all duration-150 hover:not-disabled:-translate-y-px active:not-disabled:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      providerId === "openai"
+                        ? "bg-[#10a37f] border-[#10a37f] text-white hover:not-disabled:bg-[#0d8a6a] hover:not-disabled:border-[#0d8a6a]"
+                        : "bg-surface-1/50 border-border-strong text-foreground"
+                    }`}
+                    onClick={() => handleOAuthSignIn(providerId)}
+                    disabled={isInProgress() || !config.oauth?.clientId}
                   >
-                    {providerStore.isValidating
-                      ? "Validating..."
-                      : "Add Provider"}
+                    <Show
+                      when={isInProgress()}
+                      fallback={`Sign in with ${config.name}`}
+                    >
+                      Connecting...
+                    </Show>
                   </button>
-                </>
-              );
-            }}
-          </Show>
-        </div>
+                );
+              }}
+            </For>
+          </div>
+
+          <div class="flex items-center my-5 gap-4 before:content-[''] before:flex-1 before:h-px before:bg-border-strong after:content-[''] after:flex-1 after:h-px after:bg-border-strong">
+            <span class="text-muted-foreground text-xs uppercase tracking-[0.5px]">
+              or use API key
+            </span>
+          </div>
+
+          <div class="mt-4">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Provider
+                </span>
+                <span class="text-[0.8rem] text-muted-foreground">
+                  Select a provider to configure with API key
+                </span>
+              </label>
+              <select
+                aria-label="Select provider"
+                value={selectedProvider() || ""}
+                onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setSelectedProvider(value ? (value as ProviderId) : null);
+                  setApiKeyInput("");
+                  providerStore.clearValidationError();
+                }}
+                class="min-w-[180px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] cursor-pointer focus:outline-none focus:border-accent"
+              >
+                <option value="">Select provider...</option>
+                <For
+                  each={unconfiguredProviders().filter((p) =>
+                    supportsApiKey(p),
+                  )}
+                >
+                  {(providerId) => (
+                    <option value={providerId}>
+                      {PROVIDER_CONFIGS[providerId].name}
+                    </option>
+                  )}
+                </For>
+              </select>
+            </div>
+
+            <Show when={selectedProvider()}>
+              {(provider) => {
+                const config = () => PROVIDER_CONFIGS[provider()];
+                return (
+                  <>
+                    <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
+                      <label class="flex flex-col gap-0.5 flex-1">
+                        <span class="text-[0.95rem] font-medium text-foreground">
+                          API Key
+                        </span>
+                        <span class="text-[0.8rem] text-muted-foreground">
+                          Your {config().name} API key.{" "}
+                          <a
+                            href={config().docsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="text-accent no-underline hover:underline"
+                          >
+                            Get one here
+                          </a>
+                        </span>
+                      </label>
+                      <div class="flex gap-2">
+                        <input
+                          type={showKey() ? "text" : "password"}
+                          class="flex-1 min-w-[250px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded text-foreground text-[13px] font-mono focus:outline-none focus:border-accent placeholder:text-muted-foreground placeholder:font-sans"
+                          value={apiKeyInput()}
+                          onInput={(e) => {
+                            setApiKeyInput(e.currentTarget.value);
+                            providerStore.clearValidationError();
+                          }}
+                          placeholder={
+                            config().apiKeyPlaceholder || "Enter API key..."
+                          }
+                        />
+                        <button
+                          type="button"
+                          class="px-3 py-2 bg-surface-1/50 border border-border-strong rounded text-muted-foreground text-[13px] cursor-pointer transition-colors duration-150 whitespace-nowrap hover:bg-border-medium"
+                          onClick={() => setShowKey(!showKey())}
+                          title={showKey() ? "Hide API key" : "Show API key"}
+                        >
+                          {showKey() ? "Hide" : "Show"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <Show when={providerStore.validationError}>
+                      <div class="mt-2 px-3 py-2 bg-destructive/10 border border-destructive/30 rounded text-destructive text-[13px]">
+                        {providerStore.validationError}
+                      </div>
+                    </Show>
+
+                    <button
+                      type="button"
+                      class="mt-4 px-5 py-2.5 bg-accent border-none rounded-md text-white text-sm font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-primary/85 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={handleAddApiKey}
+                      disabled={
+                        !apiKeyInput().trim() || providerStore.isValidating
+                      }
+                    >
+                      {providerStore.isValidating
+                        ? "Validating..."
+                        : "Add Provider"}
+                    </button>
+                  </>
+                );
+              }}
+            </Show>
+          </div>
+        </Show>
+
+        <Show when={unconfiguredProviders().length === 0}>
+          <div class="flex items-center gap-2 px-4 py-3 bg-success/10 border border-success/30 rounded-lg text-success text-sm mt-4">
+            <span class="text-base">&#10003;</span>
+            <span>All available providers have been configured.</span>
+          </div>
+        </Show>
       </Show>
 
-      <Show when={unconfiguredProviders().length === 0}>
-        <div class="flex items-center gap-2 px-4 py-3 bg-success/10 border border-success/30 rounded-lg text-success text-sm mt-4">
-          <span class="text-base">&#10003;</span>
-          <span>All available providers have been configured.</span>
+      <Show when={localAgentsAllowed}>
+        <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
+          LM Studio Local Agent
+        </h4>
+        <div class="flex flex-col gap-3 px-4 py-3 bg-surface-1/50 border border-border-medium rounded-lg">
+          <div class="flex items-start justify-between gap-4">
+            <label class="flex flex-col gap-0.5 flex-1">
+              <span class="text-[0.95rem] font-medium text-foreground">
+                Base URL
+              </span>
+              <span class="text-[0.8rem] text-muted-foreground">
+                OpenAI-compatible LM Studio endpoint
+              </span>
+            </label>
+            <input
+              type="url"
+              class="w-[280px] max-w-full px-3 py-2 bg-surface-3/80 border border-border-strong rounded text-foreground text-[13px] font-mono focus:outline-none focus:border-accent"
+              value={lmStudioBaseUrl()}
+              onInput={(event) =>
+                settingsStore.set("lmStudioBaseUrl", event.currentTarget.value)
+              }
+            />
+          </div>
+          <div class="flex items-start justify-between gap-4">
+            <label class="flex flex-col gap-0.5 flex-1">
+              <span class="text-[0.95rem] font-medium text-foreground">
+                API Key
+              </span>
+              <span class="text-[0.8rem] text-muted-foreground">
+                Optional server auth key
+              </span>
+            </label>
+            <input
+              type="password"
+              class="w-[280px] max-w-full px-3 py-2 bg-surface-3/80 border border-border-strong rounded text-foreground text-[13px] font-mono focus:outline-none focus:border-accent"
+              value={lmStudioApiKey()}
+              onInput={(event) =>
+                settingsStore.set("lmStudioApiKey", event.currentTarget.value)
+              }
+              placeholder="Optional"
+            />
+          </div>
+          <div class="flex flex-wrap items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              class="px-3 py-1.5 bg-transparent border border-border-strong text-foreground rounded text-[13px] cursor-pointer transition-colors duration-150 hover:not-disabled:bg-border-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleLmStudioTest}
+              disabled={lmStudioBusy() !== null}
+            >
+              {lmStudioBusy() === "test" ? "Testing..." : "Test connection"}
+            </button>
+            <button
+              type="button"
+              class="px-3 py-1.5 bg-transparent border border-accent text-accent rounded text-[13px] cursor-pointer transition-colors duration-150 hover:not-disabled:bg-accent hover:not-disabled:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleLmStudioStart}
+              disabled={lmStudioBusy() !== null || !lmStudioLifecycleEnabled()}
+              title={
+                lmStudioLifecycleEnabled()
+                  ? "Start local LM Studio server"
+                  : "Start/Stop is only available for localhost URLs"
+              }
+            >
+              {lmStudioBusy() === "start" ? "Starting..." : "Start server"}
+            </button>
+            <button
+              type="button"
+              class="px-3 py-1.5 bg-transparent border border-border-strong text-muted-foreground rounded text-[13px] cursor-pointer transition-colors duration-150 hover:not-disabled:bg-border-medium hover:not-disabled:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleLmStudioStop}
+              disabled={lmStudioBusy() !== null || !lmStudioLifecycleEnabled()}
+              title={
+                lmStudioLifecycleEnabled()
+                  ? "Stop local LM Studio server"
+                  : "Start/Stop is only available for localhost URLs"
+              }
+            >
+              {lmStudioBusy() === "stop" ? "Stopping..." : "Stop server"}
+            </button>
+          </div>
+          <Show when={lmStudioStatus()}>
+            <div class="px-3 py-2 bg-success/10 border border-success/30 rounded text-success text-[13px]">
+              {lmStudioStatus()}
+            </div>
+          </Show>
+          <Show when={lmStudioError()}>
+            <div class="px-3 py-2 bg-destructive/10 border border-destructive/30 rounded text-destructive text-[13px]">
+              {lmStudioError()}
+            </div>
+          </Show>
         </div>
       </Show>
     </section>

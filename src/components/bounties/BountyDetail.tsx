@@ -720,7 +720,13 @@ export const BountyDetail: Component<BountyDetailProps> = (props) => {
   }
 
   function isAgentType(value: string | null | undefined): value is AgentType {
-    return value === "claude-code" || value === "codex" || value === "gemini";
+    return (
+      value === "claude-code" ||
+      value === "codex" ||
+      value === "gemini" ||
+      value === "claude-codex" ||
+      value === "lmstudio"
+    );
   }
 
   const handleJoinBounty = async () => {

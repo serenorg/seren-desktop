@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
+use tauri_plugin_store::StoreExt;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
@@ -21,6 +22,8 @@ const SPAWN_ONESHOT_REQUEST_ID: i64 = 5;
 const SET_MODEL_ONESHOT_REQUEST_ID: i64 = 6;
 const TERMINATE_ONESHOT_REQUEST_ID: i64 = 7;
 const SET_MODE_ONESHOT_REQUEST_ID: i64 = 8;
+const SETTINGS_STORE: &str = "settings.json";
+const APP_SETTINGS_KEY: &str = "app";
 
 type RuntimeSocket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
@@ -298,7 +301,15 @@ pub async fn complete_oneshot(
         "networkEnabled": false,
         "timeoutSecs": 180,
     });
-    if agent_type == "claude-code" {
+    if agent_type == "lmstudio" {
+        if let Some(base_url) = app_setting_string(app, "lmStudioBaseUrl") {
+            spawn_params["lmStudioBaseUrl"] = json!(base_url);
+        }
+        if let Some(api_key) = app_setting_string(app, "lmStudioApiKey") {
+            spawn_params["lmStudioApiKey"] = json!(api_key);
+        }
+    }
+    if agent_type == "claude-code" || agent_type == "lmstudio" {
         if let Some(model) = request
             .model
             .as_deref()
@@ -568,10 +579,7 @@ async fn collect_provider_prompt(
 /// one-shot hangs until the socket/spawn timeout. Failing closed on the
 /// permission request (then terminating the ephemeral session) makes all three
 /// agents behave identically: no tool execution, no approval UI. #2398.
-fn classify_oneshot_provider_event(
-    method: &str,
-    params: &Value,
-) -> Result<Option<String>, String> {
+fn classify_oneshot_provider_event(method: &str, params: &Value) -> Result<Option<String>, String> {
     match method {
         "provider://message-chunk" => {
             if params
@@ -627,6 +635,19 @@ fn provider_oneshot_permission_mode(agent_type: &str) -> &'static str {
         "codex" => "ask",
         _ => "ask",
     }
+}
+
+fn app_setting_string(app: &AppHandle, key: &str) -> Option<String> {
+    let store = app.store(SETTINGS_STORE).ok()?;
+    let raw = store.get(APP_SETTINGS_KEY)?;
+    let raw = raw.as_str()?;
+    let parsed: Value = serde_json::from_str(raw).ok()?;
+    parsed
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn response_error_message(payload: &Value) -> Option<String> {
@@ -817,6 +838,7 @@ mod tests {
         assert_eq!(provider_oneshot_permission_mode("claude-code"), "plan");
         assert_eq!(provider_oneshot_permission_mode("gemini"), "plan");
         assert_eq!(provider_oneshot_permission_mode("codex"), "ask");
+        assert_eq!(provider_oneshot_permission_mode("lmstudio"), "ask");
         assert_eq!(provider_oneshot_permission_mode("unknown"), "ask");
     }
 

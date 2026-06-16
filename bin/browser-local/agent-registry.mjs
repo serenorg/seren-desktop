@@ -14,6 +14,12 @@ import os from "node:os";
 import path from "node:path";
 
 import { backgroundUpdateCli } from "./cli-updater.mjs";
+import {
+  checkLmStudioAuthenticated,
+  checkLmStudioAvailable,
+  ensureLmStudioCli,
+  launchLmStudioDownload,
+} from "./lmstudio-runtime.mjs";
 
 /**
  * Map a binary file's CPU architecture to Node's `process.arch` taxonomy.
@@ -301,6 +307,8 @@ function isAgentAuthenticated(agentType) {
       return hasCodexCredentials();
     case "gemini":
       return hasGeminiCredentials();
+    case "lmstudio":
+      return false;
     case "claude-codex":
       return hasClaudeCredentials() && hasCodexCredentials();
     default:
@@ -940,6 +948,42 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         launchLoginCommand(resolved !== "gemini" ? resolved : "gemini");
       },
     },
+    lmstudio: {
+      type: "lmstudio",
+      name: "LM Studio",
+      description: "Local LM Studio server via OpenAI-compatible HTTP",
+      command: "lms",
+      async getAvailability() {
+        const serverReady = await checkLmStudioAuthenticated();
+        const canStart = await checkLmStudioAvailable();
+        return {
+          type: "lmstudio",
+          name: "LM Studio",
+          description: "Local LM Studio server via OpenAI-compatible HTTP",
+          command: "lms",
+          available: true,
+          authenticated: serverReady || canStart,
+          ...(canStart
+            ? {}
+            : {
+                unavailableReason:
+                  "LM Studio is not running and the lms CLI was not found. Install LM Studio from https://lmstudio.ai/download.",
+              }),
+        };
+      },
+      async canSpawn() {
+        return true;
+      },
+      async checkAuthenticated() {
+        return checkLmStudioAuthenticated();
+      },
+      async ensureCli() {
+        return ensureLmStudioCli();
+      },
+      launchLogin() {
+        launchLmStudioDownload();
+      },
+    },
   };
 
   function getDefinition(agentType) {
@@ -1031,7 +1075,10 @@ export function createBrowserLocalAgentRegistry({ emit }) {
     },
 
     async checkAgentAuthenticated(agentType) {
-      getDefinition(agentType);
+      const definition = getDefinition(agentType);
+      if (definition.checkAuthenticated) {
+        return definition.checkAuthenticated();
+      }
       return isAgentAuthenticated(agentType);
     },
 

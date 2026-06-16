@@ -463,7 +463,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       threadType === "codex" ||
       threadType === "claude-code" ||
       threadType === "gemini" ||
-      threadType === "claude-codex"
+      threadType === "claude-codex" ||
+      threadType === "lmstudio"
     ) {
       return threadType;
     }
@@ -472,7 +473,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       sessionAgent === "codex" ||
       sessionAgent === "claude-code" ||
       sessionAgent === "gemini" ||
-      sessionAgent === "claude-codex"
+      sessionAgent === "claude-codex" ||
+      sessionAgent === "lmstudio"
     ) {
       return sessionAgent;
     }
@@ -503,6 +505,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         return "Gemini";
       case "claude-codex":
         return "Claude + Codex";
+      case "lmstudio":
+        return "LM Studio";
       default:
         return "Claude Code";
     }
@@ -1818,7 +1822,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 ? "Gemini"
                 : agentType === "claude-codex"
                   ? "Claude + Codex"
-                  : "Claude Code";
+                  : agentType === "lmstudio"
+                    ? "LM Studio"
+                    : "Claude Code";
           const reason = agentStore.agentFallbackReason;
           const title =
             reason === "prompt_too_long"

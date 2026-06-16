@@ -149,6 +149,7 @@ const DEFAULT_SEREN_MODELS: Record<AgentType, string> = {
   codex: "arcee-ai/trinity-large-thinking",
   gemini: "google/gemini-2.5-pro",
   "claude-codex": "arcee-ai/trinity-large-thinking",
+  lmstudio: "arcee-ai/trinity-large-thinking",
 };
 
 /**
@@ -235,7 +236,16 @@ export function buildRedirectMessage(
   modelDisplayName: string,
   reason: "rate_limit" | "prompt_too_long" = "rate_limit",
 ): UnifiedMessage {
-  const agentName = agentType === "codex" ? "Codex" : "Claude Code";
+  const agentName =
+    agentType === "codex"
+      ? "Codex"
+      : agentType === "gemini"
+        ? "Gemini"
+        : agentType === "claude-codex"
+          ? "Claude + Codex"
+          : agentType === "lmstudio"
+            ? "LM Studio"
+            : "Claude Code";
   const reasonText =
     reason === "prompt_too_long"
       ? `${agentName} agent's context window is full.`
@@ -281,7 +291,16 @@ export async function performAgentFallback(
 
   const chatModelId = mapAgentModelToChat(agentModelId, agentType);
   const modelDisplayName = getModelDisplayName(chatModelId);
-  const agentName = agentType === "codex" ? "Codex" : "Claude";
+  const agentName =
+    agentType === "codex"
+      ? "Codex"
+      : agentType === "gemini"
+        ? "Gemini"
+        : agentType === "claude-codex"
+          ? "Claude + Codex"
+          : agentType === "lmstudio"
+            ? "LM Studio"
+            : "Claude";
   const title = sessionTitle || `${agentName} Agent (continued)`;
 
   try {

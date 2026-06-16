@@ -155,6 +155,10 @@ export interface Settings {
   agentSearchEnabled: boolean;
   agentNetworkEnabled: boolean;
   agentAutoApproveReads: boolean;
+  /** OpenAI-compatible LM Studio server URL. Defaults to the local server. */
+  lmStudioBaseUrl: string;
+  /** Optional LM Studio server API key for users who enable server auth. */
+  lmStudioApiKey: string;
   /**
    * Reasoning effort passed to the Claude Code CLI via --effort on next spawn.
    * Values: "low" | "medium" | "high" | "xhigh". Changes do not affect
@@ -278,6 +282,8 @@ const DEFAULT_SETTINGS: Settings = {
   agentSearchEnabled: true,
   agentNetworkEnabled: true,
   agentAutoApproveReads: true,
+  lmStudioBaseUrl: "http://localhost:1234",
+  lmStudioApiKey: "",
   claudeReasoningEffort: "medium",
   // Voice
   voiceAutoSubmit: true,

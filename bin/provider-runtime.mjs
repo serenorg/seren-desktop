@@ -133,6 +133,18 @@ function registerProviderHandlers() {
     "provider_list_remote_sessions",
     providerHandlers.listRemoteSessions,
   );
+  registerHandler(
+    "provider_lmstudio_test_connection",
+    providerHandlers.testLmStudioConnection,
+  );
+  registerHandler(
+    "provider_lmstudio_start_server",
+    providerHandlers.startLmStudioServer,
+  );
+  registerHandler(
+    "provider_lmstudio_stop_server",
+    providerHandlers.stopLmStudioServer,
+  );
 }
 
 function startServer(config) {

@@ -395,6 +395,7 @@ const CLAUDE_1M_TIER_CAPABLE_MODELS = new Set([
 function defaultContextWindowFor(agentType: string, modelId?: string): number {
   if (agentType === "codex") return 1_000_000;
   if (agentType === "gemini") return 1_000_000;
+  if (agentType === "lmstudio") return 128_000;
   // Paired threads gauge against the planner (Claude defaults to the 1M
   // tier); the runtime-reported contextWindow corrects this per turn.
   if (agentType === "claude-codex") return 1_000_000;
@@ -1035,6 +1036,8 @@ export function agentDisplayName(agentType?: string): string {
       return "Gemini";
     case "claude-codex":
       return "Claude + Codex";
+    case "lmstudio":
+      return "LM Studio";
     default:
       return agentType ?? "Agent";
   }
@@ -2710,7 +2713,9 @@ export const agentStore = {
           ? "Gemini Agent"
           : resolvedAgentType === "claude-codex"
             ? "Claude + Codex"
-            : "Claude Code Agent");
+            : resolvedAgentType === "lmstudio"
+              ? "LM Studio Agent"
+              : "Claude Code Agent");
 
     // Prevent concurrent spawns for the same conversation. Internal retries
     // (initRetryAttempt > 0) are allowed through because they are sequential
@@ -2878,19 +2883,7 @@ export const agentStore = {
               );
               setState(
                 "error",
-                `${
-                  data.agentType === "gemini"
-                    ? "Gemini"
-                    : data.agentType === "codex"
-                      ? "Codex"
-                      : "Claude Code"
-                } sign-in required. Opening a Terminal window — finish the login there, then click + New Agent → ${
-                  data.agentType === "gemini"
-                    ? "Gemini Agent"
-                    : data.agentType === "codex"
-                      ? "Codex Agent"
-                      : "Claude Code Agent"
-                } again.`,
+                `${agentDisplayName(data.agentType)} sign-in required. Opening a Terminal window — finish the login there, then click + New Agent → ${agentDisplayName(data.agentType)} Agent again.`,
               );
               providerService
                 .launchLogin(data.agentType)
@@ -3072,6 +3065,8 @@ export const agentStore = {
           // picker changes. See #1635.
           opts?.initialModelId,
           opts?.paired,
+          settingsStore.settings.lmStudioBaseUrl,
+          settingsStore.settings.lmStudioApiKey,
         );
         console.log("[AgentStore] Spawn result:", info);
         expectedReadySessionId = info.id;
@@ -3515,7 +3510,8 @@ export const agentStore = {
       convo.agent_type === "codex" ||
       convo.agent_type === "claude-code" ||
       convo.agent_type === "gemini" ||
-      convo.agent_type === "claude-codex"
+      convo.agent_type === "claude-codex" ||
+      convo.agent_type === "lmstudio"
         ? (convo.agent_type as AgentType)
         : state.selectedAgentType;
     const convoMetadata = parseAgentConversationMetadata(convo.agent_metadata);

@@ -37,6 +37,7 @@ const GLYPHS: Record<string, string> = {
   codex: "\u{26A1}", // ⚡ lightning bolt
   gemini: "\u{2728}", // ✨ sparkles
   "claude-codex": "\u{1F91D}", // 🤝 handshake — paired Claude + Codex
+  lmstudio: "\u{1F5A5}\uFE0F", // 🖥️ desktop computer
 };
 
 export function providerGlyph(provider: string): string {

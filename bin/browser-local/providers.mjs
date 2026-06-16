@@ -10,6 +10,7 @@ import {
 } from "./agent-registry.mjs";
 import { createClaudeRuntime } from "./claude-runtime.mjs";
 import { createGeminiRuntime } from "./gemini-runtime.mjs";
+import { createLmStudioRuntime } from "./lmstudio-runtime.mjs";
 import { providerLogPrefix } from "./logging.mjs";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
 import { createPairedRuntime, PAIRED_AGENT_TYPE } from "./paired-runtime.mjs";
@@ -995,6 +996,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
   const agentRegistry = createBrowserLocalAgentRegistry({ emit });
   const claudeRuntime = createClaudeRuntime({ emit, runtimeMode });
   const geminiRuntime = createGeminiRuntime({ emit, runtimeMode });
+  const lmStudioRuntime = createLmStudioRuntime({ emit, runtimeMode });
 
   async function withTemporaryCodexSession(cwd, callback) {
     const processHandle = spawnCodexProcess(cwd);
@@ -1056,6 +1058,10 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
 
     if (agentType === "gemini") {
       return geminiRuntime.spawnSession(params);
+    }
+
+    if (agentType === "lmstudio") {
+      return lmStudioRuntime.spawnSession(params);
     }
 
     if (agentType !== "codex") {
@@ -1235,6 +1241,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.sendPrompt({ sessionId, prompt, context });
       }
+      if (lmStudioRuntime.hasSession(sessionId)) {
+        return lmStudioRuntime.sendPrompt({ sessionId, prompt, context });
+      }
       return claudeRuntime.sendPrompt({ sessionId, prompt, context });
     }
     if (session.currentPrompt) {
@@ -1296,6 +1305,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.cancelPrompt({ sessionId });
       }
+      if (lmStudioRuntime.hasSession(sessionId)) {
+        return lmStudioRuntime.cancelPrompt({ sessionId });
+      }
       return claudeRuntime.cancelPrompt({ sessionId });
     }
     if (session.activeTurnId) {
@@ -1346,6 +1358,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.terminateSession({ sessionId });
       }
+      if (lmStudioRuntime.hasSession(sessionId)) {
+        return lmStudioRuntime.terminateSession({ sessionId });
+      }
       return claudeRuntime.terminateSession({ sessionId });
     }
 
@@ -1377,6 +1392,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       })),
       ...(await claudeRuntime.listSessions()),
       ...(await geminiRuntime.listSessions()),
+      ...(await lmStudioRuntime.listSessions()),
       ...(await pairedRuntime.listSessions()),
     ];
   }
@@ -1389,6 +1405,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       }
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.setPermissionMode({ sessionId, mode });
+      }
+      if (lmStudioRuntime.hasSession(sessionId)) {
+        return lmStudioRuntime.setPermissionMode({ sessionId, mode });
       }
       return claudeRuntime.setPermissionMode({ sessionId, mode });
     }
@@ -1409,6 +1428,13 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       }
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.respondToPermission({ sessionId, requestId, optionId });
+      }
+      if (lmStudioRuntime.hasSession(sessionId)) {
+        return lmStudioRuntime.respondToPermission({
+          sessionId,
+          requestId,
+          optionId,
+        });
       }
       return claudeRuntime.respondToPermission({ sessionId, requestId, optionId });
     }
@@ -1468,6 +1494,10 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       // ACP `session/load` flow is not yet wired through the desktop. Return
       // an empty list so the UI doesn't fail; users always get a fresh thread.
       return { sessions: [], nextCursor: null };
+    }
+
+    if (agentType === "lmstudio") {
+      return lmStudioRuntime.listRemoteSessions({ cwd, cursor });
     }
 
     return withTemporaryCodexSession(cwd, async (session) => {
@@ -1558,6 +1588,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.setModel({ sessionId, modelId });
       }
+      if (lmStudioRuntime.hasSession(sessionId)) {
+        return lmStudioRuntime.setSessionModel({ sessionId, modelId });
+      }
       return claudeRuntime.setModel({ sessionId, modelId });
     }
 
@@ -1601,6 +1634,14 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       if (geminiRuntime.hasSession(sessionId)) {
         // Gemini exposes no config options today — silently no-op.
         return null;
+      }
+      if (lmStudioRuntime.hasSession(sessionId)) {
+        return lmStudioRuntime.updateSessionConfigOption({
+          sessionId,
+          configId,
+          valueId,
+          role,
+        });
       }
       return claudeRuntime.setConfigOption({ sessionId, configId, valueId });
     }
@@ -1661,5 +1702,8 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     setSessionModel,
     setSessionMode,
     updateSessionConfigOption,
+    testLmStudioConnection: lmStudioRuntime.testConnection,
+    startLmStudioServer: lmStudioRuntime.startServer,
+    stopLmStudioServer: lmStudioRuntime.stopServer,
   };
 }

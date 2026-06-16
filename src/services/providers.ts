@@ -24,7 +24,12 @@ import { isTauriRuntime } from "@/lib/tauri-bridge";
 // `commands::chat`. The two language sides drift silently otherwise: a
 // thread bound to the new agent stays `kind='chat'` in the DB and
 // routes to the chat shell.
-export type AgentType = "claude-code" | "codex" | "gemini" | "claude-codex";
+export type AgentType =
+  | "claude-code"
+  | "codex"
+  | "gemini"
+  | "claude-codex"
+  | "lmstudio";
 export type UnlistenFn = () => void;
 
 /** Roles inside a paired `claude-codex` thread (#2368). */
@@ -86,6 +91,19 @@ export interface RemoteSessionInfo {
 export interface RemoteSessionsPage {
   sessions: RemoteSessionInfo[];
   nextCursor?: string | null;
+}
+
+export interface LmStudioModelInfo {
+  modelId: string;
+  name: string;
+  description?: string;
+}
+
+export interface LmStudioConnectionResult {
+  ok: boolean;
+  baseUrl: string;
+  message: string;
+  models?: LmStudioModelInfo[];
 }
 
 // Event payloads
@@ -394,6 +412,8 @@ export async function spawnAgent(
   reasoningEffort?: string,
   initialModelId?: string,
   paired?: PairedSpawnConfig,
+  lmStudioBaseUrl?: string,
+  lmStudioApiKey?: string,
 ): Promise<AgentSessionInfo> {
   return invokeProvider<AgentSessionInfo>(
     "provider_spawn",
@@ -412,6 +432,8 @@ export async function spawnAgent(
       reasoningEffort: reasoningEffort ?? null,
       initialModelId: initialModelId ?? null,
       paired: paired ?? null,
+      lmStudioBaseUrl: lmStudioBaseUrl ?? null,
+      lmStudioApiKey: lmStudioApiKey ?? null,
     },
     { timeoutMs: 120_000 },
   );
@@ -631,6 +653,16 @@ export async function ensurePairedCli(): Promise<string> {
 }
 
 /**
+ * Ensure LM Studio's `lms` helper is installed. Seren cannot install LM Studio;
+ * this validates local availability and otherwise surfaces the download path.
+ */
+export async function ensureLmStudioCli(): Promise<string> {
+  return invokeProvider<string>("provider_ensure_agent_cli", {
+    agentType: "lmstudio",
+  });
+}
+
+/**
  * Check if a specific agent binary is available in PATH.
  */
 export async function checkAgentAvailable(
@@ -658,6 +690,44 @@ export async function checkAgentAuthenticated(
  */
 export async function launchLogin(agentType: AgentType): Promise<void> {
   return invokeProvider("provider_launch_login", { agentType });
+}
+
+export async function testLmStudioConnection(
+  baseUrl: string,
+  apiKey?: string,
+): Promise<LmStudioConnectionResult> {
+  return invokeProvider<LmStudioConnectionResult>(
+    "provider_lmstudio_test_connection",
+    {
+      baseUrl,
+      apiKey: apiKey ?? null,
+    },
+    { timeoutMs: 20_000 },
+  );
+}
+
+export async function startLmStudioServer(
+  baseUrl: string,
+  apiKey?: string,
+): Promise<{ ok: boolean }> {
+  return invokeProvider<{ ok: boolean }>(
+    "provider_lmstudio_start_server",
+    {
+      baseUrl,
+      apiKey: apiKey ?? null,
+    },
+    { timeoutMs: 45_000 },
+  );
+}
+
+export async function stopLmStudioServer(
+  baseUrl: string,
+): Promise<{ ok: boolean }> {
+  return invokeProvider<{ ok: boolean }>(
+    "provider_lmstudio_stop_server",
+    { baseUrl },
+    { timeoutMs: 30_000 },
+  );
 }
 
 // ============================================================================

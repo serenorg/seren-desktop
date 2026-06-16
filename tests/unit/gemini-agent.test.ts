@@ -159,8 +159,21 @@ describe("Gemini Agent — agent.store.ts wiring (#1471)", () => {
 
 describe("Gemini Agent — thread.store.ts auto-detect (#1471)", () => {
   it("getBestAgent considers gemini in the availability fallback chain", () => {
-    expect(threadStoreTs).toContain('a.type === "gemini" && a.available');
+    expect(threadStoreTs).toContain(
+      'a.type === "gemini" && canAutoSelectAgent(a)',
+    );
     expect(threadStoreTs).toContain('agentType: "gemini"');
+  });
+});
+
+describe("LM Studio Agent — thread.store.ts auto-detect (#2451)", () => {
+  it("only auto-selects LM Studio when it is reachable or startable", () => {
+    expect(threadStoreTs).toContain(
+      'agent.available && (agent.type !== "lmstudio" || agent.authenticated)',
+    );
+    expect(threadStoreTs).toContain(
+      'a.type === "lmstudio" && canAutoSelectAgent(a)',
+    );
   });
 });
 

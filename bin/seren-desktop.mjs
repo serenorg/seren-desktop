@@ -264,6 +264,10 @@ function registerBrowserLocalHandlers() {
     providerHandlers.checkAgentAvailable,
   );
   registerHandler(
+    "provider_check_agent_authenticated",
+    providerHandlers.checkAgentAuthenticated,
+  );
+  registerHandler(
     "provider_ensure_agent_cli",
     providerHandlers.ensureAgentCli,
   );
@@ -291,6 +295,18 @@ function registerBrowserLocalHandlers() {
   registerHandler(
     "provider_update_session_config_option",
     providerHandlers.updateSessionConfigOption,
+  );
+  registerHandler(
+    "provider_lmstudio_test_connection",
+    providerHandlers.testLmStudioConnection,
+  );
+  registerHandler(
+    "provider_lmstudio_start_server",
+    providerHandlers.startLmStudioServer,
+  );
+  registerHandler(
+    "provider_lmstudio_stop_server",
+    providerHandlers.stopLmStudioServer,
   );
 }
 

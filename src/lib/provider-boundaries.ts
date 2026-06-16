@@ -7,7 +7,7 @@ import type { UnifiedMessage } from "@/types/conversation";
 /**
  * Compact label for a producer provider — either a chat provider id from
  * `PROVIDER_CONFIGS` or an external agent type (`claude-code` / `codex` /
- * `gemini`). Falls back to a humanized version of the raw id so a future
+ * `gemini` / `lmstudio`). Falls back to a humanized version of the raw id so a future
  * provider added to `messages.provider` shows up as something readable
  * rather than the empty string.
  */
@@ -27,6 +27,8 @@ export function providerDisplayName(
       return "Gemini";
     case "claude-codex":
       return "Claude + Codex";
+    case "lmstudio":
+      return "LM Studio";
     default: {
       // Title-case the raw id so unknown providers still render legibly.
       // Drop empty segments so a leading, trailing, or repeated separator
