@@ -147,6 +147,40 @@ function Remove-LocalE2EUser([string]$UserName) {
     -TimeoutSeconds 30
 }
 
+function Remove-StaleE2EUsers() {
+  # A cancelled/superseded release run (or a killed SSM step) skips the finally
+  # teardown, leaking its temporary SerenE2E* admin account and profile dir.
+  # Reap every existing SerenE2E* account and orphaned profile dir before this
+  # run creates its user, so leaks self-heal instead of accumulating.
+  # windows-app-e2e is serialized (group: release), so no concurrent run owns
+  # one of these accounts. #2468
+  try {
+    foreach ($staleUser in @(Get-LocalUser -Name "SerenE2E*" -ErrorAction SilentlyContinue)) {
+      Write-Stage "Reaping stale e2e user $($staleUser.Name)"
+      Remove-LocalE2EUser $staleUser.Name
+    }
+    Get-ChildItem -LiteralPath "C:\Users" -Directory -Filter "SerenE2E*" -ErrorAction SilentlyContinue |
+      ForEach-Object {
+        $orphanPath = $_.FullName
+        Invoke-CleanupWithTimeout `
+          -Label "Remove orphaned e2e profile directory $orphanPath" `
+          -ScriptBlock {
+            param($Path)
+            Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue |
+              Where-Object { $_.LocalPath -eq $Path } |
+              Remove-CimInstance -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $Path) {
+              Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          } `
+          -ArgumentList @($orphanPath) `
+          -TimeoutSeconds 30
+      }
+  } catch {
+    Write-Host "::warning::Stale e2e user reap failed: $($_.Exception.Message)"
+  }
+}
+
 $resolvedInstaller = (Resolve-Path -LiteralPath $InstallerPath).Path
 $resolvedWorkDir = (Resolve-Path -LiteralPath $WorkDir).Path
 $runnerPath = Join-Path $resolvedWorkDir "scripts\windows-e2e-app.ps1"
@@ -163,6 +197,7 @@ $taskLogPath = Join-Path $resolvedWorkDir "windows-e2e-task.log"
 $e2eInstallDir = Join-Path $env:SystemDrive "SerenDesktopE2E"
 
 try {
+  Remove-StaleE2EUsers
   Write-Stage "Creating temporary Windows user $qualifiedUserName"
   Remove-LocalE2EUser $userName
   & net user $userName $password /add /Y | Out-Null
