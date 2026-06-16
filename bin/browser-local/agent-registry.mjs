@@ -14,12 +14,14 @@ import os from "node:os";
 import path from "node:path";
 
 import { backgroundUpdateCli } from "./cli-updater.mjs";
-import {
-  checkLmStudioAuthenticated,
-  checkLmStudioAvailable,
-  ensureLmStudioCli,
-  launchLmStudioDownload,
-} from "./lmstudio-runtime.mjs";
+
+// LM Studio support is loaded lazily so a missing LM Studio dependency (e.g.
+// @lmstudio/sdk) never crashes the registry, which every agent relies on for
+// install/login/availability metadata (#2457). It is imported on demand only
+// when the LM Studio agent is queried.
+function loadLmStudioRuntime() {
+  return import("./lmstudio-runtime.mjs");
+}
 
 /**
  * Map a binary file's CPU architecture to Node's `process.arch` taxonomy.
@@ -954,8 +956,23 @@ export function createBrowserLocalAgentRegistry({ emit }) {
       description: "Local LM Studio server via OpenAI-compatible HTTP",
       command: "lms",
       async getAvailability() {
-        const serverReady = await checkLmStudioAuthenticated();
-        const canStart = await checkLmStudioAvailable();
+        let lmStudio;
+        try {
+          lmStudio = await loadLmStudioRuntime();
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          return {
+            type: "lmstudio",
+            name: "LM Studio",
+            description: "Local LM Studio server via OpenAI-compatible HTTP",
+            command: "lms",
+            available: false,
+            authenticated: false,
+            unavailableReason: `LM Studio support failed to load: ${reason}`,
+          };
+        }
+        const serverReady = await lmStudio.checkLmStudioAuthenticated();
+        const canStart = await lmStudio.checkLmStudioAvailable();
         return {
           type: "lmstudio",
           name: "LM Studio",
@@ -975,13 +992,16 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         return true;
       },
       async checkAuthenticated() {
-        return checkLmStudioAuthenticated();
+        const lmStudio = await loadLmStudioRuntime();
+        return lmStudio.checkLmStudioAuthenticated();
       },
       async ensureCli() {
-        return ensureLmStudioCli();
+        const lmStudio = await loadLmStudioRuntime();
+        return lmStudio.ensureLmStudioCli();
       },
-      launchLogin() {
-        launchLmStudioDownload();
+      async launchLogin() {
+        const lmStudio = await loadLmStudioRuntime();
+        lmStudio.launchLmStudioDownload();
       },
     },
   };
