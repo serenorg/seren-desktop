@@ -441,6 +441,13 @@ try {
     [Environment]::SetEnvironmentVariable("SEREN_E2E_AGENT_MODEL", `$bedrockModel, "Process")
     # Bedrock uses the AWS credential chain; no Claude login file is required.
     [Environment]::SetEnvironmentVariable("SEREN_E2E_AGENT_CREDENTIALS_REQUIRED", "0", "Process")
+    # A brand-new profile's first claude-code run on the e2e host fetches the
+    # autoupdater/telemetry/feature-gate catalog over the network at startup;
+    # any of those stalling can wedge the stream-json initialize handshake on a
+    # cold box. Disable that non-essential startup traffic so the handshake only
+    # depends on the local catalog. The runtime still kills+respawns a wedged
+    # process as a backstop. #2452
+    [Environment]::SetEnvironmentVariable("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1", "Process")
     Write-TaskLog "Configured Bedrock agent backend: region=`$bedrockRegion model=`$bedrockModel small=`$bedrockSmallModel"
   }
   Import-AgentCredentialArchive
