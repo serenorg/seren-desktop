@@ -364,9 +364,31 @@ jobs:
           $cspConfig = Get-ChildItem -Path $installDir -Recurse -Filter "eSignerCSP.Config.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($cspConfig) { & $cspConfig.FullName | Out-Null }
           $cka = Join-Path $installDir "eSignerCKATool.exe"
-          & $cka config -mode "PRODUCTION" -user "$env:ES_USERNAME" -pass "$env:ES_PASSWORD" -totp "$env:ES_TOTP_SECRET" -key "$masterKey" -r
-          & $cka unload
-          & $cka load
+          if (-not (Test-Path -LiteralPath $cka)) {
+            Write-Host "::error::eSignerCKATool.exe not found at $cka — eSigner CKA cannot load certificates."
+            exit 1
+          }
+
+          function Invoke-EsignerCka {
+            param(
+              [Parameter(Mandatory = $true)][string]$Step,
+              [Parameter(Mandatory = $true)][string[]]$Arguments
+            )
+            & $cka @Arguments
+            $exitCode = $LASTEXITCODE
+            if ($exitCode -ne 0) {
+              if ($Step -eq "config/login") {
+                Write-Host "::error::eSigner CKA config/login failed with exit code $exitCode. Validate or rotate ES_USERNAME, ES_PASSWORD, and ES_TOTP_SECRET."
+              } else {
+                Write-Host "::error::eSigner CKA $Step failed with exit code $exitCode."
+              }
+              exit $exitCode
+            }
+          }
+
+          Invoke-EsignerCka "config/login" @("config", "-mode", "PRODUCTION", "-user", "$env:ES_USERNAME", "-pass", "$env:ES_PASSWORD", "-totp", "$env:ES_TOTP_SECRET", "-key", "$masterKey", "-r")
+          Invoke-EsignerCka "unload" @("unload")
+          Invoke-EsignerCka "load" @("load")
           $cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Select-Object -First 1
           if (-not $cert) {
             Write-Host "::error::eSigner CKA did not load a code-signing certificate into the store."
