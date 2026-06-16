@@ -1,0 +1,102 @@
+# ABOUTME: Manual SSL.com eSigner CKA auth preflight for Windows release signing.
+# ABOUTME: Validates signing auth without creating releases, artifacts, or updater manifests.
+
+name: eSigner CKA Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  esigner-cka-preflight:
+    runs-on: windows-latest
+    env:
+      HAS_WINDOWS_SIGNING: ${{ secrets.ES_USERNAME != '' && secrets.ES_PASSWORD != '' && secrets.ES_TOTP_SECRET != '' }}
+      ES_USERNAME: ${{ secrets.ES_USERNAME }}
+      ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+      ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
+    steps:
+      - name: Validate eSigner secret presence
+        shell: pwsh
+        run: |
+          if ($env:HAS_WINDOWS_SIGNING -ne "true") {
+            Write-Host "::error::Missing one or more eSigner secrets: ES_USERNAME, ES_PASSWORD, ES_TOTP_SECRET."
+            exit 1
+          }
+          Write-Host "eSigner secrets are present; running CKA auth preflight."
+
+      - name: Install and authenticate eSigner CKA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installDir = Join-Path $env:USERPROFILE "eSignerCKA"
+          $masterKey = Join-Path $installDir "master.key"
+
+          Write-Host "Downloading SSL.com eSigner CKA installer"
+          Invoke-WebRequest -Uri "https://github.com/SSLcom/eSignerCKA/releases/download/v1.0.8/SSL.COM-eSigner-CKA_1.0.8.zip" -OutFile eSigner_CKA_Setup.zip
+          Expand-Archive -Force eSigner_CKA_Setup.zip
+          Remove-Item eSigner_CKA_Setup.zip
+          Move-Item -Destination "eSigner_CKA_Installer.exe" -Path "eSigner_CKA_Setup\*.exe"
+
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          Write-Host "Installing eSigner CKA into $installDir"
+          Start-Process ".\eSigner_CKA_Installer.exe" -ArgumentList '/CURRENTUSER','/VERYSILENT','/SUPPRESSMSGBOXES',"/DIR=$installDir" -Wait
+
+          if (Test-Path ".\setup\vc_redist.x64.exe") {
+            Write-Host "Installing bundled Visual C++ redistributables"
+            Start-Process ".\setup\vc_redist.x86.exe" -ArgumentList "/install","/q" -Wait
+            Start-Process ".\setup\vc_redist.x64.exe" -ArgumentList "/install","/q" -Wait
+          }
+
+          $registerKsp = Get-ChildItem -Path $installDir -Recurse -Filter "RegisterKSP.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $registerKsp) {
+            Write-Host "::error::RegisterKSP.exe not found under $installDir; eSigner KSP cannot be registered."
+            exit 1
+          }
+          Write-Host "Registering eSigner KSP"
+          & $registerKsp.FullName | Out-Null
+
+          $cspConfig = Get-ChildItem -Path $installDir -Recurse -Filter "eSignerCSP.Config.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($cspConfig) {
+            Write-Host "Running eSigner CSP configuration"
+            & $cspConfig.FullName | Out-Null
+          }
+
+          $cka = Join-Path $installDir "eSignerCKATool.exe"
+          if (-not (Test-Path -LiteralPath $cka)) {
+            Write-Host "::error::eSignerCKATool.exe not found at $cka; eSigner CKA cannot load certificates."
+            exit 1
+          }
+          Write-Host "Resolved eSignerCKATool.exe at $cka"
+
+          function Invoke-EsignerCka {
+            param(
+              [Parameter(Mandatory = $true)][string]$Step,
+              [Parameter(Mandatory = $true)][string[]]$Arguments
+            )
+            Write-Host "Running eSigner CKA $Step"
+            & $cka @Arguments
+            $exitCode = $LASTEXITCODE
+            if ($exitCode -ne 0) {
+              if ($Step -eq "config/login") {
+                Write-Host "::error::eSigner CKA config/login failed with exit code $exitCode. Validate SSL.com account status, cooldown/lockout, ES_USERNAME, ES_PASSWORD, and ES_TOTP_SECRET before rotating secrets."
+              } else {
+                Write-Host "::error::eSigner CKA $Step failed with exit code $exitCode."
+              }
+              exit $exitCode
+            }
+          }
+
+          Invoke-EsignerCka "config/login" @("config", "-mode", "PRODUCTION", "-user", "$env:ES_USERNAME", "-pass", "$env:ES_PASSWORD", "-totp", "$env:ES_TOTP_SECRET", "-key", "$masterKey", "-r")
+          Invoke-EsignerCka "unload" @("unload")
+          Invoke-EsignerCka "load" @("load")
+
+          $cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Select-Object -First 1
+          if (-not $cert) {
+            Write-Host "::error::eSigner CKA authenticated but did not load a code-signing certificate into Cert:\CurrentUser\My."
+            exit 1
+          }
+
+          Write-Host "eSigner CKA preflight loaded code-signing certificate: $($cert.Subject) [$($cert.Thumbprint)]"
