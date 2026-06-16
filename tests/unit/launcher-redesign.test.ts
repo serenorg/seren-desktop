@@ -23,6 +23,13 @@ describe("ThreadSidebar — launcher sections (#1832)", () => {
   });
 });
 
+describe("ThreadSidebar — terminal YOLO state stays out of the thread list", () => {
+  it("does not render a sidebar YOLO badge for terminal threads", () => {
+    expect(sidebarTsx).not.toContain('data-testid="sidebar-yolo-badge"');
+    expect(sidebarTsx).not.toMatch(/thread\.launchMode === "yolo"/);
+  });
+});
+
 describe("ThreadSidebar — stable testids on every row (#1832)", () => {
   const testids = [
     "new-seren-chat",
@@ -32,9 +39,7 @@ describe("ThreadSidebar — stable testids on every row (#1832)", () => {
     "new-gemini-agent",
     "new-lmstudio-agent",
     "new-claude-cli",
-    "new-claude-cli-yolo",
     "new-codex-cli",
-    "new-codex-cli-yolo",
     "new-terminal",
   ];
   for (const id of testids) {
@@ -120,19 +125,15 @@ describe("ThreadSidebar — dispatch preserved (#1832)", () => {
     expect(sidebarTsx).toContain('handleNewAgent("lmstudio")');
   });
 
-  it("CLI rows dispatch via createTerminalThread with launch metadata", () => {
+  it("CLI rows dispatch via createTerminalThread without hardcoding launch mode", () => {
     expect(sidebarTsx).toMatch(
-      /handleNewTerminal\(\{\s*cliKind:\s*"claude",\s*launchMode:\s*"normal",?\s*\}\)/s,
+      /handleNewTerminal\(\{\s*cliKind:\s*"claude",?\s*\}\)/s,
     );
     expect(sidebarTsx).toMatch(
-      /handleNewTerminal\(\{\s*cliKind:\s*"claude",\s*launchMode:\s*"yolo",?\s*\}\)/s,
+      /handleNewTerminal\(\{\s*cliKind:\s*"codex",?\s*\}\)/s,
     );
-    expect(sidebarTsx).toMatch(
-      /handleNewTerminal\(\{\s*cliKind:\s*"codex",\s*launchMode:\s*"normal",?\s*\}\)/s,
-    );
-    expect(sidebarTsx).toMatch(
-      /handleNewTerminal\(\{\s*cliKind:\s*"codex",\s*launchMode:\s*"yolo",?\s*\}\)/s,
-    );
+    expect(sidebarTsx).not.toContain('data-testid="new-claude-cli-yolo"');
+    expect(sidebarTsx).not.toContain('data-testid="new-codex-cli-yolo"');
   });
 
   it("plain Terminal still dispatches via createTerminalThread with title 'Terminal'", () => {
@@ -209,15 +210,15 @@ describe("ThreadSidebar — Seren Agent clarification + Claude + Codex row (#236
     expect(sidebarTsx).toContain('handleNewAgent("claude-codex")');
   });
 
-  it("Claude + Codex gates on BOTH Claude and Codex org policies + availability", () => {
+  it("Claude + Codex gates on BOTH Claude and Codex org policies without hiding on probe lag", () => {
     const gate = sidebarTsx.slice(
       sidebarTsx.indexOf("const showPairedAgent"),
       sidebarTsx.indexOf("const showPairedAgent") + 400,
     );
     expect(gate).toContain("allowsClaudeAgent(authStore.privateChatPolicy)");
     expect(gate).toContain("allowsCodexAgent(authStore.privateChatPolicy)");
-    expect(gate).toContain("claudeAvailable()");
-    expect(gate).toContain("codexAvailable()");
+    expect(gate).not.toContain("claudeAvailable()");
+    expect(gate).not.toContain("codexAvailable()");
   });
 
   it("Seren Agent still creates a chat thread (no agent_type stamp)", () => {
@@ -233,6 +234,57 @@ describe("ThreadSidebar — Seren Agent clarification + Claude + Codex row (#236
   it("ThreadTabBar +New menu carries the same Claude + Codex row", () => {
     expect(tabBarTsx).toContain('data-testid="new-claude-codex-agent"');
     expect(tabBarTsx).toContain('handleNewAgent("claude-codex")');
+  });
+
+  it("ThreadTabBar +New menu carries command-line launch rows", () => {
+    for (const id of [
+      "new-claude-cli",
+      "new-codex-cli",
+      "new-terminal",
+    ]) {
+      expect(tabBarTsx).toContain(`data-testid="${id}"`);
+    }
+    expect(tabBarTsx).toContain('cliKind: "claude"');
+    expect(tabBarTsx).toContain('cliKind: "codex"');
+    expect(tabBarTsx).not.toContain('data-testid="new-claude-cli-yolo"');
+    expect(tabBarTsx).not.toContain('data-testid="new-codex-cli-yolo"');
+    expect(tabBarTsx).not.toContain('launchMode: "yolo"');
+    expect(tabBarTsx).toContain("createTerminalThread");
+  });
+});
+
+describe("ThreadSidebar — launcher rows are policy-gated, not probe-gated", () => {
+  it("does not hide coding-agent rows when the availability probe is empty or late", () => {
+    for (const name of [
+      "const showClaudeAgent",
+      "const showCodexAgent",
+      "const showGeminiAgent",
+      "const showLmStudioAgent",
+    ]) {
+      const gate = sidebarTsx.slice(
+        sidebarTsx.indexOf(name),
+        sidebarTsx.indexOf(name) + 180,
+      );
+      expect(gate).not.toContain("Available()");
+      expect(gate).not.toContain("availableAgents");
+    }
+  });
+
+  it("does not hide CLI terminal rows when the availability probe is empty or late", () => {
+    const section = sidebarTsx.slice(
+      sidebarTsx.indexOf("const showCliLaunchers"),
+      sidebarTsx.indexOf("const showCliLaunchers") + 220,
+    );
+    expect(section).toContain("disable_local_agents");
+    expect(section).not.toContain("availableAgents");
+    expect(section).not.toContain("Available()");
+  });
+});
+
+describe("Launcher policy freshness", () => {
+  it("refreshes private chat policy when either +New menu opens", () => {
+    expect(sidebarTsx).toContain("refreshPrivateChatPolicy");
+    expect(tabBarTsx).toContain("refreshPrivateChatPolicy");
   });
 });
 

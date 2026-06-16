@@ -17,16 +17,37 @@ export type TerminalSignal =
   | "terminate"
   | "kill";
 
+const DEFAULT_CLI_LAUNCH_MODE_KEY = "seren:terminal-cli-launch-mode";
+
 export interface TerminalBufferInfo {
   id: string;
+  instanceId?: string | null;
   title: string;
   cwd?: string | null;
   command?: string | null;
   cliKind?: TerminalCliKind | null;
   launchMode: TerminalLaunchMode;
+  /** Session id for this terminal's cliKind (Claude assigned / Codex captured). */
+  sessionId?: string | null;
+  /** True once the CLI has created a session that can be resumed by id. */
+  sessionResumable: boolean;
   cols: number;
   rows: number;
   status: TerminalStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Durable record used to restore + resume a CLI-agent terminal after restart. */
+export interface TerminalAgentDescriptor {
+  id: string;
+  title: string;
+  cliKind: TerminalCliKind;
+  launchMode: TerminalLaunchMode;
+  cwd?: string | null;
+  sessionId?: string | null;
+  sessionResumable: boolean;
+  autoRestore: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -38,38 +59,50 @@ interface TerminalExitEvent {
 interface TerminalState {
   buffers: Record<string, TerminalBufferInfo>;
   focusRequests: Record<string, number>;
+  defaultCliLaunchMode: TerminalLaunchMode;
   initialized: boolean;
+}
+
+function normalizeLaunchMode(value: unknown): TerminalLaunchMode {
+  return value === "yolo" ? "yolo" : "normal";
+}
+
+function browserLocalStorage(): Storage | null {
+  return typeof window === "undefined" ? null : window.localStorage;
+}
+
+function readDefaultCliLaunchMode(): TerminalLaunchMode {
+  try {
+    return normalizeLaunchMode(
+      browserLocalStorage()?.getItem(DEFAULT_CLI_LAUNCH_MODE_KEY),
+    );
+  } catch {
+    return "normal";
+  }
+}
+
+function writeDefaultCliLaunchMode(launchMode: TerminalLaunchMode): void {
+  try {
+    browserLocalStorage()?.setItem(DEFAULT_CLI_LAUNCH_MODE_KEY, launchMode);
+  } catch {
+    // Non-critical preference; fall back to the in-memory value.
+  }
 }
 
 const [state, setState] = createStore<TerminalState>({
   buffers: {},
   focusRequests: {},
+  defaultCliLaunchMode: readDefaultCliLaunchMode(),
   initialized: false,
 });
 
 let exitUnlisten: UnlistenFn | null = null;
 
-export function terminalCommandForCliLaunch(
-  cliKind: TerminalCliKind,
-  launchMode: TerminalLaunchMode,
-): string {
-  if (cliKind === "claude") {
-    return launchMode === "yolo"
-      ? "claude --dangerously-skip-permissions"
-      : "claude";
-  }
-
-  return launchMode === "yolo"
-    ? "codex --dangerously-bypass-approvals-and-sandbox"
-    : "codex";
-}
-
 export function terminalTitleForCliLaunch(
   cliKind: TerminalCliKind,
-  launchMode: TerminalLaunchMode,
+  _launchMode: TerminalLaunchMode,
 ): string {
-  const base = cliKind === "claude" ? "Claude Code CLI" : "Codex CLI";
-  return launchMode === "yolo" ? `${base} (YOLO)` : base;
+  return cliKind === "claude" ? "Claude Code CLI" : "Codex CLI";
 }
 
 export const terminalStore = {
@@ -87,6 +120,16 @@ export const terminalStore = {
   getFocusRequest(id: string | null): number {
     if (!id) return 0;
     return state.focusRequests[id] ?? 0;
+  },
+
+  get defaultCliLaunchMode(): TerminalLaunchMode {
+    return state.defaultCliLaunchMode;
+  },
+
+  setDefaultCliLaunchMode(launchMode: TerminalLaunchMode): void {
+    const normalized = normalizeLaunchMode(launchMode);
+    setState("defaultCliLaunchMode", normalized);
+    writeDefaultCliLaunchMode(normalized);
   },
 
   requestFocus(bufferId: string): void {
@@ -122,34 +165,48 @@ export const terminalStore = {
   },
 
   async createBuffer(options: {
+    id?: string;
     title?: string;
     command?: string;
     cliKind?: TerminalCliKind;
     launchMode?: TerminalLaunchMode;
     cwd?: string | null;
+    /** Resume an existing session rather than starting a fresh one. */
+    resume?: boolean;
+    /** Session id to resume (or, for a Claude fresh launch, assign). */
+    sessionId?: string | null;
+    sessionResumable?: boolean;
   }): Promise<TerminalBufferInfo> {
     await this.init();
-    const launchMode = options.launchMode ?? "normal";
+    const launchMode =
+      options.launchMode ??
+      (options.cliKind ? state.defaultCliLaunchMode : "normal");
     const info = await invoke<TerminalBufferInfo>("terminal_create_buffer", {
       request: {
+        id: options.id,
         title:
           options.title ??
           (options.cliKind
             ? terminalTitleForCliLaunch(options.cliKind, launchMode)
             : undefined),
-        command:
-          options.command ??
-          (options.cliKind
-            ? terminalCommandForCliLaunch(options.cliKind, launchMode)
-            : undefined),
+        command: options.cliKind ? undefined : options.command,
         cliKind: options.cliKind ?? null,
         launchMode,
+        resume: options.resume ?? false,
+        sessionId: options.sessionId ?? undefined,
+        sessionResumable: options.sessionResumable ?? undefined,
         cwd: options.cwd ?? fileTreeState.rootPath ?? undefined,
         cols: 100,
         rows: 28,
       },
     });
     setState("buffers", info.id, info);
+    // Codex assigns its own session id (deferred until first activity); capture
+    // it shortly after launch so a later toggle / app-restart can resume the
+    // exact session. Best-effort and idempotent.
+    if (info.cliKind === "codex" && !info.sessionId) {
+      this.scheduleCodexSessionCapture(info.id);
+    }
     return info;
   },
 
@@ -174,19 +231,97 @@ export const terminalStore = {
           (cliKind
             ? terminalTitleForCliLaunch(cliKind, launchMode)
             : undefined),
-        command:
-          options.command ??
-          (cliKind
-            ? terminalCommandForCliLaunch(cliKind, launchMode)
-            : undefined),
+        command: cliKind ? undefined : options.command,
         cliKind: cliKind ?? null,
         launchMode,
+        sessionId: current?.sessionId ?? undefined,
+        expectedInstanceId: current?.instanceId ?? undefined,
         cwd: options.cwd ?? current?.cwd ?? undefined,
       },
     });
     setState("buffers", info.id, info);
+    if (info.cliKind === "codex" && !info.sessionId) {
+      this.scheduleCodexSessionCapture(info.id);
+    }
     this.requestFocus(info.id);
     return info;
+  },
+
+  /** Capture the Codex session id from the live process (idempotent no-op for
+   * Claude / already-captured / not-yet-written sessions). */
+  async captureSessionId(bufferId: string): Promise<string | null> {
+    if (!isTauriRuntime()) return null;
+    const sessionId = await invoke<string | null>(
+      "terminal_capture_session_id",
+      { bufferId },
+    );
+    if (sessionId && state.buffers[bufferId]) {
+      setState("buffers", bufferId, "sessionId", sessionId);
+      setState("buffers", bufferId, "sessionResumable", true);
+    }
+    return sessionId;
+  },
+
+  /** Poll a few times for a Codex session id after launch — the rollout file is
+   * created lazily on first activity, so it may not exist immediately. */
+  scheduleCodexSessionCapture(bufferId: string): void {
+    if (!isTauriRuntime()) return;
+    let attempts = 0;
+    const tick = async () => {
+      attempts += 1;
+      const buffer = state.buffers[bufferId];
+      if (buffer?.status !== "running" || buffer?.sessionId) return;
+      const captured = await this.captureSessionId(bufferId).catch(() => null);
+      if (!captured && attempts < 10) {
+        setTimeout(() => void tick(), 3000);
+      }
+    };
+    setTimeout(() => void tick(), 3000);
+  },
+
+  async listAgentDescriptors(): Promise<TerminalAgentDescriptor[]> {
+    if (!isTauriRuntime()) return [];
+    return invoke<TerminalAgentDescriptor[]>("terminal_list_agent_descriptors");
+  },
+
+  /** Drop the persisted descriptor so a closed terminal is not auto-restored. */
+  async forgetAgent(bufferId: string): Promise<void> {
+    if (!isTauriRuntime()) return;
+    await invoke("terminal_forget_agent", { bufferId });
+  },
+
+  /** Re-open and resume the CLI-agent terminals the user had open before the
+   * app restarted. Each descriptor reuses its id (== thread id) and resumes its
+   * session in its persisted mode (YOLO included, per design). Best-effort per
+   * descriptor so one failure does not block the rest. */
+  async restoreAgents(): Promise<void> {
+    if (!isTauriRuntime()) return;
+    const descriptors = await this.listAgentDescriptors().catch(() => []);
+    for (const descriptor of descriptors) {
+      if (!descriptor.autoRestore) continue;
+      if (!descriptor.sessionResumable) {
+        await this.forgetAgent(descriptor.id).catch(() => {});
+        continue;
+      }
+      if (state.buffers[descriptor.id]) continue;
+      try {
+        await this.createBuffer({
+          id: descriptor.id,
+          title: descriptor.title,
+          cliKind: descriptor.cliKind,
+          launchMode: descriptor.launchMode,
+          cwd: descriptor.cwd ?? undefined,
+          resume: true,
+          sessionId: descriptor.sessionId ?? undefined,
+          sessionResumable: true,
+        });
+      } catch (error) {
+        console.warn(
+          `Failed to restore terminal agent ${descriptor.id}`,
+          error,
+        );
+      }
+    }
   },
 
   async write(bufferId: string, data: string): Promise<void> {

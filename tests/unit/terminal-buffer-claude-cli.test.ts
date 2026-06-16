@@ -26,15 +26,16 @@ describe("TerminalBuffer — Claude Code CLI billing pill (#2004)", () => {
     expect(terminalBufferTsx).toContain("Subscription · Pro/Max");
   });
 
-  it("renders a YOLO launch-mode pill and restart toggle", () => {
-    expect(terminalBufferTsx).toContain(
+  it("renders a single YOLO launch-mode toggle in the terminal header", () => {
+    expect(terminalBufferTsx).not.toContain(
       'data-testid="terminal-yolo-mode-pill"',
     );
     expect(terminalBufferTsx).toContain(
       'data-testid="terminal-launch-mode-toggle"',
     );
-    expect(terminalBufferTsx).toContain("Restart YOLO");
-    expect(terminalBufferTsx).toContain("Restart normal");
+    expect(terminalBufferTsx).toMatch(/>\s*YOLO\s*</);
+    expect(terminalBufferTsx).toContain("Turn on YOLO mode");
+    expect(terminalBufferTsx).toContain("Turn off YOLO mode");
   });
 });
 

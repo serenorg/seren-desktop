@@ -438,6 +438,12 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
   let dragAnchor: CellPos | null = null;
   let dragMoved = false;
   const activeBufferId = () => props.threadId ?? threadStore.activeThreadId;
+  const activeBufferInstanceKey = () => {
+    const id = activeBufferId();
+    if (!id) return null;
+    const current = terminalStore.getBuffer(id);
+    return current?.instanceId ? `${id}:${current.instanceId}` : id;
+  };
 
   // Scrollback viewport. `viewportOffset` is the number of rows above
   // the live bottom that the user has scrolled up; 0 means the live
@@ -479,12 +485,19 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     const current = buffer();
     const cliKind = bufferCliKind();
     if (!current || !cliKind || isRestartingLaunchMode()) return;
+    const launchMode = current.launchMode === "yolo" ? "normal" : "yolo";
     setIsRestartingLaunchMode(true);
     try {
+      // Pin the exact Codex session before we kill it so the restart resumes
+      // the same conversation rather than the most-recent one in this folder.
+      if (cliKind === "codex" && !current.sessionId) {
+        await terminalStore.captureSessionId(current.id).catch(() => null);
+      }
       await terminalStore.restartBuffer(current.id, {
         cliKind,
-        launchMode: current.launchMode === "yolo" ? "normal" : "yolo",
+        launchMode,
       });
+      terminalStore.setDefaultCliLaunchMode(launchMode);
     } finally {
       setIsRestartingLaunchMode(false);
     }
@@ -1571,13 +1584,12 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     pushResize();
   });
 
-  // Refetch immediately when the active buffer changes (thread switch),
-  // so the canvas shows the freshly-selected terminal's state without
-  // waiting for the next output event. Also clear the grid signal up
-  // front so a switch never momentarily shows the previous terminal's
-  // content while the new fetch is in flight.
+  // Refetch immediately when the active buffer or backend process instance
+  // changes, so a restart clears the old canvas before the new PTY output
+  // arrives.
   createEffect(
-    on(activeBufferId, (id) => {
+    on(activeBufferInstanceKey, () => {
+      const id = activeBufferId();
       // Per-buffer state - flush so the next buffer starts clean.
       pendingDiffs = [];
       pendingRepaintRows.clear();
@@ -2024,27 +2036,25 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
                 </div>
                 <Show when={isCliTerminal()}>
                   <div class="flex items-center gap-2 shrink-0">
-                    <Show when={isYoloTerminal()}>
-                      <span
-                        data-testid="terminal-yolo-mode-pill"
-                        class="text-[11px] font-semibold tracking-[0.04em] text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/35"
-                      >
-                        YOLO
-                      </span>
-                    </Show>
                     <button
                       type="button"
                       data-testid="terminal-launch-mode-toggle"
                       title={
                         isYoloTerminal()
-                          ? "Restart this terminal with normal safety prompts"
-                          : "Restart this terminal in YOLO mode"
+                          ? "Turn off YOLO mode, restart this terminal, and use normal mode for new CLI terminals"
+                          : "Turn on YOLO mode, restart this terminal, and use YOLO for new CLI terminals"
                       }
-                      class="text-[11px] font-medium tracking-tight text-secondary-foreground bg-surface-3 px-2.5 py-1 rounded-full border border-border cursor-pointer transition-colors hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      class="text-[11px] font-semibold tracking-[0.04em] px-2.5 py-1 rounded-full border cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      classList={{
+                        "text-destructive bg-destructive/10 border-destructive/35 hover:bg-destructive/15":
+                          isYoloTerminal(),
+                        "text-secondary-foreground bg-surface-3 border-border hover:bg-surface-2":
+                          !isYoloTerminal(),
+                      }}
                       disabled={isRestartingLaunchMode()}
                       onClick={() => void restartWithToggledLaunchMode()}
                     >
-                      {isYoloTerminal() ? "Restart normal" : "Restart YOLO"}
+                      YOLO
                     </button>
                     <Show when={isClaudeCli()}>
                       <Show when={claudeCliVersion()}>

@@ -54,6 +54,9 @@ const SCROLLBACK_LIMIT: usize = 10_000;
 #[derive(Default)]
 pub struct TerminalState {
     buffers: Mutex<HashMap<String, TerminalProcess>>,
+    /// Serializes read-modify-write access to the persisted agent-descriptor
+    /// file so concurrent create/restart/forget calls cannot clobber it.
+    descriptor_lock: Mutex<()>,
 }
 
 impl TerminalState {
@@ -123,6 +126,7 @@ struct TerminalProcess {
     child: Arc<Mutex<Box<dyn Child + Send>>>,
     /// Parsed terminal grid consumed by the canvas renderer.
     grid: Arc<Mutex<TerminalGrid>>,
+    pending_submission_input: bool,
 }
 
 /// Emulator grid. Owns a termwiz `Parser` that turns raw PTY bytes
@@ -1786,11 +1790,19 @@ impl TerminalGrid {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalBufferInfo {
     pub id: String,
+    pub instance_id: String,
     pub title: String,
     pub cwd: Option<String>,
     pub command: Option<String>,
     pub cli_kind: Option<TerminalCliKind>,
     pub launch_mode: TerminalLaunchMode,
+    /// The session id for this terminal's `cli_kind`: a Claude session UUID we
+    /// minted, or a Codex rollout UUID captured from the live process. Drives
+    /// exact resume across YOLO toggles and app restarts.
+    pub session_id: Option<String>,
+    /// True only after the CLI has materialized a conversation that can be
+    /// resumed by id.
+    pub session_resumable: bool,
     pub cols: u16,
     pub rows: u16,
     pub status: TerminalStatus,
@@ -1834,6 +1846,12 @@ pub struct CreateTerminalBufferRequest {
     pub command: Option<String>,
     pub cli_kind: Option<TerminalCliKind>,
     pub launch_mode: Option<TerminalLaunchMode>,
+    /// When true, compose a resume command instead of a fresh launch.
+    pub resume: Option<bool>,
+    /// Session id to resume (or, for a Claude fresh launch, the id to assign).
+    pub session_id: Option<String>,
+    /// Restored descriptors can mark an already-materialized session.
+    pub session_resumable: Option<bool>,
     pub cols: Option<u16>,
     pub rows: Option<u16>,
 }
@@ -1846,6 +1864,8 @@ pub struct RestartTerminalBufferRequest {
     pub command: Option<String>,
     pub cli_kind: Option<TerminalCliKind>,
     pub launch_mode: Option<TerminalLaunchMode>,
+    pub session_id: Option<String>,
+    pub expected_instance_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1947,12 +1967,37 @@ fn spawn_terminal_buffer(
         (!trimmed.is_empty()).then_some(trimmed)
     });
     let launch_mode = request.launch_mode.unwrap_or_default();
+    let resume = request.resume.unwrap_or(false);
+    let session_resumable = request.session_resumable.unwrap_or(false) || resume;
     let cli_kind = request
         .cli_kind
         .or_else(|| command.as_deref().and_then(infer_terminal_cli_kind));
-    let command = cli_kind
-        .map(|kind| terminal_cli_command(kind, launch_mode).to_string())
-        .or(command);
+    let mut session_id = request.session_id.clone();
+    let command = if let Some(kind) = cli_kind {
+        let intent = if resume {
+            LaunchIntent::Resume
+        } else {
+            LaunchIntent::Fresh
+        };
+        // Claude fresh launches assign our own session id so the exact
+        // conversation can be resumed later across toggles/restarts.
+        if matches!(
+            (kind, intent),
+            (TerminalCliKind::Claude, LaunchIntent::Fresh)
+        ) && session_id.is_none()
+        {
+            session_id = Some(Uuid::new_v4().to_string());
+        }
+        Some(compose_cli_command(
+            kind,
+            launch_mode,
+            intent,
+            session_id.as_deref(),
+        )?)
+    } else {
+        session_id = None;
+        command
+    };
     let title = request.title.unwrap_or_else(|| {
         command
             .as_deref()
@@ -2003,11 +2048,14 @@ fn spawn_terminal_buffer(
 
     let info = TerminalBufferInfo {
         id: id.clone(),
+        instance_id: instance_id.clone(),
         title,
         cwd: cwd.map(|path| path.to_string_lossy().to_string()),
         command,
         cli_kind,
         launch_mode,
+        session_id: session_id.clone(),
+        session_resumable,
         cols,
         rows,
         status: TerminalStatus::Running,
@@ -2037,6 +2085,7 @@ fn spawn_terminal_buffer(
                 writer: Arc::clone(&writer_arc),
                 child: Arc::new(Mutex::new(child)),
                 grid: Arc::clone(&grid),
+                pending_submission_input: false,
             },
         );
     }
@@ -2064,6 +2113,12 @@ fn spawn_terminal_buffer(
             "Failed to spawn terminal reader thread: {spawn_err}"
         ));
     }
+    // Persist CLI-agent launches so they survive an app restart. Restart reuses
+    // the same id, so this upserts (preserving created_at). Plain shells return
+    // None and are never recorded.
+    if let Some(descriptor) = descriptor_from_info(&info) {
+        upsert_descriptor(app, state, descriptor);
+    }
     Ok(info)
 }
 
@@ -2079,6 +2134,16 @@ pub fn terminal_restart_buffer(
             .buffers
             .lock()
             .map_err(|err| format!("Terminal state mutex poisoned: {err}"))?;
+        if let (Some(process), Some(expected_instance_id)) = (
+            buffers.get(&buffer_id),
+            request.expected_instance_id.as_deref(),
+        ) {
+            if process.instance_id != expected_instance_id {
+                return Err(format!(
+                    "Terminal buffer changed before restart: {buffer_id}"
+                ));
+            }
+        }
         buffers.remove(&buffer_id)
     };
     let Some(old_process) = old_process else {
@@ -2099,11 +2164,811 @@ pub fn terminal_restart_buffer(
         command: request.command.or(old_info.command),
         cli_kind: request.cli_kind.or(old_info.cli_kind),
         launch_mode: request.launch_mode.or(Some(old_info.launch_mode)),
+        // A restart always resumes the same conversation in the (possibly
+        // toggled) mode once the CLI has materialized it. Before then, launch
+        // fresh with the same assigned session id.
+        resume: Some(old_info.session_resumable),
+        session_id: request.session_id.or(old_info.session_id),
+        session_resumable: Some(old_info.session_resumable),
         cols: Some(old_info.cols),
         rows: Some(old_info.rows),
     };
 
     spawn_terminal_buffer(&app, &state, restart_request)
+}
+
+/// Durable record of a terminal CLI-agent session, persisted to app data so the
+/// agent terminals a user had open are restored (and resumed) after the app
+/// restarts. Plain shell terminals are never recorded.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalAgentDescriptor {
+    pub id: String,
+    pub title: String,
+    pub cli_kind: TerminalCliKind,
+    pub launch_mode: TerminalLaunchMode,
+    pub cwd: Option<String>,
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub session_resumable: bool,
+    #[serde(default = "default_auto_restore")]
+    pub auto_restore: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn default_auto_restore() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalAgentStore {
+    #[serde(default)]
+    agents: Vec<TerminalAgentDescriptor>,
+}
+
+fn descriptors_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|err| err.to_string())?
+        .join("terminal_agents.json"))
+}
+
+fn read_descriptor_store(app: &AppHandle) -> TerminalAgentStore {
+    let Ok(path) = descriptors_path(app) else {
+        return TerminalAgentStore::default();
+    };
+    match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        Err(_) => TerminalAgentStore::default(),
+    }
+}
+
+fn write_descriptor_store(app: &AppHandle, store: &TerminalAgentStore) -> Result<(), String> {
+    let path = descriptors_path(app)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    let bytes = serde_json::to_vec_pretty(store).map_err(|err| err.to_string())?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, &bytes).map_err(|err| err.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// Serialized read-modify-write of the descriptor file. Best-effort: a
+/// persistence failure is logged and never blocks the terminal.
+fn mutate_descriptors(
+    app: &AppHandle,
+    state: &TerminalState,
+    mutate: impl FnOnce(&mut Vec<TerminalAgentDescriptor>),
+) {
+    let _guard = state
+        .descriptor_lock
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut store = read_descriptor_store(app);
+    mutate(&mut store.agents);
+    if let Err(err) = write_descriptor_store(app, &store) {
+        log::warn!("[Terminal] Failed to persist agent descriptors: {err}");
+    }
+}
+
+/// Insert or replace the descriptor for a CLI-agent buffer, preserving stable
+/// user-controlled fields on replace.
+fn upsert_descriptor(app: &AppHandle, state: &TerminalState, descriptor: TerminalAgentDescriptor) {
+    mutate_descriptors(app, state, |agents| {
+        if let Some(existing) = agents.iter_mut().find(|agent| agent.id == descriptor.id) {
+            replace_descriptor_preserving_stable_fields(existing, descriptor);
+        } else {
+            agents.push(descriptor);
+        }
+    });
+}
+
+fn replace_descriptor_preserving_stable_fields(
+    existing: &mut TerminalAgentDescriptor,
+    descriptor: TerminalAgentDescriptor,
+) {
+    let created_at = existing.created_at;
+    let auto_restore = existing.auto_restore;
+    *existing = descriptor;
+    existing.created_at = created_at;
+    existing.auto_restore = auto_restore;
+}
+
+/// Build a descriptor from live buffer info; returns None for non-agent
+/// (plain shell) terminals, which are never persisted.
+fn descriptor_from_info(info: &TerminalBufferInfo) -> Option<TerminalAgentDescriptor> {
+    let cli_kind = info.cli_kind?;
+    Some(TerminalAgentDescriptor {
+        id: info.id.clone(),
+        title: info.title.clone(),
+        cli_kind,
+        launch_mode: info.launch_mode,
+        cwd: info.cwd.clone(),
+        session_id: info.session_id.clone(),
+        session_resumable: info.session_resumable,
+        auto_restore: true,
+        created_at: info.created_at,
+        updated_at: info.updated_at,
+    })
+}
+
+fn terminal_input_has_text(data: &str) -> bool {
+    data.chars().any(|ch| !ch.is_control() && ch != '\u{7f}')
+}
+
+fn terminal_input_submits(data: &str) -> bool {
+    data.contains('\r') || data.contains('\n')
+}
+
+fn record_cli_submission_for_resume(
+    cli_kind: Option<TerminalCliKind>,
+    session_id: Option<&str>,
+    session_resumable: bool,
+    pending_submission_input: &mut bool,
+    data: &str,
+) -> bool {
+    if session_resumable
+        || session_id.is_none()
+        || !matches!(cli_kind, Some(TerminalCliKind::Claude))
+    {
+        return false;
+    }
+
+    if terminal_input_has_text(data) {
+        *pending_submission_input = true;
+    }
+    if terminal_input_submits(data) && *pending_submission_input {
+        *pending_submission_input = false;
+        return true;
+    }
+    false
+}
+
+fn record_terminal_input_for_resume(process: &mut TerminalProcess, data: &str) -> bool {
+    if record_cli_submission_for_resume(
+        process.info.cli_kind,
+        process.info.session_id.as_deref(),
+        process.info.session_resumable,
+        &mut process.pending_submission_input,
+        data,
+    ) {
+        process.info.session_resumable = true;
+        process.info.updated_at = unix_millis();
+        return true;
+    }
+    false
+}
+
+fn canonical_session_uuid(value: &str) -> Result<String, String> {
+    Uuid::parse_str(value)
+        .map(|uuid| uuid.hyphenated().to_string())
+        .map_err(|_| format!("invalid terminal session id: {value}"))
+}
+
+/// Extract the Codex session UUID from a canonical rollout file path such as
+/// `.../sessions/2026/06/16/rollout-2026-06-16T07-24-21-<uuid>.jsonl`.
+/// The parser mirrors Codex's filename shape and returns a canonical
+/// hyphenated UUID.
+fn codex_session_id_from_rollout_path(path: &str) -> Option<String> {
+    let path = path.replace('\\', "/");
+    let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    let sessions_idx = parts.iter().position(|part| *part == "sessions")?;
+    let year = *parts.get(sessions_idx + 1)?;
+    let month = *parts.get(sessions_idx + 2)?;
+    let day = *parts.get(sessions_idx + 3)?;
+    let file = *parts.get(sessions_idx + 4)?;
+    if parts.len() != sessions_idx + 5 {
+        return None;
+    }
+    let stem = file.strip_prefix("rollout-")?.strip_suffix(".jsonl")?;
+    let (sep_idx, candidate) = stem.match_indices('-').rev().find_map(|(idx, _)| {
+        canonical_session_uuid(&stem[idx + 1..])
+            .ok()
+            .map(|id| (idx, id))
+    })?;
+    let timestamp = &stem[..sep_idx];
+    if timestamp.len() != "YYYY-MM-DDThh-mm-ss".len() {
+        return None;
+    }
+    let bytes = timestamp.as_bytes();
+    for idx in [4, 7, 13, 16] {
+        if bytes.get(idx) != Some(&b'-') {
+            return None;
+        }
+    }
+    if bytes.get(10) != Some(&b'T') {
+        return None;
+    }
+    if &timestamp[0..4] != year || &timestamp[5..7] != month || &timestamp[8..10] != day {
+        return None;
+    }
+    if !bytes
+        .iter()
+        .enumerate()
+        .all(|(idx, byte)| matches!(idx, 4 | 7 | 10 | 13 | 16) || byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(candidate)
+}
+
+/// Open file paths held by a live process. Linux reads `/proc/<pid>/fd`;
+/// macOS shells `lsof` with a short timeout; Windows duplicates handles from
+/// the child process and resolves file names.
+#[cfg(target_os = "linux")]
+fn process_open_file_paths(pid: u32) -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(format!("/proc/{pid}/fd")) {
+        for entry in entries.flatten() {
+            if let Ok(target) = std::fs::read_link(entry.path()) {
+                paths.push(target.to_string_lossy().into_owned());
+            }
+        }
+    }
+    paths
+}
+
+#[cfg(target_os = "macos")]
+fn process_open_file_paths(pid: u32) -> Vec<String> {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let (tx, rx) = mpsc::channel();
+    let Ok(_) = std::thread::Builder::new()
+        .name("codex-session-lsof".into())
+        .spawn(move || {
+            let paths = std::process::Command::new("lsof")
+                .args(["-p", &pid.to_string(), "-F", "n"])
+                .output()
+                .ok()
+                .map(|output| {
+                    String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .filter_map(|line| line.strip_prefix('n').map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let _ = tx.send(paths);
+        })
+    else {
+        return Vec::new();
+    };
+
+    match rx.recv_timeout(Duration::from_millis(500)) {
+        Ok(paths) => paths,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            log::debug!("[Terminal] macOS open file scan timed out");
+            Vec::new()
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => Vec::new(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn process_open_file_paths(pid: u32) -> Vec<String> {
+    use std::collections::HashMap;
+    use std::sync::mpsc;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    static BLOCKED_SCAN_PIDS: OnceLock<Mutex<HashMap<u32, Instant>>> = OnceLock::new();
+    const SCAN_BLOCK_TTL: Duration = Duration::from_secs(5);
+
+    let blocked_scan_pids = BLOCKED_SCAN_PIDS.get_or_init(|| Mutex::new(HashMap::new()));
+    {
+        let Ok(mut pids) = blocked_scan_pids.lock() else {
+            return Vec::new();
+        };
+        let now = Instant::now();
+        pids.retain(|_, blocked_at| now.duration_since(*blocked_at) < SCAN_BLOCK_TTL);
+        if pids.contains_key(&pid) {
+            return Vec::new();
+        }
+        pids.insert(pid, now);
+    }
+
+    let (tx, rx) = mpsc::channel();
+    let Ok(_) = std::thread::Builder::new()
+        .name("codex-session-handles".into())
+        .spawn(move || {
+            let _ = tx.send(windows_open_file_paths(pid).unwrap_or_default());
+        })
+    else {
+        if let Ok(mut pids) = blocked_scan_pids.lock() {
+            pids.remove(&pid);
+        }
+        return Vec::new();
+    };
+
+    match rx.recv_timeout(Duration::from_millis(500)) {
+        Ok(paths) => {
+            if let Ok(mut pids) = blocked_scan_pids.lock() {
+                pids.remove(&pid);
+            }
+            paths
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            if let Ok(mut pids) = blocked_scan_pids.lock() {
+                pids.insert(pid, Instant::now());
+            }
+            log::debug!("[Terminal] Windows file handle scan timed out");
+            Vec::new()
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            if let Ok(mut pids) = blocked_scan_pids.lock() {
+                pids.remove(&pid);
+            }
+            Vec::new()
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn process_open_file_paths(_pid: u32) -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(target_os = "windows")]
+fn windows_open_file_paths(pid: u32) -> Option<Vec<String>> {
+    use std::ffi::c_void;
+    use std::mem::{size_of, transmute};
+    use windows::Win32::Foundation::{CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE};
+    use windows::Win32::Storage::FileSystem::{
+        FILE_NAME_NORMALIZED, FILE_TYPE_DISK, GetFileType, GetFinalPathNameByHandleW,
+    };
+    use windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, PROCESS_DUP_HANDLE, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::core::s;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct ProcessHandleTableEntryInfo {
+        handle_value: usize,
+        handle_count: usize,
+        pointer_count: usize,
+        granted_access: u32,
+        object_type_index: u32,
+        handle_attributes: u32,
+        reserved: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct SystemHandleTableEntryInfoEx {
+        object: usize,
+        unique_process_id: usize,
+        handle_value: usize,
+        granted_access: u32,
+        creator_back_trace_index: u16,
+        object_type_index: u16,
+        handle_attributes: u32,
+        reserved: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct UnicodeString {
+        length: u16,
+        maximum_length: u16,
+        buffer: *const u16,
+    }
+
+    struct OwnedHandle(HANDLE);
+
+    impl Drop for OwnedHandle {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+
+    type NtQueryInformationProcessFn = unsafe extern "system" fn(
+        process_handle: HANDLE,
+        process_information_class: u32,
+        process_information: *mut c_void,
+        process_information_length: u32,
+        return_length: *mut u32,
+    ) -> i32;
+
+    type NtQuerySystemInformationFn = unsafe extern "system" fn(
+        system_information_class: u32,
+        system_information: *mut c_void,
+        system_information_length: u32,
+        return_length: *mut u32,
+    ) -> i32;
+
+    type NtQueryObjectFn = unsafe extern "system" fn(
+        handle: HANDLE,
+        object_information_class: u32,
+        object_information: *mut c_void,
+        object_information_length: u32,
+        return_length: *mut u32,
+    ) -> i32;
+
+    const PROCESS_HANDLE_INFORMATION: u32 = 51;
+    const SYSTEM_EXTENDED_HANDLE_INFORMATION: u32 = 64;
+    const OBJECT_NAME_INFORMATION: u32 = 1;
+    const STATUS_SUCCESS: i32 = 0;
+    const STATUS_INFO_LENGTH_MISMATCH: i32 = 0xC0000004u32 as i32;
+    const STATUS_BUFFER_TOO_SMALL: i32 = 0xC0000023u32 as i32;
+    const STATUS_BUFFER_OVERFLOW: i32 = 0x80000005u32 as i32;
+    const MAX_HANDLE_QUERY_BYTES: u32 = 64 * 1024 * 1024;
+    const MAX_OBJECT_NAME_BYTES: u32 = 1024 * 1024;
+
+    fn load_nt_query_information_process() -> Option<NtQueryInformationProcessFn> {
+        unsafe {
+            let ntdll = GetModuleHandleA(s!("ntdll.dll")).ok()?;
+            let proc = GetProcAddress(ntdll, s!("NtQueryInformationProcess"))?;
+            Some(transmute(proc))
+        }
+    }
+
+    fn load_nt_query_system_information() -> Option<NtQuerySystemInformationFn> {
+        unsafe {
+            let ntdll = GetModuleHandleA(s!("ntdll.dll")).ok()?;
+            let proc = GetProcAddress(ntdll, s!("NtQuerySystemInformation"))?;
+            Some(transmute(proc))
+        }
+    }
+
+    fn load_nt_query_object() -> Option<NtQueryObjectFn> {
+        unsafe {
+            let ntdll = GetModuleHandleA(s!("ntdll.dll")).ok()?;
+            let proc = GetProcAddress(ntdll, s!("NtQueryObject"))?;
+            Some(transmute(proc))
+        }
+    }
+
+    fn query_process_handle_table(
+        query: NtQueryInformationProcessFn,
+        process: HANDLE,
+    ) -> Option<Vec<u8>> {
+        let mut buffer_len = 64 * 1024u32;
+        loop {
+            let mut buffer = vec![0u8; buffer_len as usize];
+            let mut return_len = 0u32;
+            let status = unsafe {
+                query(
+                    process,
+                    PROCESS_HANDLE_INFORMATION,
+                    buffer.as_mut_ptr().cast(),
+                    buffer_len,
+                    &mut return_len,
+                )
+            };
+            match status {
+                STATUS_SUCCESS => return Some(buffer),
+                STATUS_INFO_LENGTH_MISMATCH | STATUS_BUFFER_TOO_SMALL
+                    if buffer_len < MAX_HANDLE_QUERY_BYTES =>
+                {
+                    buffer_len = return_len
+                        .saturating_add(64 * 1024)
+                        .max(buffer_len.saturating_mul(2))
+                        .min(MAX_HANDLE_QUERY_BYTES);
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    fn query_system_handle_table(query: NtQuerySystemInformationFn) -> Option<Vec<u8>> {
+        let mut buffer_len = 1024 * 1024u32;
+        loop {
+            let mut buffer = vec![0u8; buffer_len as usize];
+            let mut return_len = 0u32;
+            let status = unsafe {
+                query(
+                    SYSTEM_EXTENDED_HANDLE_INFORMATION,
+                    buffer.as_mut_ptr().cast(),
+                    buffer_len,
+                    &mut return_len,
+                )
+            };
+            match status {
+                STATUS_SUCCESS => return Some(buffer),
+                STATUS_INFO_LENGTH_MISMATCH | STATUS_BUFFER_TOO_SMALL
+                    if buffer_len < MAX_HANDLE_QUERY_BYTES =>
+                {
+                    buffer_len = return_len
+                        .saturating_add(64 * 1024)
+                        .max(buffer_len.saturating_mul(2))
+                        .min(MAX_HANDLE_QUERY_BYTES);
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    fn process_handle_values(buffer: &[u8]) -> Option<Vec<usize>> {
+        let header_len = size_of::<usize>() * 2;
+        let entry_len = size_of::<ProcessHandleTableEntryInfo>();
+        let count = buffer
+            .get(..size_of::<usize>())?
+            .try_into()
+            .ok()
+            .map(usize::from_ne_bytes)?;
+        let mut values = Vec::with_capacity(count.min(256));
+        for idx in 0..count {
+            let start = header_len.checked_add(idx.checked_mul(entry_len)?)?;
+            let end = start.checked_add(entry_len)?;
+            if end > buffer.len() {
+                break;
+            }
+            let entry = unsafe {
+                std::ptr::read_unaligned(
+                    buffer
+                        .as_ptr()
+                        .add(start)
+                        .cast::<ProcessHandleTableEntryInfo>(),
+                )
+            };
+            if entry.handle_value != 0 {
+                values.push(entry.handle_value);
+            }
+        }
+        Some(values)
+    }
+
+    fn system_handle_values(buffer: &[u8], pid: u32) -> Option<Vec<usize>> {
+        let header_len = size_of::<usize>() * 2;
+        let entry_len = size_of::<SystemHandleTableEntryInfoEx>();
+        let count = buffer
+            .get(..size_of::<usize>())?
+            .try_into()
+            .ok()
+            .map(usize::from_ne_bytes)?;
+        let mut values = Vec::new();
+        for idx in 0..count {
+            let start = header_len.checked_add(idx.checked_mul(entry_len)?)?;
+            let end = start.checked_add(entry_len)?;
+            if end > buffer.len() {
+                break;
+            }
+            let entry = unsafe {
+                std::ptr::read_unaligned(
+                    buffer
+                        .as_ptr()
+                        .add(start)
+                        .cast::<SystemHandleTableEntryInfoEx>(),
+                )
+            };
+            if entry.unique_process_id == pid as usize && entry.handle_value != 0 {
+                values.push(entry.handle_value);
+            }
+        }
+        Some(values)
+    }
+
+    fn object_name_from_handle(query: NtQueryObjectFn, handle: HANDLE) -> Option<String> {
+        let mut buffer_len = 4096u32;
+        loop {
+            let mut buffer = vec![0u8; buffer_len as usize];
+            let mut return_len = 0u32;
+            let status = unsafe {
+                query(
+                    handle,
+                    OBJECT_NAME_INFORMATION,
+                    buffer.as_mut_ptr().cast(),
+                    buffer_len,
+                    &mut return_len,
+                )
+            };
+            match status {
+                STATUS_SUCCESS => {
+                    let name = unsafe {
+                        std::ptr::read_unaligned(buffer.as_ptr().cast::<UnicodeString>())
+                    };
+                    if name.length == 0 || name.length % 2 != 0 || name.buffer.is_null() {
+                        return None;
+                    }
+                    let buffer_start = buffer.as_ptr() as usize;
+                    let buffer_end = buffer_start.checked_add(buffer.len())?;
+                    let name_start = name.buffer as usize;
+                    let name_end = name_start.checked_add(name.length as usize)?;
+                    if name_start < buffer_start || name_end > buffer_end || name_start % 2 != 0 {
+                        return None;
+                    }
+                    let chars = unsafe {
+                        std::slice::from_raw_parts(name.buffer, name.length as usize / 2)
+                    };
+                    return Some(String::from_utf16_lossy(chars));
+                }
+                STATUS_INFO_LENGTH_MISMATCH | STATUS_BUFFER_TOO_SMALL | STATUS_BUFFER_OVERFLOW
+                    if buffer_len < MAX_OBJECT_NAME_BYTES =>
+                {
+                    buffer_len = return_len
+                        .saturating_add(1024)
+                        .max(buffer_len.saturating_mul(2))
+                        .min(MAX_OBJECT_NAME_BYTES);
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    fn path_from_handle(query_object: Option<NtQueryObjectFn>, handle: HANDLE) -> Option<String> {
+        if unsafe { GetFileType(handle) } != FILE_TYPE_DISK {
+            return None;
+        }
+        fn unresolved_disk_handle(
+            query_object: Option<NtQueryObjectFn>,
+            handle: HANDLE,
+        ) -> Option<String> {
+            if let Some(query_object) = query_object {
+                if let Some(path) = object_name_from_handle(query_object, handle) {
+                    return Some(path);
+                }
+            }
+            log::debug!("[Terminal] Windows file handle path resolution failed");
+            None
+        }
+
+        let mut buffer = vec![0u16; 4096];
+        let mut len =
+            unsafe { GetFinalPathNameByHandleW(handle, &mut buffer, FILE_NAME_NORMALIZED) };
+        if len == 0 || len == u32::MAX {
+            return unresolved_disk_handle(query_object, handle);
+        }
+        if len as usize >= buffer.len() {
+            buffer.resize(len as usize + 1, 0);
+            len = unsafe { GetFinalPathNameByHandleW(handle, &mut buffer, FILE_NAME_NORMALIZED) };
+            if len == 0 || len == u32::MAX || len as usize >= buffer.len() {
+                return unresolved_disk_handle(query_object, handle);
+            }
+        }
+        Some(String::from_utf16_lossy(&buffer[..len as usize]))
+    }
+
+    let source_process = unsafe {
+        OpenProcess(
+            PROCESS_DUP_HANDLE | PROCESS_QUERY_LIMITED_INFORMATION,
+            false,
+            pid,
+        )
+        .ok()
+        .map(OwnedHandle)?
+    };
+    let current_process = unsafe { GetCurrentProcess() };
+    let handle_values = load_nt_query_information_process()
+        .and_then(|query| query_process_handle_table(query, source_process.0))
+        .and_then(|buffer| process_handle_values(&buffer))
+        .or_else(|| {
+            load_nt_query_system_information()
+                .and_then(query_system_handle_table)
+                .and_then(|buffer| system_handle_values(&buffer, pid))
+        })?;
+    let query_object = load_nt_query_object();
+    let mut paths = Vec::new();
+
+    for handle_value in handle_values {
+        let mut raw_handle = HANDLE::default();
+        let dup_result = unsafe {
+            DuplicateHandle(
+                source_process.0,
+                HANDLE(handle_value as *mut c_void),
+                current_process,
+                &mut raw_handle,
+                0,
+                false,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        let duplicated = dup_result.ok().map(|_| OwnedHandle(raw_handle));
+        let Some(duplicated) = duplicated else {
+            continue;
+        };
+
+        if let Some(path) = path_from_handle(query_object, duplicated.0) {
+            if !paths.iter().any(|existing| existing == &path) {
+                paths.push(path);
+            }
+        }
+    }
+
+    Some(paths)
+}
+
+/// Inspect a live process's open files for its Codex rollout file and return the
+/// embedded session UUID. Returns None on unsupported platforms, before the
+/// deferred rollout file exists, or if the process is gone.
+fn discover_codex_session_id(pid: u32) -> Option<String> {
+    process_open_file_paths(pid)
+        .into_iter()
+        .find_map(|path| codex_session_id_from_rollout_path(&path))
+}
+
+#[tauri::command]
+pub fn terminal_list_agent_descriptors(app: AppHandle) -> Vec<TerminalAgentDescriptor> {
+    read_descriptor_store(&app).agents
+}
+
+#[tauri::command]
+pub fn terminal_forget_agent(app: AppHandle, state: State<'_, TerminalState>, buffer_id: String) {
+    mutate_descriptors(&app, &state, |agents| {
+        agents.retain(|agent| agent.id != buffer_id);
+    });
+}
+
+/// Capture the Codex session id for a live buffer via open-fd inspection and
+/// persist it onto the buffer info + descriptor. Idempotent: a no-op once a
+/// session id is known, for non-Codex buffers, or before Codex has written its
+/// (deferred) rollout file. Returns the known/captured session id, if any.
+#[tauri::command]
+pub fn terminal_capture_session_id(
+    app: AppHandle,
+    state: State<'_, TerminalState>,
+    buffer_id: String,
+) -> Option<String> {
+    let (pid, cli_kind, existing, instance_id) = {
+        let buffers = state.buffers.lock().ok()?;
+        let process = buffers.get(&buffer_id)?;
+        let pid = process
+            .child
+            .lock()
+            .ok()
+            .and_then(|child| child.process_id());
+        (
+            pid,
+            process.info.cli_kind,
+            process.info.session_id.clone(),
+            process.instance_id.clone(),
+        )
+    };
+    if !matches!(cli_kind, Some(TerminalCliKind::Codex)) {
+        return existing;
+    }
+    if existing.is_some() {
+        let info = {
+            let mut buffers = state.buffers.lock().ok()?;
+            let process = buffers.get_mut(&buffer_id)?;
+            if !process.info.session_resumable {
+                process.info.session_resumable = true;
+                process.info.updated_at = unix_millis();
+            }
+            process.info.clone()
+        };
+        if let Some(descriptor) = descriptor_from_info(&info) {
+            upsert_descriptor(&app, &state, descriptor);
+        }
+        return existing;
+    }
+    let discovered = discover_codex_session_id(pid?)?;
+
+    let info = {
+        let mut buffers = state.buffers.lock().ok()?;
+        let process = buffers.get_mut(&buffer_id)?;
+        if process.instance_id != instance_id {
+            return None;
+        }
+        let current_pid = process
+            .child
+            .lock()
+            .ok()
+            .and_then(|child| child.process_id());
+        if current_pid != pid {
+            return None;
+        }
+        // Re-check under the lock so a concurrent capture wins only once.
+        if process.info.session_id.is_some() {
+            return process.info.session_id.clone();
+        }
+        process.info.session_id = Some(discovered.clone());
+        process.info.session_resumable = true;
+        process.info.updated_at = unix_millis();
+        process.info.clone()
+    };
+    if let Some(descriptor) = descriptor_from_info(&info) {
+        upsert_descriptor(&app, &state, descriptor);
+    }
+    Some(discovered)
 }
 
 #[tauri::command]
@@ -2122,6 +2987,7 @@ pub fn terminal_list_buffers(
 
 #[tauri::command]
 pub fn terminal_write(
+    app: AppHandle,
     state: State<'_, TerminalState>,
     buffer_id: String,
     data: String,
@@ -2145,6 +3011,25 @@ pub fn terminal_write(
     writer
         .flush()
         .map_err(|err| format!("Failed to flush terminal input: {err}"))?;
+    drop(writer);
+
+    let descriptor = {
+        let mut buffers = state
+            .buffers
+            .lock()
+            .map_err(|err| format!("Terminal state mutex poisoned: {err}"))?;
+        let Some(process) = buffers.get_mut(&buffer_id) else {
+            return Ok(());
+        };
+        if record_terminal_input_for_resume(process, &data) {
+            descriptor_from_info(&process.info)
+        } else {
+            None
+        }
+    };
+    if let Some(descriptor) = descriptor {
+        upsert_descriptor(&app, &state, descriptor);
+    }
     Ok(())
 }
 
@@ -2714,17 +3599,56 @@ fn infer_terminal_cli_kind(command: &str) -> Option<TerminalCliKind> {
     }
 }
 
-fn terminal_cli_command(kind: TerminalCliKind, mode: TerminalLaunchMode) -> &'static str {
-    match (kind, mode) {
-        (TerminalCliKind::Claude, TerminalLaunchMode::Normal) => "claude",
-        (TerminalCliKind::Claude, TerminalLaunchMode::Yolo) => {
-            "claude --dangerously-skip-permissions"
-        }
-        (TerminalCliKind::Codex, TerminalLaunchMode::Normal) => "codex",
-        (TerminalCliKind::Codex, TerminalLaunchMode::Yolo) => {
-            "codex --dangerously-bypass-approvals-and-sandbox"
-        }
+/// Whether a CLI launch starts a brand-new session or resumes an existing one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchIntent {
+    Fresh,
+    Resume,
+}
+
+/// The startup flag that drops the safety rails for each CLI's YOLO mode.
+fn yolo_flag(kind: TerminalCliKind) -> &'static str {
+    match kind {
+        TerminalCliKind::Claude => "--dangerously-skip-permissions",
+        TerminalCliKind::Codex => "--dangerously-bypass-approvals-and-sandbox",
     }
+}
+
+/// Compose the exact CLI command for a launch.
+///
+/// `session_id` is the per-terminal session id for `kind` — a Claude session
+/// UUID we mint, or a Codex rollout UUID we captured from the live process. It
+/// is canonicalized to a hyphenated UUID before interpolation. Resume without a
+/// known id falls back to each CLI's "most recent in this directory" form
+/// (`claude --continue`, `codex resume --last`).
+fn compose_cli_command(
+    kind: TerminalCliKind,
+    mode: TerminalLaunchMode,
+    intent: LaunchIntent,
+    session_id: Option<&str>,
+) -> Result<String, String> {
+    let session_id = session_id.map(canonical_session_uuid).transpose()?;
+    let session_id = session_id.as_deref();
+    let mut parts: Vec<String> = match (kind, intent) {
+        (TerminalCliKind::Claude, LaunchIntent::Fresh) => {
+            let id = session_id
+                .ok_or_else(|| "claude fresh launch requires a session id".to_string())?;
+            vec!["claude".into(), "--session-id".into(), id.into()]
+        }
+        (TerminalCliKind::Claude, LaunchIntent::Resume) => match session_id {
+            Some(id) => vec!["claude".into(), "--resume".into(), id.into()],
+            None => vec!["claude".into(), "--continue".into()],
+        },
+        (TerminalCliKind::Codex, LaunchIntent::Fresh) => vec!["codex".into()],
+        (TerminalCliKind::Codex, LaunchIntent::Resume) => match session_id {
+            Some(id) => vec!["codex".into(), "resume".into(), id.into()],
+            None => vec!["codex".into(), "resume".into(), "--last".into()],
+        },
+    };
+    if matches!(mode, TerminalLaunchMode::Yolo) {
+        parts.push(yolo_flag(kind).to_string());
+    }
+    Ok(parts.join(" "))
 }
 
 /// PATH for terminal child processes — the parent process PATH plus
@@ -2828,23 +3752,362 @@ mod tests {
         assert_eq!(title_from_command("   "), "Terminal");
     }
 
+    const TEST_UUID: &str = "11111111-1111-4111-8111-111111111111";
+
+    fn compose(
+        kind: TerminalCliKind,
+        mode: TerminalLaunchMode,
+        intent: LaunchIntent,
+        session_id: Option<&str>,
+    ) -> String {
+        compose_cli_command(kind, mode, intent, session_id).unwrap()
+    }
+
     #[test]
-    fn terminal_cli_commands_include_yolo_flags() {
+    fn fresh_launch_commands_assign_or_omit_session_id() {
+        use LaunchIntent::Fresh;
+        use TerminalCliKind::{Claude, Codex};
+        use TerminalLaunchMode::{Normal, Yolo};
+
         assert_eq!(
-            terminal_cli_command(TerminalCliKind::Claude, TerminalLaunchMode::Normal),
-            "claude"
+            compose(Claude, Normal, Fresh, Some(TEST_UUID)),
+            format!("claude --session-id {TEST_UUID}")
         );
         assert_eq!(
-            terminal_cli_command(TerminalCliKind::Claude, TerminalLaunchMode::Yolo),
-            "claude --dangerously-skip-permissions"
+            compose(Claude, Yolo, Fresh, Some(TEST_UUID)),
+            format!("claude --session-id {TEST_UUID} --dangerously-skip-permissions")
         );
+        assert_eq!(compose(Codex, Normal, Fresh, None), "codex");
         assert_eq!(
-            terminal_cli_command(TerminalCliKind::Codex, TerminalLaunchMode::Normal),
-            "codex"
-        );
-        assert_eq!(
-            terminal_cli_command(TerminalCliKind::Codex, TerminalLaunchMode::Yolo),
+            compose(Codex, Yolo, Fresh, None),
             "codex --dangerously-bypass-approvals-and-sandbox"
+        );
+    }
+
+    #[test]
+    fn resume_launch_commands_target_the_session() {
+        use LaunchIntent::Resume;
+        use TerminalCliKind::{Claude, Codex};
+        use TerminalLaunchMode::{Normal, Yolo};
+
+        assert_eq!(
+            compose(Claude, Normal, Resume, Some(TEST_UUID)),
+            format!("claude --resume {TEST_UUID}")
+        );
+        assert_eq!(
+            compose(Claude, Yolo, Resume, Some(TEST_UUID)),
+            format!("claude --resume {TEST_UUID} --dangerously-skip-permissions")
+        );
+        assert_eq!(
+            compose(Codex, Normal, Resume, Some(TEST_UUID)),
+            format!("codex resume {TEST_UUID}")
+        );
+        assert_eq!(
+            compose(Codex, Yolo, Resume, Some(TEST_UUID)),
+            format!("codex resume {TEST_UUID} --dangerously-bypass-approvals-and-sandbox")
+        );
+    }
+
+    #[test]
+    fn resume_without_session_id_falls_back_to_cli_recent() {
+        use LaunchIntent::Resume;
+        use TerminalCliKind::{Claude, Codex};
+        use TerminalLaunchMode::{Normal, Yolo};
+
+        assert_eq!(compose(Claude, Normal, Resume, None), "claude --continue");
+        assert_eq!(
+            compose(Claude, Yolo, Resume, None),
+            "claude --continue --dangerously-skip-permissions"
+        );
+        assert_eq!(compose(Codex, Normal, Resume, None), "codex resume --last");
+        assert_eq!(
+            compose(Codex, Yolo, Resume, None),
+            "codex resume --last --dangerously-bypass-approvals-and-sandbox"
+        );
+    }
+
+    #[test]
+    fn parses_codex_session_id_from_rollout_path() {
+        let id = "5973b6c0-94b8-487b-a530-2aeb6098ae0e";
+        let path =
+            format!("/Users/x/.codex/sessions/2026/06/16/rollout-2026-06-16T07-24-21-{id}.jsonl");
+        assert_eq!(
+            codex_session_id_from_rollout_path(&path).as_deref(),
+            Some(id)
+        );
+        let windows_path = format!(
+            r"\\?\C:\Users\x\.codex\sessions\2026\06\16\rollout-2026-06-16T07-24-21-{id}.jsonl"
+        );
+        assert_eq!(
+            codex_session_id_from_rollout_path(&windows_path).as_deref(),
+            Some(id)
+        );
+        let nt_path = format!(
+            r"\Device\HarddiskVolume3\Users\x\.codex\sessions\2026\06\16\rollout-2026-06-16T07-24-21-{id}.jsonl"
+        );
+        assert_eq!(
+            codex_session_id_from_rollout_path(&nt_path).as_deref(),
+            Some(id)
+        );
+    }
+
+    #[test]
+    fn rollout_parser_rejects_non_canonical_timestamps() {
+        let id = "5973b6c0-94b8-487b-a530-2aeb6098ae0e";
+        for path in [
+            format!("/Users/x/.codex/sessions/2026/06/16/rollout-2026-06-16T07:24:21-{id}.jsonl"),
+            format!("/Users/x/.codex/sessions/2026/06/16/rollout-anything-{id}.jsonl"),
+            format!("/Users/x/.codex/sessions/2026/06/16/rollout-2026-6-16T7-24-21-{id}.jsonl"),
+            format!("/Users/x/.codex/sessions/2026/06/15/rollout-2026-06-16T07-24-21-{id}.jsonl"),
+        ] {
+            assert_eq!(codex_session_id_from_rollout_path(&path), None, "{path}");
+        }
+    }
+
+    #[test]
+    fn ignores_non_rollout_open_files() {
+        for path in [
+            "/Users/x/.codex/sessions/2026/06/16/notes.txt",
+            "/Users/x/project/src/main.rs",
+            "/dev/ttys003",
+            "/Users/x/.codex/config.toml",
+            // A rollout-shaped name outside a sessions dir is not a session file.
+            "/tmp/rollout-2026-06-16T07-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl",
+            // A rollout-shaped project file under an unrelated sessions folder is not enough.
+            "/Users/x/project/sessions/notes/rollout-2026-06-16T07-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl",
+            "/Users/x/.codex/sessions/2026/06/16/nested/rollout-2026-06-16T07-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl",
+        ] {
+            assert_eq!(codex_session_id_from_rollout_path(path), None, "{path}");
+        }
+    }
+
+    #[test]
+    fn agent_descriptor_round_trips_and_defaults_auto_restore() {
+        let descriptor = TerminalAgentDescriptor {
+            id: "buf-1".into(),
+            title: "Codex CLI (YOLO)".into(),
+            cli_kind: TerminalCliKind::Codex,
+            launch_mode: TerminalLaunchMode::Yolo,
+            cwd: Some("/work".into()),
+            session_id: Some(TEST_UUID.into()),
+            session_resumable: true,
+            auto_restore: true,
+            created_at: 10,
+            updated_at: 20,
+        };
+        let json = serde_json::to_value(&descriptor).unwrap();
+        assert_eq!(json["cliKind"], "codex");
+        assert_eq!(json["launchMode"], "yolo");
+        assert_eq!(json["sessionId"], TEST_UUID);
+        assert_eq!(json["sessionResumable"], true);
+        let back: TerminalAgentDescriptor = serde_json::from_value(json).unwrap();
+        assert_eq!(back, descriptor);
+
+        // auto_restore defaults to true for legacy records missing the field.
+        let legacy = serde_json::json!({
+            "id": "buf-2",
+            "title": "Claude Code CLI",
+            "cliKind": "claude",
+            "launchMode": "normal",
+            "cwd": null,
+            "sessionId": null,
+            "createdAt": 1,
+            "updatedAt": 2
+        });
+        let parsed: TerminalAgentDescriptor = serde_json::from_value(legacy).unwrap();
+        assert!(parsed.auto_restore);
+        assert!(!parsed.session_resumable);
+    }
+
+    #[test]
+    fn descriptor_from_info_skips_plain_shells() {
+        let mut info = TerminalBufferInfo {
+            id: "buf".into(),
+            instance_id: "instance".into(),
+            title: "bash".into(),
+            cwd: None,
+            command: Some("bash".into()),
+            cli_kind: None,
+            launch_mode: TerminalLaunchMode::Normal,
+            session_id: None,
+            session_resumable: false,
+            cols: 80,
+            rows: 24,
+            status: TerminalStatus::Running,
+            created_at: 1,
+            updated_at: 1,
+        };
+        assert!(descriptor_from_info(&info).is_none());
+        info.cli_kind = Some(TerminalCliKind::Claude);
+        info.session_id = Some(TEST_UUID.into());
+        info.session_resumable = true;
+        assert_eq!(
+            descriptor_from_info(&info).unwrap().session_id.as_deref(),
+            Some(TEST_UUID)
+        );
+        assert!(descriptor_from_info(&info).unwrap().session_resumable);
+    }
+
+    #[test]
+    fn descriptor_replace_preserves_stable_fields() {
+        let mut existing = TerminalAgentDescriptor {
+            id: "buf-1".into(),
+            title: "Claude Code CLI".into(),
+            cli_kind: TerminalCliKind::Claude,
+            launch_mode: TerminalLaunchMode::Normal,
+            cwd: None,
+            session_id: Some(TEST_UUID.into()),
+            session_resumable: false,
+            auto_restore: false,
+            created_at: 10,
+            updated_at: 20,
+        };
+        let next = TerminalAgentDescriptor {
+            id: "buf-1".into(),
+            title: "Claude Code CLI".into(),
+            cli_kind: TerminalCliKind::Claude,
+            launch_mode: TerminalLaunchMode::Yolo,
+            cwd: Some("/work".into()),
+            session_id: Some(TEST_UUID.into()),
+            session_resumable: true,
+            auto_restore: true,
+            created_at: 30,
+            updated_at: 40,
+        };
+
+        replace_descriptor_preserving_stable_fields(&mut existing, next);
+
+        assert_eq!(existing.created_at, 10);
+        assert!(!existing.auto_restore);
+        assert_eq!(existing.launch_mode, TerminalLaunchMode::Yolo);
+        assert!(existing.session_resumable);
+        assert_eq!(existing.updated_at, 40);
+    }
+
+    #[test]
+    fn claude_submission_marks_session_resumable() {
+        let mut pending = false;
+        assert!(record_cli_submission_for_resume(
+            Some(TerminalCliKind::Claude),
+            Some(TEST_UUID),
+            false,
+            &mut pending,
+            "hello\r",
+        ));
+        assert!(!pending);
+    }
+
+    #[test]
+    fn claude_submission_tracks_split_text_and_enter() {
+        let mut pending = false;
+        assert!(!record_cli_submission_for_resume(
+            Some(TerminalCliKind::Claude),
+            Some(TEST_UUID),
+            false,
+            &mut pending,
+            "hello",
+        ));
+        assert!(pending);
+        assert!(record_cli_submission_for_resume(
+            Some(TerminalCliKind::Claude),
+            Some(TEST_UUID),
+            false,
+            &mut pending,
+            "\r",
+        ));
+        assert!(!pending);
+    }
+
+    #[test]
+    fn claude_submission_ignores_control_only_and_ineligible_sessions() {
+        let mut pending = false;
+        assert!(!record_cli_submission_for_resume(
+            Some(TerminalCliKind::Claude),
+            Some(TEST_UUID),
+            false,
+            &mut pending,
+            "\r",
+        ));
+        assert!(!pending);
+        assert!(!record_cli_submission_for_resume(
+            Some(TerminalCliKind::Claude),
+            None,
+            false,
+            &mut pending,
+            "hello\r",
+        ));
+        assert!(!record_cli_submission_for_resume(
+            Some(TerminalCliKind::Codex),
+            Some(TEST_UUID),
+            false,
+            &mut pending,
+            "hello\r",
+        ));
+        assert!(!record_cli_submission_for_resume(
+            Some(TerminalCliKind::Claude),
+            Some(TEST_UUID),
+            true,
+            &mut pending,
+            "hello\r",
+        ));
+    }
+
+    #[test]
+    fn claude_fresh_launch_requires_a_session_id() {
+        assert!(
+            compose_cli_command(
+                TerminalCliKind::Claude,
+                TerminalLaunchMode::Normal,
+                LaunchIntent::Fresh,
+                None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn non_uuid_session_ids_are_rejected_before_composition() {
+        for bad in [
+            "not-a-uuid",
+            "; rm -rf /",
+            "11111111-1111-4111-8111",
+            "$(whoami)",
+        ] {
+            assert!(
+                compose_cli_command(
+                    TerminalCliKind::Claude,
+                    TerminalLaunchMode::Normal,
+                    LaunchIntent::Resume,
+                    Some(bad),
+                )
+                .is_err(),
+                "expected rejection of {bad}"
+            );
+        }
+        assert_eq!(canonical_session_uuid(TEST_UUID).unwrap(), TEST_UUID);
+    }
+
+    #[test]
+    fn session_ids_are_canonicalized_before_command_composition() {
+        assert_eq!(
+            compose_cli_command(
+                TerminalCliKind::Claude,
+                TerminalLaunchMode::Normal,
+                LaunchIntent::Resume,
+                Some("11111111111141118111111111111111"),
+            )
+            .unwrap(),
+            format!("claude --resume {TEST_UUID}")
+        );
+        assert_eq!(
+            compose_cli_command(
+                TerminalCliKind::Codex,
+                TerminalLaunchMode::Yolo,
+                LaunchIntent::Resume,
+                Some("urn:uuid:11111111-1111-4111-8111-111111111111"),
+            )
+            .unwrap(),
+            format!("codex resume {TEST_UUID} --dangerously-bypass-approvals-and-sandbox")
         );
     }
 

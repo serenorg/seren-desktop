@@ -37,7 +37,7 @@ import {
 } from "@/services/organization-policy";
 import type { AgentType } from "@/services/providers";
 import { agentStore } from "@/stores/agent.store";
-import { authStore } from "@/stores/auth.store";
+import { authStore, refreshPrivateChatPolicy } from "@/stores/auth.store";
 import { editorSessionStore } from "@/stores/editor.sessions";
 import { fileTreeState } from "@/stores/fileTree";
 import type {
@@ -234,7 +234,13 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   };
 
   const toggleLauncher = () => {
-    setShowLauncher((v) => !v);
+    setShowLauncher((open) => {
+      const next = !open;
+      if (next) {
+        void refreshPrivateChatPolicy();
+      }
+      return next;
+    });
   };
 
   const handleSelectThread = (thread: Thread) => {
@@ -393,49 +399,33 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     <div class="h-px bg-border/60 mx-3 my-1" />
   );
 
-  const claudeAvailable = createMemo(() =>
-    agentStore.availableAgents.some(
-      (a) => a.type === "claude-code" && a.available,
-    ),
-  );
-  const codexAvailable = createMemo(() =>
-    agentStore.availableAgents.some((a) => a.type === "codex" && a.available),
-  );
-  const geminiAvailable = createMemo(() =>
-    agentStore.availableAgents.some((a) => a.type === "gemini" && a.available),
-  );
-  const lmStudioAvailable = createMemo(() =>
-    agentStore.availableAgents.some(
-      (a) => a.type === "lmstudio" && a.available,
-    ),
-  );
   const showSerenChat = createMemo(() =>
     allowsSerenPublicModels(authStore.privateChatPolicy),
   );
   const showSerenPrivate = createMemo(() =>
     allowsSerenPrivateAgent(authStore.privateChatPolicy),
   );
-  const showClaudeAgent = createMemo(
-    () => allowsClaudeAgent(authStore.privateChatPolicy) && claudeAvailable(),
+  const showClaudeAgent = createMemo(() =>
+    allowsClaudeAgent(authStore.privateChatPolicy),
   );
-  const showCodexAgent = createMemo(
-    () => allowsCodexAgent(authStore.privateChatPolicy) && codexAvailable(),
+  const showCodexAgent = createMemo(() =>
+    allowsCodexAgent(authStore.privateChatPolicy),
   );
-  const showGeminiAgent = createMemo(
-    () => allowsGeminiAgent(authStore.privateChatPolicy) && geminiAvailable(),
+  const showGeminiAgent = createMemo(() =>
+    allowsGeminiAgent(authStore.privateChatPolicy),
   );
-  const showLmStudioAgent = createMemo(
-    () =>
-      allowsLmStudioAgent(authStore.privateChatPolicy) && lmStudioAvailable(),
+  const showLmStudioAgent = createMemo(() =>
+    allowsLmStudioAgent(authStore.privateChatPolicy),
   );
   // Paired Claude + Codex needs both CLIs' org-policy gates; CLI install and
   // login flow through the existing subscription setup toasts on spawn.
   const showPairedAgent = createMemo(
     () =>
       allowsClaudeAgent(authStore.privateChatPolicy) &&
-      allowsCodexAgent(authStore.privateChatPolicy) &&
-      claudeAvailable() &&
-      codexAvailable(),
+      allowsCodexAgent(authStore.privateChatPolicy),
+  );
+  const showCliLaunchers = createMemo(
+    () => !authStore.privateChatPolicy?.disable_local_agents,
   );
   const hasChatSection = createMemo(
     () => showSerenChat() || showSerenPrivate(),
@@ -448,7 +438,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       showGeminiAgent() ||
       showLmStudioAgent(),
   );
-  const hasCliSection = createMemo(() => claudeAvailable() || codexAvailable());
+  const hasCliSection = createMemo(() => showCliLaunchers());
 
   return (
     <aside
@@ -766,83 +756,49 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               <Show when={hasCliSection()}>
                 <SectionLabel>Command line</SectionLabel>
               </Show>
-              <Show when={claudeAvailable()}>
-                <div class="flex items-stretch gap-1.5">
-                  <button
-                    type="button"
-                    data-testid="new-claude-cli"
-                    class="flex items-center gap-2.5 flex-1 min-w-0 py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                    onClick={() =>
-                      void handleNewTerminal({
-                        cliKind: "claude",
-                        launchMode: "normal",
-                      })
-                    }
-                  >
-                    <CliBrandIcon glyph={"\u{1F916}"} />
-                    <div class="flex-1 min-w-0">
-                      <div class="font-medium">Claude Code</div>
-                      <div class="text-[11px] text-muted-foreground">
-                        Runs <code class="font-mono text-[10px]">claude</code>{" "}
-                        in a terminal pane
-                      </div>
+              <Show when={showCliLaunchers()}>
+                <button
+                  type="button"
+                  data-testid="new-claude-cli"
+                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                  onClick={() =>
+                    void handleNewTerminal({
+                      cliKind: "claude",
+                    })
+                  }
+                >
+                  <CliBrandIcon glyph={"\u{1F916}"} />
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">Claude Code</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      Runs <code class="font-mono text-[10px]">claude</code> in
+                      a terminal pane
                     </div>
-                    <LauncherChip variant="cli">CLI</LauncherChip>
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="new-claude-cli-yolo"
-                    title="Start Claude Code with permission checks bypassed"
-                    class="w-[52px] shrink-0 rounded-md border border-destructive/35 bg-destructive/10 px-2 text-[10px] font-semibold tracking-[0.06em] text-destructive cursor-pointer transition-colors duration-100 hover:bg-destructive/15"
-                    onClick={() =>
-                      void handleNewTerminal({
-                        cliKind: "claude",
-                        launchMode: "yolo",
-                      })
-                    }
-                  >
-                    YOLO
-                  </button>
-                </div>
+                  </div>
+                  <LauncherChip variant="cli">CLI</LauncherChip>
+                </button>
               </Show>
-              <Show when={codexAvailable()}>
-                <div class="flex items-stretch gap-1.5">
-                  <button
-                    type="button"
-                    data-testid="new-codex-cli"
-                    class="flex items-center gap-2.5 flex-1 min-w-0 py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                    onClick={() =>
-                      void handleNewTerminal({
-                        cliKind: "codex",
-                        launchMode: "normal",
-                      })
-                    }
-                  >
-                    <CliBrandIcon glyph={"⚡"} />
-                    <div class="flex-1 min-w-0">
-                      <div class="font-medium">Codex</div>
-                      <div class="text-[11px] text-muted-foreground">
-                        Runs <code class="font-mono text-[10px]">codex</code> in
-                        a terminal pane
-                      </div>
+              <Show when={showCliLaunchers()}>
+                <button
+                  type="button"
+                  data-testid="new-codex-cli"
+                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                  onClick={() =>
+                    void handleNewTerminal({
+                      cliKind: "codex",
+                    })
+                  }
+                >
+                  <CliBrandIcon glyph={"⚡"} />
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">Codex</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      Runs <code class="font-mono text-[10px]">codex</code> in a
+                      terminal pane
                     </div>
-                    <LauncherChip variant="cli">CLI</LauncherChip>
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="new-codex-cli-yolo"
-                    title="Start Codex with approvals and sandbox bypassed"
-                    class="w-[52px] shrink-0 rounded-md border border-destructive/35 bg-destructive/10 px-2 text-[10px] font-semibold tracking-[0.06em] text-destructive cursor-pointer transition-colors duration-100 hover:bg-destructive/15"
-                    onClick={() =>
-                      void handleNewTerminal({
-                        cliKind: "codex",
-                        launchMode: "yolo",
-                      })
-                    }
-                  >
-                    YOLO
-                  </button>
-                </div>
+                  </div>
+                  <LauncherChip variant="cli">CLI</LauncherChip>
+                </button>
               </Show>
 
               {/* ---------- Shell ---------- */}

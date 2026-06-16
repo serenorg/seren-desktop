@@ -18,21 +18,24 @@ import {
   allowsSerenPublicModels,
 } from "@/services/organization-policy";
 import { agentStore } from "@/stores/agent.store";
-import { authStore } from "@/stores/auth.store";
+import { authStore, refreshPrivateChatPolicy } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
+import type { TerminalCliKind } from "@/stores/terminal.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
 // Right-aligned chip telling the user how a thread is billed.
 // Mirrors LauncherChip in ThreadSidebar.tsx — kept locally to avoid pulling
 // shared UI primitives across components for a single 7-row use case.
 const Chip: Component<{
-  variant: "paid" | "subscription";
+  variant: "paid" | "subscription" | "cli";
   children: string;
 }> = (chipProps) => {
   const tone = () =>
     chipProps.variant === "paid"
       ? "bg-primary/10 text-primary/90 border-primary/25"
-      : "bg-purple-500/12 text-purple-300 border-purple-500/30";
+      : chipProps.variant === "subscription"
+        ? "bg-purple-500/12 text-purple-300 border-purple-500/30"
+        : "bg-surface-3 text-muted-foreground border-border";
   return (
     <span
       class={`text-[10px] font-semibold tracking-[0.04em] px-1.5 py-0.5 rounded-full border whitespace-nowrap ${tone()}`}
@@ -95,6 +98,14 @@ export const ThreadTabBar: Component = () => {
     const cwd = fileTreeState.rootPath;
     if (!cwd) return;
     await threadStore.createAgentThread(agentType, cwd);
+  };
+
+  const handleNewTerminal = async (options?: {
+    title?: string;
+    cliKind?: TerminalCliKind;
+  }) => {
+    setShowNewMenu(false);
+    await threadStore.createTerminalThread(options);
   };
 
   const threadIcon = (thread: Thread) => {
@@ -184,7 +195,15 @@ export const ThreadTabBar: Component = () => {
         <button
           type="button"
           class="flex items-center justify-center w-8 h-full bg-none border-none border-l border-l-border text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border/80 hover:text-primary"
-          onClick={() => setShowNewMenu((v) => !v)}
+          onClick={() =>
+            setShowNewMenu((open) => {
+              const next = !open;
+              if (next) {
+                void refreshPrivateChatPolicy();
+              }
+              return next;
+            })
+          }
           title="New thread"
         >
           <svg
@@ -205,7 +224,7 @@ export const ThreadTabBar: Component = () => {
         </button>
 
         <Show when={showNewMenu()}>
-          <div class="absolute top-full right-0 min-w-[260px] bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
+          <div class="absolute top-full right-0 min-w-[300px] max-h-[70vh] overflow-y-auto bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
             <Show when={allowsSerenPublicModels(authStore.privateChatPolicy)}>
               <button
                 type="button"
@@ -319,6 +338,52 @@ export const ThreadTabBar: Component = () => {
                 </span>
                 <div class="flex-1 min-w-0 font-medium">Gemini</div>
                 <Chip variant="subscription">Subscription</Chip>
+              </button>
+            </Show>
+            <Show when={!authStore.privateChatPolicy?.disable_local_agents}>
+              <div class="h-px bg-border/60 mx-2 my-1" />
+              <button
+                type="button"
+                data-testid="new-claude-cli"
+                class="flex items-center gap-2.5 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 text-left"
+                onClick={() =>
+                  void handleNewTerminal({
+                    cliKind: "claude",
+                  })
+                }
+              >
+                <span class="text-[13px] w-[18px] text-center shrink-0">
+                  🤖
+                </span>
+                <div class="flex-1 min-w-0 font-medium">Claude Code CLI</div>
+                <Chip variant="cli">CLI</Chip>
+              </button>
+              <button
+                type="button"
+                data-testid="new-codex-cli"
+                class="flex items-center gap-2.5 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 text-left"
+                onClick={() =>
+                  void handleNewTerminal({
+                    cliKind: "codex",
+                  })
+                }
+              >
+                <span class="text-[13px] w-[18px] text-center shrink-0">
+                  ⚡
+                </span>
+                <div class="flex-1 min-w-0 font-medium">Codex CLI</div>
+                <Chip variant="cli">CLI</Chip>
+              </button>
+              <button
+                type="button"
+                data-testid="new-terminal"
+                class="flex items-center gap-2.5 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 text-left"
+                onClick={() => void handleNewTerminal({ title: "Terminal" })}
+              >
+                <span class="text-[13px] w-[18px] text-center shrink-0">
+                  &gt;_
+                </span>
+                <div class="flex-1 min-w-0 font-medium">Terminal</div>
               </button>
             </Show>
           </div>

@@ -142,6 +142,8 @@ export interface Thread {
   timestamp: number;
   /** Whether this thread has an active in-memory agent runtime session. */
   isLive: boolean;
+  /** Launch mode for terminal (CLI) threads; drives the sidebar YOLO badge. */
+  launchMode?: TerminalLaunchMode;
 }
 
 export interface ThreadGroup {
@@ -524,6 +526,7 @@ export const threadStore = {
       employeeId: null,
       timestamp: buffer.createdAt,
       isLive: buffer.status === "running",
+      launchMode: buffer.launchMode,
     }));
 
     const editorThreads: Thread[] = editorSessionStore.sessions.map(
@@ -1047,6 +1050,8 @@ export const threadStore = {
     } else if (kind === "terminal") {
       await terminalStore.kill(id);
       terminalStore.removeLocal(id);
+      // Closing a terminal agent means it should not be auto-restored next boot.
+      await terminalStore.forgetAgent(id).catch(() => {});
     } else {
       // Editor sessions: close every tab in the session. The session
       // disappears from the sidebar automatically because it's derived from
@@ -1100,6 +1105,8 @@ export const threadStore = {
     await conversationStore.loadHistory();
     await agentStore.refreshRecentAgentConversations(200);
     await terminalStore.init();
+    // Re-open and resume the CLI-agent terminals open before the last restart.
+    await terminalStore.restoreAgents();
 
     // Only restore if no thread is already active (e.g. deep-linked navigation).
     if (state.activeThreadId) return;

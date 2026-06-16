@@ -299,6 +299,15 @@ export function dismissSignInModal(): void {
   setState("signInModalRequested", false);
 }
 
+export async function refreshPrivateChatPolicy(): Promise<OrganizationPrivateChatPolicy | null> {
+  if (!state.isAuthenticated) {
+    return null;
+  }
+  const privateChatPolicy = await loadPrivateChatPolicy();
+  setState("privateChatPolicy", privateChatPolicy);
+  return privateChatPolicy;
+}
+
 // Listen for session-expired events from the desktop runtime (both tokens
 // dead, or backend explicitly told us to re-auth). The Rust side already
 // cleared its own state; we mirror that into the frontend store AND raise
