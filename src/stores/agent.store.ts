@@ -501,7 +501,11 @@ let claudeMemoryInterceptedListener: Promise<UnlistenFn> | null = null;
 
 let sessionResetGeneration = 0;
 const CLAUDE_MEMORY_EVIDENCE_LIMIT = 20;
-const CLAUDE_MEMORY_RENDER_BEFORE_SPAWN_TIMEOUT_MS = 15_000;
+// Warm fast-path window for refreshing the Claude memory index before spawn.
+// A responsive SerenDB renders the index well under this budget; a cold
+// (scaled-to-zero) database takes far longer, so we cap the spawn wait here
+// and let the render finish in the background instead of stalling the spawn.
+const CLAUDE_MEMORY_RENDER_BEFORE_SPAWN_TIMEOUT_MS = 4_000;
 
 function disposeTauriListener(
   listener: Promise<UnlistenFn> | null,
@@ -1190,41 +1194,43 @@ async function refreshClaudeMemoryMdBeforeSpawn(
   if (!hasSerenApiKey) return;
   if (!settingsStore.get("claudeMemoryInterceptEnabled")) return;
 
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  let timedOut = false;
-  const renderPromise = renderClaudeMemoryMd(cwd).catch((error) => {
-    if (timedOut) {
-      console.warn(
-        "[AgentStore] Claude memory index refresh failed after spawn-time timeout:",
-        error,
-      );
+  // The on-disk MEMORY.md is what the agent reads at startup, and the
+  // interceptor re-renders it after every local memory write, so it is already
+  // current for a single-device user. This pre-spawn render only pulls in
+  // cross-device / cross-session updates from SerenDB. We give it a short warm
+  // fast-path window so a responsive DB refreshes the index before the agent
+  // reads it, but we never stall the spawn on a cold SerenDB: the render keeps
+  // running in the background and refreshes MEMORY.md for the next spawn.
+  let settled = false;
+  const renderPromise = renderClaudeMemoryMd(cwd)
+    .then((result) => {
+      settled = true;
+      if (result) {
+        console.info("[AgentStore] Refreshed Claude memory index:", result);
+      }
+      return result;
+    })
+    .catch((error) => {
+      settled = true;
+      console.warn("[AgentStore] Claude memory index refresh failed:", error);
       return null;
-    }
-    throw error;
-  });
+    });
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<"timeout">((resolve) => {
-    timeoutId = setTimeout(() => {
-      timedOut = true;
-      resolve("timeout");
-    }, CLAUDE_MEMORY_RENDER_BEFORE_SPAWN_TIMEOUT_MS);
+    timeoutId = setTimeout(
+      () => resolve("timeout"),
+      CLAUDE_MEMORY_RENDER_BEFORE_SPAWN_TIMEOUT_MS,
+    );
   });
 
   try {
     const result = await Promise.race([renderPromise, timeoutPromise]);
-    if (result === "timeout") {
-      console.warn(
-        `[AgentStore] Claude memory index refresh timed out after ${CLAUDE_MEMORY_RENDER_BEFORE_SPAWN_TIMEOUT_MS}ms; spawning with existing MEMORY.md.`,
+    if (result === "timeout" && !settled) {
+      console.info(
+        `[AgentStore] Claude memory index still refreshing after ${CLAUDE_MEMORY_RENDER_BEFORE_SPAWN_TIMEOUT_MS}ms; spawning with on-disk MEMORY.md while the refresh finishes in the background.`,
       );
-      return;
     }
-    if (result) {
-      console.info("[AgentStore] Refreshed Claude memory index:", result);
-    }
-  } catch (error) {
-    console.warn(
-      "[AgentStore] Claude memory index refresh before spawn failed:",
-      error,
-    );
   } finally {
     if (timeoutId !== undefined) {
       clearTimeout(timeoutId);
