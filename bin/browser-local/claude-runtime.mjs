@@ -860,26 +860,25 @@ function sendControlRequest(session, request, timeoutMs = 30_000) {
   });
 }
 
-// A brand-new user's first-ever claude invocation does one-time init (fresh
-// profile, fetching the dynamic command/plugin catalog over the network) that
-// runs several times slower than a warm run — measured up to ~9s on a cold
-// Windows host versus ~2s warm. The default per-request window was too tight
-// for that cold path and timed out the spawn (#2452/#2454), so the initialize
-// handshake gets a wider budget and one retry before the session is abandoned.
+// A brand-new profile's first-ever claude invocation does one-time init (fresh
+// profile, fetching the dynamic command/plugin catalog and feature gates over
+// the network) that runs several times slower than a warm run — measured up to
+// ~9s on a cold Windows host versus ~2s warm — and can occasionally wedge so
+// the CLI never answers the handshake at all. Each attempt gets a wide budget;
+// if it still times out, spawnSession kills the wedged process and hands the
+// handshake to a fresh one rather than re-asking the stuck child, whose warm
+// second invocation answers in ~2s. #2452/#2454
 const INITIALIZE_TIMEOUT_MS = 60_000;
+// Total initialize attempts (initial spawn + respawns) before the session is
+// abandoned. Each attempt runs against a fresh process. #2452
+const INITIALIZE_MAX_ATTEMPTS = 2;
 
-async function sendInitializeWithRetry(session) {
-  const request = { subtype: "initialize", hooks: null };
-  try {
-    return await sendControlRequest(session, request, INITIALIZE_TIMEOUT_MS);
-  } catch (error) {
-    console.error(
-      `${session.logPrefix ?? "[claude]"} initialize handshake timed out after ${
-        INITIALIZE_TIMEOUT_MS / 1000
-      }s; retrying once: ${error.message}`,
-    );
-    return sendControlRequest(session, request, INITIALIZE_TIMEOUT_MS);
-  }
+function sendInitialize(session) {
+  return sendControlRequest(
+    session,
+    { subtype: "initialize", hooks: null },
+    INITIALIZE_TIMEOUT_MS,
+  );
 }
 
 function buildClaudeArgs({
@@ -1851,90 +1850,138 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     // only the latter made the Claude spawn line
     // useless when correlating with [AgentRuntime] Event received logs
     // in the renderer console. #1889
-    console.error(
-      `${claudeLogPrefix} spawn sessionId=${sessionId} ` +
-        `agentSessionId=${remoteSessionId} preferredModel="${preferredModel}"`,
-    );
-    const processHandle = spawn(
-      claudeBin,
-      claudeArgs,
-      {
-        cwd,
-        env: {
-          ...process.env,
-          ...mcpConfig.childEnv,
-          PATH: extendedPath,
-        },
-        stdio: ["pipe", "pipe", "pipe"],
-        shell: resolveSpawnShell(claudeBin),
-      },
-    );
-
-    // Clean up MCP config temp file when the process exits
-    if (claudeArgs._mcpTempFile) {
-      const tempFile = claudeArgs._mcpTempFile;
-      processHandle.on("exit", () => {
-        try { unlinkSync(tempFile); } catch {}
-      });
-    }
-
-    // Catch spawn errors (e.g. ENOENT, EBADARCH) to prevent crashing the provider runtime.
-    processHandle.on("error", (spawnError) => {
-      console.error(`${claudeLogPrefix} Spawn error: ${spawnError.message}`);
-      sessions.delete(sessionId);
-      // macOS surfaces a wrong-arch binary as `errno: -86` / "Bad CPU type in
-      // executable" (EBADARCH). It hits when a prior install dropped the wrong
-      // slice (e.g. x86_64 claude on an arm64 Mac without Rosetta) and our
-      // resolver couldn't see that path was unusable. Surface a specific,
-      // actionable error so the user doesn't see "spawn Unknown system error -86". #1862
-      const isBadArch =
-        spawnError.errno === -86 ||
-        spawnError.code === "EBADARCH" ||
-        /bad cpu type in executable/i.test(spawnError.message ?? "");
-      let errorMessage;
-      if (spawnError.code === "ENOENT") {
-        errorMessage = `Claude Code CLI not found at "${claudeBin}". Install it from https://claude.ai/download`;
-      } else if (isBadArch) {
-        errorMessage =
-          `Claude Code CLI at "${claudeBin}" is the wrong CPU type for this Mac ` +
-          `(host arch: ${process.arch}). Install Rosetta 2 with ` +
-          `'softwareupdate --install-rosetta --agree-to-license', or delete that ` +
-          `binary and let Seren reinstall via npm on next launch.`;
-      } else {
-        errorMessage = `Failed to start Claude Code: ${spawnError.message}`;
-      }
-      emit("provider://error", {
-        sessionId,
-        error: errorMessage,
-      });
-      emit("provider://session-status", {
-        sessionId,
-        status: "terminated",
-      });
-    });
-
     const resolvedMode = claudeModeFromApprovalPolicy(approvalPolicy);
-    const session = createSessionRecord({
-      sessionId,
-      cwd,
-      processHandle,
-      timeoutSecs,
-      agentSessionId: remoteSessionId,
-      // Seed currentModelId with what we spawned on so the first session-status
-      // event reflects reality; assistant messages then refresh it from
-      // message.model on every turn (#1635).
-      currentModelId: preferredModel,
-      currentModeId: "default",
-      mcpConfigJson: mcpConfig.claudeMcpConfigJson,
-      spawnEnv: mcpConfig.childEnv,
-      reasoningEffort: effectiveEffort,
-    });
 
-    sessions.set(sessionId, session);
-    attachProcessListeners(emit, sessions, session, exitPromises);
+    // Spawn the CLI, wire its listeners, and register the session. Returns the
+    // process handle and session record so the initialize handshake can hand
+    // off to a fresh process if the first one wedges. #2452
+    const launchClaudeProcess = () => {
+      console.error(
+        `${claudeLogPrefix} spawn sessionId=${sessionId} ` +
+          `agentSessionId=${remoteSessionId} preferredModel="${preferredModel}"`,
+      );
+
+      // The MCP config temp file is consumed at CLI startup and unlinked when
+      // the process exits, so a respawn must rematerialize it before launching.
+      if (claudeArgs._mcpTempFile && mcpConfig.claudeMcpConfigJson) {
+        writeFileSync(
+          claudeArgs._mcpTempFile,
+          mcpConfig.claudeMcpConfigJson,
+          "utf-8",
+        );
+      }
+
+      const processHandle = spawn(
+        claudeBin,
+        claudeArgs,
+        {
+          cwd,
+          env: {
+            ...process.env,
+            ...mcpConfig.childEnv,
+            PATH: extendedPath,
+          },
+          stdio: ["pipe", "pipe", "pipe"],
+          shell: resolveSpawnShell(claudeBin),
+        },
+      );
+
+      // Clean up MCP config temp file when the process exits
+      if (claudeArgs._mcpTempFile) {
+        const tempFile = claudeArgs._mcpTempFile;
+        processHandle.on("exit", () => {
+          try { unlinkSync(tempFile); } catch {}
+        });
+      }
+
+      // Catch spawn errors (e.g. ENOENT, EBADARCH) to prevent crashing the provider runtime.
+      processHandle.on("error", (spawnError) => {
+        console.error(`${claudeLogPrefix} Spawn error: ${spawnError.message}`);
+        sessions.delete(sessionId);
+        // macOS surfaces a wrong-arch binary as `errno: -86` / "Bad CPU type in
+        // executable" (EBADARCH). It hits when a prior install dropped the wrong
+        // slice (e.g. x86_64 claude on an arm64 Mac without Rosetta) and our
+        // resolver couldn't see that path was unusable. Surface a specific,
+        // actionable error so the user doesn't see "spawn Unknown system error -86". #1862
+        const isBadArch =
+          spawnError.errno === -86 ||
+          spawnError.code === "EBADARCH" ||
+          /bad cpu type in executable/i.test(spawnError.message ?? "");
+        let errorMessage;
+        if (spawnError.code === "ENOENT") {
+          errorMessage = `Claude Code CLI not found at "${claudeBin}". Install it from https://claude.ai/download`;
+        } else if (isBadArch) {
+          errorMessage =
+            `Claude Code CLI at "${claudeBin}" is the wrong CPU type for this Mac ` +
+            `(host arch: ${process.arch}). Install Rosetta 2 with ` +
+            `'softwareupdate --install-rosetta --agree-to-license', or delete that ` +
+            `binary and let Seren reinstall via npm on next launch.`;
+        } else {
+          errorMessage = `Failed to start Claude Code: ${spawnError.message}`;
+        }
+        emit("provider://error", {
+          sessionId,
+          error: errorMessage,
+        });
+        emit("provider://session-status", {
+          sessionId,
+          status: "terminated",
+        });
+      });
+
+      const launchedSession = createSessionRecord({
+        sessionId,
+        cwd,
+        processHandle,
+        timeoutSecs,
+        agentSessionId: remoteSessionId,
+        // Seed currentModelId with what we spawned on so the first session-status
+        // event reflects reality; assistant messages then refresh it from
+        // message.model on every turn (#1635).
+        currentModelId: preferredModel,
+        currentModeId: "default",
+        mcpConfigJson: mcpConfig.claudeMcpConfigJson,
+        spawnEnv: mcpConfig.childEnv,
+        reasoningEffort: effectiveEffort,
+      });
+
+      sessions.set(sessionId, launchedSession);
+      attachProcessListeners(emit, sessions, launchedSession, exitPromises);
+      return { processHandle, session: launchedSession };
+    };
+
+    let { processHandle, session } = launchClaudeProcess();
 
     try {
-      const initResult = await sendInitializeWithRetry(session);
+      // Initialize handshake with kill+respawn. A first-run stall can wedge the
+      // CLI so it never answers the request; re-asking the SAME process can't
+      // recover (it's already stuck), so on timeout we kill it and hand the
+      // handshake to a fresh process. The previous same-process retry just
+      // doubled the wait. #2452
+      let initResult;
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          initResult = await sendInitialize(session);
+          break;
+        } catch (initError) {
+          if (attempt >= INITIALIZE_MAX_ATTEMPTS) throw initError;
+          console.error(
+            `${session.logPrefix ?? claudeLogPrefix} initialize handshake timed ` +
+              `out after ${INITIALIZE_TIMEOUT_MS / 1000}s ` +
+              `(attempt ${attempt}/${INITIALIZE_MAX_ATTEMPTS}); killing the wedged ` +
+              `process and respawning: ${initError.message}`,
+          );
+          // Detach the wedged session before killing so its exit handler sees
+          // wasTracked=false and stays silent (no spurious terminated emit, no
+          // control-request rejection against the fresh session). Then wait for
+          // its exit cleanup to release the session id before relaunching.
+          sessions.delete(sessionId);
+          const pendingExit = exitPromises.get(sessionId);
+          killChildTree(processHandle);
+          if (pendingExit) await pendingExit;
+          ({ processHandle, session } = launchClaudeProcess());
+        }
+      }
 
       session.availableModelRecords = augmentWithLegacyOpus(
         normalizeModelRecords(initResult),

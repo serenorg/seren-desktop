@@ -1,5 +1,5 @@
-// ABOUTME: Regression test for #2454 — claude-code initialize handshake must
-// ABOUTME: tolerate cold first-run latency (wide timeout + one retry) and resolve .local\bin.
+// ABOUTME: Regression test for #2452/#2454 — claude-code initialize handshake uses a wide
+// ABOUTME: timeout and recovers a wedged spawn by killing+respawning, not a same-process retry.
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -17,21 +17,42 @@ describe("#2454 — claude initialize handshake tolerates cold first-run", () =>
     const ms = Number((match?.[1] ?? "0").replaceAll("_", ""));
     expect(ms).toBeGreaterThanOrEqual(60_000);
   });
+});
 
-  it("retries the initialize handshake once before abandoning the spawn", () => {
-    const start = runtimeSource.indexOf("async function sendInitializeWithRetry");
-    expect(start, "sendInitializeWithRetry must exist").toBeGreaterThan(0);
-    const body = runtimeSource.slice(start, start + 700);
-    // Two sendControlRequest calls = initial attempt + one retry.
-    const calls = body.match(/sendControlRequest\(/g) ?? [];
-    expect(calls.length, "must call sendControlRequest twice (attempt + retry)").toBe(2);
-    expect(body).toContain("subtype: \"initialize\"");
-    expect(body).toMatch(/catch\s*\(/);
+describe("#2452 — a wedged initialize handshake recovers by respawning, not re-asking", () => {
+  it("sends initialize as a single-attempt request (no same-process retry helper)", () => {
+    expect(
+      runtimeSource.includes("function sendInitialize("),
+      "sendInitialize helper must exist",
+    ).toBe(true);
+    expect(
+      runtimeSource.includes("sendInitializeWithRetry"),
+      "the same-process retry helper must be gone",
+    ).toBe(false);
+    const start = runtimeSource.indexOf("function sendInitialize(");
+    const body = runtimeSource.slice(start, start + 300);
+    // Exactly one control request — recovery now respawns a fresh process.
+    expect((body.match(/sendControlRequest\(/g) ?? []).length).toBe(1);
+    expect(body).toContain('subtype: "initialize"');
   });
 
-  it("spawn drives initialize through the retry helper, not a bare 20s control request", () => {
-    expect(runtimeSource).toContain("await sendInitializeWithRetry(session)");
-    // The old tight inline initialize timeout must be gone.
+  it("bounds the attempts and kills+respawns a fresh process on timeout", () => {
+    const max = runtimeSource.match(/INITIALIZE_MAX_ATTEMPTS\s*=\s*([0-9_]+)/);
+    expect(max, "INITIALIZE_MAX_ATTEMPTS constant must exist").not.toBeNull();
+    expect(Number((max?.[1] ?? "0").replaceAll("_", ""))).toBeGreaterThanOrEqual(2);
+
+    const start = runtimeSource.indexOf("let initResult;");
+    expect(start, "initialize loop must exist").toBeGreaterThan(0);
+    const body = runtimeSource.slice(start, start + 1200);
+    expect(body).toContain("await sendInitialize(session)");
+    expect(body).toMatch(/attempt\s*>=\s*INITIALIZE_MAX_ATTEMPTS/);
+    // On timeout: detach the wedged session, kill its tree, relaunch fresh.
+    expect(body).toContain("sessions.delete(sessionId)");
+    expect(body).toContain("killChildTree(processHandle)");
+    expect(body).toContain("launchClaudeProcess()");
+  });
+
+  it("does not drive initialize through a bare 20s control request", () => {
     expect(runtimeSource).not.toMatch(/subtype:\s*"initialize"[\s\S]{0,80}20_000/);
   });
 });
