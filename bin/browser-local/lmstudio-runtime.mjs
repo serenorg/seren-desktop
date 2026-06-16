@@ -23,6 +23,8 @@ const DEFAULT_MCP_GATEWAY_URL =
   process.env.SEREN_MCP_GATEWAY_URL ?? "https://mcp.serendb.com/mcp";
 const LMSTUDIO_AGENT_TYPE = "lmstudio";
 const MAX_TOOL_ITERATIONS = 25;
+const TOOLS_UNSUPPORTED_NOTICE =
+  "_This model doesn't support tool calls, so local file access and Seren tools are off for this chat._\n\n";
 
 const FILE_TOOLS = [
   {
@@ -625,6 +627,37 @@ export function normalizeToolCalls(accumulator) {
     .filter((call) => call.function.name);
 }
 
+function throwIfErrorPayload(payload) {
+  if (payload?.error == null) return;
+  const detail = payload.error?.message ?? payload.error;
+  throw new Error(
+    typeof detail === "string" ? detail : JSON.stringify(detail),
+  );
+}
+
+/**
+ * True when an LM Studio failure means the loaded model can't accept tool
+ * definitions. Tool support is a property of the specific GGUF's Jinja chat
+ * template, not the model family — community "obliterated"/abliterated builds
+ * routinely ship a template that throws when `tools` are present, while the
+ * official build of the same model handles them. We can't know up front, so
+ * the caller degrades reactively on these signatures.
+ */
+export function isToolIncompatibilityError(message) {
+  const lower = String(message ?? "").toLowerCase();
+  return (
+    lower.includes("jinja") ||
+    lower.includes("does not support tool") ||
+    lower.includes("doesn't support tool") ||
+    lower.includes("not support tools") ||
+    lower.includes("tool use is not supported") ||
+    lower.includes("tools are not supported") ||
+    lower.includes("tool calling is not supported") ||
+    lower.includes("function calling is not supported") ||
+    lower.includes("tool_choice")
+  );
+}
+
 async function streamOpenAiResponse({ session, body, signal, onContent }) {
   const response = await fetch(`${openAiBaseUrl(session.baseUrl)}/chat/completions`, {
     method: "POST",
@@ -644,6 +677,7 @@ async function streamOpenAiResponse({ session, body, signal, onContent }) {
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/event-stream")) {
     const payload = await response.json();
+    throwIfErrorPayload(payload);
     const message = payload?.choices?.[0]?.message ?? {};
     if (message.content) onContent(message.content);
     return {
@@ -659,6 +693,34 @@ async function streamOpenAiResponse({ session, body, signal, onContent }) {
   let content = "";
   let stopReason = "stop";
 
+  const processEvent = (event) => {
+    const data = event
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim())
+      .join("\n");
+    if (!data || data === "[DONE]") return;
+
+    const payload = safeJsonParse(data, null);
+    // LM Studio reports server/model failures (e.g. a chat template that can't
+    // render tool definitions) as a 200 OK SSE `event: error` frame with no
+    // `choices`. Surface it instead of silently returning an empty completion.
+    throwIfErrorPayload(payload);
+    const choice = payload?.choices?.[0];
+    if (!choice) return;
+    if (choice.finish_reason) stopReason = choice.finish_reason;
+    const delta = choice.delta ?? {};
+    if (typeof delta.content === "string" && delta.content.length > 0) {
+      content += delta.content;
+      onContent(delta.content);
+    }
+    if (Array.isArray(delta.tool_calls)) {
+      for (const toolCall of delta.tool_calls) {
+        appendToolDelta(toolAccumulator, toolCall);
+      }
+    }
+  };
+
   for await (const chunk of response.body) {
     buffer += decoder.decode(chunk, { stream: true });
     let boundary = buffer.indexOf("\n\n");
@@ -666,29 +728,13 @@ async function streamOpenAiResponse({ session, body, signal, onContent }) {
       const event = buffer.slice(0, boundary);
       buffer = buffer.slice(boundary + 2);
       boundary = buffer.indexOf("\n\n");
-
-      const data = event
-        .split(/\r?\n/)
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim())
-        .join("\n");
-      if (!data || data === "[DONE]") continue;
-
-      const payload = safeJsonParse(data, null);
-      const choice = payload?.choices?.[0];
-      if (!choice) continue;
-      if (choice.finish_reason) stopReason = choice.finish_reason;
-      const delta = choice.delta ?? {};
-      if (typeof delta.content === "string" && delta.content.length > 0) {
-        content += delta.content;
-        onContent(delta.content);
-      }
-      if (Array.isArray(delta.tool_calls)) {
-        for (const toolCall of delta.tool_calls) {
-          appendToolDelta(toolAccumulator, toolCall);
-        }
-      }
+      processEvent(event);
     }
+  }
+  // Flush a trailing event the server emitted without a closing blank line —
+  // otherwise a final error frame can be dropped and surface as an empty reply.
+  if (buffer.trim().length > 0) {
+    processEvent(buffer);
   }
 
   return {
@@ -696,6 +742,50 @@ async function streamOpenAiResponse({ session, body, signal, onContent }) {
     toolCalls: normalizeToolCalls(toolAccumulator),
     stopReason,
   };
+}
+
+/**
+ * Run one chat completion, degrading gracefully when the loaded model rejects
+ * tool definitions. Tool-capable models keep full tool calling; models whose
+ * chat template can't render tools (common for community local builds) drop
+ * tools for the rest of the session and retry, so the user always gets a reply
+ * instead of a silent empty response.
+ */
+async function runChatCompletion({ session, tools, signal, onContent }) {
+  const useTools = tools.length > 0 && !session.toolsDisabled;
+  const baseBody = {
+    model: session.currentModelId,
+    messages: session.messages,
+    stream: true,
+  };
+
+  try {
+    return await streamOpenAiResponse({
+      session,
+      signal,
+      onContent,
+      body: useTools ? { ...baseBody, tools, tool_choice: "auto" } : baseBody,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      !useTools ||
+      error?.name === "AbortError" ||
+      !isToolIncompatibilityError(message)
+    ) {
+      throw error;
+    }
+
+    session.toolsDisabled = true;
+    console.warn(
+      `${session.logPrefix} model "${session.currentModelId}" rejected tool definitions (${message}); retrying without tools for this session.`,
+    );
+    // One-time, honest notice so the user understands why tools are inactive.
+    // Emitted to the UI only (not pushed into session.messages), so it never
+    // re-enters the model's context on later turns.
+    onContent(TOOLS_UNSUPPORTED_NOTICE);
+    return streamOpenAiResponse({ session, signal, onContent, body: baseBody });
+  }
 }
 
 async function requestPermission(session, toolCall, args) {
@@ -852,15 +942,10 @@ async function sendPromptToLmStudio(session, prompt, context) {
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
       const { tools, handlers } = await buildToolCatalog(session);
-      const result = await streamOpenAiResponse({
+      const result = await runChatCompletion({
         session,
+        tools,
         signal: abortController.signal,
-        body: {
-          model: session.currentModelId,
-          messages: session.messages,
-          stream: true,
-          ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
-        },
         onContent: (text) => {
           session.emit("provider://message-chunk", {
             sessionId: session.id,
@@ -974,6 +1059,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
       pendingPermissions: new Map(),
       approvedForSession: new Set(),
       messages: [],
+      toolsDisabled: false,
       loadedModelKey: null,
       loadedModelIdentifier: null,
       loadedBySession: false,

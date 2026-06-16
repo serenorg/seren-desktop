@@ -9,6 +9,7 @@ import * as lmStudioRuntime from "../../bin/browser-local/lmstudio-runtime.mjs";
 const {
   buildLmsExecInvocation,
   isLoopbackLmStudioBaseUrl,
+  isToolIncompatibilityError,
   lmStudioHttpBaseUrl,
   lmStudioWsBaseUrl,
   normalizeLmStudioBaseUrl,
@@ -21,6 +22,7 @@ const {
     platform?: NodeJS.Platform,
   ) => { command: string; args: string[] };
   isLoopbackLmStudioBaseUrl: (value: string) => boolean;
+  isToolIncompatibilityError: (message: unknown) => boolean;
   lmStudioHttpBaseUrl: (value: string) => string;
   lmStudioWsBaseUrl: (value: string) => string;
   normalizeLmStudioBaseUrl: (value: string) => string;
@@ -84,6 +86,24 @@ describe("LM Studio runtime helpers", () => {
     ]);
   });
 
+  it("detects tool-incompatibility failures and ignores unrelated errors", () => {
+    // The obliterated-Gemma signature reproduced live against LM Studio.
+    expect(
+      isToolIncompatibilityError(
+        'Error rendering prompt with jinja template: "Cannot call something that is not a function: got UndefinedValue".',
+      ),
+    ).toBe(true);
+    expect(isToolIncompatibilityError("This model does not support tools")).toBe(
+      true,
+    );
+    expect(isToolIncompatibilityError("Invalid tool_choice value")).toBe(true);
+    // Unrelated failures must NOT trigger a silent no-tools degrade.
+    expect(isToolIncompatibilityError("Context length exceeded")).toBe(false);
+    expect(isToolIncompatibilityError("Model is still loading")).toBe(false);
+    expect(isToolIncompatibilityError("")).toBe(false);
+    expect(isToolIncompatibilityError(null)).toBe(false);
+  });
+
   it("runs Windows lms command shims through cmd.exe", () => {
     expect(
       buildLmsExecInvocation("C:\\Users\\me\\.lmstudio\\bin\\lms.cmd", [
@@ -133,5 +153,13 @@ describe("LM Studio runtime wiring", () => {
     expect(providersSource).toContain('agentType === "lmstudio"');
     const fallbacks = providersSource.match(/lmStudioRuntime\.hasSession/g) ?? [];
     expect(fallbacks.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("surfaces streamed error frames and degrades tools instead of replying empty", () => {
+    // Streamed `event: error` frames must throw, not be swallowed into an empty
+    // completion; tool-incompatible models must drop tools and retry.
+    expect(runtimeSource).toContain("throwIfErrorPayload");
+    expect(runtimeSource).toContain("session.toolsDisabled = true");
+    expect(runtimeSource).toContain("runChatCompletion");
   });
 });
