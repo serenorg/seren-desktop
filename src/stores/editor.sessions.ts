@@ -2,6 +2,7 @@
 // ABOUTME: Sessions surface in the project-rooted thread sidebar as kind="editor" entries.
 
 import { createEffect, untrack } from "solid-js";
+import { isPdfFile } from "@/lib/files/file-types";
 import { pathExists, readFile } from "@/lib/files/service";
 import { isSupportedImageFile } from "@/lib/images/file-types";
 import { log } from "@/lib/logger";
@@ -304,10 +305,10 @@ export async function restoreEditorSessions(): Promise<void> {
 
   for (const tab of persisted.tabs) {
     try {
-      // Image tabs are binary; reading them as text would throw. The viewer
-      // loads the file itself, so reopen with empty content when it still
-      // exists (matching the drop-if-missing behavior of the text path).
-      if (isSupportedImageFile(tab.filePath)) {
+      // Image and PDF tabs are binary; reading them as text would throw. The
+      // viewer loads the file itself, so reopen with empty content when it
+      // still exists (matching the drop-if-missing behavior of the text path).
+      if (isSupportedImageFile(tab.filePath) || isPdfFile(tab.filePath)) {
         if (await pathExists(tab.filePath)) {
           openTab(tab.filePath, "", tab.cwd);
         }
