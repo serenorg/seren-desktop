@@ -177,32 +177,34 @@ pub async fn run_history_sync_once(
 ) -> Result<HistorySyncSummary, String> {
     let lock = HistorySyncLock::handle(&app);
     let _guard = lock.lock().await;
-    let mut client = open_remote_client(&app, &config).await?;
-    ensure_remote_schema(&mut client)?;
+    with_remote_client(&app, &config, |app, mut client| {
+        ensure_remote_schema(&mut client)?;
 
-    let backfilled = with_local_db(&app, enqueue_initial_backfill)?;
-    let pushed = push_outbox(&app, &mut client)?;
-    let pulled = pull_remote(&app, &mut client)?;
-    let (queued, conflicts) = with_local_db(&app, |conn| {
-        Ok((
-            conn.query_row("SELECT COUNT(*) FROM sync_outbox", [], |row| {
-                row.get::<_, i64>(0)
-            })? as usize,
-            conn.query_row(
-                "SELECT COUNT(*) FROM sync_outbox WHERE conflict = 1",
-                [],
-                |row| row.get::<_, i64>(0),
-            )? as usize,
-        ))
-    })?;
+        let backfilled = with_local_db(&app, enqueue_initial_backfill)?;
+        let pushed = push_outbox(&app, &mut client)?;
+        let pulled = pull_remote(&app, &mut client)?;
+        let (queued, conflicts) = with_local_db(&app, |conn| {
+            Ok((
+                conn.query_row("SELECT COUNT(*) FROM sync_outbox", [], |row| {
+                    row.get::<_, i64>(0)
+                })? as usize,
+                conn.query_row(
+                    "SELECT COUNT(*) FROM sync_outbox WHERE conflict = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )? as usize,
+            ))
+        })?;
 
-    Ok(HistorySyncSummary {
-        pushed,
-        pulled,
-        backfilled,
-        queued,
-        conflicts,
+        Ok(HistorySyncSummary {
+            pushed,
+            pulled,
+            backfilled,
+            queued,
+            conflicts,
+        })
     })
+    .await
 }
 
 pub async fn wipe_remote_history(
@@ -218,16 +220,18 @@ pub async fn wipe_remote_history(
     }
     let lock = HistorySyncLock::handle(&app);
     let _guard = lock.lock().await;
-    let mut client = open_remote_client(&app, &config).await?;
-    wipe_remote_history_in_order(
-        || with_local_db(&app, |conn| reset_local_sync_state(conn)),
-        || {
-            client
-                .execute("DROP SCHEMA IF EXISTS seren_desktop CASCADE", &[])
-                .map_err(|err| err.to_string())?;
-            ensure_remote_schema(&mut client)
-        },
-    )
+    with_remote_client(&app, &config, |app, mut client| {
+        wipe_remote_history_in_order(
+            || with_local_db(&app, |conn| reset_local_sync_state(conn)),
+            || {
+                client
+                    .execute("DROP SCHEMA IF EXISTS seren_desktop CASCADE", &[])
+                    .map_err(|err| err.to_string())?;
+                ensure_remote_schema(&mut client)
+            },
+        )
+    })
+    .await
 }
 
 /// Clear local sync bookkeeping after the remote copy is wiped so the next sync
@@ -268,19 +272,50 @@ fn wipe_remote_history_in_order(
     wipe_remote_schema()
 }
 
-async fn open_remote_client(
+/// Resolve the connection string (async) and run a synchronous postgres body on
+/// a blocking thread.
+///
+/// The synchronous `postgres` client drives its own internal tokio runtime via
+/// `block_on` on every `connect`/`query`/`execute`. Calling it on a Tauri
+/// reactor thread panics with "Cannot start a runtime from within a runtime",
+/// so the connect and the entire body that touches the client MUST live on a
+/// blocking-pool thread. If the first pass fails with a refreshable auth error,
+/// the connection string is refreshed and the body retried once (the body is
+/// idempotent and safe to re-run, since connect is its first step).
+async fn with_remote_client<T, F>(
     app: &AppHandle,
     config: &HistorySyncConfig,
-) -> Result<PgClient, String> {
+    body: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(AppHandle, PgClient) -> Result<T, String> + Clone + Send + 'static,
+{
     let connection = get_connection_string(app, config, false).await?;
-    match connect_client(&connection) {
-        Ok(client) => Ok(client),
+    match run_with_connection(app.clone(), connection, body.clone()).await {
         Err(err) if is_refreshable_postgres_error_text(&err) => {
             let refreshed = get_connection_string(app, config, true).await?;
-            connect_client(&refreshed)
+            run_with_connection(app.clone(), refreshed, body).await
         }
-        Err(err) => Err(err),
+        other => other,
     }
+}
+
+async fn run_with_connection<T, F>(
+    app: AppHandle,
+    connection: String,
+    body: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(AppHandle, PgClient) -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        let client = connect_client(&connection)?;
+        body(app, client)
+    })
+    .await
+    .map_err(|err| format!("history sync task failed: {err}"))?
 }
 
 fn connect_client(connection_string: &str) -> Result<PgClient, String> {
@@ -1635,6 +1670,25 @@ mod tests {
     use super::*;
     use crate::services::database::{PersistedMessage, save_message_record, setup_schema};
     use std::cell::RefCell;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn connect_client_runs_off_the_reactor_without_runtime_panic() {
+        // Regression for the runtime-in-runtime panic: the synchronous
+        // `postgres` client calls `block_on` internally, so it must run on a
+        // blocking-pool thread, never on a tokio reactor thread. Wrapped in
+        // spawn_blocking it returns a normal connection error for an
+        // unreachable host instead of panicking — the production sync path
+        // routes through the same spawn_blocking in `with_remote_client`.
+        let result = tokio::task::spawn_blocking(|| {
+            connect_client("postgresql://invalid:invalid@127.0.0.1:1/none")
+        })
+        .await
+        .expect("spawn_blocking task must not panic");
+        assert!(
+            result.is_err(),
+            "expected a connection error from an unreachable host, got Ok"
+        );
+    }
 
     #[test]
     fn remote_schema_has_no_audio_binary_columns() {
