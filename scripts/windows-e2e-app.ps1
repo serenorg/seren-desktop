@@ -129,7 +129,7 @@ function Clear-DownloadMarksUnder([string]$Root) {
   }
 }
 
-function Invoke-ProcessWithTimeout([string]$FilePath, [string[]]$ArgumentList, [int]$TimeoutSeconds, [string]$Label, [switch]$NoNewWindow) {
+function Invoke-ProcessWithTimeout([string]$FilePath, [string[]]$ArgumentList, [int]$TimeoutSeconds, [string]$Label, [switch]$NoNewWindow, [scriptblock]$OnTimeout = $null) {
   Write-Stage "Starting ${Label} with ${TimeoutSeconds}s timeout"
   $startArgs = @{
     FilePath = $FilePath
@@ -142,6 +142,14 @@ function Invoke-ProcessWithTimeout([string]$FilePath, [string[]]$ArgumentList, [
   $process = Start-Process @startArgs
   $timeoutMs = [int]([Math]::Min([int]::MaxValue, [int64]$TimeoutSeconds * 1000))
   if (-not $process.WaitForExit($timeoutMs)) {
+    Write-Stage "${Label} exceeded ${TimeoutSeconds}s timeout; collecting timeout diagnostics"
+    if ($null -ne $OnTimeout) {
+      try {
+        & $OnTimeout
+      } catch {
+        Write-Host "::warning::Timeout diagnostics for ${Label} failed: $($_.Exception.Message)"
+      }
+    }
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     Fail "$Label timed out after ${TimeoutSeconds}s and was killed."
   }
@@ -186,6 +194,20 @@ function Write-WindowsLaunchDiagnostics([System.Diagnostics.Process]$AppProcess)
   & { $ErrorActionPreference = "Continue"; query session 2>&1 } | Out-String | Write-Host
   Write-Host "Logged-on users:"
   & { $ErrorActionPreference = "Continue"; quser 2>&1 } | Out-String | Write-Host
+}
+
+function Write-ProbeTimeoutDiagnostics([System.Diagnostics.Process]$AppProcess) {
+  Write-Stage "Collecting probe timeout diagnostics"
+  Write-WindowsLaunchDiagnostics $AppProcess
+
+  Write-Host "Windows e2e probe process snapshot:"
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -in @("node.exe", "npm.cmd", "powershell.exe", "cmd.exe", "claude.exe", "codex.exe", "Seren.exe", "msedgewebview2.exe") } |
+    Select-Object ProcessId, ParentProcessId, SessionId, Name, CreationDate |
+    Sort-Object Name, ProcessId |
+    Format-Table -AutoSize |
+    Out-String |
+    Write-Host
 }
 
 function Wait-ForCdp([int]$Port, [int]$TimeoutSeconds, [System.Diagnostics.Process]$AppProcess) {
@@ -309,7 +331,9 @@ try {
   Write-Stage "Waiting for WebView2 CDP endpoint"
   Wait-ForCdp -Port $RemoteDebugPort -TimeoutSeconds $StartupTimeoutSeconds -AppProcess $app
   Write-Stage "Running Node app e2e probe"
-  $probeExitCode = Invoke-ProcessWithTimeout "node" @("$PSScriptRoot/windows-e2e-app.mjs") $ProbeTimeoutSeconds "Windows app e2e probe" -NoNewWindow
+  $probeExitCode = Invoke-ProcessWithTimeout "node" @("$PSScriptRoot/windows-e2e-app.mjs") $ProbeTimeoutSeconds "Windows app e2e probe" -NoNewWindow -OnTimeout {
+    Write-ProbeTimeoutDiagnostics $app
+  }
   if ($probeExitCode -ne 0) {
     Fail "Windows app e2e script failed with exit code $probeExitCode"
   }
