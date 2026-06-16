@@ -39,6 +39,10 @@ const CLIENT_ID = "seren-desktop";
 const REDIRECT_URI = "http://127.0.0.1:8787/auth/callback";
 const CODE_VERIFIER_LENGTH = 64;
 const STATE_LENGTH = 32;
+// Stop waiting on the loopback callback after this long so an abandoned or
+// failed browser flow can't leave the sign-in UI stuck in a loading phase
+// with no way to recover short of restarting the app.
+const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 
 function generateRandomString(length: number): string {
   const chars =
@@ -214,9 +218,20 @@ export async function startSocialLogin(
     callbackWaiter.handler,
   );
 
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   try {
     await invoke("start_social_login", { provider, authUrl });
-    const callback = await callbackWaiter.promise;
+
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(
+          new Error(
+            "Social sign-in timed out. Close the browser tab and try again.",
+          ),
+        );
+      }, CALLBACK_TIMEOUT_MS);
+    });
+    const callback = await Promise.race([callbackWaiter.promise, timeout]);
 
     const tokenPayload = await exchangeCodeForTokens(
       callback.code ?? "",
@@ -234,6 +249,9 @@ export async function startSocialLogin(
       default_organization_id: defaultOrganizationId,
     };
   } finally {
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
+    }
     unlisten();
   }
 }
