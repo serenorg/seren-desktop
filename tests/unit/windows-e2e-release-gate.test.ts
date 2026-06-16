@@ -105,6 +105,9 @@ describe("Windows production e2e release gate", () => {
     expect(runner).toContain("Windows app e2e probe");
     expect(runner).toContain("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
     expect(runner).toContain("Write-WindowsLaunchDiagnostics");
+    expect(runner).toContain("Write-ProbeTimeoutDiagnostics");
+    expect(runner).toContain("Collecting probe timeout diagnostics");
+    expect(runner).toContain("OnTimeout");
     expect(runner).toContain("msedgewebview2.exe");
     expect(runner).toContain("query session");
     expect(runner).toContain("quser");
@@ -230,6 +233,26 @@ describe("Windows production e2e release gate", () => {
       expect(probe).toContain(required);
     }
     expect(probe).toContain("SEREN_WINDOWS_E2E_OK");
+  });
+
+  it("bounds provider runtime waits and preserves diagnostic breadcrumbs (#2475)", () => {
+    for (const required of [
+      "PROVIDER_CONFIG_TIMEOUT_MS",
+      "PROVIDER_WS_OPEN_TIMEOUT_MS",
+      "PROVIDER_RPC_TIMEOUT_MS",
+      "PROVIDER_SPAWN_TIMEOUT_MS",
+      "PROVIDER_TERMINATE_TIMEOUT_MS",
+      "rpcWithTimeout",
+      "provider runtime auth",
+      "provider runtime config",
+      "provider runtime WebSocket open",
+      "journey starting",
+      "spawning provider session",
+      "prompt-complete event observed",
+      "Last provider runtime events",
+    ]) {
+      expect(probe).toContain(required);
+    }
   });
 
   it("certifies every shipped agent journey, not one env-selected type (#2375)", () => {

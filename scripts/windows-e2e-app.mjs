@@ -53,6 +53,10 @@ function assert(condition, message) {
   }
 }
 
+function logStage(message) {
+  console.log(`[windows-e2e] ${message}`);
+}
+
 async function waitUntil(label, fn, { timeoutMs = 60_000, intervalMs = 500 } = {}) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
@@ -401,32 +405,99 @@ function createRuntimeBuffer(ws) {
   };
 }
 
-function rpc(ws, method, params = {}) {
+function rpc(ws, method, params = {}, { timeoutMs = 0, label = method } = {}) {
   const id = Math.floor(Math.random() * 1_000_000_000);
   return new Promise((resolve, reject) => {
+    let timer;
+    let settled = false;
+    const cleanup = () => {
+      ws.off("message", onMessage);
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn(value);
+    };
     const onMessage = (raw) => {
       let message;
       try {
         message = JSON.parse(String(raw));
       } catch (error) {
-        ws.off("message", onMessage);
-        reject(error);
+        settle(reject, error);
         return;
       }
       if (message.id !== id) return;
-      ws.off("message", onMessage);
       if (message.error) {
-        reject(new Error(String(message.error.message ?? "Provider runtime RPC failed")));
+        settle(
+          reject,
+          new Error(String(message.error.message ?? "Provider runtime RPC failed")),
+        );
         return;
       }
-      resolve(message.result);
+      settle(resolve, message.result);
     };
     ws.on("message", onMessage);
-    ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        settle(
+          reject,
+          new Error(`Timed out after ${timeoutMs}ms waiting for ${label} (${method})`),
+        );
+      }, timeoutMs);
+    }
+    try {
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+    } catch (error) {
+      settle(reject, error);
+    }
+  });
+}
+
+function rpcWithTimeout(
+  ws,
+  method,
+  params = {},
+  timeoutMs = PROVIDER_RPC_TIMEOUT_MS,
+  label = method,
+) {
+  return rpc(ws, method, params, { timeoutMs, label });
+}
+
+function waitForWebSocketOpen(ws) {
+  return new Promise((resolve, reject) => {
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("open", onOpen);
+      ws.off("error", onError);
+    };
+    const onOpen = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    timer = setTimeout(() => {
+      cleanup();
+      reject(
+        new Error(
+          `Timed out after ${PROVIDER_WS_OPEN_TIMEOUT_MS}ms waiting for provider runtime WebSocket open`,
+        ),
+      );
+    }, PROVIDER_WS_OPEN_TIMEOUT_MS);
+    ws.once("open", onOpen);
+    ws.once("error", onError);
   });
 }
 
 async function connectProviderRuntime(config) {
+  logStage(`Waiting for provider runtime health at ${config.apiBaseUrl}`);
   const health = await waitUntil(
     "provider runtime health",
     async () => {
@@ -436,12 +507,18 @@ async function connectProviderRuntime(config) {
     { timeoutMs: 45_000 },
   );
   assert(health.mode === "desktop-native", `Unexpected provider runtime mode: ${health.mode}`);
+  logStage("Provider runtime health OK; connecting WebSocket");
   const ws = new WebSocket(config.wsBaseUrl);
-  await new Promise((resolve, reject) => {
-    ws.once("open", resolve);
-    ws.once("error", reject);
-  });
-  await rpc(ws, "auth", { token: config.token });
+  await waitForWebSocketOpen(ws);
+  logStage("Authenticating provider runtime WebSocket");
+  await rpcWithTimeout(
+    ws,
+    "auth",
+    { token: config.token },
+    PROVIDER_RPC_TIMEOUT_MS,
+    "provider runtime auth",
+  );
+  logStage("Provider runtime WebSocket authenticated");
   return ws;
 }
 
@@ -462,6 +539,11 @@ const SINGLE_PROMPT_TIMEOUT_MS = 240_000;
 // The paired pipeline is three inner turns (plan → execute → review), so it
 // needs a wider ceiling than a single prompt.
 const PAIRED_PROMPT_TIMEOUT_MS = 600_000;
+const PROVIDER_CONFIG_TIMEOUT_MS = 30_000;
+const PROVIDER_WS_OPEN_TIMEOUT_MS = 30_000;
+const PROVIDER_RPC_TIMEOUT_MS = 60_000;
+const PROVIDER_SPAWN_TIMEOUT_MS = 150_000;
+const PROVIDER_TERMINATE_TIMEOUT_MS = 15_000;
 
 // Both the Claude and Codex runtimes collapse auth failures to this text
 // (claude-runtime/providers.mjs isAuthError). Detecting it lets an expired or
@@ -530,6 +612,49 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+function shortSessionId(sessionId) {
+  return String(sessionId ?? "").slice(0, 8) || "<none>";
+}
+
+function redactUrl(value) {
+  try {
+    const url = new URL(String(value));
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "<unparseable>";
+  }
+}
+
+function summarizeProviderRuntimeEvents(buffer, marker, sessionIds) {
+  const ids = new Set(sessionIds.filter(Boolean));
+  const events = buffer
+    .slice(marker)
+    .filter((event) => {
+      if (!event?.method) return false;
+      const sessionId = event.params?.sessionId;
+      return ids.size === 0 || !sessionId || ids.has(sessionId);
+    })
+    .slice(-10)
+    .map((event) => {
+      const params = event.params ?? {};
+      const session = params.sessionId
+        ? ` session=${shortSessionId(params.sessionId)}`
+        : "";
+      const kind = params.kind ? ` kind=${params.kind}` : "";
+      const status = params.status ? ` status=${params.status}` : "";
+      const paired = params.paired?.state ? ` paired=${params.paired.state}` : "";
+      const error = params.error
+        ? ` error=${String(params.error).slice(0, 160)}`
+        : "";
+      return `${event.method}${session}${kind}${status}${paired}${error}`;
+    });
+  return events.length > 0 ? events.join(" | ") : "<no provider runtime events captured>";
+}
+
 // A raw spawn/prompt failure carries a generic message; the runtime also emits
 // a provider://error with the auth text. Promote either signal to a distinct
 // AgentAuthError so the job names the credential gap, not a timeout (#2375).
@@ -557,6 +682,15 @@ function classifyJourneyError(journey, error, buffer, marker, sessionIds) {
   if (processExitEvent) {
     return provisioningError(journey, String(processExitEvent.params.error));
   }
+  if (message.startsWith("Timed out after")) {
+    return new Error(
+      `${message}. Last provider runtime events: ${summarizeProviderRuntimeEvents(
+        buffer,
+        marker,
+        ids,
+      )}`,
+    );
+  }
   return error instanceof Error ? error : new Error(message);
 }
 
@@ -565,44 +699,67 @@ async function runSingleAgentJourney(ws, buffer, agentType) {
   const marker = buffer.mark();
   let session;
   try {
-    const available = await rpc(ws, "provider_check_agent_available", {
-      agentType,
-    });
+    logStage(`${agentType} journey starting`);
+    logStage(`${agentType} checking provider availability`);
+    const available = await rpcWithTimeout(
+      ws,
+      "provider_check_agent_available",
+      { agentType },
+      PROVIDER_RPC_TIMEOUT_MS,
+      `${agentType} availability check`,
+    );
     assert(available === true, `${agentType} is not available on the Windows e2e host`);
-    const authenticated = await rpc(ws, "provider_check_agent_authenticated", {
-      agentType,
-    });
+    logStage(`${agentType} checking provider authentication`);
+    const authenticated = await rpcWithTimeout(
+      ws,
+      "provider_check_agent_authenticated",
+      { agentType },
+      PROVIDER_RPC_TIMEOUT_MS,
+      `${agentType} authentication check`,
+    );
     if (authenticated !== true) {
       throw authError(
         agentType,
         "provider_check_agent_authenticated returned false before prompt",
       );
     }
-    session = await rpc(ws, "provider_spawn", {
-      agentType,
-      cwd: AGENT_CWD,
-      localSessionId,
-      resumeAgentSessionId: null,
-      sandboxMode: "workspace-write",
-      apiKey: null,
-      approvalPolicy: agentType === "codex" ? "never" : "on-request",
-      searchEnabled: false,
-      networkEnabled: true,
-      timeoutSecs: 120,
-      initialModelId: AGENT_MODEL ?? undefined,
-    });
+    logStage(`${agentType} spawning provider session`);
+    session = await rpcWithTimeout(
+      ws,
+      "provider_spawn",
+      {
+        agentType,
+        cwd: AGENT_CWD,
+        localSessionId,
+        resumeAgentSessionId: null,
+        sandboxMode: "workspace-write",
+        apiKey: null,
+        approvalPolicy: agentType === "codex" ? "never" : "on-request",
+        searchEnabled: false,
+        networkEnabled: true,
+        timeoutSecs: 120,
+        initialModelId: AGENT_MODEL ?? undefined,
+      },
+      PROVIDER_SPAWN_TIMEOUT_MS,
+      `${agentType} spawn`,
+    );
     assert(session?.id, `${agentType} provider_spawn did not return a local session id`);
+    logStage(`${agentType} provider session spawned: ${shortSessionId(session.id)}`);
     // The prompt RPC resolves only when the turn completes (or rejects on an
     // auth/runtime error), so the wait bounds the whole turn.
-    await withTimeout(
-      rpc(ws, "provider_prompt", {
+    logStage(`${agentType} prompt started`);
+    await rpcWithTimeout(
+      ws,
+      "provider_prompt",
+      {
         sessionId: session.id,
         prompt: PROMPT_TEXT,
         context: null,
-      }),
+      },
       SINGLE_PROMPT_TIMEOUT_MS,
       `${agentType} prompt`,
     );
+    logStage(`${agentType} prompt RPC completed`);
     await buffer.waitFor(
       (message) =>
         message.method === "provider://prompt-complete" &&
@@ -611,6 +768,7 @@ async function runSingleAgentJourney(ws, buffer, agentType) {
       30_000,
       marker,
     );
+    logStage(`${agentType} prompt-complete event observed`);
     const text = assistantText(buffer, marker, session.id);
     assert(
       text.includes("SEREN_WINDOWS_E2E_OK"),
@@ -624,7 +782,20 @@ async function runSingleAgentJourney(ws, buffer, agentType) {
     ]);
   } finally {
     if (session?.id) {
-      await rpc(ws, "provider_terminate", { sessionId: session.id }).catch(() => {});
+      logStage(`${agentType} terminating provider session ${shortSessionId(session.id)}`);
+      await rpcWithTimeout(
+        ws,
+        "provider_terminate",
+        { sessionId: session.id },
+        PROVIDER_TERMINATE_TIMEOUT_MS,
+        `${agentType} terminate`,
+      ).catch((error) => {
+        console.warn(
+          `[windows-e2e] ${agentType} provider_terminate failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
     }
   }
 }
@@ -634,34 +805,53 @@ async function runPairedJourney(ws, buffer) {
   const marker = buffer.mark();
   let session;
   try {
-    const available = await rpc(ws, "provider_check_agent_available", {
-      agentType: PAIRED_AGENT_TYPE,
-    });
+    logStage(`${PAIRED_AGENT_TYPE} journey starting`);
+    logStage(`${PAIRED_AGENT_TYPE} checking provider availability`);
+    const available = await rpcWithTimeout(
+      ws,
+      "provider_check_agent_available",
+      { agentType: PAIRED_AGENT_TYPE },
+      PROVIDER_RPC_TIMEOUT_MS,
+      `${PAIRED_AGENT_TYPE} availability check`,
+    );
     assert(available === true, `${PAIRED_AGENT_TYPE} is not available on the Windows e2e host`);
-    const authenticated = await rpc(ws, "provider_check_agent_authenticated", {
-      agentType: PAIRED_AGENT_TYPE,
-    });
+    logStage(`${PAIRED_AGENT_TYPE} checking provider authentication`);
+    const authenticated = await rpcWithTimeout(
+      ws,
+      "provider_check_agent_authenticated",
+      { agentType: PAIRED_AGENT_TYPE },
+      PROVIDER_RPC_TIMEOUT_MS,
+      `${PAIRED_AGENT_TYPE} authentication check`,
+    );
     if (authenticated !== true) {
       throw authError(
         PAIRED_AGENT_TYPE,
         "provider_check_agent_authenticated returned false before prompt",
       );
     }
-    session = await rpc(ws, "provider_spawn", {
-      agentType: PAIRED_AGENT_TYPE,
-      cwd: AGENT_CWD,
-      localSessionId,
-      resumeAgentSessionId: null,
-      sandboxMode: "workspace-write",
-      apiKey: null,
-      // "never" keeps the Codex executor from stalling on an approval that no
-      // operator is present to grant during the headless run.
-      approvalPolicy: "never",
-      searchEnabled: false,
-      networkEnabled: true,
-      timeoutSecs: 120,
-    });
+    logStage(`${PAIRED_AGENT_TYPE} spawning provider session`);
+    session = await rpcWithTimeout(
+      ws,
+      "provider_spawn",
+      {
+        agentType: PAIRED_AGENT_TYPE,
+        cwd: AGENT_CWD,
+        localSessionId,
+        resumeAgentSessionId: null,
+        sandboxMode: "workspace-write",
+        apiKey: null,
+        // "never" keeps the Codex executor from stalling on an approval that no
+        // operator is present to grant during the headless run.
+        approvalPolicy: "never",
+        searchEnabled: false,
+        networkEnabled: true,
+        timeoutSecs: 120,
+      },
+      PROVIDER_SPAWN_TIMEOUT_MS,
+      `${PAIRED_AGENT_TYPE} spawn`,
+    );
     assert(session?.id, "paired provider_spawn did not return a local session id");
+    logStage(`${PAIRED_AGENT_TYPE} provider session spawned: ${shortSessionId(session.id)}`);
 
     // The setup declaration is the first paired transcript event, emitted at
     // spawn for a fresh thread. Role model/effort echoes refresh it in place
@@ -688,15 +878,19 @@ async function runPairedJourney(ws, buffer) {
     );
 
     const promptMark = buffer.mark();
-    await withTimeout(
-      rpc(ws, "provider_prompt", {
+    logStage(`${PAIRED_AGENT_TYPE} prompt started`);
+    await rpcWithTimeout(
+      ws,
+      "provider_prompt",
+      {
         sessionId: session.id,
         prompt: PROMPT_TEXT,
         context: null,
-      }),
+      },
       PAIRED_PROMPT_TIMEOUT_MS,
       "claude-codex paired prompt",
     );
+    logStage(`${PAIRED_AGENT_TYPE} prompt RPC completed`);
 
     const turnEvents = buffer.slice(promptMark);
     const completes = turnEvents.filter(
@@ -708,6 +902,7 @@ async function runPairedJourney(ws, buffer) {
       completes.length === 1,
       `paired turn must emit exactly one prompt-complete, got ${completes.length}`,
     );
+    logStage(`${PAIRED_AGENT_TYPE} prompt-complete event observed`);
 
     const handoffs = turnEvents.filter(
       (event) =>
@@ -757,14 +952,35 @@ async function runPairedJourney(ws, buffer) {
     ]);
   } finally {
     if (session?.id) {
-      await rpc(ws, "provider_terminate", { sessionId: session.id }).catch(() => {});
+      logStage(`${PAIRED_AGENT_TYPE} terminating provider session ${shortSessionId(session.id)}`);
+      await rpcWithTimeout(
+        ws,
+        "provider_terminate",
+        { sessionId: session.id },
+        PROVIDER_TERMINATE_TIMEOUT_MS,
+        `${PAIRED_AGENT_TYPE} terminate`,
+      ).catch((error) => {
+        console.warn(
+          `[windows-e2e] ${PAIRED_AGENT_TYPE} provider_terminate failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
     }
   }
 }
 
 async function exerciseAgentRuntime(page) {
-  const config = await tauriInvoke(page, "provider_runtime_get_config");
+  logStage("Resolving provider runtime config");
+  const config = await withTimeout(
+    tauriInvoke(page, "provider_runtime_get_config"),
+    PROVIDER_CONFIG_TIMEOUT_MS,
+    "provider runtime config",
+  );
   assert(config?.apiBaseUrl && config?.wsBaseUrl && config?.token, "provider runtime config missing fields");
+  logStage(
+    `Provider runtime config resolved: api=${redactUrl(config.apiBaseUrl)} ws=${redactUrl(config.wsBaseUrl)}`,
+  );
   const ws = await connectProviderRuntime(config);
   const buffer = createRuntimeBuffer(ws);
   try {
