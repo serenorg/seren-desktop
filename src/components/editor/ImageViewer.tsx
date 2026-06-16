@@ -1,7 +1,6 @@
 // ABOUTME: Image viewer component for displaying image files.
 // ABOUTME: Supports zoom, pan, and displays image metadata.
 
-import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   type Component,
   createEffect,
@@ -9,7 +8,10 @@ import {
   onCleanup,
   Show,
 } from "solid-js";
-import { openImageInDefaultViewer } from "@/lib/files/service";
+import {
+  openImageInDefaultViewer,
+  readImageAsDataUrl,
+} from "@/lib/files/service";
 
 interface ImageViewerProps {
   filePath: string;
@@ -30,18 +32,31 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
   const [dragStart, setDragStart] = createSignal({ x: 0, y: 0 });
   const [pointerStart, setPointerStart] = createSignal({ x: 0, y: 0 });
 
-  // Load image when file path changes
+  // Load image when file path changes. The bytes are read through the bridge
+  // (which resolves `~` and reads binary safely) and shown as a data URL, so
+  // the viewer works for absolute, tilde, and Windows paths alike.
   createEffect(() => {
     const path = props.filePath;
     if (!path) return;
 
-    // Convert file path to URL using Tauri's asset protocol
-    const url = convertFileSrc(path);
-    setImageUrl(url);
+    setImageUrl(null);
+    setDimensions(null);
     setError(null);
     setOpenError(null);
     setZoom(100);
     setPosition({ x: 0, y: 0 });
+
+    let cancelled = false;
+    onCleanup(() => {
+      cancelled = true;
+    });
+    readImageAsDataUrl(path)
+      .then((url) => {
+        if (!cancelled) setImageUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Failed to load image");
+      });
   });
 
   function handleImageLoad(e: Event) {
