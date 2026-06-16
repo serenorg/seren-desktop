@@ -43,13 +43,23 @@ describe("#2452 — a wedged initialize handshake recovers by respawning, not re
 
     const start = runtimeSource.indexOf("let initResult;");
     expect(start, "initialize loop must exist").toBeGreaterThan(0);
-    const body = runtimeSource.slice(start, start + 1200);
+    const body = runtimeSource.slice(start, start + 1600);
     expect(body).toContain("await sendInitialize(session)");
     expect(body).toMatch(/attempt\s*>=\s*INITIALIZE_MAX_ATTEMPTS/);
     // On timeout: detach the wedged session, kill its tree, relaunch fresh.
     expect(body).toContain("sessions.delete(sessionId)");
     expect(body).toContain("killChildTree(processHandle)");
     expect(body).toContain("launchClaudeProcess()");
+  });
+
+  it("gates the spawn error listener so an orphaned handle can't clobber the live session (#2470)", () => {
+    const start = runtimeSource.indexOf('processHandle.on("error"');
+    expect(start, "spawn error listener must exist").toBeGreaterThan(0);
+    const body = runtimeSource.slice(start, start + 800);
+    // The listener must early-return unless its own launch's session is still
+    // the registered one, so a late error from a respawned-over handle is inert.
+    expect(body).toMatch(/sessions\.get\(sessionId\)\s*!==\s*launchedSession/);
+    expect(body).toMatch(/return;/);
   });
 
   it("does not drive initialize through a bare 20s control request", () => {

@@ -1894,8 +1894,22 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         });
       }
 
+      // Declared before the error listener so the listener can identity-check
+      // against this launch's session; assigned below once the record exists.
+      let launchedSession;
+
       // Catch spawn errors (e.g. ENOENT, EBADARCH) to prevent crashing the provider runtime.
       processHandle.on("error", (spawnError) => {
+        // A respawn (#2452) reuses this sessionId on a fresh process while the
+        // old killed handle keeps its listeners. Only act when THIS launch's
+        // session is still the registered one, so a late error from an orphaned
+        // handle can't delete or terminate the live session. #2470
+        if (sessions.get(sessionId) !== launchedSession) {
+          console.error(
+            `${claudeLogPrefix} ignoring spawn error from a replaced process: ${spawnError.message}`,
+          );
+          return;
+        }
         console.error(`${claudeLogPrefix} Spawn error: ${spawnError.message}`);
         sessions.delete(sessionId);
         // macOS surfaces a wrong-arch binary as `errno: -86` / "Bad CPU type in
@@ -1929,7 +1943,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         });
       });
 
-      const launchedSession = createSessionRecord({
+      launchedSession = createSessionRecord({
         sessionId,
         cwd,
         processHandle,
@@ -1976,6 +1990,9 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
           // control-request rejection against the fresh session). Then wait for
           // its exit cleanup to release the session id before relaunching.
           sessions.delete(sessionId);
+          // Close the wedged session's readline so its stdout reader is torn
+          // down with it, mirroring terminateSession's cleanup.
+          session.output.close();
           const pendingExit = exitPromises.get(sessionId);
           killChildTree(processHandle);
           if (pendingExit) await pendingExit;
