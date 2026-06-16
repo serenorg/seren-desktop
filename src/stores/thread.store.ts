@@ -24,6 +24,10 @@ import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 import { skillsStore } from "@/stores/skills.store";
 import { closeTab } from "@/stores/tabs";
+import type {
+  TerminalCliKind,
+  TerminalLaunchMode,
+} from "@/stores/terminal.store";
 import { terminalStore } from "@/stores/terminal.store";
 
 const LAST_ACTIVE_THREAD_KEY = "seren:lastActiveThread";
@@ -916,11 +920,18 @@ export const threadStore = {
   },
 
   async createTerminalThread(
-    options: { title?: string; command?: string } = {},
+    options: {
+      title?: string;
+      command?: string;
+      cliKind?: TerminalCliKind;
+      launchMode?: TerminalLaunchMode;
+    } = {},
   ): Promise<string | null> {
     const buffer = await terminalStore.createBuffer({
       title: options.title,
       command: options.command,
+      cliKind: options.cliKind,
+      launchMode: options.launchMode,
       cwd: fileTreeState.rootPath,
     });
     this.selectThread(buffer.id, "terminal");

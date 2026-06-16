@@ -40,6 +40,10 @@ import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { editorSessionStore } from "@/stores/editor.sessions";
 import { fileTreeState } from "@/stores/fileTree";
+import type {
+  TerminalCliKind,
+  TerminalLaunchMode,
+} from "@/stores/terminal.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
 import { type WorkspaceWindow, workspaceStore } from "@/stores/workspace.store";
 
@@ -192,6 +196,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   const handleNewTerminal = async (options?: {
     title?: string;
     command?: string;
+    cliKind?: TerminalCliKind;
+    launchMode?: TerminalLaunchMode;
   }) => {
     setShowLauncher(false);
     setSpawning(true);
@@ -761,50 +767,82 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                 <SectionLabel>Command line</SectionLabel>
               </Show>
               <Show when={claudeAvailable()}>
-                <button
-                  type="button"
-                  data-testid="new-claude-cli"
-                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                  onClick={() =>
-                    void handleNewTerminal({
-                      title: "Claude Code CLI",
-                      command: "claude",
-                    })
-                  }
-                >
-                  <CliBrandIcon glyph={"\u{1F916}"} />
-                  <div class="flex-1 min-w-0">
-                    <div class="font-medium">Claude Code</div>
-                    <div class="text-[11px] text-muted-foreground">
-                      Runs <code class="font-mono text-[10px]">claude</code> in
-                      a terminal pane
+                <div class="flex items-stretch gap-1.5">
+                  <button
+                    type="button"
+                    data-testid="new-claude-cli"
+                    class="flex items-center gap-2.5 flex-1 min-w-0 py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                    onClick={() =>
+                      void handleNewTerminal({
+                        cliKind: "claude",
+                        launchMode: "normal",
+                      })
+                    }
+                  >
+                    <CliBrandIcon glyph={"\u{1F916}"} />
+                    <div class="flex-1 min-w-0">
+                      <div class="font-medium">Claude Code</div>
+                      <div class="text-[11px] text-muted-foreground">
+                        Runs <code class="font-mono text-[10px]">claude</code>{" "}
+                        in a terminal pane
+                      </div>
                     </div>
-                  </div>
-                  <LauncherChip variant="cli">CLI</LauncherChip>
-                </button>
+                    <LauncherChip variant="cli">CLI</LauncherChip>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="new-claude-cli-yolo"
+                    title="Start Claude Code with permission checks bypassed"
+                    class="w-[52px] shrink-0 rounded-md border border-destructive/35 bg-destructive/10 px-2 text-[10px] font-semibold tracking-[0.06em] text-destructive cursor-pointer transition-colors duration-100 hover:bg-destructive/15"
+                    onClick={() =>
+                      void handleNewTerminal({
+                        cliKind: "claude",
+                        launchMode: "yolo",
+                      })
+                    }
+                  >
+                    YOLO
+                  </button>
+                </div>
               </Show>
               <Show when={codexAvailable()}>
-                <button
-                  type="button"
-                  data-testid="new-codex-cli"
-                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                  onClick={() =>
-                    void handleNewTerminal({
-                      title: "Codex CLI",
-                      command: "codex",
-                    })
-                  }
-                >
-                  <CliBrandIcon glyph={"⚡"} />
-                  <div class="flex-1 min-w-0">
-                    <div class="font-medium">Codex</div>
-                    <div class="text-[11px] text-muted-foreground">
-                      Runs <code class="font-mono text-[10px]">codex</code> in a
-                      terminal pane
+                <div class="flex items-stretch gap-1.5">
+                  <button
+                    type="button"
+                    data-testid="new-codex-cli"
+                    class="flex items-center gap-2.5 flex-1 min-w-0 py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                    onClick={() =>
+                      void handleNewTerminal({
+                        cliKind: "codex",
+                        launchMode: "normal",
+                      })
+                    }
+                  >
+                    <CliBrandIcon glyph={"⚡"} />
+                    <div class="flex-1 min-w-0">
+                      <div class="font-medium">Codex</div>
+                      <div class="text-[11px] text-muted-foreground">
+                        Runs <code class="font-mono text-[10px]">codex</code> in
+                        a terminal pane
+                      </div>
                     </div>
-                  </div>
-                  <LauncherChip variant="cli">CLI</LauncherChip>
-                </button>
+                    <LauncherChip variant="cli">CLI</LauncherChip>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="new-codex-cli-yolo"
+                    title="Start Codex with approvals and sandbox bypassed"
+                    class="w-[52px] shrink-0 rounded-md border border-destructive/35 bg-destructive/10 px-2 text-[10px] font-semibold tracking-[0.06em] text-destructive cursor-pointer transition-colors duration-100 hover:bg-destructive/15"
+                    onClick={() =>
+                      void handleNewTerminal({
+                        cliKind: "codex",
+                        launchMode: "yolo",
+                      })
+                    }
+                  >
+                    YOLO
+                  </button>
+                </div>
               </Show>
 
               {/* ---------- Shell ---------- */}

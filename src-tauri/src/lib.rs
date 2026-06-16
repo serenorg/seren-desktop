@@ -802,6 +802,7 @@ pub fn run() {
             // Interactive terminal buffers
             terminal::terminal_create_buffer,
             terminal::terminal_list_buffers,
+            terminal::terminal_restart_buffer,
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_kill,

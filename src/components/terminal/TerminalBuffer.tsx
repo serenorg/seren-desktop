@@ -458,13 +458,37 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
   let wheelAccumulator = 0;
 
   const buffer = createMemo(() => terminalStore.getBuffer(activeBufferId()));
-  // #2006 — trust signal used by paint code (cursor, selection, line-height)
-  // AND by the header/footer JSX. Mirrors the launcher entry at
-  // ThreadSidebar.tsx:702, which is locked by launcher-redesign.test.ts to
-  // spawn `claude` with no flags. Drift here silently loses every themed
-  // surface, so the file-string regression test in
-  // tests/unit/terminal-buffer-claude-cli.test.ts pins the predicate.
-  const isClaudeCli = () => buffer()?.command === "claude";
+  const bufferCliKind = () => {
+    const current = buffer();
+    if (current?.cliKind === "claude" || current?.cliKind === "codex") {
+      return current.cliKind;
+    }
+    if (current?.command === "claude") return "claude";
+    if (current?.command === "codex") return "codex";
+    return null;
+  };
+  // #2006 - trust signal used by paint code (cursor, selection, line-height)
+  // and by the header/footer JSX. CLI launches can include startup flags, so
+  // the launcher metadata is the source of truth.
+  const isClaudeCli = () => bufferCliKind() === "claude";
+  const isCliTerminal = () => bufferCliKind() !== null;
+  const isYoloTerminal = () => buffer()?.launchMode === "yolo";
+  const [isRestartingLaunchMode, setIsRestartingLaunchMode] =
+    createSignal(false);
+  const restartWithToggledLaunchMode = async () => {
+    const current = buffer();
+    const cliKind = bufferCliKind();
+    if (!current || !cliKind || isRestartingLaunchMode()) return;
+    setIsRestartingLaunchMode(true);
+    try {
+      await terminalStore.restartBuffer(current.id, {
+        cliKind,
+        launchMode: current.launchMode === "yolo" ? "normal" : "yolo",
+      });
+    } finally {
+      setIsRestartingLaunchMode(false);
+    }
+  };
   // #2006 — version pill copy. Fetches once via the cached terminalStore
   // helper, only when the active thread is a Claude CLI thread. The pill
   // renders behind <Show when={claudeCliVersion()}> so a null (probe
@@ -1979,15 +2003,6 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
         }
       >
         {(current) => {
-          // Trust signal for the themed Claude Code CLI chrome (#2004, #2006).
-          // Mirrors the launcher entry at ThreadSidebar.tsx:702, which is
-          // locked by launcher-redesign.test.ts to spawn `claude` with no
-          // flags. Per Anthropic's June 15, 2026 split, interactive
-          // `claude` in a terminal draws from the Pro/Max subscription
-          // pool — the pill below makes that visible to the user.
-          // Mirrors the component-scoped `isClaudeCli` so paint code +
-          // header chrome share the exact same predicate.
-          const isClaudeCli = () => current().command === "claude";
           return (
             <>
               <div class="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-card">
@@ -2007,21 +2022,45 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
                     </span>
                   </Show>
                 </div>
-                <Show when={isClaudeCli()}>
+                <Show when={isCliTerminal()}>
                   <div class="flex items-center gap-2 shrink-0">
-                    <Show when={claudeCliVersion()}>
-                      {(version) => (
-                        <span
-                          data-testid="claude-cli-version-pill"
-                          class="text-[11px] font-mono tracking-tight text-secondary-foreground bg-surface-3 px-2 py-0.5 rounded-full border border-border"
-                        >
-                          {`claude ${version()}`}
-                        </span>
-                      )}
+                    <Show when={isYoloTerminal()}>
+                      <span
+                        data-testid="terminal-yolo-mode-pill"
+                        class="text-[11px] font-semibold tracking-[0.04em] text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/35"
+                      >
+                        YOLO
+                      </span>
                     </Show>
-                    <span class="text-[11px] font-medium tracking-tight text-primary bg-primary-muted px-2.5 py-1 rounded-full border border-[color:rgba(56,189,248,0.22)]">
-                      Subscription · Pro/Max
-                    </span>
+                    <button
+                      type="button"
+                      data-testid="terminal-launch-mode-toggle"
+                      title={
+                        isYoloTerminal()
+                          ? "Restart this terminal with normal safety prompts"
+                          : "Restart this terminal in YOLO mode"
+                      }
+                      class="text-[11px] font-medium tracking-tight text-secondary-foreground bg-surface-3 px-2.5 py-1 rounded-full border border-border cursor-pointer transition-colors hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={isRestartingLaunchMode()}
+                      onClick={() => void restartWithToggledLaunchMode()}
+                    >
+                      {isYoloTerminal() ? "Restart normal" : "Restart YOLO"}
+                    </button>
+                    <Show when={isClaudeCli()}>
+                      <Show when={claudeCliVersion()}>
+                        {(version) => (
+                          <span
+                            data-testid="claude-cli-version-pill"
+                            class="text-[11px] font-mono tracking-tight text-secondary-foreground bg-surface-3 px-2 py-0.5 rounded-full border border-border"
+                          >
+                            {`claude ${version()}`}
+                          </span>
+                        )}
+                      </Show>
+                      <span class="text-[11px] font-medium tracking-tight text-primary bg-primary-muted px-2.5 py-1 rounded-full border border-[color:rgba(56,189,248,0.22)]">
+                        Subscription · Pro/Max
+                      </span>
+                    </Show>
                   </div>
                 </Show>
               </div>

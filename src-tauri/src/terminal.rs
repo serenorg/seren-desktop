@@ -21,8 +21,8 @@ use termwiz::color::ColorSpec;
 use termwiz::escape::{
     Action, ControlCode, Esc, EscCode,
     csi::{
-        CSI, Cursor, DecPrivateMode, DecPrivateModeCode, Edit, EraseInDisplay,
-        EraseInLine, Mode, Sgr, TerminalMode, TerminalModeCode,
+        CSI, Cursor, DecPrivateMode, DecPrivateModeCode, Edit, EraseInDisplay, EraseInLine, Mode,
+        Sgr, TerminalMode, TerminalModeCode,
     },
     parser::Parser,
 };
@@ -112,6 +112,7 @@ impl TerminalState {
 }
 
 struct TerminalProcess {
+    instance_id: String,
     info: TerminalBufferInfo,
     master: Box<dyn MasterPty + Send>,
     // Arc<Mutex<>> so callers can clone-and-release the global buffers lock
@@ -564,7 +565,19 @@ fn diff_has_changes(diff: &GridDiff) -> bool {
 /// buffers state is gone (app shutting down). The lock is taken
 /// briefly and only when a title actually changed - no contention
 /// during steady-state torrents.
-fn sync_title_to_buffer(app: &AppHandle, buffer_id: &str, title: Option<&str>) {
+fn is_current_terminal_instance(app: &AppHandle, buffer_id: &str, instance_id: &str) -> bool {
+    app.try_state::<TerminalState>()
+        .and_then(|state| {
+            state.buffers.lock().ok().and_then(|buffers| {
+                buffers
+                    .get(buffer_id)
+                    .map(|process| process.instance_id.clone())
+            })
+        })
+        .is_some_and(|current| current == instance_id)
+}
+
+fn sync_title_to_buffer(app: &AppHandle, buffer_id: &str, instance_id: &str, title: Option<&str>) {
     let Some(title) = title else { return };
     if title.is_empty() {
         return;
@@ -572,6 +585,9 @@ fn sync_title_to_buffer(app: &AppHandle, buffer_id: &str, title: Option<&str>) {
     if let Some(state) = app.try_state::<TerminalState>() {
         if let Ok(mut buffers) = state.buffers.lock() {
             if let Some(process) = buffers.get_mut(buffer_id) {
+                if process.instance_id != instance_id {
+                    return;
+                }
                 if process.info.title != title {
                     process.info.title = title.to_string();
                     process.info.updated_at = unix_millis();
@@ -663,8 +679,7 @@ impl TerminalGrid {
     /// giving snapshots and diffs a common monotonic version.
     fn feed(&mut self, bytes: &[u8]) {
         let mut actions: Vec<Action> = Vec::new();
-        self.parser
-            .parse(bytes, |action| actions.push(action));
+        self.parser.parse(bytes, |action| actions.push(action));
         if actions.is_empty() {
             // Empty chunk or partial-state parse (e.g. mid-UTF-8). No
             // observable change, so don't bump seq - that would fire
@@ -867,10 +882,7 @@ impl TerminalGrid {
             return;
         }
         if let Some(last) = self.pending_scrolls.last_mut() {
-            if last.top == top
-                && last.bottom == bottom
-                && last.delta.signum() == delta.signum()
-            {
+            if last.top == top && last.bottom == bottom && last.delta.signum() == delta.signum() {
                 last.delta = last.delta.saturating_add(delta);
                 return;
             }
@@ -927,8 +939,7 @@ impl TerminalGrid {
             Esc::Code(EscCode::DecLineDrawingG1) => {
                 self.g1_charset = CharSet::DecLineDrawing;
             }
-            Esc::Code(EscCode::UkCharacterSetG0)
-            | Esc::Code(EscCode::UkCharacterSetG1) => {
+            Esc::Code(EscCode::UkCharacterSetG0) | Esc::Code(EscCode::UkCharacterSetG1) => {
                 // Treated as ASCII; the # -> pound difference is not
                 // significant for our terminal use.
             }
@@ -1372,9 +1383,7 @@ impl TerminalGrid {
         self.current_bg = alt.saved_bg;
         self.current_attrs = alt.saved_attrs;
         self.scroll_top = alt.saved_scroll_top.min(self.rows.saturating_sub(1));
-        self.scroll_bottom = alt
-            .saved_scroll_bottom
-            .min(self.rows.saturating_sub(1));
+        self.scroll_bottom = alt.saved_scroll_bottom.min(self.rows.saturating_sub(1));
         self.cursor_visible = alt.saved_cursor_visible;
         self.mark_all_dirty();
     }
@@ -1476,8 +1485,7 @@ impl TerminalGrid {
                     .min(self.cols.saturating_sub(1));
             }
             Cursor::CharacterAbsolute(col) | Cursor::CharacterPositionAbsolute(col) => {
-                self.cursor_col =
-                    (col.as_zero_based() as u16).min(self.cols.saturating_sub(1));
+                self.cursor_col = (col.as_zero_based() as u16).min(self.cols.saturating_sub(1));
             }
             Cursor::LinePositionAbsolute(line) => {
                 let line = line.saturating_sub(1) as u16;
@@ -1523,11 +1531,7 @@ impl TerminalGrid {
             // (1-based) row;col so apps that probe cursor position
             // (e.g. some prompts after paste) get a real answer.
             Cursor::RequestActivePositionReport => {
-                let resp = format!(
-                    "\x1b[{};{}R",
-                    self.cursor_row + 1,
-                    self.cursor_col + 1,
-                );
+                let resp = format!("\x1b[{};{}R", self.cursor_row + 1, self.cursor_col + 1,);
                 self.pending_responses.extend_from_slice(resp.as_bytes());
             }
             Cursor::SetTopAndBottomMargins { top, bottom } => {
@@ -1785,11 +1789,33 @@ pub struct TerminalBufferInfo {
     pub title: String,
     pub cwd: Option<String>,
     pub command: Option<String>,
+    pub cli_kind: Option<TerminalCliKind>,
+    pub launch_mode: TerminalLaunchMode,
     pub cols: u16,
     pub rows: u16,
     pub status: TerminalStatus,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalCliKind {
+    Claude,
+    Codex,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalLaunchMode {
+    Normal,
+    Yolo,
+}
+
+impl Default for TerminalLaunchMode {
+    fn default() -> Self {
+        Self::Normal
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -1806,8 +1832,20 @@ pub struct CreateTerminalBufferRequest {
     pub title: Option<String>,
     pub cwd: Option<String>,
     pub command: Option<String>,
+    pub cli_kind: Option<TerminalCliKind>,
+    pub launch_mode: Option<TerminalLaunchMode>,
     pub cols: Option<u16>,
     pub rows: Option<u16>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestartTerminalBufferRequest {
+    pub title: Option<String>,
+    pub cwd: Option<String>,
+    pub command: Option<String>,
+    pub cli_kind: Option<TerminalCliKind>,
+    pub launch_mode: Option<TerminalLaunchMode>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1881,6 +1919,14 @@ pub fn terminal_create_buffer(
     state: State<'_, TerminalState>,
     request: CreateTerminalBufferRequest,
 ) -> Result<TerminalBufferInfo, String> {
+    spawn_terminal_buffer(&app, &state, request)
+}
+
+fn spawn_terminal_buffer(
+    app: &AppHandle,
+    state: &TerminalState,
+    request: CreateTerminalBufferRequest,
+) -> Result<TerminalBufferInfo, String> {
     let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
     {
         let buffers = state
@@ -1900,12 +1946,20 @@ pub fn terminal_create_buffer(
         let trimmed = value.trim().to_string();
         (!trimmed.is_empty()).then_some(trimmed)
     });
+    let launch_mode = request.launch_mode.unwrap_or_default();
+    let cli_kind = request
+        .cli_kind
+        .or_else(|| command.as_deref().and_then(infer_terminal_cli_kind));
+    let command = cli_kind
+        .map(|kind| terminal_cli_command(kind, launch_mode).to_string())
+        .or(command);
     let title = request.title.unwrap_or_else(|| {
         command
             .as_deref()
             .map(title_from_command)
             .unwrap_or_else(|| "Terminal".to_string())
     });
+    let instance_id = Uuid::new_v4().to_string();
 
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -1934,22 +1988,16 @@ pub fn terminal_create_buffer(
         .slave
         .spawn_command(builder)
         .map_err(|err| format!("Failed to spawn terminal process: {err}"))?;
-    let reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|err| {
-            let _ = child.kill();
-            let _ = child.wait();
-            format!("Failed to clone PTY reader: {err}")
-        })?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|err| {
-            let _ = child.kill();
-            let _ = child.wait();
-            format!("Failed to take PTY writer: {err}")
-        })?;
+    let reader = pair.master.try_clone_reader().map_err(|err| {
+        let _ = child.kill();
+        let _ = child.wait();
+        format!("Failed to clone PTY reader: {err}")
+    })?;
+    let writer = pair.master.take_writer().map_err(|err| {
+        let _ = child.kill();
+        let _ = child.wait();
+        format!("Failed to take PTY writer: {err}")
+    })?;
 
     drop(pair.slave);
 
@@ -1958,6 +2006,8 @@ pub fn terminal_create_buffer(
         title,
         cwd: cwd.map(|path| path.to_string_lossy().to_string()),
         command,
+        cli_kind,
+        launch_mode,
         cols,
         rows,
         status: TerminalStatus::Running,
@@ -1981,6 +2031,7 @@ pub fn terminal_create_buffer(
         buffers.insert(
             id.clone(),
             TerminalProcess {
+                instance_id: instance_id.clone(),
                 info: info.clone(),
                 master: pair.master,
                 writer: Arc::clone(&writer_arc),
@@ -1993,7 +2044,14 @@ pub fn terminal_create_buffer(
     // Pass the writer Arc to the reader thread too so it can write
     // emulator query responses (DA1, DSR, XTVERSION) back to the PTY
     // without going through the global buffers lock.
-    if let Err(spawn_err) = spawn_reader_thread(app.clone(), id.clone(), reader, grid, writer_arc) {
+    if let Err(spawn_err) = spawn_reader_thread(
+        app.clone(),
+        id.clone(),
+        instance_id,
+        reader,
+        grid,
+        writer_arc,
+    ) {
         if let Ok(mut buffers) = state.buffers.lock() {
             if let Some(rolled_back) = buffers.remove(&id) {
                 if let Ok(mut child) = rolled_back.child.lock() {
@@ -2007,6 +2065,45 @@ pub fn terminal_create_buffer(
         ));
     }
     Ok(info)
+}
+
+#[tauri::command]
+pub fn terminal_restart_buffer(
+    app: AppHandle,
+    state: State<'_, TerminalState>,
+    buffer_id: String,
+    request: RestartTerminalBufferRequest,
+) -> Result<TerminalBufferInfo, String> {
+    let old_process = {
+        let mut buffers = state
+            .buffers
+            .lock()
+            .map_err(|err| format!("Terminal state mutex poisoned: {err}"))?;
+        buffers.remove(&buffer_id)
+    };
+    let Some(old_process) = old_process else {
+        return Err(format!("Terminal buffer not found: {buffer_id}"));
+    };
+
+    let old_info = old_process.info.clone();
+    if let Ok(mut child) = old_process.child.lock() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    drop(old_process);
+
+    let restart_request = CreateTerminalBufferRequest {
+        id: Some(buffer_id),
+        title: request.title.or(Some(old_info.title)),
+        cwd: request.cwd.or(old_info.cwd),
+        command: request.command.or(old_info.command),
+        cli_kind: request.cli_kind.or(old_info.cli_kind),
+        launch_mode: request.launch_mode.or(Some(old_info.launch_mode)),
+        cols: Some(old_info.cols),
+        rows: Some(old_info.rows),
+    };
+
+    spawn_terminal_buffer(&app, &state, restart_request)
 }
 
 #[tauri::command]
@@ -2323,6 +2420,7 @@ pub fn terminal_signal(
 fn spawn_reader_thread(
     app: AppHandle,
     buffer_id: String,
+    instance_id: String,
     mut reader: Box<dyn Read + Send>,
     grid: Arc<Mutex<TerminalGrid>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -2345,6 +2443,7 @@ fn spawn_reader_thread(
         let grid = Arc::clone(&grid);
         let app = app.clone();
         let buffer_id = buffer_id.clone();
+        let instance_id = instance_id.clone();
         thread::Builder::new()
             .name(format!("terminal-diff-{buffer_id}"))
             .spawn(move || {
@@ -2355,7 +2454,10 @@ fn spawn_reader_thread(
                     }
                     let diff = grid.lock().ok().map(|mut g| g.drain_diff());
                     if let Some(diff) = diff.filter(diff_has_changes) {
-                        sync_title_to_buffer(&app, &buffer_id, diff.title.as_deref());
+                        if !is_current_terminal_instance(&app, &buffer_id, &instance_id) {
+                            continue;
+                        }
+                        sync_title_to_buffer(&app, &buffer_id, &instance_id, diff.title.as_deref());
                         let _ = app.emit(
                             TERMINAL_GRID_DIFF_EVENT,
                             GridDiffEvent {
@@ -2378,11 +2480,12 @@ fn spawn_reader_thread(
                 if pending.swap(false, Ordering::AcqRel) {
                     let diff = grid.lock().ok().map(|mut g| g.drain_diff());
                     if let Some(diff) = diff.filter(diff_has_changes) {
-                        sync_title_to_buffer(&app, &buffer_id, diff.title.as_deref());
-                        let _ = app.emit(
-                            TERMINAL_GRID_DIFF_EVENT,
-                            GridDiffEvent { buffer_id, diff },
-                        );
+                        if !is_current_terminal_instance(&app, &buffer_id, &instance_id) {
+                            return;
+                        }
+                        sync_title_to_buffer(&app, &buffer_id, &instance_id, diff.title.as_deref());
+                        let _ =
+                            app.emit(TERMINAL_GRID_DIFF_EVENT, GridDiffEvent { buffer_id, diff });
                     }
                 }
             })?;
@@ -2442,8 +2545,9 @@ fn spawn_reader_thread(
             let child_handle = app.try_state::<TerminalState>().and_then(|state| {
                 state.buffers.lock().ok().and_then(|buffers| {
                     buffers.get(&buffer_id).and_then(|process| {
-                        matches!(process.info.status, TerminalStatus::Running)
-                            .then(|| Arc::clone(&process.child))
+                        (process.instance_id == instance_id
+                            && matches!(process.info.status, TerminalStatus::Running))
+                        .then(|| Arc::clone(&process.child))
                     })
                 })
             });
@@ -2458,7 +2562,9 @@ fn spawn_reader_thread(
             if let Some(state) = app.try_state::<TerminalState>() {
                 if let Ok(mut buffers) = state.buffers.lock() {
                     if let Some(process) = buffers.get_mut(&buffer_id) {
-                        if matches!(process.info.status, TerminalStatus::Running) {
+                        if process.instance_id == instance_id
+                            && matches!(process.info.status, TerminalStatus::Running)
+                        {
                             process.info.status = TerminalStatus::Exited;
                             process.info.updated_at = unix_millis();
                             should_emit = true;
@@ -2600,6 +2706,27 @@ fn unix_initial_command_shell_args(command: &str) -> (&'static str, String) {
     ("-c", format!("exec {command}"))
 }
 
+fn infer_terminal_cli_kind(command: &str) -> Option<TerminalCliKind> {
+    match command.split_whitespace().next()? {
+        "claude" => Some(TerminalCliKind::Claude),
+        "codex" => Some(TerminalCliKind::Codex),
+        _ => None,
+    }
+}
+
+fn terminal_cli_command(kind: TerminalCliKind, mode: TerminalLaunchMode) -> &'static str {
+    match (kind, mode) {
+        (TerminalCliKind::Claude, TerminalLaunchMode::Normal) => "claude",
+        (TerminalCliKind::Claude, TerminalLaunchMode::Yolo) => {
+            "claude --dangerously-skip-permissions"
+        }
+        (TerminalCliKind::Codex, TerminalLaunchMode::Normal) => "codex",
+        (TerminalCliKind::Codex, TerminalLaunchMode::Yolo) => {
+            "codex --dangerously-bypass-approvals-and-sandbox"
+        }
+    }
+}
+
 /// PATH for terminal child processes — the parent process PATH plus
 /// the CLI install dirs (`~/.claude/bin`, `~/.local/bin`, Homebrew,
 /// `%APPDATA%\npm`) a GUI-launched Tauri app typically misses.
@@ -2695,10 +2822,30 @@ mod tests {
     #[test]
     fn terminal_title_uses_first_command_word() {
         assert_eq!(
-            title_from_command("codex --dangerously-bypass-approvals"),
+            title_from_command("codex --dangerously-bypass-approvals-and-sandbox"),
             "codex"
         );
         assert_eq!(title_from_command("   "), "Terminal");
+    }
+
+    #[test]
+    fn terminal_cli_commands_include_yolo_flags() {
+        assert_eq!(
+            terminal_cli_command(TerminalCliKind::Claude, TerminalLaunchMode::Normal),
+            "claude"
+        );
+        assert_eq!(
+            terminal_cli_command(TerminalCliKind::Claude, TerminalLaunchMode::Yolo),
+            "claude --dangerously-skip-permissions"
+        );
+        assert_eq!(
+            terminal_cli_command(TerminalCliKind::Codex, TerminalLaunchMode::Normal),
+            "codex"
+        );
+        assert_eq!(
+            terminal_cli_command(TerminalCliKind::Codex, TerminalLaunchMode::Yolo),
+            "codex --dangerously-bypass-approvals-and-sandbox"
+        );
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -2737,8 +2884,8 @@ mod tests {
         }
         #[cfg(target_os = "windows")]
         {
-            let userprofile = std::env::var("USERPROFILE")
-                .expect("USERPROFILE must be set for this test");
+            let userprofile =
+                std::env::var("USERPROFILE").expect("USERPROFILE must be set for this test");
             let expected = format!(r"{}\.claude\bin", userprofile);
             assert!(
                 path.split(';').any(|p| p == expected),
@@ -2915,7 +3062,10 @@ mod tests {
         let mut grid = TerminalGrid::new(2, 4);
         grid.feed(b"hi");
         let body = TerminalSnapshotBody::Grid(grid.snapshot());
-        let snap = TerminalSnapshot { seq: grid.seq, body };
+        let snap = TerminalSnapshot {
+            seq: grid.seq,
+            body,
+        };
         let json = serde_json::to_value(&snap).unwrap();
         assert_eq!(json["kind"], "grid");
         assert_eq!(json["payload"]["rows"], 2);
@@ -3529,10 +3679,7 @@ mod tests {
         grid.feed(b"\x1b[5n");
         assert_eq!(grid.drain_responses(), b"\x1b[0n");
         grid.feed(b"\x1b[>q");
-        assert_eq!(
-            grid.drain_responses(),
-            b"\x1bP>|seren-desktop\x1b\\"
-        );
+        assert_eq!(grid.drain_responses(), b"\x1bP>|seren-desktop\x1b\\");
     }
 
     #[test]
@@ -3889,7 +4036,10 @@ mod tests {
     fn grid_decset_1000_enables_vt200_mouse_tracking() {
         let mut grid = TerminalGrid::new(2, 4);
         grid.feed(b"\x1b[?1000h");
-        assert!(matches!(grid.effective_mouse_tracking(), MouseTracking::Vt200));
+        assert!(matches!(
+            grid.effective_mouse_tracking(),
+            MouseTracking::Vt200
+        ));
         assert!(!grid.mouse_sgr);
         let snap = grid.snapshot();
         assert!(matches!(snap.mouse_tracking, MouseTracking::Vt200));
@@ -3902,7 +4052,10 @@ mod tests {
         // newer set wins, matching xterm.
         let mut grid = TerminalGrid::new(2, 4);
         grid.feed(b"\x1b[?1000h\x1b[?1002h");
-        assert!(matches!(grid.effective_mouse_tracking(), MouseTracking::ButtonEvent));
+        assert!(matches!(
+            grid.effective_mouse_tracking(),
+            MouseTracking::ButtonEvent
+        ));
     }
 
     #[test]
@@ -3914,9 +4067,15 @@ mod tests {
         let mut grid = TerminalGrid::new(2, 4);
         grid.feed(b"\x1b[?1000h");
         grid.feed(b"\x1b[?1002l");
-        assert!(matches!(grid.effective_mouse_tracking(), MouseTracking::Vt200));
+        assert!(matches!(
+            grid.effective_mouse_tracking(),
+            MouseTracking::Vt200
+        ));
         grid.feed(b"\x1b[?1000l");
-        assert!(matches!(grid.effective_mouse_tracking(), MouseTracking::Off));
+        assert!(matches!(
+            grid.effective_mouse_tracking(),
+            MouseTracking::Off
+        ));
     }
 
     #[test]
@@ -3986,7 +4145,10 @@ mod tests {
         let mut grid = TerminalGrid::new(2, 4);
         grid.feed(b"\x1b[?1006h");
         assert!(grid.mouse_sgr);
-        assert!(matches!(grid.effective_mouse_tracking(), MouseTracking::Off));
+        assert!(matches!(
+            grid.effective_mouse_tracking(),
+            MouseTracking::Off
+        ));
     }
 
     #[test]

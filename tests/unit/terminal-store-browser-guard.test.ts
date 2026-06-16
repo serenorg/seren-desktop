@@ -78,3 +78,25 @@ describe("terminalStore browser runtime guard", () => {
     expect(unlistenMock).toHaveBeenCalledOnce();
   });
 });
+
+describe("terminalStore CLI launch helpers", () => {
+  it("builds normal and YOLO startup commands for Claude and Codex", async () => {
+    const { terminalCommandForCliLaunch, terminalTitleForCliLaunch } =
+      await import("@/stores/terminal.store");
+
+    expect(terminalCommandForCliLaunch("claude", "normal")).toBe("claude");
+    expect(terminalCommandForCliLaunch("claude", "yolo")).toBe(
+      "claude --dangerously-skip-permissions",
+    );
+    expect(terminalCommandForCliLaunch("codex", "normal")).toBe("codex");
+    expect(terminalCommandForCliLaunch("codex", "yolo")).toBe(
+      "codex --dangerously-bypass-approvals-and-sandbox",
+    );
+    expect(terminalTitleForCliLaunch("claude", "yolo")).toBe(
+      "Claude Code CLI (YOLO)",
+    );
+    expect(terminalTitleForCliLaunch("codex", "yolo")).toBe(
+      "Codex CLI (YOLO)",
+    );
+  });
+});

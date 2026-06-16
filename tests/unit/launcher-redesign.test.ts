@@ -32,7 +32,9 @@ describe("ThreadSidebar — stable testids on every row (#1832)", () => {
     "new-gemini-agent",
     "new-lmstudio-agent",
     "new-claude-cli",
+    "new-claude-cli-yolo",
     "new-codex-cli",
+    "new-codex-cli-yolo",
     "new-terminal",
   ];
   for (const id of testids) {
@@ -118,12 +120,18 @@ describe("ThreadSidebar — dispatch preserved (#1832)", () => {
     expect(sidebarTsx).toContain('handleNewAgent("lmstudio")');
   });
 
-  it("CLI rows dispatch via createTerminalThread with the correct title and command", () => {
+  it("CLI rows dispatch via createTerminalThread with launch metadata", () => {
     expect(sidebarTsx).toMatch(
-      /handleNewTerminal\(\{\s*title:\s*"Claude Code CLI",\s*command:\s*"claude",?\s*\}\)/s,
+      /handleNewTerminal\(\{\s*cliKind:\s*"claude",\s*launchMode:\s*"normal",?\s*\}\)/s,
     );
     expect(sidebarTsx).toMatch(
-      /handleNewTerminal\(\{\s*title:\s*"Codex CLI",\s*command:\s*"codex",?\s*\}\)/s,
+      /handleNewTerminal\(\{\s*cliKind:\s*"claude",\s*launchMode:\s*"yolo",?\s*\}\)/s,
+    );
+    expect(sidebarTsx).toMatch(
+      /handleNewTerminal\(\{\s*cliKind:\s*"codex",\s*launchMode:\s*"normal",?\s*\}\)/s,
+    );
+    expect(sidebarTsx).toMatch(
+      /handleNewTerminal\(\{\s*cliKind:\s*"codex",\s*launchMode:\s*"yolo",?\s*\}\)/s,
     );
   });
 

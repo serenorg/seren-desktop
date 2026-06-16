@@ -1,6 +1,6 @@
 // ABOUTME: Critical regression guard for the themed Claude Code CLI terminal pill (#2004, #2006).
 // ABOUTME: Trust contract — the billing-pool label must only render when the buffer was
-// ABOUTME: spawned via `command: "claude"` (no flags), which is the interactive-pool boundary.
+// ABOUTME: spawned via Claude CLI launch metadata, including flagged startup modes.
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -12,13 +12,10 @@ const terminalBufferTsx = readFileSync(
 );
 
 describe("TerminalBuffer — Claude Code CLI billing pill (#2004)", () => {
-  it("conditions the themed chrome on command === 'claude'", () => {
-    // The trust signal: the launcher entry at ThreadSidebar.tsx:702 spawns
-    // with { command: "claude" } and no flags (locked by launcher-redesign.test.ts).
-    // The pill must key off the SAME signal so anyone who later adds `-p` or
-    // `--output-format stream-json` to the command silently loses the pill —
-    // making the regression visible.
-    expect(terminalBufferTsx).toMatch(/command\s*===\s*"claude"/);
+  it("conditions the themed chrome on cliKind === 'claude'", () => {
+    // CLI startup flags are command details; the user-facing terminal chrome
+    // keys off the launch metadata so Claude normal and YOLO modes match.
+    expect(terminalBufferTsx).toMatch(/cliKind\s*===\s*"claude"/);
   });
 
   it("renders the 'Subscription · Pro/Max' label as the billing pill copy", () => {
@@ -27,6 +24,17 @@ describe("TerminalBuffer — Claude Code CLI billing pill (#2004)", () => {
     // Pro/Max subscription quota — not the Agent SDK credit pool. If this string
     // drifts, users get misled about which pool their session uses.
     expect(terminalBufferTsx).toContain("Subscription · Pro/Max");
+  });
+
+  it("renders a YOLO launch-mode pill and restart toggle", () => {
+    expect(terminalBufferTsx).toContain(
+      'data-testid="terminal-yolo-mode-pill"',
+    );
+    expect(terminalBufferTsx).toContain(
+      'data-testid="terminal-launch-mode-toggle"',
+    );
+    expect(terminalBufferTsx).toContain("Restart YOLO");
+    expect(terminalBufferTsx).toContain("Restart normal");
   });
 });
 

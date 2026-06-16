@@ -8,6 +8,8 @@ import { isTauriRuntime } from "@/lib/tauri-bridge";
 import { fileTreeState } from "@/stores/fileTree";
 
 export type TerminalStatus = "running" | "exited";
+export type TerminalCliKind = "claude" | "codex";
+export type TerminalLaunchMode = "normal" | "yolo";
 export type TerminalSignal =
   | "interrupt"
   | "quit"
@@ -20,6 +22,8 @@ export interface TerminalBufferInfo {
   title: string;
   cwd?: string | null;
   command?: string | null;
+  cliKind?: TerminalCliKind | null;
+  launchMode: TerminalLaunchMode;
   cols: number;
   rows: number;
   status: TerminalStatus;
@@ -44,6 +48,29 @@ const [state, setState] = createStore<TerminalState>({
 });
 
 let exitUnlisten: UnlistenFn | null = null;
+
+export function terminalCommandForCliLaunch(
+  cliKind: TerminalCliKind,
+  launchMode: TerminalLaunchMode,
+): string {
+  if (cliKind === "claude") {
+    return launchMode === "yolo"
+      ? "claude --dangerously-skip-permissions"
+      : "claude";
+  }
+
+  return launchMode === "yolo"
+    ? "codex --dangerously-bypass-approvals-and-sandbox"
+    : "codex";
+}
+
+export function terminalTitleForCliLaunch(
+  cliKind: TerminalCliKind,
+  launchMode: TerminalLaunchMode,
+): string {
+  const base = cliKind === "claude" ? "Claude Code CLI" : "Codex CLI";
+  return launchMode === "yolo" ? `${base} (YOLO)` : base;
+}
 
 export const terminalStore = {
   get buffers(): TerminalBufferInfo[] {
@@ -97,19 +124,68 @@ export const terminalStore = {
   async createBuffer(options: {
     title?: string;
     command?: string;
+    cliKind?: TerminalCliKind;
+    launchMode?: TerminalLaunchMode;
     cwd?: string | null;
   }): Promise<TerminalBufferInfo> {
     await this.init();
+    const launchMode = options.launchMode ?? "normal";
     const info = await invoke<TerminalBufferInfo>("terminal_create_buffer", {
       request: {
-        title: options.title,
-        command: options.command,
+        title:
+          options.title ??
+          (options.cliKind
+            ? terminalTitleForCliLaunch(options.cliKind, launchMode)
+            : undefined),
+        command:
+          options.command ??
+          (options.cliKind
+            ? terminalCommandForCliLaunch(options.cliKind, launchMode)
+            : undefined),
+        cliKind: options.cliKind ?? null,
+        launchMode,
         cwd: options.cwd ?? fileTreeState.rootPath ?? undefined,
         cols: 100,
         rows: 28,
       },
     });
     setState("buffers", info.id, info);
+    return info;
+  },
+
+  async restartBuffer(
+    bufferId: string,
+    options: {
+      title?: string;
+      command?: string;
+      cliKind?: TerminalCliKind;
+      launchMode?: TerminalLaunchMode;
+      cwd?: string | null;
+    } = {},
+  ): Promise<TerminalBufferInfo> {
+    const current = state.buffers[bufferId];
+    const cliKind = options.cliKind ?? current?.cliKind ?? undefined;
+    const launchMode = options.launchMode ?? current?.launchMode ?? "normal";
+    const info = await invoke<TerminalBufferInfo>("terminal_restart_buffer", {
+      bufferId,
+      request: {
+        title:
+          options.title ??
+          (cliKind
+            ? terminalTitleForCliLaunch(cliKind, launchMode)
+            : undefined),
+        command:
+          options.command ??
+          (cliKind
+            ? terminalCommandForCliLaunch(cliKind, launchMode)
+            : undefined),
+        cliKind: cliKind ?? null,
+        launchMode,
+        cwd: options.cwd ?? current?.cwd ?? undefined,
+      },
+    });
+    setState("buffers", info.id, info);
+    this.requestFocus(info.id);
     return info;
   },
 
