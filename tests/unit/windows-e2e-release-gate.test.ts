@@ -337,6 +337,9 @@ describe("Windows production e2e release gate", () => {
     expect(releaseWorkflow).toContain("generate_presigned_url");
     expect(releaseWorkflow).toContain("put_object");
     expect(releaseWorkflow).toContain("Invoke-WebRequest -Uri $logsUploadUrl -Method Put");
+    expect(releaseWorkflow).toContain("          import os\n");
+    expect(releaseWorkflow).toContain("          PY\n");
+    expect(releaseWorkflow).not.toContain("\nimport os\nimport subprocess\n");
     expect(releaseWorkflow).not.toContain("aws s3 cp $logBundle $logsS3Uri");
     expect(releaseWorkflow).toContain("Download Windows e2e log bundle");
     expect(releaseWorkflow).toContain("Upload Windows e2e logs");

@@ -1259,31 +1259,31 @@ jobs:
             WINDOWS_E2E_LOG_BUCKET="$WINDOWS_E2E_S3_BUCKET" \
             WINDOWS_E2E_LOG_KEY="$logs_key" \
             python3 <<'PY'
-import os
-import subprocess
-import sys
+          import os
+          import subprocess
+          import sys
 
-try:
-    import boto3
-except ModuleNotFoundError:
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "--quiet", "boto3"],
-        stdout=subprocess.DEVNULL,
-    )
-    import boto3
+          try:
+              import boto3
+          except ModuleNotFoundError:
+              subprocess.check_call(
+                  [sys.executable, "-m", "pip", "install", "--quiet", "boto3"],
+                  stdout=subprocess.DEVNULL,
+              )
+              import boto3
 
-bucket = os.environ["WINDOWS_E2E_LOG_BUCKET"]
-key = os.environ["WINDOWS_E2E_LOG_KEY"]
-client = boto3.client("s3", region_name=os.environ.get("AWS_REGION"))
-print(
-    client.generate_presigned_url(
-        "put_object",
-        Params={"Bucket": bucket, "Key": key},
-        ExpiresIn=7200,
-        HttpMethod="PUT",
-    )
-)
-PY
+          bucket = os.environ["WINDOWS_E2E_LOG_BUCKET"]
+          key = os.environ["WINDOWS_E2E_LOG_KEY"]
+          client = boto3.client("s3", region_name=os.environ.get("AWS_REGION"))
+          print(
+              client.generate_presigned_url(
+                  "put_object",
+                  Params={"Bucket": bucket, "Key": key},
+                  ExpiresIn=7200,
+                  HttpMethod="PUT",
+              )
+          )
+          PY
           )"
           echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
           {
