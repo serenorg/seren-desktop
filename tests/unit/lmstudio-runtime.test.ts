@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import * as lmStudioRuntime from "../../bin/browser-local/lmstudio-runtime.mjs";
 
 const {
+  buildLmStudioChatCompletionBodyForContextBudget,
   buildLmStudioPromptForContextBudget,
   buildLmsExecInvocation,
   isLmStudioContextOverflowError,
@@ -22,6 +23,28 @@ const {
   prepareLmStudioMessagesForContextBudget,
   reasoningTextFromDelta,
 } = lmStudioRuntime as {
+  buildLmStudioChatCompletionBodyForContextBudget: (args: {
+    model: string;
+    messages: Array<{ role: string; content: string }>;
+    tools?: Array<Record<string, unknown>>;
+    contextLength: number;
+    useTools?: boolean;
+    options?: { aggressive?: boolean };
+  }) => {
+    body: {
+      model: string;
+      messages: Array<{ role: string; content: string }>;
+      stream: boolean;
+      max_tokens: number;
+      tools?: Array<Record<string, unknown>>;
+      tool_choice?: string;
+    };
+    messages: Array<{ role: string; content: string }>;
+    droppedMessages: number;
+    droppedTools: number;
+    estimatedInputTokens: number;
+    maxTokens: number;
+  };
   buildLmStudioPromptForContextBudget: (
     prompt: string,
     context: Array<Record<string, string>> | undefined,
@@ -187,6 +210,68 @@ describe("LM Studio runtime helpers", () => {
     expect(prepared.messages).toEqual([
       { role: "user", content: "latest request" },
     ]);
+  });
+
+  it("builds LM Studio request bodies with a bounded completion budget", () => {
+    const prepared = buildLmStudioChatCompletionBodyForContextBudget({
+      model: "gemma-4-e4b",
+      messages: [
+        { role: "user", content: `first ${"a".repeat(20_000)}` },
+        { role: "assistant", content: "old answer" },
+        { role: "user", content: "latest request" },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "read_file",
+            description: "Read a file",
+            parameters: {
+              type: "object",
+              properties: { path: { type: "string" } },
+            },
+          },
+        },
+      ],
+      contextLength: 4096,
+      useTools: true,
+    });
+
+    expect(prepared.droppedMessages).toBe(2);
+    expect(prepared.body.messages).toEqual([
+      { role: "user", content: "latest request" },
+    ]);
+    expect(prepared.body.tools).toHaveLength(1);
+    expect(prepared.body.tool_choice).toBe("auto");
+    expect(prepared.body.max_tokens).toBeGreaterThan(0);
+    expect(prepared.body.max_tokens).toBeLessThanOrEqual(1024);
+    expect(prepared.estimatedInputTokens + prepared.maxTokens).toBeLessThanOrEqual(
+      Math.floor(4096 * 0.94),
+    );
+  });
+
+  it("omits oversized LM Studio tool schemas when they would exhaust local context", () => {
+    const prepared = buildLmStudioChatCompletionBodyForContextBudget({
+      model: "gemma-4-e4b",
+      messages: [{ role: "user", content: "Hello world?" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "huge_gateway_tool",
+            description: "x".repeat(40_000),
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+      contextLength: 4096,
+      useTools: true,
+    });
+
+    expect(prepared.droppedTools).toBe(1);
+    expect(prepared.body.tools).toBeUndefined();
+    expect(prepared.body.tool_choice).toBeUndefined();
+    expect(prepared.body.max_tokens).toBeGreaterThan(0);
   });
 
   it("scopes tool incompatibility to the selected LM Studio model", () => {
