@@ -238,11 +238,14 @@ export interface MemoryStartFailureNotice {
 
 /**
  * Map a Claude-memory interceptor start failure to an actionable, body-free
- * user notice. Branches on the failure class so a non-transient auth/permission
- * failure (401/403) reads differently from a retryable one, and so the dialog
- * never echoes raw server bodies (which can include an HTTP 403 payload). The
- * status is parsed from the `returned HTTP <status>` marker that both the Rust
- * `run_sql` formatter and the seren-db service errors emit. #2497 Defect 3.
+ * user notice. Branches on the failure class — auth/permission (401/403),
+ * billing (402), still-provisioning (missing key), other non-retryable client
+ * errors (400/404/409/422), and retryable transients (408/429/5xx/network) —
+ * so each reads differently and only the genuinely-retryable bucket promises an
+ * automatic retry. The dialog never echoes raw server bodies (which can include
+ * an HTTP 403 payload). The status is parsed from the `returned HTTP <status>`
+ * marker that both the Rust `run_sql` formatter and the seren-db service errors
+ * emit. #2497 Defect 3; #2506.
  */
 export function classifyMemoryStartFailure(
   error: unknown,
@@ -262,6 +265,16 @@ export function classifyMemoryStartFailure(
     };
   }
 
+  // Quota exceeded / payment required — retrying never helps; the user must top
+  // up. seren-core returns 402 for this on the seren-db path. #2506.
+  if (status === 402) {
+    return {
+      status,
+      message:
+        "Seren memory storage needs an active plan or balance on your account. Add funds in Settings → Wallet, then retry from Settings → Code Indexing → Claude Code Auto-Memory.",
+    };
+  }
+
   // The desktop API key hasn't landed yet — a transient provisioning failure
   // upstream kept the session but left no key. Re-authenticating re-mints it.
   if (/api key not available/i.test(raw)) {
@@ -272,8 +285,19 @@ export function classifyMemoryStartFailure(
     };
   }
 
-  // Everything else (5xx, 408, gateway timeout, network, cold-start exhaustion)
-  // is transient and self-heals on the next memory write.
+  // Other non-retryable client errors — no organization (400), no active plan
+  // (404), conflict (409), unprocessable (422). These will NOT self-heal, so we
+  // must not promise an automatic retry. seren-core#187 documents 400/404 here.
+  if (status === 400 || status === 404 || status === 409 || status === 422) {
+    return {
+      status,
+      message:
+        "Seren couldn't set up memory storage for your account. Sign out and back in, and contact support if it keeps happening.",
+    };
+  }
+
+  // Everything else (5xx, 408, 429, gateway timeout, network, cold-start
+  // exhaustion) is transient and self-heals on the next memory write.
   return {
     status,
     message:

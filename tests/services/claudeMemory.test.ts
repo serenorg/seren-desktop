@@ -512,20 +512,48 @@ describe("classifyMemoryStartFailure (#2497 Defect 3)", () => {
     expect(notice.message).not.toContain("log in to Seren Desktop so the key");
   });
 
-  it("treats 5xx / gateway timeouts as transient and retryable", () => {
-    for (const status of [408, 500, 502, 503, 504]) {
+  it("treats 408/429/5xx / gateway timeouts as transient with an auto-retry promise", () => {
+    for (const status of [408, 429, 500, 502, 503, 504]) {
       const notice = classifyMemoryStartFailure(
         new Error(`SerenDB query returned HTTP ${status}: upstream`),
       );
       expect(notice.status).toBe(status);
-      expect(notice.message.toLowerCase()).toContain("retry");
+      expect(notice.message.toLowerCase()).toContain("retry automatically");
       expect(notice.message).not.toContain("upstream");
     }
   });
 
-  it("defaults to the transient notice for status-less errors", () => {
+  it("defaults to the transient auto-retry notice for status-less errors", () => {
     const notice = classifyMemoryStartFailure(new Error("network unreachable"));
     expect(notice.status).toBeUndefined();
-    expect(notice.message.toLowerCase()).toContain("retry");
+    expect(notice.message.toLowerCase()).toContain("retry automatically");
+  });
+
+  it("treats 402 as a billing wall (top up), never an auto-retry (#2506)", () => {
+    const notice = classifyMemoryStartFailure(
+      new Error(
+        'Failed to create project: returned HTTP 402: {"error":"quota exceeded"}',
+      ),
+    );
+    expect(notice.status).toBe(402);
+    expect(notice.message.toLowerCase()).toContain("plan or balance");
+    expect(notice.message).toMatch(/Settings → Wallet/);
+    // Must NOT promise an automatic retry, and must not leak the raw body.
+    expect(notice.message).not.toContain("retry automatically");
+    expect(notice.message).not.toContain("quota exceeded");
+  });
+
+  it("treats 400/404/409/422 as non-retryable setup errors, never auto-retry (#2506)", () => {
+    for (const status of [400, 404, 409, 422]) {
+      const notice = classifyMemoryStartFailure(
+        new Error(
+          `Failed to create project: returned HTTP ${status}: {"error":"no active plan"}`,
+        ),
+      );
+      expect(notice.status).toBe(status);
+      expect(notice.message.toLowerCase()).toContain("set up memory storage");
+      expect(notice.message).not.toContain("retry automatically");
+      expect(notice.message).not.toContain("no active plan");
+    }
   });
 });
