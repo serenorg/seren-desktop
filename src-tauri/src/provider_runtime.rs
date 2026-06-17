@@ -215,11 +215,16 @@ impl ProviderRuntimeState {
                         // kill_on_drop only terminates the immediate child, leaving
                         // grandchild node.exe processes (claude CLI) orphaned and
                         // holding file locks that block the next NSIS install.
+                        // Spawn detached instead of .status(): this runs in the
+                        // RunEvent::Exit handler on the UI thread, and waiting on
+                        // taskkill there freezes "Quit Seren" until the whole tree
+                        // dies (#2508). /F /T is fire-and-forget — taskkill keeps
+                        // running and reaps the tree after we exit.
                         use std::os::windows::process::CommandExt;
                         let _ = std::process::Command::new("taskkill")
                             .args(["/F", "/T", "/PID", &pid.to_string()])
                             .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                            .status();
+                            .spawn();
                     }
                 }
             }
