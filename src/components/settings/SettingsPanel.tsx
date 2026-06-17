@@ -11,6 +11,7 @@ import {
   Show,
 } from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
+import { type BuildInfo, getBuildInfo } from "@/services/buildInfo";
 import {
   getClaudeMemoryStatus,
   migrateExistingClaudeMemory,
@@ -89,6 +90,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
   // Claude Code auto-memory interceptor state. The watcher lives in Rust;
   // the panel only reflects its current status and exposes the controls.
+  const [buildInfo, setBuildInfo] = createSignal<BuildInfo | null>(null);
   const [claudeMemoryRunning, setClaudeMemoryRunning] = createSignal(false);
   const [claudeMemoryWatchingRoot, setClaudeMemoryWatchingRoot] = createSignal<
     string | null
@@ -422,6 +424,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
       handleOpenSection as EventListener,
     );
     void refreshClaudeMemoryStatus();
+    void getBuildInfo().then(setBuildInfo);
   });
 
   onCleanup(() => {
@@ -2188,6 +2191,25 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             <p class="m-0 mb-6 text-muted-foreground leading-normal">
               Configure application behavior and privacy options.
             </p>
+
+            <Show when={buildInfo()}>
+              {(info) => (
+                <div class="flex items-center justify-between py-3 border-b border-border">
+                  <span class="flex flex-col gap-0.5">
+                    <span class="text-[0.95rem] font-medium text-foreground">
+                      Version
+                    </span>
+                    <span class="text-[0.8rem] text-muted-foreground">
+                      The Seren build currently running — include this when
+                      reporting an issue
+                    </span>
+                  </span>
+                  <span class="text-[0.85rem] font-mono text-muted-foreground text-right break-all">
+                    {info().app_version}
+                  </span>
+                </div>
+              )}
+            </Show>
 
             <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">

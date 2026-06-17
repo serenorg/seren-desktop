@@ -227,6 +227,61 @@ export interface InterceptFailureEvent {
 }
 
 /**
+ * A user-facing notice for a failed interceptor start. `status` is the parsed
+ * HTTP status (for telemetry); `message` is body-free copy safe to show in a
+ * dialog.
+ */
+export interface MemoryStartFailureNotice {
+  status: number | undefined;
+  message: string;
+}
+
+/**
+ * Map a Claude-memory interceptor start failure to an actionable, body-free
+ * user notice. Branches on the failure class so a non-transient auth/permission
+ * failure (401/403) reads differently from a retryable one, and so the dialog
+ * never echoes raw server bodies (which can include an HTTP 403 payload). The
+ * status is parsed from the `returned HTTP <status>` marker that both the Rust
+ * `run_sql` formatter and the seren-db service errors emit. #2497 Defect 3.
+ */
+export function classifyMemoryStartFailure(
+  error: unknown,
+): MemoryStartFailureNotice {
+  const raw = error instanceof Error ? error.message : String(error);
+  const statusMatch = /returned HTTP (\d{3})/i.exec(raw);
+  const status = statusMatch?.[1]
+    ? Number.parseInt(statusMatch[1], 10)
+    : undefined;
+
+  // Auth/permission failure — not transient. "Toggle it off and on" won't help.
+  if (status === 401 || status === 403) {
+    return {
+      status,
+      message:
+        "Seren couldn't authorize memory storage for your account. This usually means your account is still finishing setup. Sign out and back in, or try again in a few minutes. If it keeps happening, contact support.",
+    };
+  }
+
+  // The desktop API key hasn't landed yet — a transient provisioning failure
+  // upstream kept the session but left no key. Re-authenticating re-mints it.
+  if (/api key not available/i.test(raw)) {
+    return {
+      status,
+      message:
+        "Seren is still finishing your account setup, so memory storage isn't ready yet. Sign out and back in, or try again shortly.",
+    };
+  }
+
+  // Everything else (5xx, 408, gateway timeout, network, cold-start exhaustion)
+  // is transient and self-heals on the next memory write.
+  return {
+    status,
+    message:
+      "Seren couldn't reach memory storage just now. It will retry automatically on the next memory write — you can also retry from Settings → Code Indexing → Claude Code Auto-Memory.",
+  };
+}
+
+/**
  * Resolve the SerenDB project + branch + database the Claude memory
  * interceptor should write to. Auto-creates anything missing on first run
  * and persists the resolved IDs to settings so subsequent runs reuse them.

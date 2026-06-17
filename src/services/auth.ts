@@ -276,11 +276,26 @@ export { getToken };
 const DESKTOP_API_KEY_NAME = "Seren Desktop";
 
 /**
+ * Thrown when provisioning the SerenDB desktop API key fails. Carries the HTTP
+ * `status` so the auth store can distinguish a non-transient auth/permission
+ * failure (401/403 → re-sign-in) from a retryable one (5xx/network → keep the
+ * session, chat still works on the JWT). See #2497.
+ */
+export class ApiKeyProvisioningError extends Error {
+  readonly status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "ApiKeyProvisioningError";
+    this.status = status;
+  }
+}
+
+/**
  * Create a new API key for MCP authentication.
  * Uses POST /organizations/default/api-keys, which resolves "default" to
  * the user's first organization.
  * @returns API key (seren_xxx_yyy format)
- * @throws Error if not authenticated or request fails
+ * @throws ApiKeyProvisioningError if not authenticated or the request fails
  */
 export async function createApiKey(): Promise<string> {
   const { data, error, response } = await createDefaultOrgApiKey({
@@ -289,6 +304,7 @@ export async function createApiKey(): Promise<string> {
   });
 
   if (error || !data?.data) {
+    const status = response?.status;
     let message = "Failed to create API key";
     try {
       const parsed = (await response?.clone().json()) as Partial<AuthError>;
@@ -298,7 +314,14 @@ export async function createApiKey(): Promise<string> {
     } catch {
       // Non-JSON body — fall back to default message.
     }
-    throw new Error(message);
+    // Carry the HTTP status both as a property (so callers can branch on
+    // 401/403 vs 5xx without regex) and in the message via the same
+    // `returned HTTP <status>` marker App.tsx already parses. Without this,
+    // downstream telemetry/dialogs can't tell a non-transient auth/permission
+    // failure from a retryable one. #2497.
+    const statusSuffix =
+      typeof status === "number" ? ` (returned HTTP ${status})` : "";
+    throw new ApiKeyProvisioningError(`${message}${statusSuffix}`, status);
   }
 
   return data.data.api_key;

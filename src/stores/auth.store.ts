@@ -61,16 +61,25 @@ let authBindingsInitialized = false;
 let authEpoch = 0;
 
 /**
+ * Outcome of [`ensureApiKey`]. On failure we carry the HTTP `status` (when the
+ * server gave one) so the caller can tell a non-transient auth/permission
+ * failure (401/403) apart from a retryable one (5xx/network). See #2497.
+ */
+type EnsureApiKeyResult =
+  | { ok: true }
+  | { ok: false; status: number | undefined; error: unknown };
+
+/**
  * Ensure we have a Seren API key for MCP authentication.
  * Checks local storage first, only creates a new key if none stored.
  */
-async function ensureApiKey(): Promise<boolean> {
+async function ensureApiKey(): Promise<EnsureApiKeyResult> {
   try {
     // Check if we already have a stored API key
     const existingKey = await getSerenApiKey();
     if (existingKey) {
       verboseRuntimeConsole.debug("[Auth Store] Using existing stored API key");
-      return true;
+      return { ok: true };
     }
 
     // No stored key - create a new one
@@ -82,10 +91,44 @@ async function ensureApiKey(): Promise<boolean> {
     verboseRuntimeConsole.debug(
       "[Auth Store] API key created and stored successfully",
     );
-    return true;
+    return { ok: true };
   } catch (error) {
     console.error("[Auth Store] Failed to ensure API key:", error);
-    return false;
+    const status =
+      typeof (error as { status?: unknown })?.status === "number"
+        ? (error as { status: number }).status
+        : undefined;
+    return { ok: false, status, error };
+  }
+}
+
+/**
+ * Report an API-key provisioning failure to the support pipeline so persistent
+ * failures open a serenorg/seren-core ticket instead of dying in a console log.
+ * Non-blocking and best-effort — telemetry must never gate sign-in. #2497.
+ */
+async function reportApiKeyFailure(
+  status: number | undefined,
+  error: unknown,
+): Promise<void> {
+  try {
+    const { captureSupportError } = await import("@/lib/support/hook");
+    const message = error instanceof Error ? error.message : String(error);
+    const stack =
+      error instanceof Error && error.stack ? error.stack.split("\n") : [];
+    void captureSupportError({
+      kind: "auth.api_key_provisioning_failure",
+      message,
+      stack,
+      http: {
+        method: "POST",
+        url: "https://api.serendb.com/organizations/default/api-keys",
+        status,
+        body: message,
+      },
+    });
+  } catch (captureErr) {
+    console.warn(`[Auth Store] captureSupportError unavailable: ${captureErr}`);
   }
 }
 
@@ -152,13 +195,35 @@ async function activateAuthenticatedSession(
     return false;
   }
 
-  const hasApiKey = await ensureApiKey();
+  const apiKey = await ensureApiKey();
   if (authEpochChanged(expectedEpoch)) {
     return false;
   }
 
-  if (!hasApiKey) {
-    console.warn("[Auth Store] Could not ensure API key - MCP may not work");
+  if (!apiKey.ok) {
+    void reportApiKeyFailure(apiKey.status, apiKey.error);
+
+    // A 401/403 means the server rejected us for auth/permission reasons — the
+    // JWT itself is no good (or this account can't provision a key), so we must
+    // NOT present a logged-in shell. Clear the session and surface the blocking
+    // sign-in modal: that IS the actionable error + retry. #2497.
+    if (apiKey.status === 401 || apiKey.status === 403) {
+      clearAuthState();
+      requestSignInModal();
+      return false;
+    }
+
+    // Any other failure (network, 5xx, unknown) is transient: the JWT is still
+    // valid and the SerenDB key is only needed by MCP tools + the Claude memory
+    // interceptor — NOT by the primary chat path, which goes direct to the
+    // provider CLI on the JWT. Blocking the whole session here would break chat
+    // for an otherwise-valid user, and (because this runs on auth:token-refreshed)
+    // would spuriously force-logout mid-refresh. Keep the session; ensureApiKey
+    // re-runs on the next refresh and self-heals, and the interceptor surfaces
+    // the now-classified failure. #2497 (NEW P1-a).
+    console.warn(
+      "[Auth Store] API key provisioning failed transiently; keeping session, MCP + Claude memory will retry on next refresh",
+    );
   }
 
   setState({
