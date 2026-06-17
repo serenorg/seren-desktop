@@ -2214,6 +2214,49 @@ export const agentStore = {
     setState("threadStates", threadId, "turnError", null);
   },
 
+  failTurnForSession(
+    sessionId: string,
+    message: string,
+    kind: ErrorKind = "crash_ceiling",
+  ): void {
+    const session = state.sessions[sessionId];
+    const threadId = session?.conversationId;
+    if (!threadId) return;
+
+    const turnIsActive =
+      this.isTurnInFlight(threadId) || session.info.status === "prompting";
+    if (!turnIsActive) return;
+
+    const existing = state.threadStates[threadId]?.turnError;
+    if (
+      existing?.kind === kind &&
+      existing.message === message &&
+      !this.isTurnInFlight(threadId)
+    ) {
+      if (state.sessions[sessionId]?.info.status === "prompting") {
+        setState(
+          "sessions",
+          sessionId,
+          "info",
+          "status",
+          "ready" as SessionStatus,
+        );
+      }
+      return;
+    }
+
+    this.setTurnError(threadId, kind, message);
+    if (state.sessions[sessionId]?.info.status === "prompting") {
+      setState(
+        "sessions",
+        sessionId,
+        "info",
+        "status",
+        "ready" as SessionStatus,
+      );
+    }
+  },
+
   async recoverDroppedPrompt(
     sessionId: string,
     reason: string,
@@ -5516,10 +5559,15 @@ export const agentStore = {
             "[AgentStore] sendPrompt: waiting for in-flight compaction to complete",
           );
           await compactPromise;
+        } else {
+          this.addErrorMessage(sessionId, message);
+          this.failTurnForSession(sessionId, message);
         }
-        // Don't add error message — compactAndRetry handles fallback
+        // If compactAndRetry is active it owns the terminal fallback. Without
+        // that promise this catch path is the only terminal failure signal.
       } else if (!message.includes("Task cancelled")) {
         this.addErrorMessage(sessionId, message);
+        this.failTurnForSession(sessionId, message);
       }
 
       // Ensure the session is not stuck in "prompting" after any error —
@@ -6604,6 +6652,7 @@ export const agentStore = {
                 );
                 setState("sessions", sessionId, "promptTooLong", true);
                 this.addErrorMessage(sessionId, event.data.error);
+                this.failTurnForSession(sessionId, String(event.data.error));
                 this.acceptRateLimitFallback().catch((err) => {
                   console.error("[AgentStore] Auto-failover failed:", err);
                 });
@@ -6618,10 +6667,10 @@ export const agentStore = {
                 console.warn(
                   "[AgentStore] Compaction skipped (nothing to compact). Session is too small to compact — surfacing error to user without Chat fallback.",
                 );
-                this.addErrorMessage(
-                  sessionId,
-                  "This thread is too full for the model's context window and there is nothing left to compact. Start a new thread to continue.",
-                );
+                const terminalMessage =
+                  "This thread is too full for the model's context window and there is nothing left to compact. Start a new thread to continue.";
+                this.addErrorMessage(sessionId, terminalMessage);
+                this.failTurnForSession(sessionId, terminalMessage);
               }
               return outcome;
             },
@@ -6699,6 +6748,7 @@ export const agentStore = {
             void this.recoverDroppedPrompt(sessionId, errStr);
           } else {
             this.addErrorMessage(sessionId, event.data.error);
+            this.failTurnForSession(sessionId, errStr);
           }
         }
         break;
@@ -7726,18 +7776,24 @@ export const agentStore = {
     const session = state.sessions[sessionId];
     const agentLabel = agentDisplayName(session?.info.agentType);
     const prefixedError = `[${agentLabel}] ${error}`;
+    const lastMessage = session?.messages.at(-1);
 
-    const message: AgentMessage = {
-      id: crypto.randomUUID(),
-      type: "error",
-      content: prefixedError,
-      timestamp: Date.now(),
-    };
+    if (
+      lastMessage?.type !== "error" ||
+      lastMessage.content !== prefixedError
+    ) {
+      const message: AgentMessage = {
+        id: crypto.randomUUID(),
+        type: "error",
+        content: prefixedError,
+        timestamp: Date.now(),
+      };
 
-    setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
-    const errConvoId = session?.conversationId;
-    const errAgentType = session?.info.agentType ?? null;
-    if (errConvoId) persistAgentMessage(errConvoId, message, errAgentType);
+      setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
+      const errConvoId = session?.conversationId;
+      const errAgentType = session?.info.agentType ?? null;
+      if (errConvoId) persistAgentMessage(errConvoId, message, errAgentType);
+    }
     // Set session-specific error instead of global error
     setState("sessions", sessionId, "error", prefixedError);
   },
