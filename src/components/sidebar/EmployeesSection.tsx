@@ -7,7 +7,6 @@ import {
   createMemo,
   createSignal,
   For,
-  type JSX,
   onCleanup,
   onMount,
   Show,
@@ -203,34 +202,6 @@ const EmployeeRow: Component<{
   );
 };
 
-const ManagementRow: Component<{
-  title: string;
-  description: string;
-  onClick: () => void;
-  testId?: string;
-  children: JSX.Element;
-}> = (props) => (
-  <button
-    type="button"
-    data-testid={props.testId}
-    class="thread-list-row group flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/40"
-    onClick={props.onClick}
-    aria-label={props.title}
-  >
-    <span class="flex items-center justify-center w-[22px] h-[22px] rounded-md border border-border/80 text-muted-foreground/80 transition-colors duration-100 group-hover:border-primary/50 group-hover:text-primary">
-      {props.children}
-    </span>
-    <div class="flex-1 min-w-0">
-      <div class="thread-list-title text-muted-foreground truncate transition-colors duration-100 group-hover:text-foreground">
-        {props.title}
-      </div>
-      <div class="thread-list-meta text-muted-foreground/70 truncate">
-        {props.description}
-      </div>
-    </div>
-  </button>
-);
-
 export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
   const [activeId, setActiveId] = createSignal<string | null>(null);
   const [collapsed, setCollapsed] = createSignal(false);
@@ -302,16 +273,6 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
 
   const handleCloseEmployeeDetail = () => {
     setActiveId(null);
-  };
-
-  const handleOpenCatalog = () => {
-    setActiveId(null);
-    props.onOpenCatalog?.();
-  };
-
-  const handleOpenInbox = () => {
-    setActiveId(null);
-    props.onOpenInbox?.();
   };
 
   let interval: ReturnType<typeof setInterval> | null = null;
@@ -409,70 +370,6 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
               </div>
             }
           >
-            <Show when={props.onOpenCatalog}>
-              <ManagementRow
-                title="Agent catalog"
-                description="Managed agent definitions"
-                onClick={handleOpenCatalog}
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M3 3.5h10v9H3z"
-                    stroke="currentColor"
-                    stroke-width="1.3"
-                    stroke-linejoin="round"
-                  />
-                  <path
-                    d="M5 6h6M5 8.5h4"
-                    stroke="currentColor"
-                    stroke-width="1.3"
-                    stroke-linecap="round"
-                  />
-                </svg>
-              </ManagementRow>
-            </Show>
-            <Show when={props.onOpenInbox}>
-              <ManagementRow
-                title="Approval inbox"
-                description="Runs needing review"
-                onClick={handleOpenInbox}
-                testId="sidebar-inbox"
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M3 4h10v8.5H3z"
-                    stroke="currentColor"
-                    stroke-width="1.3"
-                    stroke-linejoin="round"
-                  />
-                  <path
-                    d="M3 7h3l1 2h2l1-2h3"
-                    stroke="currentColor"
-                    stroke-width="1.3"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </ManagementRow>
-            </Show>
-            <Show when={props.onOpenCatalog || props.onOpenInbox}>
-              <div
-                class="mx-2 my-1 border-t border-border/40"
-                aria-hidden="true"
-              />
-            </Show>
             <Show when={employeeStore.error}>
               <div
                 class="px-2 py-1 text-[11px] text-status-error opacity-80"
