@@ -1286,7 +1286,7 @@
         "enum": [
           "skip",
           "static",
-          "seren_reward"
+          "seren_bounty"
         ],
         "type": "string"
       },
@@ -1374,7 +1374,7 @@
             "format": "int32",
             "type": "integer"
           },
-          "seren_reward_campaign_id": {
+          "seren_bounty_campaign_id": {
             "format": "uuid",
             "type": [
               "string",

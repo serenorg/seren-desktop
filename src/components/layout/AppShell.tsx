@@ -14,6 +14,7 @@ import {
 } from "solid-js";
 import { SessionExpiredModal } from "@/components/auth/SessionExpiredModal";
 import { SignIn } from "@/components/auth/SignIn";
+import { BountyDetail } from "@/components/bounties/BountyDetail";
 import { CatalogList } from "@/components/catalog/CatalogList";
 import { ArchivedEmployeeDetail } from "@/components/employees/ArchivedEmployeeDetail";
 import { EmployeeDetail } from "@/components/employees/EmployeeDetail";
@@ -29,6 +30,12 @@ import { AudioPrimingDialog } from "@/components/meeting/AudioPrimingDialog";
 import { MeetingPanel } from "@/components/meeting/MeetingPanel";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
+import {
+  type BountyDetailEventDetail,
+  type BountyInheritFrom,
+  CLOSE_BOUNTY_DETAIL_EVENT,
+  OPEN_BOUNTY_DETAIL_EVENT,
+} from "@/components/sidebar/BountiesSection";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import {
   CLOSE_CATALOG_EVENT,
@@ -171,6 +178,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const [activeEmployeeId, setActiveEmployeeId] = createSignal<string | null>(
     null,
   );
+  const [activeBountyId, setActiveBountyId] = createSignal<string | null>(null);
+  const [activeBountyInheritFrom, setActiveBountyInheritFrom] =
+    createSignal<BountyInheritFrom | null>(null);
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [inboxOpen, setInboxOpen] = createSignal(false);
   const [interviewLandingOpen, setInterviewLandingOpen] = createSignal(
@@ -202,6 +212,11 @@ export const AppShell: Component<AppShellProps> = (props) => {
     setInterviewEmployeeSlug(employeeSlug ?? null);
     setInterviewLandingOpen(true);
     setActiveEmployeeId(null);
+    if (activeBountyId() !== null) {
+      setActiveBountyId(null);
+      setActiveBountyInheritFrom(null);
+      window.dispatchEvent(new CustomEvent(CLOSE_BOUNTY_DETAIL_EVENT));
+    }
     setCatalogOpen(false);
     setInboxOpen(false);
     if (source) {
@@ -232,6 +247,11 @@ export const AppShell: Component<AppShellProps> = (props) => {
     if (detail?.employeeId) {
       setActiveEmployeeId(detail.employeeId);
       setInterviewLandingOpen(false);
+      if (activeBountyId() !== null) {
+        setActiveBountyId(null);
+        setActiveBountyInheritFrom(null);
+        window.dispatchEvent(new CustomEvent(CLOSE_BOUNTY_DETAIL_EVENT));
+      }
       setCatalogOpen(false);
       setInboxOpen(false);
     }
@@ -246,12 +266,47 @@ export const AppShell: Component<AppShellProps> = (props) => {
     window.dispatchEvent(new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT));
   };
 
+  const handleOpenBountyDetail = (event: Event) => {
+    const detail = (event as CustomEvent<BountyDetailEventDetail>).detail;
+    if (detail?.bountyId) {
+      setActiveBountyId(detail.bountyId);
+      setInterviewLandingOpen(false);
+      // Snapshot the binding the sidebar captured before clearing the
+      // active thread. `BountyDetail.handleJoinBounty` consults this so
+      // a user joining a bounty from a Codex thread lands in another
+      // Codex thread instead of the global chat default.
+      setActiveBountyInheritFrom(detail.inheritFrom ?? null);
+      if (activeEmployeeId() !== null) {
+        setActiveEmployeeId(null);
+        window.dispatchEvent(new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT));
+      }
+      setCatalogOpen(false);
+      setInboxOpen(false);
+    }
+  };
+
+  const handleCloseBountyDetail = () => {
+    setActiveBountyId(null);
+    setActiveBountyInheritFrom(null);
+  };
+
+  const closeBountyDetailPane = () => {
+    setActiveBountyId(null);
+    setActiveBountyInheritFrom(null);
+    window.dispatchEvent(new CustomEvent(CLOSE_BOUNTY_DETAIL_EVENT));
+  };
+
   const handleOpenCatalog = () => {
     setCatalogOpen(true);
     setInterviewLandingOpen(false);
     if (activeEmployeeId() !== null) {
       setActiveEmployeeId(null);
       window.dispatchEvent(new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT));
+    }
+    if (activeBountyId() !== null) {
+      setActiveBountyId(null);
+      setActiveBountyInheritFrom(null);
+      window.dispatchEvent(new CustomEvent(CLOSE_BOUNTY_DETAIL_EVENT));
     }
     setInboxOpen(false);
   };
@@ -267,6 +322,11 @@ export const AppShell: Component<AppShellProps> = (props) => {
       setActiveEmployeeId(null);
       window.dispatchEvent(new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT));
     }
+    if (activeBountyId() !== null) {
+      setActiveBountyId(null);
+      setActiveBountyInheritFrom(null);
+      window.dispatchEvent(new CustomEvent(CLOSE_BOUNTY_DETAIL_EVENT));
+    }
     setCatalogOpen(false);
   };
 
@@ -280,6 +340,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
       () => {
         if (activeEmployeeId() !== null) {
           closeEmployeeDetailPane();
+        }
+        if (activeBountyId() !== null) {
+          closeBountyDetailPane();
         }
         setCatalogOpen(false);
         setInboxOpen(false);
@@ -298,6 +361,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
       CLOSE_EMPLOYEE_DETAIL_EVENT,
       handleCloseEmployeeDetail,
     );
+    window.addEventListener(OPEN_BOUNTY_DETAIL_EVENT, handleOpenBountyDetail);
+    window.addEventListener(CLOSE_BOUNTY_DETAIL_EVENT, handleCloseBountyDetail);
     window.addEventListener(
       OPEN_INTERVIEW_LANDING_EVENT,
       handleOpenInterviewLanding,
@@ -355,6 +420,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
     window.removeEventListener(
       CLOSE_EMPLOYEE_DETAIL_EVENT,
       handleCloseEmployeeDetail,
+    );
+    window.removeEventListener(
+      OPEN_BOUNTY_DETAIL_EVENT,
+      handleOpenBountyDetail,
+    );
+    window.removeEventListener(
+      CLOSE_BOUNTY_DETAIL_EVENT,
+      handleCloseBountyDetail,
     );
     window.removeEventListener(
       OPEN_INTERVIEW_LANDING_EVENT,
@@ -723,7 +796,21 @@ export const AppShell: Component<AppShellProps> = (props) => {
                       <Show
                         when={activeEmployeeId()}
                         fallback={
-                          <ThreadContent onSignInClick={handleSignInClick} />
+                          <Show
+                            when={activeBountyId()}
+                            fallback={
+                              <ThreadContent
+                                onSignInClick={handleSignInClick}
+                              />
+                            }
+                          >
+                            {(id) => (
+                              <BountyDetail
+                                bountyId={id()}
+                                inheritFrom={activeBountyInheritFrom()}
+                              />
+                            )}
+                          </Show>
                         }
                       >
                         {(id) => (

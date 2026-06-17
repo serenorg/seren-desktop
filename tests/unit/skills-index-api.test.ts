@@ -35,7 +35,7 @@ function skillSummary(slug: string) {
     owner_organization_id: "org-1",
     owner_user_id: "user-1",
     price_cents: 0,
-    seren_reward_campaign_id: null,
+    seren_bounty_campaign_id: null,
     skill_folder_name: slug,
     slug,
     sponsor_mode: "skip",
