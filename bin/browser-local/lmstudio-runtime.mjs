@@ -23,8 +23,15 @@ const DEFAULT_MCP_GATEWAY_URL =
   process.env.SEREN_MCP_GATEWAY_URL ?? "https://mcp.serendb.com/mcp";
 const LMSTUDIO_AGENT_TYPE = "lmstudio";
 const MAX_TOOL_ITERATIONS = 25;
+const DEFAULT_CONTEXT_LENGTH = 4096;
+const RESERVED_OUTPUT_TOKENS = 1024;
+const CONTEXT_SAFETY_FRACTION = 0.82;
+const AGGRESSIVE_CONTEXT_SAFETY_FRACTION = 0.58;
+const MIN_INPUT_BUDGET_TOKENS = 512;
 const TOOLS_UNSUPPORTED_NOTICE =
   "_This LM Studio model doesn't support tool calls, so local file access and Seren tools are off for this model._\n\n";
+const CONTEXT_TRIM_NOTICE =
+  "[Seren trimmed older LM Studio context so this request fits the loaded model context window.]";
 
 const FILE_TOOLS = [
   {
@@ -613,14 +620,168 @@ function buildSessionStatus(session, status = session.status) {
   };
 }
 
-function buildPrompt(prompt, context) {
+function estimateLmStudioTokens(value) {
+  return Math.ceil(String(value ?? "").length / 4);
+}
+
+function inputBudgetForContextLength(contextLength, { aggressive = false } = {}) {
+  const resolvedContextLength =
+    Number.isFinite(contextLength) && contextLength > 0
+      ? Math.floor(contextLength)
+      : DEFAULT_CONTEXT_LENGTH;
+  const fraction = aggressive
+    ? AGGRESSIVE_CONTEXT_SAFETY_FRACTION
+    : CONTEXT_SAFETY_FRACTION;
+  return Math.max(
+    MIN_INPUT_BUDGET_TOKENS,
+    Math.floor(resolvedContextLength * fraction) - RESERVED_OUTPUT_TOKENS,
+  );
+}
+
+function truncateTextToTokenBudget(text, tokenBudget) {
+  const raw = String(text ?? "");
+  if (estimateLmStudioTokens(raw) <= tokenBudget) return raw;
+  const maxChars = Math.max(0, Math.floor(tokenBudget * 4));
+  if (maxChars <= 0) return "";
+  return raw.slice(Math.max(0, raw.length - maxChars));
+}
+
+function contextTextFromEntries(context) {
   const contextText = Array.isArray(context)
     ? context
         .map((entry) => entry?.text)
         .filter((value) => typeof value === "string" && value.length > 0)
         .join("\n\n")
     : "";
-  return [contextText, prompt].filter(Boolean).join("\n\n");
+  return contextText;
+}
+
+function buildPrompt(prompt, context) {
+  return [contextTextFromEntries(context), prompt].filter(Boolean).join("\n\n");
+}
+
+export function buildLmStudioPromptForContextBudget(
+  prompt,
+  context,
+  contextLength,
+  options = {},
+) {
+  const fullPrompt = buildPrompt(prompt, context);
+  const budget = inputBudgetForContextLength(contextLength, options);
+  if (estimateLmStudioTokens(fullPrompt) <= budget) {
+    return {
+      prompt: fullPrompt,
+      trimmed: false,
+      estimatedTokens: estimateLmStudioTokens(fullPrompt),
+    };
+  }
+
+  const rawPrompt = String(prompt ?? "");
+  const contextText = contextTextFromEntries(context);
+  const noticeTokens = estimateLmStudioTokens(CONTEXT_TRIM_NOTICE) + 8;
+  const promptBudget = Math.max(128, budget - noticeTokens);
+  const boundedPrompt = truncateTextToTokenBudget(rawPrompt, promptBudget);
+  const remainingBudget =
+    budget -
+    noticeTokens -
+    estimateLmStudioTokens(boundedPrompt) -
+    (contextText ? 8 : 0);
+  const boundedContext =
+    remainingBudget > 64
+      ? truncateTextToTokenBudget(contextText, remainingBudget)
+      : "";
+  const parts = [CONTEXT_TRIM_NOTICE];
+  if (boundedContext) {
+    parts.push(`Most recent retained context:\n${boundedContext}`);
+  }
+  parts.push(boundedPrompt);
+  const bounded = parts.filter(Boolean).join("\n\n");
+
+  return {
+    prompt: bounded,
+    trimmed: true,
+    estimatedTokens: estimateLmStudioTokens(bounded),
+  };
+}
+
+function estimateLmStudioMessageTokens(message) {
+  const content =
+    typeof message?.content === "string"
+      ? message.content
+      : JSON.stringify(message?.content ?? "");
+  return 8 + estimateLmStudioTokens(content);
+}
+
+function estimateLmStudioMessagesTokens(messages) {
+  return messages.reduce(
+    (total, message) => total + estimateLmStudioMessageTokens(message),
+    0,
+  );
+}
+
+export function prepareLmStudioMessagesForContextBudget(
+  messages,
+  contextLength,
+  options = {},
+) {
+  const budget = inputBudgetForContextLength(contextLength, options);
+  let prepared = Array.isArray(messages) ? [...messages] : [];
+  let droppedMessages = 0;
+
+  while (
+    prepared.length > 1 &&
+    estimateLmStudioMessagesTokens(prepared) > budget
+  ) {
+    const nextUserIndex = prepared.findIndex(
+      (message, index) => index > 0 && message?.role === "user",
+    );
+    if (nextUserIndex === -1) break;
+    droppedMessages += nextUserIndex;
+    prepared = prepared.slice(nextUserIndex);
+  }
+
+  while (prepared.length > 1 && prepared[0]?.role !== "user") {
+    prepared.shift();
+    droppedMessages += 1;
+  }
+
+  if (
+    prepared.length === 1 &&
+    estimateLmStudioMessagesTokens(prepared) > budget
+  ) {
+    const [onlyMessage] = prepared;
+    if (typeof onlyMessage?.content === "string") {
+      const contentBudget = Math.max(
+        128,
+        budget - estimateLmStudioTokens(CONTEXT_TRIM_NOTICE) - 8,
+      );
+      prepared = [
+        {
+          ...onlyMessage,
+          content: `${CONTEXT_TRIM_NOTICE}\n\n${truncateTextToTokenBudget(
+            onlyMessage.content,
+            contentBudget,
+          )}`,
+        },
+      ];
+    }
+  }
+
+  return {
+    messages: prepared,
+    droppedMessages,
+    estimatedTokens: estimateLmStudioMessagesTokens(prepared),
+  };
+}
+
+export function isLmStudioContextOverflowError(message) {
+  const lower = String(message ?? "").toLowerCase();
+  return (
+    (lower.includes("tokens to keep") && lower.includes("context length")) ||
+    lower.includes("context length exceeded") ||
+    lower.includes("context window exceeded") ||
+    lower.includes("prompt is too long")
+  );
 }
 
 function appendToolDelta(accumulator, toolCall) {
@@ -808,13 +969,32 @@ async function runChatCompletion({ session, tools, signal, onContent }) {
   const useTools =
     tools.length > 0 &&
     !isLmStudioModelToolIncompatible(session, requestModelId);
-  const baseBody = {
+  const buildBody = () => ({
     model: requestModelId,
     messages: session.messages,
     stream: true,
-  };
+  });
 
   try {
+    const estimatedTokensBefore = estimateLmStudioMessagesTokens(
+      session.messages,
+    );
+    const prepared = prepareLmStudioMessagesForContextBudget(
+      session.messages,
+      session.contextLength,
+    );
+    if (
+      prepared.droppedMessages > 0 ||
+      prepared.estimatedTokens < estimatedTokensBefore
+    ) {
+      console.warn(
+        prepared.droppedMessages > 0
+          ? `${session.logPrefix} trimmed ${prepared.droppedMessages} old message(s) to fit ${session.contextLength ?? DEFAULT_CONTEXT_LENGTH} token context.`
+          : `${session.logPrefix} trimmed an oversized message to fit ${session.contextLength ?? DEFAULT_CONTEXT_LENGTH} token context.`,
+      );
+      session.messages = prepared.messages;
+    }
+    const baseBody = buildBody();
     return await streamOpenAiResponse({
       session,
       signal,
@@ -823,6 +1003,32 @@ async function runChatCompletion({ session, tools, signal, onContent }) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (isLmStudioContextOverflowError(message)) {
+      const prepared = prepareLmStudioMessagesForContextBudget(
+        session.messages,
+        session.contextLength,
+        { aggressive: true },
+      );
+      if (
+        prepared.droppedMessages > 0 ||
+        prepared.estimatedTokens <
+          estimateLmStudioMessagesTokens(session.messages)
+      ) {
+        console.warn(
+          `${session.logPrefix} LM Studio reported context overflow; retrying with tighter local context trim.`,
+        );
+        session.messages = prepared.messages;
+        const retryBody = buildBody();
+        return streamOpenAiResponse({
+          session,
+          signal,
+          onContent,
+          body: useTools
+            ? { ...retryBody, tools, tool_choice: "auto" }
+            : retryBody,
+        });
+      }
+    }
     if (
       !useTools ||
       error?.name === "AbortError" ||
@@ -839,7 +1045,12 @@ async function runChatCompletion({ session, tools, signal, onContent }) {
     // Emitted to the UI only (not pushed into session.messages), so it never
     // re-enters the model's context on later turns.
     onContent(TOOLS_UNSUPPORTED_NOTICE);
-    return streamOpenAiResponse({ session, signal, onContent, body: baseBody });
+    return streamOpenAiResponse({
+      session,
+      signal,
+      onContent,
+      body: buildBody(),
+    });
   }
 }
 
@@ -963,36 +1174,60 @@ async function executeToolCall(session, toolCall, handlers) {
 
 async function ensureModelLoaded(session, modelId = session.currentModelId) {
   if (!modelId) {
-    throw new Error("No LM Studio model selected. Download a model in LM Studio and select it from Seren.");
+    throw new Error(
+      "No LM Studio model selected. Download a model in LM Studio and select it from Seren.",
+    );
   }
-  if (session.loadedModelKey === modelId) return;
+  if (session.loadedModelKey === modelId && session.contextLength) return;
 
   const loadedBefore = await session.client.llm.listLoaded().catch(() => []);
   const wasLoaded = loadedBefore.some(
-    (model) => model.modelKey === modelId || model.path === modelId || model.identifier === modelId,
+    (model) =>
+      model.modelKey === modelId ||
+      model.path === modelId ||
+      model.identifier === modelId,
   );
-  const model = await session.client.llm.model(modelId);
+  const model = await session.client.llm.model(modelId, { verbose: false });
   session.loadedModelKey = modelId;
   session.loadedModelIdentifier = model.identifier;
   session.loadedBySession = !wasLoaded;
+  session.loadedModelHandle = model;
+  session.contextLength = await model
+    .getContextLength()
+    .catch(() => DEFAULT_CONTEXT_LENGTH);
 }
 
 async function sendPromptToLmStudio(session, prompt, context) {
   if (session.currentPrompt) {
-    throw new Error("Another prompt is already active for this LM Studio session.");
+    throw new Error(
+      "Another prompt is already active for this LM Studio session.",
+    );
   }
 
   session.status = "prompting";
-  session.emit("provider://session-status", buildSessionStatus(session, "prompting"));
+  session.emit(
+    "provider://session-status",
+    buildSessionStatus(session, "prompting"),
+  );
 
   const abortController = new AbortController();
   session.currentPrompt = { abortController };
 
   try {
     await ensureModelLoaded(session);
+    const builtPrompt = buildLmStudioPromptForContextBudget(
+      prompt,
+      context,
+      session.contextLength,
+    );
+    if (builtPrompt.trimmed) {
+      console.warn(
+        `${session.logPrefix} trimmed LM Studio prompt context before dispatch (${builtPrompt.estimatedTokens} estimated tokens).`,
+      );
+    }
     session.messages.push({
       role: "user",
-      content: buildPrompt(prompt, context),
+      content: builtPrompt.prompt,
     });
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
@@ -1118,7 +1353,9 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
       toolIncompatibleModelIds: new Set(),
       loadedModelKey: null,
       loadedModelIdentifier: null,
+      loadedModelHandle: null,
       loadedBySession: false,
+      contextLength: null,
       lmStudioVersion,
       logPrefix,
       emit,

@@ -7,7 +7,9 @@ import { describe, expect, it } from "vitest";
 import * as lmStudioRuntime from "../../bin/browser-local/lmstudio-runtime.mjs";
 
 const {
+  buildLmStudioPromptForContextBudget,
   buildLmsExecInvocation,
+  isLmStudioContextOverflowError,
   isLmStudioModelToolIncompatible,
   isLoopbackLmStudioBaseUrl,
   isToolIncompatibilityError,
@@ -17,13 +19,21 @@ const {
   normalizeLmStudioBaseUrl,
   normalizeOpenAiToolName,
   normalizeToolCalls,
+  prepareLmStudioMessagesForContextBudget,
   reasoningTextFromDelta,
 } = lmStudioRuntime as {
+  buildLmStudioPromptForContextBudget: (
+    prompt: string,
+    context: Array<Record<string, string>> | undefined,
+    contextLength: number,
+    options?: { aggressive?: boolean },
+  ) => { prompt: string; trimmed: boolean; estimatedTokens: number };
   buildLmsExecInvocation: (
     command: string,
     args: string[],
     platform?: NodeJS.Platform,
   ) => { command: string; args: string[] };
+  isLmStudioContextOverflowError: (message: unknown) => boolean;
   isLmStudioModelToolIncompatible: (
     session: {
       currentModelId?: string;
@@ -51,6 +61,15 @@ const {
       { id: string; function: { name: string; arguments: string } }
     >,
   ) => Array<{ function: { name: string } }>;
+  prepareLmStudioMessagesForContextBudget: (
+    messages: Array<{ role: string; content: string }>,
+    contextLength: number,
+    options?: { aggressive?: boolean },
+  ) => {
+    messages: Array<{ role: string; content: string }>;
+    droppedMessages: number;
+    estimatedTokens: number;
+  };
 };
 
 describe("LM Studio runtime helpers", () => {
@@ -132,6 +151,42 @@ describe("LM Studio runtime helpers", () => {
     expect(isToolIncompatibilityError("Model is still loading")).toBe(false);
     expect(isToolIncompatibilityError("")).toBe(false);
     expect(isToolIncompatibilityError(null)).toBe(false);
+  });
+
+  it("detects LM Studio context overflow without treating it as tool incompatibility", () => {
+    const error =
+      "The number of tokens to keep from the initial prompt is greater than the context length.";
+    expect(isLmStudioContextOverflowError(error)).toBe(true);
+    expect(isToolIncompatibilityError(error)).toBe(false);
+  });
+
+  it("trims oversized prompt context while preserving the current prompt tail", () => {
+    const bounded = buildLmStudioPromptForContextBudget(
+      "Answer the current request. KEEP_CURRENT_PROMPT_TAIL",
+      [{ type: "text", text: `old context ${"x".repeat(40_000)}` }],
+      4096,
+    );
+
+    expect(bounded.trimmed).toBe(true);
+    expect(bounded.prompt).toContain("trimmed older LM Studio context");
+    expect(bounded.prompt).toContain("KEEP_CURRENT_PROMPT_TAIL");
+    expect(bounded.estimatedTokens).toBeLessThanOrEqual(4096);
+  });
+
+  it("drops old LM Studio history at user boundaries when the loaded context is full", () => {
+    const prepared = prepareLmStudioMessagesForContextBudget(
+      [
+        { role: "user", content: `first ${"a".repeat(20_000)}` },
+        { role: "assistant", content: "old answer" },
+        { role: "user", content: "latest request" },
+      ],
+      4096,
+    );
+
+    expect(prepared.droppedMessages).toBe(2);
+    expect(prepared.messages).toEqual([
+      { role: "user", content: "latest request" },
+    ]);
   });
 
   it("scopes tool incompatibility to the selected LM Studio model", () => {
