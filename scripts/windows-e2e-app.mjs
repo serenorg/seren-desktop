@@ -339,7 +339,14 @@ async function completeGithubAuthorization(authUrl, label) {
     if (await login.isVisible({ timeout: 10_000 }).catch(() => false)) {
       await login.fill(GITHUB_USERNAME);
       await page.locator("#password, input[name='password']").first().fill(GITHUB_PASSWORD);
-      await page.getByRole("button", { name: /sign in/i }).click();
+      // Target the password form's submit, not a name regex: GitHub now also
+      // renders a "Sign in with a passkey" <button>, so /sign in/i matched two
+      // elements and tripped Playwright strict mode (#2527). The passkey is a
+      // type="button", so the submit selector can't collide with it.
+      await page
+        .locator("input[type='submit'][name='commit'], button[type='submit']")
+        .first()
+        .click();
     }
 
     const otpInput = page
@@ -378,10 +385,17 @@ async function completeGithubAuthorization(authUrl, label) {
     await page.waitForURL(/localhost:8787\/oauth\/callback|127\.0\.0\.1:8787\/oauth\/callback|github\.com\/settings\/connections/, {
       timeout: 120_000,
     }).catch(async () => {
-      await captureOAuthFailureArtifacts(page, label);
       const body = await page.locator("body").innerText({ timeout: 5_000 }).catch(() => "");
       throw new Error(`GitHub OAuth did not reach the Seren callback. URL=${page.url()} Body=${body.slice(0, 500)}`);
     });
+  } catch (error) {
+    // Any failure in the GitHub flow — login, 2FA, authorize, or callback —
+    // leaves a screenshot + page HTML in the work dir so the next github.com
+    // UI change is a quick fix, not a hand-pulled on-box log (#2527). The
+    // earlier login-button failure produced no artifact because capture was
+    // scoped only to the callback timeout.
+    await captureOAuthFailureArtifacts(page, label);
+    throw error;
   } finally {
     await browser.close();
   }
