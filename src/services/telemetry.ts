@@ -40,7 +40,7 @@ export interface EmployeeInterestTelemetryInput {
 }
 
 export interface EmployeeInterestTelemetryPayload {
-  selected_employee_slug: string | null;
+  employee_slug: string;
   event: string;
   source: string;
   occurred_at: string;
@@ -58,9 +58,10 @@ export function websiteApiUrl(path: string): string {
 export function buildEmployeeInterestTelemetryPayload(
   input: EmployeeInterestTelemetryInput,
   now = new Date(),
-): EmployeeInterestTelemetryPayload {
+): EmployeeInterestTelemetryPayload | null {
+  if (!input.employeeSlug) return null;
   return {
-    selected_employee_slug: input.employeeSlug ?? null,
+    employee_slug: input.employeeSlug,
     event: input.event ?? "interview-launched",
     source: input.source,
     occurred_at: now.toISOString(),
@@ -155,6 +156,8 @@ class TelemetryService {
     input: EmployeeInterestTelemetryInput,
   ): Promise<void> {
     if (!this.config.enabled) return;
+    const payload = buildEmployeeInterestTelemetryPayload(input);
+    if (!payload) return;
 
     try {
       const headers: Record<string, string> = {
@@ -168,7 +171,7 @@ class TelemetryService {
       await appFetch(websiteApiUrl("/api/telemetry/employee-interest"), {
         method: "POST",
         headers,
-        body: JSON.stringify(buildEmployeeInterestTelemetryPayload(input)),
+        body: JSON.stringify(payload),
       });
     } catch {
       // Product telemetry is best-effort and must never block the intake.

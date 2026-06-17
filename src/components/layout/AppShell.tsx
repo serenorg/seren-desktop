@@ -848,11 +848,6 @@ export const AppShell: Component<AppShellProps> = (props) => {
                   "desktop-interview-start",
                   "interview-started",
                 );
-                window.dispatchEvent(
-                  new CustomEvent("seren:start-employee-interview", {
-                    detail: { employee: employeeSlug },
-                  }),
-                );
               }}
             />
           </Show>

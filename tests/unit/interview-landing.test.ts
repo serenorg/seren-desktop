@@ -67,6 +67,18 @@ describe("AppShell interview landing wiring", () => {
     expect(appShell).not.toContain("persistInterviewLandingDismissed");
   });
 
+  it("submits the desktop intake instead of dispatching an unhandled queued event", () => {
+    const landing = readFileSync(
+      resolve("src/components/interview/InterviewLanding.tsx"),
+      "utf8",
+    );
+
+    expect(landing).toContain("submitGeneralEmployeeIntake");
+    expect(landing).toContain("EMPLOYEE_INTAKE_CALENDLY_URL");
+    expect(landing).not.toContain("Intake queued for Seren Employee customization");
+    expect(appShell).not.toContain("seren:start-employee-interview");
+  });
+
   it("listens for desktop interview deep links", () => {
     expect(appShell).toContain("listenForInterviewLaunch");
     expect(appShell).toContain("OPEN_INTERVIEW_LANDING_EVENT");

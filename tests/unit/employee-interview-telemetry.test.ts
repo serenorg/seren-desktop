@@ -20,7 +20,7 @@ describe("employee interview telemetry", () => {
         new Date("2026-06-17T01:00:00.000Z"),
       ),
     ).toEqual({
-      selected_employee_slug: "ciso",
+      employee_slug: "ciso",
       event: "interview-launched",
       source: "desktop-deep-link",
       occurred_at: "2026-06-17T01:00:00.000Z",
@@ -33,7 +33,7 @@ describe("employee interview telemetry", () => {
         employeeSlug: null,
         event: "role-selected",
         source: "desktop-role-selection",
-      }).selected_employee_slug,
+      }),
     ).toBeNull();
   });
 
@@ -49,6 +49,7 @@ describe("employee interview telemetry", () => {
 
     expect(app).not.toContain("interview-intent");
     expect(shell).not.toContain("interview-intent");
+    expect(shell).not.toContain("seren:start-employee-interview");
     expect(app).toContain("OPEN_INTERVIEW_LANDING_EVENT");
     expect(shell).toContain("recordEmployeeInterest");
   });
