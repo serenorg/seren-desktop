@@ -44,6 +44,16 @@ function parseJsonOrFallback(value: string, fallback: unknown): unknown {
   }
 }
 
+function stringifyJsonOrFallback(value: unknown, fallback: unknown): string {
+  const candidate = value ?? fallback;
+  try {
+    const json = JSON.stringify(candidate, null, 2);
+    return typeof json === "string" ? json : JSON.stringify(fallback, null, 2);
+  } catch {
+    return JSON.stringify(fallback, null, 2);
+  }
+}
+
 export const CatalogEntryModal: Component<CatalogEntryModalProps> = (props) => {
   const mode = (): Mode => (props.entry ? "edit" : "create");
 
@@ -64,11 +74,11 @@ export const CatalogEntryModal: Component<CatalogEntryModalProps> = (props) => {
     props.entry?.deprecated ?? false,
   );
   const [labelsText, setLabelsText] = createSignal(
-    props.entry ? JSON.stringify(props.entry.labels, null, 2) : "{}",
+    props.entry ? stringifyJsonOrFallback(props.entry.labels, {}) : "{}",
   );
   const [sourceText, setSourceText] = createSignal(
     props.entry
-      ? JSON.stringify(props.entry.source, null, 2)
+      ? stringifyJsonOrFallback(props.entry.source, { type: "inline" })
       : '{"type": "inline"}',
   );
 

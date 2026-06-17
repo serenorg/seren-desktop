@@ -28,6 +28,94 @@ export type CatalogListQuery = {
   includeDeprecated?: boolean;
 };
 
+const CATALOG_ENTRY_KINDS: CatalogEntryKind[] = [
+  "agent",
+  "skill",
+  "mcp_server",
+  "prompt",
+  "runtime_policy",
+];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function stringField(obj: Record<string, unknown>, key: string): string | null {
+  const value = obj[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function optionalStringField(
+  obj: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  const value = obj[key];
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return typeof value === "string" ? value : undefined;
+}
+
+function catalogKind(value: unknown): CatalogEntryKind | null {
+  return typeof value === "string" &&
+    CATALOG_ENTRY_KINDS.includes(value as CatalogEntryKind)
+    ? (value as CatalogEntryKind)
+    : null;
+}
+
+export function normalizeAgentCatalogEntry(
+  value: unknown,
+): CatalogEntry | null {
+  if (!isRecord(value)) return null;
+
+  const id = stringField(value, "id");
+  const name = stringField(value, "name");
+  const version = stringField(value, "version");
+  const kind = catalogKind(value.kind);
+
+  if (!id || !name || !version || !kind) {
+    return null;
+  }
+
+  return {
+    annotations: value.annotations ?? {},
+    category: optionalStringField(value, "category") ?? null,
+    created_at: stringField(value, "created_at") ?? "",
+    created_by_user_id: optionalStringField(value, "created_by_user_id"),
+    deprecated: value.deprecated === true,
+    description: typeof value.description === "string" ? value.description : "",
+    id,
+    kind,
+    labels: value.labels ?? {},
+    name,
+    namespace: stringField(value, "namespace") ?? "default",
+    organization_id: stringField(value, "organization_id") ?? "",
+    requires: isRecord(value.requires)
+      ? (value.requires as CatalogEntry["requires"])
+      : undefined,
+    source: value.source ?? { type: "inline" },
+    tag: optionalStringField(value, "tag") ?? null,
+    trust: value.trust ?? {},
+    updated_at: stringField(value, "updated_at") ?? "",
+    version,
+  };
+}
+
+export function normalizeAgentCatalogEntries(value: unknown): CatalogEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const normalized = normalizeAgentCatalogEntry(entry);
+    return normalized ? [normalized] : [];
+  });
+}
+
+function requireCatalogEntry(value: unknown, action: string): CatalogEntry {
+  const entry = normalizeAgentCatalogEntry(value);
+  if (!entry) {
+    throw new Error(`Catalog ${action} response did not include a valid entry`);
+  }
+  return entry;
+}
+
 export const agentCatalog = {
   async list(
     organizationId: string,
@@ -49,7 +137,7 @@ export const agentCatalog = {
         `Failed to list catalog entries: ${formatApiError(error, response, "")}`,
       );
     }
-    return data?.data?.data ?? [];
+    return normalizeAgentCatalogEntries(data?.data?.data);
   },
 
   async get(organizationId: string, entryId: string): Promise<CatalogEntry> {
@@ -62,10 +150,7 @@ export const agentCatalog = {
         `Failed to load catalog entry: ${formatApiError(error, response, "")}`,
       );
     }
-    if (!data?.data) {
-      throw new Error("Catalog entry response did not include a body");
-    }
-    return data.data;
+    return requireCatalogEntry(data?.data, "load");
   },
 
   async resolveTag(
@@ -88,10 +173,7 @@ export const agentCatalog = {
         `Failed to resolve catalog tag: ${formatApiError(error, response, "")}`,
       );
     }
-    if (!data?.data) {
-      throw new Error("Catalog tag-resolution response did not include a body");
-    }
-    return data.data;
+    return requireCatalogEntry(data?.data, "tag-resolution");
   },
 
   async create(
@@ -108,10 +190,7 @@ export const agentCatalog = {
         `Failed to create catalog entry: ${formatApiError(error, response, "")}`,
       );
     }
-    if (!data?.data) {
-      throw new Error("Catalog create response did not include a body");
-    }
-    return data.data;
+    return requireCatalogEntry(data?.data, "create");
   },
 
   async update(
@@ -129,10 +208,7 @@ export const agentCatalog = {
         `Failed to update catalog entry: ${formatApiError(error, response, "")}`,
       );
     }
-    if (!data?.data) {
-      throw new Error("Catalog update response did not include a body");
-    }
-    return data.data;
+    return requireCatalogEntry(data?.data, "update");
   },
 
   async delete(organizationId: string, entryId: string): Promise<void> {
