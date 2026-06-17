@@ -1,5 +1,6 @@
 import { randomUUID, createHmac } from "node:crypto";
 import { spawn } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "@playwright/test";
@@ -306,7 +307,28 @@ function totp(secret, timestamp = Date.now()) {
   return String(code % 1_000_000).padStart(6, "0");
 }
 
-async function completeGithubAuthorization(authUrl) {
+// Persist a screenshot and page HTML when the GitHub OAuth flow stalls. The
+// SSM transport only echoes the run log, so without an on-disk artifact a
+// GitHub UI change surfaces as an opaque timeout (#2509). Files land in the
+// harness work dir and are retrievable from the e2e box.
+async function captureOAuthFailureArtifacts(page, label) {
+  const safe = label.replace(/[^a-z0-9-]/gi, "_");
+  const base = `github-oauth-failure-${safe}`;
+  try {
+    await page.screenshot({ path: `${base}.png`, fullPage: true });
+    logStage(`captured OAuth failure screenshot ${base}.png`);
+  } catch (error) {
+    logStage(`could not capture OAuth screenshot: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  try {
+    await writeFile(`${base}.html`, await page.content(), "utf8");
+    logStage(`captured OAuth failure HTML ${base}.html`);
+  } catch (error) {
+    logStage(`could not capture OAuth HTML: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function completeGithubAuthorization(authUrl, label) {
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -320,14 +342,29 @@ async function completeGithubAuthorization(authUrl) {
       await page.getByRole("button", { name: /sign in/i }).click();
     }
 
-    const otpInput = page.locator("input[name='otp'], input#app_otp, input[autocomplete='one-time-code']").first();
-    if (await otpInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    const otpInput = page
+      .locator(
+        "input[autocomplete='one-time-code'], input[name='otp'], input[name='app_otp'], input#app_totp, input#otp, input[inputmode='numeric']",
+      )
+      .first();
+    if (await otpInput.isVisible({ timeout: 20_000 }).catch(() => false)) {
       assert(
         GITHUB_TOTP_SECRET,
         "GitHub requested two-factor auth but SEREN_E2E_GITHUB_TOTP_SECRET is not configured",
       );
       await otpInput.fill(totp(GITHUB_TOTP_SECRET));
-      await page.keyboard.press("Enter");
+      // GitHub's 2FA app page renders an explicit Verify button and does not
+      // reliably submit on Enter (#2509); click it when present, else Enter.
+      const verifyButton = page
+        .getByRole("button", { name: /verify|confirm|continue|sign in/i })
+        .or(page.locator("button[type='submit']"))
+        .first();
+      if (await verifyButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await verifyButton.click();
+      } else {
+        await page.keyboard.press("Enter");
+      }
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
     }
 
     const authorizeButton = page
@@ -341,6 +378,7 @@ async function completeGithubAuthorization(authUrl) {
     await page.waitForURL(/localhost:8787\/oauth\/callback|127\.0\.0\.1:8787\/oauth\/callback|github\.com\/settings\/connections/, {
       timeout: 120_000,
     }).catch(async () => {
+      await captureOAuthFailureArtifacts(page, label);
       const body = await page.locator("body").innerText({ timeout: 5_000 }).catch(() => "");
       throw new Error(`GitHub OAuth did not reach the Seren callback. URL=${page.url()} Body=${body.slice(0, 500)}`);
     });
@@ -356,7 +394,7 @@ async function exerciseOAuthReconnect(page) {
 
   for (const phase of ["connect", "reconnect"]) {
     const authUrl = await startGatewayOAuth(page, token);
-    await completeGithubAuthorization(authUrl);
+    await completeGithubAuthorization(authUrl, phase);
     const connection = await assertOAuthConnected(token);
     console.log(`[windows-e2e] GitHub OAuth ${phase} valid for ${connection.provider_email ?? connection.provider_slug}`);
     await revokeOAuthConnection(token);
