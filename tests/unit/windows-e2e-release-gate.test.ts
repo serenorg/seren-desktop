@@ -333,6 +333,11 @@ describe("Windows production e2e release gate", () => {
 
     expect(releaseWorkflow).toContain("windows-e2e-logs.zip");
     expect(releaseWorkflow).toContain("Bundling Windows app harness logs");
+    expect(releaseWorkflow).toContain("logs_upload_url");
+    expect(releaseWorkflow).toContain("generate_presigned_url");
+    expect(releaseWorkflow).toContain("put_object");
+    expect(releaseWorkflow).toContain("Invoke-WebRequest -Uri $logsUploadUrl -Method Put");
+    expect(releaseWorkflow).not.toContain("aws s3 cp $logBundle $logsS3Uri");
     expect(releaseWorkflow).toContain("Download Windows e2e log bundle");
     expect(releaseWorkflow).toContain("Upload Windows e2e logs");
     expect(releaseWorkflow).toContain("windows-app-e2e-logs");
