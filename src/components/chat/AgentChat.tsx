@@ -2013,7 +2013,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       </Show>
 
       {/* Input Area */}
-      <Show when={hasSession()}>
+      {/* Gate on the active agent thread, not on a live session, so the
+          composer paints in the same frame as the hydrated history instead of
+          waiting for the async spawn. sendMessage()'s cold-start path spawns
+          the session on first send when none exists yet (#1631, #2517). */}
+      <Show when={activeAgentThread()}>
         <div class="shrink-0 border-t border-surface-2 bg-surface-1">
           <form
             class="chat-composer-form flex flex-col gap-2 px-4 pb-4 pt-1.5"
@@ -2044,7 +2048,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 }}
               />
               <ResizableTextarea
-                workspaceDefaultFocus={hasSession()}
+                workspaceDefaultFocus={!!activeAgentThread()}
                 ref={(el) => (inputRef = el)}
                 value={input() ?? ""}
                 placeholder={
@@ -2062,7 +2066,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 onDragOver={handleSkillDragOver}
                 onDrop={(event) => void handleSkillDrop(event)}
                 onKeyDown={handleKeyDown}
-                disabled={!hasSession()}
               />
             </div>
             <Show when={commandStatus()}>
@@ -2168,11 +2171,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     <button
                       type="submit"
                       class="px-4 py-1.5 bg-success text-white rounded-md text-[13px] font-medium hover:bg-emerald-700 transition-colors disabled:bg-surface-2 disabled:text-muted-foreground disabled:cursor-not-allowed"
-                      disabled={
-                        !hasSession() ||
-                        !(input() ?? "").trim() ||
-                        isProcessingDocs()
-                      }
+                      disabled={!(input() ?? "").trim() || isProcessingDocs()}
                     >
                       Send
                     </button>
