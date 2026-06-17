@@ -1,19 +1,30 @@
 // ABOUTME: Regression guard for removing the retired desktop bounty UI.
 // ABOUTME: Keeps the interview landing as the main replacement surface.
 
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+
+function sourceFiles(root: string): string[] {
+  return readdirSync(root).flatMap((entry) => {
+    const path = join(root, entry);
+    const stat = statSync(path);
+
+    if (stat.isDirectory()) {
+      return sourceFiles(path);
+    }
+
+    return stat.isFile() ? [path] : [];
+  });
+}
 
 describe("retired desktop bounty UI", () => {
   it("has no remaining source references", () => {
-    const result = spawnSync("rg", ["-i", "bounty", "src"], {
-      encoding: "utf8",
-    });
+    const matches = sourceFiles(resolve("src")).filter((path) =>
+      readFileSync(path, "utf8").toLowerCase().includes("bounty"),
+    );
 
-    expect(result.status).toBe(1);
-    expect(result.stdout.trim()).toBe("");
+    expect(matches).toEqual([]);
   });
 
   it("keeps the interview landing wired as the replacement main surface", () => {
