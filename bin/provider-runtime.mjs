@@ -215,6 +215,15 @@ function startServer(config) {
     });
   });
 
+  server.on("error", (error) => {
+    console.error(
+      `[provider-runtime] listen failed on ${config.host}:${config.port}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    process.exit(1);
+  });
+
   server.listen(config.port, config.host, () => {
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : config.port;

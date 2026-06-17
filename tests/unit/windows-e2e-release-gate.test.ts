@@ -285,6 +285,9 @@ describe("Windows production e2e release gate", () => {
   it("bounds provider runtime waits and preserves diagnostic breadcrumbs (#2475)", () => {
     for (const required of [
       "PROVIDER_CONFIG_TIMEOUT_MS",
+      "PROVIDER_CONFIG_REFRESH_TIMEOUT_MS",
+      "PROVIDER_HEALTH_TIMEOUT_MS",
+      "PROVIDER_HEALTH_REQUEST_TIMEOUT_MS",
       "PROVIDER_WS_OPEN_TIMEOUT_MS",
       "PROVIDER_RPC_TIMEOUT_MS",
       "PROVIDER_ENSURE_CLI_TIMEOUT_MS",
@@ -301,6 +304,38 @@ describe("Windows production e2e release gate", () => {
     ]) {
       expect(probe).toContain(required);
     }
+  });
+
+  it("refreshes provider-runtime config while waiting for health (#2539)", () => {
+    expect(probe).toContain("resolveProviderRuntimeConfig");
+    expect(probe).toContain("fetchProviderRuntimeHealth");
+    expect(probe).toContain("refreshProviderRuntimeConfig");
+    expect(probe).toContain("Provider runtime health miss");
+    expect(probe).toContain("provider runtime config refresh");
+    expect(probe).toContain("connectProviderRuntime(page, config)");
+
+    const connectStart = probe.indexOf("async function connectProviderRuntime");
+    expect(connectStart).toBeGreaterThanOrEqual(0);
+    const connectBody = probe.slice(connectStart, probe.indexOf("function assistantText"));
+    expect(connectBody.indexOf("fetchProviderRuntimeHealth")).toBeLessThan(
+      connectBody.indexOf("refreshProviderRuntimeConfig"),
+    );
+  });
+
+  it("uploads complete Windows e2e probe and runtime logs (#2539)", () => {
+    expect(runner).toContain("windows-e2e-logs");
+    expect(runner).toContain("windows-e2e-probe.stdout.log");
+    expect(runner).toContain("windows-e2e-probe.stderr.log");
+    expect(runner).toContain("RedirectStandardOutput");
+    expect(runner).toContain("RedirectStandardError");
+    expect(runner).toContain("Copy-E2EAppLogs");
+    expect(runner).toContain("com.serendb.desktop\\logs");
+
+    expect(releaseWorkflow).toContain("windows-e2e-logs.zip");
+    expect(releaseWorkflow).toContain("Bundling Windows app harness logs");
+    expect(releaseWorkflow).toContain("Download Windows e2e log bundle");
+    expect(releaseWorkflow).toContain("Upload Windows e2e logs");
+    expect(releaseWorkflow).toContain("windows-app-e2e-logs");
   });
 
   it("provisions agent CLIs before checking release-gate availability (#2481)", () => {

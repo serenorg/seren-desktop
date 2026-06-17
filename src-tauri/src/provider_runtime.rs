@@ -44,6 +44,7 @@ struct ProviderRuntimeProcess {
 pub struct ProviderRuntimeState {
     process: Mutex<Option<ProviderRuntimeProcess>>,
     monitor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    last_config: Mutex<Option<ProviderRuntimeConfig>>,
 }
 
 impl ProviderRuntimeState {
@@ -51,6 +52,7 @@ impl ProviderRuntimeState {
         Self {
             process: Mutex::new(None),
             monitor_handle: Mutex::new(None),
+            last_config: Mutex::new(None),
         }
     }
 
@@ -66,11 +68,23 @@ impl ProviderRuntimeState {
             return Err("Update in progress — provider runtime spawn refused".to_string());
         }
 
+        let mut preferred_config = self.last_config.lock().await.clone();
         let mut guard = self.process.lock().await;
 
         if let Some(process) = guard.as_mut() {
+            preferred_config = Some(process.config.clone());
             match process.child.try_wait() {
-                Ok(None) => return Ok(process.config.clone()),
+                Ok(None) => {
+                    if check_provider_runtime_health_once(&process.config).await {
+                        return Ok(process.config.clone());
+                    }
+                    log::warn!(
+                        "[ProviderRuntime] Existing process pid={} failed cached health check; restarting on pinned port {}",
+                        process.child.id().unwrap_or(0),
+                        process.config.port
+                    );
+                    let _ = process.child.start_kill();
+                }
                 Ok(Some(status)) => {
                     log::warn!(
                         "[ProviderRuntime] Existing process exited before reuse: {}",
@@ -89,7 +103,7 @@ impl ProviderRuntimeState {
         }
 
         let host = "127.0.0.1".to_string();
-        let token = generate_auth_token();
+        let config = startup_config_for_host(&host, preferred_config.as_ref())?;
         let node_bin = resolve_node_binary(app);
         let runtime_entry = find_provider_runtime_mjs()?;
 
@@ -100,16 +114,14 @@ impl ProviderRuntimeState {
         let mut attempt_errors: Vec<String> = Vec::with_capacity(STARTUP_ATTEMPT_BUDGETS.len());
         for (attempt_idx, deadline) in STARTUP_ATTEMPT_BUDGETS.iter().enumerate() {
             let attempt_num = attempt_idx + 1;
-            let port = find_available_port()?;
-            let config = ProviderRuntimeConfig {
-                api_base_url: format!("http://{}:{}", host, port),
-                ws_base_url: format!("ws://{}:{}", host, port),
-                host: host.clone(),
-                port,
-                token: token.clone(),
-            };
 
-            let mut child = spawn_node_process(&node_bin, &runtime_entry, &host, port, &token)?;
+            let mut child = spawn_node_process(
+                &node_bin,
+                &runtime_entry,
+                &config.host,
+                config.port,
+                &config.token,
+            )?;
 
             log::info!(
                 "[ProviderRuntime] Attempt {}/{} — spawned node={} pid={} port={} deadline={}s",
@@ -117,7 +129,7 @@ impl ProviderRuntimeState {
                 STARTUP_ATTEMPT_BUDGETS.len(),
                 node_bin.display(),
                 child.id().unwrap_or(0),
-                port,
+                config.port,
                 deadline.as_secs(),
             );
 
@@ -130,6 +142,7 @@ impl ProviderRuntimeState {
                         config: config.clone(),
                     });
                     drop(guard);
+                    *self.last_config.lock().await = Some(config.clone());
 
                     // Abort any previous crash monitor before starting a new one
                     if let Some(old_handle) = self.monitor_handle.lock().await.take() {
@@ -154,7 +167,7 @@ impl ProviderRuntimeState {
                         STARTUP_ATTEMPT_BUDGETS.len(),
                         attempt_err,
                         if attempt_num < STARTUP_ATTEMPT_BUDGETS.len() {
-                            "retrying with fresh process"
+                            "retrying on pinned port"
                         } else {
                             "giving up"
                         },
@@ -255,6 +268,34 @@ fn find_available_port() -> Result<u16, String> {
         .local_addr()
         .map(|addr| addr.port())
         .map_err(|err| format!("Failed to read provider runtime port: {}", err))
+}
+
+fn build_provider_runtime_config(host: String, port: u16, token: String) -> ProviderRuntimeConfig {
+    ProviderRuntimeConfig {
+        api_base_url: format!("http://{}:{}", host, port),
+        ws_base_url: format!("ws://{}:{}", host, port),
+        host,
+        port,
+        token,
+    }
+}
+
+fn startup_config_for_host(
+    host: &str,
+    preferred: Option<&ProviderRuntimeConfig>,
+) -> Result<ProviderRuntimeConfig, String> {
+    match preferred {
+        Some(config) => Ok(build_provider_runtime_config(
+            host.to_string(),
+            config.port,
+            config.token.clone(),
+        )),
+        None => Ok(build_provider_runtime_config(
+            host.to_string(),
+            find_available_port()?,
+            generate_auth_token(),
+        )),
+    }
 }
 
 fn generate_auth_token() -> String {
@@ -457,6 +498,23 @@ async fn wait_for_provider_runtime_with_deadline(
         }
 
         tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+}
+
+async fn check_provider_runtime_health_once(config: &ProviderRuntimeConfig) -> bool {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(750))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let health_url = format!("{}/__seren/health", config.api_base_url);
+    match client.get(&health_url).send().await {
+        Ok(response) if response.status().is_success() => response
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|body| body.get("ok").and_then(|value| value.as_bool()))
+            .unwrap_or(false),
+        _ => false,
     }
 }
 
@@ -811,6 +869,31 @@ mod tests {
             api_base_url: "http://127.0.0.1:1".to_string(),
             ws_base_url: "ws://127.0.0.1:1".to_string(),
         }
+    }
+
+    #[test]
+    fn startup_config_reuses_existing_port_and_token() {
+        let existing = build_provider_runtime_config(
+            "127.0.0.1".to_string(),
+            51908,
+            "existing-token".to_string(),
+        );
+
+        let reused = startup_config_for_host("127.0.0.1", Some(&existing)).expect("reused config");
+
+        assert_eq!(reused.port, existing.port);
+        assert_eq!(reused.token, existing.token);
+        assert_eq!(reused.api_base_url, "http://127.0.0.1:51908");
+        assert_eq!(reused.ws_base_url, "ws://127.0.0.1:51908");
+    }
+
+    #[tokio::test]
+    async fn cached_health_check_rejects_dead_port() {
+        let config = dummy_config();
+        assert!(
+            !check_provider_runtime_health_once(&config).await,
+            "a cached config for a dead port must not be reused"
+        );
     }
 
     /// GH #1587: a child that exits (e.g. SIGKILL, signal 9) before binding
