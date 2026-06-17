@@ -1543,6 +1543,15 @@ interface AgentState {
   sessions: Record<string, ActiveSession>;
   /** Per-thread runtime state keyed by conversationId (#1631). */
   threadStates: Record<string, ThreadRuntimeState>;
+  /**
+   * Durable transcript fallback keyed by conversationId, hydrated from the
+   * SQLite `messages` table when a thread is viewed without a live session.
+   * Lets an agent thread render its history on cold start, after an
+   * idle-reclaim, or mid-spawn instead of showing blank. Live
+   * `session.messages` take precedence once a session owns the transcript.
+   * #2499.
+   */
+  persistedMessages: Record<string, AgentMessage[]>;
   /** Currently focused session ID */
   activeSessionId: string | null;
   /** Selected agent type for new sessions */
@@ -1609,6 +1618,7 @@ const [state, setState] = createStore<AgentState>({
   availableAgents: [],
   sessions: {},
   threadStates: {},
+  persistedMessages: {},
   activeSessionId: null,
   selectedAgentType: "claude-code",
   recentAgentConversations: [],
@@ -1991,7 +2001,38 @@ export const agentStore = {
     const session = Object.values(state.sessions).find(
       (s) => s.conversationId === conversationId,
     );
-    return session?.messages ?? [];
+    if (session && session.messages.length > 0) {
+      return session.messages;
+    }
+    // No live session yet (cold start, idle-reclaim, mid-spawn) or it has not
+    // hydrated: fall back to the durable transcript so the thread never renders
+    // blank. Populated by hydratePersistedHistory. #2499.
+    return state.persistedMessages[conversationId] ?? [];
+  },
+
+  /**
+   * Load this thread's durable transcript from SQLite into the
+   * `persistedMessages` fallback when no live session owns it, so an agent
+   * thread renders its history immediately instead of blank. Reads fresh on
+   * every call where no session has messages, so the fallback cannot go stale
+   * after an idle-reclaim. No-op (and drops any stale fallback) once a live
+   * session has messages — that source is authoritative. #2499.
+   */
+  async hydratePersistedHistory(conversationId: string): Promise<void> {
+    const ownsTranscript = (id: string): boolean => {
+      const session = this.getSessionForConversation(id);
+      return !!session && session.messages.length > 0;
+    };
+    if (ownsTranscript(conversationId)) {
+      if (state.persistedMessages[conversationId]) {
+        setState("persistedMessages", conversationId, undefined as never);
+      }
+      return;
+    }
+    const { messages } = await loadPersistedAgentHistory(conversationId);
+    // A session may have hydrated while awaiting the read; don't clobber it.
+    if (ownsTranscript(conversationId)) return;
+    setState("persistedMessages", conversationId, messages);
   },
 
   /**
