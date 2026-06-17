@@ -25,11 +25,16 @@ const LMSTUDIO_AGENT_TYPE = "lmstudio";
 const MAX_TOOL_ITERATIONS = 25;
 const DEFAULT_CONTEXT_LENGTH = 4096;
 const RESERVED_OUTPUT_TOKENS = 1024;
+const REQUEST_INPUT_OVERHEAD_TOKENS = 128;
+const MIN_COMPLETION_TOKENS = 128;
 const CONTEXT_SAFETY_FRACTION = 0.82;
 const AGGRESSIVE_CONTEXT_SAFETY_FRACTION = 0.58;
 const MIN_INPUT_BUDGET_TOKENS = 512;
+const TOOL_SCHEMA_TOKEN_SAFETY_MULTIPLIER = 1.35;
 const TOOLS_UNSUPPORTED_NOTICE =
   "_This LM Studio model doesn't support tool calls, so local file access and Seren tools are off for this model._\n\n";
+const TOOLS_CONTEXT_OVERFLOW_NOTICE =
+  "_This LM Studio request exceeded the loaded context with tools enabled, so this turn is retrying without tools._\n\n";
 const CONTEXT_TRIM_NOTICE =
   "[Seren trimmed older LM Studio context so this request fits the loaded model context window.]";
 
@@ -624,17 +629,34 @@ function estimateLmStudioTokens(value) {
   return Math.ceil(String(value ?? "").length / 4);
 }
 
-function inputBudgetForContextLength(contextLength, { aggressive = false } = {}) {
-  const resolvedContextLength =
-    Number.isFinite(contextLength) && contextLength > 0
-      ? Math.floor(contextLength)
-      : DEFAULT_CONTEXT_LENGTH;
+function resolvedLmStudioContextLength(contextLength) {
+  return Number.isFinite(contextLength) && contextLength > 0
+    ? Math.floor(contextLength)
+    : DEFAULT_CONTEXT_LENGTH;
+}
+
+function totalInputBudgetForContextLength(
+  contextLength,
+  { aggressive = false } = {},
+) {
+  const resolvedContextLength = resolvedLmStudioContextLength(contextLength);
   const fraction = aggressive
     ? AGGRESSIVE_CONTEXT_SAFETY_FRACTION
     : CONTEXT_SAFETY_FRACTION;
   return Math.max(
     MIN_INPUT_BUDGET_TOKENS,
     Math.floor(resolvedContextLength * fraction) - RESERVED_OUTPUT_TOKENS,
+  );
+}
+
+function inputBudgetForContextLength(
+  contextLength,
+  { aggressive = false, reservedInputTokens = 0 } = {},
+) {
+  return Math.max(
+    MIN_INPUT_BUDGET_TOKENS,
+    totalInputBudgetForContextLength(contextLength, { aggressive }) -
+      Math.max(0, Math.ceil(reservedInputTokens)),
   );
 }
 
@@ -719,6 +741,64 @@ function estimateLmStudioMessagesTokens(messages) {
   );
 }
 
+function estimateLmStudioToolTokens(tool) {
+  return (
+    Math.ceil(
+      estimateLmStudioTokens(JSON.stringify(tool ?? {})) *
+        TOOL_SCHEMA_TOKEN_SAFETY_MULTIPLIER,
+    ) + 12
+  );
+}
+
+function maxCompletionTokensForContextLength(contextLength, estimatedInputTokens) {
+  const resolvedContextLength = resolvedLmStudioContextLength(contextLength);
+  const available =
+    Math.floor(resolvedContextLength * 0.94) -
+    Math.max(0, Math.ceil(estimatedInputTokens));
+  if (available <= 0) return 1;
+  if (available < MIN_COMPLETION_TOKENS) return available;
+  return Math.min(RESERVED_OUTPUT_TOKENS, available);
+}
+
+function selectLmStudioToolsForContextBudget(
+  tools,
+  messages,
+  contextLength,
+  options = {},
+) {
+  const availableTools = Array.isArray(tools) ? tools : [];
+  const messageTokens = estimateLmStudioMessagesTokens(
+    Array.isArray(messages) ? messages : [],
+  );
+  const availableToolBudget =
+    totalInputBudgetForContextLength(contextLength, options) -
+    messageTokens -
+    REQUEST_INPUT_OVERHEAD_TOKENS;
+  const selected = [];
+  let estimatedTokens = 0;
+
+  if (availableToolBudget <= 0) {
+    return {
+      tools: selected,
+      droppedTools: availableTools.length,
+      estimatedTokens,
+    };
+  }
+
+  for (const tool of availableTools) {
+    const toolTokens = estimateLmStudioToolTokens(tool);
+    if (estimatedTokens + toolTokens > availableToolBudget) continue;
+    selected.push(tool);
+    estimatedTokens += toolTokens;
+  }
+
+  return {
+    tools: selected,
+    droppedTools: availableTools.length - selected.length,
+    estimatedTokens,
+  };
+}
+
 export function prepareLmStudioMessagesForContextBudget(
   messages,
   contextLength,
@@ -771,6 +851,73 @@ export function prepareLmStudioMessagesForContextBudget(
     messages: prepared,
     droppedMessages,
     estimatedTokens: estimateLmStudioMessagesTokens(prepared),
+  };
+}
+
+export function buildLmStudioChatCompletionBodyForContextBudget({
+  model,
+  messages,
+  tools = [],
+  contextLength,
+  useTools = true,
+  options = {},
+}) {
+  const availableTools = useTools && Array.isArray(tools) ? tools : [];
+  let selectedTools = selectLmStudioToolsForContextBudget(
+    availableTools,
+    messages,
+    contextLength,
+    options,
+  );
+  let prepared = prepareLmStudioMessagesForContextBudget(
+    messages,
+    contextLength,
+    {
+      ...options,
+      reservedInputTokens:
+        selectedTools.estimatedTokens + REQUEST_INPUT_OVERHEAD_TOKENS,
+    },
+  );
+
+  selectedTools = selectLmStudioToolsForContextBudget(
+    availableTools,
+    prepared.messages,
+    contextLength,
+    options,
+  );
+  prepared = prepareLmStudioMessagesForContextBudget(messages, contextLength, {
+    ...options,
+    reservedInputTokens:
+      selectedTools.estimatedTokens + REQUEST_INPUT_OVERHEAD_TOKENS,
+  });
+
+  const estimatedInputTokens =
+    prepared.estimatedTokens +
+    selectedTools.estimatedTokens +
+    REQUEST_INPUT_OVERHEAD_TOKENS;
+  const maxTokens = maxCompletionTokensForContextLength(
+    contextLength,
+    estimatedInputTokens,
+  );
+  const baseBody = {
+    model,
+    messages: prepared.messages,
+    stream: true,
+    max_tokens: maxTokens,
+  };
+
+  return {
+    body:
+      selectedTools.tools.length > 0
+        ? { ...baseBody, tools: selectedTools.tools, tool_choice: "auto" }
+        : baseBody,
+    messages: prepared.messages,
+    droppedMessages: prepared.droppedMessages,
+    estimatedMessageTokens: prepared.estimatedTokens,
+    estimatedToolTokens: selectedTools.estimatedTokens,
+    estimatedInputTokens,
+    droppedTools: selectedTools.droppedTools,
+    maxTokens,
   };
 }
 
@@ -969,63 +1116,93 @@ async function runChatCompletion({ session, tools, signal, onContent }) {
   const useTools =
     tools.length > 0 &&
     !isLmStudioModelToolIncompatible(session, requestModelId);
-  const buildBody = () => ({
-    model: requestModelId,
-    messages: session.messages,
-    stream: true,
-  });
-
-  try {
-    const estimatedTokensBefore = estimateLmStudioMessagesTokens(
-      session.messages,
-    );
-    const prepared = prepareLmStudioMessagesForContextBudget(
-      session.messages,
-      session.contextLength,
-    );
+  const buildPreparedBody = (options = {}, forceNoTools = false) =>
+    buildLmStudioChatCompletionBodyForContextBudget({
+      model: requestModelId,
+      messages: session.messages,
+      tools,
+      contextLength: session.contextLength,
+      useTools: useTools && !forceNoTools,
+      options,
+    });
+  const applyPreparedBody = (prepared) => {
+    if (prepared.messages !== session.messages) {
+      session.messages = prepared.messages;
+    }
+    return prepared.body;
+  };
+  const logPreparedBodyTrim = (prepared, estimatedTokensBefore) => {
     if (
       prepared.droppedMessages > 0 ||
-      prepared.estimatedTokens < estimatedTokensBefore
+      prepared.estimatedMessageTokens < estimatedTokensBefore
     ) {
       console.warn(
         prepared.droppedMessages > 0
           ? `${session.logPrefix} trimmed ${prepared.droppedMessages} old message(s) to fit ${session.contextLength ?? DEFAULT_CONTEXT_LENGTH} token context.`
           : `${session.logPrefix} trimmed an oversized message to fit ${session.contextLength ?? DEFAULT_CONTEXT_LENGTH} token context.`,
       );
-      session.messages = prepared.messages;
     }
-    const baseBody = buildBody();
+    if (useTools && prepared.droppedTools > 0) {
+      console.warn(
+        `${session.logPrefix} omitted ${prepared.droppedTools} LM Studio tool definition(s) to fit ${session.contextLength ?? DEFAULT_CONTEXT_LENGTH} token context.`,
+      );
+    }
+  };
+
+  try {
+    const estimatedTokensBefore = estimateLmStudioMessagesTokens(
+      session.messages,
+    );
+    const prepared = buildPreparedBody();
+    logPreparedBodyTrim(prepared, estimatedTokensBefore);
+    const body = applyPreparedBody(prepared);
     return await streamOpenAiResponse({
       session,
       signal,
       onContent,
-      body: useTools ? { ...baseBody, tools, tool_choice: "auto" } : baseBody,
+      body,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (isLmStudioContextOverflowError(message)) {
-      const prepared = prepareLmStudioMessagesForContextBudget(
+      const estimatedTokensBefore = estimateLmStudioMessagesTokens(
         session.messages,
-        session.contextLength,
-        { aggressive: true },
       );
-      if (
-        prepared.droppedMessages > 0 ||
-        prepared.estimatedTokens <
-          estimateLmStudioMessagesTokens(session.messages)
-      ) {
+      const prepared = buildPreparedBody({ aggressive: true });
+      if (prepared.droppedMessages > 0 || prepared.droppedTools > 0) {
         console.warn(
           `${session.logPrefix} LM Studio reported context overflow; retrying with tighter local context trim.`,
         );
-        session.messages = prepared.messages;
-        const retryBody = buildBody();
+        logPreparedBodyTrim(prepared, estimatedTokensBefore);
+        const retryBody = applyPreparedBody(prepared);
+        try {
+          return await streamOpenAiResponse({
+            session,
+            signal,
+            onContent,
+            body: retryBody,
+          });
+        } catch (retryError) {
+          const retryMessage =
+            retryError instanceof Error ? retryError.message : String(retryError);
+          if (!useTools || !isLmStudioContextOverflowError(retryMessage)) {
+            throw retryError;
+          }
+        }
+      }
+      if (useTools) {
+        console.warn(
+          `${session.logPrefix} LM Studio context overflow persisted with tools; retrying this turn without tools.`,
+        );
+        onContent(TOOLS_CONTEXT_OVERFLOW_NOTICE);
+        const noToolBody = applyPreparedBody(
+          buildPreparedBody({ aggressive: true }, true),
+        );
         return streamOpenAiResponse({
           session,
           signal,
           onContent,
-          body: useTools
-            ? { ...retryBody, tools, tool_choice: "auto" }
-            : retryBody,
+          body: noToolBody,
         });
       }
     }
@@ -1049,7 +1226,7 @@ async function runChatCompletion({ session, tools, signal, onContent }) {
       session,
       signal,
       onContent,
-      body: buildBody(),
+      body: applyPreparedBody(buildPreparedBody({}, true)),
     });
   }
 }
