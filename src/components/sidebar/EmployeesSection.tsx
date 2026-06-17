@@ -287,6 +287,7 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
   const handleSelect = (id: string) => {
     threadStore.setActiveThread(null);
     setActiveId(id);
+    window.dispatchEvent(new CustomEvent("seren:close-bounty-detail"));
     window.dispatchEvent(
       new CustomEvent<EmployeeDetailEventDetail>(OPEN_EMPLOYEE_DETAIL_EVENT, {
         detail: { employeeId: id },

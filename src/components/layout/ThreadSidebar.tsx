@@ -13,6 +13,7 @@ import {
   Switch,
 } from "solid-js";
 import { providerGlyph } from "@/components/chat/ProviderIcon";
+import { BountiesSection } from "@/components/sidebar/BountiesSection";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import {
   type EmployeeDetailEventDetail,
@@ -842,6 +843,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             onOpenCatalog={props.onOpenCatalog}
             onOpenInbox={props.onOpenInbox}
           />
+          <BountiesSection />
           <Show
             when={threadStore.groupedThreads.length > 0}
             fallback={
