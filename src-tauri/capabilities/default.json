@@ -26,6 +26,7 @@
     {
       "identifier": "http:default",
       "allow": [
+        { "url": "https://serendb.com/**" },
         { "url": "https://api.serendb.com/**" },
         { "url": "https://mcp.serendb.com/**" },
         { "url": "https://openrouter.ai/**" },
