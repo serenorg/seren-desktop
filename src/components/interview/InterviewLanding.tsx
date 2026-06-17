@@ -15,18 +15,19 @@ import {
   clusterLabel,
   resolveInterviewEmployeeSlug,
 } from "@/components/interview/interviewLandingModel";
+
+export {
+  CLOSE_INTERVIEW_LANDING_EVENT,
+  type InterviewLandingEventDetail,
+  OPEN_INTERVIEW_LANDING_EVENT,
+} from "@/components/interview/interviewLandingEvents";
+
 import { employeeCatalogStore } from "@/stores/employee-catalog.store";
-
-export const OPEN_INTERVIEW_LANDING_EVENT = "seren:open-interview-landing";
-export const CLOSE_INTERVIEW_LANDING_EVENT = "seren:close-interview-landing";
-
-export type InterviewLandingEventDetail = {
-  employee?: string | null;
-};
 
 interface InterviewLandingProps {
   initialEmployeeSlug?: string | null;
   onClose?: () => void;
+  onSelectEmployee?: (employeeSlug: string) => void;
   onStartInterview?: (employeeSlug: string | null) => void;
 }
 
@@ -205,7 +206,10 @@ export const InterviewLanding: Component<InterviewLandingProps> = (props) => {
                     }}
                     data-testid="interview-role-option"
                     aria-pressed={active()}
-                    onClick={() => setSelectedSlug(employee.slug)}
+                    onClick={() => {
+                      setSelectedSlug(employee.slug);
+                      props.onSelectEmployee?.(employee.slug);
+                    }}
                   >
                     <div class="relative h-24 overflow-hidden bg-surface-2">
                       <img

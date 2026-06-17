@@ -13,6 +13,7 @@ import { AboutDialog } from "@/components/common/AboutDialog";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { OrganizationOtpModal } from "@/components/common/OrganizationOtpModal";
 import { GatewayToolApproval } from "@/components/gateway/GatewayToolApproval";
+import { OPEN_INTERVIEW_LANDING_EVENT } from "@/components/interview/interviewLandingEvents";
 import { AppShell } from "@/components/layout/AppShell";
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { ShellApproval } from "@/components/shell/ShellApproval";
@@ -53,8 +54,31 @@ import {
 } from "@/stores/wallet.store";
 import "./styles.css";
 
+const FIRST_AUTH_INTERVIEW_LANDING_KEY =
+  "seren:employee_intake_first_authenticated_launch";
+
 // Initialize telemetry early to capture startup errors
 telemetry.init();
+
+function claimFirstAuthenticatedInterviewLaunch(): boolean {
+  try {
+    if (localStorage.getItem(FIRST_AUTH_INTERVIEW_LANDING_KEY) === "true") {
+      return false;
+    }
+    localStorage.setItem(FIRST_AUTH_INTERVIEW_LANDING_KEY, "true");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function openFirstAuthenticatedInterviewLanding(): void {
+  window.dispatchEvent(
+    new CustomEvent(OPEN_INTERVIEW_LANDING_EVENT, {
+      detail: { source: "desktop-first-auth-launch" },
+    }),
+  );
+}
 
 function App() {
   if (shouldRenderPhase3Playground()) {
@@ -183,6 +207,9 @@ function App() {
 
       // Use untrack to prevent reactive dependencies
       untrack(() => {
+        if (claimFirstAuthenticatedInterviewLaunch()) {
+          queueMicrotask(openFirstAuthenticatedInterviewLanding);
+        }
         startAutoRefresh();
         autocompleteStore.enable();
         // Store cleanup to prevent effect accumulation

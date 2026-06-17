@@ -33,6 +33,40 @@ const DEFAULT_CONFIG: TelemetryConfig = {
   maxBatchSize: 20,
 };
 
+export interface EmployeeInterestTelemetryInput {
+  employeeSlug?: string | null;
+  event?: string;
+  source: string;
+}
+
+export interface EmployeeInterestTelemetryPayload {
+  selected_employee_slug: string | null;
+  event: string;
+  source: string;
+  occurred_at: string;
+}
+
+const SEREN_WEBSITE_ORIGIN =
+  import.meta.env.VITE_SEREN_WEBSITE_URL ?? "https://serendb.com";
+
+export function websiteApiUrl(path: string): string {
+  return `${SEREN_WEBSITE_ORIGIN.replace(/\/$/, "")}${
+    path.startsWith("/") ? path : `/${path}`
+  }`;
+}
+
+export function buildEmployeeInterestTelemetryPayload(
+  input: EmployeeInterestTelemetryInput,
+  now = new Date(),
+): EmployeeInterestTelemetryPayload {
+  return {
+    selected_employee_slug: input.employeeSlug ?? null,
+    event: input.event ?? "interview-launched",
+    source: input.source,
+    occurred_at: now.toISOString(),
+  };
+}
+
 class TelemetryService {
   private config: TelemetryConfig;
   private rateLimiter: RateLimiter;
@@ -115,6 +149,30 @@ class TelemetryService {
    */
   reportError(error: Error, context?: Record<string, unknown>): void {
     this.captureError(error, context);
+  }
+
+  async recordEmployeeInterest(
+    input: EmployeeInterestTelemetryInput,
+  ): Promise<void> {
+    if (!this.config.enabled) return;
+
+    try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      const token = await getToken();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      await appFetch(websiteApiUrl("/api/telemetry/employee-interest"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify(buildEmployeeInterestTelemetryPayload(input)),
+      });
+    } catch {
+      // Product telemetry is best-effort and must never block the intake.
+    }
   }
 
   /**
