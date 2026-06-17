@@ -323,7 +323,20 @@ fn connect_client(connection_string: &str) -> Result<PgClient, String> {
         .build()
         .map_err(|err| err.to_string())?;
     let tls = postgres_native_tls::MakeTlsConnector::new(tls);
-    PgClient::connect(connection_string, tls).map_err(|err| err.to_string())
+    let mut client = PgClient::connect(connection_string, tls).map_err(|err| err.to_string())?;
+    // The idempotent history-sync DDL (CREATE ... IF NOT EXISTS) makes the
+    // server emit a NOTICE per already-existing object on every sync tick, and
+    // the sync `postgres` crate logs each at INFO (target `postgres::config`).
+    // These "already exists, skipping" notices carry no diagnostic value, so
+    // suppress them at the protocol source in normal builds — keeping them in
+    // debug builds only. WARNING/ERROR still flow through. Best-effort: a
+    // failure here must not break the sync. #2500.
+    if !cfg!(debug_assertions) {
+        if let Err(err) = client.batch_execute("SET client_min_messages = warning") {
+            log::debug!("[HistorySync] failed to set client_min_messages: {err}");
+        }
+    }
+    Ok(client)
 }
 
 fn is_refreshable_postgres_error_text(err: &str) -> bool {
