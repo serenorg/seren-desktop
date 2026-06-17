@@ -3,6 +3,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 
 const repoRoot = process.cwd();
 const tauriDir = join(repoRoot, "src-tauri");
