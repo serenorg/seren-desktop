@@ -10,6 +10,11 @@ const agentStoreSource = readFileSync(
   "utf-8",
 );
 
+const agentChatSource = readFileSync(
+  resolve("src/components/chat/AgentChat.tsx"),
+  "utf-8",
+);
+
 describe("agent message persistence guards", () => {
   it("persistAgentMessage only stores user, assistant, and handoff types", () => {
     const fnStart = agentStoreSource.indexOf(
@@ -220,5 +225,55 @@ describe("#1663 — agent thread history must not be wiped on resume or send", (
     expect(slice).toContain(
       "clearConversationHistory(session.conversationId)",
     );
+  });
+});
+
+describe("#2499 — agent thread transcript must fall back to durable history when no live session", () => {
+  it("getMessagesForConversation falls back to the persistedMessages cache, not just live session.messages", () => {
+    const fnIdx = agentStoreSource.indexOf(
+      "getMessagesForConversation(conversationId: string): AgentMessage[]",
+    );
+    expect(fnIdx).toBeGreaterThan(0);
+    const fnBody = agentStoreSource.slice(fnIdx, fnIdx + 600);
+    // Live session wins when it owns the transcript...
+    expect(fnBody).toContain("session.messages.length > 0");
+    // ...otherwise the durable cache is the source so the panel is never blank.
+    expect(fnBody).toContain("state.persistedMessages[conversationId]");
+    // The old blank-prone implementation returned bare session messages.
+    expect(fnBody).not.toMatch(/return\s+session\?\.messages\s*\?\?\s*\[\];/);
+  });
+
+  it("persistedMessages is part of agent store state and initialized", () => {
+    expect(agentStoreSource).toContain(
+      "persistedMessages: Record<string, AgentMessage[]>;",
+    );
+    expect(agentStoreSource).toContain("persistedMessages: {},");
+  });
+
+  it("hydratePersistedHistory loads from SQLite, respects live-session precedence, and re-reads fresh", () => {
+    const fnIdx = agentStoreSource.indexOf(
+      "async hydratePersistedHistory(conversationId: string)",
+    );
+    expect(fnIdx).toBeGreaterThan(0);
+    const fnBody = agentStoreSource.slice(fnIdx, fnIdx + 900);
+    // Reads the durable transcript from SQLite.
+    expect(fnBody).toContain("loadPersistedAgentHistory(conversationId)");
+    // Writes into the fallback cache.
+    expect(fnBody).toContain('setState("persistedMessages", conversationId');
+    // Does not clobber a live session that already owns the transcript
+    // (guarded both before and after the awaited read).
+    expect(fnBody).toContain("ownsTranscript");
+  });
+
+  it("AgentChat hydrates the durable transcript when the viewed thread has no live session", () => {
+    expect(agentChatSource).toContain(
+      "agentStore.hydratePersistedHistory(thread.id)",
+    );
+    // The hydrate must trigger only when there is no live transcript to show.
+    const callIdx = agentChatSource.indexOf(
+      "agentStore.hydratePersistedHistory(thread.id)",
+    );
+    const window = agentChatSource.slice(callIdx - 220, callIdx);
+    expect(window).toContain("session.messages.length === 0");
   });
 });

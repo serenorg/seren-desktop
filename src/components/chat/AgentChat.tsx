@@ -441,6 +441,20 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
   });
 
+  // Hydrate the durable transcript from SQLite whenever the viewed thread has
+  // no live session messages to show. Without this, reopening an agent thread
+  // before its session re-spawns (cold start, idle-reclaim, spawn thrash)
+  // leaves the panel blank even though the history is on disk. Re-runs on
+  // thread switch and on session presence change. #2499.
+  createEffect(() => {
+    const thread = activeAgentThread();
+    if (!thread) return;
+    const session = threadSession();
+    if (!session || session.messages.length === 0) {
+      void agentStore.hydratePersistedHistory(thread.id);
+    }
+  });
+
   const forkSupported = createMemo(() => {
     const session = threadSession();
     if (!session) return false;
