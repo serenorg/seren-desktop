@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
-  meetingAutodetect: vi.fn(async () => ({
+  meetingAutodetect: vi.fn(async (): Promise<MeetingAutodetectResult> => ({
     detected: false,
     sourceApp: null,
   })),
@@ -30,7 +30,7 @@ vi.mock("@/stores/settings.store", () => ({
   },
 }));
 
-import type { Meeting } from "@/services/meetings";
+import type { Meeting, MeetingAutodetectResult } from "@/services/meetings";
 import { meetingStore } from "@/stores/meeting.store";
 
 describe("meeting auto-detect dismissal reset (#2209)", () => {
