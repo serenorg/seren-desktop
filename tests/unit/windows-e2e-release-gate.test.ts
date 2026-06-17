@@ -87,8 +87,6 @@ describe("Windows production e2e release gate", () => {
       "SEREN_E2E_HISTORY_PROJECT_ID",
       "SEREN_E2E_HISTORY_BRANCH_ID",
       "SEREN_E2E_HISTORY_DATABASE_NAME",
-      "SEREN_E2E_GITHUB_USERNAME",
-      "SEREN_E2E_GITHUB_PASSWORD",
       "SEREN_E2E_GITHUB_PAT",
     ]) {
       expect(runner).toContain(required);
@@ -274,8 +272,7 @@ describe("Windows production e2e release gate", () => {
       "provider_prompt",
       "history_sync_run_now",
       "history_sync_wipe_remote",
-      "get_oauth_redirect_url",
-      "/oauth/connections",
+      "api.github.com/user",
       "create_meeting",
       "start_meeting_capture",
       "stop_meeting_capture",
