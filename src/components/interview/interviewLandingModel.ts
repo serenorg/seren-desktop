@@ -20,6 +20,22 @@ export function resolveInterviewEmployeeSlug(
     : null;
 }
 
+// Keep a still-valid manual selection when the catalog list is replaced (e.g.
+// a Refresh or a background reload), otherwise fall back to the deep-link slug.
+export function nextInterviewSelection(
+  currentSlug: string | null,
+  employees: readonly Pick<EmployeeCatalogItem, "slug">[],
+  requestedSlug?: string | null,
+): string | null {
+  if (
+    currentSlug &&
+    employees.some((employee) => employee.slug === currentSlug)
+  ) {
+    return currentSlug;
+  }
+  return resolveInterviewEmployeeSlug(employees, requestedSlug);
+}
+
 export function clusterLabel(
   employee: Pick<EmployeeCatalogItem, "cluster">,
 ): string {
