@@ -13,6 +13,14 @@ const bountyDetailTsx = readFileSync(
   resolve("src/components/bounties/BountyDetail.tsx"),
   "utf-8",
 );
+const bountiesSectionTsx = readFileSync(
+  resolve("src/components/sidebar/BountiesSection.tsx"),
+  "utf-8",
+);
+const threadSidebarTsx = readFileSync(
+  resolve("src/components/layout/ThreadSidebar.tsx"),
+  "utf-8",
+);
 
 function functionBody(name: string, source: string): string {
   const match = source.match(
@@ -47,5 +55,24 @@ describe("Seren Bounties wiring", () => {
     expect(bountyDetailTsx).toMatch(
       /s\.scope === "seren" &&\s+s\.slug === SEREN_BOUNTY_SLUG/,
     );
+  });
+
+  it("does not auto-dispatch OPEN_BOUNTY_DETAIL_EVENT on load", () => {
+    // The sidebar must not auto-open the newest active bounty on startup.
+    // Strong startup default is the Seren Employee intake landing; explicit
+    // user selection is the only path to opening a bounty.
+    expect(bountiesSectionTsx).not.toContain("autoOpenedDefault");
+    expect(bountiesSectionTsx).not.toContain("setAutoOpenedDefault");
+    // Guard: the only place dispatching OPEN_BOUNTY_DETAIL_EVENT must be
+    // `handleSelectBounty`, which is only reachable via user click.
+    expect(bountiesSectionTsx).not.toMatch(/createEffect\([^)]*handleSelectBounty/);
+  });
+
+  it("renders EmployeesSection before BountiesSection in the sidebar", () => {
+    const employeesIdx = threadSidebarTsx.indexOf("<EmployeesSection");
+    const bountiesIdx = threadSidebarTsx.indexOf("<BountiesSection");
+    expect(employeesIdx).toBeGreaterThanOrEqual(0);
+    expect(bountiesIdx).toBeGreaterThanOrEqual(0);
+    expect(employeesIdx).toBeLessThan(bountiesIdx);
   });
 });

@@ -87,7 +87,6 @@ export type SlidePanelView =
   | null;
 
 const SLIDE_PANEL_KEY = "seren:slide_panel";
-const INTERVIEW_LANDING_DISMISSED_KEY = "seren:interview_landing_dismissed";
 
 const PERSISTABLE_VIEWS: ReadonlySet<NonNullable<SlidePanelView>> = new Set([
   "settings",
@@ -112,20 +111,12 @@ function loadInitialSlidePanel(): SlidePanelView {
   return null;
 }
 
+// Strong startup default: the Seren Employee intake landing is the canonical
+// startup surface. Closing it is session-only — the next launch shows it
+// again. This intentionally ignores the legacy
+// `seren:interview_landing_dismissed` key.
 function loadInitialInterviewLanding(): boolean {
-  try {
-    return localStorage.getItem(INTERVIEW_LANDING_DISMISSED_KEY) !== "true";
-  } catch {
-    return true;
-  }
-}
-
-function persistInterviewLandingDismissed(): void {
-  try {
-    localStorage.setItem(INTERVIEW_LANDING_DISMISSED_KEY, "true");
-  } catch {
-    // Non-fatal
-  }
+  return true;
 }
 
 function persistSlidePanel(view: SlidePanelView): void {
@@ -232,14 +223,12 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const closeInterviewLanding = () => {
     setInterviewLandingOpen(false);
     setInterviewEmployeeSlug(null);
-    persistInterviewLandingDismissed();
     window.dispatchEvent(new CustomEvent(CLOSE_INTERVIEW_LANDING_EVENT));
   };
 
   const handleCloseInterviewLanding = () => {
     setInterviewLandingOpen(false);
     setInterviewEmployeeSlug(null);
-    persistInterviewLandingDismissed();
   };
 
   const handleOpenEmployeeDetail = (event: Event) => {
