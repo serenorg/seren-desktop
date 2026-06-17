@@ -1,5 +1,5 @@
-// ABOUTME: Regression guards for temporarily hidden employee management surfaces.
-// ABOUTME: Ensures AppShell does not expose catalog/inbox buttons in the sidebar.
+// ABOUTME: Regression guards for employee management surface wiring.
+// ABOUTME: Ensures AppShell exposes catalog/inbox buttons through the sidebar.
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -15,17 +15,19 @@ const sidebarTsx = readFileSync(
 );
 
 describe("AppShell employee management wiring", () => {
-  it("does not pass catalog and inbox handlers into ThreadSidebar", () => {
+  it("passes catalog and inbox handlers into ThreadSidebar", () => {
     const threadSidebarInvocation = appShellTsx.match(
       /<ThreadSidebar[\s\S]*?\/>/,
     )?.[0];
 
     expect(threadSidebarInvocation).toBeDefined();
-    expect(threadSidebarInvocation).not.toContain("onOpenCatalog=");
-    expect(threadSidebarInvocation).not.toContain("onOpenInbox=");
+    expect(threadSidebarInvocation).toContain(
+      "onOpenCatalog={handleOpenCatalog}",
+    );
+    expect(threadSidebarInvocation).toContain("onOpenInbox={handleOpenInbox}");
   });
 
-  it("keeps ThreadSidebar support ready for the hidden buttons", () => {
+  it("keeps ThreadSidebar catalog and inbox callbacks wired", () => {
     expect(sidebarTsx).toContain("onOpenCatalog={props.onOpenCatalog}");
     expect(sidebarTsx).toContain("onOpenInbox={props.onOpenInbox}");
   });

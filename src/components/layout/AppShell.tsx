@@ -19,6 +19,12 @@ import { CatalogList } from "@/components/catalog/CatalogList";
 import { ArchivedEmployeeDetail } from "@/components/employees/ArchivedEmployeeDetail";
 import { EmployeeDetail } from "@/components/employees/EmployeeDetail";
 import { InboxList } from "@/components/inbox/InboxList";
+import {
+  CLOSE_INTERVIEW_LANDING_EVENT,
+  InterviewLanding,
+  type InterviewLandingEventDetail,
+  OPEN_INTERVIEW_LANDING_EVENT,
+} from "@/components/interview/InterviewLanding";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { AudioPrimingDialog } from "@/components/meeting/AudioPrimingDialog";
 import { MeetingPanel } from "@/components/meeting/MeetingPanel";
@@ -47,6 +53,7 @@ import { AgentTasksPanel } from "@/components/tasks/AgentTasksPanel";
 import { isMeetingProcessingStatus } from "@/lib/meeting-format";
 import { shortcuts } from "@/lib/shortcuts";
 import type { InstalledSkill } from "@/lib/skills";
+import { listenForInterviewLaunch } from "@/lib/tauri-bridge";
 import {
   appearanceState,
   applyAppearanceToDocument,
@@ -79,6 +86,7 @@ export type SlidePanelView =
   | null;
 
 const SLIDE_PANEL_KEY = "seren:slide_panel";
+const INTERVIEW_LANDING_DISMISSED_KEY = "seren:interview_landing_dismissed";
 
 const PERSISTABLE_VIEWS: ReadonlySet<NonNullable<SlidePanelView>> = new Set([
   "settings",
@@ -90,11 +98,9 @@ const PERSISTABLE_VIEWS: ReadonlySet<NonNullable<SlidePanelView>> = new Set([
 ]);
 
 function loadInitialSlidePanel(): SlidePanelView {
-  // First launch (no stored preference) opens the skills panel by default
-  // so users discover the catalog without having to hunt for it.
   try {
     const raw = localStorage.getItem(SLIDE_PANEL_KEY);
-    if (raw === null) return "skills";
+    if (raw === null) return null;
     if (raw === "null") return null;
     if (PERSISTABLE_VIEWS.has(raw as NonNullable<SlidePanelView>)) {
       return raw as SlidePanelView;
@@ -102,7 +108,23 @@ function loadInitialSlidePanel(): SlidePanelView {
   } catch {
     // localStorage unavailable - fall back to default
   }
-  return "skills";
+  return null;
+}
+
+function loadInitialInterviewLanding(): boolean {
+  try {
+    return localStorage.getItem(INTERVIEW_LANDING_DISMISSED_KEY) !== "true";
+  } catch {
+    return true;
+  }
+}
+
+function persistInterviewLandingDismissed(): void {
+  try {
+    localStorage.setItem(INTERVIEW_LANDING_DISMISSED_KEY, "true");
+  } catch {
+    // Non-fatal
+  }
 }
 
 function persistSlidePanel(view: SlidePanelView): void {
@@ -160,14 +182,52 @@ export const AppShell: Component<AppShellProps> = (props) => {
     createSignal<BountyInheritFrom | null>(null);
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [inboxOpen, setInboxOpen] = createSignal(false);
+  const [interviewLandingOpen, setInterviewLandingOpen] = createSignal(
+    loadInitialInterviewLanding(),
+  );
+  const [interviewEmployeeSlug, setInterviewEmployeeSlug] = createSignal<
+    string | null
+  >(null);
   createEffect(() => {
     persistSlidePanel(slidePanel());
   });
+
+  const openInterviewLanding = (employeeSlug?: string | null) => {
+    setInterviewEmployeeSlug(employeeSlug ?? null);
+    setInterviewLandingOpen(true);
+    setActiveEmployeeId(null);
+    if (activeBountyId() !== null) {
+      setActiveBountyId(null);
+      setActiveBountyInheritFrom(null);
+      window.dispatchEvent(new CustomEvent(CLOSE_BOUNTY_DETAIL_EVENT));
+    }
+    setCatalogOpen(false);
+    setInboxOpen(false);
+  };
+
+  const handleOpenInterviewLanding = (event: Event) => {
+    const detail = (event as CustomEvent<InterviewLandingEventDetail>).detail;
+    openInterviewLanding(detail?.employee ?? null);
+  };
+
+  const closeInterviewLanding = () => {
+    setInterviewLandingOpen(false);
+    setInterviewEmployeeSlug(null);
+    persistInterviewLandingDismissed();
+    window.dispatchEvent(new CustomEvent(CLOSE_INTERVIEW_LANDING_EVENT));
+  };
+
+  const handleCloseInterviewLanding = () => {
+    setInterviewLandingOpen(false);
+    setInterviewEmployeeSlug(null);
+    persistInterviewLandingDismissed();
+  };
 
   const handleOpenEmployeeDetail = (event: Event) => {
     const detail = (event as CustomEvent<EmployeeDetailEventDetail>).detail;
     if (detail?.employeeId) {
       setActiveEmployeeId(detail.employeeId);
+      setInterviewLandingOpen(false);
       if (activeBountyId() !== null) {
         setActiveBountyId(null);
         setActiveBountyInheritFrom(null);
@@ -191,6 +251,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     const detail = (event as CustomEvent<BountyDetailEventDetail>).detail;
     if (detail?.bountyId) {
       setActiveBountyId(detail.bountyId);
+      setInterviewLandingOpen(false);
       // Snapshot the binding the sidebar captured before clearing the
       // active thread. `BountyDetail.handleJoinBounty` consults this so
       // a user joining a bounty from a Codex thread lands in another
@@ -218,6 +279,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
   const handleOpenCatalog = () => {
     setCatalogOpen(true);
+    setInterviewLandingOpen(false);
     if (activeEmployeeId() !== null) {
       setActiveEmployeeId(null);
       window.dispatchEvent(new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT));
@@ -236,6 +298,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
   const handleOpenInbox = () => {
     setInboxOpen(true);
+    setInterviewLandingOpen(false);
     if (activeEmployeeId() !== null) {
       setActiveEmployeeId(null);
       window.dispatchEvent(new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT));
@@ -264,6 +327,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
         }
         setCatalogOpen(false);
         setInboxOpen(false);
+        setInterviewLandingOpen(false);
       },
       { defer: true },
     ),
@@ -280,6 +344,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
     );
     window.addEventListener(OPEN_BOUNTY_DETAIL_EVENT, handleOpenBountyDetail);
     window.addEventListener(CLOSE_BOUNTY_DETAIL_EVENT, handleCloseBountyDetail);
+    window.addEventListener(
+      OPEN_INTERVIEW_LANDING_EVENT,
+      handleOpenInterviewLanding,
+    );
+    window.addEventListener(
+      CLOSE_INTERVIEW_LANDING_EVENT,
+      handleCloseInterviewLanding,
+    );
     window.addEventListener(OPEN_CATALOG_EVENT, handleOpenCatalog);
     window.addEventListener(CLOSE_CATALOG_EVENT, handleCloseCatalog);
     window.addEventListener(OPEN_INBOX_EVENT, handleOpenInbox);
@@ -300,6 +372,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
     };
     media.addEventListener("change", onSystemThemeChange);
     onCleanup(() => media.removeEventListener("change", onSystemThemeChange));
+
+    let cleanupInterviewLaunch: (() => void) | null = null;
+    void listenForInterviewLaunch((payload) => {
+      openInterviewLanding(payload.employee ?? null);
+    }).then((unlisten) => {
+      cleanupInterviewLaunch = unlisten;
+    });
+    onCleanup(() => cleanupInterviewLaunch?.());
   });
 
   // Mirror every appearance mutation to the document. Keep DOM side effects
@@ -329,6 +409,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
     window.removeEventListener(
       CLOSE_BOUNTY_DETAIL_EVENT,
       handleCloseBountyDetail,
+    );
+    window.removeEventListener(
+      OPEN_INTERVIEW_LANDING_EVENT,
+      handleOpenInterviewLanding,
+    );
+    window.removeEventListener(
+      CLOSE_INTERVIEW_LANDING_EVENT,
+      handleCloseInterviewLanding,
     );
   });
 
@@ -672,60 +760,81 @@ export const AppShell: Component<AppShellProps> = (props) => {
         <ThreadSidebar
           collapsed={sidebarCollapsed()}
           onToggle={() => setSidebarCollapsed((v) => !v)}
+          onOpenCatalog={handleOpenCatalog}
+          onOpenInbox={handleOpenInbox}
         />
 
         <main class="flex-1 overflow-auto flex flex-col min-w-0">
           <Show
-            when={inboxOpen()}
+            when={interviewLandingOpen()}
             fallback={
               <Show
-                when={catalogOpen()}
+                when={inboxOpen()}
                 fallback={
                   <Show
-                    when={activeEmployeeId()}
+                    when={catalogOpen()}
                     fallback={
                       <Show
-                        when={activeBountyId()}
+                        when={activeEmployeeId()}
                         fallback={
-                          <ThreadContent onSignInClick={handleSignInClick} />
+                          <Show
+                            when={activeBountyId()}
+                            fallback={
+                              <ThreadContent
+                                onSignInClick={handleSignInClick}
+                              />
+                            }
+                          >
+                            {(id) => (
+                              <BountyDetail
+                                bountyId={id()}
+                                inheritFrom={activeBountyInheritFrom()}
+                              />
+                            )}
+                          </Show>
                         }
                       >
                         {(id) => (
-                          <BountyDetail
-                            bountyId={id()}
-                            inheritFrom={activeBountyInheritFrom()}
-                          />
+                          <Show
+                            when={
+                              employeeStore.byId(id()) === undefined &&
+                              employeeStore.archivedById(id()) !== undefined
+                            }
+                            fallback={
+                              <EmployeeDetail
+                                employeeId={id()}
+                                onClose={closeEmployeeDetailPane}
+                              />
+                            }
+                          >
+                            <ArchivedEmployeeDetail
+                              employeeId={id()}
+                              onClose={closeEmployeeDetailPane}
+                            />
+                          </Show>
                         )}
                       </Show>
                     }
                   >
-                    {(id) => (
-                      <Show
-                        when={
-                          employeeStore.byId(id()) === undefined &&
-                          employeeStore.archivedById(id()) !== undefined
-                        }
-                        fallback={
-                          <EmployeeDetail
-                            employeeId={id()}
-                            onClose={closeEmployeeDetailPane}
-                          />
-                        }
-                      >
-                        <ArchivedEmployeeDetail
-                          employeeId={id()}
-                          onClose={closeEmployeeDetailPane}
-                        />
-                      </Show>
-                    )}
+                    <CatalogList />
                   </Show>
                 }
               >
-                <CatalogList />
+                <InboxList />
               </Show>
             }
           >
-            <InboxList />
+            <InterviewLanding
+              initialEmployeeSlug={interviewEmployeeSlug()}
+              onClose={closeInterviewLanding}
+              onStartInterview={(employeeSlug) => {
+                window.dispatchEvent(
+                  new CustomEvent("seren:start-employee-interview", {
+                    detail: { employee: employeeSlug },
+                  }),
+                );
+              }}
+            />
           </Show>
         </main>
 
