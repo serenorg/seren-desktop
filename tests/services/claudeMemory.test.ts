@@ -55,6 +55,7 @@ vi.mock("@/stores/settings.store", () => ({
 }));
 
 import {
+  classifyMemoryStartFailure,
   ensureClaudeMemoryProvisioned,
   getClaudeMemoryStatus,
   migrateExistingClaudeMemory,
@@ -483,5 +484,48 @@ describe("startClaudeMemoryInterceptor wiring", () => {
     });
     expect(invokeMock).not.toHaveBeenCalled();
     expect(databasesMock.listProjects).not.toHaveBeenCalled();
+  });
+});
+
+describe("classifyMemoryStartFailure (#2497 Defect 3)", () => {
+  it("treats 401/403 as a non-transient auth/permission failure", () => {
+    for (const status of [401, 403]) {
+      const notice = classifyMemoryStartFailure(
+        new Error(`serendb SELECT failed: SerenDB query returned HTTP ${status}: {"message":"forbidden"}`),
+      );
+      expect(notice.status).toBe(status);
+      expect(notice.message.toLowerCase()).toContain("authorize");
+      // Never echoes the raw server body or the toggle-off-and-on advice.
+      expect(notice.message).not.toContain("forbidden");
+      expect(notice.message).not.toMatch(/toggling it off and on/i);
+    }
+  });
+
+  it("explains that the desktop key is still provisioning when it is absent", () => {
+    const notice = classifyMemoryStartFailure(
+      new Error(
+        "SerenDB API key not available — log in to Seren Desktop so the key is provisioned",
+      ),
+    );
+    expect(notice.status).toBeUndefined();
+    expect(notice.message.toLowerCase()).toContain("finishing");
+    expect(notice.message).not.toContain("log in to Seren Desktop so the key");
+  });
+
+  it("treats 5xx / gateway timeouts as transient and retryable", () => {
+    for (const status of [408, 500, 502, 503, 504]) {
+      const notice = classifyMemoryStartFailure(
+        new Error(`SerenDB query returned HTTP ${status}: upstream`),
+      );
+      expect(notice.status).toBe(status);
+      expect(notice.message.toLowerCase()).toContain("retry");
+      expect(notice.message).not.toContain("upstream");
+    }
+  });
+
+  it("defaults to the transient notice for status-less errors", () => {
+    const notice = classifyMemoryStartFailure(new Error("network unreachable"));
+    expect(notice.status).toBeUndefined();
+    expect(notice.message.toLowerCase()).toContain("retry");
   });
 });

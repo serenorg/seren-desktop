@@ -309,8 +309,11 @@ function App() {
         }
         claudeMemoryStartedForAuth = key;
 
-        const { startClaudeMemoryInterceptor, migrateExistingClaudeMemory } =
-          await import("@/services/claudeMemory");
+        const {
+          startClaudeMemoryInterceptor,
+          migrateExistingClaudeMemory,
+          classifyMemoryStartFailure,
+        } = await import("@/services/claudeMemory");
         const { message: showMessageDialog } = await import(
           "@tauri-apps/plugin-dialog"
         );
@@ -362,10 +365,11 @@ function App() {
           const errMessage = err instanceof Error ? err.message : String(err);
           const errStack =
             err instanceof Error && err.stack ? err.stack.split("\n") : [];
-          const httpStatusMatch = /returned HTTP (\d{3})/i.exec(errMessage);
-          const httpStatusCode = httpStatusMatch?.[1]
-            ? Number.parseInt(httpStatusMatch[1], 10)
-            : undefined;
+          // Classify the failure once: `notice.status` drives telemetry and
+          // `notice.message` is the body-free, actionable dialog copy. The raw
+          // server body still flows to telemetry (below) but is NEVER shown to
+          // the user — a 401/403 can carry a permission payload. #2497 Defect 3.
+          const notice = classifyMemoryStartFailure(err);
           try {
             const { captureSupportError } = await import("@/lib/support/hook");
             void captureSupportError({
@@ -375,7 +379,7 @@ function App() {
               http: {
                 method: "POST",
                 url: "https://api.serendb.com/publishers/seren-db/query",
-                status: httpStatusCode,
+                status: notice.status,
                 body: errMessage,
               },
             });
@@ -385,9 +389,7 @@ function App() {
               `[ClaudeMemory] captureSupportError unavailable: ${captureErr}`,
             );
           }
-          await notifyUser(
-            `The Claude memory interceptor could not start: ${err}. You can try again by toggling it off and on in Settings → Code Indexing → Claude Code Auto-Memory.`,
-          );
+          await notifyUser(notice.message);
         }
       } catch (error) {
         console.error(`[ClaudeMemory] reactive start crashed: ${error}`);

@@ -88,6 +88,12 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: listenMock,
 }));
 
+// reportApiKeyFailure dynamically imports this on the failure path; stub it so
+// the tests stay deterministic and the output stays pristine.
+vi.mock("@/lib/support/hook", () => ({
+  captureSupportError: vi.fn(),
+}));
+
 import {
   authStore,
   checkAuth,
@@ -222,6 +228,66 @@ describe("auth.store #1613 — API key before isAuthenticated flips", () => {
     expect(storeSerenApiKeyMock).toHaveBeenCalledTimes(1);
     expect(createApiKeyMock).toHaveBeenCalledTimes(1);
     expect(authAtStoreTime).toBe(false);
+    expect(authStore.isAuthenticated).toBe(true);
+    expect(authStore.signInModalRequested).toBe(false);
+  });
+});
+
+describe("auth.store #2497 — API key provisioning failure handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    eventListeners.clear();
+    isTauriRuntimeMock.mockReturnValue(false);
+    hasStoredTokenMock.mockResolvedValue(true);
+    isLoggedInMock.mockResolvedValue(true);
+    runtimeHasCapabilityMock.mockReturnValue(false);
+    resetAuthStore();
+  });
+
+  for (const status of [401, 403]) {
+    it(`HTTP ${status} key failure does NOT flip isAuthenticated and raises the sign-in modal`, async () => {
+      storedKeyRef.value = null;
+      createApiKeyMock.mockRejectedValueOnce(
+        Object.assign(new Error(`Forbidden (returned HTTP ${status})`), {
+          status,
+        }),
+      );
+
+      await setAuthenticated({ id: "u1", email: "u@test", name: "U" });
+
+      // Genuine auth/permission failure: the logged-in shell must NOT appear,
+      // the key must not be stored, and the user must be told to sign in again.
+      expect(authStore.isAuthenticated).toBe(false);
+      expect(authStore.signInModalRequested).toBe(true);
+      expect(storeSerenApiKeyMock).not.toHaveBeenCalled();
+    });
+  }
+
+  for (const status of [500, 503]) {
+    it(`HTTP ${status} key failure KEEPS the session so chat still works (no forced sign-in)`, async () => {
+      storedKeyRef.value = null;
+      createApiKeyMock.mockRejectedValueOnce(
+        Object.assign(new Error(`Server error (returned HTTP ${status})`), {
+          status,
+        }),
+      );
+
+      await setAuthenticated({ id: "u1", email: "u@test", name: "U" });
+
+      // The JWT is still valid; the SerenDB key is only needed by MCP tools +
+      // the Claude memory interceptor, not the primary chat path. Blocking the
+      // whole session here would break chat for an otherwise-valid user.
+      expect(authStore.isAuthenticated).toBe(true);
+      expect(authStore.signInModalRequested).toBe(false);
+    });
+  }
+
+  it("a status-less (network) key failure also keeps the session", async () => {
+    storedKeyRef.value = null;
+    createApiKeyMock.mockRejectedValueOnce(new Error("network unreachable"));
+
+    await setAuthenticated({ id: "u1", email: "u@test", name: "U" });
+
     expect(authStore.isAuthenticated).toBe(true);
     expect(authStore.signInModalRequested).toBe(false);
   });

@@ -33,6 +33,39 @@ export type Database = DatabaseWithOwner;
 export type { Branch, Organization, Project };
 
 /**
+ * Format a seren-db management-call failure so it carries the HTTP status (and
+ * any short server detail) using the same `returned HTTP <status>` marker the
+ * Rust SQL client emits. Without this, a 403 on the seren-db management path
+ * (most likely on `createProject` for a brand-new user) reaches the Claude
+ * memory interceptor as an opaque "Failed to X" — defeating the App.tsx dialog
+ * classifier and the support telemetry that seren-core#187 needs to correlate
+ * the 403. The status drives downstream classification; raw bodies are never
+ * shown to the user. #2497 (NEW P1-b).
+ */
+function describeSerenDbError(
+  action: string,
+  error: unknown,
+  response: { status?: number } | undefined,
+): string {
+  const status = response?.status;
+  let detail = "";
+  if (error && typeof error === "object") {
+    const candidate =
+      "message" in error
+        ? (error as { message?: unknown }).message
+        : "error" in error
+          ? (error as { error?: unknown }).error
+          : undefined;
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      detail = `: ${candidate.trim().slice(0, 200)}`;
+    }
+  }
+  return typeof status === "number"
+    ? `Failed to ${action}: returned HTTP ${status}${detail}`
+    : `Failed to ${action}${detail}`;
+}
+
+/**
  * Database service for Seren API operations.
  * Uses generated SDK with full type safety.
  */
@@ -57,10 +90,12 @@ export const databases = {
    */
   async listProjects(): Promise<Project[]> {
     console.log("[Databases] Fetching projects");
-    const { data, error } = await apiListProjects({ throwOnError: false });
+    const { data, error, response } = await apiListProjects({
+      throwOnError: false,
+    });
     if (error) {
       console.error("[Databases] Error fetching projects:", error);
-      throw new Error("Failed to list projects");
+      throw new Error(describeSerenDbError("list projects", error, response));
     }
     const projects = data?.data || [];
     console.log("[Databases] Found", projects.length, "projects");
@@ -76,13 +111,13 @@ export const databases = {
     _organizationId?: string,
   ): Promise<Project> {
     console.log("[Databases] Creating project:", name);
-    const { data, error } = await apiCreateProject({
+    const { data, error, response } = await apiCreateProject({
       body: { name, region: "aws-us-east-2" },
       throwOnError: false,
     });
     if (error || !data?.data) {
       console.error("[Databases] Error creating project:", error);
-      throw new Error("Failed to create project");
+      throw new Error(describeSerenDbError("create project", error, response));
     }
     // Fetch full project details (create returns ProjectCreated, not full Project)
     return this.getProject(data.data.id);
@@ -108,13 +143,13 @@ export const databases = {
    */
   async listBranches(projectId: string): Promise<Branch[]> {
     console.log("[Databases] Fetching branches for project:", projectId);
-    const { data, error } = await apiListBranches({
+    const { data, error, response } = await apiListBranches({
       path: { id: projectId },
       throwOnError: false,
     });
     if (error) {
       console.error("[Databases] Error fetching branches:", error);
-      throw new Error("Failed to list branches");
+      throw new Error(describeSerenDbError("list branches", error, response));
     }
     const branches = data?.data || [];
     console.log("[Databases] Found", branches.length, "branches");
@@ -166,13 +201,13 @@ export const databases = {
     branchId: string,
   ): Promise<Database[]> {
     console.log("[Databases] Fetching databases for branch:", branchId);
-    const { data, error } = await apiListDatabases({
+    const { data, error, response } = await apiListDatabases({
       path: { id: projectId, bid: branchId },
       throwOnError: false,
     });
     if (error) {
       console.error("[Databases] Error fetching databases:", error);
-      throw new Error("Failed to list databases");
+      throw new Error(describeSerenDbError("list databases", error, response));
     }
     const dbs = data?.data || [];
     console.log("[Databases] Found", dbs.length, "databases");
@@ -197,14 +232,14 @@ export const databases = {
       "branch:",
       branchId,
     );
-    const { data, error } = await apiCreateDatabase({
+    const { data, error, response } = await apiCreateDatabase({
       path: { id: projectId, bid: branchId },
       body: { name, owner_name: ownerName ?? null },
       throwOnError: false,
     });
     if (error || !data?.data) {
       console.error("[Databases] Error creating database:", error);
-      throw new Error("Failed to create database");
+      throw new Error(describeSerenDbError("create database", error, response));
     }
     return {
       id: data.data.id,
@@ -255,12 +290,12 @@ export const databases = {
    * Get a single project by ID.
    */
   async getProject(projectId: string): Promise<Project> {
-    const { data, error } = await apiGetProject({
+    const { data, error, response } = await apiGetProject({
       path: { id: projectId },
       throwOnError: false,
     });
     if (error || !data?.data) {
-      throw new Error("Failed to get project");
+      throw new Error(describeSerenDbError("get project", error, response));
     }
     return data.data;
   },
