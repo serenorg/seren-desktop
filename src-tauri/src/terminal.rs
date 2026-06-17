@@ -102,11 +102,16 @@ impl TerminalState {
 
             #[cfg(windows)]
             if let Some(pid) = pid {
+                // Spawn detached instead of .status(): kill_all runs in the
+                // RunEvent::Exit handler on the UI thread, and waiting on
+                // taskkill there freezes "Quit Seren" until the tree dies
+                // (#2508). /F /T is fire-and-forget — taskkill keeps running
+                // and reaps the tree after we exit.
                 use std::os::windows::process::CommandExt;
                 let _ = std::process::Command::new("taskkill")
                     .args(["/F", "/T", "/PID", &pid.to_string()])
                     .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                    .status();
+                    .spawn();
             }
             #[cfg(not(windows))]
             let _ = pid;
