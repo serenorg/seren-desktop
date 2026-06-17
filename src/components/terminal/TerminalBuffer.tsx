@@ -387,6 +387,16 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     () => appearanceState.appearance.terminalFontSize,
   );
   const [selection, setSelection] = createSignal<SelectionRange | null>(null);
+  // Text captured at selection time. The grid scrolls as the CLI streams, so
+  // re-deriving text from the live grid at copy time returns whatever later
+  // output now occupies those viewport rows (#2279). Capture against the grid
+  // present when the selection is made and copy from this snapshot instead.
+  const [selectedText, setSelectedText] = createSignal("");
+  const captureSelection = (range: SelectionRange | null) => {
+    setSelection(range);
+    const g = grid();
+    setSelectedText(range && g ? selectionText(g, range) : "");
+  };
   // Right-click context menu state. null = closed; { x, y } = open at viewport coords.
   // Reuses the shared ContextMenu primitive (src/components/common/ContextMenu.tsx).
   const [ctxMenu, setCtxMenu] = createSignal<{ x: number; y: number } | null>(
@@ -1203,7 +1213,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     if (cell.row !== dragAnchor.row || cell.col !== dragAnchor.col) {
       dragMoved = true;
     }
-    setSelection({ anchor: dragAnchor, head: cell });
+    captureSelection({ anchor: dragAnchor, head: cell });
   };
 
   const onWindowMouseUp = (e?: MouseEvent) => {
@@ -1213,7 +1223,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     if (!dragMoved) {
       // Plain click without drag - clear any prior selection so the
       // user can dismiss a selection by clicking on the canvas.
-      setSelection(null);
+      captureSelection(null);
     }
     dragAnchor = null;
     dragMoved = false;
@@ -1262,7 +1272,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
     e.preventDefault();
     dragAnchor = cell;
     dragMoved = false;
-    setSelection({ anchor: cell, head: cell });
+    captureSelection({ anchor: cell, head: cell });
     // Listen on window so a drag that leaves the canvas still tracks.
     window.addEventListener("mousemove", onWindowMouseMove);
     window.addEventListener("mouseup", onWindowMouseUp);
@@ -1604,7 +1614,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       detachMouseTracking();
       setGrid(null);
       setGridSeq(0);
-      setSelection(null);
+      captureSelection(null);
       if (!id) return;
       pushResize();
       void fetchGridSnapshot();
@@ -1620,8 +1630,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
   // clipboard path. Cleared when the terminal selection is empty so we
   // never hijack a real selection in the chat or Monaco editor. #2091.
   createEffect(() => {
-    const sel = selection();
-    const g = grid();
+    const text = selectedText();
     const mirror = selectionMirrorRef;
     if (!mirror) return;
     const docSel = window.getSelection();
@@ -1635,11 +1644,6 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
         docSel.removeAllRanges();
       }
     };
-    if (!sel || !g) {
-      clearMirroredDomSelection();
-      return;
-    }
-    const text = selectionText(g, sel);
     if (!text) {
       clearMirroredDomSelection();
       return;
@@ -1669,17 +1673,14 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
   const contextMenuItems = (): ContextMenuItem[] => {
     const current = buffer();
     const running = current?.status === "running";
-    const sel = selection();
-    const g = grid();
-    const hasSelection = !!sel && !!g && selectionText(g, sel).length > 0;
+    const hasSelection = selectedText().length > 0;
     return [
       {
         label: "Copy",
         shortcut: copyShortcutLabel(),
         disabled: !hasSelection,
         onClick: () => {
-          if (!sel || !g) return;
-          void writeClipboard(selectionText(g, sel));
+          void writeClipboard(selectedText());
         },
       },
       {
@@ -1703,24 +1704,21 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       { label: "", separator: true, onClick: () => {} },
       {
         label: "Select All",
-        disabled: !g,
+        disabled: !grid(),
         onClick: () => {
           const snapshot = grid();
           if (!snapshot) return;
           // The selection signal is watched by the repaint createEffect
           // above, so updating it triggers a full canvas redraw on the
           // next animation frame — no manual repaint needed.
-          setSelection(selectAllGrid(snapshot));
+          captureSelection(selectAllGrid(snapshot));
         },
       },
     ];
   };
 
   const handleCopy = (event: ClipboardEvent) => {
-    const sel = selection();
-    const g = grid();
-    if (!sel || !g) return;
-    const text = selectionText(g, sel);
+    const text = selectedText();
     if (!text) return;
     event.clipboardData?.setData("text/plain", text);
     event.preventDefault();
@@ -1757,11 +1755,7 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
       (event.metaKey || (event.ctrlKey && event.shiftKey));
     if (isCopyChord) {
       event.preventDefault();
-      const sel = selection();
-      const g = grid();
-      if (sel && g) {
-        await writeClipboard(selectionText(g, sel));
-      }
+      await writeClipboard(selectedText());
       return;
     }
 
