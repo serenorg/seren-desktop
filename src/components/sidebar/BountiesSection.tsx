@@ -4,7 +4,6 @@
 import { createQuery } from "@tanstack/solid-query";
 import {
   type Component,
-  createEffect,
   createMemo,
   createSignal,
   For,
@@ -172,7 +171,6 @@ const BountyRow: Component<{
 export const BountiesSection: Component = () => {
   const [collapsed, setCollapsed] = createSignal(false);
   const [activeId, setActiveId] = createSignal<string | null>(null);
-  const [autoOpenedDefault, setAutoOpenedDefault] = createSignal(false);
 
   const handleSelectBounty = (bountyId: string) => {
     // Snapshot the active thread's binding BEFORE clearing the active
@@ -261,13 +259,6 @@ export const BountiesSection: Component = () => {
       .sort((a, b) => createdAtTime(b.createdAt) - createdAtTime(a.createdAt)),
   );
 
-  createEffect(() => {
-    if (autoOpenedDefault() || activeId() || threadStore.activeThreadId) return;
-    const bounty = activeBounties()[0];
-    if (!bounty) return;
-    setAutoOpenedDefault(true);
-    handleSelectBounty(bounty.id);
-  });
   const errorMessage = createMemo(() =>
     bountiesQuery.error instanceof Error
       ? bountiesQuery.error.message

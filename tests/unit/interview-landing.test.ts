@@ -44,10 +44,15 @@ describe("AppShell interview landing wiring", () => {
     "utf8",
   );
 
-  it("opens the interview landing on first launch instead of the skills panel", () => {
+  it("uses a strong startup default for the interview landing", () => {
     expect(appShell).toContain("loadInitialInterviewLanding()");
-    expect(appShell).toContain('if (raw === null) return null');
-    expect(appShell).toContain("INTERVIEW_LANDING_DISMISSED_KEY");
+    // Strong default: the loader returns `true` unconditionally and does not
+    // consult the legacy persistent-dismissal key. Closing is session-only.
+    expect(appShell).toMatch(
+      /function loadInitialInterviewLanding\(\): boolean \{[\s\S]*?return true;[\s\S]*?\}/,
+    );
+    expect(appShell).not.toContain("INTERVIEW_LANDING_DISMISSED_KEY");
+    expect(appShell).not.toContain("persistInterviewLandingDismissed");
   });
 
   it("listens for desktop interview deep links", () => {
