@@ -16,6 +16,7 @@ import {
   agentCatalog,
   type CatalogEntry,
   type CatalogEntryKind,
+  normalizeAgentCatalogEntries,
 } from "@/services/agent-catalog";
 
 const KIND_LABEL: Record<CatalogEntryKind, string> = {
@@ -71,8 +72,12 @@ export const CatalogList: Component = () => {
     },
   );
 
+  const safeEntries = createMemo(() =>
+    normalizeAgentCatalogEntries(entries() ?? []),
+  );
+
   const grouped = createMemo(() => {
-    const list = entries() ?? [];
+    const list = safeEntries();
     const byKind = new Map<CatalogEntryKind, CatalogEntry[]>();
     for (const entry of list) {
       const bucket = byKind.get(entry.kind) ?? [];
@@ -178,9 +183,7 @@ export const CatalogList: Component = () => {
         </div>
       </Show>
       <Show
-        when={
-          !entries.loading && !entries.error && (entries() ?? []).length === 0
-        }
+        when={!entries.loading && !entries.error && safeEntries().length === 0}
       >
         <div class="text-[13px] text-muted-foreground">
           No catalog entries yet.

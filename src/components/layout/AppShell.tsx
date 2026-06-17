@@ -5,6 +5,7 @@ import {
   type Component,
   createEffect,
   createSignal,
+  ErrorBoundary,
   Match,
   on,
   onCleanup,
@@ -824,7 +825,36 @@ export const AppShell: Component<AppShellProps> = (props) => {
                       </Show>
                     }
                   >
-                    <CatalogList />
+                    <ErrorBoundary
+                      fallback={(error) => {
+                        telemetry.reportError(
+                          error instanceof Error
+                            ? error
+                            : new Error(String(error)),
+                          { surface: "agent_catalog" },
+                        );
+                        return (
+                          <div class="flex h-full min-h-[320px] flex-col items-center justify-center gap-3 p-6 text-center">
+                            <div class="text-sm font-semibold text-foreground">
+                              Agent catalog is recovering.
+                            </div>
+                            <div class="max-w-md text-[13px] text-muted-foreground">
+                              The catalog view hit an unexpected entry, but the
+                              rest of Seren is still available.
+                            </div>
+                            <button
+                              type="button"
+                              class="rounded border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-surface-2"
+                              onClick={handleCloseCatalog}
+                            >
+                              Back to workspace
+                            </button>
+                          </div>
+                        );
+                      }}
+                    >
+                      <CatalogList />
+                    </ErrorBoundary>
                   </Show>
                 }
               >
