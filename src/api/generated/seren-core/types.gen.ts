@@ -15371,7 +15371,7 @@ export type ListResourcesData = {
          */
         publisher_slug?: string | null;
         /**
-         * Filter by resource type (e.g., "bounty", "dataset")
+         * Filter by resource type (e.g., "dataset")
          */
         resource_type?: string | null;
         /**

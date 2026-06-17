@@ -474,7 +474,7 @@ export type SkillEditDocument = {
 
 export type SkillOwnerKind = 'user' | 'organization';
 
-export type SkillSponsorMode = 'skip' | 'static' | 'seren_bounty';
+export type SkillSponsorMode = 'skip' | 'static' | 'seren_reward';
 
 export type SkillStatus = 'draft' | 'published' | 'suspended' | 'deleted';
 
@@ -500,7 +500,7 @@ export type SkillSummary = {
     owner_organization_id: string;
     owner_user_id?: string | null;
     price_cents: number;
-    seren_bounty_campaign_id?: string | null;
+    seren_reward_campaign_id?: string | null;
     skill_folder_name: string;
     slug: string;
     sponsor_mode: SkillSponsorMode;

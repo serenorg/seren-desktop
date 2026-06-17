@@ -8,7 +8,6 @@ export default defineConfig({
     "./openapi/openapi-seren-private-models.json",
     "./openapi/openapi-seren-agent.json",
     "./openapi/openapi-seren-skills.json",
-    "./openapi/openapi-seren-bounty.json",
   ],
   output: [
     {
@@ -28,9 +27,6 @@ export default defineConfig({
     },
     {
       path: "src/api/generated/seren-skills",
-    },
-    {
-      path: "src/api/generated/seren-bounty",
     },
   ],
   plugins: [
