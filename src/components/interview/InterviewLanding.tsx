@@ -17,6 +17,11 @@ import {
   nextInterviewSelection,
   resolveInterviewEmployeeSlug,
 } from "@/components/interview/interviewLandingModel";
+import { openExternalLink } from "@/lib/external-link";
+import {
+  EMPLOYEE_INTAKE_CALENDLY_URL,
+  submitGeneralEmployeeIntake,
+} from "@/services/employee-intake";
 
 export {
   CLOSE_INTERVIEW_LANDING_EVENT,
@@ -35,7 +40,15 @@ interface InterviewLandingProps {
 
 export const InterviewLanding: Component<InterviewLandingProps> = (props) => {
   const [selectedSlug, setSelectedSlug] = createSignal<string | null>(null);
-  const [started, setStarted] = createSignal(false);
+  const [step, setStep] = createSignal<"select" | "questions" | "complete">(
+    "select",
+  );
+  const [goals, setGoals] = createSignal("");
+  const [requirements, setRequirements] = createSignal("");
+  const [tools, setTools] = createSignal("");
+  const [discussionNotes, setDiscussionNotes] = createSignal("");
+  const [submitting, setSubmitting] = createSignal(false);
+  const [submitError, setSubmitError] = createSignal<string | null>(null);
 
   onMount(() => {
     if (
@@ -62,7 +75,8 @@ export const InterviewLanding: Component<InterviewLandingProps> = (props) => {
       () => props.initialEmployeeSlug,
       (requested) => {
         setSelectedSlug(resolveInterviewEmployeeSlug(employees(), requested));
-        setStarted(false);
+        setStep("select");
+        setSubmitError(null);
       },
       { defer: true },
     ),
@@ -80,7 +94,8 @@ export const InterviewLanding: Component<InterviewLandingProps> = (props) => {
       );
       if (next !== current) {
         setSelectedSlug(next);
-        setStarted(false);
+        setStep("select");
+        setSubmitError(null);
       }
     }),
   );
@@ -91,9 +106,47 @@ export const InterviewLanding: Component<InterviewLandingProps> = (props) => {
     return employeeCatalogStore.bySlug(slug) ?? null;
   });
 
+  const isComplete = createMemo(
+    () =>
+      !!selectedSlug() &&
+      goals().trim().length > 0 &&
+      requirements().trim().length > 0 &&
+      tools().trim().length > 0 &&
+      discussionNotes().trim().length > 0,
+  );
+
   const handleStartInterview = () => {
-    setStarted(true);
+    if (!selectedSlug()) {
+      setSubmitError("Choose a Seren employee before starting the intake.");
+      return;
+    }
+    setStep("questions");
+    setSubmitError(null);
     props.onStartInterview?.(selectedSlug());
+  };
+
+  const handleSubmitIntake = async () => {
+    if (!isComplete()) {
+      setSubmitError("Complete each intake field before scheduling.");
+      return;
+    }
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await submitGeneralEmployeeIntake({
+        selectedEmployeeSlug: selectedSlug(),
+        goals: goals(),
+        requirements: requirements(),
+        tools: tools(),
+        discussionNotes: discussionNotes(),
+      });
+      setStep("complete");
+      await openExternalLink(EMPLOYEE_INTAKE_CALENDLY_URL);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -159,22 +212,124 @@ export const InterviewLanding: Component<InterviewLandingProps> = (props) => {
           </Show>
         </div>
 
-        <button
-          type="button"
-          class="mt-5 flex h-10 w-full items-center justify-center rounded-md border border-primary/70 bg-primary text-[13px] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:border-border disabled:bg-surface-2 disabled:text-muted-foreground"
-          disabled={employeeCatalogStore.loading || employees().length === 0}
-          data-testid="start-employee-interview"
-          onClick={handleStartInterview}
+        <Show
+          when={step() === "questions"}
+          fallback={
+            <Show
+              when={step() === "complete"}
+              fallback={
+                <button
+                  type="button"
+                  class="mt-5 flex h-10 w-full items-center justify-center rounded-md border border-primary/70 bg-primary text-[13px] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:border-border disabled:bg-surface-2 disabled:text-muted-foreground"
+                  disabled={
+                    employeeCatalogStore.loading ||
+                    employees().length === 0 ||
+                    !selectedSlug()
+                  }
+                  data-testid="start-employee-interview"
+                  onClick={handleStartInterview}
+                >
+                  Start Interview
+                </button>
+              }
+            >
+              <div
+                class="mt-5 rounded-md border border-success/40 bg-success/10 px-3 py-3"
+                data-testid="interview-complete-state"
+              >
+                <p class="m-0 text-[13px] font-semibold text-success">
+                  Intake sent to Seren.
+                </p>
+                <p class="mt-1 mb-0 text-[12px] leading-snug text-muted-foreground">
+                  Calendly is open for your follow-up call.
+                </p>
+                <button
+                  type="button"
+                  class="mt-3 h-9 w-full rounded-md border border-border/80 bg-surface-1 text-[12px] font-medium text-foreground hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/70"
+                  onClick={() =>
+                    void openExternalLink(EMPLOYEE_INTAKE_CALENDLY_URL)
+                  }
+                >
+                  Open Calendly
+                </button>
+              </div>
+            </Show>
+          }
         >
-          Start Interview
-        </button>
-        <Show when={started()}>
-          <p
-            class="mt-3 mb-0 text-[12px] leading-snug text-success"
-            data-testid="interview-started-state"
-          >
-            Intake queued for Seren Employee customization.
-          </p>
+          <div class="mt-5 space-y-3" data-testid="employee-intake-form">
+            <label class="block">
+              <span class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                Goals
+              </span>
+              <textarea
+                class="mt-1 min-h-20 w-full resize-y rounded-md border border-border/80 bg-surface-1 px-3 py-2 text-[13px] leading-snug text-foreground outline-none focus:border-primary/70"
+                value={goals()}
+                onInput={(event) => setGoals(event.currentTarget.value)}
+              />
+            </label>
+            <label class="block">
+              <span class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                Requirements
+              </span>
+              <textarea
+                class="mt-1 min-h-20 w-full resize-y rounded-md border border-border/80 bg-surface-1 px-3 py-2 text-[13px] leading-snug text-foreground outline-none focus:border-primary/70"
+                value={requirements()}
+                onInput={(event) => setRequirements(event.currentTarget.value)}
+              />
+            </label>
+            <label class="block">
+              <span class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                Tools
+              </span>
+              <textarea
+                class="mt-1 min-h-16 w-full resize-y rounded-md border border-border/80 bg-surface-1 px-3 py-2 text-[13px] leading-snug text-foreground outline-none focus:border-primary/70"
+                value={tools()}
+                onInput={(event) => setTools(event.currentTarget.value)}
+              />
+            </label>
+            <label class="block">
+              <span class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                Discuss with Seren
+              </span>
+              <textarea
+                class="mt-1 min-h-20 w-full resize-y rounded-md border border-border/80 bg-surface-1 px-3 py-2 text-[13px] leading-snug text-foreground outline-none focus:border-primary/70"
+                value={discussionNotes()}
+                onInput={(event) =>
+                  setDiscussionNotes(event.currentTarget.value)
+                }
+              />
+            </label>
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="h-10 flex-1 rounded-md border border-primary/70 bg-primary text-[13px] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:border-border disabled:bg-surface-2 disabled:text-muted-foreground"
+                disabled={submitting() || !isComplete()}
+                data-testid="submit-employee-intake"
+                onClick={() => void handleSubmitIntake()}
+              >
+                {submitting() ? "Sending..." : "Send and Schedule"}
+              </button>
+              <button
+                type="button"
+                class="h-10 rounded-md border border-border/80 bg-transparent px-3 text-[12px] font-medium text-muted-foreground hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/70"
+                disabled={submitting()}
+                onClick={() => setStep("select")}
+              >
+                Back
+              </button>
+            </div>
+          </div>
+        </Show>
+        <Show when={submitError()}>
+          {(message) => (
+            <p
+              class="mt-3 mb-0 text-[12px] leading-snug text-status-error"
+              role="alert"
+              data-testid="interview-submit-error"
+            >
+              {message()}
+            </p>
+          )}
         </Show>
       </aside>
 
