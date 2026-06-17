@@ -7,12 +7,14 @@ import {
   createMemo,
   createSignal,
   For,
+  on,
   onMount,
   Show,
 } from "solid-js";
 import {
   catalogAssetUrl,
   clusterLabel,
+  nextInterviewSelection,
   resolveInterviewEmployeeSlug,
 } from "@/components/interview/interviewLandingModel";
 
@@ -53,12 +55,35 @@ export const InterviewLanding: Component<InterviewLandingProps> = (props) => {
     }),
   );
 
-  createEffect(() => {
-    setSelectedSlug(
-      resolveInterviewEmployeeSlug(employees(), props.initialEmployeeSlug),
-    );
-    setStarted(false);
-  });
+  // A deep link (including an in-place re-open) targets a specific role and
+  // should win, resetting the queued state for the new context.
+  createEffect(
+    on(
+      () => props.initialEmployeeSlug,
+      (requested) => {
+        setSelectedSlug(resolveInterviewEmployeeSlug(employees(), requested));
+        setStarted(false);
+      },
+      { defer: true },
+    ),
+  );
+
+  // Seed the selection from the catalog, but preserve a still-valid manual
+  // selection across catalog refreshes instead of discarding it (#2512).
+  createEffect(
+    on(employees, (list) => {
+      const current = selectedSlug();
+      const next = nextInterviewSelection(
+        current,
+        list,
+        props.initialEmployeeSlug,
+      );
+      if (next !== current) {
+        setSelectedSlug(next);
+        setStarted(false);
+      }
+    }),
+  );
 
   const selectedEmployee = createMemo(() => {
     const slug = selectedSlug();

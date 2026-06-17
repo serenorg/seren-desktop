@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   catalogAssetUrl,
+  nextInterviewSelection,
   resolveInterviewEmployeeSlug,
 } from "@/components/interview/interviewLandingModel";
 
@@ -35,6 +36,17 @@ describe("InterviewLanding", () => {
     expect(catalogAssetUrl("https://cdn.example/role.webp")).toBe(
       "https://cdn.example/role.webp",
     );
+  });
+
+  it("preserves a still-valid manual selection across a catalog refresh", () => {
+    expect(nextInterviewSelection("role-3", catalog, "cfo")).toBe("role-3");
+    expect(nextInterviewSelection("role-3", catalog, null)).toBe("role-3");
+  });
+
+  it("re-seeds from the deep-link slug when the selection is gone or absent", () => {
+    expect(nextInterviewSelection(null, catalog, "cfo")).toBe("cfo");
+    expect(nextInterviewSelection("removed-role", catalog, "cfo")).toBe("cfo");
+    expect(nextInterviewSelection("removed-role", catalog, null)).toBeNull();
   });
 });
 
