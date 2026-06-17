@@ -19,12 +19,12 @@ import { CatalogList } from "@/components/catalog/CatalogList";
 import { ArchivedEmployeeDetail } from "@/components/employees/ArchivedEmployeeDetail";
 import { EmployeeDetail } from "@/components/employees/EmployeeDetail";
 import { InboxList } from "@/components/inbox/InboxList";
+import { InterviewLanding } from "@/components/interview/InterviewLanding";
 import {
   CLOSE_INTERVIEW_LANDING_EVENT,
-  InterviewLanding,
   type InterviewLandingEventDetail,
   OPEN_INTERVIEW_LANDING_EVENT,
-} from "@/components/interview/InterviewLanding";
+} from "@/components/interview/interviewLandingEvents";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { AudioPrimingDialog } from "@/components/meeting/AudioPrimingDialog";
 import { MeetingPanel } from "@/components/meeting/MeetingPanel";
@@ -54,6 +54,7 @@ import { isMeetingProcessingStatus } from "@/lib/meeting-format";
 import { shortcuts } from "@/lib/shortcuts";
 import type { InstalledSkill } from "@/lib/skills";
 import { listenForInterviewLaunch } from "@/lib/tauri-bridge";
+import { telemetry } from "@/services/telemetry";
 import {
   appearanceState,
   applyAppearanceToDocument,
@@ -192,7 +193,22 @@ export const AppShell: Component<AppShellProps> = (props) => {
     persistSlidePanel(slidePanel());
   });
 
-  const openInterviewLanding = (employeeSlug?: string | null) => {
+  const reportInterviewInterest = (
+    employeeSlug: string | null,
+    source: string,
+    event = "interview-launched",
+  ) => {
+    void telemetry.recordEmployeeInterest({
+      employeeSlug,
+      event,
+      source,
+    });
+  };
+
+  const openInterviewLanding = (
+    employeeSlug?: string | null,
+    source?: string,
+  ) => {
     setInterviewEmployeeSlug(employeeSlug ?? null);
     setInterviewLandingOpen(true);
     setActiveEmployeeId(null);
@@ -203,11 +219,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
     }
     setCatalogOpen(false);
     setInboxOpen(false);
+    if (source) {
+      reportInterviewInterest(employeeSlug ?? null, source);
+    }
   };
 
   const handleOpenInterviewLanding = (event: Event) => {
     const detail = (event as CustomEvent<InterviewLandingEventDetail>).detail;
-    openInterviewLanding(detail?.employee ?? null);
+    openInterviewLanding(detail?.employee ?? null, detail?.source);
   };
 
   const closeInterviewLanding = () => {
@@ -375,7 +394,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
     let cleanupInterviewLaunch: (() => void) | null = null;
     void listenForInterviewLaunch((payload) => {
-      openInterviewLanding(payload.employee ?? null);
+      openInterviewLanding(payload.employee ?? null, "desktop-deep-link");
     }).then((unlisten) => {
       cleanupInterviewLaunch = unlisten;
     });
@@ -827,7 +846,19 @@ export const AppShell: Component<AppShellProps> = (props) => {
             <InterviewLanding
               initialEmployeeSlug={interviewEmployeeSlug()}
               onClose={closeInterviewLanding}
+              onSelectEmployee={(employeeSlug) => {
+                reportInterviewInterest(
+                  employeeSlug,
+                  "desktop-role-selection",
+                  "role-selected",
+                );
+              }}
               onStartInterview={(employeeSlug) => {
+                reportInterviewInterest(
+                  employeeSlug,
+                  "desktop-interview-start",
+                  "interview-started",
+                );
                 window.dispatchEvent(
                   new CustomEvent("seren:start-employee-interview", {
                     detail: { employee: employeeSlug },
