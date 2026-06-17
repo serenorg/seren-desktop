@@ -778,7 +778,9 @@ pub async fn render_memory_md_from_db(
         .run_sql(config, &sql, /* read_only */ true)
         .await
         .map_err(|e| format!("serendb SELECT failed: {e}"))?;
-    log::info!(
+    // Routine per-refresh bookkeeping; only useful while debugging memory
+    // provisioning. Keep it out of the INFO console to reduce noise. #2500.
+    log::debug!(
         "[ClaudeMemory] SELECT returned {} preference rows for project {}",
         result.row_count,
         project_path
