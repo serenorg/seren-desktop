@@ -2105,6 +2105,13 @@ export const agentStore = {
     return state.threadStates[threadId]?.turnInFlight === true;
   },
 
+  /** True while a spawn for this conversation is in flight. Backed by the
+   *  spawnSession dedup guard (added before spawn, removed in finally), so it
+   *  is never stale — used to reject duplicate cold-start sends (#2525). */
+  isSpawning(conversationId: string): boolean {
+    return spawningConversations.has(conversationId);
+  },
+
   getTurnError(threadId: string): TurnError | null {
     return state.threadStates[threadId]?.turnError ?? null;
   },
