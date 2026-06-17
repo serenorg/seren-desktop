@@ -798,6 +798,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         console.warn("[AgentChat] sendMessage aborted: no open folder");
         return;
       }
+      // A Send/Enter while the cold-start spawn is still running would call
+      // spawnSession again; the store rejects the duplicate (returns null),
+      // which the failure branch below would misread as spawn_failed and tear
+      // down the in-flight spawn. Ignore the extra submit until it's ready.
+      if (agentStore.isSpawning(thread.id)) return;
       agentStore.setTurnInFlight(thread.id, true);
       agentStore.armRestartTimer(thread.id, 60_000, "spawn_failed");
       try {
