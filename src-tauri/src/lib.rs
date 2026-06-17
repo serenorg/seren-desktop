@@ -294,6 +294,51 @@ fn get_oauth_providers(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     Ok(providers)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+struct InterviewLaunchPayload {
+    employee: Option<String>,
+}
+
+fn is_valid_employee_slug(value: &str) -> bool {
+    let Some(first) = value.chars().next() else {
+        return false;
+    };
+    let Some(last) = value.chars().last() else {
+        return false;
+    };
+
+    first.is_ascii_alphanumeric()
+        && last.is_ascii_alphanumeric()
+        && value.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        })
+}
+
+fn parse_interview_launch_url(raw_url: &str) -> Option<InterviewLaunchPayload> {
+    let url = url::Url::parse(raw_url).ok()?;
+    if url.scheme() != "seren" {
+        return None;
+    }
+
+    let is_interview_launch = match url.host_str() {
+        Some("interview") => url.path().is_empty() || url.path() == "/",
+        _ => url.path() == "/interview",
+    };
+    if !is_interview_launch {
+        return None;
+    }
+
+    let employee = url.query_pairs().find_map(|(key, value)| {
+        if key == "employee" && is_valid_employee_slug(&value) {
+            Some(value.into_owned())
+        } else {
+            None
+        }
+    });
+
+    Some(InterviewLaunchPayload { employee })
+}
+
 /// Redact sensitive query parameters from an OAuth URL for safe logging.
 fn redact_auth_url(url: &str) -> String {
     let sensitive_params = [
@@ -709,7 +754,25 @@ pub fn run() {
                         log::debug!("[Deep Link] Processing URL: {}", url);
                         log::debug!("[Deep Link] - scheme: {}", url.scheme());
                         log::debug!("[Deep Link] - path: {}", url.path());
-                        if url.scheme() == "seren" && url.path() == "/callback" {
+                        if let Some(payload) = parse_interview_launch_url(&url.to_string()) {
+                            log::info!("[Deep Link] Match! Emitting interview-launch event");
+                            if let Err(e) = handle.emit("interview-launch", payload) {
+                                log::error!(
+                                    "[Deep Link] Failed to emit interview-launch event: {}",
+                                    e
+                                );
+                            } else {
+                                log::info!(
+                                    "[Deep Link] Successfully emitted interview-launch event"
+                                );
+                            }
+                            if let Some(window) = handle.get_webview_window("main") {
+                                let _ = window.set_focus();
+                                log::info!(
+                                    "[Deep Link] Focused main window after interview launch"
+                                );
+                            }
+                        } else if url.scheme() == "seren" && url.path() == "/callback" {
                             log::info!("[Deep Link] Match! Emitting oauth-callback event");
                             // Emit event to frontend with OAuth callback data
                             if let Err(e) = handle.emit("oauth-callback", url.to_string()) {
@@ -1067,4 +1130,57 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{InterviewLaunchPayload, parse_interview_launch_url};
+
+    #[test]
+    fn parses_interview_launch_host_url() {
+        assert_eq!(
+            parse_interview_launch_url("seren://interview?employee=cfo"),
+            Some(InterviewLaunchPayload {
+                employee: Some("cfo".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_interview_launch_path_url() {
+        assert_eq!(
+            parse_interview_launch_url("seren:/interview?employee=chief-revenue-officer"),
+            Some(InterviewLaunchPayload {
+                employee: Some("chief-revenue-officer".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_general_interview_launch_url() {
+        assert_eq!(
+            parse_interview_launch_url("seren://interview"),
+            Some(InterviewLaunchPayload { employee: None })
+        );
+    }
+
+    #[test]
+    fn rejects_non_interview_launch_urls() {
+        assert_eq!(
+            parse_interview_launch_url("https://serendb.com/interview?employee=cfo"),
+            None
+        );
+        assert_eq!(
+            parse_interview_launch_url("seren://callback?employee=cfo"),
+            None
+        );
+        assert_eq!(
+            parse_interview_launch_url("seren://interview?employee=CFO"),
+            Some(InterviewLaunchPayload { employee: None })
+        );
+        assert_eq!(
+            parse_interview_launch_url("seren://interview?employee=chief_revenue_officer"),
+            Some(InterviewLaunchPayload { employee: None })
+        );
+    }
 }

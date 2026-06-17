@@ -633,6 +633,32 @@ export async function listenForOAuthCallback(
   return unlisten;
 }
 
+export interface InterviewLaunchPayload {
+  employee?: string | null;
+}
+
+/**
+ * Listen for employee interview launch events from deep links.
+ * @param callback - Function to call with the requested employee slug
+ * @returns Cleanup function to remove the listener
+ */
+export async function listenForInterviewLaunch(
+  callback: (payload: InterviewLaunchPayload) => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    // Browser fallback - no deep link support
+    return () => {};
+  }
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await listen<InterviewLaunchPayload>(
+    "interview-launch",
+    (event) => {
+      callback(event.payload);
+    },
+  );
+  return unlisten;
+}
+
 // ============================================================================
 // Chat Conversation Management
 // ============================================================================
