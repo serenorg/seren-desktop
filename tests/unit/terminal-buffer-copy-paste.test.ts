@@ -70,8 +70,22 @@ describe("TerminalBuffer — terminal selection owns browser copy (#2279)", () =
     expect(terminalBufferTsx).toMatch(/onSelectStart=\{preventNativeSelection\}/);
     expect(terminalBufferTsx).toMatch(/class="[^"]*select-none/);
     expect(terminalBufferTsx).toMatch(
-      /const onSurfaceMouseDown[\s\S]*e\.preventDefault\(\)[\s\S]*setSelection\(\{ anchor: cell, head: cell \}\)/,
+      /const onSurfaceMouseDown[\s\S]*e\.preventDefault\(\)[\s\S]*captureSelection\(\{ anchor: cell, head: cell \}\)/,
     );
+  });
+
+  it("copies the snapshot captured at selection time, not text re-derived from the live grid (#2279)", () => {
+    // The CLI streams output, so the grid scrolls between selecting and
+    // copying. Re-reading selectionText(grid(), sel) at copy time returns
+    // whatever later output now occupies those viewport rows. captureSelection
+    // snapshots the text when the selection is made; every clipboard path then
+    // reads selectedText() instead of the live grid.
+    expect(terminalBufferTsx).toMatch(/const captureSelection\s*=/);
+    expect(terminalBufferTsx).toMatch(
+      /setSelectedText\([\s\S]*selectionText\(g, range\)/,
+    );
+    expect(terminalBufferTsx).toMatch(/const text = selectedText\(\)/);
+    expect(terminalBufferTsx).toMatch(/writeClipboard\(selectedText\(\)\)/);
   });
 
   it("handles browser copy events by writing the terminal cell selection, not the native DOM selection", () => {
