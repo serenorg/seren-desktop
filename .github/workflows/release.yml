@@ -1280,10 +1280,12 @@ jobs:
             throw new Error("Missing presigned Windows e2e payload URL(s)");
           }
           const workName = `seren-release-windows-e2e-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`;
+          const logsS3Uri = `s3://${env.WINDOWS_E2E_S3_BUCKET}/${env.S3_PREFIX}/windows-e2e-logs.zip`;
           const commands = [
             "$ErrorActionPreference = 'Stop'",
             "$ProgressPreference = 'SilentlyContinue'",
             `$work = Join-Path $env:TEMP '${workName}'`,
+            `$logsS3Uri = ${psString(logsS3Uri)}`,
             "if (Test-Path $work) { Remove-Item -LiteralPath $work -Recurse -Force }",
             "New-Item -ItemType Directory -Force -Path $work | Out-Null",
             "Write-Host '[windows-e2e:ssm] Downloading staged installer and payload'",
@@ -1294,7 +1296,17 @@ jobs:
             "Set-Location $work",
             "Write-Host '[windows-e2e:ssm] Running Windows app harness as scheduled task user'",
             `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows-e2e-task-user.ps1 -InstallerPath (Join-Path $work 'SerenDesktop-setup.exe') -WorkDir $work -SecretParameterPrefix ${psString(env.WINDOWS_E2E_SECRET_PARAMETER_PREFIX)} -ProbeTimeoutSeconds 1800 -TaskTimeoutSeconds 3600`,
-            "if ($LASTEXITCODE -ne 0) { throw \"Windows app scheduled-task harness failed with exit code $LASTEXITCODE\" }",
+            "$harnessExitCode = $LASTEXITCODE",
+            "Write-Host '[windows-e2e:ssm] Bundling Windows app harness logs'",
+            "$logPaths = @((Join-Path $work 'windows-e2e-task.log'), (Join-Path $work 'windows-e2e-logs')) | Where-Object { Test-Path -LiteralPath $_ }",
+            "if (@($logPaths).Count -eq 0) { Set-Content -LiteralPath (Join-Path $work 'windows-e2e-log-missing.txt') -Value 'No Windows e2e logs were produced.'; $logPaths = @((Join-Path $work 'windows-e2e-log-missing.txt')) }",
+            "$logBundle = Join-Path $work 'windows-e2e-logs.zip'",
+            "Remove-Item -LiteralPath $logBundle -Force -ErrorAction SilentlyContinue",
+            "Compress-Archive -Path $logPaths -DestinationPath $logBundle -Force",
+            "aws s3 cp $logBundle $logsS3Uri",
+            "if ($LASTEXITCODE -ne 0) { throw \"Failed to upload Windows app harness logs to $logsS3Uri\" }",
+            "Write-Host \"[windows-e2e:ssm] Uploaded Windows app harness logs to $logsS3Uri\"",
+            "if ($harnessExitCode -ne 0) { throw \"Windows app scheduled-task harness failed with exit code $harnessExitCode\" }",
             ];
           // executionTimeout bounds the whole on-box command. It must exceed the
           // harness's own budget: the scheduled-task wait (TaskTimeoutSeconds + 60
@@ -1347,6 +1359,30 @@ jobs:
             --instance-id "$WINDOWS_E2E_INSTANCE_ID" \
             --query "{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}" \
             --output json
+
+      - name: Download Windows e2e log bundle
+        if: always()
+        shell: bash
+        env:
+          S3_PREFIX: ${{ steps.stage.outputs.prefix }}
+        run: |
+          set -uo pipefail
+          mkdir -p windows-e2e-logs
+          if [ -z "${S3_PREFIX:-}" ]; then
+            echo "::warning::Windows e2e S3 prefix was not produced; skipping log download."
+            exit 0
+          fi
+          if ! aws s3 cp "s3://${WINDOWS_E2E_S3_BUCKET}/${S3_PREFIX}/windows-e2e-logs.zip" windows-e2e-logs/windows-e2e-logs.zip; then
+            echo "::warning::Windows e2e log bundle was not available in S3."
+          fi
+
+      - name: Upload Windows e2e logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-app-e2e-logs
+          path: windows-e2e-logs/
+          if-no-files-found: warn
 
   publish-release:
     needs: [create-release, build, windows-app-e2e]

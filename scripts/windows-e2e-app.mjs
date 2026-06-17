@@ -349,15 +349,82 @@ function waitForWebSocketOpen(ws) {
   });
 }
 
-async function connectProviderRuntime(config) {
+function validateProviderRuntimeConfig(config, label = "provider runtime config") {
+  assert(
+    config?.apiBaseUrl && config?.wsBaseUrl && config?.token,
+    `${label} missing fields`,
+  );
+  return config;
+}
+
+async function resolveProviderRuntimeConfig(
+  page,
+  { timeoutMs = PROVIDER_CONFIG_TIMEOUT_MS, label = "provider runtime config" } = {},
+) {
+  return validateProviderRuntimeConfig(
+    await withTimeout(tauriInvoke(page, "provider_runtime_get_config"), timeoutMs, label),
+    label,
+  );
+}
+
+async function fetchProviderRuntimeHealth(config) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_HEALTH_REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${config.apiBaseUrl}/__seren/health`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const health = await response.json();
+    if (health?.ok !== true) {
+      throw new Error(`health ok=${String(health?.ok)}`);
+    }
+    return health;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function refreshProviderRuntimeConfig(page, previousConfig) {
+  const nextConfig = await resolveProviderRuntimeConfig(page, {
+    timeoutMs: PROVIDER_CONFIG_REFRESH_TIMEOUT_MS,
+    label: "provider runtime config refresh",
+  });
+  if (
+    nextConfig.apiBaseUrl !== previousConfig.apiBaseUrl ||
+    nextConfig.wsBaseUrl !== previousConfig.wsBaseUrl ||
+    nextConfig.token !== previousConfig.token
+  ) {
+    logStage(
+      `Provider runtime config refreshed: api=${redactUrl(nextConfig.apiBaseUrl)} ws=${redactUrl(nextConfig.wsBaseUrl)}`,
+    );
+  }
+  return nextConfig;
+}
+
+async function connectProviderRuntime(page, initialConfig) {
+  let config = validateProviderRuntimeConfig(initialConfig);
+  let failedHealthAttempts = 0;
   logStage(`Waiting for provider runtime health at ${config.apiBaseUrl}`);
   const health = await waitUntil(
     "provider runtime health",
     async () => {
-      const response = await fetch(`${config.apiBaseUrl}/__seren/health`);
-      return response.ok ? response.json() : null;
+      try {
+        return await fetchProviderRuntimeHealth(config);
+      } catch (error) {
+        failedHealthAttempts += 1;
+        if (failedHealthAttempts <= 3 || failedHealthAttempts % 10 === 0) {
+          logStage(
+            `Provider runtime health miss at ${redactUrl(config.apiBaseUrl)}; refreshing config (${error instanceof Error ? error.message : String(error)})`,
+          );
+        }
+        config = await refreshProviderRuntimeConfig(page, config);
+        return null;
+      }
     },
-    { timeoutMs: 45_000 },
+    { timeoutMs: PROVIDER_HEALTH_TIMEOUT_MS },
   );
   assert(health.mode === "desktop-native", `Unexpected provider runtime mode: ${health.mode}`);
   logStage("Provider runtime health OK; connecting WebSocket");
@@ -393,6 +460,9 @@ const SINGLE_PROMPT_TIMEOUT_MS = 240_000;
 // needs a wider ceiling than a single prompt.
 const PAIRED_PROMPT_TIMEOUT_MS = 600_000;
 const PROVIDER_CONFIG_TIMEOUT_MS = 30_000;
+const PROVIDER_CONFIG_REFRESH_TIMEOUT_MS = 5_000;
+const PROVIDER_HEALTH_TIMEOUT_MS = 45_000;
+const PROVIDER_HEALTH_REQUEST_TIMEOUT_MS = 2_000;
 const PROVIDER_WS_OPEN_TIMEOUT_MS = 30_000;
 const PROVIDER_RPC_TIMEOUT_MS = 60_000;
 const PROVIDER_ENSURE_CLI_TIMEOUT_MS = 600_000;
@@ -849,16 +919,11 @@ async function runPairedJourney(ws, buffer) {
 
 async function exerciseAgentRuntime(page) {
   logStage("Resolving provider runtime config");
-  const config = await withTimeout(
-    tauriInvoke(page, "provider_runtime_get_config"),
-    PROVIDER_CONFIG_TIMEOUT_MS,
-    "provider runtime config",
-  );
-  assert(config?.apiBaseUrl && config?.wsBaseUrl && config?.token, "provider runtime config missing fields");
+  const config = await resolveProviderRuntimeConfig(page);
   logStage(
     `Provider runtime config resolved: api=${redactUrl(config.apiBaseUrl)} ws=${redactUrl(config.wsBaseUrl)}`,
   );
-  const ws = await connectProviderRuntime(config);
+  const ws = await connectProviderRuntime(page, config);
   const buffer = createRuntimeBuffer(ws);
   try {
     for (const journey of AGENT_JOURNEYS) {

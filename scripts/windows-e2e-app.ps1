@@ -129,7 +129,7 @@ function Clear-DownloadMarksUnder([string]$Root) {
   }
 }
 
-function Invoke-ProcessWithTimeout([string]$FilePath, [string[]]$ArgumentList, [int]$TimeoutSeconds, [string]$Label, [switch]$NoNewWindow, [scriptblock]$OnTimeout = $null) {
+function Invoke-ProcessWithTimeout([string]$FilePath, [string[]]$ArgumentList, [int]$TimeoutSeconds, [string]$Label, [switch]$NoNewWindow, [scriptblock]$OnTimeout = $null, [string]$StdoutPath = "", [string]$StderrPath = "") {
   Write-Stage "Starting ${Label} with ${TimeoutSeconds}s timeout"
   $startArgs = @{
     FilePath = $FilePath
@@ -138,6 +138,14 @@ function Invoke-ProcessWithTimeout([string]$FilePath, [string[]]$ArgumentList, [
   }
   if ($NoNewWindow) {
     $startArgs.NoNewWindow = $true
+  }
+  if (-not [string]::IsNullOrWhiteSpace($StdoutPath)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $StdoutPath) | Out-Null
+    $startArgs.RedirectStandardOutput = $StdoutPath
+  }
+  if (-not [string]::IsNullOrWhiteSpace($StderrPath)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $StderrPath) | Out-Null
+    $startArgs.RedirectStandardError = $StderrPath
   }
   $process = Start-Process @startArgs
   $timeoutMs = [int]([Math]::Min([int]::MaxValue, [int64]$TimeoutSeconds * 1000))
@@ -151,10 +159,20 @@ function Invoke-ProcessWithTimeout([string]$FilePath, [string[]]$ArgumentList, [
       }
     }
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    Write-FileTail $StdoutPath 200
+    Write-FileTail $StderrPath 200
     Fail "$Label timed out after ${TimeoutSeconds}s and was killed."
   }
   Write-Stage "${Label} exited with code $($process.ExitCode)"
   return $process.ExitCode
+}
+
+function Write-FileTail([string]$Path, [int]$Tail = 200) {
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+    return
+  }
+  Write-Host "Tail of ${Path}:"
+  Get-Content -LiteralPath $Path -Tail $Tail -ErrorAction SilentlyContinue | Write-Host
 }
 
 function Write-DirectorySnapshot([string]$Root) {
@@ -210,6 +228,36 @@ function Write-ProbeTimeoutDiagnostics([System.Diagnostics.Process]$AppProcess) 
     Write-Host
 }
 
+function Copy-E2EAppLogs([string]$DestinationDir) {
+  New-Item -ItemType Directory -Force -Path $DestinationDir | Out-Null
+  $roots = @()
+  foreach ($base in @($env:APPDATA, $env:LOCALAPPDATA)) {
+    if ([string]::IsNullOrWhiteSpace($base)) {
+      continue
+    }
+    $roots += @(
+      (Join-Path $base "com.serendb.desktop\logs"),
+      (Join-Path $base "SerenDesktop\logs"),
+      (Join-Path $base "Seren\logs")
+    )
+  }
+
+  foreach ($root in ($roots | Select-Object -Unique)) {
+    if (-not (Test-Path -LiteralPath $root)) {
+      continue
+    }
+    try {
+      $safeName = ($root -replace "[:\\\/]+", "_").Trim("_")
+      $target = Join-Path $DestinationDir "app-logs-$safeName"
+      New-Item -ItemType Directory -Force -Path $target | Out-Null
+      Copy-Item -Path (Join-Path $root "*") -Destination $target -Recurse -Force -ErrorAction Stop
+      Write-Stage "Copied app logs from $root to $target"
+    } catch {
+      Write-Host "::warning::Unable to copy app logs from ${root}: $($_.Exception.Message)"
+    }
+  }
+}
+
 function Wait-ForCdp([int]$Port, [int]$TimeoutSeconds, [System.Diagnostics.Process]$AppProcess) {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   $url = "http://127.0.0.1:$Port/json/version"
@@ -244,6 +292,11 @@ function Find-RequiredFile([string]$Root, [string]$Filter, [string]$Label) {
   }
   return $match.FullName
 }
+
+$e2eLogDir = Join-Path (Split-Path -Parent $PSScriptRoot) "windows-e2e-logs"
+New-Item -ItemType Directory -Force -Path $e2eLogDir | Out-Null
+$probeStdoutPath = Join-Path $e2eLogDir "windows-e2e-probe.stdout.log"
+$probeStderrPath = Join-Path $e2eLogDir "windows-e2e-probe.stderr.log"
 
 Write-Stage "Validating required production e2e environment"
 Require-Env @(
@@ -329,16 +382,20 @@ try {
   Write-Stage "Waiting for WebView2 CDP endpoint"
   Wait-ForCdp -Port $RemoteDebugPort -TimeoutSeconds $StartupTimeoutSeconds -AppProcess $app
   Write-Stage "Running Node app e2e probe"
-  $probeExitCode = Invoke-ProcessWithTimeout "node" @("$PSScriptRoot/windows-e2e-app.mjs") $ProbeTimeoutSeconds "Windows app e2e probe" -NoNewWindow -OnTimeout {
+  $probeExitCode = Invoke-ProcessWithTimeout "node" @("$PSScriptRoot/windows-e2e-app.mjs") $ProbeTimeoutSeconds "Windows app e2e probe" -NoNewWindow -StdoutPath $probeStdoutPath -StderrPath $probeStderrPath -OnTimeout {
     Write-ProbeTimeoutDiagnostics $app
   }
   if ($probeExitCode -ne 0) {
+    Write-FileTail $probeStdoutPath 200
+    Write-FileTail $probeStderrPath 200
     Fail "Windows app e2e script failed with exit code $probeExitCode"
   }
 } finally {
+  Copy-E2EAppLogs $e2eLogDir
   Write-Stage "Cleaning up Seren processes"
   if ($null -ne $app -and -not $app.HasExited) {
     Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
   }
   Get-Process -Name "Seren" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Copy-E2EAppLogs $e2eLogDir
 }
