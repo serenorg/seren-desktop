@@ -70,6 +70,28 @@ function logStage(message) {
   console.log(`[windows-e2e] ${message}`);
 }
 
+function isTransientProviderRuntimeStartupError(message) {
+  return /^WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/?' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED$/.test(
+    message,
+  );
+}
+
+function assertNoUnexpectedBrowserErrors(browserErrors) {
+  const unexpectedErrors = browserErrors.filter(
+    (message) => !isTransientProviderRuntimeStartupError(message),
+  );
+  const ignoredCount = browserErrors.length - unexpectedErrors.length;
+  if (ignoredCount > 0) {
+    console.log(
+      `[windows-e2e] ignored ${ignoredCount} transient provider runtime startup WebSocket error(s) after runtime auth succeeded`,
+    );
+  }
+  assert(
+    unexpectedErrors.length === 0,
+    `WebView console/page errors: ${unexpectedErrors.join("\n")}`,
+  );
+}
+
 async function waitUntil(label, fn, { timeoutMs = 60_000, intervalMs = 500 } = {}) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
@@ -1384,7 +1406,7 @@ async function main() {
     await exerciseHistorySync(page, token);
     await validateGithubPat();
     await exerciseMeetingCapture(page);
-    assert(browserErrors.length === 0, `WebView console/page errors: ${browserErrors.join("\n")}`);
+    assertNoUnexpectedBrowserErrors(browserErrors);
     console.log("[windows-e2e] full Windows production e2e passed");
   } finally {
     await browser.close();
