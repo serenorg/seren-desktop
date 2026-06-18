@@ -106,6 +106,15 @@ describe("Windows production e2e release gate", () => {
     expect(probe).toContain("https://api.serendb.com");
   });
 
+  it("submits Windows sign-in without relying on WebView2 pointer click completion (#2553)", () => {
+    expect(probe).toContain("submitSignInForm");
+    expect(probe).toContain("enabled sign-in submit button");
+    expect(probe).toContain("form.requestSubmit(button)");
+    expect(probe).not.toContain(
+      'form.getByRole("button", { name: /^Sign In$/ }).click();',
+    );
+  });
+
   it("fails eSigner CKA login/load commands at their native failure point (#2483)", () => {
     const buildJob = workflowJob("build");
     expect(buildJob).toContain("function Invoke-EsignerCka");
