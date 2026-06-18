@@ -1,16 +1,30 @@
-// ABOUTME: Host-side skill secret broker for per-skill credentials.
-// ABOUTME: Stores raw key material in Tauri storage while list/audit APIs expose metadata only.
+// ABOUTME: Host-side binding store for per-skill Seren Passwords references.
+// ABOUTME: Stores seren-secrets:// refs while list/audit APIs expose metadata only.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
-use uuid::Uuid;
+use tokio::sync::Mutex;
+use url::Url;
+use uuid::{Uuid, Variant};
 
 const SECRET_BROKER_STORE: &str = "skill-keys.json";
 const SECRET_BROKER_STATE_KEY: &str = "state";
+const SECRET_SOURCE_LOCAL_STORE: &str = "local_store";
+const SECRET_SOURCE_SEREN_PASSWORDS: &str = "seren_passwords";
+
+static SECRET_BROKER_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn secret_broker_write_lock() -> &'static Mutex<()> {
+    // Serializes read-modify-write of the broker state so concurrent
+    // commands cannot interleave reads and lose updates (for example two
+    // releases charging a session cap from the same starting balance).
+    SECRET_BROKER_WRITE_LOCK.get_or_init(|| Mutex::new(()))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +40,7 @@ pub struct KeyApprovalPolicy {
 #[serde(rename_all = "camelCase")]
 pub struct SecretBindingSummary {
     pub id: String,
+    pub source: String,
     pub service_id: String,
     pub service_name: String,
     pub skill_id: String,
@@ -41,6 +56,8 @@ pub struct SecretBindingSummary {
 #[serde(rename_all = "camelCase")]
 struct StoredSecretBinding {
     pub id: String,
+    #[serde(default = "default_binding_source")]
+    pub source: String,
     pub service_id: String,
     pub service_name: String,
     pub skill_id: String,
@@ -56,6 +73,8 @@ struct StoredSecretBinding {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertSkillSecretBindingRequest {
+    #[serde(default = "default_binding_source")]
+    pub source: String,
     pub service_id: String,
     pub service_name: String,
     pub skill_id: String,
@@ -78,6 +97,7 @@ pub struct SkillSecretEnvResponse {
     pub binding_id: String,
     pub variable_names: Vec<String>,
     pub secret_values: BTreeMap<String, String>,
+    pub reference_values: BTreeMap<String, String>,
     pub decision: String,
     pub active_session_id: Option<String>,
 }
@@ -222,6 +242,81 @@ fn binding_id(service_id: &str, skill_id: &str) -> String {
     format!("{service_id}::{skill_id}")
 }
 
+fn default_binding_source() -> String {
+    SECRET_SOURCE_LOCAL_STORE.to_string()
+}
+
+fn normalize_binding_source(source: &str) -> Result<String, String> {
+    let source = source.trim();
+    match source {
+        "" => Ok(default_binding_source()),
+        SECRET_SOURCE_LOCAL_STORE | SECRET_SOURCE_SEREN_PASSWORDS => Ok(source.to_string()),
+        _ => Err("Unsupported secret binding source".to_string()),
+    }
+}
+
+fn normalize_secret_values(
+    values: BTreeMap<String, String>,
+    source: &str,
+) -> Result<BTreeMap<String, String>, String> {
+    let mut normalized = BTreeMap::new();
+    for (name, value) in values {
+        let normalized_name = name.trim().to_ascii_uppercase();
+        let secret_value = value.trim().to_string();
+        if normalized_name.is_empty() {
+            return Err("Each secret value must have an environment variable name".to_string());
+        }
+        if secret_value.is_empty() {
+            return Err(format!("{normalized_name} is empty"));
+        }
+        if source == SECRET_SOURCE_SEREN_PASSWORDS && !is_seren_secrets_reference(&secret_value) {
+            return Err(
+                "Each Seren Passwords value must be a valid seren-secrets:// reference".to_string(),
+            );
+        }
+        normalized.insert(normalized_name, secret_value);
+    }
+    Ok(normalized)
+}
+
+fn is_seren_secrets_reference(value: &str) -> bool {
+    let trimmed = value.trim();
+    let Ok(parsed) = Url::parse(trimmed) else {
+        return false;
+    };
+    if parsed.scheme() != "seren-secrets" {
+        return false;
+    }
+    if parsed.username() != ""
+        || parsed.password().is_some()
+        || parsed.port().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return false;
+    }
+    let Some(vault_id) = parsed.host_str() else {
+        return false;
+    };
+    if !is_supported_reference_uuid(vault_id) {
+        return false;
+    }
+    let path_segments: Vec<_> = parsed.path().split('/').collect();
+    path_segments.len() == 3
+        && path_segments[0].is_empty()
+        && is_supported_reference_uuid(path_segments[1])
+        && !path_segments[2].is_empty()
+        && !trimmed.chars().any(char::is_whitespace)
+}
+
+fn is_supported_reference_uuid(value: &str) -> bool {
+    let Ok(uuid) = Uuid::parse_str(value) else {
+        return false;
+    };
+    uuid.hyphenated().to_string().eq_ignore_ascii_case(value)
+        && uuid.get_variant() == Variant::RFC4122
+}
+
 fn default_skills_root() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".config").join("seren").join("skills"))
 }
@@ -247,17 +342,29 @@ fn service_for_env_var(name: &str) -> Option<&'static ServiceDefinition> {
     })
 }
 
+#[cfg(test)]
 fn parse_env_variable_names(contents: &str) -> Vec<String> {
-    let mut names = Vec::new();
+    parse_env_variable_assignments(contents)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+fn parse_env_variable_assignments(contents: &str) -> Vec<(String, String)> {
+    let mut assignments = Vec::new();
     for line in contents.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
         let assignment = trimmed.strip_prefix("export ").unwrap_or(trimmed).trim();
-        let Some((name, _)) = assignment.split_once('=') else {
+        let Some((name, value)) = assignment.split_once('=') else {
             continue;
         };
+        let value = value.trim().trim_matches(|ch| ch == '"' || ch == '\'');
+        if is_seren_secrets_reference(value) {
+            continue;
+        }
         let name = name.trim();
         if name.is_empty() {
             continue;
@@ -270,10 +377,10 @@ fn parse_env_variable_names(contents: &str) -> Vec<String> {
                 .next()
                 .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
         {
-            names.push(name.to_ascii_uppercase());
+            assignments.push((name.to_ascii_uppercase(), value.trim().to_string()));
         }
     }
-    names
+    assignments
 }
 
 fn read_state(app: &AppHandle) -> Result<SecretBrokerState, String> {
@@ -309,20 +416,28 @@ fn is_active_session(
     if session.binding_id != binding_id || session.ended_at.is_some() {
         return false;
     }
-    if session.expires_at <= now_iso() {
+    if session_has_expired(&session.expires_at) {
         return false;
     }
-    if let Some(amount) = amount_usd {
-        if session.spent_usd + amount > session.cap_usd {
-            return false;
-        }
+    if let Some(amount) = amount_usd
+        && session.spent_usd + amount > session.cap_usd
+    {
+        return false;
     }
     true
+}
+
+fn session_has_expired(expires_at: &str) -> bool {
+    match expires_at.parse::<jiff::Timestamp>() {
+        Ok(expires_at) => expires_at <= jiff::Timestamp::now(),
+        Err(_) => true,
+    }
 }
 
 fn to_summary(state: &SecretBrokerState, binding: &StoredSecretBinding) -> SecretBindingSummary {
     SecretBindingSummary {
         id: binding.id.clone(),
+        source: binding.source.clone(),
         service_id: binding.service_id.clone(),
         service_name: binding.service_name.clone(),
         skill_id: binding.skill_id.clone(),
@@ -375,6 +490,7 @@ pub async fn upsert_skill_secret_binding(
     app: AppHandle,
     request: UpsertSkillSecretBindingRequest,
 ) -> Result<SecretBindingSummary, String> {
+    let source = normalize_binding_source(&request.source)?;
     let service_id = request.service_id.trim().to_string();
     let skill_id = request.skill_id.trim().to_string();
     if service_id.is_empty() || skill_id.is_empty() {
@@ -382,16 +498,19 @@ pub async fn upsert_skill_secret_binding(
     }
 
     let id = binding_id(&service_id, &skill_id);
+    let _write_guard = secret_broker_write_lock().lock().await;
     let mut state = read_state(&app)?;
     let now = now_iso();
-    let variable_names: Vec<String> = request
-        .secret_values
+    let secret_values = normalize_secret_values(request.secret_values, &source)?;
+    let variable_names: Vec<String> = secret_values
         .keys()
-        .map(|name| name.trim().to_ascii_uppercase())
-        .filter(|name| !name.is_empty())
+        .cloned()
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
+    if variable_names.is_empty() {
+        return Err("At least one secret value is required".to_string());
+    }
 
     let mut replacement = false;
     let created_at = if let Some(existing) = state.bindings.iter().find(|b| b.id == id) {
@@ -413,12 +532,13 @@ pub async fn upsert_skill_secret_binding(
 
     let binding = StoredSecretBinding {
         id: id.clone(),
+        source: source.clone(),
         service_id,
         service_name: request.service_name,
         skill_id,
         skill_name: request.skill_name,
         variable_names,
-        secret_values: request.secret_values,
+        secret_values,
         approval_policy: request.approval_policy,
         created_at,
         updated_at: now,
@@ -429,9 +549,17 @@ pub async fn upsert_skill_secret_binding(
         &mut state,
         &binding,
         if replacement {
-            "Key replaced; active sessions ended"
+            if source == SECRET_SOURCE_SEREN_PASSWORDS {
+                "References replaced; active sessions ended"
+            } else {
+                "Secrets replaced; active sessions ended"
+            }
         } else {
-            "Key stored"
+            if source == SECRET_SOURCE_SEREN_PASSWORDS {
+                "References stored"
+            } else {
+                "Secrets stored"
+            }
         },
         if replacement {
             "key_edited"
@@ -439,7 +567,11 @@ pub async fn upsert_skill_secret_binding(
             "approved_by_user"
         },
         if replacement {
-            "Key edited"
+            if source == SECRET_SOURCE_SEREN_PASSWORDS {
+                "References edited"
+            } else {
+                "Secrets edited"
+            }
         } else {
             "Stored by you"
         },
@@ -457,6 +589,7 @@ pub async fn request_skill_secret_env(
     request: SkillSecretEnvRequest,
 ) -> Result<SkillSecretEnvResponse, String> {
     let amount_usd = request.amount_usd.unwrap_or(0.0).max(0.0);
+    let _write_guard = secret_broker_write_lock().lock().await;
     let mut state = read_state(&app)?;
     let Some(binding) = state
         .bindings
@@ -464,8 +597,16 @@ pub async fn request_skill_secret_env(
         .find(|binding| binding.id == request.binding_id)
         .cloned()
     else {
-        return Err("Key binding not found".to_string());
+        return Err("Reference binding not found".to_string());
     };
+    if binding.source == SECRET_SOURCE_SEREN_PASSWORDS
+        && !binding
+            .secret_values
+            .values()
+            .all(|value| is_seren_secrets_reference(value))
+    {
+        return Err("Seren Passwords binding contains invalid references".to_string());
+    }
 
     let active_session = state
         .sessions
@@ -491,7 +632,11 @@ pub async fn request_skill_secret_env(
             &binding,
             request.operation,
             "approval_required",
-            "Default $0 cap requires an explicit approval before secrets are released",
+            if binding.source == SECRET_SOURCE_SEREN_PASSWORDS {
+                "Default $0 cap requires an explicit approval before references are released"
+            } else {
+                "Default $0 cap requires an explicit approval before secrets are released"
+            },
             Some(amount_usd),
         );
         write_state(&app, &state)?;
@@ -511,7 +656,11 @@ pub async fn request_skill_secret_env(
         &binding,
         request.operation,
         decision.clone(),
-        "Secret released by host broker",
+        if binding.source == SECRET_SOURCE_SEREN_PASSWORDS {
+            "Reference released by host broker"
+        } else {
+            "Secret released by host broker"
+        },
         Some(amount_usd),
     );
     write_state(&app, &state)?;
@@ -519,7 +668,12 @@ pub async fn request_skill_secret_env(
     Ok(SkillSecretEnvResponse {
         binding_id: binding.id,
         variable_names: binding.variable_names,
-        secret_values: binding.secret_values,
+        secret_values: binding.secret_values.clone(),
+        reference_values: if binding.source == SECRET_SOURCE_SEREN_PASSWORDS {
+            binding.secret_values
+        } else {
+            BTreeMap::new()
+        },
         decision,
         active_session_id: session_id,
     })
@@ -527,6 +681,7 @@ pub async fn request_skill_secret_env(
 
 #[tauri::command]
 pub async fn delete_skill_secret_binding(app: AppHandle, binding_id: String) -> Result<(), String> {
+    let _write_guard = secret_broker_write_lock().lock().await;
     let mut state = read_state(&app)?;
     let now = now_iso();
     state.bindings.retain(|binding| binding.id != binding_id);
@@ -585,7 +740,10 @@ fn build_env_migration_proposals_for_file(
     contents: &str,
 ) -> Vec<SkillEnvMigrationProposal> {
     let mut variables_by_service: BTreeMap<&'static str, BTreeSet<String>> = BTreeMap::new();
-    for name in parse_env_variable_names(contents) {
+    for (name, value) in parse_env_variable_assignments(contents) {
+        if value.is_empty() || is_seren_secrets_reference(&value) {
+            continue;
+        }
         let Some(service) = service_for_env_var(&name) else {
             continue;
         };
@@ -600,12 +758,16 @@ fn build_env_migration_proposals_for_file(
         .filter_map(|(service_id, variable_names)| {
             let service = SERVICES.iter().find(|service| service.id == service_id)?;
             let source_path = env_path.to_string_lossy().to_string();
+            let migrated_path = env_path
+                .with_file_name(".env.migrated")
+                .to_string_lossy()
+                .to_string();
             Some(SkillEnvMigrationProposal {
                 id: binding_id(service_id, skill_id),
                 service_id: service_id.to_string(),
                 service_name: service.name.to_string(),
                 skill_id: skill_id.to_string(),
-                migrated_path: source_path.replace(".env", ".env.migrated"),
+                migrated_path,
                 source_path,
                 variable_names: variable_names.into_iter().collect(),
                 requires_confirmation: true,
@@ -635,6 +797,7 @@ pub async fn grant_skill_secret_session(
         return Err("duration_minutes and cap_usd must be positive".to_string());
     }
 
+    let _write_guard = secret_broker_write_lock().lock().await;
     let mut state = read_state(&app)?;
     let Some(binding) = state
         .bindings
@@ -642,7 +805,7 @@ pub async fn grant_skill_secret_session(
         .find(|binding| binding.id == binding_id)
         .cloned()
     else {
-        return Err("Key binding not found".to_string());
+        return Err("Reference binding not found".to_string());
     };
 
     let now = now_iso();
@@ -675,6 +838,7 @@ pub async fn grant_skill_secret_session(
 
 #[tauri::command]
 pub async fn end_skill_secret_session(app: AppHandle, session_id: String) -> Result<(), String> {
+    let _write_guard = secret_broker_write_lock().lock().await;
     let mut state = read_state(&app)?;
     let now = now_iso();
     let Some(index) = state
@@ -718,9 +882,115 @@ mod tests {
     #[test]
     fn parses_known_env_vars() {
         let names = parse_env_variable_names(
-            "POLY_API_KEY=abc\nexport KRAKEN_API_SECRET=def\n#APCA_API_KEY_ID=no\n",
+            "POLY_API_KEY=abc\nexport KRAKEN_API_SECRET=def\nAPCA_API_KEY_ID=seren-secrets://11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/key\n#APCA_API_KEY_ID=no\n",
         );
         assert_eq!(names, vec!["POLY_API_KEY", "KRAKEN_API_SECRET"]);
+    }
+
+    #[test]
+    fn validates_seren_secrets_references() {
+        assert!(is_seren_secrets_reference(
+            "seren-secrets://11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/password"
+        ));
+        assert!(is_seren_secrets_reference(
+            "  seren-secrets://11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/password  "
+        ));
+        assert!(!is_seren_secrets_reference(
+            "seren-secrets://vault/item/password"
+        ));
+        assert!(!is_seren_secrets_reference(
+            "seren-secrets://11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/password?field=other"
+        ));
+        assert!(!is_seren_secrets_reference(
+            "seren-secrets://11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/password#fragment"
+        ));
+        assert!(!is_seren_secrets_reference(
+            "seren-secrets://user@11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/password"
+        ));
+        assert!(!is_seren_secrets_reference(
+            "seren-secrets://11111111-1111-4111-8111-111111111111:1234/22222222-2222-4222-8222-222222222222/password"
+        ));
+        assert!(!is_seren_secrets_reference(
+            "seren-secrets://11111111-1111-4111-8111-111111111111//22222222-2222-4222-8222-222222222222/password"
+        ));
+        assert!(!is_seren_secrets_reference(
+            "seren-secrets://11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222//password"
+        ));
+        assert!(!is_seren_secrets_reference(
+            "seren-secrets://00000000-0000-0000-0000-000000000000/22222222-2222-4222-8222-222222222222/password"
+        ));
+        assert!(is_seren_secrets_reference(
+            "seren-secrets://11111111-1111-4111-8111-111111111111/01890f25-7b08-723d-bd8f-f9c1f9b59a7d/password"
+        ));
+        assert!(!is_seren_secrets_reference(
+            "seren-secrets://11111111111141118111111111111111/22222222-2222-4222-8222-222222222222/password"
+        ));
+        assert!(!is_seren_secrets_reference("seren-secrets://vault"));
+        assert!(!is_seren_secrets_reference(
+            "seren-secrets://vault-id/item-id/password"
+        ));
+        assert!(!is_seren_secrets_reference(
+            "seren-secret://vault/item/password"
+        ));
+        assert!(!is_seren_secrets_reference("seren-secrets://"));
+        assert!(!is_seren_secrets_reference("plain-secret"));
+    }
+
+    #[test]
+    fn stored_bindings_without_source_default_to_local_store() {
+        let binding: StoredSecretBinding = serde_json::from_value(serde_json::json!({
+            "id": "polymarket::bot",
+            "serviceId": "polymarket",
+            "serviceName": "Polymarket",
+            "skillId": "bot",
+            "skillName": "bot",
+            "variableNames": ["POLY_API_KEY"],
+            "secretValues": {
+                "POLY_API_KEY": "plain-secret"
+            },
+            "approvalPolicy": {
+                "mode": "always_ask",
+                "perTransactionCapUsd": 0.0,
+                "sessionDurationMinutes": 30,
+                "sessionCapUsd": 200.0,
+                "logEveryUse": true
+            },
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+            "lastUsedAt": null
+        }))
+        .unwrap();
+
+        assert_eq!(binding.source, SECRET_SOURCE_LOCAL_STORE);
+    }
+
+    #[test]
+    fn secret_value_validation_depends_on_binding_source() {
+        let mut values = BTreeMap::new();
+        values.insert("poly_api_key".to_string(), "plain-secret".to_string());
+
+        let local = normalize_secret_values(values.clone(), SECRET_SOURCE_LOCAL_STORE).unwrap();
+        assert_eq!(
+            local.get("POLY_API_KEY").map(String::as_str),
+            Some("plain-secret")
+        );
+        assert!(
+            normalize_secret_values(values, SECRET_SOURCE_SEREN_PASSWORDS)
+                .unwrap_err()
+                .contains("seren-secrets://")
+        );
+
+        let mut references = BTreeMap::new();
+        references.insert(
+            "poly_api_key".to_string(),
+            "seren-secrets://11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/password".to_string(),
+        );
+        let stored = normalize_secret_values(references, SECRET_SOURCE_SEREN_PASSWORDS).unwrap();
+        assert!(
+            stored
+                .get("POLY_API_KEY")
+                .is_some_and(|value| is_seren_secrets_reference(value))
+        );
     }
 
     #[test]
@@ -737,5 +1007,27 @@ mod tests {
             "rename_env_to_env_migrated"
         );
         assert!(proposals[0].requires_confirmation);
+    }
+
+    #[test]
+    fn migration_skips_existing_seren_secrets_references() {
+        let proposals = build_env_migration_proposals_for_file(
+            "polymarket-bot",
+            Path::new("/tmp/polymarket-bot/.env"),
+            "POLY_API_KEY=seren-secrets://11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/api-key\nPOLY_SECRET=plaintext\n",
+        );
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].variable_names, vec!["POLY_SECRET"]);
+    }
+
+    #[test]
+    fn active_session_expiry_parses_timestamps_instead_of_string_sorting() {
+        let now = jiff::Timestamp::now();
+        let expired = (now - jiff::SignedDuration::from_secs(1)).to_string();
+        let active = (now + jiff::SignedDuration::from_secs(60)).to_string();
+
+        assert!(session_has_expired(&expired));
+        assert!(!session_has_expired(&active));
+        assert!(session_has_expired("not-a-timestamp"));
     }
 }

@@ -46,6 +46,7 @@ pub mod messaging;
 mod oauth;
 mod oauth_callback_server;
 mod orchestrator;
+mod passwords;
 mod path_util;
 mod pdf;
 mod polymarket;
@@ -979,6 +980,14 @@ pub fn run() {
             secret_broker::list_secret_access_audit,
             secret_broker::grant_skill_secret_session,
             secret_broker::end_skill_secret_session,
+            passwords::create_passwords_api_credential,
+            passwords::unlock_passwords_vault,
+            passwords::setup_passwords_vault,
+            passwords::create_passwords_vault,
+            passwords::lock_passwords_vault,
+            passwords::list_passwords_items,
+            passwords::get_passwords_item,
+            passwords::save_passwords_api_credential,
             // Polymarket WebSocket commands
             polymarket::commands::connect_polymarket_websocket,
             polymarket::commands::subscribe_polymarket_market,
