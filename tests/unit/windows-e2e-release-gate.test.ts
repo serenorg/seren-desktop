@@ -161,6 +161,29 @@ describe("Windows production e2e release gate", () => {
     expect(failureAt).toBeGreaterThan(fallbackAt);
   });
 
+  it("ignores only transient provider runtime startup WebSocket console noise after successful auth (#2561)", () => {
+    expect(probe).toContain("isTransientProviderRuntimeStartupError");
+    expect(probe).toContain("assertNoUnexpectedBrowserErrors");
+    expect(probe).toContain("net::ERR_CONNECTION_REFUSED");
+    expect(probe).toContain(
+      "transient provider runtime startup WebSocket error(s) after runtime auth succeeded",
+    );
+    expect(probe).toContain("unexpectedErrors.length === 0");
+    expect(probe).not.toContain("browserErrors.length === 0");
+
+    const mainAt = probe.indexOf("async function main()");
+    const agentRuntimeAt = probe.indexOf("await exerciseAgentRuntime(page);", mainAt);
+    const meetingCaptureAt = probe.indexOf("await exerciseMeetingCapture(page);", mainAt);
+    const auditAt = probe.indexOf(
+      "assertNoUnexpectedBrowserErrors(browserErrors);",
+      mainAt,
+    );
+    expect(mainAt).toBeGreaterThanOrEqual(0);
+    expect(agentRuntimeAt).toBeGreaterThan(mainAt);
+    expect(meetingCaptureAt).toBeGreaterThan(agentRuntimeAt);
+    expect(auditAt).toBeGreaterThan(meetingCaptureAt);
+  });
+
   it("fails eSigner CKA login/load commands at their native failure point (#2483)", () => {
     const buildJob = workflowJob("build");
     expect(buildJob).toContain("function Invoke-EsignerCka");
