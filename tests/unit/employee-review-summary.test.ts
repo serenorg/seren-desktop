@@ -10,12 +10,35 @@ describe("buildEmployeePolicyReviewSummary", () => {
     });
 
     expect(summary.runtimePolicy).toEqual(["Default managed runtime policy"]);
+    expect(summary.memoryPolicy).toEqual(["Long-term memory disabled"]);
     expect(summary.toolAccess).toEqual([
       "Presets: Live data",
       "No typed tool refs declared",
     ]);
     expect(summary.toolRefDetails).toEqual(["No typed tool refs declared"]);
     expect(summary.approvalRules).toContain("Read-only by default");
+  });
+
+  it("summarizes an enabled Seren-managed semantic memory policy", () => {
+    const summary = buildEmployeePolicyReviewSummary({
+      approvalPolicy: "read_only",
+      toolPresets: [],
+      memoryPolicy: {
+        semantic_memory: {
+          enabled: true,
+          read_policy: "always_on",
+          write_policy: "on_observation",
+          store: "org_default",
+          retention_days: 90,
+        },
+        transcript_retention_days: null,
+        compaction: null,
+      },
+    });
+
+    expect(summary.memoryPolicy).toEqual([
+      "Semantic memory enabled; always injected; automatic writes; retention 90d",
+    ]);
   });
 
   it("surfaces runtime policy, typed tool details, and approval gates", () => {

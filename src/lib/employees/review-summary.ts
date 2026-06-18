@@ -3,6 +3,7 @@
 
 import type {
   AgentGuardrailPolicy,
+  AgentMemoryPolicy,
   AgentRuntimePolicy,
   AgentToolRef,
   ManagedAgentApprovalPolicy,
@@ -11,6 +12,7 @@ import type {
 
 export type EmployeePolicyReviewSummary = {
   runtimePolicy: string[];
+  memoryPolicy: string[];
   toolAccess: string[];
   toolRefDetails: string[];
   approvalRules: string[];
@@ -20,6 +22,7 @@ export type EmployeePolicyReviewInput = {
   approvalPolicy: ManagedAgentApprovalPolicy;
   toolPresets: readonly ManagedAgentToolPreset[];
   runtimePolicy?: AgentRuntimePolicy | null;
+  memoryPolicy?: AgentMemoryPolicy | null;
   toolRefs?: readonly AgentToolRef[];
   guardrails?: readonly AgentGuardrailPolicy[];
 };
@@ -170,6 +173,27 @@ function runtimePolicyLines(policy: AgentRuntimePolicy | null | undefined) {
   return lines;
 }
 
+function memoryPolicyLines(policy: AgentMemoryPolicy | null | undefined) {
+  const semantic = policy?.semantic_memory;
+  if (!semantic?.enabled) {
+    return ["Long-term memory disabled"];
+  }
+  const read =
+    semantic.read_policy === "always_on"
+      ? "always injected"
+      : "explicit load_memory tool";
+  const write =
+    semantic.write_policy === "on_observation"
+      ? "automatic writes"
+      : semantic.write_policy === "none"
+        ? "no writes"
+        : "explicit save tool when available";
+  const retention = semantic.retention_days
+    ? `retention ${semantic.retention_days}d`
+    : "default retention";
+  return [`Semantic memory enabled; ${read}; ${write}; ${retention}`];
+}
+
 function toolRefDetailLines(toolRefs: readonly AgentToolRef[]) {
   if (toolRefs.length === 0) {
     return ["No typed tool refs declared"];
@@ -208,6 +232,7 @@ export function buildEmployeePolicyReviewSummary(
 
   return {
     runtimePolicy: runtimePolicyLines(input.runtimePolicy),
+    memoryPolicy: memoryPolicyLines(input.memoryPolicy),
     toolAccess: [
       `Presets: ${compactList(
         input.toolPresets.map(formatToolPreset),

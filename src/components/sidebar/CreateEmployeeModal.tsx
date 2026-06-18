@@ -221,6 +221,13 @@ function buildMemoryPolicy(input: {
   };
 }
 
+function sameMemoryPolicy(
+  left: AgentMemoryPolicy | null | undefined,
+  right: AgentMemoryPolicy | null | undefined,
+) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
 interface CreateEmployeeModalProps {
   onClose: () => void;
   onCreated: (employeeId: string) => void;
@@ -936,6 +943,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       runtimePolicy: props.employee?.runtimePolicy ?? null,
       toolRefs: currentToolRefs(),
       guardrails: props.employee?.guardrails ?? [],
+      memoryPolicy: currentMemoryPolicy(),
     }),
   );
 
@@ -957,10 +965,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     }
     if (!sameStringSet(toolPresets(), employee.toolPresets)) return true;
     if (!sameToolRefs(currentToolRefs(), employee.toolRefs)) return true;
-    if (
-      JSON.stringify(currentMemoryPolicy()) !==
-      JSON.stringify(employee.memoryPolicy)
-    )
+    if (!sameMemoryPolicy(currentMemoryPolicy(), employee.memoryPolicy))
       return true;
     if (approvalPolicy() !== employee.approvalPolicy) return true;
     if (
@@ -1032,6 +1037,10 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             currentToolRefs(),
             props.employee.toolRefs,
           );
+          const memoryPolicyChanged = !sameMemoryPolicy(
+            currentMemoryPolicy(),
+            props.employee.memoryPolicy,
+          );
           const patch: EmployeePatch = {
             name: name().trim(),
             // Mode is immutable on update; cron fields only flow when the
@@ -1053,7 +1062,9 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             modelId: modelChoice() === "private" ? modelId().trim() : undefined,
             toolPresets: toolPresets(),
             toolRefs: toolRefsChanged ? currentToolRefs() : undefined,
-            memoryPolicy: currentMemoryPolicy(),
+            memoryPolicy: memoryPolicyChanged
+              ? currentMemoryPolicy()
+              : undefined,
             approvalPolicy: approvalPolicy(),
             limits,
           };
@@ -2303,6 +2314,7 @@ const PolicyReviewPanel: Component<{
 }> = (props) => {
   const groups = () => [
     { title: "Runtime policy", lines: props.summary.runtimePolicy },
+    { title: "Memory", lines: props.summary.memoryPolicy },
     { title: "Tool access", lines: props.summary.toolAccess },
     { title: "Typed tool details", lines: props.summary.toolRefDetails },
     { title: "Approval rules", lines: props.summary.approvalRules },
