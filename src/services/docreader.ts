@@ -4,7 +4,7 @@
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import type { Attachment } from "@/lib/providers/types";
-import { unwrapPublisherBody } from "@/lib/publisher-response";
+import { publisherStatus, unwrapPublisherBody } from "@/lib/publisher-response";
 import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 import { updateBalanceFromError } from "@/stores/wallet.store";
@@ -49,6 +49,65 @@ function extractText(payload: DocReaderResponseBody): string | undefined {
     if (joined.trim()) return joined;
   }
   return undefined;
+}
+
+function updateBalanceFromPublisherError(payload: unknown): void {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
+  const balanceAtomic = (payload as Record<string, unknown>)
+    .availableBalanceAtomic;
+  if (typeof balanceAtomic !== "string" && typeof balanceAtomic !== "number") {
+    return;
+  }
+  const parsed =
+    typeof balanceAtomic === "number"
+      ? balanceAtomic
+      : Number.parseInt(balanceAtomic, 10);
+  if (!Number.isNaN(parsed)) {
+    updateBalanceFromError(parsed);
+  }
+}
+
+function publisherErrorMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (typeof record.message === "string" && record.message.trim()) {
+    return record.message.trim();
+  }
+  if (typeof record.error === "string" && record.error.trim()) {
+    return record.error.trim();
+  }
+  const error = record.error;
+  if (error && typeof error === "object" && !Array.isArray(error)) {
+    const message = (error as Record<string, unknown>).message;
+    if (typeof message === "string" && message.trim()) {
+      return message.trim();
+    }
+  }
+  return null;
+}
+
+function docReaderStatusError(status: number, payload: unknown): Error {
+  if (status === 402) {
+    updateBalanceFromPublisherError(payload);
+    return new Error(
+      "Insufficient SerenBucks balance. Add funds to process documents.",
+    );
+  }
+  if (status === 401) {
+    return new Error(
+      "Document processing requires a Seren account. Sign in to continue.",
+    );
+  }
+
+  const message = publisherErrorMessage(payload);
+  return new Error(
+    message
+      ? `DocReader service failed (${status}): ${message}`
+      : `DocReader service failed (${status}). Try again later.`,
+  );
 }
 
 /**
@@ -127,6 +186,17 @@ export async function readDocument(attachment: Attachment): Promise<string> {
 
   const data = await response.json();
   console.log("[DocReader] Response payload keys:", Object.keys(data));
+  const innerStatus = publisherStatus(data);
+  if (innerStatus !== undefined && innerStatus >= 400) {
+    const payload = unwrapPublisherBody<unknown>(data);
+    console.error(
+      "[DocReader] Publisher error:",
+      innerStatus,
+      JSON.stringify(payload).slice(0, 500),
+    );
+    throw docReaderStatusError(innerStatus, payload);
+  }
+
   const payload = unwrapPublisherBody<DocReaderResponseBody>(
     data,
   ) as DocReaderResponseBody;
