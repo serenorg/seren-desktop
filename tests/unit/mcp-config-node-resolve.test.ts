@@ -100,7 +100,7 @@ describe("#1883 — mcp-config resolves bare 'node' to embedded node binary", ()
       mcpServers: [PLAYWRIGHT_SERVER],
     });
 
-    expect(codexMcpConfigOverride).toContain(`"command"=${JSON.stringify(EMBEDDED_NODE)}`);
-    expect(codexMcpConfigOverride).not.toContain(`"command"="node"`);
+    expect(codexMcpConfigOverride).toContain(`command='${EMBEDDED_NODE}'`);
+    expect(codexMcpConfigOverride).not.toContain("command='node'");
   });
 });
