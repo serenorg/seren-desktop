@@ -115,6 +115,24 @@ describe("Windows production e2e release gate", () => {
     );
   });
 
+  it("uses spoken system audio for the Windows Meeting capture stimulus (#2555)", () => {
+    expect(probe).toContain("powerShellSingleQuoted");
+    expect(probe).toContain("SAPI.SpVoice");
+    expect(probe).toContain("$voice.Speak");
+    expect(probe).toContain("spoken system audio");
+    expect(probe).toContain("$playedSpeech");
+    expect(probe).toContain("[Console]::Beep");
+
+    const stimulusStart = probe.indexOf("function playWindowsAudio");
+    const captureStart = probe.indexOf("async function exerciseMeetingCapture");
+    expect(stimulusStart).toBeGreaterThanOrEqual(0);
+    expect(captureStart).toBeGreaterThan(stimulusStart);
+    const stimulus = probe.slice(stimulusStart, captureStart);
+    expect(stimulus.indexOf("SAPI.SpVoice")).toBeLessThan(
+      stimulus.indexOf("[Console]::Beep"),
+    );
+  });
+
   it("fails eSigner CKA login/load commands at their native failure point (#2483)", () => {
     const buildJob = workflowJob("build");
     expect(buildJob).toContain("function Invoke-EsignerCka");

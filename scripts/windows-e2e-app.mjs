@@ -1299,13 +1299,39 @@ async function exerciseHistorySync(page, token) {
   await runHistorySync(page, destination, "after-wipe-resync");
 }
 
+function powerShellSingleQuoted(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
 function playWindowsAudio() {
+  const speechText = powerShellSingleQuoted(
+    "Seren Windows end to end meeting capture test. This spoken system audio should be recorded and transcribed.",
+  );
+  const stimulusSeconds = Math.max(6, CAPTURE_SECONDS - 1);
   const command = [
-    "[Console]::Beep(880, 1200)",
-    "Start-Sleep -Milliseconds 250",
-    "[Console]::Beep(660, 1200)",
-    "Start-Sleep -Milliseconds 250",
-    "[Console]::Beep(990, 1200)",
+    "$ErrorActionPreference = 'Continue'",
+    `$deadline = (Get-Date).AddSeconds(${stimulusSeconds})`,
+    "$playedSpeech = $false",
+    "try {",
+    "  $voice = New-Object -ComObject SAPI.SpVoice",
+    "  $voice.Volume = 100",
+    "  $voice.Rate = -1",
+    "  while ((Get-Date) -lt $deadline) {",
+    `    [void]$voice.Speak(${speechText}, 0)`,
+    "    $playedSpeech = $true",
+    "    Start-Sleep -Milliseconds 150",
+    "  }",
+    "} catch {",
+    "  $playedSpeech = $false",
+    "}",
+    "if (-not $playedSpeech) {",
+    "  while ((Get-Date) -lt $deadline) {",
+    "    [Console]::Beep(880, 800)",
+    "    Start-Sleep -Milliseconds 150",
+    "    [Console]::Beep(660, 800)",
+    "    Start-Sleep -Milliseconds 150",
+    "  }",
+    "}",
   ].join("; ");
   return spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], {
     stdio: "ignore",
