@@ -1,5 +1,5 @@
-// ABOUTME: Frontend service wrapper for the Tauri Keys secret-broker commands.
-// ABOUTME: Falls back to safe demo metadata in browser-only tests; never returns raw secrets.
+// ABOUTME: Frontend service wrapper for Seren Passwords reference bindings.
+// ABOUTME: Falls back to safe demo metadata in browser-only tests; never returns plaintext.
 
 import {
   createDemoAuditEvents,
@@ -8,6 +8,7 @@ import {
   type KeyApprovalPolicy,
   type SecretAccessSession,
   type SecretAuditEvent,
+  type SecretBindingSource,
   type SkillEnvMigrationProposal,
   type SkillSecretBinding,
   type SkillSecretEnvRequest,
@@ -16,12 +17,78 @@ import {
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 export interface UpsertSkillSecretBindingRequest {
+  source: SecretBindingSource;
   serviceId: string;
   serviceName: string;
   skillId: string;
   skillName: string;
   secretValues: Record<string, string>;
   approvalPolicy: KeyApprovalPolicy;
+}
+
+export interface PasswordsSecretFieldInput {
+  name: string;
+  value: string;
+}
+
+export interface CreatePasswordsApiCredentialRequest {
+  masterPassword: string;
+  title: string;
+  serviceName: string;
+  fields: PasswordsSecretFieldInput[];
+}
+
+export interface CreatePasswordsApiCredentialResponse {
+  vaultId: string;
+  itemId: string;
+  references: Record<string, string>;
+}
+
+export interface PasswordsVaultSummary {
+  vaultId: string;
+  name: string;
+  writable: boolean;
+  itemCount: number;
+}
+
+export interface UnlockPasswordsVaultResponse {
+  vaults: PasswordsVaultSummary[];
+}
+
+export interface SetupPasswordsVaultResponse {
+  recoveryKeyDisplay: string;
+  personalVaultId: string;
+  vaults: PasswordsVaultSummary[];
+}
+
+export interface PasswordsItemSummary {
+  vaultId: string;
+  itemId: string;
+  title: string;
+  itemKind: string;
+  favorite: boolean;
+  sensitive: boolean;
+  reprompt: boolean;
+  tags: string[];
+  updatedAt: string;
+  decryptError: boolean;
+}
+
+export interface PasswordsItemDetail {
+  vaultId: string;
+  itemId: string;
+  title: string;
+  itemKind: string;
+  fields: PasswordsSecretFieldInput[];
+  updatedAt: string;
+}
+
+export interface SavePasswordsApiCredentialRequest {
+  vaultId: string;
+  itemId?: string | null;
+  title: string;
+  serviceName: string;
+  fields: PasswordsSecretFieldInput[];
 }
 
 async function invokeTauri<T>(
@@ -58,6 +125,73 @@ export async function upsertSkillSecretBinding(
   return invokeTauri<SkillSecretBinding>("upsert_skill_secret_binding", {
     request,
   });
+}
+
+export async function createPasswordsApiCredential(
+  request: CreatePasswordsApiCredentialRequest,
+): Promise<CreatePasswordsApiCredentialResponse> {
+  return invokeTauri<CreatePasswordsApiCredentialResponse>(
+    "create_passwords_api_credential",
+    { request },
+  );
+}
+
+export async function unlockPasswordsVault(
+  masterPassword: string,
+): Promise<UnlockPasswordsVaultResponse> {
+  return invokeTauri<UnlockPasswordsVaultResponse>("unlock_passwords_vault", {
+    request: { masterPassword },
+  });
+}
+
+export async function setupPasswordsVault(request: {
+  masterPassword: string;
+  displayName: string;
+  vaultName: string;
+}): Promise<SetupPasswordsVaultResponse> {
+  return invokeTauri<SetupPasswordsVaultResponse>("setup_passwords_vault", {
+    request,
+  });
+}
+
+export async function createPasswordsVault(request: {
+  name: string;
+  description?: string;
+}): Promise<UnlockPasswordsVaultResponse> {
+  return invokeTauri<UnlockPasswordsVaultResponse>("create_passwords_vault", {
+    request,
+  });
+}
+
+export async function lockPasswordsVault(): Promise<void> {
+  await invokeTauri<void>("lock_passwords_vault");
+}
+
+export async function listPasswordsItems(
+  vaultId: string,
+): Promise<PasswordsItemSummary[]> {
+  return invokeTauri<PasswordsItemSummary[]>("list_passwords_items", {
+    vaultId,
+  });
+}
+
+export async function getPasswordsItem(
+  vaultId: string,
+  itemId: string,
+): Promise<PasswordsItemDetail> {
+  return invokeTauri<PasswordsItemDetail>("get_passwords_item", {
+    vaultId,
+    itemId,
+  });
+}
+
+export async function savePasswordsApiCredential(
+  request: SavePasswordsApiCredentialRequest,
+): Promise<CreatePasswordsApiCredentialResponse> {
+  return invokeTauri<CreatePasswordsApiCredentialResponse>(
+    "save_passwords_api_credential",
+    { request },
+  );
 }
 
 export async function requestSkillSecretEnv(

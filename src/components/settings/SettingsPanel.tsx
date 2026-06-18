@@ -370,7 +370,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "providers", label: "AI Providers", icon: "🤖" },
     { id: "logins", label: "Logins", icon: "🔐" },
     { id: "sync", label: "Cloud Sync", icon: "☁️" },
-    { id: "keys", label: "Keys", icon: "🔑" },
+    { id: "keys", label: "Passwords", icon: "🔑" },
     { id: "toolsets", label: "Toolsets", icon: "📦" },
     { id: "editor", label: "Editor", icon: "📝" },
     { id: "wallet", label: "Wallet", icon: "💳" },

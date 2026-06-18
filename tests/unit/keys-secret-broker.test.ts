@@ -54,7 +54,7 @@ describe("Keys secret broker policy (#1823)", () => {
         skillId: "polymarket-bot",
         envPath: "/Users/test/.config/seren/skills/polymarket-bot/.env",
         contents:
-          "POLY_API_KEY=abc\nPOLY_SECRET=def\nSEREN_API_KEY=seren\nNOT_SECRET=ok\n",
+          "POLY_API_KEY=abc\nPOLY_SECRET=seren-secrets://11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/password\nSEREN_API_KEY=seren\nNOT_SECRET=ok\n",
       },
       {
         skillId: "paired-basis-maker",
@@ -71,7 +71,7 @@ describe("Keys secret broker policy (#1823)", () => {
         proposal.variableNames,
       ]),
     ).toEqual([
-      ["polymarket", "polymarket-bot", ["POLY_API_KEY", "POLY_SECRET"]],
+      ["polymarket", "polymarket-bot", ["POLY_API_KEY"]],
       ["seren-api", "polymarket-bot", ["SEREN_API_KEY"]],
       ["polymarket", "paired-basis-maker", ["POLY_API_KEY"]],
     ]);

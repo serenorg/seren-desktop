@@ -1,7 +1,8 @@
-// ABOUTME: Client-side policy helpers for the Keys secret broker.
+// ABOUTME: Client-side policy helpers for Seren Passwords reference bindings.
 // ABOUTME: Keeps service/skill binding and migration behavior testable without Tauri.
 
 export type KeyApprovalMode = "always_ask" | "auto_approve_cap";
+export type SecretBindingSource = "local_store" | "seren_passwords";
 
 export interface KeyApprovalPolicy {
   mode: KeyApprovalMode;
@@ -29,6 +30,7 @@ export interface SkillSecretBindingIdentity {
 
 export interface SkillSecretBinding {
   id: string;
+  source: SecretBindingSource;
   serviceId: string;
   serviceName: string;
   skillId: string;
@@ -50,6 +52,7 @@ export interface SkillSecretEnvResponse {
   bindingId: string;
   variableNames: string[];
   secretValues: Record<string, string>;
+  referenceValues: Record<string, string>;
   decision: "session_approved" | "auto_approved";
   activeSessionId: string | null;
 }
@@ -223,6 +226,85 @@ export function buildSkillSecretBindingId(
   return `${identity.serviceId}::${identity.skillId}`;
 }
 
+export function isEnvVarName(name: string): boolean {
+  return /^[_A-Z][_A-Z0-9]*$/.test(name.trim().toUpperCase());
+}
+
+/**
+ * Build the ENV -> seren-secrets:// reference map a binding stores, from a vault
+ * entry's chosen field names. A vault entry's fields are already named as env
+ * vars, so each field becomes an env var of the same (uppercased) name pointing
+ * at its field in the entry. Field names that are not valid env vars are skipped
+ * (the caller surfaces them and steers to the advanced editor).
+ */
+export function buildBindingReferences(
+  vaultId: string,
+  itemId: string,
+  fieldNames: string[],
+): Record<string, string> {
+  const references: Record<string, string> = {};
+  for (const field of fieldNames) {
+    const name = field.trim();
+    if (!name || !isEnvVarName(name)) continue;
+    references[name.toUpperCase()] =
+      `seren-secrets://${vaultId}/${itemId}/${name}`;
+  }
+  return references;
+}
+
+/**
+ * Infer which service a vault entry belongs to from its field names, so the
+ * friendly flow does not need an explicit Service pick in the common case.
+ */
+export function inferServiceFromFieldNames(
+  fieldNames: string[],
+): KeyServiceDefinition | null {
+  for (const name of fieldNames) {
+    const service = findKeyServiceForEnvVar(name);
+    if (service) return service;
+  }
+  return null;
+}
+
+export function isSerenSecretsReference(value: string): boolean {
+  const trimmed = value.trim();
+  if (/\s/.test(trimmed)) return false;
+  try {
+    const parsed = new URL(trimmed);
+    // Match the native validator: a reference is exactly
+    // seren-secrets://<vault>/<item>/<field> with no userinfo, port,
+    // query, or fragment. Accepting any of those here lets the UI treat
+    // a reference as valid that the Rust broker then rejects on save.
+    if (
+      parsed.username !== "" ||
+      parsed.password !== "" ||
+      parsed.port !== "" ||
+      parsed.search !== "" ||
+      parsed.hash !== ""
+    ) {
+      return false;
+    }
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const pathSegments = parsed.pathname.split("/");
+    return (
+      parsed.protocol === "seren-secrets:" &&
+      uuidPattern.test(parsed.hostname) &&
+      pathSegments.length === 3 &&
+      pathSegments[0] === "" &&
+      uuidPattern.test(pathSegments[1]) &&
+      pathSegments[2].length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+interface EnvAssignment {
+  name: string;
+  value: string;
+}
+
 export function buildEnvMigrationProposals(
   envFiles: EnvFileForMigration[],
 ): SkillEnvMigrationProposal[] {
@@ -230,7 +312,10 @@ export function buildEnvMigrationProposals(
 
   for (const envFile of envFiles) {
     const variablesByService = new Map<string, Set<string>>();
-    for (const variableName of parseEnvVariableNames(envFile.contents)) {
+    for (const { name: variableName, value } of parseEnvAssignments(
+      envFile.contents,
+    )) {
+      if (!value || isSerenSecretsReference(value)) continue;
       const service = findKeyServiceForEnvVar(variableName);
       if (!service) continue;
 
@@ -263,8 +348,8 @@ export function buildEnvMigrationProposals(
   return proposals;
 }
 
-export function parseEnvVariableNames(contents: string): string[] {
-  const names: string[] = [];
+function parseEnvAssignments(contents: string): EnvAssignment[] {
+  const assignments: EnvAssignment[] = [];
   for (const line of contents.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
@@ -272,12 +357,22 @@ export function parseEnvVariableNames(contents: string): string[] {
     const normalized = trimmed.startsWith("export ")
       ? trimmed.slice("export ".length).trim()
       : trimmed;
-    const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(normalized);
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(normalized);
     if (!match) continue;
+    const value = match[2]?.trim().replace(/^(['"])(.*)\1$/, "$2") ?? "";
 
-    names.push(match[1].toUpperCase());
+    assignments.push({
+      name: match[1].toUpperCase(),
+      value,
+    });
   }
-  return names;
+  return assignments;
+}
+
+export function parseEnvVariableNames(contents: string): string[] {
+  return parseEnvAssignments(contents)
+    .filter(({ value }) => value && !isSerenSecretsReference(value))
+    .map(({ name }) => name);
 }
 
 export function groupBindingsByService(bindings: SkillSecretBinding[]): Array<{
@@ -324,6 +419,7 @@ export function createDemoKeyBindings(now = new Date()): SkillSecretBinding[] {
   return [
     {
       id: "polymarket::polymarket-bot",
+      source: "seren_passwords",
       serviceId: "polymarket",
       serviceName: "Polymarket",
       skillId: "polymarket-bot",
@@ -341,6 +437,7 @@ export function createDemoKeyBindings(now = new Date()): SkillSecretBinding[] {
     },
     {
       id: "polymarket::paired-basis-maker",
+      source: "seren_passwords",
       serviceId: "polymarket",
       serviceName: "Polymarket",
       skillId: "paired-basis-maker",
@@ -362,6 +459,7 @@ export function createDemoKeyBindings(now = new Date()): SkillSecretBinding[] {
     },
     {
       id: "polymarket::high-throughput-basis-maker",
+      source: "seren_passwords",
       serviceId: "polymarket",
       serviceName: "Polymarket",
       skillId: "high-throughput-basis-maker",
@@ -379,6 +477,7 @@ export function createDemoKeyBindings(now = new Date()): SkillSecretBinding[] {
     },
     {
       id: "kraken::grid-trader",
+      source: "seren_passwords",
       serviceId: "kraken",
       serviceName: "Kraken",
       skillId: "grid-trader",
@@ -395,6 +494,7 @@ export function createDemoKeyBindings(now = new Date()): SkillSecretBinding[] {
     },
     {
       id: "seren-api::system",
+      source: "seren_passwords",
       serviceId: "seren-api",
       serviceName: "Seren API",
       skillId: "system",

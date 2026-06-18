@@ -27,17 +27,41 @@ describe("Settings navigation includes Keys (#1823)", () => {
   });
 });
 
-describe("KeysSettings mockup contract (#1823)", () => {
-  it("states the per-skill and python-dotenv migration model", () => {
-    expect(keysSettings).toContain("1 per skill");
-    expect(keysSettings).toContain("python-dotenv shim");
-    expect(keysSettings).toContain("Review & migrate");
+describe("KeysSettings Seren Passwords contract (#1823)", () => {
+  it("states the per-skill reference and migration model", () => {
+    expect(keysSettings).toContain("Unlock your vault");
+    expect(keysSettings).toContain(".env migration");
+    expect(keysSettings).toContain("Review migration");
   });
 
-  it("requires service + skill on add key and documents replacement warning", () => {
+  it("requires service + skill on add reference and documents replacement warning", () => {
     expect(keysSettings).toContain("required · 1:1 binding");
-    expect(keysSettings).toContain("already has a");
-    expect(keysSettings).toContain("will replace it");
+    expect(keysSettings).toContain("already has");
+    expect(keysSettings).toContain("Saving replaces");
+  });
+
+  it("prompts to unlock or create a vault before editing entries", () => {
+    expect(keysSettings).toContain("Unlock Seren Passwords");
+    expect(keysSettings).toContain("Create your vault");
+    expect(keysSettings).toContain("Save your recovery key");
+    expect(keysSettings).toContain("New vault entry");
+    expect(keysSettings).toContain("Edit vault entry");
+    expect(keysSettings).toContain("Use for binding");
+  });
+
+  it("requires acknowledging the recovery key and states local-only derivation", () => {
+    expect(keysSettings).toContain("I have saved it");
+    expect(keysSettings).toContain("it will not be shown");
+    expect(keysSettings).toContain("derived locally; Seren");
+  });
+
+  it("offers a friendly grant-access flow with an advanced escape", () => {
+    expect(keysSettings).toContain("Give an agent access");
+    expect(keysSettings).toContain("Grant access");
+    expect(keysSettings).toContain("Update access");
+    expect(keysSettings).toContain("can request ");
+    // Advanced mode still exposes the raw editor.
+    expect(keysSettings).toContain("Advanced");
   });
 
   it("surfaces always-ask and session approval defaults", () => {
@@ -47,10 +71,16 @@ describe("KeysSettings mockup contract (#1823)", () => {
     expect(keysSettings).toContain("$200.00");
   });
 
-  it("renders approval and activity session language from the v4 mocks", () => {
-    expect(keysSettings).toContain("Approve & start 30 min session");
+  it("renders activity session language", () => {
     expect(keysSettings).toContain("Session-approved");
     expect(keysSettings).toContain("ACTIVE SESSION");
     expect(keysSettings).toContain("End now");
+  });
+
+  it("guards stale vault list and item-detail responses", () => {
+    expect(keysSettings).toContain("vaultItemsRequestId");
+    expect(keysSettings).toContain("vaultItemDetailRequestId");
+    expect(keysSettings).toContain("selectedVaultId() !== vaultId");
+    expect(keysSettings).toContain("selectedVaultId() !== item.vaultId");
   });
 });
