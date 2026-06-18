@@ -177,6 +177,26 @@ async function dismissSessionExpiredModal(page) {
   }
 }
 
+async function submitSignInForm(form) {
+  const submitButton = form.getByRole("button", { name: /^Sign In$/ });
+  await waitUntil(
+    "enabled sign-in submit button",
+    async () => ((await submitButton.isEnabled().catch(() => false)) ? true : null),
+    { timeoutMs: 10_000 },
+  );
+  await submitButton.evaluate((button) => {
+    const form = button.closest("form");
+    if (!form) {
+      throw new Error("Sign-in submit button is not inside a form");
+    }
+    if (typeof form.requestSubmit === "function") {
+      form.requestSubmit(button);
+      return;
+    }
+    button.click();
+  });
+}
+
 async function signIn(page) {
   await tauriInvoke(page, "clear_token").catch(() => {});
   await tauriInvoke(page, "clear_refresh_token").catch(() => {});
@@ -195,7 +215,7 @@ async function signIn(page) {
   const form = page.locator("form").filter({ has: page.getByLabel("Email") });
   await form.getByLabel("Email").fill(EMAIL);
   await form.getByLabel("Password").fill(PASSWORD);
-  await form.getByRole("button", { name: /^Sign In$/ }).click();
+  await submitSignInForm(form);
 
   const token = await waitUntil(
     "stored production auth token",
