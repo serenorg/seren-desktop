@@ -6,6 +6,8 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const MODULE_PATH = "../../bin/browser-local/mcp-config.mjs";
+const WINDOWS_SHELL_ARGS_MODULE =
+  "../../bin/browser-local/windows-shell-args.mjs";
 const EMBEDDED_NODE = String.raw`C:\Program Files\Seren Desktop\embedded-runtime\win32-x64\node\node.exe`;
 const PLAYWRIGHT_SCRIPT = String.raw`C:\Users\rebec\AppData\Local\Seren Desktop\mcp-servers\playwright-stealth\dist\index.js`;
 
@@ -51,19 +53,23 @@ describe("Codex MCP config override", () => {
     );
   });
 
-  it("survives shell=true argv construction when wrapped as one Windows shell arg", async () => {
+  it("survives shell=true command-line construction as one config arg", async () => {
     const { buildProviderMcpConfig } = await loadModule();
+    const { composeWindowsShellCommand } = await import(
+      WINDOWS_SHELL_ARGS_MODULE
+    );
     const { codexMcpConfigOverride } = buildProviderMcpConfig({
       apiKey: null,
       mcpServers: [PLAYWRIGHT_SERVER],
     });
-    const wrappedForWindowsShell = `"${codexMcpConfigOverride}"`;
+    const commandLine = composeWindowsShellCommand(process.execPath, [
+      resolve("tests/fixtures/argv-printer.mjs"),
+      "app-server",
+      "-c",
+      codexMcpConfigOverride,
+    ]);
 
-    const probe = spawnSync(
-      process.execPath,
-      [resolve("tests/fixtures/argv-printer.mjs"), "app-server", "-c", wrappedForWindowsShell],
-      { encoding: "utf8", shell: true },
-    );
+    const probe = spawnSync(commandLine, { encoding: "utf8", shell: true });
 
     expect(probe.status).toBe(0);
     expect(JSON.parse(probe.stdout)).toEqual([
