@@ -146,6 +146,21 @@ describe("Windows production e2e release gate", () => {
     expect(stopAt).toBeGreaterThan(injectAt);
   });
 
+  it("does not fail a successful Windows probe solely because PowerShell reported a blank exit code (#2559)", () => {
+    expect(runner).toContain("$process.Refresh()");
+    expect(runner).toContain(
+      'Select-String -LiteralPath $probeStdoutPath -SimpleMatch "[windows-e2e] full Windows production e2e passed" -Quiet',
+    );
+    expect(runner).toContain(
+      "Windows app e2e probe exit code was blank but success sentinel was observed",
+    );
+
+    const fallbackAt = runner.indexOf("$null -eq $probeExitCode");
+    const failureAt = runner.indexOf("Windows app e2e script failed with exit code");
+    expect(fallbackAt).toBeGreaterThanOrEqual(0);
+    expect(failureAt).toBeGreaterThan(fallbackAt);
+  });
+
   it("fails eSigner CKA login/load commands at their native failure point (#2483)", () => {
     const buildJob = workflowJob("build");
     expect(buildJob).toContain("function Invoke-EsignerCka");

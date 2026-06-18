@@ -163,8 +163,19 @@ function Invoke-ProcessWithTimeout([string]$FilePath, [string[]]$ArgumentList, [
     Write-FileTail $StderrPath 200
     Fail "$Label timed out after ${TimeoutSeconds}s and was killed."
   }
-  Write-Stage "${Label} exited with code $($process.ExitCode)"
-  return $process.ExitCode
+  try {
+    $process.WaitForExit()
+    $process.Refresh()
+  } catch {
+    Write-Host "::warning::Unable to refresh ${Label} process exit status: $($_.Exception.Message)"
+  }
+  if ($null -eq $process.ExitCode) {
+    Write-Stage "${Label} exited without reporting an exit code"
+    return $null
+  }
+  $exitCode = [int]$process.ExitCode
+  Write-Stage "${Label} exited with code $exitCode"
+  return $exitCode
 }
 
 function Write-FileTail([string]$Path, [int]$Tail = 200) {
@@ -382,6 +393,13 @@ try {
   Write-Stage "Running Node app e2e probe"
   $probeExitCode = Invoke-ProcessWithTimeout "node" @("$PSScriptRoot/windows-e2e-app.mjs") $ProbeTimeoutSeconds "Windows app e2e probe" -NoNewWindow -StdoutPath $probeStdoutPath -StderrPath $probeStderrPath -OnTimeout {
     Write-ProbeTimeoutDiagnostics $app
+  }
+  if ($null -eq $probeExitCode -and (Test-Path -LiteralPath $probeStdoutPath)) {
+    $probePassed = Select-String -LiteralPath $probeStdoutPath -SimpleMatch "[windows-e2e] full Windows production e2e passed" -Quiet
+    if ($probePassed) {
+      Write-Stage "Windows app e2e probe exit code was blank but success sentinel was observed"
+      $probeExitCode = 0
+    }
   }
   if ($probeExitCode -ne 0) {
     Write-FileTail $probeStdoutPath 200
