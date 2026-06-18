@@ -103,7 +103,7 @@ impl ProviderRuntimeState {
         }
 
         let host = "127.0.0.1".to_string();
-        let config = startup_config_for_host(&host, preferred_config.as_ref())?;
+        let mut config = startup_config_for_host(&host, preferred_config.as_ref())?;
         let node_bin = resolve_node_binary(app);
         let runtime_entry = find_provider_runtime_mjs()?;
 
@@ -167,7 +167,7 @@ impl ProviderRuntimeState {
                         STARTUP_ATTEMPT_BUDGETS.len(),
                         attempt_err,
                         if attempt_num < STARTUP_ATTEMPT_BUDGETS.len() {
-                            "retrying on pinned port"
+                            "retrying on a fresh port"
                         } else {
                             "giving up"
                         },
@@ -191,6 +191,37 @@ impl ProviderRuntimeState {
                     let _ = child.start_kill();
                     drop(child);
                     attempt_errors.push(format!("attempt {}: {}", attempt_num, attempt_err));
+
+                    // #2563: the pinned port can be transiently unbindable on
+                    // restart (Windows TIME_WAIT, or the just-killed process
+                    // has not released the socket). The node runtime exits
+                    // immediately on a listen error, so reusing the same port
+                    // just fails the same way. Rebind the remaining attempts on
+                    // a fresh port, preserving the auth token so clients that
+                    // cached the prior token re-authenticate against the new
+                    // port. Attempt 1 still uses the pinned port, keeping the
+                    // #2542 reconnect behavior for the common case.
+                    if attempt_num < STARTUP_ATTEMPT_BUDGETS.len() {
+                        match find_available_port() {
+                            Ok(fresh_port) if fresh_port != config.port => {
+                                log::warn!(
+                                    "[ProviderRuntime] Rebinding from port {} to {} for next attempt",
+                                    config.port,
+                                    fresh_port
+                                );
+                                config = config_with_port(&config, fresh_port);
+                            }
+                            Ok(_) => {}
+                            Err(port_err) => {
+                                log::warn!(
+                                    "[ProviderRuntime] Could not pick a fresh port after attempt {} ({}); reusing {}",
+                                    attempt_num,
+                                    port_err,
+                                    config.port
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -278,6 +309,14 @@ fn build_provider_runtime_config(host: String, port: u16, token: String) -> Prov
         port,
         token,
     }
+}
+
+/// Rebuild a runtime config on a different port while preserving the auth
+/// token and host. #2563: when the pinned port is transiently unbindable on
+/// restart the runtime rebinds on a fresh port without rotating the token, so
+/// clients holding the prior token re-authenticate against the new port.
+fn config_with_port(prev: &ProviderRuntimeConfig, port: u16) -> ProviderRuntimeConfig {
+    build_provider_runtime_config(prev.host.clone(), port, prev.token.clone())
 }
 
 fn startup_config_for_host(
@@ -574,7 +613,18 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
                         return; // ensure_started spawns a new monitor
                     }
                     Err(err) => {
+                        // #2563: `ensure_started` has already exhausted its
+                        // spawn attempts (including the fresh-port fallback),
+                        // so this is unrecoverable. Surface it instead of
+                        // looping back to a silent `break` on the now-empty
+                        // process slot — otherwise the frontend never learns
+                        // the agent runtime died.
                         log::error!("[ProviderRuntime] Restart failed: {}", err);
+                        let _ = app.emit(
+                            "provider-runtime://failed",
+                            serde_json::json!({ "attempts": restart_attempts, "error": err }),
+                        );
+                        return;
                     }
                 }
             }
@@ -772,6 +822,21 @@ pub async fn provider_force_kill_session(
 mod tests {
     use super::*;
     use tokio::process::Command as TokioCommand;
+
+    #[test]
+    fn config_with_port_rebinds_without_rotating_token() {
+        let prev =
+            build_provider_runtime_config("127.0.0.1".to_string(), 50401, "tok-abc".to_string());
+        let next = config_with_port(&prev, 51999);
+        // The port and its derived URLs move to the fresh port...
+        assert_eq!(next.port, 51999);
+        assert_eq!(next.api_base_url, "http://127.0.0.1:51999");
+        assert_eq!(next.ws_base_url, "ws://127.0.0.1:51999");
+        // ...but the host and auth token are preserved so a client holding the
+        // prior token can re-authenticate against the rebound port (#2563).
+        assert_eq!(next.host, "127.0.0.1");
+        assert_eq!(next.token, "tok-abc");
+    }
 
     #[test]
     fn force_kill_guard_only_matches_descendants() {
