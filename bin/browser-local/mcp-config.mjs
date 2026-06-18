@@ -95,25 +95,43 @@ function dedupeServers(servers) {
   return Array.from(deduped.values());
 }
 
+function encodeTomlString(value) {
+  const raw = String(value);
+  if (!raw.includes("'") && !/[\r\n]/.test(raw)) {
+    return `'${raw}'`;
+  }
+  if (!raw.includes("'''") && !/[\r\n]/.test(raw)) {
+    return `'''${raw}'''`;
+  }
+  return JSON.stringify(raw);
+}
+
+function encodeTomlKey(key) {
+  if (/^[A-Za-z0-9_-]+$/.test(key)) {
+    return key;
+  }
+  return encodeTomlString(key);
+}
+
 function encodeTomlValue(value) {
   if (typeof value === "string") {
-    return JSON.stringify(value);
+    return encodeTomlString(value);
   }
   if (typeof value === "number") {
-    return Number.isFinite(value) ? String(value) : JSON.stringify(String(value));
+    return Number.isFinite(value) ? String(value) : encodeTomlString(value);
   }
   if (typeof value === "boolean") {
     return value ? "true" : "false";
   }
   if (Array.isArray(value)) {
-    return `[${value.map((item) => encodeTomlValue(item)).join(", ")}]`;
+    return `[${value.map((item) => encodeTomlValue(item)).join(",")}]`;
   }
   if (value && typeof value === "object") {
     return `{${Object.entries(value)
-      .map(([key, child]) => `${JSON.stringify(key)}=${encodeTomlValue(child)}`)
-      .join(", ")}}`;
+      .map(([key, child]) => `${encodeTomlKey(key)}=${encodeTomlValue(child)}`)
+      .join(",")}}`;
   }
-  return '""';
+  return "''";
 }
 
 function buildClaudeMcpConfig(servers) {

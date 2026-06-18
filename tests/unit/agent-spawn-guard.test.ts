@@ -53,3 +53,18 @@ describe("Codex spawnSession dead-process guard", () => {
     );
   });
 });
+
+describe("agent initialization failure copy", () => {
+  const agentStoreSource = readFileSync(
+    resolve("src/stores/agent.store.ts"),
+    "utf-8",
+  );
+
+  it("uses provider-specific fallback remediation instead of a Claude-only message", () => {
+    expect(agentStoreSource).toContain("agentInitializationFailureMessage");
+    expect(agentStoreSource).toContain("Codex is installed and signed in");
+    expect(agentStoreSource).not.toContain(
+      "Agent session terminated before initialization completed. Check that Claude Code is installed and authenticated.",
+    );
+  });
+});

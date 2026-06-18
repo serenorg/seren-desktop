@@ -256,11 +256,21 @@ function buildInitializeParams() {
   };
 }
 
+function quoteWindowsShellArg(arg) {
+  return `"${String(arg).replace(/"/g, '\\"')}"`;
+}
+
 function spawnCodexProcess(cwd, { apiKey, mcpServers } = {}) {
   const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
+  const useWindowsShell = process.platform === "win32";
   const args = ["app-server"];
   if (mcpConfig.codexMcpConfigOverride) {
-    args.push("-c", mcpConfig.codexMcpConfigOverride);
+    args.push(
+      "-c",
+      useWindowsShell
+        ? quoteWindowsShellArg(mcpConfig.codexMcpConfigOverride)
+        : mcpConfig.codexMcpConfigOverride,
+    );
   }
 
   // Use the absolute-path resolver instead of bare `"codex"` so GUI-launched
@@ -274,7 +284,7 @@ function spawnCodexProcess(cwd, { apiKey, mcpServers } = {}) {
       ...mcpConfig.childEnv,
     },
     stdio: ["pipe", "pipe", "pipe"],
-    shell: process.platform === "win32",
+    shell: useWindowsShell,
   });
 }
 

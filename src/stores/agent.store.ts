@@ -1047,6 +1047,22 @@ export function agentDisplayName(agentType?: string): string {
   }
 }
 
+function agentInitializationFailureMessage(agentType?: string): string {
+  const agentName = agentDisplayName(agentType);
+  const remediation =
+    agentType === "codex"
+      ? "Codex is installed and signed in"
+      : agentType === "gemini"
+        ? "Gemini is installed and signed in"
+        : agentType === "lmstudio"
+          ? "LM Studio is running and reachable"
+          : agentType === "claude-codex"
+            ? "Claude Code and Codex are installed and signed in"
+            : `${agentName} is installed and authenticated`;
+
+  return `Agent session terminated before initialization completed. Check that ${remediation}.`;
+}
+
 function truncateBootstrapText(content: string): string {
   return content.length > FORK_BOOTSTRAP_MAX_MSG_CHARS
     ? `${content.slice(0, FORK_BOOTSTRAP_MAX_MSG_CHARS)}... [truncated]`
@@ -2947,11 +2963,11 @@ export const agentStore = {
                 "Agent session failed during initialization.";
               rejectReady(new Error(sessionError));
             } else if (data.status === "terminated" && rejectReady) {
-              // Claude process exited before reaching "ready" — typically an
-              // auth failure or binary-not-found on Windows.
+              // The provider process exited before reaching "ready" — typically
+              // an auth failure or binary-not-found on Windows.
               const sessionError =
                 state.sessions[data.sessionId]?.error ??
-                "Agent session terminated before initialization completed. Check that Claude Code is installed and authenticated.";
+                agentInitializationFailureMessage(resolvedAgentType);
               rejectReady(new Error(sessionError));
             }
           },
@@ -3333,7 +3349,7 @@ export const agentStore = {
               );
               initFailure =
                 sessionState?.error ??
-                "Agent session terminated before initialization completed. Check that Claude Code is installed and authenticated.";
+                agentInitializationFailureMessage(resolvedAgentType);
             } else {
               console.warn(
                 "[AgentStore] Timeout waiting for ready, proceeding anyway",
