@@ -1,7 +1,7 @@
 // ABOUTME: Tauri commands for Meeting Mode persistence and transcript history.
 // ABOUTME: Stores meetings and transcript segments without persisting raw audio.
 
-use crate::audio::capture::to_mono_16k;
+use crate::audio::capture::{TARGET_SAMPLE_RATE, to_mono_16k};
 use crate::audio::chunker::{Chunk, ChunkCfg, chunk as chunk_pcm};
 use crate::audio::cleanup::{build_cleanup_prompt, build_transform_prompt};
 use crate::audio::detect::{MeetingAutodetectResult, meeting_detection, probe_audio_activity};
@@ -203,12 +203,7 @@ const PUBLISH_FAIL_BODY_LIMIT: usize = 2_048;
 // Emit a structured "publish failed" event the frontend listens for to call
 // captureSupportError, which opens a serenorg/seren-desktop bug ticket from
 // the existing support telemetry pipeline. #2343.
-fn emit_notes_publish_failed(
-    app: &AppHandle,
-    meeting_id: &str,
-    status: Option<u16>,
-    body: &str,
-) {
+fn emit_notes_publish_failed(app: &AppHandle, meeting_id: &str, status: Option<u16>, body: &str) {
     let trimmed = if body.len() > PUBLISH_FAIL_BODY_LIMIT {
         &body[..PUBLISH_FAIL_BODY_LIMIT]
     } else {
@@ -373,14 +368,7 @@ pub async fn republish_meeting_to_seren_notes(
     .await?;
     let transcript = assemble_transcript(segments);
     tauri::async_runtime::spawn(async move {
-        spawn_seren_notes_publish(
-            app,
-            meeting_id,
-            notes_markdown,
-            action_items,
-            transcript,
-        )
-        .await;
+        spawn_seren_notes_publish(app, meeting_id, notes_markdown, action_items, transcript).await;
     });
     Ok(())
 }
@@ -409,11 +397,7 @@ pub async fn set_meeting_routed_skill(
 }
 
 #[tauri::command]
-pub async fn update_meeting_title(
-    app: AppHandle,
-    id: String,
-    title: String,
-) -> Result<(), String> {
+pub async fn update_meeting_title(app: AppHandle, id: String, title: String) -> Result<(), String> {
     let lookup = id.clone();
     run_db(app.clone(), move |conn| {
         conn.execute(
@@ -634,6 +618,68 @@ pub async fn stop_meeting_capture(
     .await?;
     emit_meeting_status_by_id(&app, &meeting_id).await;
     Ok(outcome)
+}
+
+#[tauri::command]
+pub async fn e2e_inject_meeting_capture_audio(
+    app: AppHandle,
+    registry: State<'_, CaptureRegistry>,
+    meeting_id: String,
+) -> Result<(), String> {
+    if !e2e_capture_injection_enabled() {
+        return Err("Meeting capture e2e injection is disabled".to_string());
+    }
+    if !registry.is_active(&meeting_id) {
+        return Err("Meeting capture is not active for e2e injection".to_string());
+    }
+
+    for samples in e2e_capture_probe_frames() {
+        if !registry.push_frame(&meeting_id, Speaker::Them, samples) {
+            return Err("Meeting capture did not accept e2e injected audio".to_string());
+        }
+    }
+
+    let segment = NewTranscriptSegment {
+        id: Uuid::new_v4().to_string(),
+        meeting_id: meeting_id.clone(),
+        seq: 10_000,
+        speaker: Speaker::Them,
+        text: "Seren Windows e2e injected Meeting capture audio.".to_string(),
+        start_ms: 0,
+        end_ms: 1200,
+        status: SegmentStatus::Ok,
+        speaker_label: None,
+        speaker_source: SpeakerSource::Channel,
+        created_at: now_ms(),
+    };
+    run_db(app.clone(), move |conn| {
+        insert_transcript_segment(conn, segment)
+    })
+    .await?;
+    emit_meeting_status_by_id(&app, &meeting_id).await;
+    Ok(())
+}
+
+fn e2e_capture_injection_enabled() -> bool {
+    std::env::var("SEREN_E2E_CAPTURE_INJECTION")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn e2e_capture_probe_frames() -> Vec<Vec<i16>> {
+    let frame_len = TARGET_SAMPLE_RATE as usize / 2;
+    [440.0_f32, 660.0, 550.0]
+        .into_iter()
+        .map(|freq| {
+            (0..frame_len)
+                .map(|index| {
+                    let phase =
+                        (index as f32 * freq * std::f32::consts::TAU) / TARGET_SAMPLE_RATE as f32;
+                    (phase.sin() * 10_000.0).round() as i16
+                })
+                .collect()
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize)]

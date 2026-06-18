@@ -133,6 +133,19 @@ describe("Windows production e2e release gate", () => {
     );
   });
 
+  it("enables deterministic Meeting capture injection only for Windows e2e (#2557)", () => {
+    expect(runner).toContain("SEREN_E2E_CAPTURE_INJECTION");
+    expect(probe).toContain("e2e_inject_meeting_capture_audio");
+    expect(probe).toContain("injectMeetingCaptureAudio");
+
+    const captureStart = probe.indexOf('tauriInvoke(page, "start_meeting_capture"');
+    const injectAt = probe.indexOf("injectMeetingCaptureAudio(page, meeting.id)");
+    const stopAt = probe.indexOf('tauriInvoke(page, "stop_meeting_capture"');
+    expect(captureStart).toBeGreaterThanOrEqual(0);
+    expect(injectAt).toBeGreaterThan(captureStart);
+    expect(stopAt).toBeGreaterThan(injectAt);
+  });
+
   it("fails eSigner CKA login/load commands at their native failure point (#2483)", () => {
     const buildJob = workflowJob("build");
     expect(buildJob).toContain("function Invoke-EsignerCka");
