@@ -80,18 +80,28 @@ describe("Windows production e2e release gate", () => {
     expect(job).not.toContain("deadline=$((SECONDS + 3600))");
   });
 
-  it("requires real production credentials and a live history-sync tenant", () => {
+  it("requires real production credentials and self-provisions a history-sync tenant (#2549)", () => {
     for (const required of [
       "SEREN_E2E_EMAIL",
       "SEREN_E2E_PASSWORD",
-      "SEREN_E2E_HISTORY_PROJECT_ID",
-      "SEREN_E2E_HISTORY_BRANCH_ID",
-      "SEREN_E2E_HISTORY_DATABASE_NAME",
       "SEREN_E2E_GITHUB_PAT",
     ]) {
       expect(runner).toContain(required);
       expect(probe).toContain(required);
     }
+    for (const optionalHistoryOverride of [
+      "SEREN_E2E_HISTORY_PROJECT_ID",
+      "SEREN_E2E_HISTORY_BRANCH_ID",
+      "SEREN_E2E_HISTORY_DATABASE_NAME",
+    ]) {
+      expect(runner).not.toContain(`"${optionalHistoryOverride}"`);
+      expect(probe).toContain(optionalHistoryOverride);
+    }
+    expect(probe).toContain("SEREN_E2E_HISTORY_PROJECT_NAME");
+    expect(probe).toContain("windows-e2e-history");
+    expect(probe).toContain("resolveHistoryDestination");
+    expect(probe).toContain("connection-string?pooled=true");
+    expect(probe).toContain("explicit history destination returned HTTP 404");
     expect(runner).toContain("https://api.serendb.com");
     expect(probe).toContain("https://api.serendb.com");
   });

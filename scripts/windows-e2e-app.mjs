@@ -9,9 +9,21 @@ const API_BASE = requiredEnv("SEREN_E2E_API_BASE", "https://api.serendb.com").re
 const CDP_ENDPOINT = requiredEnv("SEREN_E2E_CDP_ENDPOINT");
 const EMAIL = requiredEnv("SEREN_E2E_EMAIL");
 const PASSWORD = requiredEnv("SEREN_E2E_PASSWORD");
-const HISTORY_PROJECT_ID = requiredEnv("SEREN_E2E_HISTORY_PROJECT_ID");
-const HISTORY_BRANCH_ID = requiredEnv("SEREN_E2E_HISTORY_BRANCH_ID");
-const HISTORY_DATABASE_NAME = requiredEnv("SEREN_E2E_HISTORY_DATABASE_NAME");
+const HISTORY_PROJECT_ID = optionalEnv("SEREN_E2E_HISTORY_PROJECT_ID");
+const HISTORY_BRANCH_ID = optionalEnv("SEREN_E2E_HISTORY_BRANCH_ID");
+const HISTORY_PROJECT_NAME =
+  optionalEnv("SEREN_E2E_HISTORY_PROJECT_NAME") ?? "windows-e2e-history";
+const HISTORY_BRANCH_NAME =
+  optionalEnv("SEREN_E2E_HISTORY_BRANCH_NAME") ?? "production";
+const HISTORY_DATABASE_NAME =
+  optionalEnv("SEREN_E2E_HISTORY_DATABASE_NAME") ?? "windows_e2e_history";
+const HISTORY_REGION = optionalEnv("SEREN_E2E_HISTORY_REGION") ?? "aws-us-east-2";
+const HISTORY_SYNC_READY_ATTEMPTS = Number(
+  process.env.SEREN_E2E_HISTORY_READY_ATTEMPTS ?? "90",
+);
+const HISTORY_SYNC_READY_DELAY_MS = Number(
+  process.env.SEREN_E2E_HISTORY_READY_DELAY_MS ?? "2000",
+);
 const GITHUB_PAT = requiredEnv("SEREN_E2E_GITHUB_PAT");
 // The paired workflow ships as one agent type backed by two CLIs. Declared
 // locally because the e2e payload only bundles this script — never bin/.
@@ -41,6 +53,11 @@ function requiredEnv(name, fallback) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value;
+}
+
+function optionalEnv(name) {
+  const value = process.env[name];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
 function assert(condition, message) {
@@ -189,6 +206,7 @@ async function signIn(page) {
     { timeoutMs: 45_000 },
   );
   await validateSerenSession(token);
+  return token;
 }
 
 async function validateSerenSession(token) {
@@ -199,6 +217,237 @@ async function validateSerenSession(token) {
   const payload = await response.json();
   assert(payload?.data?.email, "Production /auth/me response did not include a user email");
   console.log(`[windows-e2e] Signed in to production as ${payload.data.email}`);
+}
+
+class SerenDbApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = "SerenDbApiError";
+    this.status = status;
+  }
+}
+
+function pathSegment(value) {
+  return encodeURIComponent(value);
+}
+
+function describeSerenDbPayload(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const candidate =
+    payload.message ??
+    payload.error ??
+    payload.detail ??
+    payload.data?.message ??
+    payload.data?.error;
+  return typeof candidate === "string" && candidate.trim() !== ""
+    ? candidate.trim().slice(0, 200)
+    : "";
+}
+
+async function serenDbRequest(
+  token,
+  path,
+  { method = "GET", body, acceptedStatuses = [200] } = {},
+) {
+  const response = await fetch(`${API_BASE}/publishers/seren-db${path}`, {
+    method,
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  let payload = null;
+  if (text.trim() !== "") {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { message: text };
+    }
+  }
+  if (!acceptedStatuses.includes(response.status)) {
+    const detail = describeSerenDbPayload(payload);
+    throw new SerenDbApiError(
+      `${method} ${path} returned HTTP ${response.status}${detail ? `: ${detail}` : ""}`,
+      response.status,
+    );
+  }
+  return payload?.data;
+}
+
+function requireDataArray(value, label) {
+  if (Array.isArray(value)) return value;
+  throw new Error(`${label} response did not include an array`);
+}
+
+async function listHistoryProjects(token) {
+  return requireDataArray(await serenDbRequest(token, "/projects"), "list projects");
+}
+
+async function listHistoryBranches(token, projectId) {
+  return requireDataArray(
+    await serenDbRequest(token, `/projects/${pathSegment(projectId)}/branches`),
+    "list branches",
+  );
+}
+
+async function listHistoryDatabases(token, projectId, branchId) {
+  return requireDataArray(
+    await serenDbRequest(
+      token,
+      `/projects/${pathSegment(projectId)}/branches/${pathSegment(branchId)}/databases`,
+    ),
+    "list databases",
+  );
+}
+
+async function fetchHistoryConnectionString(token, destination) {
+  const data = await serenDbRequest(
+    token,
+    `/projects/${pathSegment(destination.projectId)}/branches/${pathSegment(
+      destination.branchId,
+    )}/connection-string?pooled=true`,
+  );
+  assert(
+    typeof data?.connection_string === "string" && data.connection_string.length > 0,
+    "history connection-string response did not include connection_string",
+  );
+}
+
+async function createHistoryProject(token) {
+  const data = await serenDbRequest(token, "/projects", {
+    method: "POST",
+    body: { name: HISTORY_PROJECT_NAME, region: HISTORY_REGION },
+    acceptedStatuses: [200, 201],
+  });
+  assert(data?.id, "create project response did not include an id");
+  return data;
+}
+
+async function createHistoryBranch(token, projectId) {
+  const data = await serenDbRequest(token, `/projects/${pathSegment(projectId)}/branches`, {
+    method: "POST",
+    body: { name: HISTORY_BRANCH_NAME, add_endpoint: true },
+    acceptedStatuses: [200, 201],
+  });
+  const branch = data?.branch ?? data;
+  assert(branch?.id, "create branch response did not include a branch id");
+  return branch;
+}
+
+async function createHistoryDatabase(token, projectId, branchId) {
+  const data = await serenDbRequest(
+    token,
+    `/projects/${pathSegment(projectId)}/branches/${pathSegment(branchId)}/databases`,
+    {
+      method: "POST",
+      body: { name: HISTORY_DATABASE_NAME, owner_name: null },
+      acceptedStatuses: [200, 201],
+    },
+  );
+  assert(data?.id || data?.name, "create database response did not include database data");
+  return data;
+}
+
+async function ensureNamedHistoryProject(token) {
+  const existing = (await listHistoryProjects(token)).find(
+    (project) => project?.name === HISTORY_PROJECT_NAME,
+  );
+  if (existing?.id) return existing;
+  logStage(`Provisioning SerenDB history project "${HISTORY_PROJECT_NAME}"`);
+  return await createHistoryProject(token);
+}
+
+async function ensureNamedHistoryBranch(token, projectId) {
+  const existing = (await listHistoryBranches(token, projectId)).find(
+    (branch) => branch?.name === HISTORY_BRANCH_NAME,
+  );
+  if (existing?.id) return existing;
+  logStage(`Provisioning SerenDB history branch "${HISTORY_BRANCH_NAME}"`);
+  try {
+    return await createHistoryBranch(token, projectId);
+  } catch (error) {
+    if (error instanceof SerenDbApiError && [400, 409].includes(error.status)) {
+      const raced = (await listHistoryBranches(token, projectId)).find(
+        (branch) => branch?.name === HISTORY_BRANCH_NAME,
+      );
+      if (raced?.id) return raced;
+    }
+    throw error;
+  }
+}
+
+async function ensureHistoryDatabase(token, destination) {
+  const existing = (await listHistoryDatabases(
+    token,
+    destination.projectId,
+    destination.branchId,
+  )).find((database) => database?.name === destination.databaseName);
+  if (existing) return;
+  logStage(`Provisioning SerenDB history database "${destination.databaseName}"`);
+  try {
+    await createHistoryDatabase(token, destination.projectId, destination.branchId);
+  } catch (error) {
+    if (error instanceof SerenDbApiError && [400, 409].includes(error.status)) {
+      const raced = (await listHistoryDatabases(
+        token,
+        destination.projectId,
+        destination.branchId,
+      )).find((database) => database?.name === destination.databaseName);
+      if (raced) return;
+    }
+    throw error;
+  }
+}
+
+async function resolveNamedHistoryDestination(token) {
+  const project = await ensureNamedHistoryProject(token);
+  const branch = await ensureNamedHistoryBranch(token, project.id);
+  const destination = {
+    projectId: project.id,
+    branchId: branch.id,
+    databaseName: HISTORY_DATABASE_NAME,
+  };
+  await ensureHistoryDatabase(token, destination);
+  await fetchHistoryConnectionString(token, destination);
+  logStage(
+    `Using self-provisioned history destination project=${destination.projectId} branch=${destination.branchId} database=${destination.databaseName}`,
+  );
+  return destination;
+}
+
+async function resolveHistoryDestination(token) {
+  if ((HISTORY_PROJECT_ID && !HISTORY_BRANCH_ID) || (!HISTORY_PROJECT_ID && HISTORY_BRANCH_ID)) {
+    throw new Error(
+      "Set both SEREN_E2E_HISTORY_PROJECT_ID and SEREN_E2E_HISTORY_BRANCH_ID, or neither",
+    );
+  }
+  if (HISTORY_PROJECT_ID && HISTORY_BRANCH_ID) {
+    const destination = {
+      projectId: HISTORY_PROJECT_ID,
+      branchId: HISTORY_BRANCH_ID,
+      databaseName: HISTORY_DATABASE_NAME,
+    };
+    try {
+      await ensureHistoryDatabase(token, destination);
+      await fetchHistoryConnectionString(token, destination);
+      logStage(
+        `Using explicit history destination project=${destination.projectId} branch=${destination.branchId} database=${destination.databaseName}`,
+      );
+      return destination;
+    } catch (error) {
+      if (error instanceof SerenDbApiError && error.status === 404) {
+        console.warn(
+          `[windows-e2e] explicit history destination returned HTTP 404; provisioning named e2e destination instead`,
+        );
+      } else {
+        throw error;
+      }
+    }
+  }
+  return await resolveNamedHistoryDestination(token);
 }
 
 async function validateGithubPat() {
@@ -963,30 +1212,71 @@ async function createConversationWithMessage(page, label) {
   return conversationId;
 }
 
-async function runHistorySync(page, label) {
-  const summary = await tauriInvoke(page, "history_sync_run_now", {
-    projectId: HISTORY_PROJECT_ID,
-    branchId: HISTORY_BRANCH_ID,
-    databaseName: HISTORY_DATABASE_NAME,
-  });
-  assert(summary.conflicts === 0, `${label} history sync reported conflicts`);
-  assert(summary.queued === 0, `${label} history sync left queued rows`);
-  assert(summary.pushed > 0 || summary.pulled > 0 || summary.backfilled > 0, `${label} history sync moved no rows`);
-  console.log(`[windows-e2e] history sync ${label}: ${JSON.stringify(summary)}`);
-  return summary;
+function isHistorySyncReadinessError(error) {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return [
+    "failed to connect to target database",
+    "database not ready",
+    "connection refused",
+    "connection timed out",
+    "connection string request failed: http 408",
+    "connection string request failed: http 502",
+    "connection string request failed: http 503",
+    "connection string request failed: http 504",
+    "returned http 408",
+    "returned http 502",
+    "returned http 503",
+    "returned http 504",
+    "server closed the connection",
+    "could not connect",
+  ].some((marker) => message.includes(marker));
 }
 
-async function exerciseHistorySync(page) {
+async function runHistorySync(page, destination, label) {
+  let lastError;
+  for (let attempt = 1; attempt <= HISTORY_SYNC_READY_ATTEMPTS; attempt += 1) {
+    try {
+      const summary = await tauriInvoke(page, "history_sync_run_now", {
+        projectId: destination.projectId,
+        branchId: destination.branchId,
+        databaseName: destination.databaseName,
+      });
+      assert(summary.conflicts === 0, `${label} history sync reported conflicts`);
+      assert(summary.queued === 0, `${label} history sync left queued rows`);
+      assert(
+        summary.pushed > 0 || summary.pulled > 0 || summary.backfilled > 0,
+        `${label} history sync moved no rows`,
+      );
+      console.log(`[windows-e2e] history sync ${label}: ${JSON.stringify(summary)}`);
+      return summary;
+    } catch (error) {
+      lastError = error;
+      if (!isHistorySyncReadinessError(error) || attempt === HISTORY_SYNC_READY_ATTEMPTS) {
+        throw error;
+      }
+      console.warn(
+        `[windows-e2e] history sync ${label} not ready (attempt ${attempt}/${HISTORY_SYNC_READY_ATTEMPTS}); retrying: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      await sleep(HISTORY_SYNC_READY_DELAY_MS);
+    }
+  }
+  throw lastError ?? new Error(`${label} history sync did not run`);
+}
+
+async function exerciseHistorySync(page, token) {
+  const destination = await resolveHistoryDestination(token);
   await createConversationWithMessage(page, "before-wipe");
-  await runHistorySync(page, "initial");
+  await runHistorySync(page, destination, "initial");
   await tauriInvoke(page, "history_sync_wipe_remote", {
-    projectId: HISTORY_PROJECT_ID,
-    branchId: HISTORY_BRANCH_ID,
-    databaseName: HISTORY_DATABASE_NAME,
-    confirmation: HISTORY_DATABASE_NAME,
+    projectId: destination.projectId,
+    branchId: destination.branchId,
+    databaseName: destination.databaseName,
+    confirmation: destination.databaseName,
   });
   await createConversationWithMessage(page, "after-wipe");
-  await runHistorySync(page, "after-wipe-resync");
+  await runHistorySync(page, destination, "after-wipe-resync");
 }
 
 function playWindowsAudio() {
@@ -1037,9 +1327,9 @@ async function exerciseMeetingCapture(page) {
 async function main() {
   const { browser, page, browserErrors } = await connectToApp();
   try {
-    await signIn(page);
+    const token = await signIn(page);
     await exerciseAgentRuntime(page);
-    await exerciseHistorySync(page);
+    await exerciseHistorySync(page, token);
     await validateGithubPat();
     await exerciseMeetingCapture(page);
     assert(browserErrors.length === 0, `WebView console/page errors: ${browserErrors.join("\n")}`);
