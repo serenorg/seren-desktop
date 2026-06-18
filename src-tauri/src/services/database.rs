@@ -529,7 +529,12 @@ fn setup_history_sync_schema(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
-    add_column_if_missing(conn, "sync_outbox", "attempts", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(
+        conn,
+        "sync_outbox",
+        "attempts",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     add_column_if_missing(conn, "sync_outbox", "last_error", "TEXT")?;
     add_column_if_missing(conn, "sync_outbox", "last_attempt_at", "INTEGER")?;
     conn.execute(
@@ -538,12 +543,60 @@ fn setup_history_sync_schema(conn: &Connection) -> Result<()> {
         [],
     )
     .ok();
+    setup_history_sync_state_schema(conn)?;
+    Ok(())
+}
+
+fn setup_history_sync_state_schema(conn: &Connection) -> Result<()> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'history_sync_state'
+        )",
+        [],
+        |row| row.get::<_, i64>(0).map(|value| value != 0),
+    )?;
+    if !exists {
+        return create_scoped_history_sync_state(conn);
+    }
+
+    if column_exists(conn, "history_sync_state", "sync_scope") {
+        return Ok(());
+    }
+
+    conn.execute(
+        "DROP TABLE IF EXISTS history_sync_state_legacy_migration",
+        [],
+    )?;
+    conn.execute(
+        "ALTER TABLE history_sync_state RENAME TO history_sync_state_legacy_migration",
+        [],
+    )?;
+    create_scoped_history_sync_state(conn)?;
+    conn.execute(
+        "INSERT OR IGNORE INTO history_sync_state
+            (table_name, sync_scope, last_pulled_version, first_backfill_completed, updated_at)
+         SELECT table_name,
+                'legacy',
+                last_pulled_version,
+                first_backfill_completed,
+                updated_at
+         FROM history_sync_state_legacy_migration",
+        [],
+    )?;
+    conn.execute("DROP TABLE history_sync_state_legacy_migration", [])?;
+    Ok(())
+}
+
+fn create_scoped_history_sync_state(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS history_sync_state (
-            table_name TEXT PRIMARY KEY,
+            table_name TEXT NOT NULL,
+            sync_scope TEXT NOT NULL,
             last_pulled_version INTEGER NOT NULL DEFAULT 0,
             first_backfill_completed INTEGER NOT NULL DEFAULT 0,
-            updated_at INTEGER NOT NULL
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (table_name, sync_scope)
         )",
         [],
     )?;
@@ -1398,6 +1451,52 @@ mod tests {
             .query_row("PRAGMA wal_autocheckpoint", [], |row| row.get(0))
             .unwrap();
         assert_eq!(autocheckpoint_pages, WAL_AUTOCHECKPOINT_PAGES as i64);
+    }
+
+    #[test]
+    fn setup_schema_migrates_history_sync_state_to_destination_scopes() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE history_sync_state (
+                table_name TEXT PRIMARY KEY,
+                last_pulled_version INTEGER NOT NULL DEFAULT 0,
+                first_backfill_completed INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO history_sync_state
+                (table_name, last_pulled_version, first_backfill_completed, updated_at)
+             VALUES ('messages', 42, 1, 1000)",
+            [],
+        )
+        .unwrap();
+
+        setup_schema(&conn).unwrap();
+
+        assert!(column_exists(&conn, "history_sync_state", "sync_scope"));
+        let migrated: (String, String, i64, i64) = conn
+            .query_row(
+                "SELECT table_name, sync_scope, last_pulled_version, first_backfill_completed
+                 FROM history_sync_state
+                 WHERE table_name = 'messages'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            migrated,
+            ("messages".to_string(), "legacy".to_string(), 42, 1)
+        );
+        conn.execute(
+            "INSERT INTO history_sync_state
+                (table_name, sync_scope, last_pulled_version, first_backfill_completed, updated_at)
+             VALUES ('messages', 'new-destination', 0, 0, 2000)",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]

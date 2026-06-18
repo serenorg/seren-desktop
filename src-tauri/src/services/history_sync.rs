@@ -177,12 +177,13 @@ pub async fn run_history_sync_once(
 ) -> Result<HistorySyncSummary, String> {
     let lock = HistorySyncLock::handle(&app);
     let _guard = lock.lock().await;
-    with_remote_client(&app, &config, |app, mut client| {
+    let sync_scope = history_sync_scope(&config);
+    with_remote_client(&app, &config, move |app, mut client| {
         ensure_remote_schema(&mut client)?;
 
-        let backfilled = with_local_db(&app, enqueue_initial_backfill)?;
+        let backfilled = with_local_db(&app, |conn| enqueue_initial_backfill(conn, &sync_scope))?;
         let pushed = push_outbox(&app, &mut client)?;
-        let pulled = pull_remote(&app, &mut client)?;
+        let pulled = pull_remote(&app, &mut client, &sync_scope)?;
         let (queued, conflicts) = with_local_db(&app, |conn| {
             Ok((
                 conn.query_row("SELECT COUNT(*) FROM sync_outbox", [], |row| {
@@ -220,9 +221,10 @@ pub async fn wipe_remote_history(
     }
     let lock = HistorySyncLock::handle(&app);
     let _guard = lock.lock().await;
-    with_remote_client(&app, &config, |app, mut client| {
+    let sync_scope = history_sync_scope(&config);
+    with_remote_client(&app, &config, move |app, mut client| {
         wipe_remote_history_in_order(
-            || with_local_db(&app, |conn| reset_local_sync_state(conn)),
+            || with_local_db(&app, |conn| reset_local_sync_state(conn, &sync_scope)),
             || {
                 client
                     .execute("DROP SCHEMA IF EXISTS seren_desktop CASCADE", &[])
@@ -236,14 +238,20 @@ pub async fn wipe_remote_history(
 
 /// Clear local sync bookkeeping after the remote copy is wiped so the next sync
 /// performs a fresh full backfill instead of short-circuiting on stale state.
-fn reset_local_sync_state(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute(
-        "UPDATE history_sync_state
-         SET last_pulled_version = 0,
-             first_backfill_completed = 0,
-             updated_at = ?1",
-        params![now_ms()],
-    )?;
+fn reset_local_sync_state(conn: &Connection, sync_scope: &str) -> rusqlite::Result<()> {
+    let updated_at = now_ms();
+    for table in HISTORY_SYNC_TABLES {
+        conn.execute(
+            "INSERT INTO history_sync_state
+                (table_name, sync_scope, last_pulled_version, first_backfill_completed, updated_at)
+             VALUES (?1, ?2, 0, 0, ?3)
+             ON CONFLICT(table_name, sync_scope) DO UPDATE SET
+                last_pulled_version = 0,
+                first_backfill_completed = 0,
+                updated_at = excluded.updated_at",
+            params![table, sync_scope, updated_at],
+        )?;
+    }
     for table in HISTORY_SYNC_TABLES {
         // Drafts live on the conversations row, not a table of their own.
         if *table == "thread_drafts" {
@@ -301,11 +309,7 @@ where
     }
 }
 
-async fn run_with_connection<T, F>(
-    app: AppHandle,
-    connection: String,
-    body: F,
-) -> Result<T, String>
+async fn run_with_connection<T, F>(app: AppHandle, connection: String, body: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce(AppHandle, PgClient) -> Result<T, String> + Send + 'static,
@@ -347,23 +351,42 @@ fn is_refreshable_postgres_error_text(err: &str) -> bool {
         || lower.contains("authentication")
 }
 
+fn history_sync_scope(config: &HistorySyncConfig) -> String {
+    fn segment(value: &str) -> String {
+        format!("{}:{}", value.len(), value)
+    }
+    format!(
+        "v1|{}|{}|{}",
+        segment(&config.project_id),
+        segment(&config.branch_id),
+        segment(&config.database_name)
+    )
+}
+
+fn scoped_store_key(base: &str, sync_scope: &str) -> String {
+    format!("{base}:{sync_scope}")
+}
+
 async fn get_connection_string(
     app: &AppHandle,
     config: &HistorySyncConfig,
     force_refresh: bool,
 ) -> Result<String, String> {
+    let sync_scope = history_sync_scope(config);
+    let connection_key = scoped_store_key(CONNECTION_STRING_KEY, &sync_scope);
+    let cached_at_key = scoped_store_key(CONNECTION_STRING_CACHED_AT_KEY, &sync_scope);
     let store = app
         .store(HISTORY_SYNC_STORE)
         .map_err(|err| format!("failed to open history sync store: {err}"))?;
     let now = now_ms();
     if !force_refresh {
         let cached_at = store
-            .get(CONNECTION_STRING_CACHED_AT_KEY)
+            .get(&cached_at_key)
             .and_then(|value| value.as_i64())
             .unwrap_or(0);
         if now.saturating_sub(cached_at) < CONNECTION_TTL_MS {
             if let Some(connection) = store
-                .get(CONNECTION_STRING_KEY)
+                .get(&connection_key)
                 .and_then(|value| value.as_str().map(str::to_string))
             {
                 return Ok(connection);
@@ -393,13 +416,10 @@ async fn get_connection_string(
         .await
         .map_err(|err| format!("connection string response parse failed: {err}"))?;
     store.set(
-        CONNECTION_STRING_KEY,
+        &connection_key,
         serde_json::Value::String(envelope.data.connection_string.clone()),
     );
-    store.set(
-        CONNECTION_STRING_CACHED_AT_KEY,
-        serde_json::Value::Number(now.into()),
-    );
+    store.set(&cached_at_key, serde_json::Value::Number(now.into()));
     store
         .save()
         .map_err(|err| format!("failed to save history sync connection cache: {err}"))?;
@@ -414,11 +434,13 @@ fn with_local_db<T>(
     pool.with_connection(task)
 }
 
-fn enqueue_initial_backfill(conn: &Connection) -> rusqlite::Result<usize> {
+fn enqueue_initial_backfill(conn: &Connection, sync_scope: &str) -> rusqlite::Result<usize> {
     let completed: i64 = conn
         .query_row(
-            "SELECT MAX(first_backfill_completed) FROM history_sync_state",
-            [],
+            "SELECT MAX(first_backfill_completed)
+             FROM history_sync_state
+             WHERE sync_scope = ?1",
+            params![sync_scope],
             |row| row.get::<_, Option<i64>>(0),
         )
         .optional()?
@@ -446,12 +468,12 @@ fn enqueue_initial_backfill(conn: &Connection) -> rusqlite::Result<usize> {
     for table in HISTORY_SYNC_TABLES {
         conn.execute(
             "INSERT INTO history_sync_state
-                (table_name, last_pulled_version, first_backfill_completed, updated_at)
-             VALUES (?1, 0, 1, ?2)
-             ON CONFLICT(table_name) DO UPDATE SET
+                (table_name, sync_scope, last_pulled_version, first_backfill_completed, updated_at)
+             VALUES (?1, ?2, 0, 1, ?3)
+             ON CONFLICT(table_name, sync_scope) DO UPDATE SET
                 first_backfill_completed = 1,
                 updated_at = excluded.updated_at",
-            params![table, now_ms()],
+            params![table, sync_scope, now_ms()],
         )?;
     }
     Ok(count)
@@ -1259,10 +1281,10 @@ fn push_transcript_segment(client: &mut PgClient, row: TranscriptSegmentRow) -> 
     Ok(())
 }
 
-fn pull_remote(app: &AppHandle, client: &mut PgClient) -> Result<usize, String> {
+fn pull_remote(app: &AppHandle, client: &mut PgClient, sync_scope: &str) -> Result<usize, String> {
     let mut pulled = 0usize;
     for table_name in PULL_ORDER {
-        let since = local_last_pulled(app, table_name)?;
+        let since = local_last_pulled(app, table_name, sync_scope)?;
         let sql = format!(
             "SELECT * FROM seren_desktop.{table_name}
              WHERE row_version > $1
@@ -1279,18 +1301,20 @@ fn pull_remote(app: &AppHandle, client: &mut PgClient) -> Result<usize, String> 
             pulled += 1;
         }
         if max_version > since {
-            set_local_last_pulled(app, table_name, max_version)?;
+            set_local_last_pulled(app, table_name, sync_scope, max_version)?;
         }
     }
     Ok(pulled)
 }
 
-fn local_last_pulled(app: &AppHandle, table_name: &str) -> Result<i64, String> {
+fn local_last_pulled(app: &AppHandle, table_name: &str, sync_scope: &str) -> Result<i64, String> {
     with_local_db(app, |conn| {
         Ok(conn
             .query_row(
-                "SELECT last_pulled_version FROM history_sync_state WHERE table_name = ?1",
-                params![table_name],
+                "SELECT last_pulled_version
+                 FROM history_sync_state
+                 WHERE table_name = ?1 AND sync_scope = ?2",
+                params![table_name, sync_scope],
                 |row| row.get::<_, i64>(0),
             )
             .optional()?
@@ -1298,17 +1322,22 @@ fn local_last_pulled(app: &AppHandle, table_name: &str) -> Result<i64, String> {
     })
 }
 
-fn set_local_last_pulled(app: &AppHandle, table_name: &str, version: i64) -> Result<(), String> {
+fn set_local_last_pulled(
+    app: &AppHandle,
+    table_name: &str,
+    sync_scope: &str,
+    version: i64,
+) -> Result<(), String> {
     with_local_db(app, |conn| {
         conn.execute(
             "INSERT INTO history_sync_state
-                (table_name, last_pulled_version, first_backfill_completed, updated_at)
-             VALUES (?1, ?2, 1, ?3)
-             ON CONFLICT(table_name) DO UPDATE SET
+                (table_name, sync_scope, last_pulled_version, first_backfill_completed, updated_at)
+             VALUES (?1, ?2, ?3, 1, ?4)
+             ON CONFLICT(table_name, sync_scope) DO UPDATE SET
                 last_pulled_version = excluded.last_pulled_version,
                 first_backfill_completed = 1,
                 updated_at = excluded.updated_at",
-            params![table_name, version, now_ms()],
+            params![table_name, sync_scope, version, now_ms()],
         )?;
         Ok(())
     })
@@ -1684,6 +1713,9 @@ mod tests {
     use crate::services::database::{PersistedMessage, save_message_record, setup_schema};
     use std::cell::RefCell;
 
+    const SCOPE_A: &str = "scope-a";
+    const SCOPE_B: &str = "scope-b";
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn connect_client_runs_off_the_reactor_without_runtime_panic() {
         // Regression for the runtime-in-runtime panic: the synchronous
@@ -1809,8 +1841,8 @@ mod tests {
         .unwrap();
 
         conn.execute("DELETE FROM sync_outbox", []).unwrap();
-        let first = enqueue_initial_backfill(&conn).unwrap();
-        let second = enqueue_initial_backfill(&conn).unwrap();
+        let first = enqueue_initial_backfill(&conn, SCOPE_A).unwrap();
+        let second = enqueue_initial_backfill(&conn, SCOPE_A).unwrap();
         let queued: i64 = conn
             .query_row("SELECT COUNT(*) FROM sync_outbox", [], |row| row.get(0))
             .unwrap();
@@ -1818,6 +1850,58 @@ mod tests {
         assert!(first >= 3);
         assert_eq!(second, 0);
         assert_eq!(queued, first as i64);
+    }
+
+    #[test]
+    fn initial_backfill_completion_is_scoped_by_destination() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind)
+             VALUES ('c1', 'Chat', 1000, 'chat')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute("DELETE FROM sync_outbox", []).unwrap();
+        let first_scope_a = enqueue_initial_backfill(&conn, SCOPE_A).unwrap();
+        assert!(first_scope_a > 0);
+        conn.execute("DELETE FROM sync_outbox", []).unwrap();
+
+        assert_eq!(enqueue_initial_backfill(&conn, SCOPE_A).unwrap(), 0);
+
+        let first_scope_b = enqueue_initial_backfill(&conn, SCOPE_B).unwrap();
+        assert_eq!(
+            first_scope_b, first_scope_a,
+            "a new destination must receive its own initial backfill"
+        );
+    }
+
+    #[test]
+    fn destination_scope_separates_connection_store_keys() {
+        let config_a = HistorySyncConfig {
+            project_id: "project-a".to_string(),
+            branch_id: "branch-a".to_string(),
+            database_name: "seren_desktop_history".to_string(),
+        };
+        let config_b = HistorySyncConfig {
+            project_id: "project-b".to_string(),
+            branch_id: "branch-a".to_string(),
+            database_name: "seren_desktop_history".to_string(),
+        };
+
+        let scope_a = history_sync_scope(&config_a);
+        let scope_b = history_sync_scope(&config_b);
+
+        assert_ne!(scope_a, scope_b);
+        assert_ne!(
+            scoped_store_key(CONNECTION_STRING_KEY, &scope_a),
+            scoped_store_key(CONNECTION_STRING_KEY, &scope_b)
+        );
+        assert_ne!(
+            scoped_store_key(CONNECTION_STRING_CACHED_AT_KEY, &scope_a),
+            scoped_store_key(CONNECTION_STRING_CACHED_AT_KEY, &scope_b)
+        );
     }
 
     fn insert_outbox_row(conn: &Connection, table: &str, row_id: &str) -> i64 {
@@ -1969,7 +2053,7 @@ mod tests {
 
         // First sync: backfill everything, then simulate a successful push that
         // drains the outbox and stamps rows as synced.
-        let first = enqueue_initial_backfill(&conn).unwrap();
+        let first = enqueue_initial_backfill(&conn, SCOPE_A).unwrap();
         assert!(first >= 2);
         conn.execute("DELETE FROM sync_outbox", []).unwrap();
         conn.execute("UPDATE conversations SET synced_at = 123", [])
@@ -1978,15 +2062,17 @@ mod tests {
             .unwrap();
 
         // Without a reset, a re-sync short-circuits and uploads nothing — the bug.
-        assert_eq!(enqueue_initial_backfill(&conn).unwrap(), 0);
+        assert_eq!(enqueue_initial_backfill(&conn, SCOPE_A).unwrap(), 0);
 
         // Wiping the remote must reset local state so the next sync re-uploads.
-        reset_local_sync_state(&conn).unwrap();
+        reset_local_sync_state(&conn, SCOPE_A).unwrap();
 
         let completed: i64 = conn
             .query_row(
-                "SELECT MAX(first_backfill_completed) FROM history_sync_state",
-                [],
+                "SELECT MAX(first_backfill_completed)
+                 FROM history_sync_state
+                 WHERE sync_scope = ?1",
+                params![SCOPE_A],
                 |row| row.get::<_, Option<i64>>(0),
             )
             .unwrap()
@@ -2008,6 +2094,6 @@ mod tests {
         assert_eq!(outbox, 0, "stale outbox rows must be cleared");
 
         // The next backfill re-enqueues the full history.
-        assert_eq!(enqueue_initial_backfill(&conn).unwrap(), first);
+        assert_eq!(enqueue_initial_backfill(&conn, SCOPE_A).unwrap(), first);
     }
 }
