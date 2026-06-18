@@ -10,6 +10,7 @@ import {
 } from "./agent-registry.mjs";
 import { providerLogPrefix } from "./logging.mjs";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
+import { composeWindowsShellCommand } from "./windows-shell-args.mjs";
 
 // Agent runtimes are loaded in isolation (#2457). Each runtime module is
 // imported dynamically inside try/catch so that one agent failing to load — a
@@ -256,35 +257,37 @@ function buildInitializeParams() {
   };
 }
 
-function quoteWindowsShellArg(arg) {
-  return `"${String(arg).replace(/"/g, '\\"')}"`;
-}
-
 function spawnCodexProcess(cwd, { apiKey, mcpServers } = {}) {
   const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
   const useWindowsShell = process.platform === "win32";
   const args = ["app-server"];
   if (mcpConfig.codexMcpConfigOverride) {
-    args.push(
-      "-c",
-      useWindowsShell
-        ? quoteWindowsShellArg(mcpConfig.codexMcpConfigOverride)
-        : mcpConfig.codexMcpConfigOverride,
-    );
+    args.push("-c", mcpConfig.codexMcpConfigOverride);
   }
 
   // Use the absolute-path resolver instead of bare `"codex"` so GUI-launched
   // instances don't depend on shell PATH — addresses the same class of
   // Windows regressions we hit for Claude (#876, #928, #1297, #1409).
   const codexBinary = resolveInstalledCodexBinary();
+  const spawnEnv = {
+    ...process.env,
+    ...mcpConfig.childEnv,
+  };
+
+  if (useWindowsShell) {
+    return spawn(composeWindowsShellCommand(codexBinary, args), {
+      cwd,
+      env: spawnEnv,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: true,
+      windowsVerbatimArguments: true,
+    });
+  }
+
   return spawn(codexBinary, args, {
     cwd,
-    env: {
-      ...process.env,
-      ...mcpConfig.childEnv,
-    },
+    env: spawnEnv,
     stdio: ["pipe", "pipe", "pipe"],
-    shell: useWindowsShell,
   });
 }
 
