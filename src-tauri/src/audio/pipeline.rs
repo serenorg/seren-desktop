@@ -472,6 +472,7 @@ struct ActiveCapture {
     stats: Arc<CaptureStreamStats>,
     source_stats: Arc<CaptureSourceStats>,
     apm_diagnostics: Arc<StdMutex<ApmDiagnostics>>,
+    e2e_injection_enabled: bool,
     native_mic_ready: bool,
     system_audio_ready: bool,
 }
@@ -614,6 +615,12 @@ pub fn transcription_mode_for(speaker: &Speaker) -> TranscriptionMode {
     }
 }
 
+fn e2e_capture_injection_enabled() -> bool {
+    std::env::var("SEREN_E2E_CAPTURE_INJECTION")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
 /// Upper bound on each `stop` drain step (native source stop, then each worker
 /// join). Generous enough that a healthy drain never hits it, so it only fires on
 /// a genuinely wedged task / WASAPI thread (#2175).
@@ -747,6 +754,7 @@ impl CaptureRegistry {
 
         if let Some(rx) = system_rx {
             let (them_tx, them_rx) = unbounded_channel();
+            let e2e_injection_enabled = e2e_capture_injection_enabled();
             tasks.push(tauri::async_runtime::spawn(run_capture_stream(
                 meeting_id.to_string(),
                 Speaker::Them,
@@ -773,6 +781,26 @@ impl CaptureRegistry {
                     source_stats.clone(),
                 )));
             }
+            active.insert(
+                meeting_id.to_string(),
+                CaptureSlot::Active(ActiveCapture {
+                    mic_source: prepared_mic.source,
+                    system_source,
+                    tasks,
+                    them_audio,
+                    stats,
+                    source_stats,
+                    apm_diagnostics,
+                    e2e_injection_enabled,
+                    native_mic_ready: has_mic,
+                    system_audio_ready: has_system_audio,
+                }),
+            );
+            log::info!(
+                "[meeting] capture registry active for {meeting_id}; system_audio={}",
+                has_system_audio
+            );
+            return Ok(());
         }
         drop(apm_tx);
 
@@ -786,6 +814,7 @@ impl CaptureRegistry {
                 stats,
                 source_stats,
                 apm_diagnostics,
+                e2e_injection_enabled: false,
                 native_mic_ready: has_mic,
                 system_audio_ready: has_system_audio,
             }),
@@ -814,8 +843,28 @@ impl CaptureRegistry {
     }
 
     /// Push a normalized 16 kHz mono frame into the capture stream for `speaker`.
-    pub fn push_frame(&self, meeting_id: &str, speaker: Speaker, samples: Vec<i16>) {
+    pub fn push_frame(&self, meeting_id: &str, speaker: Speaker, samples: Vec<i16>) -> bool {
         let sample_count = samples.len() as u64;
+        let accepted = {
+            let active = self.active.lock().unwrap();
+            match active.get(meeting_id) {
+                Some(CaptureSlot::Active(capture)) if capture.e2e_injection_enabled => Some((
+                    capture.stats.clone(),
+                    capture.source_stats.clone(),
+                    capture.system_audio_ready,
+                )),
+                _ => None,
+            }
+        };
+        if let Some((stats, source_stats, system_audio_ready)) = accepted {
+            if system_audio_ready {
+                source_stats.record_system_audio_frame();
+            }
+            stats.record_frame(&samples, ChunkCfg::default().rms_threshold);
+            self.record_accepted_push_frame(meeting_id, sample_count);
+            return true;
+        }
+
         let active = self.active.lock().unwrap();
         let drop_reason = match active.get(meeting_id) {
             Some(CaptureSlot::Active(_capture)) => "renderer_push_disabled",
@@ -834,6 +883,7 @@ impl CaptureRegistry {
                 ingress.dropped_push_sample_count
             );
         }
+        false
     }
 
     fn reset_ingress_summary(&self, meeting_id: &str) {
@@ -854,6 +904,18 @@ impl CaptureRegistry {
         summary.dropped_push_frame_count += 1;
         summary.dropped_push_sample_count += sample_count;
         *summary
+    }
+
+    fn record_accepted_push_frame(&self, meeting_id: &str, sample_count: u64) {
+        let mut ingress = self.ingress.lock().unwrap();
+        let summary = ingress.entry(meeting_id.to_string()).or_default();
+        summary.push_frame_count += 1;
+        summary.accepted_push_frame_count += 1;
+        log::info!(
+            "[meeting] accepted e2e capture frame for {meeting_id}; accepted_push_frames={} samples={}",
+            summary.accepted_push_frame_count,
+            sample_count
+        );
     }
 
     fn take_ingress_summary(&self, meeting_id: &str) -> CaptureIngressSummary {
@@ -1076,6 +1138,7 @@ mod tests {
             stats,
             source_stats: Arc::new(CaptureSourceStats::default()),
             apm_diagnostics: Arc::new(StdMutex::new(ApmDiagnostics::default())),
+            e2e_injection_enabled: false,
             native_mic_ready: true,
             system_audio_ready: false,
         }
@@ -1306,6 +1369,41 @@ mod tests {
         assert_eq!(summary.accepted_push_frame_count, 0);
         assert_eq!(summary.dropped_push_frame_count, 1);
         assert_eq!(summary.dropped_push_sample_count, 3);
+    }
+
+    #[tokio::test]
+    async fn push_frame_accepts_when_e2e_injection_is_enabled() {
+        let registry = CaptureRegistry::default();
+        let mut capture =
+            active_capture_for_test(Vec::new(), Arc::new(CaptureStreamStats::default()));
+        capture.e2e_injection_enabled = true;
+        capture.native_mic_ready = false;
+        capture.system_audio_ready = true;
+        registry
+            .active
+            .lock()
+            .unwrap()
+            .insert("m1".to_string(), CaptureSlot::Active(capture));
+        registry.reset_ingress_summary("m1");
+
+        assert!(registry.push_frame(
+            "m1",
+            Speaker::Them,
+            tone(TARGET_SAMPLE_RATE as usize / 2, 8_000),
+        ));
+        let summary = registry
+            .stop_with_timeout("m1", Duration::from_millis(50))
+            .await;
+
+        assert!(summary.had_capture);
+        assert!(!summary.native_mic_ready);
+        assert!(summary.system_audio_ready);
+        assert_eq!(summary.push_frame_count, 1);
+        assert_eq!(summary.accepted_push_frame_count, 1);
+        assert_eq!(summary.dropped_push_frame_count, 0);
+        assert_eq!(summary.system_audio_frame_count, 1);
+        assert_eq!(summary.frame_count, 1);
+        assert!(summary.speech_frame_count > 0);
     }
 
     #[tokio::test]

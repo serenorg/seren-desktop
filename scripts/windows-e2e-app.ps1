@@ -372,6 +372,7 @@ if ([string]::IsNullOrWhiteSpace($webView2Runtime)) {
 Write-Stage "WebView2 runtime detected: $webView2Runtime"
 
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$RemoteDebugPort --remote-allow-origins=*"
+$env:SEREN_E2E_CAPTURE_INJECTION = "1"
 Write-Stage "Launching Seren.exe with WebView2 remote debugging on port $RemoteDebugPort"
 $app = Start-Process -FilePath $appExe -PassThru
 

@@ -1338,6 +1338,11 @@ function playWindowsAudio() {
   });
 }
 
+async function injectMeetingCaptureAudio(page, meetingId) {
+  await tauriInvoke(page, "e2e_inject_meeting_capture_audio", { meetingId });
+  await sleep(500);
+}
+
 async function exerciseMeetingCapture(page) {
   const meeting = await tauriInvoke(page, "create_meeting", {
     title: `Windows e2e capture ${new Date().toISOString()}`,
@@ -1347,6 +1352,7 @@ async function exerciseMeetingCapture(page) {
   });
   assert(meeting?.id, "create_meeting did not return an id");
   await tauriInvoke(page, "start_meeting_capture", { meetingId: meeting.id });
+  await injectMeetingCaptureAudio(page, meeting.id);
   const audio = playWindowsAudio();
   await sleep(CAPTURE_SECONDS * 1000);
   const outcome = await tauriInvoke(page, "stop_meeting_capture", {
