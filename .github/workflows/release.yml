@@ -1158,7 +1158,6 @@ jobs:
           prefix="${WINDOWS_E2E_SECRET_PARAMETER_PREFIX%/}"
           required=(
             SEREN_E2E_EMAIL SEREN_E2E_PASSWORD
-            SEREN_E2E_HISTORY_PROJECT_ID SEREN_E2E_HISTORY_BRANCH_ID SEREN_E2E_HISTORY_DATABASE_NAME
             SEREN_E2E_GITHUB_PAT
           )
           agent=(
