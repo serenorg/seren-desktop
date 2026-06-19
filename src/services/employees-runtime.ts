@@ -584,7 +584,7 @@ export async function runEmployeeMessage(
       // completes cleanly even when the connection drops mid-stream. The
       // unconditional pollUntilTerminal call below is the actual recovery
       // path - it reads canonical status and replays any events we missed.
-      for await (const raw of stream) {
+      for await (const raw of stream as AsyncIterable<unknown>) {
         signal.throwIfAborted();
         applyEnvelope(raw, state, callbacks);
       }

@@ -28,7 +28,7 @@ describe("buildEmployeePolicyReviewSummary", () => {
           enabled: true,
           read_policy: "always_on",
           write_policy: "on_observation",
-          store: "org_default",
+          store: "seren_managed",
           retention_days: 90,
         },
         transcript_retention_days: null,

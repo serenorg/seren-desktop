@@ -120,14 +120,14 @@ export type AgentCredentialBinding = 'env' | 'header' | 'body' | 'proxy_inject';
 export type AgentCredentialKind = 'api_key' | 'oauth2_token' | 'basic' | 'mtls' | 'aws_sig_v4' | 'gcp_service_account';
 
 /**
- * Reference to a credential held by Seren's control plane or organization
- * secret store, injected at the declared binding point.
+ * Reference to a credential held by Seren's control plane or by the
+ * organization credential-secret API, injected at the declared binding point.
  */
 export type AgentCredentialRef = {
     /**
-     * How the credential is delivered. `env` is the only mode the runtime
-     * implements today; other modes are accepted on the contract and reserved
-     * for the egress proxy phase of the credential boundary work.
+     * How the credential is delivered. `proxy_inject` is declarative: the
+     * gateway resolves and injects the reference at egress rather than this
+     * process materializing plaintext.
      */
     binding: AgentCredentialBinding;
     binding_target?: string | null;
@@ -138,7 +138,10 @@ export type AgentCredentialRef = {
     name: string;
     /**
      * URI of the credential record. Supported schemes:
-     * `control-plane://providers/{id}`, `org-secret://{key}`, `user-secret://{key}`.
+     * `control-plane://providers/{id}`, `org-secret://{key}`,
+     * `user-secret://{key}`, `seren-secrets://{vault}/{item}/{field}`.
+     * Create `org-secret` and `user-secret` records with
+     * `/organizations/{organization_id}/agent-credential-secrets`.
      */
     ref_uri: string;
     rotation?: null | AgentCredentialRotationPolicy;
@@ -165,6 +168,19 @@ export type AgentFilesystemPolicy = {
      */
     read_write_paths?: Array<string>;
 };
+
+export type AgentGraphMemoryPolicy = {
+    enabled: boolean;
+    read_policy?: AgentGraphMemoryReadPolicy;
+    store?: AgentGraphMemoryStore;
+    write_policy?: AgentGraphMemoryWritePolicy;
+};
+
+export type AgentGraphMemoryReadPolicy = 'explicit_tool' | 'always_on';
+
+export type AgentGraphMemoryStore = 'seren_managed' | 'external';
+
+export type AgentGraphMemoryWritePolicy = 'explicit_tool' | 'on_observation' | 'none';
 
 export type AgentGuardrailOnFail = 'retry' | 'block' | 'fix' | 'human';
 
@@ -251,6 +267,25 @@ export type AgentInstructionFileSelector = {
  */
 export type AgentInstructionKind = 'identity' | 'soul' | 'skill' | 'agents' | 'user' | 'tools' | 'memory' | 'heartbeat' | 'eval';
 
+export type AgentKnowledgeIndexPolicy = 'encrypted_scan' | 'plaintext_embeddings';
+
+export type AgentKnowledgePolicy = {
+    chunk_overlap?: number | null;
+    chunk_size?: number | null;
+    enabled: boolean;
+    index_policy?: AgentKnowledgeIndexPolicy;
+    read_policy?: AgentKnowledgeReadPolicy;
+    source?: AgentKnowledgeSource;
+    store?: AgentKnowledgeStore;
+    top_k?: number | null;
+};
+
+export type AgentKnowledgeReadPolicy = 'explicit_tool' | 'none';
+
+export type AgentKnowledgeSource = 'agent_instructions';
+
+export type AgentKnowledgeStore = 'seren_managed' | 'external';
+
 export type AgentMemoryCompactionPolicy = {
     event_retention_count: number;
     overlap_tokens: number;
@@ -263,6 +298,8 @@ export type AgentMemoryCompactionPolicy = {
  */
 export type AgentMemoryPolicy = {
     compaction?: null | AgentMemoryCompactionPolicy;
+    graph_memory?: null | AgentGraphMemoryPolicy;
+    knowledge?: null | AgentKnowledgePolicy;
     semantic_memory?: null | AgentSemanticMemoryPolicy;
     /**
      * Optional retention for raw run transcripts (days).
@@ -397,7 +434,7 @@ export type AgentSemanticMemoryPolicy = {
 
 export type AgentSemanticMemoryReadPolicy = 'explicit_tool' | 'always_on';
 
-export type AgentSemanticMemoryStore = 'org_default' | 'external';
+export type AgentSemanticMemoryStore = 'seren_managed' | 'external';
 
 export type AgentSemanticMemoryWritePolicy = 'explicit_tool' | 'on_observation' | 'none';
 
@@ -420,6 +457,8 @@ export type AgentSpec = {
     approval_policy?: null | ManagedAgentApprovalPolicy;
     /**
      * Optional credential references resolved by the control plane at runtime.
+     * Reusable `org-secret://` and `user-secret://` records are managed
+     * through `/organizations/{organization_id}/agent-credential-secrets`.
      */
     credentials?: Array<AgentCredentialRef> | null;
     /**
@@ -523,11 +562,14 @@ export type AgentSpecUpdate = {
      */
     clear_session_database?: boolean;
     /**
-     * Clear any existing typed tool refs.
+     * Clear any existing typed tool refs and omit `tool_refs` from the
+     * resolved runtime config. Cannot be combined with `tool_refs`.
      */
     clear_tool_refs?: boolean;
     /**
-     * Updated credential references. Replaces the entire previous list when present.
+     * Updated credential references. Replaces the entire previous list when
+     * present. Reusable `org-secret://` and `user-secret://` records are
+     * managed through the organization credential-secret API.
      */
     credentials?: Array<AgentCredentialRef> | null;
     /**
@@ -563,6 +605,10 @@ export type AgentSpecUpdate = {
     tool_presets?: Array<ManagedAgentToolPreset> | null;
     /**
      * Updated typed tool refs. Replaces the entire previous list when present.
+     *
+     * An empty list is an explicit empty replacement and will serialize as
+     * `tool_refs: []` in runtime config. Use `clear_tool_refs` when the
+     * caller wants to remove the stored typed-tool field entirely.
      */
     tool_refs?: Array<AgentToolRef> | null;
     /**
@@ -1118,7 +1164,9 @@ export type DataResponseManagedAgentDeploymentDetail = {
         config?: unknown;
         context_budget_tokens?: number | null;
         /**
-         * Credential references attached to this deployment, when any.
+         * Credential references attached to this deployment, when any. Reusable
+         * `org-secret://` and `user-secret://` records are managed through the
+         * organization credential-secret API.
          */
         credentials?: Array<AgentCredentialRef>;
         cron_schedule?: string | null;
@@ -1793,7 +1841,9 @@ export type ManagedAgentDeploymentDetail = {
     config?: unknown;
     context_budget_tokens?: number | null;
     /**
-     * Credential references attached to this deployment, when any.
+     * Credential references attached to this deployment, when any. Reusable
+     * `org-secret://` and `user-secret://` records are managed through the
+     * organization credential-secret API.
      */
     credentials?: Array<AgentCredentialRef>;
     cron_schedule?: string | null;

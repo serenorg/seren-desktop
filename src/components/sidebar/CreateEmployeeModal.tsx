@@ -14,6 +14,9 @@ import {
 } from "solid-js";
 import type {
   AgentAssetFile,
+  AgentGraphMemoryReadPolicy,
+  AgentGraphMemoryStore,
+  AgentGraphMemoryWritePolicy,
   AgentMemoryPolicy,
   AgentSemanticMemoryReadPolicy,
   AgentSemanticMemoryStore,
@@ -167,6 +170,13 @@ function sameStringSet(left: readonly string[], right: readonly string[]) {
 function memoryPresetFromPolicy(
   policy: AgentMemoryPolicy | null,
 ): MemoryPreset {
+  const graph = policy?.graph_memory;
+  if (graph?.enabled && graph.write_policy === "on_observation") {
+    return "workflow_learning";
+  }
+  if (graph?.enabled) {
+    return "careful";
+  }
   const semantic = policy?.semantic_memory;
   if (!semantic?.enabled || semantic.write_policy === "none") {
     return "no_long_term_writes";
@@ -192,6 +202,10 @@ function presetConfig(preset: MemoryPreset) {
 
 function buildMemoryPolicy(input: {
   preset: MemoryPreset;
+  graphEnabled: boolean;
+  graphStore: AgentGraphMemoryStore;
+  graphReadPolicy: AgentGraphMemoryReadPolicy;
+  graphWritePolicy: AgentGraphMemoryWritePolicy;
   semanticEnabled: boolean;
   readPolicy: AgentSemanticMemoryReadPolicy;
   writePolicy: AgentSemanticMemoryWritePolicy;
@@ -203,12 +217,28 @@ function buildMemoryPolicy(input: {
 }): AgentMemoryPolicy {
   const noWrites = input.preset === "no_long_term_writes";
   return {
+    graph_memory: {
+      enabled: input.graphEnabled && !noWrites,
+      store: input.graphStore,
+      read_policy: input.graphReadPolicy,
+      write_policy: noWrites ? "none" : input.graphWritePolicy,
+    },
     semantic_memory: {
-      enabled: input.semanticEnabled && !noWrites,
+      enabled: input.semanticEnabled && !input.graphEnabled && !noWrites,
       read_policy: input.readPolicy,
       write_policy: noWrites ? "none" : input.writePolicy,
       store: input.store,
       retention_days: input.retentionDays,
+    },
+    knowledge: {
+      enabled: true,
+      store: "seren_managed",
+      source: "agent_instructions",
+      read_policy: "explicit_tool",
+      index_policy: "encrypted_scan",
+      chunk_size: null,
+      chunk_overlap: null,
+      top_k: null,
     },
     transcript_retention_days: input.transcriptRetentionDays,
     compaction: input.compactionEnabled
@@ -219,6 +249,24 @@ function buildMemoryPolicy(input: {
         }
       : null,
   };
+}
+
+function defaultEmployeeMemoryPolicy(): AgentMemoryPolicy {
+  return buildMemoryPolicy({
+    preset: "workflow_learning",
+    graphEnabled: true,
+    graphStore: "seren_managed",
+    graphReadPolicy: "explicit_tool",
+    graphWritePolicy: "on_observation",
+    semanticEnabled: false,
+    readPolicy: "explicit_tool",
+    writePolicy: "none",
+    store: "seren_managed",
+    retentionDays: null,
+    transcriptRetentionDays: 30,
+    compactionEnabled: true,
+    compactionTokenThreshold: 120000,
+  });
 }
 
 function sameMemoryPolicy(
@@ -331,14 +379,19 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       ? initial.toolPresets
       : ["live_data"],
   );
-  const initialMemoryPolicy = initial?.memoryPolicy ?? null;
+  const initialMemoryPolicy = initial
+    ? (initial.memoryPolicy ?? null)
+    : defaultEmployeeMemoryPolicy();
   const initialMemoryPreset = memoryPresetFromPolicy(initialMemoryPolicy);
   const initialMemoryConfig = presetConfig(initialMemoryPreset);
   const [memoryPreset, setMemoryPreset] =
     createSignal<MemoryPreset>(initialMemoryPreset);
-  const [semanticMemoryEnabled, setSemanticMemoryEnabled] = createSignal(
-    initialMemoryPolicy?.semantic_memory?.enabled ??
+  const [graphMemoryEnabled, setGraphMemoryEnabled] = createSignal(
+    initialMemoryPolicy?.graph_memory?.enabled ??
       initialMemoryPreset !== "no_long_term_writes",
+  );
+  const [semanticMemoryEnabled, setSemanticMemoryEnabled] = createSignal(
+    initialMemoryPolicy?.semantic_memory?.enabled ?? false,
   );
   const [memoryReadPolicy, setMemoryReadPolicy] =
     createSignal<AgentSemanticMemoryReadPolicy>(
@@ -351,7 +404,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
         initialMemoryConfig.writePolicy,
     );
   const [memoryStore, setMemoryStore] = createSignal<AgentSemanticMemoryStore>(
-    initialMemoryPolicy?.semantic_memory?.store ?? "org_default",
+    initialMemoryPolicy?.semantic_memory?.store ?? "seren_managed",
   );
   const [memoryRetentionDays, setMemoryRetentionDays] = createSignal(
     initialMemoryPolicy?.semantic_memory?.retention_days ??
@@ -362,7 +415,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     initialMemoryPolicy?.transcript_retention_days ?? 30,
   );
   const [memoryCompactionEnabled, setMemoryCompactionEnabled] = createSignal(
-    initialMemoryPolicy?.compaction !== null,
+    initialMemoryPolicy?.compaction != null,
   );
   const [memoryCompactionThreshold, setMemoryCompactionThreshold] =
     createSignal(initialMemoryPolicy?.compaction?.token_threshold ?? 120000);
@@ -924,6 +977,14 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
   const currentMemoryPolicy = createMemo(() =>
     buildMemoryPolicy({
       preset: memoryPreset(),
+      graphEnabled: graphMemoryEnabled(),
+      graphStore: initialMemoryPolicy?.graph_memory?.store ?? "seren_managed",
+      graphReadPolicy:
+        initialMemoryPolicy?.graph_memory?.read_policy ?? "explicit_tool",
+      graphWritePolicy:
+        memoryWritePolicy() === "on_observation"
+          ? "on_observation"
+          : "explicit_tool",
       semanticEnabled: semanticMemoryEnabled(),
       readPolicy: memoryReadPolicy(),
       writePolicy: memoryWritePolicy(),
@@ -1678,12 +1739,31 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                   <label class="flex items-center gap-2 text-[12px] text-muted-foreground">
                     <input
                       type="checkbox"
-                      checked={semanticMemoryEnabled()}
-                      onChange={(e) =>
-                        setSemanticMemoryEnabled(e.currentTarget.checked)
-                      }
+                      checked={graphMemoryEnabled()}
+                      onChange={(e) => {
+                        const checked = e.currentTarget.checked;
+                        setGraphMemoryEnabled(checked);
+                        if (checked) setSemanticMemoryEnabled(false);
+                      }}
                       disabled={
                         submitting() || memoryPreset() === "no_long_term_writes"
+                      }
+                    />
+                    Graph memory
+                  </label>
+                  <label class="flex items-center gap-2 text-[12px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={semanticMemoryEnabled()}
+                      onChange={(e) => {
+                        const checked = e.currentTarget.checked;
+                        setSemanticMemoryEnabled(checked);
+                        if (checked) setGraphMemoryEnabled(false);
+                      }}
+                      disabled={
+                        submitting() ||
+                        graphMemoryEnabled() ||
+                        memoryPreset() === "no_long_term_writes"
                       }
                     />
                     Semantic memory
@@ -1754,7 +1834,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                       }
                       disabled={submitting()}
                     >
-                      <option value="org_default">Org default</option>
+                      <option value="seren_managed">Seren managed</option>
                       <option value="external">External</option>
                     </select>
                   </div>

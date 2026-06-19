@@ -174,24 +174,42 @@ function runtimePolicyLines(policy: AgentRuntimePolicy | null | undefined) {
 }
 
 function memoryPolicyLines(policy: AgentMemoryPolicy | null | undefined) {
+  const graph = policy?.graph_memory;
   const semantic = policy?.semantic_memory;
-  if (!semantic?.enabled) {
+  const knowledge = policy?.knowledge;
+  const lines: string[] = [];
+  if (graph?.enabled) {
+    const write =
+      graph.write_policy === "on_observation"
+        ? "automatic observation writes"
+        : graph.write_policy === "none"
+          ? "no writes"
+          : "explicit graph tool writes";
+    lines.push(`Graph memory enabled; explicit graph tools; ${write}`);
+  }
+  if (semantic?.enabled) {
+    const read =
+      semantic.read_policy === "always_on"
+        ? "always injected"
+        : "explicit load_memory tool";
+    const write =
+      semantic.write_policy === "on_observation"
+        ? "automatic writes"
+        : semantic.write_policy === "none"
+          ? "no writes"
+          : "explicit save tool when available";
+    const retention = semantic.retention_days
+      ? `retention ${semantic.retention_days}d`
+      : "default retention";
+    lines.push(`Semantic memory enabled; ${read}; ${write}; ${retention}`);
+  }
+  if (knowledge?.enabled) {
+    lines.push("RAG knowledge enabled; encrypted scan index");
+  }
+  if (lines.length === 0) {
     return ["Long-term memory disabled"];
   }
-  const read =
-    semantic.read_policy === "always_on"
-      ? "always injected"
-      : "explicit load_memory tool";
-  const write =
-    semantic.write_policy === "on_observation"
-      ? "automatic writes"
-      : semantic.write_policy === "none"
-        ? "no writes"
-        : "explicit save tool when available";
-  const retention = semantic.retention_days
-    ? `retention ${semantic.retention_days}d`
-    : "default retention";
-  return [`Semantic memory enabled; ${read}; ${write}; ${retention}`];
+  return lines;
 }
 
 function toolRefDetailLines(toolRefs: readonly AgentToolRef[]) {

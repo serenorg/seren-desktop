@@ -216,7 +216,7 @@ describe("employees service", () => {
         enabled: true,
         read_policy: "always_on" as const,
         write_policy: "on_observation" as const,
-        store: "org_default" as const,
+        store: "seren_managed" as const,
         retention_days: 90,
       },
       compaction: {
