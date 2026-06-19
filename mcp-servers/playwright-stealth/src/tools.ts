@@ -7,10 +7,13 @@ import {
   getActiveBrowserType,
   getContext,
   getPage,
+  listPages as listBrowserPages,
   listInstalledBrowsers,
   resetPage,
+  selectPage as selectBrowserPage,
   setBrowser,
 } from "./browser.js";
+import type { PageSelector } from "./browser.js";
 import type { NavigateOptions } from "./tool_definitions.js";
 
 type CookieInput = Parameters<BrowserContext["addCookies"]>[0][number];
@@ -157,6 +160,16 @@ export function listBrowsers(): string {
     isActive: b.name === active,
   }));
   return JSON.stringify(result, null, 2);
+}
+
+export async function listPages(): Promise<string> {
+  const pages = await listBrowserPages();
+  return JSON.stringify(pages, null, 2);
+}
+
+export async function selectPage(selector: PageSelector): Promise<string> {
+  const page = await selectBrowserPage(selector);
+  return `Selected page: ${page.url()}`;
 }
 
 export async function switchBrowser(browser: string): Promise<string> {

@@ -1,18 +1,22 @@
 // ABOUTME: Unit tests for multi-browser selection, detection, and configuration.
 // ABOUTME: Validates parseBrowserType, isChromiumBased, resolveBrowserName, and listInstalledBrowsers.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InstalledBrowser } from "../browser.js";
 import {
   addPageInitPatchIfEnabled,
   applyStealthPluginIfEnabled,
+  CONNECT_CDP_URL_ENV,
   createSafeStealthPlugin,
   detectDefaultBrowser,
+  getConfiguredCdpUrl,
+  getDefaultBrowserContext,
   isChromiumBased,
   launchBrowserWithFallback,
   listInstalledBrowsers,
   parseBrowserType,
   resolveBrowserName,
+  resolveBrowserStartupMode,
 } from "../browser.js";
 
 const TEST_INSTALLED_BROWSERS: InstalledBrowser[] = [
@@ -46,11 +50,18 @@ const CONTROLLED_ENV_KEYS = [
   "SEREN_PLAYWRIGHT_DISABLE_STEALTH",
   "SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE",
   "SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH",
+  "PLAYWRIGHT_MCP_CONNECT_CDP_URL",
 ] as const;
 
 const ORIGINAL_ENV = new Map(
   CONTROLLED_ENV_KEYS.map((key) => [key, process.env[key]]),
 );
+
+beforeEach(() => {
+  for (const key of CONTROLLED_ENV_KEYS) {
+    delete process.env[key];
+  }
+});
 
 afterEach(() => {
   for (const key of CONTROLLED_ENV_KEYS) {
@@ -162,6 +173,61 @@ describe("parseBrowserType", () => {
     expect(parseBrowserType("msedge-beta")).toBe("msedge-beta");
     expect(parseBrowserType("msedge-dev")).toBe("msedge-dev");
     expect(parseBrowserType("moz-firefox")).toBe("moz-firefox");
+  });
+});
+
+describe("CDP attach startup mode", () => {
+  it("uses PLAYWRIGHT_MCP_CONNECT_CDP_URL when configured", () => {
+    const env = {
+      [CONNECT_CDP_URL_ENV]: " http://127.0.0.1:9222 ",
+    } as NodeJS.ProcessEnv;
+
+    expect(getConfiguredCdpUrl(env, ["node", "index.js"])).toBe(
+      "http://127.0.0.1:9222",
+    );
+    expect(resolveBrowserStartupMode(env, ["node", "index.js"])).toEqual({
+      mode: "cdp",
+      cdpUrl: "http://127.0.0.1:9222",
+    });
+  });
+
+  it("uses --cdp-url when the env var is not set", () => {
+    expect(
+      resolveBrowserStartupMode({}, [
+        "node",
+        "index.js",
+        "--cdp-url",
+        "http://127.0.0.1:9223",
+      ]),
+    ).toEqual({
+      mode: "cdp",
+      cdpUrl: "http://127.0.0.1:9223",
+    });
+  });
+
+  it("falls back to launch mode when no CDP endpoint is configured", () => {
+    expect(resolveBrowserStartupMode({}, ["node", "index.js"])).toEqual({
+      mode: "launch",
+    });
+  });
+
+  it("selects the attached browser default context", () => {
+    const defaultContext = {};
+    const attachedBrowser = {
+      contexts: () => [defaultContext],
+    };
+
+    expect(getDefaultBrowserContext(attachedBrowser as never)).toBe(
+      defaultContext,
+    );
+  });
+
+  it("fails closed when an attached browser has no default context", () => {
+    const attachedBrowser = { contexts: () => [] };
+
+    expect(() => getDefaultBrowserContext(attachedBrowser as never)).toThrow(
+      "Attached CDP browser has no default context",
+    );
   });
 });
 

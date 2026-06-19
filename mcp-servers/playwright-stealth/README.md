@@ -42,6 +42,8 @@ This MCP server is automatically configured in Seren Desktop. It provides the sa
 - `playwright_press` - Press keyboard keys
 - `playwright_close` - Close browser
 - `playwright_reset` - Reset page
+- `playwright_list_pages` - List open pages/tabs in the active browser context
+- `playwright_select_page` - Select the active page/tab by id, index, URL substring, or title substring
 - `playwright_list_browsers` - List all installed browsers available for automation
 - `playwright_set_browser` - Switch to a different installed browser at runtime
 - `playwright_get_cookie` - Read a cookie value (including HttpOnly cookies) from the active page's origin
@@ -97,6 +99,33 @@ of evasion names. When the variable is unset, `iframe.contentWindow` and
 list replaces the default disabled set; set it to an empty string to opt back
 into all stealth evasions except `chrome.app`, which is always disabled for
 macOS notarization compatibility.
+
+### CDP Attach Mode for Human Login
+
+Skills that need human-in-the-loop authentication can launch a visible Chrome
+or Edge profile with remote debugging enabled, then point this MCP at that
+browser instead of allowing the MCP to launch its own fresh profile:
+
+```bash
+PLAYWRIGHT_MCP_CONNECT_CDP_URL=http://127.0.0.1:9222 node dist/index.js
+
+# Equivalent CLI form:
+node dist/index.js --cdp-url http://127.0.0.1:9222
+```
+
+In CDP mode the MCP calls `chromium.connectOverCDP`, uses the attached
+browser's existing default context, and reuses an existing tab when available.
+Call `playwright_list_pages` after the user signs in, then
+`playwright_select_page` with the returned `id`, `index`, `urlContains`, or
+`titleContains` to bind automation to the authenticated tab.
+
+CDP attach mode uses the attached browser's profile, cookies, extensions, and
+launch flags. The `playwright-extra` stealth plugin and launch-only Chromium
+arguments apply only when this MCP launches the browser itself; context and
+page init scripts still apply to future navigations where Playwright supports
+them. `playwright_reset` only unbinds the active page in CDP mode, and
+`playwright_close` disconnects from the remote browser instead of closing the
+user's visible browser.
 
 ### In Seren Desktop
 

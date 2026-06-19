@@ -62,10 +62,12 @@ export const STEALTH_EVASIONS_DISABLE_ENV =
   "SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE";
 export const DISABLE_PAGE_INIT_PATCH_ENV =
   "SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH";
+export const CONNECT_CDP_URL_ENV = "PLAYWRIGHT_MCP_CONNECT_CDP_URL";
 const DEFAULT_DISABLED_STEALTH_EVASIONS = [
   "iframe.contentWindow",
   "navigator.permissions",
 ];
+const CDP_CONNECT_TIMEOUT_MS = 120_000;
 
 // ── Browser Detection ──────────────────────────────────────────────────────────
 
@@ -443,17 +445,78 @@ export async function launchBrowserWithFallback(
 // Lazy: probing installed browser paths during module load can outrun the MCP
 // stdio `initialize` handshake on slow disks. Resolve on first read instead
 // (#1921).
+type BrowserConnectionMode = "launch" | "cdp";
+
 let activeBrowserName: string | null = null;
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
 let page: Page | null = null;
+let browserConnectionMode: BrowserConnectionMode | null = null;
 let stealthApplied = false;
+let nextPageId = 1;
+const pageIds = new WeakMap<Page, string>();
+
+export interface BrowserPageInfo {
+  id: string;
+  index: number;
+  url: string;
+  title: string;
+  isActive: boolean;
+}
+
+export type PageSelector = {
+  id?: string;
+  index?: number;
+  urlContains?: string;
+  titleContains?: string;
+};
+
+export type BrowserStartupMode =
+  | { mode: "cdp"; cdpUrl: string }
+  | { mode: "launch" };
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
+export function getConfiguredCdpUrl(
+  env: NodeJS.ProcessEnv = process.env,
+  argv: string[] = process.argv,
+): string | null {
+  const envUrl = env[CONNECT_CDP_URL_ENV]?.trim();
+  if (envUrl) return envUrl;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--cdp-url" || arg === "--connect-cdp-url") {
+      const value = argv[i + 1]?.trim();
+      if (value && !value.startsWith("--")) return value;
+      continue;
+    }
+
+    for (const prefix of ["--cdp-url=", "--connect-cdp-url="]) {
+      if (arg.startsWith(prefix)) {
+        const value = arg.slice(prefix.length).trim();
+        return value || null;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function resolveBrowserStartupMode(
+  env: NodeJS.ProcessEnv = process.env,
+  argv: string[] = process.argv,
+): BrowserStartupMode {
+  const cdpUrl = getConfiguredCdpUrl(env, argv);
+  return cdpUrl ? { mode: "cdp", cdpUrl } : { mode: "launch" };
+}
+
 export function getActiveBrowserType(): string {
   if (activeBrowserName === null) {
-    activeBrowserName = parseBrowserType(process.env.BROWSER_TYPE);
+    activeBrowserName =
+      resolveBrowserStartupMode().mode === "cdp"
+        ? "chromium-cdp"
+        : parseBrowserType(process.env.BROWSER_TYPE);
   }
   return activeBrowserName;
 }
@@ -462,6 +525,12 @@ export function getActiveBrowserType(): string {
 export async function setBrowser(
   name: string,
 ): Promise<{ name: string; browserName: string; stealthSupported: boolean }> {
+  if (resolveBrowserStartupMode().mode === "cdp") {
+    throw new Error(
+      `Cannot switch browsers while ${CONNECT_CDP_URL_ENV} or --cdp-url is set. CDP attach mode uses the already-running Chromium browser.`,
+    );
+  }
+
   const normalized = parseBrowserType(name);
 
   const installed = listInstalledBrowsers();
@@ -584,8 +653,25 @@ export async function addPageInitPatchIfEnabled(
 
 export async function getBrowser(): Promise<Browser> {
   if (!browser) {
-    const installed = listInstalledBrowsers();
+    const startupMode = resolveBrowserStartupMode();
 
+    if (startupMode.mode === "cdp") {
+      try {
+        browser = await chromium.connectOverCDP(startupMode.cdpUrl, {
+          timeout: CDP_CONNECT_TIMEOUT_MS,
+        });
+        browserConnectionMode = "cdp";
+        activeBrowserName = "chromium-cdp";
+        return browser;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Failed to connect to Chromium over CDP at ${startupMode.cdpUrl}: ${msg}. Ensure the browser was launched with --remote-debugging-port and the endpoint is reachable.`,
+        );
+      }
+    }
+
+    const installed = listInstalledBrowsers();
     try {
       const launched = await launchBrowserWithFallback(
         getActiveBrowserType(),
@@ -606,6 +692,7 @@ export async function getBrowser(): Promise<Browser> {
         },
       );
       browser = launched.browser;
+      browserConnectionMode = "launch";
       activeBrowserName = launched.browserName;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -617,9 +704,24 @@ export async function getBrowser(): Promise<Browser> {
   return browser;
 }
 
+export function getDefaultBrowserContext(b: Browser): BrowserContext {
+  const [defaultContext] = b.contexts();
+  if (!defaultContext) {
+    throw new Error(
+      "Attached CDP browser has no default context. Launch Chrome or Edge with a normal profile and --remote-debugging-port, then retry.",
+    );
+  }
+  return defaultContext;
+}
+
 export async function getContext(): Promise<BrowserContext> {
   if (!context) {
     const b = await getBrowser();
+    if (browserConnectionMode === "cdp") {
+      context = getDefaultBrowserContext(b);
+      return context;
+    }
+
     const engine = resolveBrowserName(getActiveBrowserType());
     context = await b.newContext({
       userAgent: DEFAULT_USER_AGENTS[engine],
@@ -631,10 +733,37 @@ export async function getContext(): Promise<BrowserContext> {
   return context;
 }
 
+function reusablePages(ctx: BrowserContext): Page[] {
+  return ctx.pages().filter((candidate) => !candidate.isClosed());
+}
+
+function idForPage(targetPage: Page): string {
+  const existing = pageIds.get(targetPage);
+  if (existing) return existing;
+
+  const id = `page-${nextPageId}`;
+  nextPageId += 1;
+  pageIds.set(targetPage, id);
+  return id;
+}
+
+async function safePageTitle(targetPage: Page): Promise<string> {
+  try {
+    return await targetPage.title();
+  } catch {
+    return "";
+  }
+}
+
 export async function getPage(): Promise<Page> {
+  if (page?.isClosed()) {
+    page = null;
+  }
+
   if (!page) {
     const ctx = await getContext();
-    page = await ctx.newPage();
+    const existingPage = reusablePages(ctx)[0];
+    page = existingPage ?? (await ctx.newPage());
 
     const engine = resolveBrowserName(getActiveBrowserType());
     await addPageInitPatchIfEnabled(page, engine);
@@ -642,7 +771,95 @@ export async function getPage(): Promise<Page> {
   return page;
 }
 
+export async function listPages(): Promise<BrowserPageInfo[]> {
+  const ctx = await getContext();
+  const pages = reusablePages(ctx);
+
+  return Promise.all(
+    pages.map(async (targetPage, index) => ({
+      id: idForPage(targetPage),
+      index,
+      url: targetPage.url(),
+      title: await safePageTitle(targetPage),
+      isActive: targetPage === page,
+    })),
+  );
+}
+
+export async function selectPage(selector: PageSelector): Promise<Page> {
+  const hasSelector =
+    selector.id !== undefined ||
+    selector.index !== undefined ||
+    selector.urlContains !== undefined ||
+    selector.titleContains !== undefined;
+
+  if (!hasSelector) {
+    throw new Error(
+      "Select a page by id, index, urlContains, or titleContains. Use playwright_list_pages first.",
+    );
+  }
+
+  const ctx = await getContext();
+  const pages = reusablePages(ctx);
+  const pageInfos = await Promise.all(
+    pages.map(async (targetPage, index) => ({
+      targetPage,
+      info: {
+        id: idForPage(targetPage),
+        index,
+        url: targetPage.url(),
+        title: await safePageTitle(targetPage),
+      },
+    })),
+  );
+
+  const match = pageInfos.find(({ info }) => {
+    if (selector.id !== undefined) return info.id === selector.id;
+    if (selector.index !== undefined) return info.index === selector.index;
+    if (selector.urlContains !== undefined)
+      return info.url.includes(selector.urlContains);
+    if (selector.titleContains !== undefined)
+      return info.title.includes(selector.titleContains);
+    return false;
+  });
+
+  if (!match) {
+    throw new Error(
+      `No matching page found. Available pages: ${pageInfos
+        .map(({ info }) => `${info.id}[${info.index}] ${info.url}`)
+        .join("; ")}`,
+    );
+  }
+
+  page = match.targetPage;
+  await page.bringToFront().catch(() => undefined);
+
+  const engine = resolveBrowserName(getActiveBrowserType());
+  await addPageInitPatchIfEnabled(page, engine);
+
+  return page;
+}
+
 export async function closeBrowser(): Promise<void> {
+  if (browserConnectionMode === "cdp") {
+    if (browser) {
+      const remoteBrowser = browser as Browser & {
+        disconnect?: () => Promise<void> | void;
+      };
+      if (typeof remoteBrowser.disconnect === "function") {
+        await remoteBrowser.disconnect();
+      } else {
+        await browser.close();
+      }
+    }
+    page = null;
+    context = null;
+    browser = null;
+    browserConnectionMode = null;
+    activeBrowserName = null;
+    return;
+  }
+
   if (page) {
     await page.close();
     page = null;
@@ -655,11 +872,14 @@ export async function closeBrowser(): Promise<void> {
     await browser.close();
     browser = null;
   }
+  browserConnectionMode = null;
 }
 
 export async function resetPage(): Promise<void> {
   if (page) {
-    await page.close();
+    if (browserConnectionMode !== "cdp") {
+      await page.close();
+    }
     page = null;
   }
 }
