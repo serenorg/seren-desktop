@@ -1000,6 +1000,16 @@
               }
             ]
           },
+          "realtime_sessions": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentRealtimeSessionsCapabilityPolicy"
+              }
+            ]
+          },
           "tool_error_recovery": {
             "oneOf": [
               {
@@ -1735,6 +1745,51 @@
           }
         },
         "additionalProperties": false
+      },
+      "AgentRealtimeSessionsCapabilityPolicy": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "input_transcription": {
+            "type": "boolean"
+          },
+          "model_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "persist_transcripts": {
+            "type": "boolean"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/AgentRealtimeSessionsProvider"
+          },
+          "store_to_memory": {
+            "type": "boolean"
+          },
+          "voice": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "voice_activity_detection": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentRealtimeSessionsProvider": {
+        "type": "string",
+        "enum": [
+          "open_ai"
+        ]
       },
       "AgentRemoteAgentAuth": {
         "type": "string",

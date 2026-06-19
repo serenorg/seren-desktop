@@ -84,6 +84,14 @@ function defaultEmployeeCapabilityPolicy(): AgentCapabilityPolicy {
       text_to_speech: false,
       voice_activity_detection: false,
     },
+    realtime_sessions: {
+      enabled: false,
+      provider: "open_ai",
+      voice_activity_detection: true,
+      input_transcription: true,
+      persist_transcripts: true,
+      store_to_memory: true,
+    },
   };
 }
 

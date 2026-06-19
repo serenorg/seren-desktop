@@ -141,6 +141,7 @@ export type AgentCapabilityPolicy = {
     browser?: null | AgentBrowserCapabilityPolicy;
     code_execution?: null | AgentCodeExecutionCapabilityPolicy;
     eval_harness?: null | AgentSimpleCapabilityPolicy;
+    realtime_sessions?: null | AgentRealtimeSessionsCapabilityPolicy;
     tool_error_recovery?: null | AgentToolErrorRecoveryPolicy;
     workflows?: null | AgentSimpleCapabilityPolicy;
 };
@@ -413,6 +414,19 @@ export type AgentProcessPolicy = {
      */
     seccomp_profile?: string | null;
 };
+
+export type AgentRealtimeSessionsCapabilityPolicy = {
+    enabled: boolean;
+    input_transcription?: boolean;
+    model_id?: string | null;
+    persist_transcripts?: boolean;
+    provider?: AgentRealtimeSessionsProvider;
+    store_to_memory?: boolean;
+    voice?: string | null;
+    voice_activity_detection?: boolean;
+};
+
+export type AgentRealtimeSessionsProvider = 'open_ai';
 
 export type AgentRemoteAgentAuth = 'none' | 'bearer' | 'mtls';
 
