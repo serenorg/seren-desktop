@@ -190,6 +190,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "playwright_list_pages",
+        description:
+          "List open pages/tabs in the active browser context. In CDP attach mode this lists the attached browser's existing tabs so the agent can bind to the user's authenticated tab.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "playwright_select_page",
+        description:
+          "Select the active page/tab by id, index, URL substring, or title substring. Use playwright_list_pages first to inspect available targets.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              description:
+                "Stable page id returned by playwright_list_pages, such as page-1.",
+            },
+            index: {
+              type: "number",
+              description:
+                "Zero-based index returned by playwright_list_pages.",
+            },
+            urlContains: {
+              type: "string",
+              description: "Select the first page whose URL contains this text.",
+            },
+            titleContains: {
+              type: "string",
+              description:
+                "Select the first page whose title contains this text.",
+            },
+          },
+        },
+      },
+      {
         name: "playwright_list_browsers",
         description:
           "List all browsers installed on this system that can be used for automation. Returns name, engine, executable path, stealth support, and which browser is currently active.",
@@ -370,6 +408,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "playwright_reset":
         result = await tools.reset();
+        break;
+      case "playwright_list_pages":
+        result = await tools.listPages();
+        break;
+      case "playwright_select_page":
+        result = await tools.selectPage({
+          id: args.id as string | undefined,
+          index: args.index as number | undefined,
+          urlContains: args.urlContains as string | undefined,
+          titleContains: args.titleContains as string | undefined,
+        });
         break;
       case "playwright_list_browsers":
         result = tools.listBrowsers();

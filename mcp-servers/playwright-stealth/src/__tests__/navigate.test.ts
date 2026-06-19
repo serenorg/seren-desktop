@@ -15,8 +15,10 @@ vi.mock("../browser.js", () => ({
   getActiveBrowserType: vi.fn(() => "chrome"),
   getContext: vi.fn(),
   getPage: mocks.getPage,
+  listPages: vi.fn(),
   listInstalledBrowsers: vi.fn(() => []),
   resetPage: vi.fn(),
+  selectPage: vi.fn(),
   setBrowser: vi.fn(),
 }));
 
