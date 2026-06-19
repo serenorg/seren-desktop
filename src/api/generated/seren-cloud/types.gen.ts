@@ -549,7 +549,7 @@ export type CloudDeploymentRunRequest = {
 /**
  * Cloud deployment runtime kind (language/runtime format).
  */
-export type CloudDeploymentRuntimeKind = 'python' | 'javascript' | 'typescript' | 'rust' | 'rust_wasm_adk';
+export type CloudDeploymentRuntimeKind = 'python' | 'javascript' | 'typescript' | 'rust' | 'rust_wasm';
 
 /**
  * Cloud deployment lifecycle status.
@@ -4404,7 +4404,7 @@ export type ManagedAgentLlmConnection = {
 
 export type ManagedAgentModelPolicy = 'fast' | 'balanced' | 'deep';
 
-export type ManagedAgentRuntimeAdapter = 'adk';
+export type ManagedAgentRuntimeAdapter = 'seren_agent';
 
 export type ManagedAgentSummary = {
     allowed_publisher_operations: Array<string>;

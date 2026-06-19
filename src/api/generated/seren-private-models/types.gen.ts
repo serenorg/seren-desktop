@@ -13,9 +13,19 @@ export type ApiResultResponse = {
      */
     asset_symbol: string;
     /**
-     * Response body (JSON if available, otherwise raw text)
+     * Response body (JSON if available, raw text for textual upstreams, or null
+     * when body_base64 is set)
      */
     body: unknown;
+    /**
+     * Raw binary response body, base64-encoded. Present only when the upstream
+     * returned a non-JSON, non-text payload. When set, `body` is null.
+     */
+    body_base64?: string | null;
+    /**
+     * Upstream Content-Type for a base64-encoded binary response body.
+     */
+    content_type?: string | null;
     /**
      * Actual cost charged in configured asset
      */
@@ -137,9 +147,19 @@ export type DataResponseApiResultResponse = {
          */
         asset_symbol: string;
         /**
-         * Response body (JSON if available, otherwise raw text)
+         * Response body (JSON if available, raw text for textual upstreams, or null
+         * when body_base64 is set)
          */
         body: unknown;
+        /**
+         * Raw binary response body, base64-encoded. Present only when the upstream
+         * returned a non-JSON, non-text payload. When set, `body` is null.
+         */
+        body_base64?: string | null;
+        /**
+         * Upstream Content-Type for a base64-encoded binary response body.
+         */
+        content_type?: string | null;
         /**
          * Actual cost charged in configured asset
          */

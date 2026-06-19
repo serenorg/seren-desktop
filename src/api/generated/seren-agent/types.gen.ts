@@ -65,6 +65,20 @@ export type AgentAssetFile = {
 
 export type AgentAssetPurpose = 'reference' | 'script' | 'schema' | 'resource' | 'eval';
 
+export type AgentAudioCapabilityPolicy = {
+    enabled: boolean;
+    speech_to_text?: boolean;
+    text_to_speech?: boolean;
+    voice_activity_detection?: boolean;
+};
+
+export type AgentBrowserCapabilityPolicy = {
+    enabled: boolean;
+    profile?: AgentBrowserProfile;
+};
+
+export type AgentBrowserProfile = 'minimal' | 'form_filling' | 'scraping' | 'full';
+
 /**
  * Authored agent bundle used by LLM workloads.
  */
@@ -114,6 +128,29 @@ export type AgentCapabilitiesResponse = {
     supports_direct_skill_deploy: boolean;
     supports_orchestrated_deploy: boolean;
 };
+
+/**
+ * Optional runtime capabilities declared by a managed agent.
+ *
+ * This is distinct from `tool_refs`: capability policy controls bundled
+ * runtime behavior such as tool-call error recovery and optional tool
+ * families that require runtime prerequisites.
+ */
+export type AgentCapabilityPolicy = {
+    audio?: null | AgentAudioCapabilityPolicy;
+    browser?: null | AgentBrowserCapabilityPolicy;
+    code_execution?: null | AgentCodeExecutionCapabilityPolicy;
+    eval_harness?: null | AgentSimpleCapabilityPolicy;
+    tool_error_recovery?: null | AgentToolErrorRecoveryPolicy;
+    workflows?: null | AgentSimpleCapabilityPolicy;
+};
+
+export type AgentCodeExecutionCapabilityPolicy = {
+    enabled: boolean;
+    sandbox?: AgentCodeExecutionSandbox;
+};
+
+export type AgentCodeExecutionSandbox = 'disabled' | 'managed' | 'external';
 
 export type AgentCredentialBinding = 'env' | 'header' | 'body' | 'proxy_inject';
 
@@ -438,6 +475,10 @@ export type AgentSemanticMemoryStore = 'seren_managed' | 'external';
 
 export type AgentSemanticMemoryWritePolicy = 'explicit_tool' | 'on_observation' | 'none';
 
+export type AgentSimpleCapabilityPolicy = {
+    enabled: boolean;
+};
+
 /**
  * Managed deploy request for the `seren-agent` first-class publisher.
  */
@@ -455,6 +496,7 @@ export type AgentSpec = {
      */
     allowed_remote_agent_origins?: Array<string> | null;
     approval_policy?: null | ManagedAgentApprovalPolicy;
+    capability_policy?: null | AgentCapabilityPolicy;
     /**
      * Optional credential references resolved by the control plane at runtime.
      * Reusable `org-secret://` and `user-secret://` records are managed
@@ -529,10 +571,15 @@ export type AgentSpecUpdate = {
      */
     allowed_remote_agent_origins?: Array<string> | null;
     approval_policy?: null | ManagedAgentApprovalPolicy;
+    capability_policy?: null | AgentCapabilityPolicy;
     /**
      * Clear any existing alert policy.
      */
     clear_alert_policy?: boolean;
+    /**
+     * Clear any existing capability policy.
+     */
+    clear_capability_policy?: boolean;
     /**
      * Clear any existing credential references.
      */
@@ -616,6 +663,23 @@ export type AgentSpecUpdate = {
      */
     visibility?: string | null;
     workload?: null | WorkloadSpec;
+};
+
+export type AgentToolErrorRecoveryBackoffKind = 'none' | 'fixed' | 'exponential';
+
+export type AgentToolErrorRecoveryBackoffPolicy = {
+    base_delay_ms?: number | null;
+    kind?: AgentToolErrorRecoveryBackoffKind;
+    max_delay_ms?: number | null;
+};
+
+export type AgentToolErrorRecoveryPolicy = {
+    allow_tools?: Array<string>;
+    backoff?: null | AgentToolErrorRecoveryBackoffPolicy;
+    deny_tools?: Array<string>;
+    enabled: boolean;
+    global_limit?: number | null;
+    max_attempts?: number | null;
 };
 
 /**
@@ -739,7 +803,7 @@ export type CloudDeploymentNetworkPolicy = {
 /**
  * Cloud deployment runtime kind (language/runtime format).
  */
-export type CloudDeploymentRuntimeKind = 'python' | 'javascript' | 'typescript' | 'rust' | 'rust_wasm_adk';
+export type CloudDeploymentRuntimeKind = 'python' | 'javascript' | 'typescript' | 'rust' | 'rust_wasm';
 
 /**
  * Cloud deployment lifecycle status.
@@ -1153,6 +1217,7 @@ export type DataResponseManagedAgentDeploymentDetail = {
         allowed_remote_agent_origins?: Array<string>;
         approval_policy: ManagedAgentApprovalPolicy;
         bundle: AgentBundle;
+        capability_policy?: null | AgentCapabilityPolicy;
         compute_backend: CloudDeploymentComputeBackend;
         /**
          * Structured status conditions for the managed deployment. Today this is
@@ -1830,6 +1895,7 @@ export type ManagedAgentDeploymentDetail = {
     allowed_remote_agent_origins?: Array<string>;
     approval_policy: ManagedAgentApprovalPolicy;
     bundle: AgentBundle;
+    capability_policy?: null | AgentCapabilityPolicy;
     compute_backend: CloudDeploymentComputeBackend;
     /**
      * Structured status conditions for the managed deployment. Today this is
@@ -1942,7 +2008,7 @@ export type ManagedAgentPrivateOutputPolicy = 'control_plane' | 'private_session
 
 export type ManagedAgentRevisionChangeKind = 'create' | 'update' | 'rollback';
 
-export type ManagedAgentRuntimeAdapter = 'adk';
+export type ManagedAgentRuntimeAdapter = 'seren_agent';
 
 export type ManagedAgentSessionDatabase = {
     /**

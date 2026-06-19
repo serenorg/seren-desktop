@@ -333,7 +333,7 @@ describe("employees service", () => {
       requirements: [],
       resolved_tools: [],
       routing_reason: "standard",
-      runtime_adapter: "adk",
+      runtime_adapter: "seren_agent",
       runtime_kind: "python",
       runtime_policy: {
         version: 1,

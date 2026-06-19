@@ -385,6 +385,11 @@ export type ApiKeyInfo = {
 };
 
 /**
+ * Actor kind for an API key.
+ */
+export type ApiKeyType = 'user' | 'agent';
+
+/**
  * Request to apply a referral code
  */
 export type ApplyReferralRequest = {
@@ -508,6 +513,14 @@ export type ChangePlanRequest = {
     stripe_payment_method_id?: null | StripePaymentMethodId;
 };
 
+export type CommunityPriorResponse = {
+    alpha: number;
+    beta: number;
+    last_updated?: string | null;
+    sample_size: number;
+    sufficient_population: boolean;
+};
+
 /**
  * Compute type - specific compute offering when publisher_category = Compute
  */
@@ -592,8 +605,17 @@ export type CostEstimate = {
  * Request to create a new API key
  */
 export type CreateApiKeyRequest = {
+    /**
+     * Required when `key_type` is `"agent"`. The seren-passwords identity the agent acts as.
+     */
+    agent_identity_id?: string | null;
     expires_in_days?: number | null;
+    key_type?: null | ApiKeyType;
     name: string;
+    /**
+     * Granular permission scopes for the key. Meaningful for agent keys.
+     */
+    scopes?: Array<string> | null;
 };
 
 export type CreateChargeRequest = {
@@ -2234,6 +2256,87 @@ export type DataResponseBonusClaimResponse = {
         amount_usd: string;
         bonus_type: string;
         success: boolean;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCommunityPriorResponse = {
+    data: {
+        alpha: number;
+        beta: number;
+        last_updated?: string | null;
+        sample_size: number;
+        sufficient_population: boolean;
     };
     pagination?: null | PaginationMeta;
 };
@@ -14596,7 +14699,7 @@ export type LogoutErrors = {
 
 export type LogoutResponses = {
     /**
-     * Sessions revoked and refresh cookie cleared
+     * Sessions revoked
      */
     200: DataResponseLogoutResult;
 };
@@ -14627,9 +14730,6 @@ export type GetCurrentUserResponses = {
 export type GetCurrentUserResponse = GetCurrentUserResponses[keyof GetCurrentUserResponses];
 
 export type RefreshTokenData = {
-    /**
-     * Optional - the refresh cookie is preferred
-     */
     body: RefreshTokenRequest;
     path?: never;
     query?: never;
@@ -15311,6 +15411,36 @@ export type ListAllDatabasesResponses = {
 };
 
 export type ListAllDatabasesResponse = ListAllDatabasesResponses[keyof ListAllDatabasesResponses];
+
+export type GetCommunityPriorData = {
+    body?: never;
+    path?: never;
+    query: {
+        task_type: TaskType;
+        model_id: string;
+    };
+    url: '/eval/community-prior';
+};
+
+export type GetCommunityPriorErrors = {
+    /**
+     * Invalid query parameters
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type GetCommunityPriorResponses = {
+    /**
+     * Community routing prior
+     */
+    200: DataResponseCommunityPriorResponse;
+};
+
+export type GetCommunityPriorResponse = GetCommunityPriorResponses[keyof GetCommunityPriorResponses];
 
 export type GetMatrixData = {
     body?: never;

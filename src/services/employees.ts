@@ -4,6 +4,7 @@
 import {
   type AgentBundle,
   type AgentBundlePatch,
+  type AgentCapabilityPolicy,
   type AgentSpec,
   type AgentSpecUpdate,
   type AgentToolRef,
@@ -60,6 +61,30 @@ function nonEmptyToolRefs(
   refs: readonly AgentToolRef[] | undefined,
 ): AgentToolRef[] | undefined {
   return refs && refs.length > 0 ? [...refs] : undefined;
+}
+
+function defaultEmployeeCapabilityPolicy(): AgentCapabilityPolicy {
+  return {
+    tool_error_recovery: {
+      enabled: true,
+      max_attempts: 3,
+      global_limit: 12,
+      backoff: {
+        kind: "exponential",
+        base_delay_ms: 100,
+        max_delay_ms: 2_000,
+      },
+      allow_tools: [],
+      deny_tools: [],
+    },
+    browser: { enabled: false, profile: "minimal" },
+    audio: {
+      enabled: false,
+      speech_to_text: false,
+      text_to_speech: false,
+      voice_activity_detection: false,
+    },
+  };
 }
 
 function deriveModelChoice(row: CloudDeploymentSummary): ModelChoice {
@@ -222,6 +247,7 @@ function specFromInput(input: NewEmployeeInput): AgentSpec {
     ...(input.memoryPolicy !== undefined
       ? { memory_policy: input.memoryPolicy }
       : {}),
+    capability_policy: defaultEmployeeCapabilityPolicy(),
     approval_policy: input.approvalPolicy ?? "read_only",
     model_policy: input.modelPolicy ?? "balanced",
     private_output_policy: "control_plane",
