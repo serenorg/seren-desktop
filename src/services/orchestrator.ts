@@ -706,23 +706,39 @@ function emitEmployeeToolCall(
     (m) => m.type === "tool_call" && m.toolCallId === event.id,
   );
   if (existing?.toolCall) {
-    conversationStore.updateMessage(
-      existing.id,
-      {
-        toolCall: {
-          ...existing.toolCall,
-          status: event.status ?? existing.toolCall.status,
-          name: event.name,
-          arguments: event.arguments ?? existing.toolCall.arguments,
-          parameters: parameters ?? existing.toolCall.parameters,
-        },
+    const updated: UnifiedMessage = {
+      ...existing,
+      status:
+        event.status && event.status !== "running"
+          ? "complete"
+          : existing.status,
+      toolCall: {
+        ...existing.toolCall,
+        status: event.status ?? existing.toolCall.status,
+        name: event.name,
+        arguments: event.arguments ?? existing.toolCall.arguments,
+        parameters: parameters ?? existing.toolCall.parameters,
       },
-      conversationId,
-    );
+      request: {
+        prompt: existing.request?.prompt ?? "",
+        employeeId: existing.request?.employeeId,
+        runId: event.runId ?? existing.request?.runId,
+        sequenceNumber:
+          event.sequenceNumber ?? existing.request?.sequenceNumber,
+        eventType: event.eventType ?? existing.request?.eventType,
+        eventKind: event.eventKind ?? existing.request?.eventKind,
+        itemId: event.itemId ?? existing.request?.itemId,
+      },
+    };
+    conversationStore.updateMessage(existing.id, updated, conversationId);
+    void conversationStore.persistMessage(updated, conversationId);
     return;
   }
+  const messageId = event.runId
+    ? `${event.runId}:tool_call:${event.id}`
+    : crypto.randomUUID();
   const toolMessage: UnifiedMessage = {
-    id: crypto.randomUUID(),
+    id: messageId,
     type: "tool_call",
     role: "assistant",
     content: event.name,
@@ -738,6 +754,14 @@ function emitEmployeeToolCall(
       name: event.name,
       arguments: event.arguments ?? undefined,
       parameters,
+    },
+    request: {
+      prompt: "",
+      runId: event.runId,
+      sequenceNumber: event.sequenceNumber ?? undefined,
+      eventType: event.eventType ?? undefined,
+      eventKind: event.eventKind ?? undefined,
+      itemId: event.itemId ?? undefined,
     },
   };
   conversationStore.addMessage(toolMessage, conversationId);
@@ -756,23 +780,37 @@ function emitEmployeeToolResult(
   );
   if (toolCallMsg?.toolCall) {
     const newStatus = event.isError ? "error" : "completed";
-    conversationStore.updateMessage(
-      toolCallMsg.id,
-      {
-        status: "complete",
-        toolCall: {
-          ...toolCallMsg.toolCall,
-          status: newStatus,
-          result: event.content,
-          isError: event.isError,
-        },
+    const updated: UnifiedMessage = {
+      ...toolCallMsg,
+      status: "complete",
+      toolCall: {
+        ...toolCallMsg.toolCall,
+        status: newStatus,
+        result: event.content,
+        isError: event.isError,
       },
-      conversationId,
-    );
+      request: {
+        prompt: toolCallMsg.request?.prompt ?? "",
+        employeeId: toolCallMsg.request?.employeeId,
+        runId: event.runId ?? toolCallMsg.request?.runId,
+        sequenceNumber:
+          event.sequenceNumber ?? toolCallMsg.request?.sequenceNumber,
+        eventType: event.eventType ?? toolCallMsg.request?.eventType,
+        eventKind: event.eventKind ?? toolCallMsg.request?.eventKind,
+        itemId: event.itemId ?? toolCallMsg.request?.itemId,
+      },
+    };
+    conversationStore.updateMessage(toolCallMsg.id, updated, conversationId);
+    void conversationStore.persistMessage(updated, conversationId);
   }
 
+  const resultId = event.runId
+    ? `${event.runId}:tool_result:${event.id}:${
+        event.sequenceNumber ?? event.eventKind ?? "result"
+      }`
+    : crypto.randomUUID();
   const resultMessage: UnifiedMessage = {
-    id: crypto.randomUUID(),
+    id: resultId,
     type: "tool_result",
     role: "assistant",
     content: event.content,
@@ -787,6 +825,14 @@ function emitEmployeeToolResult(
       status: event.isError ? "error" : "completed",
       isError: event.isError,
       result: event.content,
+    },
+    request: {
+      prompt: "",
+      runId: event.runId,
+      sequenceNumber: event.sequenceNumber ?? undefined,
+      eventType: event.eventType ?? undefined,
+      eventKind: event.eventKind ?? undefined,
+      itemId: event.itemId ?? undefined,
     },
   };
   conversationStore.addMessage(resultMessage, conversationId);
@@ -804,14 +850,27 @@ function emitEmployeeToolAudit(
   const content = `> **Tool audit:** ${formatToolAuditEvent(event, {
     escapeMarkdown: true,
   })}`;
+  const messageId = event.runId
+    ? `${event.runId}:tool_audit:${event.id}:${
+        event.sequenceNumber ?? event.eventKind ?? "audit"
+      }`
+    : crypto.randomUUID();
   const message: UnifiedMessage = {
-    id: crypto.randomUUID(),
+    id: messageId,
     type: "assistant",
     role: "assistant",
     content,
     timestamp: Date.now(),
     status: "complete",
     workerType: "employee",
+    request: {
+      prompt: "",
+      runId: event.runId,
+      sequenceNumber: event.sequenceNumber ?? undefined,
+      eventType: event.eventType ?? undefined,
+      eventKind: event.eventKind ?? undefined,
+      itemId: event.itemId ?? undefined,
+    },
   };
   conversationStore.addMessage(message, conversationId);
   void conversationStore.persistMessage(message, conversationId);
@@ -831,20 +890,19 @@ function finalizeOrphanToolCalls(
   const messages = conversationStore.getMessagesFor(conversationId);
   for (const msg of messages) {
     if (msg.type !== "tool_call" || msg.status !== "streaming") continue;
-    if (!msg.toolCall || msg.toolCall.status !== "running") continue;
-    conversationStore.updateMessage(
-      msg.id,
-      {
-        status: "complete",
-        toolCall: {
-          ...msg.toolCall,
-          status: finalStatus,
-          isError: finalStatus === "error",
-          result: errorText ?? msg.toolCall.result,
-        },
+    if (msg.toolCall?.status !== "running") continue;
+    const updated: UnifiedMessage = {
+      ...msg,
+      status: "complete",
+      toolCall: {
+        ...msg.toolCall,
+        status: finalStatus,
+        isError: finalStatus === "error",
+        result: errorText ?? msg.toolCall.result,
       },
-      conversationId,
-    );
+    };
+    conversationStore.updateMessage(msg.id, updated, conversationId);
+    void conversationStore.persistMessage(updated, conversationId);
   }
 }
 
@@ -934,7 +992,7 @@ async function runEmployeeTurn(
       ),
     });
     const assistantMessage: UnifiedMessage = {
-      id: stream.messageId,
+      id: result.runId ? `${result.runId}:assistant` : stream.messageId,
       type: "assistant",
       role: "assistant",
       content: finalOutputValidation.safeDisplayText,
@@ -945,7 +1003,11 @@ async function runEmployeeTurn(
       modelId: undefined,
       duration,
       finalOutputValidation,
-      request: { prompt },
+      request: {
+        prompt,
+        employeeId: deploymentId,
+        runId: result.runId ?? undefined,
+      },
     };
     conversationStore.addMessage(assistantMessage, conversationId);
     await conversationStore.persistMessage(assistantMessage, conversationId);

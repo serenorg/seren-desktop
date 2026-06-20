@@ -112,12 +112,22 @@ export interface ToolCallEvent {
   name: string;
   arguments: string | null;
   status: string | null;
+  runId?: string;
+  sequenceNumber?: number | null;
+  eventType?: string | null;
+  eventKind?: string | null;
+  itemId?: string | null;
 }
 
 export interface ToolResultEvent {
   id: string;
   content: string;
   isError: boolean;
+  runId?: string;
+  sequenceNumber?: number | null;
+  eventType?: string | null;
+  eventKind?: string | null;
+  itemId?: string | null;
 }
 
 export interface ToolAuditEvent {
@@ -131,6 +141,11 @@ export interface ToolAuditEvent {
   inputBytes: number | null;
   outputBytes: number | null;
   latencyMs: number | null;
+  runId?: string;
+  sequenceNumber?: number | null;
+  eventType?: string | null;
+  eventKind?: string | null;
+  itemId?: string | null;
 }
 
 interface ToolAuditFormatOptions {
@@ -259,6 +274,7 @@ function applyEnvelope(
   raw: unknown,
   state: RunState,
   callbacks: RunCallbacks,
+  runId?: string,
 ): void {
   if (!raw || typeof raw !== "object") return;
   const ev = raw as CloudRunOutputEventEnvelope;
@@ -288,6 +304,11 @@ function applyEnvelope(
         name: ev.name,
         arguments: ev.arguments ?? null,
         status: ev.status ?? null,
+        runId,
+        sequenceNumber: ev.sequence_number ?? null,
+        eventType: ev.event_type ?? null,
+        eventKind: ev.kind ?? null,
+        itemId: ev.item_id ?? null,
       });
       break;
     }
@@ -299,6 +320,11 @@ function applyEnvelope(
         id: ev.id,
         content: ev.content,
         isError: ev.is_error,
+        runId,
+        sequenceNumber: ev.sequence_number ?? null,
+        eventType: ev.event_type ?? null,
+        eventKind: ev.kind ?? null,
+        itemId: ev.item_id ?? null,
       });
       break;
     }
@@ -317,6 +343,11 @@ function applyEnvelope(
         inputBytes: ev.input_bytes ?? null,
         outputBytes: ev.output_bytes ?? null,
         latencyMs: ev.latency_ms ?? null,
+        runId,
+        sequenceNumber: ev.sequence_number ?? null,
+        eventType: ev.event_type ?? null,
+        eventKind: ev.kind ?? null,
+        itemId: ev.item_id ?? null,
       });
       break;
     }
@@ -383,7 +414,7 @@ async function pollUntilTerminal(
       };
       if (Array.isArray(event.output_events)) {
         for (const raw of event.output_events) {
-          applyEnvelope(raw, recovered, replayCallbacks);
+          applyEnvelope(raw, recovered, replayCallbacks, runId);
         }
       }
       if (
@@ -586,7 +617,7 @@ export async function runEmployeeMessage(
       // path - it reads canonical status and replays any events we missed.
       for await (const raw of stream as AsyncIterable<unknown>) {
         signal.throwIfAborted();
-        applyEnvelope(raw, state, callbacks);
+        applyEnvelope(raw, state, callbacks, runId);
       }
     } catch (err) {
       if (signal.aborted) throw err;

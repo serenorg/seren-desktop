@@ -80,6 +80,12 @@ export interface UnifiedMessage {
   request?: {
     prompt: string;
     context?: ChatContextData;
+    employeeId?: string;
+    runId?: string;
+    sequenceNumber?: number;
+    eventType?: string;
+    eventKind?: string;
+    itemId?: string;
   };
 
   // Migration field: retry attempt counter (temporary, from Message type)
@@ -148,12 +154,30 @@ export interface MessageMetadata {
   task_type?: string | null;
   duration?: number | null;
   cost?: number | null;
+  thinking?: string | null;
+  request?: {
+    prompt?: string;
+    context?: ChatContextData;
+    employee_id?: string;
+    run_id?: string;
+    sequence_number?: number;
+    event_type?: string;
+    event_kind?: string;
+    item_id?: string;
+  } | null;
   final_output_validation?: FinalOutputValidationReport | null;
   memory?: MessageMemoryMetadata | null;
   tool_call?: {
     id: string;
     name: string;
     arguments?: string;
+    title?: string;
+    kind?: string;
+    status?: string;
+    parameters?: Record<string, unknown>;
+    result?: string;
+    partial_result?: string;
+    is_error?: boolean;
   } | null;
   diff?: {
     path: string;
@@ -190,7 +214,9 @@ export function serializeMetadata(msg: UnifiedMessage): string | null {
     !msg.diff &&
     !msg.memory &&
     !msg.duration &&
-    !msg.cost
+    !msg.cost &&
+    !msg.thinking &&
+    !msg.request
   ) {
     return null;
   }
@@ -202,6 +228,19 @@ export function serializeMetadata(msg: UnifiedMessage): string | null {
     task_type: msg.taskType ?? null,
     duration: msg.duration ?? null,
     cost: msg.cost ?? null,
+    thinking: msg.thinking ?? null,
+    request: msg.request
+      ? {
+          prompt: msg.request.prompt,
+          context: msg.request.context,
+          employee_id: msg.request.employeeId,
+          run_id: msg.request.runId,
+          sequence_number: msg.request.sequenceNumber,
+          event_type: msg.request.eventType,
+          event_kind: msg.request.eventKind,
+          item_id: msg.request.itemId,
+        }
+      : null,
     final_output_validation: msg.finalOutputValidation ?? null,
     memory: msg.memory ?? null,
     tool_call: msg.toolCall
@@ -209,6 +248,13 @@ export function serializeMetadata(msg: UnifiedMessage): string | null {
           id: msg.toolCall.toolCallId,
           name: msg.toolCall.name ?? msg.toolCall.title,
           arguments: msg.toolCall.arguments,
+          title: msg.toolCall.title,
+          kind: msg.toolCall.kind,
+          status: msg.toolCall.status,
+          parameters: msg.toolCall.parameters,
+          result: msg.toolCall.result,
+          partial_result: msg.toolCall.partialResult,
+          is_error: msg.toolCall.isError,
         }
       : null,
     diff: msg.diff
@@ -249,6 +295,41 @@ export function deserializeMetadata(
     if (typeof meta.duration === "number" && meta.duration > 0)
       result.duration = meta.duration;
     if (typeof meta.cost === "number" && meta.cost > 0) result.cost = meta.cost;
+    if (typeof meta.thinking === "string" && meta.thinking.length > 0) {
+      result.thinking = meta.thinking;
+    }
+    if (meta.request && typeof meta.request === "object") {
+      const request = meta.request as Record<string, unknown>;
+      const prompt =
+        typeof request.prompt === "string" ? request.prompt : undefined;
+      const context =
+        request.context && typeof request.context === "object"
+          ? (request.context as ChatContextData)
+          : undefined;
+      result.request = {
+        prompt: prompt ?? "",
+        context,
+        employeeId:
+          typeof request.employee_id === "string"
+            ? request.employee_id
+            : undefined,
+        runId: typeof request.run_id === "string" ? request.run_id : undefined,
+        sequenceNumber:
+          typeof request.sequence_number === "number"
+            ? request.sequence_number
+            : undefined,
+        eventType:
+          typeof request.event_type === "string"
+            ? request.event_type
+            : undefined,
+        eventKind:
+          typeof request.event_kind === "string"
+            ? request.event_kind
+            : undefined,
+        itemId:
+          typeof request.item_id === "string" ? request.item_id : undefined,
+      };
+    }
     if (
       meta.final_output_validation &&
       typeof meta.final_output_validation === "object"
@@ -260,15 +341,29 @@ export function deserializeMetadata(
       result.memory = meta.memory;
     }
     if (meta.tool_call && typeof meta.tool_call === "object") {
-      const tc = meta.tool_call as Record<string, string>;
+      const tc = meta.tool_call as Record<string, unknown>;
       result.toolCall = {
-        toolCallId: tc.id,
-        title: tc.name,
-        kind: "unknown",
-        status: "complete",
-        name: tc.name,
-        arguments: tc.arguments,
+        toolCallId: typeof tc.id === "string" ? tc.id : "",
+        title:
+          typeof tc.title === "string"
+            ? tc.title
+            : typeof tc.name === "string"
+              ? tc.name
+              : "tool",
+        kind: typeof tc.kind === "string" ? tc.kind : "unknown",
+        status: typeof tc.status === "string" ? tc.status : "complete",
+        name: typeof tc.name === "string" ? tc.name : undefined,
+        arguments: typeof tc.arguments === "string" ? tc.arguments : undefined,
+        parameters:
+          tc.parameters && typeof tc.parameters === "object"
+            ? (tc.parameters as Record<string, unknown>)
+            : undefined,
+        result: typeof tc.result === "string" ? tc.result : undefined,
+        partialResult:
+          typeof tc.partial_result === "string" ? tc.partial_result : undefined,
+        isError: typeof tc.is_error === "boolean" ? tc.is_error : undefined,
       };
+      result.toolCallId = result.toolCall.toolCallId;
     }
     if (meta.diff && typeof meta.diff === "object") {
       const d = meta.diff as Record<string, string>;
