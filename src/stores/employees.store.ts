@@ -8,6 +8,7 @@ import type {
   EmployeeStatus,
   EmployeeSummary,
 } from "@/lib/employees/types";
+import { syncCloudEmployeeChats } from "@/services/employee-chat-sync";
 import { employees as svc } from "@/services/employees";
 import { employeesArchiveStore } from "@/services/employees-archive";
 
@@ -198,6 +199,11 @@ export const employeeStore = {
       if (employeesChanged) {
         persistOrder(ordered.map((row) => row.id));
       }
+      void syncCloudEmployeeChats(ordered, {
+        shouldContinue: () => generation === resetGeneration,
+      }).catch((err) => {
+        console.warn("Failed to sync cloud employee chats:", err);
+      });
     } finally {
       if (!background && generation === resetGeneration) {
         setState("loading", false);
