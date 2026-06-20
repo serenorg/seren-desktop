@@ -4,6 +4,7 @@
 import type {
   AgentBundle,
   AgentBundlePatch,
+  AgentCapabilityPolicy,
   AgentCredentialRef,
   AgentGuardrailPolicy,
   AgentInstructionFile,
@@ -69,6 +70,8 @@ export type EmployeeDetail = EmployeeSummary & {
   guardrails: AgentGuardrailPolicy[];
   /// Memory policy declared by the deployment, when set.
   memoryPolicy: AgentMemoryPolicy | null;
+  /// Runtime capability policy declared by the deployment, when set.
+  capabilityPolicy: AgentCapabilityPolicy | null;
   /// Credential references resolved by the control plane.
   credentials: AgentCredentialRef[];
   /// Typed tool refs alongside the coarse tool_presets.
@@ -92,6 +95,7 @@ export type NewEmployeeInput = {
   toolPresets?: EmployeeToolPreset[];
   toolRefs?: AgentToolRef[];
   memoryPolicy?: AgentMemoryPolicy | null;
+  capabilityPolicy?: AgentCapabilityPolicy | null;
   approvalPolicy?: EmployeeApprovalPolicy;
   visibility?: "open" | "opaque";
   limits?: {

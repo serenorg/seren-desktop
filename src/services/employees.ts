@@ -145,6 +145,7 @@ function detailFromManaged(
     runtimePolicy: managed.runtime_policy ?? null,
     guardrails: managed.guardrails ?? [],
     memoryPolicy: managed.memory_policy ?? null,
+    capabilityPolicy: managed.capability_policy ?? null,
     credentials: managed.credentials ?? [],
     toolRefs: managed.tool_refs ?? [],
     evalGate: managed.eval_gate ?? null,
@@ -255,7 +256,10 @@ function specFromInput(input: NewEmployeeInput): AgentSpec {
     ...(input.memoryPolicy !== undefined
       ? { memory_policy: input.memoryPolicy }
       : {}),
-    capability_policy: defaultEmployeeCapabilityPolicy(),
+    capability_policy:
+      input.capabilityPolicy === undefined
+        ? defaultEmployeeCapabilityPolicy()
+        : input.capabilityPolicy,
     approval_policy: input.approvalPolicy ?? "read_only",
     model_policy: input.modelPolicy ?? "balanced",
     private_output_policy: "control_plane",
@@ -307,6 +311,13 @@ function updateSpecFromPatch(patch: EmployeePatch): AgentSpecUpdate {
       update.clear_memory_policy = true;
     } else {
       update.memory_policy = patch.memoryPolicy;
+    }
+  }
+  if (patch.capabilityPolicy !== undefined) {
+    if (patch.capabilityPolicy === null) {
+      update.clear_capability_policy = true;
+    } else {
+      update.capability_policy = patch.capabilityPolicy;
     }
   }
   // AgentSpecUpdate.workload replaces the whole WorkloadSpec.
@@ -395,6 +406,7 @@ export const employees = {
           runtimePolicy: null,
           guardrails: [],
           memoryPolicy: null,
+          capabilityPolicy: null,
           credentials: [],
           toolRefs: [],
           evalGate: null,

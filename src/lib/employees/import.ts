@@ -28,22 +28,35 @@ export function normalizeResourcePath(path: string): string | null {
   if (!raw || raw.includes("\0")) return null;
 
   const parts: string[] = [];
-  for (const part of raw.split("/")) {
+  for (const [index, part] of raw.split("/").entries()) {
     const trimmed = part.trim();
     if (!trimmed || trimmed === ".") continue;
     if (trimmed === "..") return null;
-    if (trimmed.startsWith(".")) return null;
-    parts.push(trimmed);
+    if (trimmed.startsWith(".") && !(index === 0 && trimmed.toLowerCase() === ".skills")) {
+      return null;
+    }
+    parts.push(index === 0 && trimmed.toLowerCase() === ".skills" ? ".skills" : trimmed);
   }
 
   return parts.length > 0 ? parts.join("/") : null;
 }
 
+export function isRuntimeSkillResourcePath(path: string): boolean {
+  const normalized = normalizeResourcePath(path);
+  return normalized?.toLowerCase().startsWith(".skills/") ?? false;
+}
+
 export function hasHiddenPathSegment(path: string): boolean {
-  return path
+  const parts = path
     .replace(/\\/g, "/")
     .split("/")
-    .some((part) => part.length > 1 && part.startsWith("."));
+    .filter((part) => part.length > 0);
+  return parts.some(
+    (part, index) =>
+      part.length > 1 &&
+      part.startsWith(".") &&
+      !(index === 0 && part === ".skills"),
+  );
 }
 
 /**
@@ -150,7 +163,12 @@ export function routeFiles(files: ImportFileEntry[]): ImportResult {
   const seenResourcePaths = new Set<string>();
 
   for (const { name, body, contentBase64, contentType, sha256 } of files) {
-    const slot = slotForFilename(name);
+    if (hasHiddenPathSegment(name)) {
+      ignored.push(name);
+      continue;
+    }
+    const runtimeSkillResource = isRuntimeSkillResourcePath(name);
+    const slot = runtimeSkillResource ? null : slotForFilename(name);
     if (!slot) {
       const path = normalizeResourcePath(name);
       if (!path || !contentBase64 || seenResourcePaths.has(path)) {

@@ -69,6 +69,11 @@ export type AgentAudioCapabilityPolicy = {
     enabled: boolean;
     speech_to_text?: boolean;
     text_to_speech?: boolean;
+    /**
+     * Voice used by the text-to-speech tool when `text_to_speech` is enabled.
+     * Defaults to the runtime provider's standard voice when omitted.
+     */
+    tts_voice?: string | null;
     voice_activity_detection?: boolean;
 };
 
@@ -142,12 +147,18 @@ export type AgentCapabilityPolicy = {
     code_execution?: null | AgentCodeExecutionCapabilityPolicy;
     eval_harness?: null | AgentSimpleCapabilityPolicy;
     realtime_sessions?: null | AgentRealtimeSessionsCapabilityPolicy;
+    skills?: null | AgentSkillsCapabilityPolicy;
     tool_error_recovery?: null | AgentToolErrorRecoveryPolicy;
     workflows?: null | AgentSimpleCapabilityPolicy;
 };
 
 export type AgentCodeExecutionCapabilityPolicy = {
     enabled: boolean;
+    /**
+     * Managed code execution requires a runtime image and host environment
+     * with OS sandboxing support. Linux deployments use Bubblewrap and need
+     * unprivileged user namespaces enabled on the node.
+     */
     sandbox?: AgentCodeExecutionSandbox;
 };
 
@@ -491,6 +502,21 @@ export type AgentSemanticMemoryWritePolicy = 'explicit_tool' | 'on_observation' 
 
 export type AgentSimpleCapabilityPolicy = {
     enabled: boolean;
+};
+
+export type AgentSkillSelectionMode = 'auto';
+
+export type AgentSkillSelectionPolicy = {
+    exclude_tags?: Array<string>;
+    include_tags?: Array<string>;
+    max_selected?: number;
+    mode?: AgentSkillSelectionMode;
+};
+
+export type AgentSkillsCapabilityPolicy = {
+    enabled: boolean;
+    max_injected_chars?: number | null;
+    selection?: AgentSkillSelectionPolicy;
 };
 
 /**

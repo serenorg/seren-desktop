@@ -14,6 +14,8 @@ import {
 } from "solid-js";
 import type {
   AgentAssetFile,
+  AgentBrowserProfile,
+  AgentCapabilityPolicy,
   AgentGraphMemoryReadPolicy,
   AgentGraphMemoryStore,
   AgentGraphMemoryWritePolicy,
@@ -29,6 +31,7 @@ import {
   type ImportFileEntry,
   type InstructionSlot,
   importPathForFile,
+  isRuntimeSkillResourcePath,
   normalizeResourcePath,
   routeFiles,
   slotForFilename,
@@ -71,6 +74,14 @@ type MemoryPreset =
   | "careful"
   | "workflow_learning"
   | "no_long_term_writes";
+
+type RuntimeCapabilityToggle =
+  | "skills"
+  | "browser"
+  | "speech_to_text"
+  | "text_to_speech"
+  | "realtime_sessions"
+  | "code_execution";
 
 const MODES: ModeOption[] = [
   {
@@ -276,6 +287,45 @@ function sameMemoryPolicy(
   return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
+function sameCapabilityPolicy(
+  left: AgentCapabilityPolicy | null | undefined,
+  right: AgentCapabilityPolicy | null | undefined,
+) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function defaultEmployeeCapabilityPolicy(): AgentCapabilityPolicy {
+  return {
+    tool_error_recovery: {
+      enabled: true,
+      max_attempts: 3,
+      global_limit: 12,
+      backoff: {
+        kind: "exponential",
+        base_delay_ms: 100,
+        max_delay_ms: 2000,
+      },
+      allow_tools: [],
+      deny_tools: [],
+    },
+    browser: { enabled: false, profile: "minimal" },
+    audio: {
+      enabled: false,
+      speech_to_text: false,
+      text_to_speech: false,
+      voice_activity_detection: false,
+    },
+    realtime_sessions: {
+      enabled: false,
+      provider: "open_ai",
+      voice_activity_detection: true,
+      input_transcription: true,
+      persist_transcripts: true,
+      store_to_memory: true,
+    },
+  };
+}
+
 interface CreateEmployeeModalProps {
   onClose: () => void;
   onCreated: (employeeId: string) => void;
@@ -370,6 +420,37 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
   );
   const [modelId, setModelId] = createSignal(initial?.modelId ?? "");
   const [showAdvanced, setShowAdvanced] = createSignal(false);
+  const initialCapabilityPolicy =
+    initial?.capabilityPolicy ?? defaultEmployeeCapabilityPolicy();
+  const [runtimeSkillsEnabled, setRuntimeSkillsEnabled] = createSignal(
+    initialCapabilityPolicy.skills?.enabled ?? false,
+  );
+  const [runtimeSkillsMaxSelected, setRuntimeSkillsMaxSelected] = createSignal(
+    initialCapabilityPolicy.skills?.selection?.max_selected ?? 1,
+  );
+  const [runtimeSkillsMaxInjectedChars, setRuntimeSkillsMaxInjectedChars] =
+    createSignal(initialCapabilityPolicy.skills?.max_injected_chars ?? 4096);
+  const [browserEnabled, setBrowserEnabled] = createSignal(
+    initialCapabilityPolicy.browser?.enabled ?? false,
+  );
+  const [browserProfile, setBrowserProfile] = createSignal<AgentBrowserProfile>(
+    initialCapabilityPolicy.browser?.profile ?? "minimal",
+  );
+  const [speechToTextEnabled, setSpeechToTextEnabled] = createSignal(
+    initialCapabilityPolicy.audio?.speech_to_text ?? false,
+  );
+  const [textToSpeechEnabled, setTextToSpeechEnabled] = createSignal(
+    initialCapabilityPolicy.audio?.text_to_speech ?? false,
+  );
+  const [ttsVoice, setTtsVoice] = createSignal(
+    initialCapabilityPolicy.audio?.tts_voice ?? "",
+  );
+  const [realtimeSessionsEnabled, setRealtimeSessionsEnabled] = createSignal(
+    initialCapabilityPolicy.realtime_sessions?.enabled ?? false,
+  );
+  const [codeExecutionEnabled, setCodeExecutionEnabled] = createSignal(
+    initialCapabilityPolicy.code_execution?.enabled ?? false,
+  );
   const [approvalPolicy, setApprovalPolicy] =
     createSignal<EmployeeApprovalPolicy>(
       initial?.approvalPolicy ?? "read_only",
@@ -635,7 +716,9 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
 
     for (const { file, path } of selectedFiles) {
       const name = path;
-      const slot = slotForFilename(name);
+      const slot = isRuntimeSkillResourcePath(name)
+        ? null
+        : slotForFilename(name);
       const maxBytes = slot
         ? MAX_AGENT_INSTRUCTION_BYTES
         : MAX_AGENT_ASSET_BYTES;
@@ -924,6 +1007,13 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     });
   });
 
+  const bundledRuntimeSkillCount = createMemo(
+    () =>
+      assets().filter((asset) =>
+        /^\.skills\/[^/]+\/skill\.md$/i.test(asset.path.replace(/\\/g, "/")),
+      ).length,
+  );
+
   const submitDisabledReason = createMemo(() => {
     if (submitting()) return "";
     if (name().trim().length === 0) return "Name is required.";
@@ -934,6 +1024,10 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       return "Cron schedule is required.";
     if (modelChoice() === "private" && modelId().trim().length === 0)
       return "Private model id is required.";
+    if (runtimeSkillsEnabled() && bundledRuntimeSkillCount() === 0)
+      return "Skills require at least one .skills/*/SKILL.md file.";
+    if (codeExecutionEnabled() && approvalPolicy() !== "allow_mutations")
+      return "Code execution requires mutation access.";
     if (remoteHttpDraftError()) return remoteHttpDraftError();
     return "";
   });
@@ -997,6 +1091,64 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     }),
   );
 
+  const currentCapabilityPolicy = createMemo<AgentCapabilityPolicy>(() => {
+    const audioEnabled = speechToTextEnabled() || textToSpeechEnabled();
+    const voice = ttsVoice().trim();
+    return {
+      tool_error_recovery:
+        initialCapabilityPolicy.tool_error_recovery ??
+        defaultEmployeeCapabilityPolicy().tool_error_recovery,
+      ...(runtimeSkillsEnabled()
+        ? {
+            skills: {
+              enabled: true,
+              selection: {
+                mode: "auto",
+                max_selected: Math.max(1, runtimeSkillsMaxSelected()),
+              },
+              max_injected_chars: Math.max(
+                512,
+                runtimeSkillsMaxInjectedChars(),
+              ),
+            },
+          }
+        : {}),
+      browser: {
+        enabled: browserEnabled(),
+        profile: browserProfile(),
+      },
+      audio: {
+        enabled: audioEnabled,
+        speech_to_text: speechToTextEnabled(),
+        text_to_speech: textToSpeechEnabled(),
+        ...(voice ? { tts_voice: voice } : {}),
+        voice_activity_detection: false,
+      },
+      realtime_sessions: {
+        enabled: realtimeSessionsEnabled(),
+        provider: "open_ai",
+        voice_activity_detection: true,
+        input_transcription: true,
+        persist_transcripts: true,
+        store_to_memory: true,
+      },
+      ...(codeExecutionEnabled()
+        ? {
+            code_execution: {
+              enabled: true,
+              sandbox: "managed",
+            },
+          }
+        : {}),
+    };
+  });
+
+  createEffect(() => {
+    if (approvalPolicy() !== "allow_mutations" && codeExecutionEnabled()) {
+      setCodeExecutionEnabled(false);
+    }
+  });
+
   const policyReview = createMemo(() =>
     buildEmployeePolicyReviewSummary({
       approvalPolicy: approvalPolicy(),
@@ -1027,6 +1179,13 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     if (!sameStringSet(toolPresets(), employee.toolPresets)) return true;
     if (!sameToolRefs(currentToolRefs(), employee.toolRefs)) return true;
     if (!sameMemoryPolicy(currentMemoryPolicy(), employee.memoryPolicy))
+      return true;
+    if (
+      !sameCapabilityPolicy(
+        currentCapabilityPolicy(),
+        employee.capabilityPolicy,
+      )
+    )
       return true;
     if (approvalPolicy() !== employee.approvalPolicy) return true;
     if (
@@ -1074,6 +1233,32 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     setMemoryRetentionDays(config.retentionDays ?? 0);
   };
 
+  const setRuntimeCapability = (
+    capability: RuntimeCapabilityToggle,
+    enabled: boolean,
+  ) => {
+    switch (capability) {
+      case "skills":
+        setRuntimeSkillsEnabled(enabled);
+        break;
+      case "browser":
+        setBrowserEnabled(enabled);
+        break;
+      case "speech_to_text":
+        setSpeechToTextEnabled(enabled);
+        break;
+      case "text_to_speech":
+        setTextToSpeechEnabled(enabled);
+        break;
+      case "realtime_sessions":
+        setRealtimeSessionsEnabled(enabled);
+        break;
+      case "code_execution":
+        setCodeExecutionEnabled(enabled);
+        break;
+    }
+  };
+
   const handleSubmit = async () => {
     if (!canSubmit()) return;
     setSubmitting(true);
@@ -1102,6 +1287,10 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             currentMemoryPolicy(),
             props.employee.memoryPolicy,
           );
+          const capabilityPolicyChanged = !sameCapabilityPolicy(
+            currentCapabilityPolicy(),
+            props.employee.capabilityPolicy,
+          );
           const patch: EmployeePatch = {
             name: name().trim(),
             // Mode is immutable on update; cron fields only flow when the
@@ -1125,6 +1314,9 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
             toolRefs: toolRefsChanged ? currentToolRefs() : undefined,
             memoryPolicy: memoryPolicyChanged
               ? currentMemoryPolicy()
+              : undefined,
+            capabilityPolicy: capabilityPolicyChanged
+              ? currentCapabilityPolicy()
               : undefined,
             approvalPolicy: approvalPolicy(),
             limits,
@@ -1154,6 +1346,7 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
           toolPresets: toolPresets(),
           toolRefs: currentToolRefs(),
           memoryPolicy: currentMemoryPolicy(),
+          capabilityPolicy: currentCapabilityPolicy(),
           approvalPolicy: approvalPolicy(),
           limits,
         };
@@ -1729,6 +1922,175 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                         );
                       }}
                     </For>
+                  </div>
+                </div>
+
+                <div class="col-span-2 grid grid-cols-2 gap-3 border-t border-border pt-3">
+                  <div class="col-span-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                    Runtime capabilities
+                  </div>
+                  <label class="flex items-center gap-2 text-[12px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={runtimeSkillsEnabled()}
+                      onChange={(e) =>
+                        setRuntimeCapability("skills", e.currentTarget.checked)
+                      }
+                      disabled={submitting()}
+                    />
+                    Skills
+                  </label>
+                  <label class="flex items-center gap-2 text-[12px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={browserEnabled()}
+                      onChange={(e) =>
+                        setRuntimeCapability("browser", e.currentTarget.checked)
+                      }
+                      disabled={submitting()}
+                    />
+                    Browser
+                  </label>
+                  <label class="flex items-center gap-2 text-[12px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={speechToTextEnabled()}
+                      onChange={(e) =>
+                        setRuntimeCapability(
+                          "speech_to_text",
+                          e.currentTarget.checked,
+                        )
+                      }
+                      disabled={submitting()}
+                    />
+                    Speech to text
+                  </label>
+                  <label class="flex items-center gap-2 text-[12px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={textToSpeechEnabled()}
+                      onChange={(e) =>
+                        setRuntimeCapability(
+                          "text_to_speech",
+                          e.currentTarget.checked,
+                        )
+                      }
+                      disabled={submitting()}
+                    />
+                    Text to speech
+                  </label>
+                  <label class="flex items-center gap-2 text-[12px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={realtimeSessionsEnabled()}
+                      onChange={(e) =>
+                        setRuntimeCapability(
+                          "realtime_sessions",
+                          e.currentTarget.checked,
+                        )
+                      }
+                      disabled={submitting()}
+                    />
+                    Realtime sessions
+                  </label>
+                  <label class="flex items-center gap-2 text-[12px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={codeExecutionEnabled()}
+                      onChange={(e) =>
+                        setRuntimeCapability(
+                          "code_execution",
+                          e.currentTarget.checked,
+                        )
+                      }
+                      disabled={
+                        submitting() || approvalPolicy() !== "allow_mutations"
+                      }
+                    />
+                    Code execution
+                  </label>
+                  <div>
+                    <label
+                      for="employee-browser-profile"
+                      class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                    >
+                      Browser profile
+                    </label>
+                    <select
+                      id="employee-browser-profile"
+                      class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm focus:outline-none focus:border-primary"
+                      value={browserProfile()}
+                      onChange={(e) =>
+                        setBrowserProfile(
+                          e.currentTarget.value as AgentBrowserProfile,
+                        )
+                      }
+                      disabled={submitting() || !browserEnabled()}
+                    >
+                      <option value="minimal">Minimal</option>
+                      <option value="form_filling">Form filling</option>
+                      <option value="scraping">Scraping</option>
+                      <option value="full">Full</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      for="employee-tts-voice"
+                      class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                    >
+                      TTS voice
+                    </label>
+                    <input
+                      id="employee-tts-voice"
+                      class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm focus:outline-none focus:border-primary"
+                      value={ttsVoice()}
+                      onInput={(e) => setTtsVoice(e.currentTarget.value)}
+                      disabled={submitting() || !textToSpeechEnabled()}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      for="employee-skills-max-selected"
+                      class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                    >
+                      Skills selected
+                    </label>
+                    <input
+                      id="employee-skills-max-selected"
+                      type="number"
+                      min="1"
+                      max="8"
+                      class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm focus:outline-none focus:border-primary"
+                      value={runtimeSkillsMaxSelected()}
+                      onInput={(e) =>
+                        setRuntimeSkillsMaxSelected(
+                          Math.max(1, Number(e.currentTarget.value) || 1),
+                        )
+                      }
+                      disabled={submitting() || !runtimeSkillsEnabled()}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      for="employee-skills-max-chars"
+                      class="block mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+                    >
+                      Skills chars
+                    </label>
+                    <input
+                      id="employee-skills-max-chars"
+                      type="number"
+                      min="512"
+                      step="512"
+                      class="w-full py-2 px-3 bg-card text-foreground border border-border rounded text-sm focus:outline-none focus:border-primary"
+                      value={runtimeSkillsMaxInjectedChars()}
+                      onInput={(e) =>
+                        setRuntimeSkillsMaxInjectedChars(
+                          Math.max(512, Number(e.currentTarget.value) || 512),
+                        )
+                      }
+                      disabled={submitting() || !runtimeSkillsEnabled()}
+                    />
                   </div>
                 </div>
 
