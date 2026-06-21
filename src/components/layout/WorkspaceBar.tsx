@@ -96,6 +96,7 @@ export const WorkspaceBar: Component = () => {
       <TileControl
         label="Split right"
         hint={getKeybindingLabel("pane.splitRight", keybindingContext())}
+        disabled={!workspaceStore.canSplitFocusedPane}
         onClick={() => workspaceStore.splitFocusedPane("row")}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
@@ -123,6 +124,7 @@ export const WorkspaceBar: Component = () => {
       <TileControl
         label="Split down"
         hint={getKeybindingLabel("pane.splitDown", keybindingContext())}
+        disabled={!workspaceStore.canSplitFocusedPane}
         onClick={() => workspaceStore.splitFocusedPane("column")}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
@@ -182,15 +184,21 @@ export const WorkspaceBar: Component = () => {
 const TileControl: Component<{
   label: string;
   hint: string;
+  disabled?: boolean;
   onClick: () => void;
   children: JSX.Element;
 }> = (props) => (
   <button
     type="button"
     aria-label={props.label}
-    title={`${props.label}  -  ${props.hint}`}
+    title={
+      props.disabled
+        ? "Maximum panes reached"
+        : `${props.label}  -  ${props.hint}`
+    }
+    disabled={props.disabled}
     onClick={props.onClick}
-    class="inline-flex items-center justify-center w-[22px] h-[22px] rounded-[3px] text-muted-foreground hover:bg-surface-3 hover:text-foreground transition-colors duration-75 cursor-pointer"
+    class="inline-flex items-center justify-center w-[22px] h-[22px] rounded-[3px] text-muted-foreground hover:bg-surface-3 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground disabled:cursor-not-allowed transition-colors duration-75 cursor-pointer"
   >
     {props.children}
   </button>

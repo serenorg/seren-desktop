@@ -120,6 +120,7 @@ async function setup(initialActiveThreadId: string | null = null) {
   await Promise.resolve();
 
   return {
+    maxWorkspacePanes: workspaceModule.MAX_WORKSPACE_PANES,
     threadModule,
     threadStore: threadModule.threadStore,
     workspaceStore: workspaceModule.workspaceStore,
@@ -730,6 +731,26 @@ describe("workspaceStore", () => {
       });
     },
   );
+
+  it("caps repeated pane splits to keep the workspace renderable", async () => {
+    const { maxWorkspacePanes, workspaceStore } = await setup();
+
+    for (let i = 0; i < maxWorkspacePanes + 8; i++) {
+      workspaceStore.splitFocusedPane(i % 2 === 0 ? "row" : "column");
+    }
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows).toHaveLength(maxWorkspacePanes);
+    expect(workspaceStore.canSplitFocusedPane).toBe(false);
+
+    const focusedBefore = ws.focusedWindowId;
+    workspaceStore.splitFocusedPane("row");
+
+    expect(workspaceStore.activeWorkspace.windows).toHaveLength(
+      maxWorkspacePanes,
+    );
+    expect(workspaceStore.activeWorkspace.focusedWindowId).toBe(focusedBefore);
+  });
 
   it("closes a focused placeholder without touching sibling threads", async () => {
     const { threadStore, workspaceStore } = await setup();

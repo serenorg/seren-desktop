@@ -69,6 +69,7 @@ type WorkspaceRemovedListener = (number: number) => void;
 
 // Workspace 1 is permanent: never auto-deleted, even when empty.
 const PERMANENT_WORKSPACE_NUMBER = 1;
+export const MAX_WORKSPACE_PANES = 16;
 const workspaceRemovedListeners = new Set<WorkspaceRemovedListener>();
 
 const [state, setState] = createStore<WorkspaceState>({
@@ -683,6 +684,10 @@ export const workspaceStore = {
     return focusedWindow(this.activeWorkspace);
   },
 
+  get canSplitFocusedPane(): boolean {
+    return this.activeWorkspace.windows.length < MAX_WORKSPACE_PANES;
+  },
+
   /**
    * Switch to workspace `number`. Auto-deletes the previous one if it
    * never had a window and is not permanent (i3 convention).
@@ -753,6 +758,7 @@ export const workspaceStore = {
     if (wsIdx < 0) return;
     const ws = state.workspaces[wsIdx];
     const windowCountBeforeSplit = ws.windows.length;
+    if (windowCountBeforeSplit >= MAX_WORKSPACE_PANES) return;
     const newId = newPaneId(ws.number);
     const placeholder: WorkspaceWindow = {
       id: newId,
