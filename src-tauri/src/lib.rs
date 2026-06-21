@@ -1,7 +1,7 @@
 // ABOUTME: Core library for the Seren Desktop Tauri application.
 // ABOUTME: Contains Tauri commands and the application run function.
 
-use log::info;
+use log::{LevelFilter, info};
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_store::StoreExt;
@@ -552,10 +552,13 @@ pub fn run() {
                 .max_file_size(5_000_000) // 5 MB per log file
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
                 .level(if cfg!(debug_assertions) {
-                    log::LevelFilter::Debug
+                    LevelFilter::Debug
                 } else {
-                    log::LevelFilter::Info
+                    LevelFilter::Info
                 })
+                .level_for("reqwest", LevelFilter::Info)
+                .level_for("tokio_postgres", LevelFilter::Info)
+                .level_for("postgres::config", LevelFilter::Warn)
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())

@@ -1,7 +1,7 @@
 // ABOUTME: Rust-backed HTTP bridge for Seren Gateway API requests from the webview.
 // ABOUTME: Streams reqwest response bytes back to the frontend to avoid webview CORS limits.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use futures::StreamExt;
@@ -16,10 +16,23 @@ use url::Url;
 
 const GATEWAY_HTTP_EVENT: &str = "gateway-http://event";
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
+const GATEWAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Default)]
 pub struct GatewayHttpState {
     active: Mutex<HashMap<String, oneshot::Sender<()>>>,
+    client: reqwest::Client,
+}
+
+impl Default for GatewayHttpState {
+    fn default() -> Self {
+        Self {
+            active: Mutex::new(HashMap::new()),
+            client: reqwest::Client::builder()
+                .connect_timeout(GATEWAY_CONNECT_TIMEOUT)
+                .build()
+                .expect("failed to build gateway HTTP client"),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,9 +205,7 @@ pub async fn gateway_http_start(
     let headers = build_header_map(&request.headers)?;
     let body = request.body.clone();
 
-    let client = reqwest::Client::builder()
-        .build()
-        .map_err(|e| format!("Failed to create gateway HTTP client: {}", e))?;
+    let client = state.client.clone();
 
     let has_credentials = crate::auth::has_stored_credentials(&app);
     let response = if should_attach_stored_auth(&url, &headers, has_credentials) {
