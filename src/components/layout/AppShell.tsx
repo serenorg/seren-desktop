@@ -51,6 +51,7 @@ import { PublishSkillModal } from "@/components/sidebar/PublishSkillModal";
 import { PublishVersionModal } from "@/components/sidebar/PublishVersionModal";
 import { SkillsExplorer } from "@/components/sidebar/SkillsExplorer";
 import { AgentTasksPanel } from "@/components/tasks/AgentTasksPanel";
+import { openFolder } from "@/lib/files/service";
 import { isMeetingProcessingStatus } from "@/lib/meeting-format";
 import { shortcuts } from "@/lib/shortcuts";
 import type { InstalledSkill } from "@/lib/skills";
@@ -68,6 +69,10 @@ import {
 } from "@/stores/editor.sessions";
 import { employeeStore } from "@/stores/employees.store";
 import { fileTreeState } from "@/stores/fileTree";
+import {
+  createKeybindingMatcher,
+  type KeybindingActionId,
+} from "@/stores/keybindings.store";
 import { meetingStore } from "@/stores/meeting.store";
 import { skillPublishStore } from "@/stores/skill-publish.store";
 import { skillsStore } from "@/stores/skills.store";
@@ -86,6 +91,35 @@ export type SlidePanelView =
   | "meetings"
   | "skills"
   | null;
+
+const WORKSPACE_KEYBINDING_ACTIONS: readonly KeybindingActionId[] = [
+  "workspace.switch1",
+  "workspace.switch2",
+  "workspace.switch3",
+  "workspace.switch4",
+  "workspace.switch5",
+  "workspace.switch6",
+  "workspace.switch7",
+  "workspace.switch8",
+  "workspace.switch9",
+  "workspace.switch10",
+  "workspace.next",
+  "workspace.previous",
+  "pane.focusLeft",
+  "pane.focusRight",
+  "pane.focusUp",
+  "pane.focusDown",
+  "pane.focusPrevious",
+  "pane.focusNext",
+  "pane.splitRight",
+  "pane.splitDown",
+  "pane.close",
+  "pane.zoom",
+  "pane.resizeLeft",
+  "pane.resizeRight",
+  "pane.resizeUp",
+  "pane.resizeDown",
+];
 
 const SLIDE_PANEL_KEY = "seren:slide_panel";
 
@@ -446,7 +480,11 @@ export const AppShell: Component<AppShellProps> = (props) => {
   };
 
   const handleCloseSlidePanel = () => {
+    // Report whether a panel was actually closed so the shortcut manager only
+    // swallows Escape when there is something to dismiss.
+    if (!slidePanel()) return false;
     setSlidePanel(null);
+    return true;
   };
 
   const handleLoginSuccess = async () => {
@@ -520,50 +558,106 @@ export const AppShell: Component<AppShellProps> = (props) => {
     }
   }) as EventListener;
 
-  // Cmd on macOS, Ctrl elsewhere; Super/Win is OS-reserved.
-  const isMac =
-    typeof navigator !== "undefined" &&
-    /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+  const workspaceKeybindingMatcher = createKeybindingMatcher(
+    WORKSPACE_KEYBINDING_ACTIONS,
+    () => ({
+      terminalPaneFocused:
+        workspaceStore.activeWindow === null ||
+        workspaceStore.activeWindow.kind === null ||
+        workspaceStore.activeWindow.kind === "terminal",
+    }),
+  );
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && slidePanel()) {
-      setSlidePanel(null);
+    if (document.body.dataset.keybindingRecording === "true") {
+      workspaceKeybindingMatcher.clear();
       return;
     }
 
-    // Workspace switch: Cmd/Ctrl + digit, with 0 mapping to 10.
-    // Modifier-bearing chords fire regardless of focus - inputs only
-    // own bare keystrokes.
-    const modOnly = isMac
-      ? e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
-      : e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
-    const modShift = isMac
-      ? e.metaKey && !e.ctrlKey && !e.altKey && e.shiftKey
-      : e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey;
-    if (modOnly && e.key >= "0" && e.key <= "9") {
-      const number = e.key === "0" ? 10 : Number.parseInt(e.key, 10);
-      e.preventDefault();
+    const target = e.target;
+    if (
+      target instanceof HTMLElement &&
+      target.closest("[data-keybinding-recorder='true']")
+    ) {
+      return;
+    }
+
+    const result = workspaceKeybindingMatcher.handleEvent(e);
+    if (result.kind === "none") return;
+
+    e.preventDefault();
+    if (result.kind === "pending") return;
+
+    const action = result.action;
+    if (action.startsWith("workspace.switch")) {
+      const number = Number(action.replace("workspace.switch", ""));
       workspaceStore.switchOrCreate(number);
       return;
     }
-    // Tile chords: \ splits right, - splits down, Shift+W closes
-    // focused pane. The Shift on close avoids Cmd+W's collision with
-    // the native "Close Window" menu accelerator.
-    if (modOnly) {
-      if (e.key === "\\") {
-        e.preventDefault();
-        workspaceStore.splitFocusedPane("row");
-        return;
-      }
-      if (e.key === "-") {
-        e.preventDefault();
-        workspaceStore.splitFocusedPane("column");
-        return;
-      }
+    if (action === "workspace.next") {
+      workspaceStore.cycleWorkspace(1);
+      return;
     }
-    if (modShift && (e.key === "w" || e.key === "W")) {
+    if (action === "workspace.previous") {
+      workspaceStore.cycleWorkspace(-1);
+      return;
+    }
+
+    if (action === "pane.focusLeft") {
+      workspaceStore.focusPaneInDirection("left");
+      return;
+    }
+    if (action === "pane.focusRight") {
+      workspaceStore.focusPaneInDirection("right");
+      return;
+    }
+    if (action === "pane.focusUp") {
+      workspaceStore.focusPaneInDirection("up");
+      return;
+    }
+    if (action === "pane.focusDown") {
+      workspaceStore.focusPaneInDirection("down");
+      return;
+    }
+    if (action === "pane.focusPrevious") {
+      workspaceStore.focusPreviousPane();
+      return;
+    }
+    if (action === "pane.focusNext") {
+      workspaceStore.focusNextPane();
+      return;
+    }
+    if (action === "pane.splitRight") {
+      workspaceStore.splitFocusedPane("row");
+      return;
+    }
+    if (action === "pane.splitDown") {
+      workspaceStore.splitFocusedPane("column");
+      return;
+    }
+    if (action === "pane.close") {
       e.preventDefault();
       workspaceStore.closeFocusedWindow();
+      return;
+    }
+    if (action === "pane.zoom") {
+      workspaceStore.toggleZoomFocusedPane();
+      return;
+    }
+    if (action === "pane.resizeLeft") {
+      workspaceStore.resizeFocusedPane("left");
+      return;
+    }
+    if (action === "pane.resizeRight") {
+      workspaceStore.resizeFocusedPane("right");
+      return;
+    }
+    if (action === "pane.resizeUp") {
+      workspaceStore.resizeFocusedPane("up");
+      return;
+    }
+    if (action === "pane.resizeDown") {
+      workspaceStore.resizeFocusedPane("down");
       return;
     }
   };
@@ -697,19 +791,33 @@ export const AppShell: Component<AppShellProps> = (props) => {
     // can't swallow the workspace-switch chord.
     window.addEventListener("keydown", handleKeyDown, true);
 
-    shortcuts.register("focusChat", () => setSlidePanel(null));
-    shortcuts.register("openSettings", () =>
+    shortcuts.register("global.focusChat", () => setSlidePanel(null));
+    shortcuts.register("global.openSettings", () =>
       setSlidePanel((v) => (v === "settings" ? null : "settings")),
     );
-    shortcuts.register("toggleSidebar", () => setSidebarCollapsed((v) => !v));
-    shortcuts.register("closePanel", handleCloseSlidePanel);
-    shortcuts.register("focusEditor", () => {
+    shortcuts.register("global.toggleSidebar", () =>
+      setSidebarCollapsed((v) => !v),
+    );
+    shortcuts.register("global.closePanel", handleCloseSlidePanel);
+    shortcuts.register("global.focusEditor", () => {
       setSlidePanel(null);
       focusEditorForContext();
+    });
+    shortcuts.register("global.openFiles", () => {
+      void openFolder();
+    });
+    shortcuts.register("global.newChat", () => {
+      setSlidePanel(null);
+      void threadStore.createChatThread();
+    });
+    shortcuts.register("global.newTerminal", () => {
+      setSlidePanel(null);
+      void threadStore.createTerminalThread({ title: "Terminal" });
     });
   });
 
   onCleanup(() => {
+    workspaceKeybindingMatcher.clear();
     unsubscribeWorkspaceRemoved();
     meetingStore.stopMeetingEventListeners();
     meetingStore.stopAutoDetect();
@@ -722,11 +830,14 @@ export const AppShell: Component<AppShellProps> = (props) => {
       restoreFocusFrame = null;
     }
 
-    shortcuts.unregister("focusChat");
-    shortcuts.unregister("openSettings");
-    shortcuts.unregister("toggleSidebar");
-    shortcuts.unregister("closePanel");
-    shortcuts.unregister("focusEditor");
+    shortcuts.unregister("global.focusChat");
+    shortcuts.unregister("global.openSettings");
+    shortcuts.unregister("global.toggleSidebar");
+    shortcuts.unregister("global.closePanel");
+    shortcuts.unregister("global.focusEditor");
+    shortcuts.unregister("global.openFiles");
+    shortcuts.unregister("global.newChat");
+    shortcuts.unregister("global.newTerminal");
   });
 
   const recordPromptVisible = () =>

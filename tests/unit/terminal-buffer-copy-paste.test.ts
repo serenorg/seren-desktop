@@ -103,7 +103,9 @@ describe("TerminalBuffer — terminal selection owns browser copy (#2279)", () =
     // macOS users see Cmd-based shortcuts; Windows/Linux users see the
     // terminal-safe Ctrl+Shift+C copy chord. Ctrl+C remains reserved for
     // SIGINT in handleKeyDown.
-    expect(terminalBufferTsx).toMatch(/const isMacPlatform\s*=/);
+    expect(terminalBufferTsx).toMatch(
+      /import \{ isMacPlatform \} from "@\/lib\/platform"/,
+    );
     expect(terminalBufferTsx).toMatch(/const copyShortcutLabel\s*=/);
     expect(terminalBufferTsx).toContain("Ctrl+Shift+C");
     expect(terminalBufferTsx).toContain("Ctrl+Shift+V");

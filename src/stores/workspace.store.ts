@@ -10,6 +10,7 @@ import {
 } from "@/stores/thread.store";
 
 export type SplitDirection = "row" | "column";
+export type PaneFocusDirection = "left" | "right" | "up" | "down";
 export type WorkspaceWindowKind = ThreadKind | "editor";
 
 export interface WorkspacePaneLayout {
@@ -55,6 +56,8 @@ export interface Workspace {
   hasHadContent: boolean;
   /** Set when a thread here goes running -> not-running while inactive. */
   needsAttention: boolean;
+  /** When set, this pane is maximized to fill the workspace (zoom). */
+  zoomedWindowId: string | null;
 }
 
 interface WorkspaceState {
@@ -78,6 +81,7 @@ const [state, setState] = createStore<WorkspaceState>({
       layout: null,
       hasHadContent: false,
       needsAttention: false,
+      zoomedWindowId: null,
     },
   ],
   activeNumber: 1,
@@ -92,6 +96,7 @@ function emptyWorkspace(number: number): Workspace {
     layout: null,
     hasHadContent: false,
     needsAttention: false,
+    zoomedWindowId: null,
   };
 }
 
@@ -194,6 +199,30 @@ function resizeLayoutNode(
   };
 }
 
+// Keyboard pane resize works on the relative size weight of the focused pane's
+// subtree within the nearest enclosing split of the matching axis.
+const PANE_RESIZE_STEP = 0.2;
+const MIN_PANE_SIZE = 0.2;
+
+function findPaneResizeTarget(
+  layout: WorkspaceLayout,
+  focusedWindowId: string,
+  axis: SplitDirection,
+): { id: string; size: number } | null {
+  if (layout.type === "pane") return null;
+  for (const child of layout.children) {
+    const deeper = findPaneResizeTarget(child, focusedWindowId, axis);
+    if (deeper) return deeper;
+  }
+  if (layout.direction === axis) {
+    const child = layout.children.find((candidate) =>
+      layoutContainsWindow(candidate, focusedWindowId),
+    );
+    if (child) return { id: child.id, size: Math.max(child.size, 0.05) };
+  }
+  return null;
+}
+
 function removeWindowFromLayout(
   layout: WorkspaceLayout | null,
   windowId: string,
@@ -232,6 +261,149 @@ function focusedWindow(workspace: Workspace): WorkspaceWindow | null {
   return (
     workspace.windows.find((w) => w.id === workspace.focusedWindowId) ?? null
   );
+}
+
+interface PaneRect {
+  windowId: string;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  centerX: number;
+  centerY: number;
+}
+
+function paneRectsInLayout(
+  layout: WorkspaceLayout | null,
+  left = 0,
+  top = 0,
+  width = 1,
+  height = 1,
+): PaneRect[] {
+  if (!layout) return [];
+  if (layout.type === "pane") {
+    return [
+      {
+        windowId: layout.windowId,
+        left,
+        top,
+        right: left + width,
+        bottom: top + height,
+        centerX: left + width / 2,
+        centerY: top + height / 2,
+      },
+    ];
+  }
+
+  const totalSize = layout.children.reduce(
+    (sum, child) => sum + Math.max(0.05, child.size),
+    0,
+  );
+  if (totalSize <= 0) return [];
+
+  const rects: PaneRect[] = [];
+  let offset = 0;
+  for (const child of layout.children) {
+    const ratio = Math.max(0.05, child.size) / totalSize;
+    if (layout.direction === "row") {
+      const childWidth = width * ratio;
+      rects.push(
+        ...paneRectsInLayout(child, left + offset, top, childWidth, height),
+      );
+      offset += childWidth;
+    } else {
+      const childHeight = height * ratio;
+      rects.push(
+        ...paneRectsInLayout(child, left, top + offset, width, childHeight),
+      );
+      offset += childHeight;
+    }
+  }
+  return rects;
+}
+
+function intervalOverlap(
+  aStart: number,
+  aEnd: number,
+  bStart: number,
+  bEnd: number,
+): number {
+  return Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
+}
+
+function targetPaneInDirection(
+  layout: WorkspaceLayout | null,
+  focusedWindowId: string | null,
+  direction: PaneFocusDirection,
+): string | null {
+  if (!focusedWindowId) return null;
+  const rects = paneRectsInLayout(layout);
+  const focused = rects.find((rect) => rect.windowId === focusedWindowId);
+  if (!focused) return null;
+
+  const candidates = rects
+    .filter((rect) => rect.windowId !== focused.windowId)
+    .map((rect) => {
+      let primaryGap: number;
+      let overlap: number;
+      let secondaryDistance: number;
+      switch (direction) {
+        case "left":
+          primaryGap = focused.left - rect.right;
+          overlap = intervalOverlap(
+            focused.top,
+            focused.bottom,
+            rect.top,
+            rect.bottom,
+          );
+          secondaryDistance = Math.abs(focused.centerY - rect.centerY);
+          break;
+        case "right":
+          primaryGap = rect.left - focused.right;
+          overlap = intervalOverlap(
+            focused.top,
+            focused.bottom,
+            rect.top,
+            rect.bottom,
+          );
+          secondaryDistance = Math.abs(focused.centerY - rect.centerY);
+          break;
+        case "up":
+          primaryGap = focused.top - rect.bottom;
+          overlap = intervalOverlap(
+            focused.left,
+            focused.right,
+            rect.left,
+            rect.right,
+          );
+          secondaryDistance = Math.abs(focused.centerX - rect.centerX);
+          break;
+        case "down":
+          primaryGap = rect.top - focused.bottom;
+          overlap = intervalOverlap(
+            focused.left,
+            focused.right,
+            rect.left,
+            rect.right,
+          );
+          secondaryDistance = Math.abs(focused.centerX - rect.centerX);
+          break;
+      }
+      return { rect, primaryGap, overlap, secondaryDistance };
+    })
+    .filter((candidate) => candidate.primaryGap >= -0.001);
+
+  candidates.sort((leftCandidate, rightCandidate) => {
+    const leftGap = Math.max(0, leftCandidate.primaryGap);
+    const rightGap = Math.max(0, rightCandidate.primaryGap);
+    if (leftGap !== rightGap) return leftGap - rightGap;
+    const leftOverlaps = leftCandidate.overlap > 0.001;
+    const rightOverlaps = rightCandidate.overlap > 0.001;
+    if (leftOverlaps !== rightOverlaps) return leftOverlaps ? -1 : 1;
+    return leftCandidate.secondaryDistance - rightCandidate.secondaryDistance;
+  });
+
+  return candidates[0]?.rect.windowId ?? null;
 }
 
 function nearestNonEditorWindowIndex(
@@ -580,6 +752,7 @@ export const workspaceStore = {
     );
     if (wsIdx < 0) return;
     const ws = state.workspaces[wsIdx];
+    const windowCountBeforeSplit = ws.windows.length;
     const newId = newPaneId(ws.number);
     const placeholder: WorkspaceWindow = {
       id: newId,
@@ -588,10 +761,25 @@ export const workspaceStore = {
       editorFilePath: null,
       size: 1,
     };
-    if (ws.windows.length === 0) {
-      // No windows yet - the placeholder becomes the only pane.
-      setState("workspaces", wsIdx, "windows", [placeholder]);
-      setState("workspaces", wsIdx, "layout", paneLayout(newId));
+    if (windowCountBeforeSplit === 0) {
+      const anchorId = primaryWindowId(ws.number);
+      const anchorPlaceholder: WorkspaceWindow = {
+        id: anchorId,
+        threadId: null,
+        kind: null,
+        editorFilePath: null,
+        size: 1,
+      };
+      setState("workspaces", wsIdx, "windows", [
+        anchorPlaceholder,
+        placeholder,
+      ]);
+      setState(
+        "workspaces",
+        wsIdx,
+        "layout",
+        splitLayout(direction, [paneLayout(anchorId), paneLayout(newId)]),
+      );
     } else {
       const focusedIdx = ws.windows.findIndex(
         (w) => w.id === ws.focusedWindowId,
@@ -614,10 +802,14 @@ export const workspaceStore = {
         insertPaneInLayout(baseLayout, focusedWindowId, newId, direction),
       );
     }
-    if (ws.windows.length <= 1) {
+    if (windowCountBeforeSplit <= 1) {
       setState("workspaces", wsIdx, "splitDirection", direction);
     }
     setState("workspaces", wsIdx, "focusedWindowId", newId);
+    // A new split should be visible, so exit zoom.
+    if (ws.zoomedWindowId) {
+      setState("workspaces", wsIdx, "zoomedWindowId", null);
+    }
     if (!state.workspaces[wsIdx].hasHadContent) {
       setState("workspaces", wsIdx, "hasHadContent", true);
     }
@@ -652,6 +844,9 @@ export const workspaceStore = {
       "layout",
       removeWindowFromLayout(ws.layout, closedWindowId),
     );
+    if (ws.zoomedWindowId === closedWindowId) {
+      setState("workspaces", wsIdx, "zoomedWindowId", null);
+    }
     const closedFocused = ws.focusedWindowId === closedWindowId;
     const existingFocusIdx = nextWindows.findIndex(
       (w) => w.id === ws.focusedWindowId,
@@ -695,6 +890,96 @@ export const workspaceStore = {
     }
   },
 
+  focusPaneByOffset(offset: number): void {
+    const windows = this.activeWorkspace.windows;
+    if (windows.length <= 1) return;
+    const focusedIdx = windows.findIndex(
+      (w) => w.id === this.activeWorkspace.focusedWindowId,
+    );
+    const baseIdx = focusedIdx >= 0 ? focusedIdx : offset > 0 ? -1 : 0;
+    const nextIdx = (baseIdx + offset + windows.length) % windows.length;
+    this.focusWindow(windows[nextIdx].id);
+  },
+
+  focusNextPane(): void {
+    this.focusPaneByOffset(1);
+  },
+
+  focusPreviousPane(): void {
+    this.focusPaneByOffset(-1);
+  },
+
+  focusPaneInDirection(direction: PaneFocusDirection): void {
+    const targetWindowId = targetPaneInDirection(
+      this.activeWorkspace.layout,
+      this.activeWorkspace.focusedWindowId,
+      direction,
+    );
+    if (targetWindowId) {
+      this.focusWindow(targetWindowId);
+    }
+  },
+
+  /** Switch to the next/previous existing workspace, wrapping around. */
+  cycleWorkspace(offset: number): void {
+    const numbers = state.workspaces.map((w) => w.number).sort((a, b) => a - b);
+    if (numbers.length <= 1) return;
+    const currentIdx = numbers.indexOf(state.activeNumber);
+    const baseIdx = currentIdx >= 0 ? currentIdx : 0;
+    const nextNumber =
+      numbers[(baseIdx + offset + numbers.length) % numbers.length];
+    this.switchTo(nextNumber);
+  },
+
+  /** Toggle the focused pane filling the workspace. No-op for a sole pane. */
+  toggleZoomFocusedPane(): void {
+    const wsIdx = state.workspaces.findIndex(
+      (w) => w.number === state.activeNumber,
+    );
+    if (wsIdx < 0) return;
+    const ws = state.workspaces[wsIdx];
+    const focusedId = ws.focusedWindowId;
+    if (!focusedId || ws.windows.length <= 1) {
+      if (ws.zoomedWindowId) {
+        setState("workspaces", wsIdx, "zoomedWindowId", null);
+      }
+      return;
+    }
+    setState(
+      "workspaces",
+      wsIdx,
+      "zoomedWindowId",
+      ws.zoomedWindowId === focusedId ? null : focusedId,
+    );
+  },
+
+  /** Grow/shrink the focused pane along the given axis. */
+  resizeFocusedPane(direction: PaneFocusDirection): void {
+    const wsIdx = state.workspaces.findIndex(
+      (w) => w.number === state.activeNumber,
+    );
+    if (wsIdx < 0) return;
+    const ws = state.workspaces[wsIdx];
+    const focusedId = ws.focusedWindowId;
+    if (!focusedId || !ws.layout) return;
+    const axis: SplitDirection =
+      direction === "left" || direction === "right" ? "row" : "column";
+    const target = findPaneResizeTarget(ws.layout, focusedId, axis);
+    if (!target) return;
+    const grow = direction === "right" || direction === "down";
+    const nextSize = Math.max(
+      MIN_PANE_SIZE,
+      target.size + (grow ? PANE_RESIZE_STEP : -PANE_RESIZE_STEP),
+    );
+    if (nextSize === target.size) return;
+    setState(
+      "workspaces",
+      wsIdx,
+      "layout",
+      resizeLayoutNode(ws.layout, target.id, nextSize),
+    );
+  },
+
   /** Set the focused pane within the active workspace. */
   focusWindow(windowId: string): void {
     const wsIdx = state.workspaces.findIndex(
@@ -712,6 +997,10 @@ export const workspaceStore = {
     if (!window) return;
     if (ws.focusedWindowId !== window.id) {
       setState("workspaces", wsIdx, "focusedWindowId", window.id);
+    }
+    // Navigating to a different pane exits zoom so the full tile layout returns.
+    if (ws.zoomedWindowId && ws.zoomedWindowId !== window.id) {
+      setState("workspaces", wsIdx, "zoomedWindowId", null);
     }
     if (window.threadId !== threadStore.activeThreadId) {
       threadStore.setActiveThread(window.threadId);

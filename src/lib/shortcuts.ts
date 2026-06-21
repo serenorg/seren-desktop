@@ -1,46 +1,49 @@
-// ABOUTME: Global keyboard shortcuts registration and management.
-// ABOUTME: Provides Cmd+L (chat), Cmd+, (settings), Cmd+B (sidebar toggle), Escape (close panels).
+// ABOUTME: Global keyboard shortcut registration and dispatch.
+// ABOUTME: Uses the centralized keybinding registry so settings and runtime stay in sync.
+
+import {
+  createKeybindingMatcher,
+  getKeybindingLabel,
+  type KeybindingActionId,
+} from "@/stores/keybindings.store";
 
 export type ShortcutAction =
-  | "focusChat"
-  | "openSettings"
-  | "toggleSidebar"
-  | "closePanel"
-  | "focusEditor"
-  | "openFiles";
+  | "global.focusChat"
+  | "global.openSettings"
+  | "global.toggleSidebar"
+  | "global.closePanel"
+  | "global.focusEditor"
+  | "global.openFiles"
+  | "global.newChat"
+  | "global.newTerminal";
+
+/**
+ * A shortcut handler may return `false` to signal it did not consume the key,
+ * so the manager leaves the browser default intact (e.g. Escape only closes a
+ * panel when one is open; otherwise it passes through to terminals/editors).
+ */
+export type ShortcutCallback = () => unknown;
 
 export interface ShortcutHandler {
   action: ShortcutAction;
-  callback: () => void;
+  callback: ShortcutCallback;
 }
 
-interface ShortcutDefinition {
-  key: string;
-  metaKey?: boolean;
-  ctrlKey?: boolean;
-  shiftKey?: boolean;
-  action: ShortcutAction;
-}
-
-// Define keyboard shortcuts
-// On macOS: metaKey = Cmd, on Windows/Linux: ctrlKey = Ctrl
-const SHORTCUTS: ShortcutDefinition[] = [
-  { key: "l", metaKey: true, action: "focusChat" },
-  { key: ",", metaKey: true, action: "openSettings" },
-  { key: "b", metaKey: true, action: "toggleSidebar" },
-  { key: "Escape", action: "closePanel" },
-  { key: "e", metaKey: true, action: "focusEditor" },
-  { key: "o", metaKey: true, action: "openFiles" },
+const GLOBAL_SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
+  "global.focusChat",
+  "global.openSettings",
+  "global.toggleSidebar",
+  "global.closePanel",
+  "global.focusEditor",
+  "global.openFiles",
+  "global.newChat",
+  "global.newTerminal",
 ];
 
-// Platform detection
-const isMac =
-  typeof navigator !== "undefined" &&
-  /Mac|iPod|iPhone|iPad/.test(navigator.platform);
-
 class ShortcutManager {
-  private handlers: Map<ShortcutAction, () => void> = new Map();
+  private handlers: Map<ShortcutAction, ShortcutCallback> = new Map();
   private enabled = true;
+  private matcher = createKeybindingMatcher(GLOBAL_SHORTCUT_ACTIONS);
   private boundHandler: (e: KeyboardEvent) => void;
 
   constructor() {
@@ -61,12 +64,13 @@ class ShortcutManager {
   destroy(): void {
     if (typeof window === "undefined") return;
     window.removeEventListener("keydown", this.boundHandler);
+    this.matcher.clear();
   }
 
   /**
    * Register a handler for a shortcut action.
    */
-  register(action: ShortcutAction, callback: () => void): void {
+  register(action: ShortcutAction, callback: ShortcutCallback): void {
     this.handlers.set(action, callback);
   }
 
@@ -82,6 +86,7 @@ class ShortcutManager {
    */
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
+    if (!enabled) this.matcher.clear();
   }
 
   /**
@@ -93,84 +98,44 @@ class ShortcutManager {
 
   private handleKeyDown(e: KeyboardEvent): void {
     if (!this.enabled) return;
+    if (document.body.dataset.keybindingRecording === "true") {
+      this.matcher.clear();
+      return;
+    }
 
-    // Don't trigger shortcuts when typing in input fields (except Escape)
+    const result = this.matcher.handleEvent(e);
+    if (result.kind === "none") return;
+
     const target = e.target as HTMLElement;
     const isInputField =
       target.tagName === "INPUT" ||
       target.tagName === "TEXTAREA" ||
       target.isContentEditable;
 
-    for (const shortcut of SHORTCUTS) {
-      if (this.matchesShortcut(e, shortcut)) {
-        // Allow Escape even in input fields
-        if (isInputField && shortcut.key !== "Escape") {
-          continue;
-        }
-
-        const handler = this.handlers.get(shortcut.action);
-        if (handler) {
-          e.preventDefault();
-          handler();
-          return;
-        }
-      }
-    }
-  }
-
-  private matchesShortcut(
-    e: KeyboardEvent,
-    shortcut: ShortcutDefinition,
-  ): boolean {
-    // Key match (case-insensitive for letters)
-    // e.key can be undefined on Windows for dead keys / IME composition
-    if (!e.key) return false;
-    const keyMatch =
-      e.key.toLowerCase() === shortcut.key.toLowerCase() ||
-      e.key === shortcut.key;
-
-    if (!keyMatch) return false;
-
-    // Meta/Ctrl key check - use metaKey on Mac, ctrlKey on Windows/Linux
-    const requiresMeta = shortcut.metaKey || shortcut.ctrlKey;
-    if (requiresMeta) {
-      const hasModifier = isMac ? e.metaKey : e.ctrlKey;
-      if (!hasModifier) return false;
+    if (result.kind === "pending") {
+      if (!isInputField) e.preventDefault();
+      return;
     }
 
-    // Shift key check
-    if (shortcut.shiftKey && !e.shiftKey) return false;
+    if (isInputField && result.action !== "global.closePanel") {
+      return;
+    }
 
-    return true;
+    const handler = this.handlers.get(result.action as ShortcutAction);
+    if (handler) {
+      // Only swallow the key if the handler actually consumed it. Returning
+      // false (e.g. closePanel with no panel open) lets the default through.
+      const consumed = handler();
+      if (consumed !== false) e.preventDefault();
+    }
   }
 }
 
-// Singleton instance
 export const shortcuts = new ShortcutManager();
 
 /**
  * Get a human-readable label for a shortcut.
  */
 export function getShortcutLabel(action: ShortcutAction): string {
-  const shortcut = SHORTCUTS.find((s) => s.action === action);
-  if (!shortcut) return "";
-
-  const parts: string[] = [];
-
-  if (shortcut.metaKey || shortcut.ctrlKey) {
-    parts.push(isMac ? "⌘" : "Ctrl");
-  }
-  if (shortcut.shiftKey) {
-    parts.push(isMac ? "⇧" : "Shift");
-  }
-
-  // Format the key nicely
-  let keyLabel = shortcut.key;
-  if (keyLabel === "Escape") keyLabel = "Esc";
-  else if (keyLabel === ",") keyLabel = ",";
-  else keyLabel = keyLabel.toUpperCase();
-
-  parts.push(keyLabel);
-
-  return parts.join(isMac ? "" : "+");
+  return getKeybindingLabel(action as KeybindingActionId);
 }

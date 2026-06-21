@@ -25,6 +25,7 @@ import {
   saveTab,
 } from "@/lib/files/service";
 import { isSupportedImageFile } from "@/lib/images/file-types";
+import { isMacPlatform } from "@/lib/platform";
 import { editorStore } from "@/stores/editor.store";
 import { fileTreeState, setNodes, setSelectedPath } from "@/stores/fileTree";
 import {
@@ -372,7 +373,7 @@ export const EditorPanel: Component = () => {
                   <p class="m-0 mb-5 text-muted-foreground leading-normal">
                     Open a folder to browse files, or use{" "}
                     <kbd class="bg-border-hover px-1.5 py-0.5 rounded font-inherit text-[0.9em]">
-                      {navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+O
+                      {isMacPlatform() ? "⌘" : "Ctrl"}+O
                     </kbd>{" "}
                     to open a file.
                   </p>

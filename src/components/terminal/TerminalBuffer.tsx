@@ -17,6 +17,7 @@ import {
   ContextMenu,
   type ContextMenuItem,
 } from "@/components/common/ContextMenu";
+import { isMacPlatform } from "@/lib/platform";
 import {
   canAcceptSkillDrop,
   setCurrentSkillDragPayload,
@@ -320,11 +321,6 @@ function selectAllGrid(grid: GridSnapshot): SelectionRange {
     head: { row: Math.max(0, grid.rows - 1), col: Math.max(0, grid.cols - 1) },
   };
 }
-
-const isMacPlatform = (): boolean => {
-  if (typeof navigator === "undefined") return false;
-  return /Mac|iPhone|iPad|iPod/.test(navigator.platform);
-};
 
 const copyShortcutLabel = (): string =>
   isMacPlatform() ? "⌘C" : "Ctrl+Shift+C";

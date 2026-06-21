@@ -42,6 +42,7 @@ import {
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { chatStore } from "@/stores/chat.store";
 import { fileTreeState, initDefaultRootIfNeeded } from "@/stores/fileTree";
+import { loadKeybindings } from "@/stores/keybindings.store";
 import { providerStore } from "@/stores/provider.store";
 import { loadAllSettings, settingsState } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
@@ -114,6 +115,7 @@ function App() {
 
     // Load all settings including app settings (chatDefaultModel, etc.) and MCP settings
     await loadAllSettings();
+    await loadKeybindings();
 
     // Load provider settings - this restores the last used model from previous session
     await providerStore.loadSettings();

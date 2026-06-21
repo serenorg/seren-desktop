@@ -1,23 +1,27 @@
 // ABOUTME: i3-style virtual workspace pills - numbered switchers + "+" appender.
-// ABOUTME: Tile controls (split right / split down / close pane) anchor to the right.
+// ABOUTME: Tile controls (splits, close pane) anchor to the right.
 
 import { type Component, For, type JSX, Show } from "solid-js";
+import { isMacPlatform } from "@/lib/platform";
+import { getKeybindingLabel } from "@/stores/keybindings.store";
 import { workspaceStore } from "@/stores/workspace.store";
 
-const isMac =
-  typeof navigator !== "undefined" &&
-  /Mac|iPod|iPhone|iPad/.test(navigator.platform);
-const MOD_LABEL = isMac ? "Cmd" : "Ctrl";
-const MOD_GLYPH = isMac ? "⌘" : "Ctrl+";
+const IS_MAC = isMacPlatform();
+const MOD_LABEL = IS_MAC ? "Cmd" : "Ctrl";
+const MOD_SEPARATOR = IS_MAC ? "" : "+";
 
 /** Tooltip hint for the keyboard shortcut. 0 maps to workspace 10. */
 function shortcutHint(number: number): string | null {
   if (number < 1 || number > 10) return null;
   const digit = number === 10 ? "0" : String(number);
-  return `${MOD_LABEL}${isMac ? "" : "+"}${digit}`;
+  return `${MOD_LABEL}${MOD_SEPARATOR}${digit}`;
 }
 
 export const WorkspaceBar: Component = () => {
+  const keybindingContext = () => ({
+    terminalPaneFocused: workspaceStore.activeWindow?.kind === "terminal",
+  });
+
   return (
     // The "+" button stays a sibling of the tablist (not a child) so
     // ARIA tablist children are all role=tab.
@@ -91,7 +95,7 @@ export const WorkspaceBar: Component = () => {
 
       <TileControl
         label="Split right"
-        hint={`${MOD_GLYPH}\\`}
+        hint={getKeybindingLabel("pane.splitRight", keybindingContext())}
         onClick={() => workspaceStore.splitFocusedPane("row")}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
@@ -118,7 +122,7 @@ export const WorkspaceBar: Component = () => {
 
       <TileControl
         label="Split down"
-        hint={`${MOD_GLYPH}-`}
+        hint={getKeybindingLabel("pane.splitDown", keybindingContext())}
         onClick={() => workspaceStore.splitFocusedPane("column")}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
@@ -146,7 +150,7 @@ export const WorkspaceBar: Component = () => {
       <Show when={workspaceStore.activeWorkspace.windows.length > 1}>
         <TileControl
           label="Close pane"
-          hint={isMac ? "⇧⌘W" : "Ctrl+Shift+W"}
+          hint={IS_MAC ? "Shift+Cmd+W" : "Ctrl+Shift+W"}
           onClick={() => workspaceStore.closeFocusedWindow()}
         >
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">

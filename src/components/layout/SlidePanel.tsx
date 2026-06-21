@@ -114,7 +114,7 @@ export const SlidePanel: Component<SlidePanelProps> = (props) => {
     <Show when={props.open}>
       <div
         classList={{
-          "absolute inset-0 z-[15] flex justify-end": !props.docked,
+          "absolute inset-0 z-[50] flex justify-end": !props.docked,
           "relative z-[1] shrink-0 h-full": props.docked,
         }}
       >

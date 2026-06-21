@@ -40,6 +40,7 @@ import {
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
+import { resetAllKeybindings } from "@/stores/keybindings.store";
 import { providerStore } from "@/stores/provider.store";
 import {
   mcpSettings,
@@ -51,6 +52,7 @@ import {
 } from "@/stores/settings.store";
 import { claimDaily, walletState } from "@/stores/wallet.store";
 import { SendTransferModal } from "../wallet/SendTransferModal";
+import { KeybindingsSettings } from "./KeybindingsSettings";
 import { KeysSettings } from "./KeysSettings";
 import { MessagingSettings } from "./MessagingSettings";
 import { OAuthLogins } from "./OAuthLogins";
@@ -66,6 +68,7 @@ type SettingsSection =
   | "sync"
   | "keys"
   | "toolsets"
+  | "shortcuts"
   | "editor"
   | "wallet"
   | "messaging"
@@ -341,6 +344,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   const handleResetAll = () => {
     settingsStore.reset();
     appearanceStore.reset();
+    resetAllKeybindings();
     setShowResetConfirm(false);
   };
 
@@ -377,6 +381,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "messaging", label: "Messaging", icon: "💬" },
     { id: "indexing", label: "Code Indexing", icon: "🔍" },
     { id: "appearance", label: "Appearance", icon: "🎨" },
+    { id: "shortcuts", label: "Shortcuts", icon: "⌨️" },
     { id: "general", label: "General", icon: "⚙️" },
     { id: "mcp", label: "MCP Servers", icon: "🔌" },
   ];
@@ -688,6 +693,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
         <Show when={activeSection() === "toolsets"}>
           <ToolsetsSettings />
+        </Show>
+
+        <Show when={activeSection() === "shortcuts"}>
+          <KeybindingsSettings />
         </Show>
 
         <Show when={activeSection() === "editor"}>

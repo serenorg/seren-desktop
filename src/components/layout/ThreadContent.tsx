@@ -137,6 +137,28 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
     const placements = new Map<string, PanePlacement>();
     const gutters: GutterPlacement[] = [];
 
+    // Zoom: a single pane fills the workspace; the rest stay hidden and no
+    // resize gutters are drawn. A stale zoom id (window gone) falls through.
+    const zoomed = ws.zoomedWindowId
+      ? ws.windows.find((w) => w.id === ws.zoomedWindowId)
+      : null;
+    if (zoomed) {
+      placements.set(
+        zoomed.id,
+        rectToPlacement({
+          topPct: 0,
+          leftPct: 0,
+          widthPct: 100,
+          heightPct: 100,
+          topPx: 0,
+          leftPx: 0,
+          widthPx: 0,
+          heightPx: 0,
+        }),
+      );
+      return { placements, gutters };
+    }
+
     const walk = (layout: WorkspaceLayout, rect: LayoutRect) => {
       if (layout.type === "pane") {
         placements.set(layout.windowId, rectToPlacement(rect));

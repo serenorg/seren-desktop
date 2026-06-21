@@ -18,6 +18,7 @@ import {
 } from "@/lib/editor";
 import { saveTab } from "@/lib/files/service";
 import { isSupportedImageFile } from "@/lib/images/file-types";
+import { isMacPlatform } from "@/lib/platform";
 import { authStore } from "@/stores/auth.store";
 import { editorStore } from "@/stores/editor.store";
 import { setSelectedPath } from "@/stores/fileTree";
@@ -353,7 +354,7 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
                 <p class="m-0 mb-5 text-muted-foreground leading-normal">
                   Select a file from the explorer, or use{" "}
                   <kbd class="bg-border-hover px-1.5 py-0.5 rounded font-inherit text-[0.9em]">
-                    {navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+O
+                    {isMacPlatform() ? "⌘" : "Ctrl"}+O
                   </kbd>{" "}
                   to open a file.
                 </p>
