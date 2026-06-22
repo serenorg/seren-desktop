@@ -52,6 +52,8 @@
     "@lmstudio/sdk": "1.5.0",
     "@monaco-editor/loader": "^1.7.0",
     "@playwright/mcp": "^0.0.76",
+    "@seren/recording-core": "workspace:*",
+    "@seren/recording-ui": "workspace:*",
     "@tailwindcss/vite": "4",
     "@tanstack/solid-query": "^5.100.14",
     "@tauri-apps/api": "^2",

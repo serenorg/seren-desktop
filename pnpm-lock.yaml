@@ -20,6 +20,12 @@ importers:
       '@playwright/mcp':
         specifier: ^0.0.76
         version: 0.0.76
+      '@seren/recording-core':
+        specifier: workspace:*
+        version: link:packages/recording-core
+      '@seren/recording-ui':
+        specifier: workspace:*
+        version: link:packages/recording-ui
       '@tailwindcss/vite':
         specifier: '4'
         version: 4.3.1(vite@8.0.16(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.4))
@@ -117,6 +123,20 @@ importers:
       vitest:
         specifier: ^4.1.8
         version: 4.1.8(@types/node@26.0.0)(vite@8.0.16(@types/node@26.0.0)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.4))
+
+  packages/recording-core: {}
+
+  packages/recording-extension: {}
+
+  packages/recording-ui:
+    dependencies:
+      solid-js:
+        specifier: ^1.9.0
+        version: 1.9.13
+    devDependencies:
+      '@seren/recording-core':
+        specifier: workspace:*
+        version: link:../recording-core
 
 packages:
 

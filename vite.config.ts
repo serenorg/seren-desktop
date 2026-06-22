@@ -82,6 +82,14 @@ export default defineConfig(async () => ({
   resolve: {
     alias: [
       { find: "@", replacement: resolve(__dirname, "src") },
+      {
+        find: "@seren/recording-core",
+        replacement: resolve(__dirname, "packages/recording-core/src/index.ts"),
+      },
+      {
+        find: "@seren/recording-ui",
+        replacement: resolve(__dirname, "packages/recording-ui/src/index.tsx"),
+      },
       // Shim qrcode CJS → ESM for Thirdweb's dynamic import("qrcode").
       // Match the bare specifier ONLY — subpaths like "qrcode/lib/browser.js"
       // must still resolve to the real package so Vite's optimizeDeps can

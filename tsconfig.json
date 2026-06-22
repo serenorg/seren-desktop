@@ -18,6 +18,8 @@
     /* Path aliases */
     "baseUrl": ".",
     "paths": {
+      "@seren/recording-core": ["packages/recording-core/src/index.ts"],
+      "@seren/recording-ui": ["packages/recording-ui/src/index.tsx"],
       "@/*": ["src/*"]
     },
 
@@ -31,6 +33,6 @@
        The migration off baseUrl is tracked separately. */
     "ignoreDeprecations": "6.0"
   },
-  "include": ["src", "tests"],
+  "include": ["src", "tests", "packages"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
