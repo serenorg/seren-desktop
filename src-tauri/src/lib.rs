@@ -892,6 +892,7 @@ pub fn run() {
             commands::audio::update_meeting_status,
             commands::audio::update_meeting_notes,
             commands::audio::update_meeting_title,
+            commands::audio::update_meeting_template,
             commands::audio::set_meeting_routed_skill,
             commands::audio::append_transcript_segment,
             commands::audio::get_transcript_segments,

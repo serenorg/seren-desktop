@@ -122,9 +122,11 @@ function keywords(text: string): string[] {
 
 export function MeetingDetail(props: MeetingDetailProps) {
   const [templates, setTemplates] = createSignal<MeetingTemplate[]>([]);
-  const [selectedTemplate, setSelectedTemplate] = createSignal(
-    props.meeting.templateId ?? settingsStore.get("meetingTemplateId"),
-  );
+  // The selected template is derived from the meeting record (not local state)
+  // so it stays scoped to this meeting. A shared one-shot signal previously
+  // leaked the last selection across every meeting (#2583).
+  const selectedTemplate = () =>
+    props.meeting.templateId ?? settingsStore.get("meetingTemplateId");
   const [regenerating, setRegenerating] = createSignal(false);
   const [republishing, setRepublishing] = createSignal(false);
   const [highlightedSeq, setHighlightedSeq] = createSignal<number | null>(null);
@@ -372,7 +374,12 @@ export function MeetingDetail(props: MeetingDetailProps) {
         <select
           class="h-7 rounded-md border border-border bg-surface-1 px-2 text-[12px] text-foreground focus:outline-none focus:border-primary/60"
           value={selectedTemplate()}
-          onChange={(event) => setSelectedTemplate(event.currentTarget.value)}
+          onChange={(event) =>
+            void meetingStore.setMeetingTemplate(
+              props.meeting,
+              event.currentTarget.value,
+            )
+          }
         >
           <For each={templates()}>
             {(template) => <option value={template.id}>{template.name}</option>}

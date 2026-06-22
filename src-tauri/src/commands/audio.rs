@@ -415,6 +415,28 @@ pub async fn update_meeting_title(app: AppHandle, id: String, title: String) -> 
 }
 
 #[tauri::command]
+pub async fn update_meeting_template(
+    app: AppHandle,
+    id: String,
+    template_id: Option<String>,
+) -> Result<(), String> {
+    let lookup = id.clone();
+    run_db(app.clone(), move |conn| {
+        conn.execute(
+            "UPDATE meetings
+             SET template_id = ?1, updated_at = ?2
+             WHERE id = ?3",
+            params![template_id, now_ms(), id],
+        )?;
+        mark_sync_upsert(conn, "meetings", &id)?;
+        Ok(())
+    })
+    .await?;
+    emit_meeting_status_by_id(&app, &lookup).await;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn append_transcript_segment(
     app: AppHandle,
     meeting_id: String,
