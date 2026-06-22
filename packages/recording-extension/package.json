@@ -1,0 +1,11 @@
+{
+  "name": "@seren/recording-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Seren workflow recording browser extension scaffold",
+  "type": "module",
+  "files": [
+    "manifest.json",
+    "src"
+  ]
+}

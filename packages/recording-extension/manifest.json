@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Seren Workflow Recorder",
+  "version": "0.1.0",
+  "description": "Captures user-approved browser workflow events for Seren skill generation.",
+  "permissions": ["activeTab", "debugger", "scripting", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Seren Workflow Recorder"
+  }
+}
