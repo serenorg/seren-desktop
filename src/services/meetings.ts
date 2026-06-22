@@ -121,6 +121,13 @@ export function updateMeetingTitle(id: string, title: string): Promise<void> {
   return invoke("update_meeting_title", { id, title });
 }
 
+export function updateMeetingTemplate(
+  id: string,
+  templateId: string | null,
+): Promise<void> {
+  return invoke("update_meeting_template", { id, templateId });
+}
+
 export function setMeetingRoutedSkill(
   id: string,
   routedSkillSlug?: string | null,

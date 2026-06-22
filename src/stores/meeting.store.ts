@@ -31,6 +31,7 @@ import {
   stopMeetingCapture as stopBackendCapture,
   type TranscriptSegment,
   updateMeetingStatus,
+  updateMeetingTemplate,
   updateMeetingTitle,
 } from "@/services/meetings";
 import { orchestrate } from "@/services/orchestrator";
@@ -835,6 +836,37 @@ async function renameMeeting(meeting: Meeting, title: string): Promise<void> {
   }
 }
 
+// Persist a meeting's note template so the choice is locked to that meeting and
+// survives switching between meetings. Updates the list row and the active
+// selection immediately; the backend also emits meeting://status, which
+// reconciles any other surface.
+async function setMeetingTemplate(
+  meeting: Meeting,
+  templateId: string,
+): Promise<void> {
+  if (templateId === meeting.templateId) return;
+  if (!isTauriRuntime()) return;
+  try {
+    await updateMeetingTemplate(meeting.id, templateId);
+    setMeetingState("meetings", (meetings) =>
+      meetings.map((item) =>
+        item.id === meeting.id ? { ...item, templateId } : item,
+      ),
+    );
+    if (meetingState.activeMeeting?.id === meeting.id) {
+      setMeetingState("activeMeeting", {
+        ...meetingState.activeMeeting,
+        templateId,
+      });
+    }
+  } catch (error) {
+    setMeetingState(
+      "error",
+      error instanceof Error ? error.message : "Failed to set meeting template",
+    );
+  }
+}
+
 async function deleteMeeting(meeting: Meeting): Promise<void> {
   if (!isTauriRuntime()) return;
   setMeetingState("error", null);
@@ -976,6 +1008,7 @@ export const meetingStore = {
   regenerateNotes,
   republishToSerenNotes,
   renameMeeting,
+  setMeetingTemplate,
   deleteMeeting,
   clearError,
   startAutoDetect,
