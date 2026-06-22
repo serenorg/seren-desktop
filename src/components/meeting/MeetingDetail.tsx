@@ -442,6 +442,63 @@ export function MeetingDetail(props: MeetingDetailProps) {
         <div class="mb-2 text-[12px] font-medium text-muted-foreground">
           Notes
         </div>
+        {/* Link/CTA renders above the note body so it's reachable without
+          scrolling past the full markdown (#2584). */}
+        <Show when={props.meeting.notesMarkdown}>
+          <Show
+            when={props.meeting.serenNotesId}
+            fallback={
+              <Show
+                when={authStore.isAuthenticated}
+                fallback={
+                  <div class="mb-2 text-[12px] text-muted-foreground">
+                    <button
+                      type="button"
+                      class="text-primary hover:underline focus:outline-none focus:underline"
+                      onClick={() => requestSignInModal()}
+                    >
+                      Login to SerenDB to chat with your meeting notes
+                    </button>
+                  </div>
+                }
+              >
+                {/* Authenticated but no published id — the auto-publish
+                  hit a 5xx after retry, the prior session was offline, or
+                  the user signed in after notes finalized. Manual retry. */}
+                <div class="mb-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="h-7 px-2.5 rounded-md border border-primary/40 bg-primary/10 text-[12px] text-primary hover:bg-primary/15 disabled:opacity-60"
+                    onClick={republish}
+                    disabled={republishing() || !isTauriRuntime()}
+                    title="Publish these notes to notes.serendb.com"
+                  >
+                    {republishing() ? "Publishing…" : "Publish to Seren Notes"}
+                  </button>
+                </div>
+              </Show>
+            }
+          >
+            {(serenNotesId) => {
+              const url = `https://notes.serendb.com/notes/${serenNotesId()}`;
+              return (
+                <div class="mb-2 text-[12px] text-muted-foreground">
+                  Chat with meeting notes:{" "}
+                  <button
+                    type="button"
+                    class="text-primary hover:underline focus:outline-none focus:underline break-all"
+                    onClick={() => {
+                      void openExternalLink(url);
+                    }}
+                    title="Open this meeting on notes.serendb.com"
+                  >
+                    {url}
+                  </button>
+                </div>
+              );
+            }}
+          </Show>
+        </Show>
         <Show
           when={props.meeting.notesMarkdown}
           fallback={
@@ -465,61 +522,6 @@ export function MeetingDetail(props: MeetingDetailProps) {
               innerHTML={renderMarkdown(markdown())}
             />
           )}
-        </Show>
-        <Show when={props.meeting.notesMarkdown}>
-          <Show
-            when={props.meeting.serenNotesId}
-            fallback={
-              <Show
-                when={authStore.isAuthenticated}
-                fallback={
-                  <div class="mt-2 text-[12px] text-muted-foreground">
-                    <button
-                      type="button"
-                      class="text-primary hover:underline focus:outline-none focus:underline"
-                      onClick={() => requestSignInModal()}
-                    >
-                      Login to SerenDB to chat with your meeting notes
-                    </button>
-                  </div>
-                }
-              >
-                {/* Authenticated but no published id — the auto-publish
-                  hit a 5xx after retry, the prior session was offline, or
-                  the user signed in after notes finalized. Manual retry. */}
-                <div class="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    class="h-7 px-2.5 rounded-md border border-primary/40 bg-primary/10 text-[12px] text-primary hover:bg-primary/15 disabled:opacity-60"
-                    onClick={republish}
-                    disabled={republishing() || !isTauriRuntime()}
-                    title="Publish these notes to notes.serendb.com"
-                  >
-                    {republishing() ? "Publishing…" : "Publish to Seren Notes"}
-                  </button>
-                </div>
-              </Show>
-            }
-          >
-            {(serenNotesId) => {
-              const url = `https://notes.serendb.com/notes/${serenNotesId()}`;
-              return (
-                <div class="mt-2 text-[12px] text-muted-foreground">
-                  Chat with meeting notes:{" "}
-                  <button
-                    type="button"
-                    class="text-primary hover:underline focus:outline-none focus:underline break-all"
-                    onClick={() => {
-                      void openExternalLink(url);
-                    }}
-                    title="Open this meeting on notes.serendb.com"
-                  >
-                    {url}
-                  </button>
-                </div>
-              );
-            }}
-          </Show>
         </Show>
       </section>
 
