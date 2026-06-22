@@ -382,7 +382,17 @@ export function MeetingDetail(props: MeetingDetailProps) {
           }
         >
           <For each={templates()}>
-            {(template) => <option value={template.id}>{template.name}</option>}
+            {(template) => (
+              // `selected` lives on the option so it re-applies when the async
+              // template list populates; binding only `value` on the select
+              // leaves the dropdown on option[0] until the next switch (#2587).
+              <option
+                value={template.id}
+                selected={template.id === selectedTemplate()}
+              >
+                {template.name}
+              </option>
+            )}
           </For>
         </select>
         <button
