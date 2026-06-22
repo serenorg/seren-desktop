@@ -35,7 +35,7 @@ jobs:
       release_id: ${{ steps.set_release_id.outputs.id }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -155,7 +155,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Configure git for private dependencies
         run: git config --global url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
@@ -250,7 +250,7 @@ jobs:
 
       - name: Clone seren-desktop-publishers
         if: steps.check_sidecars.outputs.found == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: serenorg/seren-desktop-publishers
           token: ${{ secrets.GH_PAT }}
@@ -1098,7 +1098,7 @@ jobs:
       AWS_REGION: ${{ secrets.AWS_REGION }}
     steps:
       - name: Checkout e2e scripts
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Download signed Windows installer
         uses: actions/download-artifact@v8
