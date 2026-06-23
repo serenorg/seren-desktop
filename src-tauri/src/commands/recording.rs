@@ -46,14 +46,31 @@ pub struct RecordingState {
     active: Mutex<Option<ActiveRecording>>,
 }
 
+impl RecordingState {
+    /// Stop any in-progress native recording, releasing its capture process.
+    /// Called from `RunEvent::Exit` because Tauri terminates via
+    /// `std::process::exit`, which never runs `Drop` — without this an active
+    /// macOS `screencapture` child is orphaned and keeps recording the screen
+    /// after the app quits. Works through a shared reference by locking.
+    pub fn shutdown(&self) {
+        if let Ok(mut active) = self.active.lock() {
+            finalize_active_recording(active.take());
+        }
+    }
+}
+
 impl Drop for RecordingState {
     fn drop(&mut self) {
         if let Ok(active) = self.active.get_mut() {
-            if let Some(active) = active.take() {
-                clear_active_recorder_marker_for_output_dir(active.session.output_dir.as_deref());
-                discard_native_recording_backend(active.backend);
-            }
+            finalize_active_recording(active.take());
         }
+    }
+}
+
+fn finalize_active_recording(active: Option<ActiveRecording>) {
+    if let Some(active) = active {
+        clear_active_recorder_marker_for_output_dir(active.session.output_dir.as_deref());
+        discard_native_recording_backend(active.backend);
     }
 }
 
