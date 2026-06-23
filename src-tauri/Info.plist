@@ -3,7 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Seren uses your microphone to transcribe voice input for AI chat.</string>
+    <string>Seren uses your microphone for voice input, meeting transcripts, and optional workflow recording narration.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Seren uses your camera only when you enable the camera overlay for workflow recording.</string>
     <key>NSAudioCaptureUsageDescription</key>
     <string>Seren captures meeting audio to produce live transcripts and notes.</string>
     <key>CFBundleURLTypes</key>

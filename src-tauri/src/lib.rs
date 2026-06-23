@@ -21,6 +21,7 @@ pub mod commands {
     pub mod model_context_cache;
     pub mod orchestrator;
     pub mod provider_runtime;
+    pub mod recording;
     pub mod session;
     pub mod updater;
     pub mod web;
@@ -813,6 +814,15 @@ pub fn run() {
 
             // Track Rust-bridged Gateway HTTP requests so the frontend can abort streams.
             app.manage(commands::gateway_http::GatewayHttpState::default());
+            app.manage(commands::recording::RecordingState::default());
+            // Reap a native recorder orphaned by a previous crash/force-quit so a
+            // stuck screen recording does not keep running after relaunch.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    commands::recording::reap_orphaned_recordings(&handle);
+                });
+            }
             app.manage(terminal::TerminalState::default());
 
             // Initialize memory state for cloud + local cache operations.
@@ -885,6 +895,19 @@ pub fn run() {
             // Rust-backed Gateway API bridge
             commands::gateway_http::gateway_http_start,
             commands::gateway_http::gateway_http_cancel,
+            commands::recording::recording_list_targets,
+            commands::recording::recording_list_capture_windows,
+            commands::recording::recording_capture_window_preview,
+            commands::recording::recording_clear_window_previews,
+            commands::recording::recording_check_permissions,
+            commands::recording::recording_request_permission,
+            commands::recording::recording_open_permission_settings,
+            commands::recording::recording_start,
+            commands::recording::recording_stop,
+            commands::recording::recording_add_marker,
+            commands::recording::recording_list_local,
+            commands::recording::recording_delete_local,
+            commands::recording::recording_reveal_local,
             commands::history_sync::history_sync_run_now,
             commands::history_sync::history_sync_wipe_remote,
             // Meeting Mode persistence commands
@@ -1065,6 +1088,7 @@ pub fn run() {
             skills::write_skill_sync_state,
             skills::resolve_skill_path,
             skills::create_skill_folder,
+            skills::create_skill_bundle_folder,
             // Messaging transport commands
             messaging::commands::messaging_start,
             messaging::commands::messaging_stop,
