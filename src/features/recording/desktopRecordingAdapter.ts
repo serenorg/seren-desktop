@@ -24,6 +24,31 @@ async function getInvoke(): Promise<
   return invoke;
 }
 
+async function getListen(): Promise<
+  typeof import("@tauri-apps/api/event").listen | null
+> {
+  if (!isTauriRuntime()) return null;
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen;
+}
+
+const EXTERNAL_STOP_EVENT = "recording://external-stop";
+
+interface ExternalStopPayload {
+  recordingId: string;
+}
+
+function externalStopSession(recordingId: string): RecordingSession {
+  return {
+    id: recordingId,
+    targetKind: "screen",
+    targetLabel: "Workflow recording",
+    startedAtMs: 0,
+    outputDir: null,
+    maxVideoHeight: 0,
+  };
+}
+
 function browserTargets(): RecordingTarget[] {
   return DEFAULT_RECORDING_TARGETS.map((target) => ({
     ...target,
@@ -171,5 +196,43 @@ export const desktopRecordingAdapter: RecordingHostAdapter = {
     const invoke = await getInvoke();
     if (!invoke) return;
     await invoke("recording_add_marker", { kind });
+  },
+
+  releaseSessionArtifacts(_session: RecordingSession): void {
+    // Native artifacts are file:// URLs backed by on-disk files; there are no
+    // blob: handles to revoke.
+  },
+
+  onExternalStop(handler: (session: RecordingSession) => void): () => void {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void getListen().then((listen) => {
+      if (!listen || cancelled) return;
+      void listen<ExternalStopPayload>(EXTERNAL_STOP_EVENT, (event) => {
+        const recordingId = event.payload?.recordingId;
+        if (!recordingId) return;
+        // The OS ended capture out-of-band; finalize via the stop command to
+        // recover the artifact-bearing session, falling back to a minimal
+        // session if finalize yielded nothing.
+        void desktopRecordingAdapter
+          .stop()
+          .then((session) =>
+            handler(session ?? externalStopSession(recordingId)),
+          )
+          .catch(() => handler(externalStopSession(recordingId)));
+      })
+        .then((dispose) => {
+          if (cancelled) {
+            dispose();
+            return;
+          }
+          unlisten = dispose;
+        })
+        .catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   },
 };

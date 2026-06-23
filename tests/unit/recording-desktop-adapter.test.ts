@@ -2,6 +2,8 @@
 // ABOUTME: Guards the Tauri/native boundary without importing UI package internals.
 
 import { invoke } from "@tauri-apps/api/core";
+import type { Event, EventCallback, UnlistenFn } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { desktopRecordingAdapter } from "@/features/recording/desktopRecordingAdapter";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
@@ -14,8 +16,50 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(),
+}));
+
 const isTauriRuntimeMock = vi.mocked(isTauriRuntime);
 const invokeMock = vi.mocked(invoke);
+const listenMock = vi.mocked(listen);
+
+// Flush pending tasks so the adapter's lazy dynamic import (which settles on a
+// macrotask boundary) plus the chained listen registration / stop finalize all
+// complete before assertions.
+async function flushAsync(): Promise<void> {
+  for (let i = 0; i < 3; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+interface ExternalStopPayload {
+  recordingId: string;
+}
+
+function emitExternalStop(
+  capture: EventCallback<ExternalStopPayload>,
+  recordingId: string,
+): void {
+  capture({
+    event: "recording://external-stop",
+    id: 1,
+    payload: { recordingId },
+  } as Event<ExternalStopPayload>);
+}
+
+// Capture the listen handler the adapter registers so the test can drive the
+// external-stop event directly, while keeping the mock typed to `listen`.
+function stubListen(
+  dispose: UnlistenFn,
+): { handler: () => EventCallback<ExternalStopPayload> | null } {
+  let captured: EventCallback<ExternalStopPayload> | null = null;
+  listenMock.mockImplementation((async (_event, callback) => {
+    captured = callback as EventCallback<ExternalStopPayload>;
+    return dispose;
+  }) as typeof listen);
+  return { handler: () => captured };
+}
 
 describe("desktopRecordingAdapter", () => {
   beforeEach(() => {
@@ -303,6 +347,99 @@ describe("desktopRecordingAdapter", () => {
     expect(invokeMock).toHaveBeenNthCalledWith(
       10,
       "recording_clear_window_previews",
+    );
+  });
+
+  it("releases native session artifacts without touching Tauri", () => {
+    isTauriRuntimeMock.mockReturnValue(true);
+    const session = {
+      id: "recording-1",
+      targetKind: "screen" as const,
+      targetLabel: "Workflow recording",
+      startedAtMs: 1234,
+      outputDir: null,
+      maxVideoHeight: 720,
+    };
+
+    expect(desktopRecordingAdapter.releaseSessionArtifacts?.(session)).toBe(
+      undefined,
+    );
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(listenMock).not.toHaveBeenCalled();
+  });
+
+  it("does not subscribe to external-stop events outside Tauri", async () => {
+    isTauriRuntimeMock.mockReturnValue(false);
+    const handler = vi.fn();
+
+    const unsubscribe = desktopRecordingAdapter.onExternalStop?.(handler);
+    await Promise.resolve();
+
+    expect(listenMock).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+    unsubscribe?.();
+  });
+
+  it("finalizes the recording when an external-stop event fires", async () => {
+    isTauriRuntimeMock.mockReturnValue(true);
+    const dispose = vi.fn();
+    const listenStub = stubListen(dispose);
+    invokeMock.mockImplementation(async (command) => {
+      if (command === "recording_stop") {
+        return {
+          id: "recording-77",
+          targetKind: "screen",
+          targetLabel: "Workflow recording",
+          startedAtMs: 4321,
+          outputDir: "/tmp/recording-77",
+          maxVideoHeight: 720,
+          artifactUrl: "file:///tmp/recording-77/workflow-recording.avi",
+        };
+      }
+      return undefined;
+    });
+
+    const handler = vi.fn();
+    const unsubscribe = desktopRecordingAdapter.onExternalStop?.(handler);
+    await flushAsync();
+
+    expect(listenMock).toHaveBeenCalledWith(
+      "recording://external-stop",
+      expect.any(Function),
+    );
+    const capture = listenStub.handler();
+    expect(capture).not.toBeNull();
+
+    if (capture) emitExternalStop(capture, "recording-77");
+    await flushAsync();
+
+    expect(invokeMock).toHaveBeenCalledWith("recording_stop");
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "recording-77",
+        artifactUrl: "file:///tmp/recording-77/workflow-recording.avi",
+      }),
+    );
+
+    unsubscribe?.();
+    expect(dispose).toHaveBeenCalled();
+  });
+
+  it("falls back to a minimal session when finalize yields nothing", async () => {
+    isTauriRuntimeMock.mockReturnValue(true);
+    const listenStub = stubListen(vi.fn());
+    invokeMock.mockResolvedValue(null);
+
+    const handler = vi.fn();
+    desktopRecordingAdapter.onExternalStop?.(handler);
+    await flushAsync();
+
+    const capture = listenStub.handler();
+    if (capture) emitExternalStop(capture, "recording-99");
+    await flushAsync();
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "recording-99", outputDir: null }),
     );
   });
 });

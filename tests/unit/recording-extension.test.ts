@@ -47,6 +47,32 @@ function loadExtensionScript(source: string): Record<string, unknown> {
   return context;
 }
 
+interface ElementStub {
+  tagName: string;
+  innerText: string;
+  textContent: string;
+  getAttribute(name: string): string | null;
+}
+
+function elementStub(
+  tagName: string,
+  options: {
+    attributes?: Record<string, string>;
+    innerText?: string;
+    textContent?: string;
+  } = {},
+): ElementStub {
+  const attributes = options.attributes ?? {};
+  return {
+    tagName: tagName.toUpperCase(),
+    innerText: options.innerText ?? "",
+    textContent: options.textContent ?? options.innerText ?? "",
+    getAttribute(name: string): string | null {
+      return attributes[name] ?? null;
+    },
+  };
+}
+
 const manifest = JSON.parse(
   readFileSync(resolve("packages/recording-extension/manifest.json"), "utf-8"),
 ) as {
@@ -163,6 +189,41 @@ describe("recording browser extension scaffold", () => {
     expect(isAllowed("http://localhost:9999")).toBe(false);
     expect(isAllowed("file:///etc/passwd")).toBe(false);
     expect(isAllowed("not a url")).toBe(false);
+  });
+
+  it("only captures visible text for control-label roles and scrubs PII", () => {
+    const context = loadExtensionScript(contentSource);
+    const elementName = context.elementName as (
+      element: ElementStub,
+    ) => string;
+
+    // A button label is a stable control name and may be captured, but a
+    // digit run within it must be masked.
+    expect(
+      elementName(
+        elementStub("button", { innerText: "Pay invoice 12345" }),
+      ),
+    ).toBe("Pay invoice [redacted]");
+
+    // Arbitrary page content (a div) must not have its visible text captured.
+    expect(
+      elementName(
+        elementStub("div", {
+          innerText: "Customer SSN 123-45-6789 and balance",
+        }),
+      ),
+    ).toBe("");
+
+    // Explicit accessible labels are still captured (with PII scrubbed),
+    // regardless of tag.
+    expect(
+      elementName(
+        elementStub("div", {
+          attributes: { "aria-label": "Email user@example.com" },
+          innerText: "ignored body text",
+        }),
+      ),
+    ).toBe("Email [redacted]");
   });
 
   it("strips query and fragment from captured navigation URLs", () => {

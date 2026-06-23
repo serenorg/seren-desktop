@@ -14,6 +14,7 @@ import {
   listLocalRecordings,
   revealLocalRecording,
 } from "@/features/recording/localRecordings";
+import { captureSupportError } from "@/lib/support/hook";
 
 const GHOST_ICON_BUTTON =
   "grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-40 disabled:hover:bg-transparent";
@@ -55,6 +56,11 @@ export function RecordingsSettings() {
       await revealLocalRecording(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not reveal.");
+      void captureSupportError({
+        kind: "RecordingRevealFailure",
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error && err.stack ? [err.stack] : undefined,
+      });
     } finally {
       setPendingId(null);
     }
@@ -69,6 +75,11 @@ export function RecordingsSettings() {
       setRecordings((items) => items.filter((item) => item.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete.");
+      void captureSupportError({
+        kind: "RecordingDeleteFailure",
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error && err.stack ? [err.stack] : undefined,
+      });
     } finally {
       setPendingId(null);
     }
