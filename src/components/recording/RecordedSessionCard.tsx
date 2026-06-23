@@ -16,6 +16,7 @@ import {
   formatCaptureStats,
   revealLocalRecording,
 } from "@/features/recording/localRecordings";
+import { captureSupportError } from "@/lib/support/hook";
 
 function qualityPillClass(status: RecordingSession["qualityStatus"]): string {
   if (status === "ready") {
@@ -60,6 +61,11 @@ export function RecordedSessionCard(props: {
       setError(
         err instanceof Error ? err.message : "Could not reveal recording.",
       );
+      void captureSupportError({
+        kind: "RecordingRevealFailure",
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error && err.stack ? [err.stack] : undefined,
+      });
     } finally {
       setBusy(null);
     }
@@ -76,6 +82,11 @@ export function RecordedSessionCard(props: {
       setError(
         err instanceof Error ? err.message : "Could not delete recording.",
       );
+      void captureSupportError({
+        kind: "RecordingDeleteFailure",
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error && err.stack ? [err.stack] : undefined,
+      });
       setBusy(null);
     }
   };

@@ -486,7 +486,6 @@ export type SkillSummary = {
     deleted_at?: string | null;
     description: string;
     discoverability: SkillDiscoverability;
-    tags?: Array<string>;
     /**
      * Per-skill override for the GitHub mirror folder. When set, takes
      * precedence over `skill_org_folders.folder_slug`. `None` means
@@ -508,6 +507,7 @@ export type SkillSummary = {
     sponsor_referral_code?: string | null;
     sponsor_static?: unknown;
     status: SkillStatus;
+    tags?: Array<string>;
     updated_at: string;
     visibility: SkillVisibility;
 };

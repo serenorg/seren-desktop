@@ -27,16 +27,60 @@ function elementRole(element) {
   );
 }
 
+// Roles/tags whose visible text is a stable control label (e.g. button copy)
+// rather than arbitrary page content. Only these may capture free text.
+const FREE_TEXT_ROLES = new Set([
+  "button",
+  "link",
+  "menuitem",
+  "tab",
+  "heading",
+]);
+const FREE_TEXT_TAGS = new Set([
+  "button",
+  "a",
+  "summary",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+]);
+
+function allowsFreeText(element) {
+  const role = (element.getAttribute("role") || "").toLowerCase();
+  if (FREE_TEXT_ROLES.has(role)) return true;
+  const tag = element.tagName.toLowerCase();
+  if (FREE_TEXT_TAGS.has(tag)) return true;
+  if (tag === "input" || tag === "button") {
+    const type = (element.getAttribute("type") || "").toLowerCase();
+    return type === "button" || type === "submit" || type === "reset";
+  }
+  return false;
+}
+
+// Mask digit runs (>=4) and email-like tokens so incidental PII in a captured
+// label is not stored verbatim.
+function scrubCapturedText(value) {
+  return value
+    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, "[redacted]")
+    .replace(/\d{4,}/g, "[redacted]");
+}
+
 function elementName(element) {
-  const label =
+  const attribute =
     element.getAttribute("aria-label") ||
     element.getAttribute("title") ||
     element.getAttribute("alt") ||
     element.getAttribute("placeholder") ||
-    element.innerText ||
-    element.textContent ||
     "";
-  return label.replace(/\s+/g, " ").trim().slice(0, 120);
+  const freeText = allowsFreeText(element)
+    ? element.innerText || element.textContent || ""
+    : "";
+  const label = attribute || freeText;
+  const normalized = label.replace(/\s+/g, " ").trim().slice(0, 120);
+  return scrubCapturedText(normalized);
 }
 
 function isSensitiveElement(element) {

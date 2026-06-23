@@ -21,6 +21,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use tauri::Emitter;
 use tauri::Manager;
 use uuid::Uuid;
 
@@ -43,7 +45,31 @@ use objc2_foundation::NSString;
 
 #[derive(Default)]
 pub struct RecordingState {
-    active: Mutex<Option<ActiveRecording>>,
+    active: Mutex<RecordingSlot>,
+}
+
+/// Lifecycle slot for the single in-flight native recording. `Starting` is held
+/// only while `recording_start` does its blocking capture/spawn work outside the
+/// state lock, so a concurrent start is rejected without the lock being held
+/// across a slow screen grab.
+#[derive(Default)]
+enum RecordingSlot {
+    #[default]
+    Idle,
+    Starting,
+    Active(ActiveRecording),
+}
+
+impl RecordingSlot {
+    fn take_active(&mut self) -> Option<ActiveRecording> {
+        match std::mem::replace(self, RecordingSlot::Idle) {
+            RecordingSlot::Active(active) => Some(active),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
 }
 
 impl RecordingState {
@@ -53,16 +79,16 @@ impl RecordingState {
     /// macOS `screencapture` child is orphaned and keeps recording the screen
     /// after the app quits. Works through a shared reference by locking.
     pub fn shutdown(&self) {
-        if let Ok(mut active) = self.active.lock() {
-            finalize_active_recording(active.take());
+        if let Ok(mut slot) = self.active.lock() {
+            finalize_active_recording(slot.take_active());
         }
     }
 }
 
 impl Drop for RecordingState {
     fn drop(&mut self) {
-        if let Ok(active) = self.active.get_mut() {
-            finalize_active_recording(active.take());
+        if let Ok(slot) = self.active.get_mut() {
+            finalize_active_recording(slot.take_active());
         }
     }
 }
@@ -95,6 +121,8 @@ enum NativeRecordingBackend {
     XcapAvi {
         stop_tx: mpsc::Sender<()>,
         join: thread::JoinHandle<Result<NativeRecordingArtifacts, String>>,
+        video_path: PathBuf,
+        output_dir: PathBuf,
     },
 }
 
@@ -259,8 +287,18 @@ fn native_backend_marker_fields(backend: &NativeRecordingBackend) -> Option<(u32
 }
 
 #[cfg(not(target_os = "macos"))]
-fn native_backend_marker_fields(_backend: &NativeRecordingBackend) -> Option<(u32, PathBuf)> {
-    None
+fn native_backend_marker_fields(backend: &NativeRecordingBackend) -> Option<(u32, PathBuf)> {
+    match backend {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        NativeRecordingBackend::XcapAvi { video_path, .. } => {
+            // Write a marker for the recording process (this app) so a crash
+            // leaves a `.active-recorder` the startup reaper can use to drop the
+            // partial `recording-*` directory on the next launch.
+            Some((std::process::id(), video_path.clone()))
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1380,12 +1418,17 @@ fn build_recording_session(
 }
 
 fn start_native_recording_backend(
+    app: &tauri::AppHandle,
     request: &RecordingStartRequest,
     output_dir: &Path,
 ) -> Result<NativeRecordingBackend, String> {
     match request.target_kind {
-        RecordingRequestTargetKind::Screen => start_screen_recording_backend(request, output_dir),
-        RecordingRequestTargetKind::Window => start_window_recording_backend(request, output_dir),
+        RecordingRequestTargetKind::Screen => {
+            start_screen_recording_backend(app, request, output_dir)
+        }
+        RecordingRequestTargetKind::Window => {
+            start_window_recording_backend(app, request, output_dir)
+        }
         RecordingRequestTargetKind::Browser => Err(
             "Native browser recording is not implemented yet; use the browser recorder or extension path for now."
                 .to_string(),
@@ -1416,11 +1459,13 @@ fn macos_screencapture_video_args(
 }
 
 fn start_screen_recording_backend(
+    app: &tauri::AppHandle,
     request: &RecordingStartRequest,
     output_dir: &Path,
 ) -> Result<NativeRecordingBackend, String> {
     #[cfg(target_os = "macos")]
     {
+        let _ = app;
         let video_path = output_dir.join("workflow-recording.mov");
         let mut command = Command::new("/usr/sbin/screencapture");
         command.args(macos_screencapture_video_args(request, &video_path)?);
@@ -1437,11 +1482,12 @@ fn start_screen_recording_backend(
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
         let _ = request;
-        start_xcap_screen_recording_backend(output_dir)
+        start_xcap_screen_recording_backend(app, output_dir)
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
+        let _ = app;
         let _ = request;
         let _ = output_dir;
         Err("Native screen recording is not implemented on this platform yet.".to_string())
@@ -1449,7 +1495,15 @@ fn start_screen_recording_backend(
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
+fn recording_id_from_output_dir(output_dir: &Path) -> Option<String> {
+    output_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn start_xcap_screen_recording_backend(
+    app: &tauri::AppHandle,
     output_dir: &Path,
 ) -> Result<NativeRecordingBackend, String> {
     let video_path = output_dir.join("workflow-recording.avi");
@@ -1470,6 +1524,8 @@ fn start_xcap_screen_recording_backend(
     let (stop_tx, stop_rx) = mpsc::channel();
     let thread_video_path = video_path.clone();
     let thread_output_dir = output_dir.to_path_buf();
+    let thread_app = app.clone();
+    let recording_id = recording_id_from_output_dir(output_dir);
     let join = thread::spawn(move || {
         record_xcap_avi(
             thread_video_path,
@@ -1477,13 +1533,21 @@ fn start_xcap_screen_recording_backend(
             recorder,
             receiver,
             stop_rx,
+            thread_app,
+            recording_id,
         )
     });
-    Ok(NativeRecordingBackend::XcapAvi { stop_tx, join })
+    Ok(NativeRecordingBackend::XcapAvi {
+        stop_tx,
+        join,
+        video_path,
+        output_dir: output_dir.to_path_buf(),
+    })
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 fn start_xcap_window_recording_backend(
+    app: &tauri::AppHandle,
     output_dir: &Path,
     window: xcap::Window,
 ) -> Result<NativeRecordingBackend, String> {
@@ -1491,18 +1555,26 @@ fn start_xcap_window_recording_backend(
     let (stop_tx, stop_rx) = mpsc::channel();
     let thread_video_path = video_path.clone();
     let thread_output_dir = output_dir.to_path_buf();
+    let _ = app;
     let join = thread::spawn(move || {
         record_xcap_window_avi(thread_video_path, thread_output_dir, window, stop_rx)
     });
-    Ok(NativeRecordingBackend::XcapAvi { stop_tx, join })
+    Ok(NativeRecordingBackend::XcapAvi {
+        stop_tx,
+        join,
+        video_path,
+        output_dir: output_dir.to_path_buf(),
+    })
 }
 
 fn start_window_recording_backend(
+    app: &tauri::AppHandle,
     request: &RecordingStartRequest,
     output_dir: &Path,
 ) -> Result<NativeRecordingBackend, String> {
     #[cfg(target_os = "macos")]
     {
+        let _ = app;
         let platform_id = request_capture_window_platform_id(request)?
             .ok_or_else(|| "Select an app window before recording.".to_string())?;
         ensure_capture_window_recordable(platform_id)?;
@@ -1524,11 +1596,12 @@ fn start_window_recording_backend(
         let platform_id = request_capture_window_platform_id(request)?
             .ok_or_else(|| "Select an app window before recording.".to_string())?;
         let window = select_xcap_recordable_window(platform_id)?;
-        start_xcap_window_recording_backend(output_dir, window)
+        start_xcap_window_recording_backend(app, output_dir, window)
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
+        let _ = app;
         let _ = request;
         let _ = output_dir;
         Err("Native window recording is not implemented on this platform yet.".to_string())
@@ -1827,7 +1900,10 @@ fn finish_xcap_avi_artifact(
         let _ = fs::remove_file(&video_path);
         return Err("Native recording did not encode any frames.".to_string());
     }
-    writer.finish()?;
+    if let Err(error) = writer.finish() {
+        let _ = fs::remove_file(&video_path);
+        return Err(error);
+    }
     let metadata = fs::metadata(&video_path).map_err(|error| {
         format!(
             "Native recording artifact is unavailable at {}: {error}",
@@ -1872,6 +1948,8 @@ fn record_xcap_avi(
     recorder: xcap::VideoRecorder,
     receiver: mpsc::Receiver<xcap::Frame>,
     stop_rx: mpsc::Receiver<()>,
+    app: tauri::AppHandle,
+    recording_id: Option<String>,
 ) -> Result<NativeRecordingArtifacts, String> {
     const FPS: u32 = 8;
     let started_at = Instant::now();
@@ -1884,8 +1962,11 @@ fn record_xcap_avi(
     let mut frames_encoded: u64 = 0;
     let mut frames_skipped: u64 = 0;
     let mut encode_error_count: u64 = 0;
+    // Captured instead of early-returning so `recorder.stop()` always runs and a
+    // partial file is removed on the error paths below.
+    let mut loop_error: Option<String> = None;
 
-    loop {
+    'capture: loop {
         if stop_rx.try_recv().is_ok() {
             break;
         }
@@ -1904,12 +1985,13 @@ fn record_xcap_avi(
                 if writer.is_none() {
                     frame_width = Some(frame.width);
                     frame_height = Some(frame.height);
-                    writer = Some(MjpegAviWriter::create(
-                        &video_path,
-                        frame.width,
-                        frame.height,
-                        FPS,
-                    )?);
+                    match MjpegAviWriter::create(&video_path, frame.width, frame.height, FPS) {
+                        Ok(created) => writer = Some(created),
+                        Err(error) => {
+                            loop_error = Some(error);
+                            break 'capture;
+                        }
+                    }
                 }
                 if frame_width != Some(frame.width) || frame_height != Some(frame.height) {
                     frames_skipped = frames_skipped.saturating_add(1);
@@ -1920,23 +2002,41 @@ fn record_xcap_avi(
                     Err(error) => {
                         encode_error_count = encode_error_count.saturating_add(1);
                         if writer.is_none() {
-                            return Err(error);
+                            loop_error = Some(error);
+                            break 'capture;
                         }
                         continue;
                     }
                 };
                 if let Some(writer) = writer.as_mut() {
-                    writer.write_frame(&jpeg)?;
+                    if let Err(error) = writer.write_frame(&jpeg) {
+                        loop_error = Some(error);
+                        break 'capture;
+                    }
                 }
                 frames_encoded = frames_encoded.saturating_add(1);
                 last_frame_at = Some(Instant::now());
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // The OS/capture ended the session out-of-band (no stop was
+                // requested), so notify the frontend before finalizing.
+                if let Some(recording_id) = recording_id.as_deref() {
+                    let _ = app.emit(
+                        "recording://external-stop",
+                        json!({ "recordingId": recording_id }),
+                    );
+                }
+                break;
+            }
         }
     }
 
     let _ = recorder.stop();
+    if let Some(error) = loop_error {
+        let _ = fs::remove_file(&video_path);
+        return Err(error);
+    }
     finish_xcap_avi_artifact(
         video_path,
         output_dir,
@@ -2002,7 +2102,13 @@ fn record_xcap_window_avi(
         if writer.is_none() {
             frame_width = Some(width);
             frame_height = Some(height);
-            writer = Some(MjpegAviWriter::create(&video_path, width, height, FPS)?);
+            match MjpegAviWriter::create(&video_path, width, height, FPS) {
+                Ok(created) => writer = Some(created),
+                Err(error) => {
+                    let _ = fs::remove_file(&video_path);
+                    return Err(error);
+                }
+            }
         }
         if frame_width != Some(width) || frame_height != Some(height) {
             frames_skipped = frames_skipped.saturating_add(1);
@@ -2013,13 +2119,17 @@ fn record_xcap_window_avi(
             Err(error) => {
                 encode_error_count = encode_error_count.saturating_add(1);
                 if writer.is_none() {
+                    let _ = fs::remove_file(&video_path);
                     return Err(error);
                 }
                 continue;
             }
         };
         if let Some(writer) = writer.as_mut() {
-            writer.write_frame(&jpeg)?;
+            if let Err(error) = writer.write_frame(&jpeg) {
+                let _ = fs::remove_file(&video_path);
+                return Err(error);
+            }
         }
         frames_encoded = frames_encoded.saturating_add(1);
     }
@@ -2170,9 +2280,18 @@ fn discard_native_recording_backend(backend: NativeRecordingBackend) {
             }
         }
         #[cfg(any(target_os = "windows", target_os = "linux"))]
-        NativeRecordingBackend::XcapAvi { stop_tx, join, .. } => {
+        NativeRecordingBackend::XcapAvi {
+            stop_tx,
+            join,
+            output_dir,
+            ..
+        } => {
             let _ = stop_tx.send(());
-            let _ = join.join();
+            // A failed finalize leaves only an empty/partial artifact; drop the
+            // output directory rather than accumulating dead recording folders.
+            if matches!(join.join(), Ok(Err(_)) | Err(_)) {
+                let _ = fs::remove_dir_all(&output_dir);
+            }
         }
     }
 }
@@ -2182,7 +2301,7 @@ fn recorder_process_is_active(pid: u32, video_path: &Path) -> bool {
     // Match both process name and output path so a reused PID or unrelated
     // screencapture process is not signalled.
     Command::new("/bin/ps")
-        .args(["-p", &pid.to_string(), "-o", "command="])
+        .args(["-ww", "-p", &pid.to_string(), "-o", "command="])
         .output()
         .ok()
         .filter(|output| output.status.success())
@@ -2903,18 +3022,53 @@ pub async fn recording_start(
     state: tauri::State<'_, RecordingState>,
     request: RecordingStartRequest,
 ) -> Result<RecordingSession, String> {
-    let mut active = state
+    {
+        let mut slot = state
+            .active
+            .lock()
+            .map_err(|_| "recording state poisoned")?;
+        match *slot {
+            RecordingSlot::Idle => *slot = RecordingSlot::Starting,
+            RecordingSlot::Starting | RecordingSlot::Active(_) => {
+                return Err("A workflow recording is already active.".to_string());
+            }
+        }
+    }
+
+    // Reservation acquired; run the blocking capture/spawn work without holding
+    // the state lock so concurrent IPC stays responsive. Any failure must
+    // release the `Starting` reservation back to `Idle`.
+    let started = build_active_recording(&app, request);
+    let mut slot = state
         .active
         .lock()
         .map_err(|_| "recording state poisoned")?;
-    if active.is_some() {
-        return Err("A workflow recording is already active.".to_string());
+    match started {
+        Ok(active) => {
+            let session = active.session.clone();
+            *slot = RecordingSlot::Active(active);
+            Ok(session)
+        }
+        Err(error) => {
+            *slot = RecordingSlot::Idle;
+            Err(error)
+        }
     }
+}
+
+/// Perform the blocking start work (directory creation, start keyframe capture,
+/// backend spawn, marker write) outside the state lock. On any error the freshly
+/// created output directory is removed so empty recording folders do not
+/// accumulate, mirroring the prior in-lock behavior.
+fn build_active_recording(
+    app: &tauri::AppHandle,
+    request: RecordingStartRequest,
+) -> Result<ActiveRecording, String> {
     validate_recording_start_request(&request)?;
     ensure_native_recording_permissions(&request)?;
 
     let id = format!("recording-{}", Uuid::new_v4());
-    let output_root = recording_output_root(&app)?;
+    let output_root = recording_output_root(app)?;
     let output_dir = recording_output_dir(&output_root, &id);
     fs::create_dir_all(&output_dir)
         .map_err(|error| format!("Failed to create recording output directory: {error}"))?;
@@ -2923,7 +3077,7 @@ pub async fn recording_start(
     let keyframes = capture_native_keyframe(&output_dir, "start", 0, 1, capture_window_platform_id)
         .into_iter()
         .collect::<Vec<_>>();
-    let backend = match start_native_recording_backend(&request, &output_dir) {
+    let backend = match start_native_recording_backend(app, &request, &output_dir) {
         Ok(backend) => backend,
         Err(error) => {
             // The recorder never started, so the freshly created output
@@ -2945,16 +3099,15 @@ pub async fn recording_start(
             },
         );
     }
-    *active = Some(ActiveRecording {
-        session: session.clone(),
+    Ok(ActiveRecording {
+        session,
         backend,
         markers: Vec::new(),
         next_keyframe_index: keyframes.len() + 1,
         keyframes,
         capture_window_platform_id,
         started_instant: Instant::now(),
-    });
-    Ok(session)
+    })
 }
 
 #[tauri::command]
@@ -2962,16 +3115,27 @@ pub async fn recording_stop(
     state: tauri::State<'_, RecordingState>,
 ) -> Result<Option<RecordingSession>, String> {
     let active = {
-        let mut guard = state
+        let mut slot = state
             .active
             .lock()
             .map_err(|_| "recording state poisoned")?;
-        guard.take()
-    };
-    let Some(active) = active else {
-        return Ok(None);
+        match std::mem::replace(&mut *slot, RecordingSlot::Idle) {
+            RecordingSlot::Active(active) => active,
+            // A stop racing an in-flight start must not discard the start; put
+            // the reservation back so `recording_start` can still publish it.
+            RecordingSlot::Starting => {
+                *slot = RecordingSlot::Starting;
+                return Ok(None);
+            }
+            RecordingSlot::Idle => return Ok(None),
+        }
     };
     let active_output_dir = active.session.output_dir.clone();
+
+    // Snapshot the recording duration BEFORE finalizing. On macOS finalize
+    // waits on SIGINT and runs avconvert, so taking it afterward would skew the
+    // stop keyframe/trace timestamps toward finalize time, not recording end.
+    let duration_ms = elapsed_marker_ms(active.started_instant);
 
     let artifacts = match stop_native_recording_backend(active.backend) {
         Ok(artifacts) => {
@@ -2990,6 +3154,9 @@ pub async fn recording_stop(
         }
     };
     let mut session = active.session;
+    // The video is finalized on disk. From here, sidecar/metadata writes are
+    // best-effort: a tiny JSON write failure (e.g. disk full) must not discard a
+    // perfectly good recording, so each falls back to its default on error.
     session.artifact_url = Some(file_url(&artifacts.video_path)?);
     session.mime_type = Some(artifacts.mime_type);
     session.size_bytes = Some(artifacts.size_bytes);
@@ -2999,19 +3166,18 @@ pub async fn recording_stop(
     }
     session.marker_count = Some(active.markers.len() as u64);
     session.redacted_event_count = Some(0);
-    let duration_ms = elapsed_marker_ms(active.started_instant);
-    if let Some((trace_path, trace_event_count)) = write_native_trace(
-        &artifacts.output_dir,
-        &session,
-        &active.markers,
-        duration_ms,
-    )? {
-        session.trace_artifact_url = Some(file_url(&trace_path)?);
-        session.trace_event_count = Some(trace_event_count as u64);
-        session.trace_truncated = Some(false);
-    } else {
-        session.trace_event_count = Some(0);
-        session.trace_truncated = Some(false);
+    session.trace_event_count = Some(0);
+    session.trace_truncated = Some(false);
+    match write_native_trace(&artifacts.output_dir, &session, &active.markers, duration_ms) {
+        Ok(Some((trace_path, trace_event_count))) => match file_url(&trace_path) {
+            Ok(url) => {
+                session.trace_artifact_url = Some(url);
+                session.trace_event_count = Some(trace_event_count as u64);
+            }
+            Err(error) => log::warn!("Failed to resolve recording trace URL: {error}"),
+        },
+        Ok(None) => {}
+        Err(error) => log::warn!("Failed to write recording trace: {error}"),
     }
     session.transcript_segment_count = Some(0);
     let mut keyframes = active.keyframes;
@@ -3026,18 +3192,28 @@ pub async fn recording_stop(
             keyframes.push(stop_frame);
         }
     }
-    if let Some(keyframe_path) = write_native_keyframe_manifest(&artifacts.output_dir, &keyframes)?
-    {
-        session.keyframe_artifact_url = Some(file_url(&keyframe_path)?);
-        session.keyframe_count = Some(keyframes.len() as u64);
-    } else {
-        session.keyframe_count = Some(0);
+    session.keyframe_count = Some(0);
+    match write_native_keyframe_manifest(&artifacts.output_dir, &keyframes) {
+        Ok(Some(keyframe_path)) => match file_url(&keyframe_path) {
+            Ok(url) => {
+                session.keyframe_artifact_url = Some(url);
+                session.keyframe_count = Some(keyframes.len() as u64);
+            }
+            Err(error) => log::warn!("Failed to resolve recording keyframe URL: {error}"),
+        },
+        Ok(None) => {}
+        Err(error) => log::warn!("Failed to write recording keyframe manifest: {error}"),
     }
     let (quality_status, quality_checks) = recording_quality(&session);
     session.quality_status = Some(quality_status);
     session.quality_checks = Some(quality_checks);
-    let metadata_path = write_recording_metadata(&artifacts.output_dir, &session)?;
-    session.metadata_artifact_url = Some(file_url(&metadata_path)?);
+    match write_recording_metadata(&artifacts.output_dir, &session) {
+        Ok(metadata_path) => match file_url(&metadata_path) {
+            Ok(url) => session.metadata_artifact_url = Some(url),
+            Err(error) => log::warn!("Failed to resolve recording metadata URL: {error}"),
+        },
+        Err(error) => log::warn!("Failed to write recording metadata: {error}"),
+    }
     Ok(Some(session))
 }
 
@@ -3047,11 +3223,11 @@ pub async fn recording_add_marker(
     kind: RecordingMarkerKind,
 ) -> Result<(), String> {
     let (recording_id, needs_frontmost_context) = {
-        let active = state
+        let slot = state
             .active
             .lock()
             .map_err(|_| "recording state poisoned")?;
-        let Some(active) = active.as_ref() else {
+        let RecordingSlot::Active(active) = &*slot else {
             return Err("No workflow recording is active.".to_string());
         };
         (
@@ -3065,16 +3241,16 @@ pub async fn recording_add_marker(
         None
     };
     let pending_keyframe = {
-        let mut active = state
+        let mut slot = state
             .active
             .lock()
             .map_err(|_| "recording state poisoned")?;
-        let Some(active) = active
-            .as_mut()
-            .filter(|active| active.session.id == recording_id)
-        else {
+        let RecordingSlot::Active(active) = &mut *slot else {
             return Err("No workflow recording is active.".to_string());
         };
+        if active.session.id != recording_id {
+            return Err("No workflow recording is active.".to_string());
+        }
         let context = recording_marker_action_context(active, fallback_context);
         let t_ms = elapsed_marker_ms(active.started_instant);
         active.markers.push(RecordingMarker {
@@ -3110,16 +3286,20 @@ pub async fn recording_add_marker(
             index,
             capture_window_platform_id,
         ) {
-            let mut active = state
+            let mut slot = state
                 .active
                 .lock()
                 .map_err(|_| "recording state poisoned")?;
-            if let Some(active) = active.as_mut().filter(|active| {
-                active.session.id == recording_id && active.keyframes.len() < MAX_NATIVE_KEYFRAMES
-            }) {
-                active.keyframes.push(frame);
-            } else {
-                let _ = fs::remove_file(output_dir.join(&frame.file_name));
+            match &mut *slot {
+                RecordingSlot::Active(active)
+                    if active.session.id == recording_id
+                        && active.keyframes.len() < MAX_NATIVE_KEYFRAMES =>
+                {
+                    active.keyframes.push(frame);
+                }
+                _ => {
+                    let _ = fs::remove_file(output_dir.join(&frame.file_name));
+                }
             }
         }
     }
@@ -3270,12 +3450,14 @@ pub async fn recording_delete_local(
 ) -> Result<(), String> {
     validate_local_recording_id(&id)?;
     {
-        let active = state
+        let slot = state
             .active
             .lock()
             .map_err(|_| "recording state poisoned")?;
-        if active.as_ref().map(|active| active.session.id.as_str()) == Some(id.as_str()) {
-            return Err("Stop the active recording before deleting it.".to_string());
+        if let RecordingSlot::Active(active) = &*slot {
+            if active.session.id == id {
+                return Err("Stop the active recording before deleting it.".to_string());
+            }
         }
     }
     let root = recording_output_root(&app)?;
@@ -4760,5 +4942,19 @@ mod tests {
 
         assert!(!preview_root.join("window-preview-1.png").exists());
         assert!(root.path().join("window-preview-2.png").exists());
+    }
+
+    #[test]
+    fn recording_slot_take_active_preserves_non_active_states() {
+        // An idle slot yields nothing and stays idle.
+        let mut idle = RecordingSlot::Idle;
+        assert!(idle.take_active().is_none());
+        assert!(matches!(idle, RecordingSlot::Idle));
+
+        // A stop racing an in-flight start must not consume the reservation, so
+        // `recording_start` can still publish the recording it is preparing.
+        let mut starting = RecordingSlot::Starting;
+        assert!(starting.take_active().is_none());
+        assert!(matches!(starting, RecordingSlot::Starting));
     }
 }

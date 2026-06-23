@@ -47,6 +47,7 @@ import {
   type SkillSyncState,
   type SkillSyncStatus,
 } from "@/lib/skills";
+import { captureSupportError } from "@/lib/support/hook";
 import { getDefaultOrganizationId, isTauriRuntime } from "@/lib/tauri-bridge";
 
 const LEGACY_INDEX_CACHE_KEY = "seren:skills_index";
@@ -115,6 +116,26 @@ function normalizeOrgFolderSlug(value: string, organizationId: string): string {
   return normalized || fallback;
 }
 
+/**
+ * Surface a public-publish preflight failure that is NOT a user-actionable
+ * validation error (e.g. a Gateway 5xx or network fault). Reports it to the
+ * support pipeline before rethrowing so an operator gets a ticket, while the
+ * UI still receives the thrown error. Validation errors (403 admin, 409
+ * slug-in-use, missing email) are thrown directly by the callers and are never
+ * routed here.
+ */
+function failPublicPublishPreflight(
+  kind: string,
+  message: string,
+  status: number | undefined,
+): never {
+  void captureSupportError({
+    kind,
+    message: status ? `${message} (status=${status})` : message,
+  });
+  throw new Error(message);
+}
+
 async function resolveDefaultOrgFolderSlug(
   organizationId: string,
 ): Promise<string> {
@@ -122,8 +143,11 @@ async function resolveDefaultOrgFolderSlug(
     throwOnError: false,
   });
   if (error) {
-    const status = response ? `: ${response.status}` : "";
-    throw new Error(`Failed to load organization folder details${status}`);
+    failPublicPublishPreflight(
+      "SkillPublishOrgFolderLoadFailure",
+      "Failed to load organization folder details",
+      response?.status,
+    );
   }
 
   const organization = data?.data?.find((org) => org.id === organizationId);
@@ -161,8 +185,11 @@ async function createOrgFolderForPublicPublish(
     );
   }
 
-  const status = response ? `: ${response.status}` : "";
-  throw new Error(`Failed to create organization skill folder${status}`);
+  failPublicPublishPreflight(
+    "SkillPublishOrgFolderCreateFailure",
+    "Failed to create organization skill folder",
+    response?.status,
+  );
 }
 
 async function assertOrgFolderConfiguredForPublicPublish(
@@ -193,8 +220,11 @@ async function assertOrgFolderConfiguredForPublicPublish(
     );
   }
 
-  const status = response ? `: ${response.status}` : "";
-  throw new Error(`Failed to verify organization skill folder${status}`);
+  failPublicPublishPreflight(
+    "SkillPublishOrgFolderVerifyFailure",
+    "Failed to verify organization skill folder",
+    response?.status,
+  );
 }
 
 async function ensureAuthorIdentityForPublicPublish(
@@ -205,18 +235,22 @@ async function ensureAuthorIdentityForPublicPublish(
   const existingIdentity = await getAuthorIdentity({ throwOnError: false });
   if (!existingIdentity.error) return;
   if (existingIdentity.response?.status !== 404) {
-    const status = existingIdentity.response
-      ? `: ${existingIdentity.response.status}`
-      : "";
-    throw new Error(`Failed to verify Git author identity${status}`);
+    failPublicPublishPreflight(
+      "SkillPublishAuthorIdentityVerifyFailure",
+      "Failed to verify Git author identity",
+      existingIdentity.response?.status,
+    );
   }
 
   const { data, error, response } = await getCurrentUser({
     throwOnError: false,
   });
   if (error || !data?.data) {
-    const status = response ? `: ${response.status}` : "";
-    throw new Error(`Failed to load Git author identity details${status}`);
+    failPublicPublishPreflight(
+      "SkillPublishAuthorIdentityLoadFailure",
+      "Failed to load Git author identity details",
+      response?.status,
+    );
   }
 
   const accountName = `${data.data.name ?? ""}`.trim();
@@ -237,8 +271,11 @@ async function ensureAuthorIdentityForPublicPublish(
     throwOnError: false,
   });
   if (upserted.error) {
-    const status = upserted.response ? `: ${upserted.response.status}` : "";
-    throw new Error(`Failed to configure Git author identity${status}`);
+    failPublicPublishPreflight(
+      "SkillPublishAuthorIdentityUpsertFailure",
+      "Failed to configure Git author identity",
+      upserted.response?.status,
+    );
   }
 }
 
