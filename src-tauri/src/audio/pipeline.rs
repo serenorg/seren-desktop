@@ -18,7 +18,7 @@ use crate::audio::apm::{ApmDiagnostics, MeetingAudioProcessor};
 use crate::audio::capture::{AudioCaptureSource, CaptureError, PcmFrame, TARGET_SAMPLE_RATE};
 use crate::audio::chunker::{Chunk, ChunkCfg, StreamingChunker};
 use crate::audio::transcribe::{
-    ChunkTranscriber, GatewayTranscriber, RetryConfig, TranscriptionMode,
+    ChunkTranscriber, GatewayTranscriber, RetryConfig, TranscribeError, TranscriptionMode,
     transcribe_chunk_with_retry,
 };
 use crate::audio::types::{SegmentStatus, Speaker, SpeakerSource, TranscriptSegment};
@@ -58,6 +58,12 @@ pub struct CaptureStopSummary {
     pub chunk_count: u64,
     pub emitted_segment_count: u64,
     pub emitted_gap_count: u64,
+    /// The most recent transport-level transcription failure (e.g. an upstream
+    /// `429 insufficient_quota`) seen during the capture, if any. `None` when no
+    /// chunk hit a backend error — an empty transcript was genuine silence, not
+    /// a service outage. Lets the stop path name the real cause instead of a
+    /// generic "no words transcribed" guess.
+    pub transcription_error: Option<String>,
     pub apm: ApmDiagnostics,
 }
 
@@ -77,6 +83,8 @@ pub struct CaptureStreamStats {
     chunk_count: AtomicU64,
     emitted_segment_count: AtomicU64,
     emitted_gap_count: AtomicU64,
+    transport_failure_count: AtomicU64,
+    last_transport_error: StdMutex<Option<String>>,
 }
 
 #[derive(Default)]
@@ -124,6 +132,25 @@ impl CaptureStreamStats {
         self.emitted_gap_count.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record a chunk's transcription failure. Only transport-level errors
+    /// (network/auth/quota/5xx) are kept as the surfaced cause; a terminal
+    /// `Empty` is genuine silence, not a service outage, so it stays a plain
+    /// gap. The first transport failure of a capture logs once at WARN; the
+    /// rest update the stored cause without spamming the log (a sustained
+    /// outage can fail every chunk).
+    fn record_transcription_failure(&self, err: &TranscribeError) {
+        let TranscribeError::Transport(detail) = err else {
+            return;
+        };
+        let first = self.transport_failure_count.fetch_add(1, Ordering::Relaxed) == 0;
+        *self.last_transport_error.lock().unwrap() = Some(detail.clone());
+        if first {
+            log::warn!(
+                "[meeting] transcription transport error (further errors this capture are counted but not re-logged): {detail}"
+            );
+        }
+    }
+
     fn summary(
         &self,
         had_capture: bool,
@@ -152,6 +179,7 @@ impl CaptureStreamStats {
             chunk_count: self.chunk_count.load(Ordering::Relaxed),
             emitted_segment_count: self.emitted_segment_count.load(Ordering::Relaxed),
             emitted_gap_count: self.emitted_gap_count.load(Ordering::Relaxed),
+            transcription_error: self.last_transport_error.lock().unwrap().clone(),
             apm,
         }
     }
@@ -281,9 +309,12 @@ async fn emit_segment(
                 stats.record_ok_segment();
             }
         }
-        Err(_) => {
+        Err(err) => {
             // A failed window becomes a single Gap spanning the chunk so audio is
-            // never silently dropped.
+            // never silently dropped. Record the cause so a backend outage
+            // (quota/auth/5xx) surfaces in the stop summary instead of looking
+            // like silence.
+            stats.record_transcription_failure(&err);
             let segment = TranscriptSegment {
                 id: Uuid::new_v4().to_string(),
                 meeting_id: meeting_id.to_string(),
@@ -1013,7 +1044,7 @@ impl CaptureRegistry {
             apm,
         );
         log::info!(
-            "[meeting] capture stop summary for {meeting_id}: native_mic_ready={} system_audio_ready={} apm_ready={} mic_source_frames={} system_source_frames={} push_frames={} accepted_push_frames={} dropped_push_frames={} dropped_push_samples={} frames={} speech_frames={} chunks={} emitted_segments={} emitted_gaps={}",
+            "[meeting] capture stop summary for {meeting_id}: native_mic_ready={} system_audio_ready={} apm_ready={} mic_source_frames={} system_source_frames={} push_frames={} accepted_push_frames={} dropped_push_frames={} dropped_push_samples={} frames={} speech_frames={} chunks={} emitted_segments={} emitted_gaps={} transcription_error={:?}",
             summary.native_mic_ready,
             summary.system_audio_ready,
             summary.apm_ready,
@@ -1027,7 +1058,8 @@ impl CaptureRegistry {
             summary.speech_frame_count,
             summary.chunk_count,
             summary.emitted_segment_count,
-            summary.emitted_gap_count
+            summary.emitted_gap_count,
+            summary.transcription_error
         );
         // The workers have flushed: take the buffered Them PCM out of the capture
         // (before it drops) and hand it to the post-call diarization pass. Done
@@ -1248,6 +1280,43 @@ mod tests {
         assert_eq!(summary.chunk_count, 1);
         assert_eq!(summary.emitted_segment_count, 1);
         assert_eq!(summary.emitted_gap_count, 1);
+        // Empty is genuine silence, not a service outage: no surfaced cause.
+        assert_eq!(summary.transcription_error, None);
+    }
+
+    #[test]
+    fn transport_failure_surfaces_in_summary_but_empty_does_not() {
+        // #2606: a terminal Empty stays a plain gap (real silence), but a
+        // transport failure (quota/auth/5xx) is the actionable cause and must
+        // surface so the stop path can name it instead of blaming the user.
+        let stats = CaptureStreamStats::default();
+
+        stats.record_transcription_failure(&TranscribeError::Empty);
+        let summary = stats.summary(
+            true,
+            CaptureIngressSummary::default(),
+            &CaptureSourceStats::default(),
+            true,
+            false,
+            ApmDiagnostics::default(),
+        );
+        assert_eq!(summary.transcription_error, None);
+
+        stats.record_transcription_failure(&TranscribeError::Transport(
+            "whisper upstream 429: insufficient_quota".to_string(),
+        ));
+        let summary = stats.summary(
+            true,
+            CaptureIngressSummary::default(),
+            &CaptureSourceStats::default(),
+            true,
+            false,
+            ApmDiagnostics::default(),
+        );
+        assert_eq!(
+            summary.transcription_error.as_deref(),
+            Some("whisper upstream 429: insufficient_quota")
+        );
     }
 
     #[test]

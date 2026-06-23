@@ -614,6 +614,7 @@ pub async fn stop_meeting_capture(
         apm: summary.apm.clone(),
         capture_diagnostics_json: capture_diagnostics_json.clone(),
         failure_reason: failure_reason.clone(),
+        transcription_error: summary.transcription_error.clone(),
     };
     if preserve_existing_failure {
         return Ok(outcome);
@@ -730,6 +731,10 @@ pub struct StopMeetingCaptureOutcome {
     pub apm: crate::audio::apm::ApmDiagnostics,
     pub capture_diagnostics_json: String,
     pub failure_reason: Option<String>,
+    /// The most recent transport-level transcription failure (quota/auth/5xx),
+    /// if any. Present only on a genuine backend outage; the frontend opens a
+    /// support ticket when it is set, and never for benign empty captures.
+    pub transcription_error: Option<String>,
 }
 
 fn capture_start_diagnostics_json(started: bool, error: Option<&str>) -> String {
@@ -778,6 +783,7 @@ fn capture_stop_diagnostics_json(
         "persistedSegmentCount": persisted_segment_count,
         "persistedTextSegmentCount": persisted_text_segment_count,
         "failureReason": failure_reason,
+        "transcriptionError": summary.transcription_error,
         "apm": summary.apm,
         "updatedAt": now_ms(),
     })
@@ -833,6 +839,11 @@ fn stop_capture_failure_reason(
             "Audio reached Meeting capture, but it was too short or quiet to transcribe. Speak for a few seconds, then start capture again."
                 .to_string(),
         );
+    }
+    if let Some(cause) = summary.transcription_error.as_deref() {
+        return Some(format!(
+            "Audio reached transcription, but the speech-to-text service kept returning an error ({cause}). This is a service-side problem, not your audio. Try again once the service recovers."
+        ));
     }
     if persisted_segment_count == 0 {
         return Some(
@@ -1797,6 +1808,32 @@ mod tests {
         };
 
         assert_eq!(stop_capture_failure_reason(&summary, 1, 1), None);
+    }
+
+    #[test]
+    fn stop_capture_failure_reason_names_backend_transcription_error() {
+        // Every chunk failed transcription (the #2606 quota outage): chunks were
+        // produced but no text persisted, and a transport error was recorded.
+        // The reason must name the service cause, not blame the user's audio.
+        let summary = crate::audio::pipeline::CaptureStopSummary {
+            had_capture: true,
+            frame_count: 18_207,
+            sample_count: 18_207 * 320,
+            speech_frame_count: 4_336,
+            chunk_count: 44,
+            emitted_segment_count: 44,
+            emitted_gap_count: 44,
+            transcription_error: Some(
+                "transcription transport failed: whisper upstream 429: insufficient_quota"
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+
+        let reason = stop_capture_failure_reason(&summary, 0, 0).unwrap();
+
+        assert!(reason.contains("service-side problem"));
+        assert!(reason.contains("insufficient_quota"));
     }
 
     #[test]

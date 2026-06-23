@@ -225,6 +225,9 @@ export interface CaptureStopOutcome {
   };
   captureDiagnosticsJson: string;
   failureReason?: string | null;
+  // Set only when a transport-level transcription failure (quota/auth/5xx) was
+  // seen during capture. Drives the support ticket; absent for benign silence.
+  transcriptionError?: string | null;
 }
 
 export function stopMeetingCapture(
