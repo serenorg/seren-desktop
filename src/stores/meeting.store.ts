@@ -605,6 +605,22 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
         meetingId: meeting.id,
         outcome: stopOutcome,
       });
+      // A transport-level transcription failure (quota/auth/5xx) is a
+      // service-side outage, not a benign empty capture — route it through the
+      // support pipeline so a serenorg/seren-desktop ticket opens. console.error
+      // is local-only (per `feedback_support_pipeline.md`); only a real backend
+      // error reaches here, never plain silence. #2606.
+      if (stopOutcome.transcriptionError) {
+        void captureSupportError({
+          kind: "meeting_transcription_failed",
+          message: `meeting transcription backend failed for ${meeting.id}: ${stopOutcome.transcriptionError}`,
+          http: {
+            method: "POST",
+            url: "https://api.serendb.com/publishers/seren-whisper/audio/transcriptions",
+            body: stopOutcome.transcriptionError,
+          },
+        });
+      }
       await failMeeting(meeting.id, stopOutcome.failureReason, null);
       return;
     }
