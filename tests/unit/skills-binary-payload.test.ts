@@ -25,12 +25,16 @@ vi.mock("@/lib/runtime-console", () => ({
 }));
 
 vi.mock("@/api/seren-skills", () => ({
+  createOrgFolder: vi.fn(),
   createSkill: vi.fn(),
   createVersion: vi.fn(),
   deleteSkill: vi.fn(),
   downloadSkill: mockDownloadSkill,
+  getAuthorIdentity: vi.fn(),
+  getOrgFolder: vi.fn(),
   listSkills: vi.fn(),
   updateSkill: vi.fn(),
+  upsertAuthorIdentity: vi.fn(),
 }));
 
 import { skills } from "@/services/skills";

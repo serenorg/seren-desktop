@@ -8,8 +8,12 @@ const mockDownloadSkill = vi.hoisted(() => vi.fn());
 let storage: Map<string, string>;
 
 vi.mock("@/api/seren-skills", () => ({
+  createOrgFolder: vi.fn(),
   downloadSkill: mockDownloadSkill,
+  getAuthorIdentity: vi.fn(),
+  getOrgFolder: vi.fn(),
   listSkills: mockListSkills,
+  upsertAuthorIdentity: vi.fn(),
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -20,7 +24,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
-function skillSummary(slug: string) {
+function skillSummary(slug: string, tags: string[] = []) {
   return {
     created_at: "2026-01-01T00:00:00Z",
     created_by_user_id: "user-1",
@@ -43,6 +47,7 @@ function skillSummary(slug: string) {
     sponsor_static: null,
     status: "published",
     updated_at: "2026-01-01T00:00:00Z",
+    tags,
     visibility: "public",
   };
 }
@@ -89,6 +94,27 @@ describe("skills.fetchIndex via Seren Skills API", () => {
     expect(mockListSkills.mock.calls[1][0]).toMatchObject({
       query: { limit: 100, offset: 1 },
     });
+  });
+
+  it("preserves frontmatter tags from catalog summaries", async () => {
+    mockListSkills.mockResolvedValueOnce({
+      data: {
+        skills: [skillSummary("recorded-workflow", ["recorded", "unverified"])],
+        total: 1,
+      },
+    });
+
+    const { skills } = await import("@/services/skills");
+    const result = await skills.fetchIndex(true);
+
+    expect(result[0]?.tags).toEqual(
+      expect.arrayContaining([
+        "recorded",
+        "unverified",
+        "public",
+        "published",
+      ]),
+    );
   });
 
   it("carries skill_folder_name through as skillFolderName", async () => {

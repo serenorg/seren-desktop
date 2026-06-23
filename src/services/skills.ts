@@ -3,13 +3,20 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import {
+  getCurrentUser,
+  listOrganizations as listCoreOrganizations,
+} from "@/api";
+import {
   type BundleFileInput,
+  createOrgFolder,
   createSkill,
   createVersion,
   deleteSkill,
   downloadSkill,
   downloadSkillFile,
   downloadSkillManifest,
+  getAuthorIdentity,
+  getOrgFolder,
   listSkills,
   type SkillBundle,
   type SkillBundleFile,
@@ -17,6 +24,7 @@ import {
   type SkillBundleManifest,
   type SkillSummary,
   updateSkill,
+  upsertAuthorIdentity,
 } from "@/api/seren-skills";
 import { log } from "@/lib/logger";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
@@ -39,7 +47,7 @@ import {
   type SkillSyncState,
   type SkillSyncStatus,
 } from "@/lib/skills";
-import { isTauriRuntime } from "@/lib/tauri-bridge";
+import { getDefaultOrganizationId, isTauriRuntime } from "@/lib/tauri-bridge";
 
 const LEGACY_INDEX_CACHE_KEY = "seren:skills_index";
 const INDEX_CACHE_KEY = "seren:skills_index:v2";
@@ -89,6 +97,151 @@ type DownloadedSkillBundle = SkillBundle & {
   payloadTotalBytes?: number;
 };
 
+function isPublicDistributionVisibility(
+  visibility: "private" | "public" | "paid" | undefined,
+): boolean {
+  return visibility === "public" || visibility === "paid";
+}
+
+function normalizeOrgFolderSlug(value: string, organizationId: string): string {
+  const fallback = `org-${organizationId.slice(0, 8)}`;
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 96)
+    .replace(/^-|-$/g, "");
+  return normalized || fallback;
+}
+
+async function resolveDefaultOrgFolderSlug(
+  organizationId: string,
+): Promise<string> {
+  const { data, error, response } = await listCoreOrganizations({
+    throwOnError: false,
+  });
+  if (error) {
+    const status = response ? `: ${response.status}` : "";
+    throw new Error(`Failed to load organization folder details${status}`);
+  }
+
+  const organization = data?.data?.find((org) => org.id === organizationId);
+  if (!organization) {
+    throw new Error(
+      "Public or paid skills require the default organization to be available before publishing.",
+    );
+  }
+
+  return normalizeOrgFolderSlug(
+    organization.slug || organization.name,
+    organizationId,
+  );
+}
+
+async function createOrgFolderForPublicPublish(
+  organizationId: string,
+): Promise<void> {
+  const folderSlug = await resolveDefaultOrgFolderSlug(organizationId);
+  const { error, response } = await createOrgFolder({
+    path: { org_id: organizationId },
+    body: { folder_slug: folderSlug },
+    throwOnError: false,
+  });
+  if (!error) return;
+
+  if (response?.status === 403) {
+    throw new Error(
+      "You do not have permission to create the organization skill folder. Ask an organization admin before publishing publicly.",
+    );
+  }
+  if (response?.status === 409) {
+    throw new Error(
+      `The organization skill folder "${folderSlug}" is already used. Configure a different organization folder before publishing.`,
+    );
+  }
+
+  const status = response ? `: ${response.status}` : "";
+  throw new Error(`Failed to create organization skill folder${status}`);
+}
+
+async function assertOrgFolderConfiguredForPublicPublish(
+  visibility: "private" | "public" | "paid" | undefined,
+): Promise<void> {
+  if (!isPublicDistributionVisibility(visibility)) return;
+
+  const organizationId = await getDefaultOrganizationId();
+  if (!organizationId) {
+    throw new Error(
+      "Public or paid skills require a default organization before publishing.",
+    );
+  }
+
+  const { error, response } = await getOrgFolder({
+    path: { org_id: organizationId },
+    throwOnError: false,
+  });
+  if (!error) return;
+
+  if (response?.status === 404 || response?.status === 409) {
+    await createOrgFolderForPublicPublish(organizationId);
+    return;
+  }
+  if (response?.status === 403) {
+    throw new Error(
+      "You do not have permission to inspect the organization skill folder. Ask an organization admin before publishing publicly.",
+    );
+  }
+
+  const status = response ? `: ${response.status}` : "";
+  throw new Error(`Failed to verify organization skill folder${status}`);
+}
+
+async function ensureAuthorIdentityForPublicPublish(
+  visibility: "private" | "public" | "paid" | undefined,
+): Promise<void> {
+  if (!isPublicDistributionVisibility(visibility)) return;
+
+  const existingIdentity = await getAuthorIdentity({ throwOnError: false });
+  if (!existingIdentity.error) return;
+  if (existingIdentity.response?.status !== 404) {
+    const status = existingIdentity.response
+      ? `: ${existingIdentity.response.status}`
+      : "";
+    throw new Error(`Failed to verify Git author identity${status}`);
+  }
+
+  const { data, error, response } = await getCurrentUser({
+    throwOnError: false,
+  });
+  if (error || !data?.data) {
+    const status = response ? `: ${response.status}` : "";
+    throw new Error(`Failed to load Git author identity details${status}`);
+  }
+
+  const accountName = `${data.data.name ?? ""}`.trim();
+  const accountEmail = `${data.data.email ?? ""}`.trim();
+  const displayName = accountName || accountEmail;
+  const gitEmail = accountEmail;
+  if (!displayName || !gitEmail) {
+    throw new Error(
+      "Public or paid skills require an account name and email for Git author attribution.",
+    );
+  }
+
+  const upserted = await upsertAuthorIdentity({
+    body: {
+      display_name: displayName,
+      git_email: gitEmail,
+    },
+    throwOnError: false,
+  });
+  if (upserted.error) {
+    const status = upserted.response ? `: ${upserted.response.status}` : "";
+    throw new Error(`Failed to configure Git author identity${status}`);
+  }
+}
+
 export interface InstallResult {
   installed: InstalledSkill;
   missingFiles: string[];
@@ -115,6 +268,7 @@ export interface EnabledSkillsContentOptions {
  * specific SKILL.md is missing display metadata.
  */
 function skillSummaryToSkill(summary: SkillSummary): Skill {
+  const frontmatterTags = (summary.tags ?? []).filter((tag) => tag.length > 0);
   return {
     id: `seren:${summary.slug}`,
     slug: summary.slug,
@@ -123,9 +277,14 @@ function skillSummaryToSkill(summary: SkillSummary): Skill {
     description: summary.description,
     source: "seren",
     sourceUrl: `seren-skills:${summary.slug}`,
-    tags: [summary.visibility, summary.discoverability, summary.status].filter(
-      Boolean,
-    ),
+    tags: [
+      ...new Set([
+        ...frontmatterTags,
+        summary.visibility,
+        summary.discoverability,
+        summary.status,
+      ]),
+    ],
     version: summary.current_version ?? undefined,
     lastModified: summary.updated_at,
     publisher: {
@@ -1396,7 +1555,7 @@ export const skills = {
             displayName: parsed.metadata.displayName,
             description: parsed.metadata.description || "",
             source: "local" as SkillSource,
-            tags: [],
+            tags: parsed.metadata.tags ?? [],
             excludeHosts: parsed.metadata.excludeHosts,
             scope,
             skillsDir,
@@ -2037,6 +2196,8 @@ export const skills = {
       discoverability?: "listed" | "unlisted";
     },
   ): Promise<void> {
+    await assertOrgFolderConfiguredForPublicPublish(patch.visibility);
+    await ensureAuthorIdentityForPublicPublish(patch.visibility);
     const { error, response } = await updateSkill({
       path: { slug },
       body: patch,
@@ -2070,6 +2231,8 @@ export const skills = {
       throw new Error(`Could not read SKILL.md for ${skill.slug}`);
     }
     const files = await collectPayloadFiles(skill);
+    await assertOrgFolderConfiguredForPublicPublish(options.visibility);
+    await ensureAuthorIdentityForPublicPublish(options.visibility);
     const { data, error, response } = await createSkill({
       body: {
         slug: skill.slug,
@@ -2115,6 +2278,10 @@ export const skills = {
       throw new Error(`Could not read SKILL.md for ${skill.slug}`);
     }
     const files = await collectPayloadFiles(skill);
+    await assertOrgFolderConfiguredForPublicPublish(
+      skill.publisher?.visibility,
+    );
+    await ensureAuthorIdentityForPublicPublish(skill.publisher?.visibility);
     const { error, response } = await createVersion({
       path: { slug: skill.slug },
       body: {

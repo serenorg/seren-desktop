@@ -6,12 +6,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockInvoke = vi.hoisted(() => vi.fn());
 
 vi.mock("@/api/seren-skills", () => ({
+  createOrgFolder: vi.fn(),
   listSkills: vi.fn(),
   downloadSkill: vi.fn(),
   createSkill: vi.fn(),
   createVersion: vi.fn(),
   deleteSkill: vi.fn(),
   updateSkill: vi.fn(),
+  getAuthorIdentity: vi.fn(),
+  getOrgFolder: vi.fn(),
+  upsertAuthorIdentity: vi.fn(),
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -70,7 +74,7 @@ describe("skills.listAllInstalled dedupes overlapping directories", () => {
     const authoringDir = "/Users/u/Documents/Seren/skills";
     dirContents.set(authoringDir, {
       "test-skill":
-        "---\nname: test-skill\ndescription: A skill\n---\n\n# Test\n",
+        '---\nname: test-skill\ndescription: A skill\nmetadata:\n  tags: "recorded unverified"\n---\n\n# Test\n',
     });
 
     mockInvoke.mockImplementation(
@@ -91,6 +95,7 @@ describe("skills.listAllInstalled dedupes overlapping directories", () => {
     expect(result[0]).toMatchObject({
       slug: "test-skill",
       scope: "seren",
+      tags: ["recorded", "unverified"],
       path: `${authoringDir}/test-skill/SKILL.md`,
     });
   });

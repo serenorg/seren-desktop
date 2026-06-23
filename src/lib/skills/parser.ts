@@ -76,12 +76,13 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
   const lines = yaml.split("\n");
   let currentKey: string | null = null;
   let inArray = false;
+  let parentKey: string | null = null;
 
   for (const line of lines) {
     const trimmedLine = line.trim();
 
-    // Skip empty lines, comments, and indented lines (metadata sub-keys)
-    if (!trimmedLine || trimmedLine.startsWith("#") || line.startsWith(" ")) {
+    // Skip empty lines and comments.
+    if (!trimmedLine || trimmedLine.startsWith("#")) {
       continue;
     }
 
@@ -91,8 +92,8 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
         .slice(2)
         .trim()
         .replace(/^["']|["']$/g, "");
-      if (currentKey === "tags") {
-        metadata.tags = [...(metadata.tags ?? []), value];
+      if (currentKey === "tags" || currentKey === "metadata.tags") {
+        metadata.tags = mergeTags(metadata.tags, [value]);
       }
       if (currentKey === "requires") {
         metadata.requires = [...(metadata.requires ?? []), value];
@@ -112,15 +113,48 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
       continue;
     }
 
+    if (parentKey === "metadata" && line.startsWith(" ")) {
+      const colonIndex = trimmedLine.indexOf(":");
+      if (colonIndex <= 0) {
+        continue;
+      }
+      const key = trimmedLine.slice(0, colonIndex).trim();
+      const value = trimmedLine.slice(colonIndex + 1).trim();
+      currentKey = `metadata.${key}`;
+
+      if (!value || value === "[]") {
+        inArray = true;
+        if (key === "tags") metadata.tags = [];
+        continue;
+      }
+
+      inArray = false;
+      if (key === "tags") {
+        metadata.tags = mergeTags(metadata.tags, parseTagValue(value));
+      }
+      continue;
+    }
+
+    // Skip indented sub-keys other than supported metadata entries.
+    if (line.startsWith(" ")) {
+      continue;
+    }
+
     // Check for key-value pair
     const colonIndex = trimmedLine.indexOf(":");
     if (colonIndex > 0) {
       const key = trimmedLine.slice(0, colonIndex).trim();
       const value = trimmedLine.slice(colonIndex + 1).trim();
       currentKey = key;
+      parentKey = null;
 
       // Check if this is the start of an array (empty value or explicit array)
       if (!value || value === "[]") {
+        if (key === "metadata") {
+          parentKey = "metadata";
+          inArray = false;
+          continue;
+        }
         inArray = true;
         if (key === "tags") metadata.tags = [];
         if (key === "requires") metadata.requires = [];
@@ -179,6 +213,31 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
   }
 
   return metadata;
+}
+
+function parseTagValue(value: string): string[] {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return trimmed
+      .slice(1, -1)
+      .split(",")
+      .map((item) => item.trim().replace(/^["']|["']$/g, ""))
+      .filter(Boolean);
+  }
+
+  return trimmed
+    .replace(/^["']|["']$/g, "")
+    .split(/[,\s]+/)
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function mergeTags(
+  current: string[] | undefined,
+  next: string[],
+): string[] | undefined {
+  const tags = [...(current ?? []), ...next].filter(Boolean);
+  return tags.length > 0 ? Array.from(new Set(tags)) : undefined;
 }
 
 /**

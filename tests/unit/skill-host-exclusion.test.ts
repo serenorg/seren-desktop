@@ -27,15 +27,13 @@ exclude-hosts: ["seren-desktop"]
     expect(parsed.metadata.excludeHosts).toEqual(["seren-desktop"]);
   });
 
-  it("parses block array form (unindented per parser spec)", () => {
-    // The existing YAML-lite parser treats indented lines as sub-keys and
-    // skips them. Block arrays must use unindented '- item' lines.
+  it("parses indented block array form", () => {
     const md = `---
 name: cli-only
 description: Claude CLI only skill
 exclude-hosts:
-- seren-desktop
-- other-host
+  - seren-desktop
+  - other-host
 ---
 
 # CLI Only

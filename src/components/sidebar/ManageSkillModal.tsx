@@ -8,6 +8,11 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import {
+  isPublicSkillVisibility,
+  isRecordedSkill,
+  RecordedSkillPublishAcknowledgement,
+} from "@/components/sidebar/RecordedSkillPublishAcknowledgement";
 import type { Skill, SkillVisibility } from "@/lib/skills";
 import { skills as skillsService } from "@/services/skills";
 
@@ -25,12 +30,32 @@ export const ManageSkillModal: Component<ManageSkillModalProps> = (props) => {
   const [confirmDelete, setConfirmDelete] = createSignal(false);
   const [deleting, setDeleting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [publicPermanentAcknowledged, setPublicPermanentAcknowledged] =
+    createSignal(false);
+  const [recordingReviewAcknowledged, setRecordingReviewAcknowledged] =
+    createSignal(false);
 
   const currentVisibility = (): SkillVisibility =>
     props.skill.publisher?.visibility ?? "private";
+  const requiresRecordingAcknowledgements = () =>
+    isRecordedSkill(props.skill) &&
+    !isPublicSkillVisibility(currentVisibility());
+  const acknowledgementsMissing = () =>
+    requiresRecordingAcknowledgements() &&
+    (!publicPermanentAcknowledged() || !recordingReviewAcknowledged());
+  const needsAcknowledgementForVisibility = (next: SkillVisibility) =>
+    requiresRecordingAcknowledgements() &&
+    isPublicSkillVisibility(next) &&
+    acknowledgementsMissing();
 
   const handleVisibility = async (next: SkillVisibility) => {
     if (next === currentVisibility() || pendingVisibility() !== null) return;
+    if (needsAcknowledgementForVisibility(next)) {
+      setError(
+        "Acknowledge the recording review and public permanence before changing visibility.",
+      );
+      return;
+    }
     setPendingVisibility(next);
     setError(null);
     try {
@@ -135,6 +160,10 @@ export const ManageSkillModal: Component<ManageSkillModalProps> = (props) => {
               {VISIBILITY_OPTIONS.map((option) => {
                 const active = () => currentVisibility() === option;
                 const busy = () => pendingVisibility() === option;
+                const disabled = () =>
+                  pendingVisibility() !== null ||
+                  deleting() ||
+                  needsAcknowledgementForVisibility(option);
                 return (
                   <button
                     type="button"
@@ -146,13 +175,28 @@ export const ManageSkillModal: Component<ManageSkillModalProps> = (props) => {
                         !active(),
                     }}
                     onClick={() => void handleVisibility(option)}
-                    disabled={pendingVisibility() !== null || deleting()}
+                    disabled={disabled()}
+                    title={
+                      needsAcknowledgementForVisibility(option)
+                        ? "Acknowledge recorded skill review before making this public."
+                        : undefined
+                    }
                   >
                     {busy() ? `${option}...` : option}
                   </button>
                 );
               })}
             </div>
+            <Show when={requiresRecordingAcknowledgements()}>
+              <RecordedSkillPublishAcknowledgement
+                description="This recorded skill is currently private. Review it before making it public or paid."
+                reviewAcknowledged={recordingReviewAcknowledged()}
+                permanenceAcknowledged={publicPermanentAcknowledged()}
+                onReviewAcknowledgedChange={setRecordingReviewAcknowledged}
+                onPermanenceAcknowledgedChange={setPublicPermanentAcknowledged}
+                disabled={isBusy()}
+              />
+            </Show>
           </section>
 
           <section class="flex flex-col gap-2 pt-2 border-t border-border/40">

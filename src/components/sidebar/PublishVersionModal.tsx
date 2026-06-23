@@ -8,6 +8,11 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import {
+  isPublicSkillVisibility,
+  isRecordedSkill,
+  RecordedSkillPublishAcknowledgement,
+} from "@/components/sidebar/RecordedSkillPublishAcknowledgement";
 import type { InstalledSkill } from "@/lib/skills";
 import { skills as skillsService } from "@/services/skills";
 
@@ -46,14 +51,30 @@ export const PublishVersionModal: Component<PublishVersionModalProps> = (
   const [changelog, setChangelog] = createSignal("");
   const [publishing, setPublishing] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [publicPermanentAcknowledged, setPublicPermanentAcknowledged] =
+    createSignal(false);
+  const [recordingReviewAcknowledged, setRecordingReviewAcknowledged] =
+    createSignal(false);
 
   const versionInvalid = () => !SEMVER_PATTERN.test(version().trim());
+  const requiresRecordingAcknowledgements = () =>
+    isRecordedSkill(props.skill) &&
+    isPublicSkillVisibility(props.skill.publisher?.visibility);
+  const acknowledgementsMissing = () =>
+    requiresRecordingAcknowledgements() &&
+    (!publicPermanentAcknowledged() || !recordingReviewAcknowledged());
 
   const handlePublish = async () => {
     if (publishing()) return;
     const trimmedVersion = version().trim();
     if (!SEMVER_PATTERN.test(trimmedVersion)) {
       setError(`Version must be semver (e.g. 0.1.2). Got "${trimmedVersion}".`);
+      return;
+    }
+    if (acknowledgementsMissing()) {
+      setError(
+        "Acknowledge the recording review and public permanence before publishing.",
+      );
       return;
     }
     setPublishing(true);
@@ -187,6 +208,19 @@ export const PublishVersionModal: Component<PublishVersionModalProps> = (
               disabled={publishing()}
             />
           </section>
+
+          <Show when={requiresRecordingAcknowledgements()}>
+            <RecordedSkillPublishAcknowledgement
+              description="This update changes a recorded skill that is already distributed outside your private workspace."
+              reviewAcknowledged={recordingReviewAcknowledged()}
+              permanenceAcknowledged={publicPermanentAcknowledged()}
+              onReviewAcknowledgedChange={setRecordingReviewAcknowledged}
+              onPermanenceAcknowledgedChange={setPublicPermanentAcknowledged}
+              disabled={publishing()}
+              reviewLabel="I reviewed the generated steps, assumptions, inputs, and redaction warnings in this update."
+              permanenceLabel="I understand public or paid recording skill updates, including Git author attribution, may be copied, synced, and cached after publishing."
+            />
+          </Show>
         </div>
 
         <div class="flex justify-end gap-2 py-4 px-5 border-t border-border">
@@ -202,7 +236,9 @@ export const PublishVersionModal: Component<PublishVersionModalProps> = (
             type="button"
             class="py-2 px-4 rounded text-[13px] font-medium cursor-pointer transition-all duration-150 bg-primary text-primary-foreground border border-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handlePublish}
-            disabled={publishing() || versionInvalid()}
+            disabled={
+              publishing() || versionInvalid() || acknowledgementsMissing()
+            }
           >
             {publishing() ? "Publishing..." : "Publish update"}
           </button>

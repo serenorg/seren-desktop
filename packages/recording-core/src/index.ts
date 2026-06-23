@@ -1982,9 +1982,8 @@ function buildRecordingSkillMarkdown(
     "---",
     `name: ${JSON.stringify(slug)}`,
     `description: ${JSON.stringify(buildRecordingSkillFrontmatterDescription(draft))}`,
-    "tags:",
-    "  - recorded",
-    "  - unverified",
+    "metadata:",
+    `  tags: ${JSON.stringify("recorded unverified")}`,
     "---",
     "",
     `# ${markdownInline(draft.title)}`,
@@ -2547,8 +2546,7 @@ function forwardableRecordingContext(
         safeForwardableRecordingText(context.prep.successState) ?? "",
       variableInputs:
         safeForwardableRecordingText(context.prep.variableInputs) ?? "",
-      preferences:
-        safeForwardableRecordingText(context.prep.preferences) ?? "",
+      preferences: safeForwardableRecordingText(context.prep.preferences) ?? "",
       tosAcknowledged: context.prep.tosAcknowledged,
     },
     includeMicrophone: context.includeMicrophone,
@@ -2562,7 +2560,9 @@ function forwardableRecordingTargetLabel(session: RecordingSession): string {
   if (session.targetKind === "screen") return "Full screen";
   if (session.targetKind === "window") return "App window";
   if (session.targetKind === "browser") return "Browser";
-  return safeForwardableRecordingText(session.targetLabel) ?? "Recording target";
+  return (
+    safeForwardableRecordingText(session.targetLabel) ?? "Recording target"
+  );
 }
 
 function safeForwardableRecordingText(value: unknown): string | null {

@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockDownloadSkill = vi.hoisted(() => vi.fn());
 
 vi.mock("@/api/seren-skills", () => ({
+  createOrgFolder: vi.fn(),
   downloadSkill: mockDownloadSkill,
+  getAuthorIdentity: vi.fn(),
+  getOrgFolder: vi.fn(),
+  upsertAuthorIdentity: vi.fn(),
 }));
 
 vi.mock("@/lib/logger", () => ({

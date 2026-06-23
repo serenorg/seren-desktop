@@ -11,6 +11,14 @@ use url::Url;
 use crate::services::database::init_db;
 
 const SKILL_SYNC_STATE_FILE: &str = ".seren-sync.json";
+const RECORDING_LOCAL_METADATA_DIR: &str = ".seren-recording";
+
+fn is_recording_local_metadata_path(posix: &str) -> bool {
+    posix == RECORDING_LOCAL_METADATA_DIR
+        || posix
+            .strip_prefix(RECORDING_LOCAL_METADATA_DIR)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -825,6 +833,47 @@ pub fn install_skill(
     Ok(skill_dir.join("SKILL.md").to_string_lossy().to_string())
 }
 
+/// Create a local authoring skill from a complete generated bundle.
+/// Unlike `install_skill`, this refuses to overwrite an existing slug.
+#[tauri::command]
+pub fn create_skill_bundle_folder(
+    skills_dir: String,
+    slug: String,
+    content: String,
+    extra_files: Option<String>,
+) -> Result<String, String> {
+    validate_skill_slug(&slug)?;
+    let dir_path = PathBuf::from(&skills_dir);
+    let skill_dir = dir_path.join(&slug);
+    if skill_dir.exists() {
+        return Err(format!("Skill folder '{}' already exists", slug));
+    }
+
+    let parsed_extra_files: Vec<ExtraFile> = match extra_files {
+        Some(files_json) => serde_json::from_str(&files_json)
+            .map_err(|e| format!("Failed to parse extra_files JSON: {}", e))?,
+        None => Vec::new(),
+    };
+
+    let temp_skill_dir = unique_temp_path(&dir_path, &slug, "creating")?;
+    let create_result = (|| -> Result<(), String> {
+        write_skill_tree(&temp_skill_dir, &content, &parsed_extra_files, None)?;
+        if skill_dir.exists() {
+            return Err(format!("Skill folder '{}' already exists", slug));
+        }
+        fs::rename(&temp_skill_dir, &skill_dir)
+            .map_err(|e| format!("Failed to activate skill directory: {}", e))?;
+        Ok(())
+    })();
+
+    if let Err(error) = create_result {
+        let _ = fs::remove_dir_all(&temp_skill_dir);
+        return Err(error);
+    }
+
+    Ok(skill_dir.join("SKILL.md").to_string_lossy().to_string())
+}
+
 /// Build the set of relative paths the bundle owns: `SKILL.md`, every payload
 /// file, and the sync manifest when one is being written. Anything outside
 /// this set in the previous installation is user-provisioned and must survive
@@ -1457,7 +1506,10 @@ pub fn list_skill_payload_files(
                 })
                 .collect::<Vec<_>>()
                 .join("/");
-            if posix == "SKILL.md" || posix == SKILL_SYNC_STATE_FILE {
+            if posix == "SKILL.md"
+                || posix == SKILL_SYNC_STATE_FILE
+                || is_recording_local_metadata_path(&posix)
+            {
                 continue;
             }
             let bytes = fs::read(&path)
@@ -1691,6 +1743,77 @@ See [section](#overview) and [email](mailto:test@example.com).
             fs::read_to_string(skill_dir.join("scripts/agent.py")).unwrap(),
             "print('hello')"
         );
+    }
+
+    #[test]
+    fn create_skill_bundle_folder_writes_generated_bundle_once() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let extras = serde_json::json!([
+            {"path": "scripts/agent.py", "content": "print('hello')"},
+            {"path": "skill.spec.yaml", "content": "{\"skill\":\"demo\"}\n"},
+        ]);
+
+        let path = create_skill_bundle_folder(
+            skills_dir.clone(),
+            "recorded-demo".to_string(),
+            "# Recorded Demo\n".to_string(),
+            Some(extras.to_string()),
+        )
+        .unwrap();
+
+        let skill_dir = tmp.path().join("recorded-demo");
+        assert_eq!(
+            path,
+            skill_dir.join("SKILL.md").to_string_lossy().to_string()
+        );
+        assert_eq!(
+            fs::read_to_string(skill_dir.join("SKILL.md")).unwrap(),
+            "# Recorded Demo\n"
+        );
+        assert_eq!(
+            fs::read_to_string(skill_dir.join("scripts/agent.py")).unwrap(),
+            "print('hello')"
+        );
+
+        let duplicate = create_skill_bundle_folder(
+            skills_dir,
+            "recorded-demo".to_string(),
+            "# New\n".to_string(),
+            None,
+        );
+        assert!(duplicate.is_err());
+    }
+
+    #[test]
+    fn create_skill_bundle_folder_cleans_up_failed_bundle() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+        let extras = serde_json::json!([
+            {"path": "../bad.py", "content": "print('bad')"},
+        ]);
+
+        let result = create_skill_bundle_folder(
+            skills_dir,
+            "recorded-demo".to_string(),
+            "# Recorded Demo\n".to_string(),
+            Some(extras.to_string()),
+        );
+
+        assert!(result.is_err());
+        assert!(!tmp.path().join("recorded-demo").exists());
+        let leftover_staging: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".creating.")
+            })
+            .collect();
+        assert!(leftover_staging.is_empty());
     }
 
     #[test]
@@ -2288,6 +2411,36 @@ Run [agent](scripts/agent.py) — it writes to `state/session_cache.json` lazily
         symlink(outside.path(), skill_dir.join("linked")).unwrap();
 
         let payload = list_skill_payload_files(skills_dir, "test-skill".to_string()).unwrap();
+        assert_eq!(payload.len(), 1);
+        assert_eq!(payload[0].path, "scripts/agent.py");
+    }
+
+    #[test]
+    fn list_skill_payload_files_excludes_recording_local_metadata() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            "# Test Skill\nHello".to_string(),
+            Some(
+                serde_json::json!([
+                    {"path": "scripts/agent.py", "content": "print('ok')"}
+                ])
+                .to_string(),
+            ),
+            None,
+        )
+        .unwrap();
+
+        let skill_dir = tmp.path().join("test-skill");
+        let metadata_dir = skill_dir.join(RECORDING_LOCAL_METADATA_DIR);
+        fs::create_dir_all(&metadata_dir).unwrap();
+        fs::write(metadata_dir.join("provenance.json"), "{}").unwrap();
+
+        let payload = list_skill_payload_files(skills_dir, "test-skill".to_string()).unwrap();
+
         assert_eq!(payload.len(), 1);
         assert_eq!(payload[0].path, "scripts/agent.py");
     }

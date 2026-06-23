@@ -26,8 +26,8 @@ includes: [polymarket/_shared, common/utils]
 name: My Skill
 description: A skill
 includes:
-- polymarket/_shared
-- common/utils
+  - polymarket/_shared
+  - common/utils
 ---
 # My Skill`;
     const parsed = parseSkillMd(raw);
@@ -57,6 +57,31 @@ includes: []
     const parsed = parseSkillMd(raw);
     expect(parsed.metadata.includes).toEqual([]);
   });
+
+  it("parses indented tag arrays", () => {
+    const raw = `---
+name: Recorded Skill
+description: A generated skill
+tags:
+  - recorded
+  - unverified
+---
+# Recorded Skill`;
+    const parsed = parseSkillMd(raw);
+    expect(parsed.metadata.tags).toEqual(["recorded", "unverified"]);
+  });
+
+  it("parses metadata tags", () => {
+    const raw = `---
+name: Recorded Skill
+description: A generated skill
+metadata:
+  tags: "recorded unverified"
+---
+# Recorded Skill`;
+    const parsed = parseSkillMd(raw);
+    expect(parsed.metadata.tags).toEqual(["recorded", "unverified"]);
+  });
 });
 
 // --- Bundle integration tests ---
@@ -65,7 +90,11 @@ const mockDownloadSkill = vi.hoisted(() => vi.fn());
 const mockInvoke = vi.hoisted(() => vi.fn());
 
 vi.mock("@/api/seren-skills", () => ({
+  createOrgFolder: vi.fn(),
   downloadSkill: mockDownloadSkill,
+  getAuthorIdentity: vi.fn(),
+  getOrgFolder: vi.fn(),
+  upsertAuthorIdentity: vi.fn(),
 }));
 
 vi.mock("@/lib/logger", () => ({

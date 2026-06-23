@@ -8,6 +8,11 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import {
+  isPublicSkillVisibility,
+  isRecordedSkill,
+  RecordedSkillPublishAcknowledgement,
+} from "@/components/sidebar/RecordedSkillPublishAcknowledgement";
 import type { InstalledSkill, SkillVisibility } from "@/lib/skills";
 import { skills as skillsService } from "@/services/skills";
 
@@ -25,14 +30,29 @@ export const PublishSkillModal: Component<PublishSkillModalProps> = (props) => {
   const [version, setVersion] = createSignal("0.1.0");
   const [publishing, setPublishing] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [publicPermanentAcknowledged, setPublicPermanentAcknowledged] =
+    createSignal(false);
+  const [recordingReviewAcknowledged, setRecordingReviewAcknowledged] =
+    createSignal(false);
 
   const versionInvalid = () => !SEMVER_PATTERN.test(version().trim());
+  const requiresRecordingAcknowledgements = () =>
+    isRecordedSkill(props.skill) && isPublicSkillVisibility(visibility());
+  const acknowledgementsMissing = () =>
+    requiresRecordingAcknowledgements() &&
+    (!publicPermanentAcknowledged() || !recordingReviewAcknowledged());
 
   const handlePublish = async () => {
     if (publishing()) return;
     const trimmedVersion = version().trim();
     if (!SEMVER_PATTERN.test(trimmedVersion)) {
       setError(`Version must be semver (e.g. 0.1.0). Got "${trimmedVersion}".`);
+      return;
+    }
+    if (acknowledgementsMissing()) {
+      setError(
+        "Acknowledge the recording review and public permanence before publishing.",
+      );
       return;
     }
     setPublishing(true);
@@ -151,6 +171,17 @@ export const PublishSkillModal: Component<PublishSkillModalProps> = (props) => {
             </div>
           </section>
 
+          <Show when={requiresRecordingAcknowledgements()}>
+            <RecordedSkillPublishAcknowledgement
+              description="This skill was generated from a recording and will be distributed outside your private workspace."
+              reviewAcknowledged={recordingReviewAcknowledged()}
+              permanenceAcknowledged={publicPermanentAcknowledged()}
+              onReviewAcknowledgedChange={setRecordingReviewAcknowledged}
+              onPermanenceAcknowledgedChange={setPublicPermanentAcknowledged}
+              disabled={publishing()}
+            />
+          </Show>
+
           <section class="flex flex-col gap-1.5">
             <label
               for="publish-skill-version"
@@ -187,7 +218,9 @@ export const PublishSkillModal: Component<PublishSkillModalProps> = (props) => {
             type="button"
             class="py-2 px-4 rounded text-[13px] font-medium cursor-pointer transition-all duration-150 bg-primary text-primary-foreground border border-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handlePublish}
-            disabled={publishing() || versionInvalid()}
+            disabled={
+              publishing() || versionInvalid() || acknowledgementsMissing()
+            }
           >
             {publishing() ? "Publishing..." : "Publish and install"}
           </button>
