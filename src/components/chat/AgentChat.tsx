@@ -1,6 +1,8 @@
 // ABOUTME: Chat interface for agent mode, displaying agent messages, tool calls, and diffs.
 // ABOUTME: Handles agent session lifecycle and message streaming.
 
+import type { RecordingSession } from "@seren/recording-core";
+import { RecordButton } from "@seren/recording-ui";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import type { Component } from "solid-js";
 import {
@@ -19,6 +21,9 @@ import { AgentPermissionDialog } from "@/components/agent/AgentPermissionDialog"
 import { DiffProposalDialog } from "@/components/agent/DiffProposalDialog";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
+import { RecordedSessionCard } from "@/components/recording/RecordedSessionCard";
+import { desktopRecordingAdapter } from "@/features/recording/desktopRecordingAdapter";
+import { appendRecordingSkillDraftPrompt } from "@/features/recording/recordingComposer";
 import { extractAgentThinkingMarkup } from "@/lib/agent-thinking-markup";
 import { isAuthError, isLikelyAuthError } from "@/lib/auth-errors";
 import { collapseBuildOutput } from "@/lib/build-output";
@@ -124,6 +129,8 @@ const DRAFT_DEBOUNCE_MS = 500;
 export const AgentChat: Component<AgentChatProps> = (props) => {
   const isPaneActive = () => props.active ?? true;
   const [input, setInput] = createSignal("");
+  const [recordedSession, setRecordedSession] =
+    createSignal<RecordingSession | null>(null);
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const { isDragging } = createDragDrop((files) => {
     if (!isPaneActive()) return;
@@ -171,6 +178,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     inputRef?.focus();
     const len = inputRef?.value.length ?? 0;
     inputRef?.setSelectionRange(len, len);
+  };
+  const handleRecordingSessionStop = (session: RecordingSession | null) => {
+    if (!session) return;
+    setInput((current) => appendRecordingSkillDraftPrompt(current, session));
+    if (session.outputDir) setRecordedSession(session);
+    queueMicrotask(() => {
+      inputRef?.focus();
+      const len = inputRef?.value.length ?? 0;
+      inputRef?.setSelectionRange(len, len);
+    });
   };
   markdownWorker.onmessage = (
     e: MessageEvent<{ id: string; html: string; error?: boolean }>,
@@ -2052,6 +2069,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   setCommandPopupIndex(0);
                 }}
               />
+              <Show when={recordedSession()}>
+                {(session) => (
+                  <RecordedSessionCard
+                    session={session()}
+                    onDismiss={() => setRecordedSession(null)}
+                  />
+                )}
+              </Show>
               <ResizableTextarea
                 workspaceDefaultFocus={!!activeAgentThread()}
                 ref={(el) => (inputRef = el)}
@@ -2159,6 +2184,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 </Show>
               </div>
               <div class={COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES}>
+                <RecordButton
+                  adapter={desktopRecordingAdapter}
+                  onSessionStop={handleRecordingSessionStop}
+                />
                 <VoiceInputButton
                   mode="agent"
                   onTranscript={(text) => {

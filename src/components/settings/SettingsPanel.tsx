@@ -57,6 +57,7 @@ import { KeysSettings } from "./KeysSettings";
 import { MessagingSettings } from "./MessagingSettings";
 import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
+import { RecordingsSettings } from "./RecordingsSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
 import { ToolsetsSettings } from "./ToolsetsSettings";
 
@@ -73,6 +74,7 @@ type SettingsSection =
   | "wallet"
   | "messaging"
   | "indexing"
+  | "recordings"
   | "appearance"
   | "general"
   | "mcp";
@@ -380,6 +382,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "wallet", label: "Wallet", icon: "💳" },
     { id: "messaging", label: "Messaging", icon: "💬" },
     { id: "indexing", label: "Code Indexing", icon: "🔍" },
+    { id: "recordings", label: "Recordings", icon: "🎬" },
     { id: "appearance", label: "Appearance", icon: "🎨" },
     { id: "shortcuts", label: "Shortcuts", icon: "⌨️" },
     { id: "general", label: "General", icon: "⚙️" },
@@ -1871,6 +1874,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
         <Show when={activeSection() === "messaging"}>
           <MessagingSettings />
+        </Show>
+
+        <Show when={activeSection() === "recordings"}>
+          <RecordingsSettings />
         </Show>
 
         <Show when={activeSection() === "indexing"}>

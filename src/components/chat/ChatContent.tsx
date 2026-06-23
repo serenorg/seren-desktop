@@ -1,6 +1,8 @@
 // ABOUTME: Chat content panel without file tree for resizable layout.
 // ABOUTME: Shows chat messages, input, and model selector.
 
+import type { RecordingSession } from "@seren/recording-core";
+import { RecordButton } from "@seren/recording-ui";
 import { confirm } from "@tauri-apps/plugin-dialog";
 /* eslint-disable solid/no-innerhtml */
 import type { Component } from "solid-js";
@@ -19,7 +21,10 @@ import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { SlidePanel } from "@/components/layout/SlidePanel";
+import { RecordedSessionCard } from "@/components/recording/RecordedSessionCard";
 import { DepositModal } from "@/components/wallet/DepositModal";
+import { desktopRecordingAdapter } from "@/features/recording/desktopRecordingAdapter";
+import { appendRecordingSkillDraftPrompt } from "@/features/recording/recordingComposer";
 import { isAuthError, isContextOverflowError } from "@/lib/auth-errors";
 import {
   formatChatHistoryMarkdown,
@@ -149,6 +154,8 @@ const chatDrafts = new Map<string, string>();
 
 export const ChatContent: Component<ChatContentProps> = (props) => {
   const [input, setInput] = createSignal("");
+  const [recordedSession, setRecordedSession] =
+    createSignal<RecordingSession | null>(null);
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = createSignal(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = createSignal(false);
@@ -203,6 +210,16 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   );
   const conversationId = () =>
     props.threadId ?? conversationStore.activeConversationId;
+  const handleRecordingSessionStop = (session: RecordingSession | null) => {
+    if (!session) return;
+    setInput((current) => appendRecordingSkillDraftPrompt(current, session));
+    if (session.outputDir) setRecordedSession(session);
+    queueMicrotask(() => {
+      inputRef?.focus();
+      const len = inputRef?.value.length ?? 0;
+      inputRef?.setSelectionRange(len, len);
+    });
+  };
   const activeThreadProvider = (): ProviderId => {
     const id = conversationId();
     const selectedProvider = id
@@ -1847,6 +1864,14 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                   setCommandPopupIndex(0);
                 }}
               />
+              <Show when={recordedSession()}>
+                {(session) => (
+                  <RecordedSessionCard
+                    session={session()}
+                    onDismiss={() => setRecordedSession(null)}
+                  />
+                )}
+              </Show>
               <ResizableTextarea
                 workspaceDefaultFocus={true}
                 ref={(el) => {
@@ -2037,6 +2062,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 </Show>
               </div>
               <div class={COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES}>
+                <RecordButton
+                  adapter={desktopRecordingAdapter}
+                  onSessionStop={handleRecordingSessionStop}
+                />
                 <VoiceInputButton
                   onTranscript={(text) => {
                     setInput((prev) => (prev ? `${prev} ${text}` : text));
