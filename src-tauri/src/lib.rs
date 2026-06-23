@@ -1165,6 +1165,12 @@ pub fn run() {
                 if let Some(rt_state) = app.try_state::<provider_runtime::ProviderRuntimeState>() {
                     rt_state.kill_sync();
                 }
+                // Stop an in-progress native recorder so a screen-capture child
+                // process is not orphaned and left recording the screen after
+                // quit (Tauri exits via process::exit, which skips Drop).
+                if let Some(rec_state) = app.try_state::<commands::recording::RecordingState>() {
+                    rec_state.shutdown();
+                }
             }
             _ => {}
         });
