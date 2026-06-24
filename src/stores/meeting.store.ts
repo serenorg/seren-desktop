@@ -374,12 +374,22 @@ async function startMeetingEventListeners(): Promise<void> {
   // The native mic dropped or self-healed mid-capture. Flip a flag the panel
   // reads to show "microphone disconnected — reconnecting…" so a Bluetooth/USB
   // drop is never silent; "recovered" clears it (#2608).
+  //
+  // Key the guard to the *capturing* meeting, matching the panel's banner gate
+  // (`status === "capturing"`), NOT the selected/viewed `activeMeeting`: the two
+  // diverge when the user opens another meeting mid-capture, which would
+  // otherwise drop a real disconnect for the recording meeting (the silent loss
+  // this fixes) or strand a stale banner. After stop, no meeting is capturing,
+  // so a late event from the watcher's poll window is rejected, not re-set.
   micStatusUnlisten = await listen<{
     meetingId: string;
     status: "disconnected" | "recovered";
     disconnectCount: number;
   }>("meeting://mic-status", (event) => {
-    if (meetingState.activeMeeting?.id !== event.payload.meetingId) return;
+    const capturing = meetingState.meetings.find(
+      (meeting) => meeting.status === "capturing",
+    );
+    if (capturing?.id !== event.payload.meetingId) return;
     setMeetingState("micCaptureLost", event.payload.status === "disconnected");
   });
 

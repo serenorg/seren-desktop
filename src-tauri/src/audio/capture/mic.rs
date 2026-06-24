@@ -201,10 +201,17 @@ fn acquire_stream(sink: &FrameSender) -> Result<LiveStream, CaptureError> {
 /// Re-acquire the default input device after a mid-capture loss, retrying with
 /// capped backoff until a device returns or a stop is requested. `None` means
 /// the capture was stopped before recovery.
+///
+/// The settle delay runs *before* every acquire attempt (including the first):
+/// a device that just dropped is often not immediately re-openable, and an
+/// always-on floor caps how fast a flapping device — one that builds and plays
+/// but re-fails within milliseconds — can churn rebuilds and inflate the
+/// disconnect count. A 250 ms first-recovery delay is imperceptible against a
+/// real reconnect, which takes seconds.
 fn recover_stream(stop: &AtomicBool, sink: &FrameSender) -> Option<LiveStream> {
     let mut backoff = RECOVERY_BACKOFF_START;
     loop {
-        if stop.load(Ordering::SeqCst) {
+        if !sleep_until_stop(stop, backoff) {
             return None;
         }
         match acquire_stream(sink) {
@@ -214,9 +221,6 @@ fn recover_stream(stop: &AtomicBool, sink: &FrameSender) -> Option<LiveStream> {
                     "[meeting] native mic re-acquire failed ({err}); retrying in {backoff:?}"
                 );
             }
-        }
-        if !sleep_until_stop(stop, backoff) {
-            return None;
         }
         backoff = (backoff * 2).min(RECOVERY_BACKOFF_MAX);
     }
