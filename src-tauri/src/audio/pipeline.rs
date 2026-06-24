@@ -15,7 +15,9 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use uuid::Uuid;
 
 use crate::audio::apm::{ApmDiagnostics, MeetingAudioProcessor};
-use crate::audio::capture::{AudioCaptureSource, CaptureError, PcmFrame, TARGET_SAMPLE_RATE};
+use crate::audio::capture::{
+    AudioCaptureSource, CaptureError, MicHealth, PcmFrame, TARGET_SAMPLE_RATE,
+};
 use crate::audio::chunker::{Chunk, ChunkCfg, StreamingChunker};
 use crate::audio::transcribe::{
     ChunkTranscriber, GatewayTranscriber, RetryConfig, TranscribeError, TranscriptionMode,
@@ -42,6 +44,11 @@ const MAX_THEM_BUFFER_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 60 * 90;
 pub struct CaptureStopSummary {
     pub had_capture: bool,
     pub native_mic_ready: bool,
+    /// Mid-capture mic disconnects observed during the capture. `0` is the
+    /// healthy case; any positive count means the "Me" track briefly dropped and
+    /// self-healed (or was still down at stop, in which case `native_mic_ready`
+    /// is also false) — surfaced so partial loss is never silent (#2608).
+    pub native_mic_disconnect_count: u64,
     pub system_audio_ready: bool,
     pub apm_ready: bool,
     pub apm_active: bool,
@@ -157,12 +164,14 @@ impl CaptureStreamStats {
         ingress: CaptureIngressSummary,
         source: &CaptureSourceStats,
         native_mic_ready: bool,
+        native_mic_disconnect_count: u64,
         system_audio_ready: bool,
         apm: ApmDiagnostics,
     ) -> CaptureStopSummary {
         CaptureStopSummary {
             had_capture,
             native_mic_ready,
+            native_mic_disconnect_count,
             system_audio_ready,
             apm_ready: apm.initialized,
             apm_active: apm.active,
@@ -380,6 +389,50 @@ pub struct CaptureLevelEvent {
     pub level: f32,
 }
 
+/// How often the mic-health watcher samples liveness. Fast enough that a real
+/// disconnect surfaces a banner promptly without busy-spinning.
+const MIC_HEALTH_POLL: Duration = Duration::from_millis(250);
+
+/// Notice that the native mic dropped or self-healed mid-capture. The UI turns
+/// `disconnected` into a "microphone disconnected — reconnecting…" banner and
+/// clears it on `recovered`, so a Bluetooth/USB drop is never silent (#2608).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MicStatusEvent {
+    meeting_id: String,
+    status: &'static str,
+    disconnect_count: u64,
+}
+
+/// Poll the shared mic health on a short interval and emit `meeting://mic-status`
+/// on each live/lost transition. Spawned only when a real mic source and an app
+/// handle exist; `stop` aborts it, and it owns no resources so an abort needs no
+/// cleanup (#2608).
+async fn watch_mic_health(app: AppHandle, meeting_id: String, health: Arc<MicHealth>) {
+    let mut last_live = health.is_live();
+    loop {
+        tokio::time::sleep(MIC_HEALTH_POLL).await;
+        let live = health.is_live();
+        if live == last_live {
+            continue;
+        }
+        last_live = live;
+        let status = if live { "recovered" } else { "disconnected" };
+        let disconnect_count = health.disconnect_count();
+        log::info!(
+            "[meeting] native mic {status} mid-capture for {meeting_id} (disconnects={disconnect_count})"
+        );
+        let _ = app.emit(
+            "meeting://mic-status",
+            MicStatusEvent {
+                meeting_id: meeting_id.clone(),
+                status,
+                disconnect_count,
+            },
+        );
+    }
+}
+
 enum ApmInput {
     Capture(PcmFrame),
     Render(PcmFrame),
@@ -504,7 +557,14 @@ struct ActiveCapture {
     source_stats: Arc<CaptureSourceStats>,
     apm_diagnostics: Arc<StdMutex<ApmDiagnostics>>,
     e2e_injection_enabled: bool,
+    // Whether a native mic source was established at start. Combined with
+    // `mic_health` at stop to decide the summary's `native_mic_ready` (#2608).
     native_mic_ready: bool,
+    // Live health of the native mic, present only for the real cpal source.
+    // `None` for fake/test sources, which have no mid-capture loss tracking.
+    mic_health: Option<Arc<MicHealth>>,
+    // The mic-health watcher task, aborted by `stop` before the drain.
+    mic_health_watcher: Option<JoinHandle<()>>,
     system_audio_ready: bool,
 }
 
@@ -731,6 +791,20 @@ impl CaptureRegistry {
         };
         let has_mic = prepared_mic.has_mic();
 
+        // The real cpal mic exposes a live health handle; fake/test sources don't.
+        // Watch it for mid-capture disconnect/recovery and surface a user notice
+        // (#2608). Spawned before `app` is moved into the APM stream below.
+        let mic_health = prepared_mic
+            .source
+            .as_ref()
+            .and_then(|source| source.mic_health());
+        let mic_health_watcher = match (app.clone(), mic_health.clone()) {
+            (Some(app_handle), Some(health)) => Some(tauri::async_runtime::spawn(
+                watch_mic_health(app_handle, meeting_id.to_string(), health),
+            )),
+            _ => None,
+        };
+
         // Me and Them share one sequence counter so segments order globally.
         let seq = Arc::new(AtomicI64::new(0));
         let stats = Arc::new(CaptureStreamStats::default());
@@ -824,6 +898,8 @@ impl CaptureRegistry {
                     apm_diagnostics,
                     e2e_injection_enabled,
                     native_mic_ready: has_mic,
+                    mic_health: mic_health.clone(),
+                    mic_health_watcher,
                     system_audio_ready: has_system_audio,
                 }),
             );
@@ -847,6 +923,8 @@ impl CaptureRegistry {
                 apm_diagnostics,
                 e2e_injection_enabled: false,
                 native_mic_ready: has_mic,
+                mic_health,
+                mic_health_watcher,
                 system_audio_ready: has_system_audio,
             }),
         );
@@ -1009,10 +1087,15 @@ impl CaptureRegistry {
                 ingress,
                 &CaptureSourceStats::default(),
                 false,
+                0,
                 false,
                 ApmDiagnostics::default(),
             );
         };
+        // Stop the disconnect watcher first so it can't emit a notice mid-drain.
+        if let Some(watcher) = capture.mic_health_watcher.take() {
+            watcher.abort();
+        }
         // Stop native sources first so their channels close and routers can exit.
         if let Some(mut source) = capture.mic_source.take() {
             let join = tauri::async_runtime::spawn_blocking(move || source.stop());
@@ -1035,17 +1118,30 @@ impl CaptureRegistry {
         }
         let ingress = self.take_ingress_summary(meeting_id);
         let apm = capture.apm_diagnostics.lock().unwrap().clone();
+        // A real mic source reports `native_mic_ready` as established-AND-still-live
+        // at stop, so a disconnect that never recovered reads false instead of the
+        // frozen-but-"ready" summary this used to produce. Sources without health
+        // (fakes) keep the established flag. `disconnect_count` surfaces a recovered
+        // drop too (#2608).
+        let native_mic_live = capture.mic_health.as_ref().map_or(true, |h| h.is_live());
+        let native_mic_ready = capture.native_mic_ready && native_mic_live;
+        let native_mic_disconnect_count = capture
+            .mic_health
+            .as_ref()
+            .map_or(0, |h| h.disconnect_count());
         let summary = capture.stats.summary(
             true,
             ingress,
             capture.source_stats.as_ref(),
-            capture.native_mic_ready,
+            native_mic_ready,
+            native_mic_disconnect_count,
             capture.system_audio_ready,
             apm,
         );
         log::info!(
-            "[meeting] capture stop summary for {meeting_id}: native_mic_ready={} system_audio_ready={} apm_ready={} mic_source_frames={} system_source_frames={} push_frames={} accepted_push_frames={} dropped_push_frames={} dropped_push_samples={} frames={} speech_frames={} chunks={} emitted_segments={} emitted_gaps={} transcription_error={:?}",
+            "[meeting] capture stop summary for {meeting_id}: native_mic_ready={} native_mic_disconnects={} system_audio_ready={} apm_ready={} mic_source_frames={} system_source_frames={} push_frames={} accepted_push_frames={} dropped_push_frames={} dropped_push_samples={} frames={} speech_frames={} chunks={} emitted_segments={} emitted_gaps={} transcription_error={:?}",
             summary.native_mic_ready,
+            summary.native_mic_disconnect_count,
             summary.system_audio_ready,
             summary.apm_ready,
             summary.native_mic_frame_count,
@@ -1172,6 +1268,8 @@ mod tests {
             apm_diagnostics: Arc::new(StdMutex::new(ApmDiagnostics::default())),
             e2e_injection_enabled: false,
             native_mic_ready: true,
+            mic_health: None,
+            mic_health_watcher: None,
             system_audio_ready: false,
         }
     }
@@ -1271,6 +1369,7 @@ mod tests {
             CaptureIngressSummary::default(),
             &CaptureSourceStats::default(),
             true,
+            0,
             false,
             ApmDiagnostics::default(),
         );
@@ -1297,6 +1396,7 @@ mod tests {
             CaptureIngressSummary::default(),
             &CaptureSourceStats::default(),
             true,
+            0,
             false,
             ApmDiagnostics::default(),
         );
@@ -1310,6 +1410,7 @@ mod tests {
             CaptureIngressSummary::default(),
             &CaptureSourceStats::default(),
             true,
+            0,
             false,
             ApmDiagnostics::default(),
         );
@@ -1604,6 +1705,74 @@ mod tests {
         }
 
         fn stop(&mut self) {}
+    }
+
+    /// A mic source that started, dropped mid-capture, and never recovered.
+    /// Exposes a `MicHealth` seeded as lost-with-one-disconnect so the pipeline's
+    /// health-aware stop summary can be exercised without real hardware (#2608).
+    struct LostMicSource {
+        health: Arc<MicHealth>,
+    }
+
+    impl LostMicSource {
+        fn still_disconnected() -> Self {
+            let health = Arc::new(MicHealth::default());
+            health.mark_live();
+            health.mark_lost();
+            Self { health }
+        }
+    }
+
+    impl AudioCaptureSource for LostMicSource {
+        fn start(&mut self, _sink: FrameSender) -> Result<(), CaptureError> {
+            // Dropping the sink ends the (empty) mic stream at once; the test only
+            // exercises how health flows into the stop summary.
+            Ok(())
+        }
+
+        fn stop(&mut self) {}
+
+        fn mic_health(&self) -> Option<Arc<MicHealth>> {
+            Some(self.health.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_summary_reports_a_still_disconnected_mic_as_not_ready() {
+        // #2608: a mic that dropped mid-capture and never came back must read
+        // native_mic_ready=false with a disconnect count, not the frozen-but-
+        // "ready" summary that told the user nothing.
+        let registry = CaptureRegistry::default();
+        let me_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> =
+            Arc::new(SequenceTranscriber {
+                texts: Mutex::new(vec![]),
+            });
+        let them_transcriber: Arc<dyn ChunkTranscriber + Send + Sync> =
+            Arc::new(SequenceTranscriber {
+                texts: Mutex::new(vec![]),
+            });
+        let sink = Arc::new(CollectingSink::default());
+        let collected: Arc<dyn SegmentSink> = sink.clone();
+
+        registry
+            .start_with_sources(
+                None,
+                "m1",
+                Some(Box::new(LostMicSource::still_disconnected())),
+                None,
+                me_transcriber,
+                them_transcriber,
+                collected,
+            )
+            .expect("a mic source that starts should make the capture active");
+
+        let summary = registry
+            .stop_with_timeout("m1", Duration::from_secs(1))
+            .await;
+
+        assert!(summary.had_capture);
+        assert!(!summary.native_mic_ready);
+        assert_eq!(summary.native_mic_disconnect_count, 1);
     }
 
     #[test]

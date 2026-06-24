@@ -12,6 +12,8 @@ pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::SyncSender;
 use std::thread::JoinHandle;
 
@@ -40,6 +42,42 @@ pub enum CaptureError {
     Unsupported(String),
 }
 
+/// Live health of a native microphone capture, shared between the capture
+/// worker thread (the sole writer) and the pipeline (a reader). The worker
+/// flips `live` as the underlying device stream is lost and re-acquired
+/// mid-capture and bumps `disconnect_count` on every loss, so the pipeline can
+/// surface a user-visible notice and a truthful stop summary instead of the
+/// silent partial-loss the static start-time readiness flag produced (#2608).
+#[derive(Debug, Default)]
+pub struct MicHealth {
+    live: AtomicBool,
+    disconnect_count: AtomicU64,
+}
+
+impl MicHealth {
+    /// Whether the mic stream is currently delivering frames.
+    pub fn is_live(&self) -> bool {
+        self.live.load(Ordering::SeqCst)
+    }
+
+    /// Number of mid-capture disconnects observed so far.
+    pub fn disconnect_count(&self) -> u64 {
+        self.disconnect_count.load(Ordering::SeqCst)
+    }
+
+    /// Worker-only: mark the stream live (initial acquire or post-recovery).
+    pub(crate) fn mark_live(&self) {
+        self.live.store(true, Ordering::SeqCst);
+    }
+
+    /// Worker-only: mark the stream lost and count the disconnect, returning the
+    /// new disconnect count for logging.
+    pub(crate) fn mark_lost(&self) -> u64 {
+        self.live.store(false, Ordering::SeqCst);
+        self.disconnect_count.fetch_add(1, Ordering::SeqCst) + 1
+    }
+}
+
 /// A single capture stream (mic, system audio, …) normalized to 16 kHz mono PCM.
 ///
 /// `start` begins delivering frames into `sink` and returns once capture is live;
@@ -49,6 +87,14 @@ pub enum CaptureError {
 pub trait AudioCaptureSource: Send {
     fn start(&mut self, sink: FrameSender) -> Result<(), CaptureError>;
     fn stop(&mut self);
+
+    /// The live health handle for a native microphone source, or `None` for
+    /// sources that don't track mid-capture device loss (system audio, fakes).
+    /// Lets the pipeline watch for disconnect/recovery without the capture layer
+    /// depending on Tauri (#2608).
+    fn mic_health(&self) -> Option<Arc<MicHealth>> {
+        None
+    }
 }
 
 /// Spawn `worker` on a dedicated OS thread and block until it reports readiness.
@@ -169,6 +215,26 @@ mod tests {
         let err = spawn_with_readiness(|_ready| {})
             .expect_err("a silent worker exit must surface as an error");
         assert!(matches!(err, CaptureError::Device(_)));
+    }
+
+    #[test]
+    fn mic_health_tracks_liveness_and_disconnect_count() {
+        // The stop summary's truthfulness and the disconnect notice both read
+        // this handle, so its transitions are the contract under test (#2608).
+        let health = MicHealth::default();
+        assert!(!health.is_live());
+        assert_eq!(health.disconnect_count(), 0);
+
+        health.mark_live();
+        assert!(health.is_live());
+
+        assert_eq!(health.mark_lost(), 1);
+        assert!(!health.is_live());
+
+        health.mark_live();
+        assert_eq!(health.mark_lost(), 2);
+        assert_eq!(health.disconnect_count(), 2);
+        assert!(!health.is_live());
     }
 
     #[test]

@@ -196,6 +196,12 @@ export function isMeetingCaptureActive(meetingId: string): Promise<boolean> {
 export interface CaptureStopOutcome {
   hadCapture: boolean;
   nativeMicReady: boolean;
+  /**
+   * Mid-capture mic disconnects during this capture (#2608). `0` is healthy; a
+   * positive value means the "Me" track briefly dropped and self-healed (or
+   * stayed down at stop, where `nativeMicReady` is also false).
+   */
+  nativeMicDisconnectCount: number;
   systemAudioReady: boolean;
   apmReady: boolean;
   apmActive: boolean;
