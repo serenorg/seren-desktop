@@ -2,7 +2,6 @@
 // ABOUTME: Handles agent session lifecycle and message streaming.
 
 import type { RecordingSession } from "@seren/recording-core";
-import { RecordButton } from "@seren/recording-ui";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import type { Component } from "solid-js";
 import {
@@ -22,7 +21,6 @@ import { DiffProposalDialog } from "@/components/agent/DiffProposalDialog";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { RecordedSessionCard } from "@/components/recording/RecordedSessionCard";
-import { desktopRecordingAdapter } from "@/features/recording/desktopRecordingAdapter";
 import { appendRecordingSkillDraftPrompt } from "@/features/recording/recordingComposer";
 import { extractAgentThinkingMarkup } from "@/lib/agent-thinking-markup";
 import { isAuthError, isLikelyAuthError } from "@/lib/auth-errors";
@@ -188,6 +186,18 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       const len = inputRef?.value.length ?? 0;
       inputRef?.setSelectionRange(len, len);
     });
+  };
+  // The screen recorder lives in the titlebar; route its stopped session into
+  // the focused composer. Only the active pane handles the event, and the
+  // _handled flag prevents the sibling composer from double-processing it.
+  const onRecordingSessionStop = (event: Event) => {
+    if (!isPaneActive()) return;
+    const custom = event as CustomEvent<RecordingSession | null> & {
+      _handled?: boolean;
+    };
+    if (custom._handled) return;
+    custom._handled = true;
+    handleRecordingSessionStop(custom.detail);
   };
   markdownWorker.onmessage = (
     e: MessageEvent<{ id: string; html: string; error?: boolean }>,
@@ -428,6 +438,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   onMount(() => {
     window.addEventListener("seren:pick-images", onPickImages);
     window.addEventListener("seren:set-chat-input", onSetChatInput);
+    window.addEventListener(
+      "seren:recording-session-stop",
+      onRecordingSessionStop,
+    );
     if (isPaneActive() && fileTreeState.rootPath) {
       void agentStore.refreshRemoteSessions(
         fileTreeState.rootPath,
@@ -438,6 +452,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   onCleanup(() => {
     window.removeEventListener("seren:pick-images", onPickImages);
     window.removeEventListener("seren:set-chat-input", onSetChatInput);
+    window.removeEventListener(
+      "seren:recording-session-stop",
+      onRecordingSessionStop,
+    );
   });
 
   // Resolve the session for the currently-viewed thread, not the global
@@ -2184,10 +2202,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 </Show>
               </div>
               <div class={COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES}>
-                <RecordButton
-                  adapter={desktopRecordingAdapter}
-                  onSessionStop={handleRecordingSessionStop}
-                />
                 <VoiceInputButton
                   mode="agent"
                   onTranscript={(text) => {

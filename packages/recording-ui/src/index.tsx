@@ -90,10 +90,15 @@ function RecordIcon() {
       width="16"
       height="16"
       viewBox="0 0 16 16"
-      fill="currentColor"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.4"
+      stroke-linecap="round"
+      stroke-linejoin="round"
       aria-hidden="true"
     >
-      <circle cx="8" cy="8" r="5" />
+      <rect x="1.75" y="4.25" width="8.5" height="7.5" rx="1.75" />
+      <path d="M10.25 7 14 5v6l-3.75-2z" />
     </svg>
   );
 }
