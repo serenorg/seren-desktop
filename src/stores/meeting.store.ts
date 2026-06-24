@@ -46,6 +46,12 @@ interface MeetingState {
   activeMeeting: Meeting | null;
   liveSegments: TranscriptSegment[];
   captureLevel: number;
+  /**
+   * True while the native mic is disconnected mid-capture and the backend is
+   * re-acquiring it. The panel shows a "microphone disconnected — reconnecting…"
+   * notice so the loss is never silent; cleared on recovery or stop (#2608).
+   */
+  micCaptureLost: boolean;
   isLoading: boolean;
   error: string | null;
   /**
@@ -70,6 +76,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   activeMeeting: null,
   liveSegments: [],
   captureLevel: 0,
+  micCaptureLost: false,
   isLoading: false,
   error: null,
   autoDetectSuggested: false,
@@ -84,6 +91,7 @@ let levelUnlisten: UnlistenFn | null = null;
 let segmentsUpdatedUnlisten: UnlistenFn | null = null;
 let notesPublishFailedUnlisten: UnlistenFn | null = null;
 let notesPublishedUnlisten: UnlistenFn | null = null;
+let micStatusUnlisten: UnlistenFn | null = null;
 let trayToggleUnlisten: (() => void) | null = null;
 
 // Substring marker on the publish-failed banner so the published-success
@@ -363,6 +371,18 @@ async function startMeetingEventListeners(): Promise<void> {
     }
   });
 
+  // The native mic dropped or self-healed mid-capture. Flip a flag the panel
+  // reads to show "microphone disconnected — reconnecting…" so a Bluetooth/USB
+  // drop is never silent; "recovered" clears it (#2608).
+  micStatusUnlisten = await listen<{
+    meetingId: string;
+    status: "disconnected" | "recovered";
+    disconnectCount: number;
+  }>("meeting://mic-status", (event) => {
+    if (meetingState.activeMeeting?.id !== event.payload.meetingId) return;
+    setMeetingState("micCaptureLost", event.payload.status === "disconnected");
+  });
+
   // The tray menu's Start/Stop action toggles capture through the same flow.
   trayToggleUnlisten = await onTrayToggleCapture(() => {
     void toggleCaptureFromTray();
@@ -376,6 +396,7 @@ function stopMeetingEventListeners(): void {
   segmentsUpdatedUnlisten?.();
   notesPublishFailedUnlisten?.();
   notesPublishedUnlisten?.();
+  micStatusUnlisten?.();
   trayToggleUnlisten?.();
   transcriptUnlisten = null;
   statusUnlisten = null;
@@ -383,6 +404,7 @@ function stopMeetingEventListeners(): void {
   segmentsUpdatedUnlisten = null;
   notesPublishFailedUnlisten = null;
   notesPublishedUnlisten = null;
+  micStatusUnlisten = null;
   trayToggleUnlisten = null;
 }
 
@@ -410,6 +432,7 @@ async function startCapture(meeting: Meeting): Promise<boolean> {
     return false;
   }
   setMeetingState("captureLevel", 0);
+  setMeetingState("micCaptureLost", false);
   void setTrayRecording(true);
   return true;
 }
@@ -544,6 +567,7 @@ async function stopCapture(
   meetingId: string,
 ): Promise<CaptureStopOutcome | null> {
   setMeetingState("captureLevel", 0);
+  setMeetingState("micCaptureLost", false);
   void setTrayRecording(false);
   if (isTauriRuntime()) {
     return await stopBackendCapture(meetingId);

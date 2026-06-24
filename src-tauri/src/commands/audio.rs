@@ -593,6 +593,7 @@ pub async fn stop_meeting_capture(
     let outcome = StopMeetingCaptureOutcome {
         had_capture: summary.had_capture,
         native_mic_ready: summary.native_mic_ready,
+        native_mic_disconnect_count: summary.native_mic_disconnect_count,
         system_audio_ready: summary.system_audio_ready,
         apm_ready: summary.apm_ready,
         apm_active: summary.apm_active,
@@ -710,6 +711,10 @@ fn e2e_capture_probe_frames() -> Vec<Vec<i16>> {
 pub struct StopMeetingCaptureOutcome {
     pub had_capture: bool,
     pub native_mic_ready: bool,
+    /// Mid-capture mic disconnects during this capture (#2608). `0` is healthy;
+    /// any positive value means the "Me" track briefly dropped and self-healed
+    /// (or stayed down at stop, where `native_mic_ready` is also false).
+    pub native_mic_disconnect_count: u64,
     pub system_audio_ready: bool,
     pub apm_ready: bool,
     pub apm_active: bool,
@@ -764,6 +769,7 @@ fn capture_stop_diagnostics_json(
         "rendererPushPath": "disabled",
         "hadCapture": summary.had_capture,
         "nativeMicReady": summary.native_mic_ready,
+        "nativeMicDisconnectCount": summary.native_mic_disconnect_count,
         "systemAudioReady": summary.system_audio_ready,
         "apmReady": summary.apm_ready,
         "apmActive": summary.apm_active,

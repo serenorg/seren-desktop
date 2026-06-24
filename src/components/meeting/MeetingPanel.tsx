@@ -257,6 +257,14 @@ export function MeetingPanel() {
             </div>
           )}
         </Show>
+        {/* Mid-capture mic loss: the backend is re-acquiring; surface it so the
+            user knows their side isn't recording right now (#2608). */}
+        <Show when={activeCapture() && meetingStore.state.micCaptureLost}>
+          <div class="mt-2 flex items-center gap-2 text-[11px] text-destructive">
+            <span class="w-1.5 h-1.5 rounded-full bg-destructive animate-pulse" />
+            <span>Microphone disconnected — reconnecting…</span>
+          </div>
+        </Show>
         <Show when={activeProcessing()}>
           {(meeting) => (
             <div class="mt-3 flex items-center gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
