@@ -136,8 +136,8 @@ export function RecordingsSettings() {
             <FilmIcon />
           </span>
           <p class="m-0 text-[12px] text-muted-foreground">
-            No recordings yet. Use the record button in chat to capture a
-            workflow.
+            No recordings yet. Use the record button in the titlebar to capture
+            a workflow.
           </p>
         </div>
       </Show>
