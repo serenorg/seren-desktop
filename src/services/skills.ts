@@ -689,8 +689,11 @@ async function downloadSkillBundleManifest(
   }
   const apiResultFailure = findApiResultFailure(data);
   if (apiResultFailure) {
+    const message = apiResultFailure.message
+      ? ` (${apiResultFailure.message})`
+      : "";
     throw new SkillsApiError(
-      `Failed to download manifest for skill ${slug}: ${apiResultFailure.status}`,
+      `Failed to download manifest for skill ${slug}: ${apiResultFailure.status}${message}`,
       apiResultFailure.status,
     );
   }
@@ -864,23 +867,6 @@ async function downloadSkillBundle(
         manifest.files?.reduce((sum, meta) => sum + meta.size_bytes, 0) ?? 0,
       files,
     };
-  }
-}
-
-/**
- * Bundle metadata for callers that never read file bodies (content
- * preview, sync-state revision checks). On the oversized-bundle fallback
- * this stops at the manifest, so previewing a 50 MiB skill costs one
- * metadata request instead of the full payload fan-out (#2296).
- */
-async function downloadSkillBundleMetadata(
-  slug: string,
-): Promise<SkillBundle | SkillBundleManifest> {
-  try {
-    return await downloadSkillBundleSingleShot(slug);
-  } catch (error) {
-    if (!isOversizedBundleError(error)) throw error;
-    return downloadSkillBundleManifest(slug);
   }
 }
 
@@ -1719,7 +1705,10 @@ export const skills = {
     }
 
     log.info("[Skills] Fetching content for", slug);
-    return (await downloadSkillBundleMetadata(slug)).skill_md;
+    // Preview only needs skill_md, which the manifest carries. Query it
+    // directly so previewing a large skill never pulls the full bundle
+    // (which the metered gateway buffers and rejects with 500). #2617
+    return (await downloadSkillBundleManifest(slug)).skill_md;
   },
 
   /**
