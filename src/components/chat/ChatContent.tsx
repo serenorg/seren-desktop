@@ -2,7 +2,10 @@
 // ABOUTME: Shows chat messages, input, and model selector.
 
 import type { RecordingSession } from "@seren/recording-core";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import {
+  confirm,
+  message as showMessageDialog,
+} from "@tauri-apps/plugin-dialog";
 /* eslint-disable solid/no-innerhtml */
 import type { Component } from "solid-js";
 import {
@@ -58,7 +61,11 @@ import {
   setCurrentSkillDragPayload,
   skillDragPayload,
 } from "@/lib/skill-drag";
-import { skillCommandAliases, skillMatchesCommandAlias } from "@/lib/skills";
+import {
+  type InstalledSkill,
+  skillCommandAliases,
+  skillMatchesCommandAlias,
+} from "@/lib/skills";
 import {
   buildSkillInvocationDirective,
   buildSkillInvocationDisplay,
@@ -118,6 +125,7 @@ import { RLMStepsBlock } from "./RLMStepsBlock";
 import { SatisfactionSignal } from "./SatisfactionSignal";
 import { SkillsButton } from "./SkillsButton";
 import { SlashCommandPopup } from "./SlashCommandPopup";
+import { SyncSkillButton } from "./SyncSkillButton";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ToolCallCard } from "./ToolCallCard";
 import { ToolCallGroup } from "./ToolCallGroup";
@@ -428,6 +436,40 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     }
     return null;
   });
+  // Inspect the active skill's sync status once so the composer can surface the
+  // Sync button without the user opening the catalog. The store caches the
+  // verdict; `undefined` means "not inspected yet" for this skill.
+  createEffect(() => {
+    const skill = recentSkill();
+    if (!skill) return;
+    if (skillsStore.syncStatusFor(skill.path) !== undefined) return;
+    void skillsStore.loadSyncStatus(skill).catch(() => undefined);
+  });
+  const activeSkillNeedsSync = () => {
+    const skill = recentSkill();
+    return skill ? skillsStore.skillNeedsSync(skill) : false;
+  };
+  const handleSyncActiveSkill = async (skill: InstalledSkill) => {
+    try {
+      const result = await skillsStore.syncInstalledSkill(skill);
+      if (
+        (result.outcome === "untracked" || result.outcome === "error") &&
+        result.message
+      ) {
+        await showMessageDialog(result.message, {
+          title: "Sync skill",
+          kind: result.outcome === "error" ? "error" : "warning",
+        });
+      }
+    } catch (err) {
+      await showMessageDialog(
+        `Could not sync ${skill.name}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        { title: "Sync skill", kind: "error" },
+      );
+    }
+  };
   const conversationIsLoading = () => {
     const id = conversationId();
     return id ? conversationStore.getLoadingFor(id) : false;
@@ -2064,6 +2106,14 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                       inputRef?.setSelectionRange(len, len);
                     }}
                   />
+                  <Show when={activeSkillNeedsSync() && recentSkill()}>
+                    {(skill) => (
+                      <SyncSkillButton
+                        skill={skill()}
+                        onSync={() => void handleSyncActiveSkill(skill())}
+                      />
+                    )}
+                  </Show>
                 </Show>
                 <Show when={messageQueue().length > 0}>
                   <span class="flex items-center gap-2 px-2 py-1 bg-surface-2 border border-border rounded text-xs text-muted-foreground">
