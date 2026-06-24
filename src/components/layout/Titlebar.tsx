@@ -7,6 +7,7 @@ import { BalanceDisplay } from "@/components/common/BalanceDisplay";
 import { WorkspaceBar } from "@/components/layout/WorkspaceBar";
 import { RecordPrompt } from "@/components/meeting/RecordPrompt";
 import { desktopRecordingAdapter } from "@/features/recording/desktopRecordingAdapter";
+import { recordingHandoff } from "@/features/recording/recordingHandoff";
 import { authStore } from "@/stores/auth.store";
 import { updaterStore } from "@/stores/updater.store";
 
@@ -176,19 +177,14 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         </Show>
 
         {/* Screen/workflow recorder lives beside the meeting recorder — both
-            are capture controls. The active composer picks up the stopped
-            session via the seren:recording-session-stop event. */}
+            are capture controls. A stopped session is offered to the handoff
+            store; the active chat composer consumes it when ready, so the
+            skill-draft flow survives stopping with no composer focused. */}
         <RecordButton
           adapter={desktopRecordingAdapter}
           class="relative flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-rec-fg-muted cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
           classNames={{ toolbar: "absolute right-0 top-full z-50 mt-1" }}
-          onSessionStop={(session) =>
-            window.dispatchEvent(
-              new CustomEvent("seren:recording-session-stop", {
-                detail: session,
-              }),
-            )
-          }
+          onSessionStop={(session) => recordingHandoff.offer(session)}
         />
 
         <button

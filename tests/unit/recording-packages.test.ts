@@ -721,11 +721,12 @@ describe("recording packages", () => {
     ).toMatch(/^Existing instruction\n\nCreate a Seren skill draft/);
     expect(recordingComposerSource).toContain("buildRecordingSkillDraftPrompt");
     // The composers still build the draft prompt from a stopped session, but
-    // now receive it over the titlebar's recording-session-stop event rather
-    // than a direct onSessionStop prop. (#2609)
+    // now consume it from the recordingHandoff store when the pane is active
+    // rather than a fire-and-forget window event, so the draft survives
+    // stopping with no chat focused. (#2614)
     for (const composer of [agentChatSource, chatContentSource]) {
       expect(composer).toContain("handleRecordingSessionStop");
-      expect(composer).toContain('"seren:recording-session-stop"');
+      expect(composer).toContain("recordingHandoff.pending");
     }
   });
 
@@ -2389,13 +2390,13 @@ describe("recording packages", () => {
       titlebarSource.indexOf('data-testid="titlebar-meetings-button"'),
     );
 
-    // It must not render in either composer toolbar, and the active composer
-    // receives stopped sessions over the window event instead.
+    // It must not render in either composer toolbar; the titlebar offers the
+    // stopped session to the handoff store and the active composer consumes it.
+    expect(titlebarSource).toContain("recordingHandoff.offer");
     for (const composer of [agentChatSource, chatContentSource]) {
       expect(composer).not.toContain("<RecordButton");
-      expect(composer).toContain("seren:recording-session-stop");
+      expect(composer).toContain("recordingHandoff.pending");
     }
-    expect(titlebarSource).toContain("seren:recording-session-stop");
 
     // The trigger glyph reads as "record video", never the ambiguous dot.
     expect(uiSource).not.toContain('<circle cx="8" cy="8" r="5" />');
