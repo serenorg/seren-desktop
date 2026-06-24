@@ -233,7 +233,9 @@ describe("split-download fallback (#2296)", () => {
       response: { status: 403 },
     });
 
-    await expect(skills.fetchContent(catalogSkill)).rejects.toThrow(/403/);
+    await expect(
+      skills.install(catalogSkill, "", "seren", null),
+    ).rejects.toThrow(/403/);
     expect(mockDownloadSkillManifest).not.toHaveBeenCalled();
   });
 

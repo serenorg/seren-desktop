@@ -5,11 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockListSkills = vi.hoisted(() => vi.fn());
 const mockDownloadSkill = vi.hoisted(() => vi.fn());
+const mockDownloadSkillManifest = vi.hoisted(() => vi.fn());
 let storage: Map<string, string>;
 
 vi.mock("@/api/seren-skills", () => ({
   createOrgFolder: vi.fn(),
   downloadSkill: mockDownloadSkill,
+  downloadSkillManifest: mockDownloadSkillManifest,
   getAuthorIdentity: vi.fn(),
   getOrgFolder: vi.fn(),
   listSkills: mockListSkills,
@@ -210,7 +212,7 @@ describe("skills.fetchIndex via Seren Skills API", () => {
   });
 });
 
-describe("skills.fetchContent via downloadSkillBundle", () => {
+describe("skills.fetchContent via downloadSkillBundleManifest", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
@@ -228,7 +230,7 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
   }
 
   it("unwraps a bundle response wrapped in nested data envelopes", async () => {
-    mockDownloadSkill.mockResolvedValueOnce({
+    mockDownloadSkillManifest.mockResolvedValueOnce({
       data: { data: { data: bundle("alpha") } },
     });
 
@@ -247,7 +249,7 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
   });
 
   it("returns the bundle markdown when the response is unwrapped", async () => {
-    mockDownloadSkill.mockResolvedValueOnce({ data: bundle("beta") });
+    mockDownloadSkillManifest.mockResolvedValueOnce({ data: bundle("beta") });
 
     const { skills } = await import("@/services/skills");
     const content = await skills.fetchContent({
@@ -264,7 +266,7 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
   });
 
   it("throws when the bundle response cannot be normalized", async () => {
-    mockDownloadSkill.mockResolvedValueOnce({
+    mockDownloadSkillManifest.mockResolvedValueOnce({
       data: { content_hash: "abc" },
     });
 
@@ -279,7 +281,7 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
         sourceUrl: "seren-skills:gamma",
         tags: [],
       }),
-    ).rejects.toThrow("Unexpected seren-skills bundle response for gamma");
+    ).rejects.toThrow("Unexpected seren-skills manifest response for gamma");
   });
 
   it("includes inner envelope keys when a wrapped bundle response cannot be normalized", async () => {
@@ -287,7 +289,7 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
     // and the inner envelope is missing the bundle fields. The error must
     // surface BOTH outer and inner keys so we can root-cause without
     // redeploying the desktop client.
-    mockDownloadSkill.mockResolvedValueOnce({
+    mockDownloadSkillManifest.mockResolvedValueOnce({
       data: { data: { content_hash: "abc" } },
     });
 
@@ -306,7 +308,7 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
   });
 
   it("surfaces server error envelopes when the bundle body carries an error payload", async () => {
-    mockDownloadSkill.mockResolvedValueOnce({
+    mockDownloadSkillManifest.mockResolvedValueOnce({
       data: {
         data: {
           body: {
@@ -331,7 +333,7 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
   });
 
   it("treats publisher ApiResultResponse failures as failed downloads", async () => {
-    mockDownloadSkill.mockResolvedValueOnce({
+    mockDownloadSkillManifest.mockResolvedValueOnce({
       data: {
         data: {
           status: 404,
@@ -356,12 +358,12 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
         tags: [],
       }),
     ).rejects.toThrow(
-      "Failed to download skill curve-gauge-yield-trader: 404 (skill not found)",
+      "Failed to download manifest for skill curve-gauge-yield-trader: 404 (skill not found)",
     );
   });
 
   it("throws when the API returns an error", async () => {
-    mockDownloadSkill.mockResolvedValueOnce({
+    mockDownloadSkillManifest.mockResolvedValueOnce({
       error: { message: "not found" },
       response: { status: 404 },
     });
@@ -377,6 +379,6 @@ describe("skills.fetchContent via downloadSkillBundle", () => {
         sourceUrl: "seren-skills:delta",
         tags: [],
       }),
-    ).rejects.toThrow("Failed to download skill delta: 404");
+    ).rejects.toThrow("Failed to download manifest for skill delta: 404");
   });
 });
