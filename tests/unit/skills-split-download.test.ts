@@ -237,6 +237,28 @@ describe("split-download fallback (#2296)", () => {
     expect(mockDownloadSkillManifest).not.toHaveBeenCalled();
   });
 
+  it("retries a transient 502 from the manifest endpoint and succeeds", async () => {
+    vi.useFakeTimers();
+    mockDownloadSkillManifest
+      .mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "BadGateway" },
+        response: { status: 502 },
+      })
+      .mockResolvedValueOnce({
+        data: manifest,
+        error: undefined,
+        response: { status: 200 },
+      });
+
+    const pending = skills.fetchContent(catalogSkill);
+    await vi.runAllTimersAsync();
+
+    await expect(pending).resolves.toBe(SKILL_MD);
+    expect(mockDownloadSkillManifest).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
   it("rejects the install when a file was republished mid-download", async () => {
     mockDownloadSkillFile.mockImplementation(
       async (options: { query: { path: string } }) => ({
