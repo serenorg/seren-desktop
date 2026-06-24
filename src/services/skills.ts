@@ -577,13 +577,46 @@ function normalizeSkillBundle(value: unknown): SkillBundle | null {
   });
 }
 
+/** Gateway statuses worth a bounded retry on idempotent skill GETs (#2611). */
+const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504]);
+/** Backoff before each retry; length is the number of extra attempts. */
+const TRANSIENT_RETRY_DELAYS_MS = [250, 1000];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Retry an idempotent seren-skills download GET on transient gateway
+ * failures (502/503/504). The gateway intermittently 502s across publisher
+ * endpoints while the upstream publisher pod is briefly unavailable
+ * (serenorg/seren-core#189); a bounded retry rides through the blip instead
+ * of surfacing a hard error. Non-transient statuses — including the
+ * oversized-bundle 500 that triggers the split-download fallback — return on
+ * the first attempt, so their existing handling is unchanged.
+ */
+async function withTransientGatewayRetry<
+  T extends { error?: unknown; response?: { status?: number } },
+>(call: () => Promise<T>): Promise<T> {
+  let result = await call();
+  for (const delayMs of TRANSIENT_RETRY_DELAYS_MS) {
+    if (!result.error) return result;
+    const status = result.response?.status;
+    if (status === undefined || !TRANSIENT_GATEWAY_STATUSES.has(status)) {
+      return result;
+    }
+    await sleep(delayMs);
+    result = await call();
+  }
+  return result;
+}
+
 async function downloadSkillBundleSingleShot(
   slug: string,
 ): Promise<SkillBundle> {
-  const { data, error, response } = await downloadSkill({
-    path: { slug },
-    throwOnError: false,
-  });
+  const { data, error, response } = await withTransientGatewayRetry(() =>
+    downloadSkill({ path: { slug }, throwOnError: false }),
+  );
   if (error || !data) {
     const status = response ? `: ${response.status}` : "";
     throw new SkillsApiError(
@@ -644,10 +677,9 @@ function normalizeSkillBundleManifest(
 async function downloadSkillBundleManifest(
   slug: string,
 ): Promise<SkillBundleManifest> {
-  const { data, error, response } = await downloadSkillManifest({
-    path: { slug },
-    throwOnError: false,
-  });
+  const { data, error, response } = await withTransientGatewayRetry(() =>
+    downloadSkillManifest({ path: { slug }, throwOnError: false }),
+  );
   if (error || !data) {
     const status = response ? `: ${response.status}` : "";
     throw new SkillsApiError(
@@ -687,11 +719,9 @@ async function downloadSkillBundleFilePayload(
   slug: string,
   path: string,
 ): Promise<SkillBundleFileDownload> {
-  const { data, error, response } = await downloadSkillFile({
-    path: { slug },
-    query: { path },
-    throwOnError: false,
-  });
+  const { data, error, response } = await withTransientGatewayRetry(() =>
+    downloadSkillFile({ path: { slug }, query: { path }, throwOnError: false }),
+  );
   if (error || !data) {
     const status = response ? `: ${response.status}` : "";
     throw new SkillsApiError(
@@ -1099,7 +1129,11 @@ async function fetchRemoteSkillRevision(
 ): Promise<RemoteSkillRevision | null> {
   const slug = skillSlugFromSourceUrl(sourceUrl);
   if (!slug) return null;
-  return remoteRevisionFromBundle(await downloadSkillBundleMetadata(slug));
+  // A revision check only needs content_hash/version/updated_at, all of which
+  // the manifest carries. Query it directly instead of single-shot-first so a
+  // large skill's refresh never pulls the full bundle (and never depends on
+  // the gateway's oversized-bundle 500 to fall back). #2611
+  return remoteRevisionFromBundle(await downloadSkillBundleManifest(slug));
 }
 
 /**

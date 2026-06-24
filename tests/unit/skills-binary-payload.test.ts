@@ -7,6 +7,7 @@ import type { InstalledSkill, Skill } from "@/lib/skills";
 
 const mockInvoke = vi.hoisted(() => vi.fn());
 const mockDownloadSkill = vi.hoisted(() => vi.fn());
+const mockDownloadSkillManifest = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: mockInvoke,
@@ -30,6 +31,7 @@ vi.mock("@/api/seren-skills", () => ({
   createVersion: vi.fn(),
   deleteSkill: vi.fn(),
   downloadSkill: mockDownloadSkill,
+  downloadSkillManifest: mockDownloadSkillManifest,
   getAuthorIdentity: vi.fn(),
   getOrgFolder: vi.fn(),
   listSkills: vi.fn(),
@@ -82,7 +84,15 @@ const catalogSkill: Skill = {
 beforeEach(() => {
   mockInvoke.mockReset();
   mockDownloadSkill.mockReset();
+  mockDownloadSkillManifest.mockReset();
   mockDownloadSkill.mockResolvedValue({
+    data: bundle,
+    error: undefined,
+    response: { status: 200 },
+  });
+  // The revision check (inspectSyncStatus) is manifest-first; the manifest
+  // carries the same content_hash/files the bundle does.
+  mockDownloadSkillManifest.mockResolvedValue({
     data: bundle,
     error: undefined,
     response: { status: 200 },

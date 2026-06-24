@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockDownloadSkill = vi.hoisted(() => vi.fn());
+const mockDownloadSkillManifest = vi.hoisted(() => vi.fn());
 
 vi.mock("@/api/seren-skills", () => ({
   createOrgFolder: vi.fn(),
   downloadSkill: mockDownloadSkill,
+  downloadSkillManifest: mockDownloadSkillManifest,
   getAuthorIdentity: vi.fn(),
   getOrgFolder: vi.fn(),
   upsertAuthorIdentity: vi.fn(),
@@ -27,7 +29,7 @@ describe("skills.inspectSyncStatus", () => {
     const skillSourceUrl = "seren-skills:polymarket-maker-rebate-bot";
     const lastModified = "2026-03-18T00:00:00Z";
 
-    mockDownloadSkill.mockResolvedValue({
+    mockDownloadSkillManifest.mockResolvedValue({
       data: {
         content_hash: lastModified,
         files: [],
@@ -107,7 +109,7 @@ describe("skills.inspectSyncStatus", () => {
 
   it("keeps legacy serenorg repo sync state refreshable through the Seren Skills API", async () => {
     const lastModified = "2026-03-19T00:00:00Z";
-    mockDownloadSkill.mockResolvedValue({
+    mockDownloadSkillManifest.mockResolvedValue({
       data: {
         content_hash: lastModified,
         files: [],
@@ -175,10 +177,12 @@ describe("skills.inspectSyncStatus", () => {
       },
     });
 
-    expect(mockDownloadSkill).toHaveBeenCalledWith({
+    expect(mockDownloadSkillManifest).toHaveBeenCalledWith({
       path: { slug: "polymarket-maker-rebate-bot" },
       throwOnError: false,
     });
+    // The revision check is manifest-first: it must not pull the full bundle.
+    expect(mockDownloadSkill).not.toHaveBeenCalled();
     expect(status).toMatchObject({
       state: "update-available",
       updateAvailable: true,
@@ -219,5 +223,6 @@ describe("skills.inspectSyncStatus", () => {
 
     expect(status).toBeNull();
     expect(mockDownloadSkill).not.toHaveBeenCalled();
+    expect(mockDownloadSkillManifest).not.toHaveBeenCalled();
   });
 });
