@@ -2,7 +2,6 @@
 // ABOUTME: Shows chat messages, input, and model selector.
 
 import type { RecordingSession } from "@seren/recording-core";
-import { RecordButton } from "@seren/recording-ui";
 import { confirm } from "@tauri-apps/plugin-dialog";
 /* eslint-disable solid/no-innerhtml */
 import type { Component } from "solid-js";
@@ -23,7 +22,6 @@ import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { SlidePanel } from "@/components/layout/SlidePanel";
 import { RecordedSessionCard } from "@/components/recording/RecordedSessionCard";
 import { DepositModal } from "@/components/wallet/DepositModal";
-import { desktopRecordingAdapter } from "@/features/recording/desktopRecordingAdapter";
 import { appendRecordingSkillDraftPrompt } from "@/features/recording/recordingComposer";
 import { isAuthError, isContextOverflowError } from "@/lib/auth-errors";
 import {
@@ -219,6 +217,18 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       const len = inputRef?.value.length ?? 0;
       inputRef?.setSelectionRange(len, len);
     });
+  };
+  // The screen recorder lives in the titlebar; route its stopped session into
+  // the focused composer. Only the active pane handles the event, and the
+  // _handled flag prevents the sibling composer from double-processing it.
+  const onRecordingSessionStop = (event: Event) => {
+    if (!isPaneActive()) return;
+    const custom = event as CustomEvent<RecordingSession | null> & {
+      _handled?: boolean;
+    };
+    if (custom._handled) return;
+    custom._handled = true;
+    handleRecordingSessionStop(custom.detail);
   };
   const activeThreadProvider = (): ProviderId => {
     const id = conversationId();
@@ -607,6 +617,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     // Listen for slash command events
     window.addEventListener("seren:pick-images", handlePickImages);
     window.addEventListener("seren:set-chat-input", handleSetChatInput);
+    window.addEventListener(
+      "seren:recording-session-stop",
+      onRecordingSessionStop,
+    );
     window.addEventListener(RUN_SKILL_EVENT, handleRunSkillEvent);
 
     try {
@@ -661,6 +675,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     window.removeEventListener(
       "seren:set-chat-input",
       handleSetChatInput as EventListener,
+    );
+    window.removeEventListener(
+      "seren:recording-session-stop",
+      onRecordingSessionStop,
     );
     window.removeEventListener(RUN_SKILL_EVENT, handleRunSkillEvent);
 
@@ -2062,10 +2080,6 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 </Show>
               </div>
               <div class={COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES}>
-                <RecordButton
-                  adapter={desktopRecordingAdapter}
-                  onSessionStop={handleRecordingSessionStop}
-                />
                 <VoiceInputButton
                   onTranscript={(text) => {
                     setInput((prev) => (prev ? `${prev} ${text}` : text));

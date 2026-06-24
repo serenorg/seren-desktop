@@ -54,6 +54,7 @@ const recordingComposerSource = source(
 );
 const agentChatSource = source("src/components/chat/AgentChat.tsx");
 const chatContentSource = source("src/components/chat/ChatContent.tsx");
+const titlebarSource = source("src/components/layout/Titlebar.tsx");
 const tauriLibSource = source("src-tauri/src/lib.rs");
 
 function tarString(bytes: Uint8Array, offset: number, length: number): string {
@@ -719,14 +720,13 @@ describe("recording packages", () => {
       appendRecordingSkillDraftPrompt("Existing instruction  \n", session),
     ).toMatch(/^Existing instruction\n\nCreate a Seren skill draft/);
     expect(recordingComposerSource).toContain("buildRecordingSkillDraftPrompt");
-    expect(agentChatSource).toContain("handleRecordingSessionStop");
-    expect(agentChatSource).toContain(
-      "onSessionStop={handleRecordingSessionStop}",
-    );
-    expect(chatContentSource).toContain("handleRecordingSessionStop");
-    expect(chatContentSource).toContain(
-      "onSessionStop={handleRecordingSessionStop}",
-    );
+    // The composers still build the draft prompt from a stopped session, but
+    // now receive it over the titlebar's recording-session-stop event rather
+    // than a direct onSessionStop prop. (#2609)
+    for (const composer of [agentChatSource, chatContentSource]) {
+      expect(composer).toContain("handleRecordingSessionStop");
+      expect(composer).toContain('"seren:recording-session-stop"');
+    }
   });
 
   it("builds a correction prompt from an existing draft review", () => {
@@ -2373,20 +2373,32 @@ describe("recording packages", () => {
     expect(recordingMarkerForShortcutCode("Numpad1")).toBeNull();
   });
 
-  it("wires desktop through an adapter and places record before mic", () => {
+  it("wires desktop through an adapter and places the screen recorder in the titlebar (#2609)", () => {
     expect(desktopAdapterSource).toContain("@tauri-apps/api/core");
     expect(desktopAdapterSource).toContain("recording_list_targets");
     expect(desktopAdapterSource).toContain("recording_check_permissions");
     expect(desktopAdapterSource).toContain("recording_request_permission");
     expect(desktopAdapterSource).toContain("recording_start");
 
+    // The screen recorder is a capture control: it sits in the titlebar
+    // immediately before the meeting recorder, not beside the dictation mic.
+    expect(titlebarSource).toContain('from "@seren/recording-ui"');
+    expect(titlebarSource).toContain("desktopRecordingAdapter");
+    expect(titlebarSource).toContain("<RecordButton");
+    expect(titlebarSource.indexOf("<RecordButton")).toBeLessThan(
+      titlebarSource.indexOf('data-testid="titlebar-meetings-button"'),
+    );
+
+    // It must not render in either composer toolbar, and the active composer
+    // receives stopped sessions over the window event instead.
     for (const composer of [agentChatSource, chatContentSource]) {
-      expect(composer).toContain('from "@seren/recording-ui"');
-      expect(composer).toContain("desktopRecordingAdapter");
-      expect(composer.indexOf("<RecordButton")).toBeLessThan(
-        composer.indexOf("<VoiceInputButton"),
-      );
+      expect(composer).not.toContain("<RecordButton");
+      expect(composer).toContain("seren:recording-session-stop");
     }
+    expect(titlebarSource).toContain("seren:recording-session-stop");
+
+    // The trigger glyph reads as "record video", never the ambiguous dot.
+    expect(uiSource).not.toContain('<circle cx="8" cy="8" r="5" />');
   });
 
   it("registers the desktop recording command surface", () => {
