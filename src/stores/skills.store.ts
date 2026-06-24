@@ -2,6 +2,7 @@
 // ABOUTME: Handles available skills, installed skills, and thread/project/global resolution.
 
 import { invoke } from "@tauri-apps/api/core";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { untrack } from "solid-js";
 import { createStore } from "solid-js/store";
 import { log } from "@/lib/logger";
@@ -14,6 +15,7 @@ import {
   type Skill,
   type SkillInstallOptions,
   type SkillScope,
+  type SkillSyncStatus,
   type SkillsState,
 } from "@/lib/skills";
 import {
@@ -215,6 +217,77 @@ const [projectConfigState, setProjectConfigState] = createStore<
 const [threadSkillsState, setThreadSkillsState] = createStore<
   Record<string, string[] | null | undefined>
 >({});
+
+/**
+ * Sync-status cache keyed by installed skill path. Single source of truth so
+ * every surface (the Skills catalog panel and the composer Sync button) reads
+ * the same verdict and never disagrees about whether a skill needs syncing.
+ * - `undefined`: not inspected yet
+ * - `null`: not upstream-managed (nothing to sync)
+ * - `SkillSyncStatus`: last inspected verdict
+ */
+const [syncStatusState, setSyncStatusState] = createStore<
+  Record<string, SkillSyncStatus | null | undefined>
+>({});
+
+/** Per-skill (by path) in-flight flag for a sync-status inspection or refresh. */
+const [syncLoadingState, setSyncLoadingState] = createStore<
+  Record<string, boolean>
+>({});
+
+/**
+ * Outcome of {@link skillsStore.syncInstalledSkill}. The action owns the
+ * overwrite confirmation popup; callers map the outcome to surface-specific
+ * messaging (an alert in the catalog, a silent button update in the composer).
+ */
+export interface SyncSkillResult {
+  outcome: "synced" | "cancelled" | "untracked" | "error";
+  syncStatus: SkillSyncStatus | null | undefined;
+  /** Human-readable detail for the `error`/`untracked` outcomes. */
+  message?: string;
+}
+
+/** Short revision label for confirmation copy; null collapses to "current". */
+function shortRevision(sha: string | null): string {
+  if (!sha) return "current";
+  return sha.length > 12 ? sha.slice(0, 12) : sha;
+}
+
+/**
+ * Confirmation body for {@link skillsStore.syncInstalledSkill}, adapted to the
+ * verdict so the user sees what will happen before they apply it:
+ * - local edits → list the diverging files and warn about the overwrite
+ * - update available → name the revision jump
+ * - first sync → explain the bootstrap download
+ */
+function syncConfirmationMessage(
+  skill: InstalledSkill,
+  status: SkillSyncStatus,
+): string {
+  if (status.hasLocalChanges) {
+    const changed = [
+      ...status.changedLocalFiles,
+      ...status.missingManagedFiles,
+    ];
+    const list = changed.slice(0, 8).join("\n");
+    const more =
+      changed.length > 8 ? `\n...and ${changed.length - 8} more` : "";
+    return `Local changes were detected in ${skill.name}.\n\n${list}${more}\n\nOverwrite local skill files with upstream?`;
+  }
+
+  if (status.state === "bootstrap-required") {
+    return `${skill.name} needs an initial sync to download its skill files. Sync now?`;
+  }
+
+  if (status.updateAvailable) {
+    const target = shortRevision(status.remoteRevision?.sha ?? null);
+    return `An update is available for ${skill.name} (${shortRevision(
+      status.syncedRevision,
+    )} → ${target}).\n\nSync now to update to the latest published version?`;
+  }
+
+  return `${skill.name} is already up to date. Re-download the latest skill files anyway?`;
+}
 
 /**
  * Skills store with reactive state and actions.
@@ -583,8 +656,10 @@ export const skillsStore = {
         const status = await skills.inspectSyncStatus(installed);
         // inspectSyncStatus may return null for non-upstream-managed skills;
         // the gate above guarantees it isn't, but the type is honest about it.
+        setSyncStatusState(installed.path, status);
         if (status?.updateAvailable) {
-          await skills.refreshInstalledSkill(installed);
+          const refreshed = await skills.refreshInstalledSkill(installed);
+          setSyncStatusState(refreshed.installed.path, refreshed.syncStatus);
           await this.refreshInstalled();
           log.info(
             "[SkillsStore] Refreshed stale skill on toggle-on:",
@@ -890,9 +965,13 @@ export const skillsStore = {
       if (skill.syncState?.upstreamDeleted) continue;
       try {
         const status = await skills.inspectSyncStatus(skill);
+        // Keep the shared cache coherent so the composer Sync button reflects
+        // this background sweep without re-inspecting.
+        setSyncStatusState(skill.path, status);
         if (!status || status.hasLocalChanges) continue;
         if (status.updateAvailable || status.state === "bootstrap-required") {
-          await skills.refreshInstalledSkill(skill);
+          const refreshed = await skills.refreshInstalledSkill(skill);
+          setSyncStatusState(refreshed.installed.path, refreshed.syncStatus);
           autoRefreshed++;
           summary.updated++;
           log.info("[SkillsStore] Auto-refreshed stale skill:", skill.slug);
@@ -1023,6 +1102,10 @@ export const skillsStore = {
       state.installed.filter((s) => s.path !== skill.path),
     );
 
+    // Drop the cached sync verdict so a reinstall re-inspects from scratch.
+    setSyncStatusState(skill.path, undefined);
+    setSyncLoadingState(skill.path, false);
+
     // Remove enabled state
     delete enabledState[skill.path];
     saveEnabledState(enabledState);
@@ -1074,6 +1157,143 @@ export const skillsStore = {
       skill.path === updated.path ? updated : skill,
     );
     setState("installed", next);
+  },
+
+  // --------------------------------------------------------------------------
+  // Sync status (shared by the Skills catalog panel and the composer button)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Reactive sync-status verdict for an installed skill (by path).
+   */
+  syncStatusFor(path: string): SkillSyncStatus | null | undefined {
+    return syncStatusState[path];
+  },
+
+  /**
+   * Whether an inspection or refresh is currently running for this skill path.
+   */
+  isSyncLoading(path: string): boolean {
+    return syncLoadingState[path] === true;
+  },
+
+  /**
+   * True when the cached verdict says the skill is out of step with upstream:
+   * an update is available, the local files diverge, or the skill has never
+   * been bootstrapped. Returns false when the status is unknown, an inspection
+   * error, or `current`.
+   */
+  skillNeedsSync(skill: InstalledSkill): boolean {
+    const status = syncStatusState[skill.path];
+    if (!status) return false;
+    return (
+      status.updateAvailable ||
+      status.hasLocalChanges ||
+      status.state === "bootstrap-required"
+    );
+  },
+
+  /**
+   * Inspect (or re-inspect) a single skill's sync status and cache the result.
+   * Non-upstream-managed skills are cached as `null` without a network call.
+   */
+  async loadSyncStatus(
+    skill: InstalledSkill,
+  ): Promise<SkillSyncStatus | null | undefined> {
+    if (!isUpstreamManagedSkill(skill)) {
+      setSyncStatusState(skill.path, null);
+      return null;
+    }
+
+    setSyncLoadingState(skill.path, true);
+    try {
+      const status = await skills.inspectSyncStatus(skill);
+      setSyncStatusState(skill.path, status);
+      return status;
+    } finally {
+      setSyncLoadingState(skill.path, false);
+    }
+  },
+
+  /**
+   * Inspect sync status for every installed skill, populating the cache. Used
+   * by the catalog panel on open; failures for a single skill are isolated so
+   * one bad skill cannot abort the whole sweep.
+   */
+  async refreshAllSyncStatuses(): Promise<void> {
+    await Promise.all(
+      state.installed.map((skill) =>
+        this.loadSyncStatus(skill).catch((err) => {
+          log.warn(
+            "[SkillsStore] Sync-status inspection failed:",
+            skill.slug,
+            err,
+          );
+          return undefined;
+        }),
+      ),
+    );
+  },
+
+  /**
+   * Sync an installed skill to its upstream revision. Shows a confirmation
+   * popup describing what will change before applying, refreshes the files,
+   * and updates the cached sync status. The single sync gesture for both the
+   * catalog row and the composer Sync button.
+   */
+  async syncInstalledSkill(skill: InstalledSkill): Promise<SyncSkillResult> {
+    const cached = syncStatusState[skill.path];
+    const status =
+      cached && cached.state !== "error"
+        ? cached
+        : await skills.inspectSyncStatus(skill);
+    setSyncStatusState(skill.path, status);
+
+    if (!status) {
+      return {
+        outcome: "untracked",
+        syncStatus: status,
+        message: `${skill.name} is not tracked against an upstream Seren skill revision, so Seren will not refresh it automatically.`,
+      };
+    }
+
+    if (status.state === "error") {
+      return {
+        outcome: "error",
+        syncStatus: status,
+        message: status.error
+          ? `Seren could not verify the current sync state for ${skill.name}.\n\n${status.error}\n\nSync has been blocked to avoid overwriting local files without a verified baseline.`
+          : `Seren could not verify the current sync state for ${skill.name}. Sync has been blocked to avoid overwriting local files without a verified baseline.`,
+      };
+    }
+
+    const confirmed = await confirm(syncConfirmationMessage(skill, status), {
+      title: status.hasLocalChanges
+        ? "Overwrite local skill changes?"
+        : "Sync skill?",
+      kind: status.hasLocalChanges ? "warning" : "info",
+    });
+    if (!confirmed) {
+      return { outcome: "cancelled", syncStatus: status };
+    }
+
+    setSyncLoadingState(skill.path, true);
+    try {
+      const refreshed = await skills.refreshInstalledSkill(skill, {
+        expectedLocalManagedState: status.localManagedState,
+      });
+      this.replaceInstalled(refreshed.installed);
+      setSyncStatusState(refreshed.installed.path, refreshed.syncStatus);
+      log.info("[SkillsStore] Synced skill:", skill.slug);
+      return { outcome: "synced", syncStatus: refreshed.syncStatus };
+    } catch (err) {
+      // Re-inspect so the cached verdict reflects post-failure reality
+      // (the refresh aborts before writing when local state drifted).
+      await this.loadSyncStatus(skill).catch(() => undefined);
+      throw err;
+    } finally {
+      setSyncLoadingState(skill.path, false);
+    }
   },
 
   /**

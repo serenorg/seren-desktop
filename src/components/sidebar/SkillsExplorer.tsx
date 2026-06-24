@@ -2,7 +2,6 @@
 // ABOUTME: Renders inside SlidePanel with chip filters (All / Installed / Needs sync) and an inline detail accordion.
 
 import { createInfiniteQuery } from "@tanstack/solid-query";
-import { confirm } from "@tauri-apps/plugin-dialog";
 import {
   type Component,
   createEffect,
@@ -212,12 +211,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     slug: string;
     message: string;
   } | null>(null);
-  const [syncStatuses, setSyncStatuses] = createSignal<
-    Record<string, SkillSyncStatus | null | undefined>
-  >({});
-  const [syncLoading, setSyncLoading] = createSignal<Record<string, boolean>>(
-    {},
-  );
   let contentRef: HTMLDivElement | undefined;
   let refreshStatusTimer: ReturnType<typeof setTimeout> | null = null;
   const availableSkillsQuery = createInfiniteQuery(() =>
@@ -226,17 +219,14 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   // ── Derived values ──────────────────────────────
 
-  const syncStatusFor = (skill: InstalledSkill) => syncStatuses()[skill.path];
-
-  const skillNeedsSync = (skill: InstalledSkill): boolean => {
-    const status = syncStatusFor(skill);
-    if (!status) return false;
-    return (
-      status.updateAvailable ||
-      status.hasLocalChanges ||
-      status.state === "bootstrap-required"
-    );
-  };
+  // Sync status is owned by skillsStore so the catalog panel and the composer
+  // Sync button never disagree about whether a skill needs syncing.
+  const syncStatusFor = (skill: InstalledSkill) =>
+    skillsStore.syncStatusFor(skill.path);
+  const syncLoadingFor = (skill: InstalledSkill) =>
+    skillsStore.isSyncLoading(skill.path);
+  const skillNeedsSync = (skill: InstalledSkill): boolean =>
+    skillsStore.skillNeedsSync(skill);
 
   // Ownership is decided by the publisher record, which only exists on
   // catalog-side Skills. For installed rows we cross-reference by slug. The
@@ -371,17 +361,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   // invocation surfaces; thread-attach is a separate concept that may or may
   // not come back as an explicit "persona" affordance later.
 
-  const setSyncLoadingFor = (path: string, isLoading: boolean) => {
-    setSyncLoading((current) => ({ ...current, [path]: isLoading }));
-  };
-
-  const setSyncStatusFor = (
-    path: string,
-    status: SkillSyncStatus | null | undefined,
-  ) => {
-    setSyncStatuses((current) => ({ ...current, [path]: status }));
-  };
-
   const installProgressFor = (skillId: string) =>
     installProgressBySkill()[skillId] ?? null;
 
@@ -410,26 +389,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       : "Installing...";
   };
 
-  const loadSyncStatus = async (skill: InstalledSkill) => {
-    if (!isUpstreamManagedSkill(skill)) {
-      setSyncStatusFor(skill.path, null);
-      return;
-    }
+  const loadSyncStatus = (skill: InstalledSkill) =>
+    skillsStore.loadSyncStatus(skill);
 
-    setSyncLoadingFor(skill.path, true);
-    try {
-      const status = await skillsService.inspectSyncStatus(skill);
-      setSyncStatusFor(skill.path, status);
-    } finally {
-      setSyncLoadingFor(skill.path, false);
-    }
-  };
-
-  const refreshAllSyncStatuses = async () => {
-    await Promise.all(
-      skillsStore.installed.map((skill) => loadSyncStatus(skill)),
-    );
-  };
+  const refreshAllSyncStatuses = () => skillsStore.refreshAllSyncStatuses();
 
   const updateCount = () =>
     skillsStore.installed.filter((skill) => {
@@ -753,7 +716,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     setActionInProgress(skill.id);
     try {
       await skillsStore.remove(skill);
-      setSyncStatusFor(skill.path, undefined);
       if (expandedSkillId() === skill.id) {
         setExpandedSkillId(null);
         setDetailContent(null);
@@ -809,58 +771,17 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   });
 
   const handleRefreshInstalledSkill = async (skill: InstalledSkill) => {
-    const cachedStatus = syncStatusFor(skill);
-    const existingStatus =
-      cachedStatus && cachedStatus.state !== "error"
-        ? cachedStatus
-        : await skillsService.inspectSyncStatus(skill);
-    setSyncStatusFor(skill.path, existingStatus);
-
-    if (!existingStatus) {
-      window.alert(
-        `${skill.name} is not tracked against an upstream Seren skill revision, so Seren will not refresh it automatically.`,
-      );
-      return;
-    }
-
-    if (existingStatus.state === "error") {
-      window.alert(
-        existingStatus.error
-          ? `Seren could not verify the current sync state for ${skill.name}.\n\n${existingStatus.error}\n\nRefresh has been blocked to avoid overwriting local files without a verified baseline.`
-          : `Seren could not verify the current sync state for ${skill.name}. Refresh has been blocked to avoid overwriting local files without a verified baseline.`,
-      );
-      return;
-    }
-
-    if (existingStatus?.hasLocalChanges) {
-      const changed = [
-        ...existingStatus.changedLocalFiles,
-        ...existingStatus.missingManagedFiles,
-      ];
-      const confirmOverwrite = await confirm(
-        `Local changes were detected in ${skill.name}.\n\n${changed
-          .slice(0, 8)
-          .join(
-            "\n",
-          )}${changed.length > 8 ? `\n...and ${changed.length - 8} more` : ""}\n\nOverwrite local skill files with upstream?`,
-        {
-          title: "Overwrite local skill changes?",
-          kind: "warning",
-        },
-      );
-      if (!confirmOverwrite) return;
-    }
-
     setActionInProgress(skill.id);
     try {
-      const refreshed = await skillsService.refreshInstalledSkill(skill, {
-        expectedLocalManagedState: existingStatus.localManagedState,
-      });
-      skillsStore.replaceInstalled(refreshed.installed);
-      setSyncStatusFor(refreshed.installed.path, refreshed.syncStatus);
+      const result = await skillsStore.syncInstalledSkill(skill);
+      if (
+        (result.outcome === "untracked" || result.outcome === "error") &&
+        result.message
+      ) {
+        window.alert(result.message);
+      }
     } catch (err) {
       console.error("[SkillsExplorer] Failed to refresh installed skill:", err);
-      await loadSyncStatus(skill);
     } finally {
       setActionInProgress(null);
     }
@@ -1351,7 +1272,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             Yours
                           </span>
                         </Show>
-                        <Show when={syncLoading()[skill.path]}>
+                        <Show when={syncLoadingFor(skill)}>
                           <span class="text-[10px] text-muted-foreground">
                             Checking...
                           </span>
@@ -1461,7 +1382,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                                 }
                                 disabled={
                                   actionInProgress() === skill.id ||
-                                  syncLoading()[skill.path]
+                                  syncLoadingFor(skill)
                                 }
                               >
                                 {actionInProgress() === skill.id
