@@ -1098,6 +1098,10 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
+      # EventBridge Scheduler that stops the shared e2e box nightly (23:00 ET).
+      # The release suspends it for the duration of the e2e run so the box is not
+      # killed mid-test (#2630), and restores it in an always() teardown.
+      WINDOWS_E2E_AUTO_STOP_SCHEDULE: seren-sandbox-auto-stop
     steps:
       - name: Checkout e2e scripts
         uses: actions/checkout@v7
@@ -1201,6 +1205,38 @@ jobs:
             exit 1
           fi
           echo "Windows e2e box prerequisites present."
+
+      # The nightly seren-sandbox-auto-stop schedule (23:00 ET) is a direct
+      # ec2:stopInstances with no awareness of in-flight releases, so a release
+      # that reaches e2e inside the stop window loses the box mid-command and the
+      # gate stalls for ~105 min (#2630). Suspend the schedule for the duration of
+      # this run; the always() teardown re-enables it. This runs BEFORE starting
+      # the box so a stop cannot fire during the up-to-10-min boot wait below.
+      # scheduler:UpdateSchedule is a full-definition replace, so round-trip the
+      # live definition through jq and only flip State to avoid corrupting the
+      # target. Fail OPEN: a missing scheduler permission must not block the
+      # release — the run then proceeds at the status-quo risk and the self-heal
+      # restart below recovers if the box is stopped anyway.
+      - name: Suspend nightly auto-stop during e2e
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          def="$(aws scheduler get-schedule \
+            --name "$WINDOWS_E2E_AUTO_STOP_SCHEDULE" \
+            --region "$AWS_REGION" 2>/dev/null \
+            | jq 'del(.Arn,.CreationDate,.LastModificationDate) | .State="DISABLED"')"
+          if [ -z "$def" ] || [ "$def" = "null" ]; then
+            echo "::warning::Could not read schedule '$WINDOWS_E2E_AUTO_STOP_SCHEDULE' (missing or no permission); skipping suspend. The run proceeds unprotected; the self-heal restart recovers a mid-run stop."
+            exit 0
+          fi
+          if aws scheduler update-schedule \
+            --region "$AWS_REGION" \
+            --cli-input-json "$def" >/dev/null 2>&1; then
+            echo "Suspended nightly auto-stop '$WINDOWS_E2E_AUTO_STOP_SCHEDULE' for this run."
+          else
+            echo "::warning::Failed to suspend '$WINDOWS_E2E_AUTO_STOP_SCHEDULE' (no scheduler permission?); proceeding unprotected. The self-heal restart recovers a mid-run stop."
+          fi
 
       # The e2e host is a shared box that other tooling stops to save cost.
       # SendCommand against a stopped instance fails with InvalidInstanceId
@@ -1448,6 +1484,34 @@ jobs:
             --instance-id "$WINDOWS_E2E_INSTANCE_ID" \
             --query "{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}" \
             --output json
+
+      # Re-enable the nightly auto-stop regardless of the e2e outcome so a release
+      # never leaves the shared box pinned-on (cost leak). Idempotent: re-applies
+      # the live definition with State=ENABLED even if the suspend step did not run
+      # or already restored it. Fail OPEN here too — teardown cannot meaningfully
+      # block, and the Terraform-managed schedule's desired state (ENABLED) is the
+      # backstop that corrects a stuck-disabled schedule on the next apply (#2630).
+      - name: Restore nightly auto-stop
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          def="$(aws scheduler get-schedule \
+            --name "$WINDOWS_E2E_AUTO_STOP_SCHEDULE" \
+            --region "$AWS_REGION" 2>/dev/null \
+            | jq 'del(.Arn,.CreationDate,.LastModificationDate) | .State="ENABLED"')"
+          if [ -z "$def" ] || [ "$def" = "null" ]; then
+            echo "::warning::Could not read schedule '$WINDOWS_E2E_AUTO_STOP_SCHEDULE' to restore it; Terraform will re-enable it on the next apply."
+            exit 0
+          fi
+          if aws scheduler update-schedule \
+            --region "$AWS_REGION" \
+            --cli-input-json "$def" >/dev/null 2>&1; then
+            echo "Restored nightly auto-stop '$WINDOWS_E2E_AUTO_STOP_SCHEDULE'."
+          else
+            echo "::error::Failed to restore '$WINDOWS_E2E_AUTO_STOP_SCHEDULE' to ENABLED. The shared e2e box may stay running. Re-enable it manually or via the next Terraform apply."
+          fi
 
       - name: Download Windows e2e log bundle
         if: always()
