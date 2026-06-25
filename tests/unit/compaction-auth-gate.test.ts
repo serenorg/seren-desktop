@@ -17,8 +17,10 @@ const authServiceSource = readFileSync(
 
 describe("#1639 — auto-compact auth gate", () => {
   it("imports authStore and the modal-trigger from auth.store (#1661 renamed promptLogin)", () => {
-    expect(agentStoreSource).toContain(
-      'import { authStore, requestSignInModal } from "@/stores/auth.store"',
+    // Match the import regardless of single- vs multi-line formatting or other
+    // co-imported symbols, so adding an import here doesn't trip the guard.
+    expect(agentStoreSource).toMatch(
+      /import\s*\{[^}]*\bauthStore\b[^}]*\brequestSignInModal\b[^}]*\}\s*from\s*["']@\/stores\/auth\.store["']/,
     );
   });
 

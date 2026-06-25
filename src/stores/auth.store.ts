@@ -72,7 +72,7 @@ type EnsureApiKeyResult =
  * Ensure we have a Seren API key for MCP authentication.
  * Checks local storage first, only creates a new key if none stored.
  */
-async function ensureApiKey(): Promise<EnsureApiKeyResult> {
+export async function ensureApiKey(): Promise<EnsureApiKeyResult> {
   try {
     // Check if we already have a stored API key
     const existingKey = await getSerenApiKey();
