@@ -38,7 +38,9 @@ pub mod services {
 
 pub mod audio;
 mod auth;
-mod claude_memory;
+// Public so the headless `claude_memory_sync` example can drive the
+// AppHandle-free sync core (#2639) without launching the app.
+pub mod claude_memory;
 mod claude_setup;
 mod embedded_runtime;
 mod files;
