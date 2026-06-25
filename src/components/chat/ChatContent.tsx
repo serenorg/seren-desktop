@@ -1999,8 +1999,22 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
 
                   const history = userMessageHistory();
 
+                  // Prompt-history recall only fires on a plain arrow. When a
+                  // modifier is held the arrow is a text-selection / caret
+                  // chord (Shift+Arrow, Cmd/Ctrl+Shift+Arrow,
+                  // Option+Shift+Arrow) and must reach the textarea.
+                  const isPlainArrow =
+                    !event.shiftKey &&
+                    !event.metaKey &&
+                    !event.ctrlKey &&
+                    !event.altKey;
+
                   // Up arrow: navigate to older message
-                  if (event.key === "ArrowUp" && history.length > 0) {
+                  if (
+                    event.key === "ArrowUp" &&
+                    isPlainArrow &&
+                    history.length > 0
+                  ) {
                     const textarea = event.currentTarget;
                     if (textarea.selectionStart === 0 || input() === "") {
                       event.preventDefault();
@@ -2025,7 +2039,11 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                   }
 
                   // Down arrow: navigate to newer message
-                  if (event.key === "ArrowDown" && historyIndex() >= 0) {
+                  if (
+                    event.key === "ArrowDown" &&
+                    isPlainArrow &&
+                    historyIndex() >= 0
+                  ) {
                     const textarea = event.currentTarget;
                     if (textarea.selectionStart === textarea.value.length) {
                       event.preventDefault();

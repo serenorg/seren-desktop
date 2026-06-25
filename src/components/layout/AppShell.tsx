@@ -53,7 +53,7 @@ import { SkillsExplorer } from "@/components/sidebar/SkillsExplorer";
 import { AgentTasksPanel } from "@/components/tasks/AgentTasksPanel";
 import { openFolder } from "@/lib/files/service";
 import { isMeetingProcessingStatus } from "@/lib/meeting-format";
-import { shortcuts } from "@/lib/shortcuts";
+import { isNativeTextEditingKey, shortcuts } from "@/lib/shortcuts";
 import type { InstalledSkill } from "@/lib/skills";
 import { listenForInterviewLaunch } from "@/lib/tauri-bridge";
 import { telemetry } from "@/services/telemetry";
@@ -579,6 +579,16 @@ export const AppShell: Component<AppShellProps> = (props) => {
       target instanceof HTMLElement &&
       target.closest("[data-keybinding-recorder='true']")
     ) {
+      return;
+    }
+
+    // Inside a text field, caret-movement keys must perform native cursor
+    // movement and selection (e.g. Cmd/Ctrl+Shift+Arrow). The arrow-based
+    // pane keybindings collide with that chord, so never let this capture-phase
+    // handler swallow them. Terminal surfaces are non-editable, so pane resize
+    // still works there.
+    if (isNativeTextEditingKey(e)) {
+      workspaceKeybindingMatcher.clear();
       return;
     }
 
