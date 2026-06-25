@@ -1,7 +1,7 @@
 // ABOUTME: Verifies the desktop recording adapter's host fallback and IPC payloads.
 // ABOUTME: Guards the Tauri/native boundary without importing UI package internals.
 
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { Event, EventCallback, UnlistenFn } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ vi.mock("@/lib/tauri-bridge", () => ({
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: vi.fn(),
   invoke: vi.fn(),
 }));
 
@@ -21,6 +22,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 const isTauriRuntimeMock = vi.mocked(isTauriRuntime);
+const convertFileSrcMock = vi.mocked(convertFileSrc);
 const invokeMock = vi.mocked(invoke);
 const listenMock = vi.mocked(listen);
 
@@ -65,6 +67,9 @@ describe("desktopRecordingAdapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     isTauriRuntimeMock.mockReturnValue(false);
+    convertFileSrcMock.mockImplementation(
+      (path) => `asset://localhost/${encodeURIComponent(path)}`,
+    );
   });
 
   it("returns unavailable built-in targets outside Tauri", async () => {
@@ -214,6 +219,7 @@ describe("desktopRecordingAdapter", () => {
           windowId: "123",
           capturedAtMs: 1234,
           artifactUrl: "file:///tmp/window-preview-123.png",
+          artifactPath: "/tmp/window-preview-123.png",
           mimeType: "image/png",
           width: 640,
           height: 480,
@@ -284,6 +290,7 @@ describe("desktopRecordingAdapter", () => {
     ).resolves.toEqual(
       expect.objectContaining({
         windowId: "123",
+        artifactUrl: "asset://localhost/%2Ftmp%2Fwindow-preview-123.png",
         mimeType: "image/png",
       }),
     );
@@ -322,6 +329,9 @@ describe("desktopRecordingAdapter", () => {
       3,
       "recording_capture_window_preview",
       { windowId: "123" },
+    );
+    expect(convertFileSrcMock).toHaveBeenCalledWith(
+      "/tmp/window-preview-123.png",
     );
     expect(invokeMock).toHaveBeenNthCalledWith(
       4,

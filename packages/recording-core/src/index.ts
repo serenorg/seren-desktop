@@ -44,6 +44,7 @@ export interface RecordingCaptureWindowPreview {
   windowId: string;
   capturedAtMs: number;
   artifactUrl: string;
+  artifactPath?: string | null;
   mimeType: string;
   width: number;
   height: number;

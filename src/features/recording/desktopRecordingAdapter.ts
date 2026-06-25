@@ -24,6 +24,14 @@ async function getInvoke(): Promise<
   return invoke;
 }
 
+async function getConvertFileSrc(): Promise<
+  typeof import("@tauri-apps/api/core").convertFileSrc | null
+> {
+  if (!isTauriRuntime()) return null;
+  const { convertFileSrc } = await import("@tauri-apps/api/core");
+  return convertFileSrc;
+}
+
 async function getListen(): Promise<
   typeof import("@tauri-apps/api/event").listen | null
 > {
@@ -36,6 +44,36 @@ const EXTERNAL_STOP_EVENT = "recording://external-stop";
 
 interface ExternalStopPayload {
   recordingId: string;
+}
+
+function pathFromFileUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "file:") return null;
+    const pathname = decodeURIComponent(url.pathname);
+    if (url.hostname && url.hostname !== "localhost") {
+      return `//${url.hostname}${pathname}`;
+    }
+    if (/^\/[A-Za-z]:\//.test(pathname)) return pathname.slice(1);
+    return pathname;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeWindowPreviewArtifactUrl(
+  preview: RecordingCaptureWindowPreview,
+  convertFileSrc: typeof import("@tauri-apps/api/core").convertFileSrc,
+): RecordingCaptureWindowPreview {
+  const artifactPath =
+    typeof preview.artifactPath === "string" && preview.artifactPath.trim()
+      ? preview.artifactPath
+      : pathFromFileUrl(preview.artifactUrl);
+  if (!artifactPath) return preview;
+  return {
+    ...preview,
+    artifactUrl: convertFileSrc(artifactPath),
+  };
 }
 
 function externalStopSession(recordingId: string): RecordingSession {
@@ -137,10 +175,14 @@ export const desktopRecordingAdapter: RecordingHostAdapter = {
     if (!invoke) {
       throw new Error("Window previews are only available in Seren Desktop.");
     }
-    return await invoke<RecordingCaptureWindowPreview>(
+    const preview = await invoke<RecordingCaptureWindowPreview>(
       "recording_capture_window_preview",
       { windowId },
     );
+    const convertFileSrc = await getConvertFileSrc();
+    return convertFileSrc
+      ? normalizeWindowPreviewArtifactUrl(preview, convertFileSrc)
+      : preview;
   },
 
   async clearWindowPreviews(): Promise<void> {

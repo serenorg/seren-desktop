@@ -56,6 +56,7 @@ const agentChatSource = source("src/components/chat/AgentChat.tsx");
 const chatContentSource = source("src/components/chat/ChatContent.tsx");
 const titlebarSource = source("src/components/layout/Titlebar.tsx");
 const tauriLibSource = source("src-tauri/src/lib.rs");
+const tauriConfigSource = source("src-tauri/tauri.conf.json");
 
 function tarString(bytes: Uint8Array, offset: number, length: number): string {
   const slice = bytes.slice(offset, offset + length);
@@ -2379,7 +2380,10 @@ describe("recording packages", () => {
     expect(desktopAdapterSource).toContain("recording_list_targets");
     expect(desktopAdapterSource).toContain("recording_check_permissions");
     expect(desktopAdapterSource).toContain("recording_request_permission");
+    expect(desktopAdapterSource).toContain("convertFileSrc");
     expect(desktopAdapterSource).toContain("recording_start");
+    expect(tauriConfigSource).toContain("img-src 'self' asset:");
+    expect(tauriConfigSource).toContain("http://asset.localhost");
 
     // The screen recorder is a capture control: it sits in the titlebar
     // immediately before the meeting recorder, not beside the dictation mic.
