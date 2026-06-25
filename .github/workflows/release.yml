@@ -1354,13 +1354,45 @@ jobs:
             JSON.stringify({ commands, executionTimeout: ["6000"] }, null, 2),
           );
           NODE
-          command_id="$(aws ssm send-command \
-            --instance-ids "$WINDOWS_E2E_INSTANCE_ID" \
-            --document-name "AWS-RunPowerShellScript" \
-            --comment "Seren Desktop release Windows production e2e ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}" \
-            --parameters "file://$RUNNER_TEMP/windows-e2e-commands.json" \
-            --query "Command.CommandId" \
-            --output text)"
+          send_e2e_command() {
+            aws ssm send-command \
+              --instance-ids "$WINDOWS_E2E_INSTANCE_ID" \
+              --document-name "AWS-RunPowerShellScript" \
+              --comment "Seren Desktop release Windows production e2e ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}" \
+              --parameters "file://$RUNNER_TEMP/windows-e2e-commands.json" \
+              --query "Command.CommandId" \
+              --output text
+          }
+          # The shared box is stopped nightly by the seren-sandbox-auto-stop
+          # schedule (23:00 ET, #2630), with no awareness of in-flight runs. A
+          # release that reaches e2e inside that window loses the box mid-command:
+          # the on-box command can never complete and its SSM status stalls on
+          # Pending until the deadline, then fails the release. Restart the box
+          # and resend the command instead of burning the whole deadline on a
+          # command that is already dead. The schedule fires once per night, so a
+          # single restart is the normal case; the cap bounds a genuinely broken
+          # host.
+          restart_e2e_host() {
+            echo "::warning::Windows e2e host was stopped mid-run (likely the nightly auto-stop, #2630); restarting and resending the command."
+            aws ec2 wait instance-stopped --instance-ids "$WINDOWS_E2E_INSTANCE_ID" || true
+            aws ec2 start-instances --instance-ids "$WINDOWS_E2E_INSTANCE_ID" >/dev/null
+            aws ec2 wait instance-running --instance-ids "$WINDOWS_E2E_INSTANCE_ID"
+            online_deadline=$((SECONDS + 600))
+            until [ "$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=$WINDOWS_E2E_INSTANCE_ID" \
+              --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null)" = "Online" ]; do
+              if [ "$SECONDS" -gt "$online_deadline" ]; then
+                echo "::error::Windows e2e host did not return online after a mid-run stop."
+                exit 1
+              fi
+              echo "Waiting for SSM agent after restart..."
+              sleep 15
+            done
+            echo "Windows e2e host back online after restart."
+          }
+          max_restarts=2
+          restart_count=0
+          command_id="$(send_e2e_command)"
           echo "command_id=$command_id" >> "$GITHUB_OUTPUT"
           echo "SSM command: $command_id"
           # Poll past the SSM executionTimeout (6000s) so the on-box command, not
@@ -1384,6 +1416,27 @@ jobs:
                 exit 1
                 ;;
             esac
+            # A box stopped out from under the command never reaches a terminal
+            # SSM status, so detect it directly from EC2 state rather than waiting
+            # out the deadline. Treat a transient describe error (unknown) as
+            # "keep polling" so an API blip does not trigger a needless restart.
+            instance_state="$(aws ec2 describe-instances \
+              --instance-ids "$WINDOWS_E2E_INSTANCE_ID" \
+              --query 'Reservations[0].Instances[0].State.Name' \
+              --output text 2>/dev/null || echo unknown)"
+            if [ "$instance_state" != "running" ] && [ "$instance_state" != "unknown" ]; then
+              echo "Windows e2e host state is '$instance_state' while the command is still running."
+              if [ "$restart_count" -ge "$max_restarts" ]; then
+                echo "::error::Windows e2e host was stopped mid-run and the restart cap ($max_restarts) is exhausted."
+                exit 1
+              fi
+              restart_count=$((restart_count + 1))
+              restart_e2e_host
+              command_id="$(send_e2e_command)"
+              echo "SSM command (restart $restart_count/$max_restarts): $command_id"
+              deadline=$((SECONDS + 6300))
+              continue
+            fi
             if [ "$SECONDS" -gt "$deadline" ]; then
               echo "::error::Timed out waiting for Windows e2e SSM command $command_id"
               exit 1
