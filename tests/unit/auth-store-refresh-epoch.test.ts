@@ -16,8 +16,6 @@ const mocks = vi.hoisted(() => {
     authLogout: vi.fn(async () => {}),
     initializeGateway: vi.fn(async () => {}),
     resetGateway: vi.fn(async () => {}),
-    addSerenDbServer: vi.fn(async () => {}),
-    removeSerenDbServer: vi.fn(async () => {}),
     runtimeHasCapability: vi.fn(() => false),
     getPolicy: vi.fn(),
     resetRemoteCatalog: vi.fn(),
@@ -46,11 +44,6 @@ vi.mock("@/services/auth", () => ({
 vi.mock("@/services/mcp-gateway", () => ({
   initializeGateway: mocks.initializeGateway,
   resetGateway: mocks.resetGateway,
-}));
-
-vi.mock("@/lib/mcp/serendb", () => ({
-  addSerenDbServer: mocks.addSerenDbServer,
-  removeSerenDbServer: mocks.removeSerenDbServer,
 }));
 
 vi.mock("@/lib/runtime", () => ({

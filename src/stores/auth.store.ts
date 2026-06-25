@@ -2,7 +2,6 @@
 // ABOUTME: Tracks user session and installs runtime-specific auth bindings lazily.
 
 import { createStore } from "solid-js/store";
-import { addSerenDbServer, removeSerenDbServer } from "@/lib/mcp/serendb";
 import { runtimeHasCapability } from "@/lib/runtime";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import {
@@ -143,11 +142,6 @@ async function initializeMcpInBackground(): Promise<void> {
   }
 
   try {
-    verboseRuntimeConsole.debug(
-      "[Auth Store] Adding Seren MCP server config...",
-    );
-    await addSerenDbServer();
-
     verboseRuntimeConsole.debug(
       "[Auth Store] Initializing MCP Gateway (background)...",
     );
@@ -308,13 +302,6 @@ export async function logout(): Promise<void> {
 
   // Clear stored API key
   await clearSerenApiKey();
-
-  // Remove Seren MCP server config
-  try {
-    await removeSerenDbServer();
-  } catch (error) {
-    console.error("Failed to remove Seren MCP server:", error);
-  }
 
   await authLogout();
   await resetSkillsCatalog();

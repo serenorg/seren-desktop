@@ -14,8 +14,6 @@ const {
   authLogoutMock,
   initializeGatewayMock,
   resetGatewayMock,
-  addSerenDbServerMock,
-  removeSerenDbServerMock,
   runtimeHasCapabilityMock,
   getPolicyMock,
   storedKeyRef,
@@ -40,8 +38,6 @@ const {
     authLogoutMock: vi.fn(async () => {}),
     initializeGatewayMock: vi.fn(async () => {}),
     resetGatewayMock: vi.fn(async () => {}),
-    addSerenDbServerMock: vi.fn(async () => {}),
-    removeSerenDbServerMock: vi.fn(async () => {}),
     runtimeHasCapabilityMock: vi.fn(() => false),
     getPolicyMock: vi.fn(async () => null),
     eventListeners: listeners,
@@ -69,11 +65,6 @@ vi.mock("@/services/auth", () => ({
 vi.mock("@/services/mcp-gateway", () => ({
   initializeGateway: initializeGatewayMock,
   resetGateway: resetGatewayMock,
-}));
-
-vi.mock("@/lib/mcp/serendb", () => ({
-  addSerenDbServer: addSerenDbServerMock,
-  removeSerenDbServer: removeSerenDbServerMock,
 }));
 
 vi.mock("@/lib/runtime", () => ({

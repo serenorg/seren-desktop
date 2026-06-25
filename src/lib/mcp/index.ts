@@ -20,13 +20,4 @@ export {
   parseMcpError,
 } from "./errors";
 export { getRiskLabel, getToolRiskLevel } from "./risk";
-export {
-  addSerenDbServer,
-  ensureSerenDbServer,
-  isSerenDbConfigured,
-  removeSerenDbServer,
-  SERENDB_BUILTIN_ID,
-  SERENDB_SERVER_NAME,
-  serenDbServerConfig,
-} from "./serendb";
 export * from "./types";
