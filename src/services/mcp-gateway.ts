@@ -391,8 +391,15 @@ export async function initializeGateway(): Promise<void> {
     }
   })();
 
-  await loadingPromise;
-  loadingPromise = null;
+  // Clear the in-flight slot whether the connect succeeded or threw. A failed
+  // attempt must not leave a rejected promise cached here, or every later
+  // initializeGateway() call short-circuits on it and the gateway stays dead
+  // for the whole session (recoverable only by logout). See #2654.
+  try {
+    await loadingPromise;
+  } finally {
+    loadingPromise = null;
+  }
 }
 
 /**
