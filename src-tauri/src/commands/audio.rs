@@ -139,14 +139,16 @@ fn set_meeting_notes_record(
     Ok(())
 }
 
-fn get_meeting_seren_notes_id(conn: &Connection, id: &str) -> Result<Option<String>> {
+fn get_meeting_title_and_seren_notes_id(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<(String, Option<String>)>> {
     conn.query_row(
-        "SELECT seren_notes_id FROM meetings WHERE id = ?1",
+        "SELECT title, seren_notes_id FROM meetings WHERE id = ?1",
         params![id],
-        |row| row.get::<_, Option<String>>(0),
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
     )
     .optional()
-    .map(Option::flatten)
 }
 
 fn set_meeting_seren_notes_id_record(
@@ -332,6 +334,21 @@ async fn spawn_seren_notes_publish(
             err
         );
     }
+
+    // Close the rename-during-publish window: a rename that committed before the
+    // note id was persisted couldn't PATCH a not-yet-existing note. Now that the
+    // id is stored, reconcile if the title drifted from what we just published
+    // so the cloud matches the latest local title. #2626.
+    let drift_id = meeting_id.clone();
+    let latest = run_db(app.clone(), move |conn| {
+        get_meeting_title_and_seren_notes_id(conn, &drift_id)
+    })
+    .await;
+    if let Ok(Some((latest_title, _))) = latest {
+        if latest_title != meeting.title {
+            tauri::async_runtime::spawn(reconcile_seren_notes_title(app, meeting_id));
+        }
+    }
 }
 
 // User-triggered republish: re-runs the same publish path the auto-flow
@@ -410,49 +427,77 @@ pub async fn set_meeting_routed_skill(
 pub async fn update_meeting_title(app: AppHandle, id: String, title: String) -> Result<(), String> {
     let lookup = id.clone();
     let db_id = id.clone();
-    let db_title = title.clone();
-    // Read back the published-note id inside the same closure so the rename and
-    // the lookup see one consistent row.
-    let seren_notes_id = run_db(app.clone(), move |conn| {
+    // Read back whether a cloud note exists inside the same closure so the
+    // rename and the lookup see one consistent row.
+    let has_note = run_db(app.clone(), move |conn| {
         conn.execute(
             "UPDATE meetings
              SET title = ?1, updated_at = ?2
              WHERE id = ?3",
-            params![db_title, now_ms(), db_id],
+            params![title, now_ms(), db_id],
         )?;
         mark_sync_upsert(conn, "meetings", &db_id)?;
-        get_meeting_seren_notes_id(conn, &db_id)
+        Ok(get_meeting_title_and_seren_notes_id(conn, &db_id)?
+            .and_then(|(_, note)| note)
+            .is_some())
     })
     .await?;
     emit_meeting_status_by_id(&app, &lookup).await;
 
-    // If this meeting already has a cloud note, keep its title in sync via a
-    // fire-and-forget PATCH so a slow/cold gateway never blocks the rename. The
-    // share link is preserved (no new note). When there is no note yet, the
-    // next (auto or manual) publish reads the fresh title from the DB. #2342.
-    if let Some(note_id) = seren_notes_id {
-        tauri::async_runtime::spawn(sync_seren_notes_title(app, id, note_id, title));
+    // If this meeting already has a cloud note, reconcile its title so the
+    // share link's note stays in sync. When there is no note yet, the next
+    // (auto or manual) publish reads the fresh title from the DB. #2342.
+    if has_note {
+        tauri::async_runtime::spawn(reconcile_seren_notes_title(app, id));
     }
     Ok(())
 }
 
-// Push a renamed meeting's title to its existing seren-notes entry. Best-effort:
-// the local rename already succeeded, so a terminal failure is logged (not
-// surfaced via the `notes-publish-failed` banner, whose republish CTA would
-// POST a duplicate note). #2342.
-async fn sync_seren_notes_title(app: AppHandle, meeting_id: String, note_id: String, title: String) {
+// Serializes seren-notes title reconciles process-wide so two quick renames
+// (or a rename racing the initial publish) can't land out of order and leave
+// the cloud title behind the local one. Reconciles are rare and fast, so a
+// single global lock is sufficient — no per-meeting map to leak. #2626.
+fn title_reconcile_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+// Reconcile a meeting's existing seren-notes entry with its *latest* local
+// title. The lock + re-read mean whichever reconcile runs last writes the
+// newest title regardless of spawn/HTTP ordering. Best-effort: the local
+// rename already succeeded, so a terminal PATCH failure is logged (not surfaced
+// via the `notes-publish-failed` banner, whose republish CTA would POST a
+// duplicate note). No-op when the meeting has no note yet or is gone. #2342 #2626.
+async fn reconcile_seren_notes_title(app: AppHandle, meeting_id: String) {
     use crate::audio::seren_notes_publish::PublishError;
+    let _guard = title_reconcile_lock().lock().await;
+    let lookup = meeting_id.clone();
+    let row = match run_db(app.clone(), move |conn| {
+        get_meeting_title_and_seren_notes_id(conn, &lookup)
+    })
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return,
+        Err(err) => {
+            log::warn!("[meeting] seren-notes title reconcile skipped for {meeting_id}: {err}");
+            return;
+        }
+    };
+    let (title, Some(note_id)) = row else {
+        return;
+    };
     match crate::audio::seren_notes_publish::update_meeting_note_title(&app, &note_id, &title).await
     {
         Ok(()) => {}
         Err(PublishError::NotAuthenticated) => {
             log::info!(
-                "[meeting] seren-notes title sync skipped for {meeting_id} (not authenticated)"
+                "[meeting] seren-notes title reconcile skipped for {meeting_id} (not authenticated)"
             );
         }
         Err(err) => {
             log::warn!(
-                "[meeting] seren-notes title sync failed for {meeting_id}: {}",
+                "[meeting] seren-notes title reconcile failed for {meeting_id}: {}",
                 err.into_message()
             );
         }
@@ -1604,6 +1649,43 @@ mod tests {
             template_id: Some("discovery".to_string()),
             now: 20,
         }
+    }
+
+    // The title reconcile reads (latest title, note id) to decide whether and
+    // what to PATCH. Pin that read across the three states it branches on:
+    // pre-publish (no note → no-op), post-publish (note present → PATCH latest
+    // title), and missing meeting (None → no-op, not an error). #2626.
+    #[test]
+    fn title_and_note_id_lookup_reflects_publish_state() {
+        let conn = setup();
+        insert_meeting(&conn, meeting("meeting-note")).unwrap();
+
+        let before = get_meeting_title_and_seren_notes_id(&conn, "meeting-note")
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.0, "Customer discovery");
+        assert_eq!(before.1, None);
+
+        set_meeting_seren_notes_id_record(
+            &conn,
+            "meeting-note",
+            "276a4660-e16b-4934-97c6-a1ade2426653",
+        )
+        .unwrap();
+        let after = get_meeting_title_and_seren_notes_id(&conn, "meeting-note")
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.0, "Customer discovery");
+        assert_eq!(
+            after.1.as_deref(),
+            Some("276a4660-e16b-4934-97c6-a1ade2426653")
+        );
+
+        assert!(
+            get_meeting_title_and_seren_notes_id(&conn, "ghost")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
