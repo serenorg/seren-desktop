@@ -193,6 +193,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     if (!isPaneActive()) return;
     setAttachedImages((prev) => [...prev, ...files]);
   });
+  let releaseRecordedSessionArtifacts: (() => void) | undefined;
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -217,10 +218,21 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   );
   const conversationId = () =>
     props.threadId ?? conversationStore.activeConversationId;
-  const handleRecordingSessionStop = (session: RecordingSession | null) => {
+  const clearRecordedSession = () => {
+    releaseRecordedSessionArtifacts?.();
+    releaseRecordedSessionArtifacts = undefined;
+    setRecordedSession(null);
+  };
+  onCleanup(clearRecordedSession);
+  const handleRecordingSessionStop = (
+    session: RecordingSession | null,
+    releaseArtifacts?: () => void,
+  ) => {
     if (!session) return;
+    clearRecordedSession();
+    releaseRecordedSessionArtifacts = releaseArtifacts;
     setInput((current) => appendRecordingSkillDraftPrompt(current, session));
-    if (session.outputDir) setRecordedSession(session);
+    setRecordedSession(session);
     queueMicrotask(() => {
       inputRef?.focus();
       const len = inputRef?.value.length ?? 0;
@@ -232,10 +244,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   // next gains focus), then clear so only one composer handles it. This keeps
   // the skill-draft flow alive even if recording stopped with no chat focused.
   createEffect(() => {
-    const pending = recordingHandoff.pending;
+    const pending = recordingHandoff.pendingEntry;
     if (!pending || !isPaneActive()) return;
     recordingHandoff.clear();
-    handleRecordingSessionStop(pending);
+    handleRecordingSessionStop(pending.session, pending.releaseArtifacts);
   });
   const activeThreadProvider = (): ProviderId => {
     const id = conversationId();
@@ -1919,7 +1931,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 {(session) => (
                   <RecordedSessionCard
                     session={session()}
-                    onDismiss={() => setRecordedSession(null)}
+                    onDismiss={clearRecordedSession}
                   />
                 )}
               </Show>

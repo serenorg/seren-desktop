@@ -144,6 +144,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const [awaitingLogin, setAwaitingLogin] = createSignal<AgentType | null>(
     null,
   );
+  let releaseRecordedSessionArtifacts: (() => void) | undefined;
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let userHasScrolledUp = false;
@@ -178,10 +179,21 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     const len = inputRef?.value.length ?? 0;
     inputRef?.setSelectionRange(len, len);
   };
-  const handleRecordingSessionStop = (session: RecordingSession | null) => {
+  const clearRecordedSession = () => {
+    releaseRecordedSessionArtifacts?.();
+    releaseRecordedSessionArtifacts = undefined;
+    setRecordedSession(null);
+  };
+  onCleanup(clearRecordedSession);
+  const handleRecordingSessionStop = (
+    session: RecordingSession | null,
+    releaseArtifacts?: () => void,
+  ) => {
     if (!session) return;
+    clearRecordedSession();
+    releaseRecordedSessionArtifacts = releaseArtifacts;
     setInput((current) => appendRecordingSkillDraftPrompt(current, session));
-    if (session.outputDir) setRecordedSession(session);
+    setRecordedSession(session);
     queueMicrotask(() => {
       inputRef?.focus();
       const len = inputRef?.value.length ?? 0;
@@ -193,10 +205,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // next gains focus), then clear so only one composer handles it. This keeps
   // the skill-draft flow alive even if recording stopped with no chat focused.
   createEffect(() => {
-    const pending = recordingHandoff.pending;
+    const pending = recordingHandoff.pendingEntry;
     if (!pending || !isPaneActive()) return;
     recordingHandoff.clear();
-    handleRecordingSessionStop(pending);
+    handleRecordingSessionStop(pending.session, pending.releaseArtifacts);
   });
   markdownWorker.onmessage = (
     e: MessageEvent<{ id: string; html: string; error?: boolean }>,
@@ -2088,7 +2100,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 {(session) => (
                   <RecordedSessionCard
                     session={session()}
-                    onDismiss={() => setRecordedSession(null)}
+                    onDismiss={clearRecordedSession}
                   />
                 )}
               </Show>

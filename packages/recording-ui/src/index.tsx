@@ -41,7 +41,10 @@ export interface RecordButtonProps {
   class?: string;
   classNames?: RecordingUiClassNames;
   onSessionStart?: (session: RecordingSession) => void;
-  onSessionStop?: (session: RecordingSession | null) => void;
+  onSessionStop?: (
+    session: RecordingSession | null,
+    releaseArtifacts?: () => void,
+  ) => void;
   onError?: (message: string) => void;
 }
 
@@ -232,6 +235,15 @@ export function RecordButton(props: RecordButtonProps) {
     props.onError?.(message);
   };
 
+  const releaseArtifactsFor = (session: RecordingSession) => {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      void props.adapter.releaseSessionArtifacts?.(session);
+    };
+  };
+
   let elapsedTimer: ReturnType<typeof setInterval> | undefined;
   const stopElapsedTimer = () => {
     if (!elapsedTimer) return;
@@ -254,7 +266,7 @@ export function RecordButton(props: RecordButtonProps) {
     setLastMarkerLabel(null);
     setStatus("idle");
     setError(null);
-    props.onSessionStop?.(session);
+    props.onSessionStop?.(session, releaseArtifactsFor(session));
   });
   onCleanup(() => externalStopCleanup?.());
   onCleanup(() => {
@@ -451,7 +463,10 @@ export function RecordButton(props: RecordButtonProps) {
       setMarkerCount(0);
       setLastMarkerLabel(null);
       setStatus("idle");
-      props.onSessionStop?.(session);
+      props.onSessionStop?.(
+        session,
+        session ? releaseArtifactsFor(session) : undefined,
+      );
     } catch (err) {
       fail(err, "recording");
     }

@@ -50,6 +50,7 @@ export function RecordedSessionCard(props: {
   const markerCount = () => props.session.markerCount ?? 0;
   const captureStatsLabel = () =>
     formatCaptureStats(props.session.captureStats);
+  const hasLocalArtifacts = () => Boolean(props.session.outputDir);
 
   const reveal = async () => {
     if (busy()) return;
@@ -121,26 +122,28 @@ export function RecordedSessionCard(props: {
               <SparkIcon />
               {buildingSkill() ? "Hide draft" : "Build skill"}
             </button>
-            <button
-              type="button"
-              class={GHOST_ICON_BUTTON}
-              aria-label="Reveal recording in Finder"
-              title="Reveal in Finder"
-              disabled={busy() !== null}
-              onClick={() => void reveal()}
-            >
-              <RevealIcon />
-            </button>
-            <button
-              type="button"
-              class={`${GHOST_ICON_BUTTON} hover:bg-red-500/10 hover:text-red-600`}
-              aria-label="Delete recording"
-              title="Delete recording from disk"
-              disabled={busy() !== null}
-              onClick={() => void remove()}
-            >
-              <TrashIcon />
-            </button>
+            <Show when={hasLocalArtifacts()}>
+              <button
+                type="button"
+                class={GHOST_ICON_BUTTON}
+                aria-label="Reveal recording in Finder"
+                title="Reveal in Finder"
+                disabled={busy() !== null}
+                onClick={() => void reveal()}
+              >
+                <RevealIcon />
+              </button>
+              <button
+                type="button"
+                class={`${GHOST_ICON_BUTTON} hover:bg-red-500/10 hover:text-red-600`}
+                aria-label="Delete recording"
+                title="Delete recording from disk"
+                disabled={busy() !== null}
+                onClick={() => void remove()}
+              >
+                <TrashIcon />
+              </button>
+            </Show>
             <button
               type="button"
               class={GHOST_ICON_BUTTON}
@@ -178,14 +181,16 @@ export function RecordedSessionCard(props: {
             ·
           </span>
           <span class="uppercase tracking-wide text-muted-foreground/80">
-            local only
+            {hasLocalArtifacts() ? "local only" : "no local folder"}
           </span>
         </div>
 
         <p class="text-[11px] leading-snug text-muted-foreground">
           The skill-draft prompt was added to your message. Send it, then paste
           the reply into <span class="text-foreground/80">Build skill</span>.
-          The video stays on this device.
+          {hasLocalArtifacts()
+            ? " The video stays on this device."
+            : " This capture does not expose reveal or delete actions."}
         </p>
 
         <Show when={error()}>

@@ -1758,9 +1758,10 @@ function writeTarHeader(
   mtimeSeconds: number,
 ): Uint8Array<ArrayBuffer> {
   const pathParts = path.split("/");
+  const pathBytes = new TextEncoder().encode(path);
   const pathUnsafe =
     path.length === 0 ||
-    path.length > 100 ||
+    pathBytes.length > 100 ||
     path.startsWith("/") ||
     path.includes("\\") ||
     pathParts.some((part) => part === "" || part === "." || part === "..");

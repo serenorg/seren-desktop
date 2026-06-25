@@ -184,7 +184,9 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
           adapter={desktopRecordingAdapter}
           class="relative flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-rec-fg-muted cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
           classNames={{ toolbar: "absolute right-0 top-full z-50 mt-1" }}
-          onSessionStop={(session) => recordingHandoff.offer(session)}
+          onSessionStop={(session, releaseArtifacts) =>
+            recordingHandoff.offer(session, releaseArtifacts)
+          }
         />
 
         <button
