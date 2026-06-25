@@ -31,6 +31,30 @@ const RENDERED_INDEX_FILENAME: &str = "MEMORY.md";
 const PROJECT_ID_FILENAME: &str = "project_id";
 const DEFAULT_PREF_TYPE: &str = "claude_preference";
 
+/// Maximum number of entries listed in the MEMORY.md auto-index. Rows beyond
+/// this are summarized in an overflow footer instead of being listed — their
+/// bodies always remain in SerenDB and stay reachable via the seren MCP.
+/// Without a cap the index grows one line per row and can blow past the
+/// harness's MEMORY.md load budget (a 56-row project already approaches it).
+const MAX_AUTO_INDEX_ENTRIES: usize = 50;
+
+/// Soft byte budget for the whole rendered MEMORY.md. Over this we log a
+/// warning so an oversized index is noticed. We never truncate: the bulk of an
+/// over-budget file is hand-curated prose outside the markers, which the
+/// renderer is contractually forbidden to touch.
+const MEMORY_MD_SIZE_BUDGET_BYTES: u64 = 20_000;
+
+/// Consecutive cloud-write failures tolerated for a single intercepted file
+/// before it is quarantined out of the live `memory/` dir. Bounds how long a
+/// persistently-failing plaintext file lingers and stops the watcher from
+/// retrying it forever on every fs event.
+const MAX_INTERCEPT_RETRIES: u32 = 3;
+
+/// Subdirectory (under a project's `memory/`) where files that exhausted their
+/// retries are parked. Its parent is `.quarantine`, not `memory`, so
+/// `should_intercept_path` never re-picks these up.
+const QUARANTINE_DIR_NAME: &str = ".quarantine";
+
 /// Hardcoded SerenDB SQL endpoint for the seren-db publisher. The frontend uses
 /// the same path through the generated SDK; we hit it directly from Rust so the
 /// watcher can persist files without round-tripping through JS.
@@ -99,6 +123,16 @@ pub struct InterceptFailureEvent {
     pub error: String,
 }
 
+/// Event emitted when a file exhausts its retries and is moved out of the live
+/// `memory/` dir into `.quarantine/`. The original plaintext no longer lingers
+/// where it can be re-intercepted; `quarantine_path` points at where it landed.
+#[derive(Debug, Clone, Serialize)]
+pub struct InterceptQuarantineEvent {
+    pub path: String,
+    pub quarantine_path: String,
+    pub error: String,
+}
+
 /// Global watcher handle so we can start / stop / inspect from Tauri commands.
 struct WatcherSlot {
     watcher: Option<RecommendedWatcher>,
@@ -123,6 +157,11 @@ impl Default for WatcherSlot {
 lazy_static::lazy_static! {
     static ref WATCHER_SLOT: Arc<Mutex<WatcherSlot>> =
         Arc::new(Mutex::new(WatcherSlot::default()));
+    /// Consecutive cloud-write failure count per intercepted file path. Drives
+    /// the quarantine threshold so a persistently-failing file is parked
+    /// instead of retried forever. Cleared on success or after quarantine.
+    static ref FAILURE_COUNTS: Mutex<HashMap<PathBuf, u32>> =
+        Mutex::new(HashMap::new());
 }
 
 // ---------------------------------------------------------------------------
@@ -440,14 +479,17 @@ pub fn build_upsert_preference_sql(
     )
 }
 
-/// Build a SELECT to read all preferences for a project, ordered by pref_type
-/// and pref_key for stable rendering. Used by `MEMORY.md` rendering.
+/// Build a SELECT to read all preferences for a project. Rows come back
+/// most-recently-updated first so the renderer's entry cap keeps the freshest
+/// memories; `pref_key` is the stable tie-breaker. `updated_at` is the trailing
+/// column so the positional row indexing in `render_preferences_as_markdown`
+/// (pref_key, pref_type, description, content, source_file) is unaffected.
 pub fn build_select_preferences_sql(project_path: &str) -> String {
     format!(
-        "SELECT pref_key, pref_type, description, content, source_file \
+        "SELECT pref_key, pref_type, description, content, source_file, updated_at \
          FROM claude_agent_preferences \
          WHERE project_path = {project_path} \
-         ORDER BY pref_type, pref_key;",
+         ORDER BY updated_at DESC NULLS LAST, pref_key;",
         project_path = quote_sql_string(project_path),
     )
 }
@@ -478,6 +520,8 @@ pub fn write_rendered_memory_md(
     let memory_dir = claude_project_dir.join("memory");
     fs::create_dir_all(&memory_dir)
         .map_err(|e| format!("failed to create claude memory dir: {e}"))?;
+    // Memory files are plaintext until ingested; keep the dir owner-only.
+    restrict_permissions(&memory_dir, 0o700);
 
     let final_path = memory_dir.join(RENDERED_INDEX_FILENAME);
     let block = format!(
@@ -492,8 +536,99 @@ pub fn write_rendered_memory_md(
 
     let tmp_path = memory_dir.join(format!("{RENDERED_INDEX_FILENAME}.tmp"));
     fs::write(&tmp_path, &merged).map_err(|e| format!("failed to write temp MEMORY.md: {e}"))?;
+    restrict_permissions(&tmp_path, 0o600);
     fs::rename(&tmp_path, &final_path).map_err(|e| format!("failed to finalize MEMORY.md: {e}"))?;
+    restrict_permissions(&final_path, 0o600);
+
+    // Surface an oversized index rather than silently letting it grow past the
+    // harness's load budget. We only warn — hand-curated prose outside the
+    // markers is never truncated.
+    if let Ok(meta) = fs::metadata(&final_path) {
+        if memory_md_over_budget(meta.len()) {
+            log::warn!(
+                "[ClaudeMemory] {} is {} bytes, over the {}-byte budget — consider consolidating memories (bodies stay in SerenDB)",
+                final_path.display(),
+                meta.len(),
+                MEMORY_MD_SIZE_BUDGET_BYTES
+            );
+        }
+    }
     Ok(final_path)
+}
+
+/// Restrict a path's permissions to owner-only on Unix. No-op elsewhere, where
+/// the parent dir's ACL inheritance governs access. Best-effort: a failure is
+/// logged at debug and does not abort the write.
+#[cfg(unix)]
+fn restrict_permissions(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Err(e) = fs::set_permissions(path, fs::Permissions::from_mode(mode)) {
+        log::debug!(
+            "[ClaudeMemory] could not set mode {mode:o} on {}: {e}",
+            path.display()
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn restrict_permissions(_path: &Path, _mode: u32) {}
+
+/// Whether a file with `failure_count` consecutive cloud-write failures should
+/// be quarantined out of the live memory dir.
+fn should_quarantine(failure_count: u32) -> bool {
+    failure_count >= MAX_INTERCEPT_RETRIES
+}
+
+/// Record a failed cloud write for `path` and return the new consecutive count.
+fn record_failure(path: &Path) -> u32 {
+    let mut counts = match FAILURE_COUNTS.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entry = counts.entry(path.to_path_buf()).or_insert(0);
+    *entry += 1;
+    *entry
+}
+
+/// Clear any recorded failures for `path` (on success or after quarantine).
+fn clear_failure(path: &Path) {
+    if let Ok(mut counts) = FAILURE_COUNTS.lock() {
+        counts.remove(path);
+    }
+}
+
+/// Move a file that exhausted its retries into `memory/.quarantine/`, writing a
+/// sibling `<name>.error` with the last error. The file leaves the live
+/// `memory/` dir (so it is no longer re-intercepted, since `.quarantine` is not
+/// `memory`) but is preserved for inspection rather than deleted. Returns the
+/// quarantine path.
+fn quarantine_failed_file(path: &Path, error: &str) -> Result<PathBuf, String> {
+    let memory_dir = path
+        .parent()
+        .ok_or_else(|| format!("cannot quarantine {}: no parent dir", path.display()))?;
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("cannot quarantine {}: no file name", path.display()))?;
+
+    let quarantine_dir = memory_dir.join(QUARANTINE_DIR_NAME);
+    fs::create_dir_all(&quarantine_dir)
+        .map_err(|e| format!("failed to create quarantine dir: {e}"))?;
+    restrict_permissions(&quarantine_dir, 0o700);
+
+    let dest = quarantine_dir.join(file_name);
+    fs::rename(path, &dest)
+        .map_err(|e| format!("failed to move {} to quarantine: {e}", path.display()))?;
+    restrict_permissions(&dest, 0o600);
+
+    let err_path = quarantine_dir.join(format!("{file_name}.error"));
+    if let Err(e) = fs::write(&err_path, error) {
+        log::debug!("[ClaudeMemory] could not write quarantine error sidecar: {e}");
+    } else {
+        restrict_permissions(&err_path, 0o600);
+    }
+
+    Ok(dest)
 }
 
 /// Splice `new_block` into `existing` at the auto-index markers, or append it
@@ -526,9 +661,15 @@ pub fn render_preferences_as_markdown(rows: &[Vec<serde_json::Value>]) -> String
         return String::new();
     }
 
+    // Rows arrive most-recent-first (see build_select_preferences_sql). Cap the
+    // listed set so the index can't grow past the harness's load budget; the
+    // remainder is summarized in an overflow footer and stays in SerenDB.
+    let total = rows.len();
+    let capped = &rows[..total.min(MAX_AUTO_INDEX_ENTRIES)];
+
     // Schema: pref_key, pref_type, description, content, source_file
     let mut sections: BTreeMap<String, Vec<(String, String, String)>> = BTreeMap::new();
-    for row in rows {
+    for row in capped {
         let pref_key = row.first().and_then(|v| v.as_str()).unwrap_or("");
         let pref_type = row
             .get(1)
@@ -566,7 +707,21 @@ pub fn render_preferences_as_markdown(rows: &[Vec<serde_json::Value>]) -> String
             }
         }
     }
+
+    let overflow = total.saturating_sub(capped.len());
+    if overflow > 0 {
+        out.push_str(&format!(
+            "\n_+{overflow} more {} in SerenDB — recall via the seren MCP._\n",
+            if overflow == 1 { "memory" } else { "memories" }
+        ));
+    }
     out
+}
+
+/// True when a rendered MEMORY.md exceeds the soft size budget. Pulled out so
+/// the threshold is unit-testable without capturing log output.
+pub fn memory_md_over_budget(byte_len: u64) -> bool {
+    byte_len > MEMORY_MD_SIZE_BUDGET_BYTES
 }
 
 /// `feedback` → `Feedback`, `active_engagement` → `Active Engagement`.
@@ -961,6 +1116,8 @@ async fn handle_event(app: &AppHandle, path: PathBuf, config: &SerenDbConfig) {
 
     match process_memory_file(&path, &client, config).await {
         Ok(ProcessOutcome::Persisted { name, memory_type }) => {
+            // A clean write clears any prior failure streak for this path.
+            clear_failure(&path);
             log::info!(
                 "[ClaudeMemory] persisted {} to claude_agent_preferences and removed plaintext file",
                 path.display()
@@ -1009,18 +1166,56 @@ async fn handle_event(app: &AppHandle, path: PathBuf, config: &SerenDbConfig) {
         }
         Ok(ProcessOutcome::Skipped) => {}
         Err(e) => {
-            log::warn!(
-                "[ClaudeMemory] {} left on disk — cloud write failed: {e}",
-                path.display()
-            );
-            let _ = app.emit(
-                "claude-memory-intercept-failed",
-                InterceptFailureEvent {
-                    path: path.to_string_lossy().to_string(),
-                    memory_type: memory_type_fallback,
-                    error: e,
-                },
-            );
+            let failures = record_failure(&path);
+            if should_quarantine(failures) {
+                match quarantine_failed_file(&path, &e) {
+                    Ok(dest) => {
+                        clear_failure(&path);
+                        log::warn!(
+                            "[ClaudeMemory] {} failed {failures}x — quarantined to {}: {e}",
+                            path.display(),
+                            dest.display()
+                        );
+                        let _ = app.emit(
+                            "claude-memory-intercept-quarantined",
+                            InterceptQuarantineEvent {
+                                path: path.to_string_lossy().to_string(),
+                                quarantine_path: dest.to_string_lossy().to_string(),
+                                error: e,
+                            },
+                        );
+                    }
+                    Err(qe) => {
+                        // Could not move it; leave it for another retry and
+                        // surface both errors.
+                        log::warn!(
+                            "[ClaudeMemory] {} failed {failures}x and could not be quarantined ({qe}): {e}",
+                            path.display()
+                        );
+                        let _ = app.emit(
+                            "claude-memory-intercept-failed",
+                            InterceptFailureEvent {
+                                path: path.to_string_lossy().to_string(),
+                                memory_type: memory_type_fallback,
+                                error: e,
+                            },
+                        );
+                    }
+                }
+            } else {
+                log::warn!(
+                    "[ClaudeMemory] {} left on disk (failure {failures}/{MAX_INTERCEPT_RETRIES}) — cloud write failed: {e}",
+                    path.display()
+                );
+                let _ = app.emit(
+                    "claude-memory-intercept-failed",
+                    InterceptFailureEvent {
+                        path: path.to_string_lossy().to_string(),
+                        memory_type: memory_type_fallback,
+                        error: e,
+                    },
+                );
+            }
         }
     }
 }
@@ -1038,7 +1233,29 @@ pub async fn migrate_existing_files(
     config: &SerenDbConfig,
 ) -> Result<MigrationReport, String> {
     let client = build_sql_client(app)?;
+    sync_all_projects(&client, config).await
+}
+
+/// Flush every pending memory file under `~/.claude/projects` into SerenDB and
+/// re-render each affected `MEMORY.md`. This is the AppHandle-free core shared
+/// by the in-app startup migration and the headless `claude_memory_sync`
+/// entrypoint — it depends only on a `SerenDbSqlClient` + `SerenDbConfig`, so
+/// the index can be kept consistent without launching the desktop app.
+pub async fn sync_all_projects(
+    client: &SerenDbSqlClient,
+    config: &SerenDbConfig,
+) -> Result<MigrationReport, String> {
     let root = claude_projects_root()?;
+    sync_projects_under_root(&root, client, config).await
+}
+
+/// Root-parametrized worker behind [`sync_all_projects`] so the walk can be
+/// exercised against a temp tree in tests without touching `$HOME`.
+async fn sync_projects_under_root(
+    root: &Path,
+    client: &SerenDbSqlClient,
+    config: &SerenDbConfig,
+) -> Result<MigrationReport, String> {
     if !root.exists() {
         return Ok(MigrationReport::default());
     }
@@ -1046,71 +1263,112 @@ pub async fn migrate_existing_files(
     let mut report = MigrationReport::default();
     let mut projects_to_render = BTreeSet::new();
     let project_dirs =
-        fs::read_dir(&root).map_err(|e| format!("failed to read claude projects root: {e}"))?;
+        fs::read_dir(root).map_err(|e| format!("failed to read claude projects root: {e}"))?;
 
     for entry in project_dirs.flatten() {
-        let memory_dir = entry.path().join("memory");
-        if !memory_dir.is_dir() {
-            continue;
-        }
-        let files = match fs::read_dir(&memory_dir) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-        for file in files.flatten() {
-            let path = file.path();
-            if !should_intercept_path(&path) {
-                continue;
-            }
-            match process_memory_file(&path, &client, config).await {
-                Ok(ProcessOutcome::Persisted { .. }) => {
-                    report.persisted += 1;
-                    if let Some(claude_project_dir) = claude_project_dir_for_memory_file(&path) {
-                        projects_to_render.insert(claude_project_dir);
-                    } else {
-                        report.render_failures += 1;
-                        log::warn!(
-                            "[ClaudeMemory] migration persisted {} but could not derive claude project dir for MEMORY.md refresh",
-                            path.display()
-                        );
-                    }
-                }
-                Ok(ProcessOutcome::Skipped) => {}
-                Err(e) => {
-                    log::warn!(
-                        "[ClaudeMemory] migration failed for {}: {e}",
-                        path.display()
-                    );
-                    report.failures += 1;
-                }
-            }
-        }
+        flush_memory_dir(
+            &entry.path(),
+            client,
+            config,
+            &mut report,
+            &mut projects_to_render,
+        )
+        .await;
     }
 
-    for claude_project_dir in projects_to_render {
-        match render_memory_md_from_db(&client, config, &claude_project_dir).await {
-            Ok(path) => {
-                report.rendered += 1;
-                log::info!("[ClaudeMemory] migration refreshed {}", path.display());
-            }
-            Err(e) => {
-                report.render_failures += 1;
-                log::warn!(
-                    "[ClaudeMemory] migration could not refresh MEMORY.md for {}: {e}",
-                    claude_project_dir.display()
-                );
-            }
-        }
-    }
+    render_projects(projects_to_render, client, config, &mut report).await;
 
     log::info!(
-        "[ClaudeMemory] migration finished: persisted={} failures={} rendered={} render_failures={}",
+        "[ClaudeMemory] sync finished: persisted={} failures={} rendered={} render_failures={}",
         report.persisted,
         report.failures,
         report.rendered,
         report.render_failures
     );
     Ok(report)
+}
+
+/// Flush + render a single project addressed by its working directory. Lets the
+/// headless entrypoint target one repo instead of walking everything.
+pub async fn sync_project(
+    client: &SerenDbSqlClient,
+    config: &SerenDbConfig,
+    project_cwd: &Path,
+) -> Result<MigrationReport, String> {
+    let root = claude_projects_root()?;
+    let claude_project_dir = root.join(encode_project_dir(project_cwd));
+    let mut report = MigrationReport::default();
+    let mut projects_to_render = BTreeSet::new();
+    flush_memory_dir(
+        &claude_project_dir,
+        client,
+        config,
+        &mut report,
+        &mut projects_to_render,
+    )
+    .await;
+    render_projects(projects_to_render, client, config, &mut report).await;
+    Ok(report)
+}
+
+/// Persist every interceptable file in `<claude_project_dir>/memory/` and queue
+/// the project for an index refresh if anything was written.
+async fn flush_memory_dir(
+    claude_project_dir: &Path,
+    client: &SerenDbSqlClient,
+    config: &SerenDbConfig,
+    report: &mut MigrationReport,
+    projects_to_render: &mut BTreeSet<PathBuf>,
+) {
+    let memory_dir = claude_project_dir.join("memory");
+    if !memory_dir.is_dir() {
+        return;
+    }
+    let files = match fs::read_dir(&memory_dir) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    for file in files.flatten() {
+        let path = file.path();
+        if !should_intercept_path(&path) {
+            continue;
+        }
+        match process_memory_file(&path, client, config).await {
+            Ok(ProcessOutcome::Persisted { .. }) => {
+                report.persisted += 1;
+                projects_to_render.insert(claude_project_dir.to_path_buf());
+            }
+            Ok(ProcessOutcome::Skipped) => {}
+            Err(e) => {
+                log::warn!("[ClaudeMemory] sync failed for {}: {e}", path.display());
+                report.failures += 1;
+            }
+        }
+    }
+}
+
+/// Re-render `MEMORY.md` for each project that had a successful flush.
+async fn render_projects(
+    projects: BTreeSet<PathBuf>,
+    client: &SerenDbSqlClient,
+    config: &SerenDbConfig,
+    report: &mut MigrationReport,
+) {
+    for claude_project_dir in projects {
+        match render_memory_md_from_db(client, config, &claude_project_dir).await {
+            Ok(path) => {
+                report.rendered += 1;
+                log::info!("[ClaudeMemory] sync refreshed {}", path.display());
+            }
+            Err(e) => {
+                report.render_failures += 1;
+                log::warn!(
+                    "[ClaudeMemory] sync could not refresh MEMORY.md for {}: {e}",
+                    claude_project_dir.display()
+                );
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1456,7 +1714,10 @@ mod tests {
         let sql = build_select_preferences_sql("-Users-x-evil'project");
         assert!(sql.contains("'-Users-x-evil''project'"));
         assert!(sql.contains("FROM claude_agent_preferences"));
-        assert!(sql.contains("ORDER BY pref_type, pref_key"));
+        // Recency ordering so the renderer's entry cap keeps the freshest rows.
+        assert!(sql.contains("ORDER BY updated_at DESC NULLS LAST, pref_key"));
+        // updated_at must be projected for the ordering to be selectable.
+        assert!(sql.contains("source_file, updated_at"));
     }
 
     #[test]
@@ -1497,6 +1758,135 @@ mod tests {
             !rendered.contains("name: feedback_one"),
             "frontmatter blocks must not appear in the auto-index"
         );
+    }
+
+    // ---- #2637: bounded auto-index + size budget --------------------------
+
+    #[test]
+    fn render_preferences_caps_entries_and_emits_overflow_footer() {
+        // More rows than the cap → exactly MAX_AUTO_INDEX_ENTRIES are listed
+        // and the remainder is summarized so nothing is silently dropped.
+        let n = MAX_AUTO_INDEX_ENTRIES + 7;
+        let rows: Vec<Vec<serde_json::Value>> = (0..n)
+            .map(|i| {
+                vec![
+                    serde_json::json!(format!("pref_{i}")),
+                    serde_json::json!("project"),
+                    serde_json::json!(format!("desc {i}")),
+                    serde_json::json!("body"),
+                    serde_json::json!(format!("pref_{i}.md")),
+                ]
+            })
+            .collect();
+        let rendered = render_preferences_as_markdown(&rows);
+        let listed = rendered.matches("](").count();
+        assert_eq!(
+            listed, MAX_AUTO_INDEX_ENTRIES,
+            "must list exactly the cap, not every row"
+        );
+        assert!(
+            rendered.contains("_+7 more memories in SerenDB"),
+            "overflow remainder must be surfaced; got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn render_preferences_no_footer_when_within_cap() {
+        let rows = vec![vec![
+            serde_json::json!("pref_one"),
+            serde_json::json!("project"),
+            serde_json::json!("desc"),
+            serde_json::json!("body"),
+            serde_json::json!("pref_one.md"),
+        ]];
+        let rendered = render_preferences_as_markdown(&rows);
+        assert!(!rendered.contains("more memor"));
+    }
+
+    #[test]
+    fn memory_md_over_budget_is_strict_threshold() {
+        assert!(!memory_md_over_budget(0));
+        assert!(!memory_md_over_budget(MEMORY_MD_SIZE_BUDGET_BYTES));
+        assert!(memory_md_over_budget(MEMORY_MD_SIZE_BUDGET_BYTES + 1));
+    }
+
+    // ---- #2638: secure perms + quarantine ---------------------------------
+
+    #[test]
+    fn should_quarantine_only_at_retry_ceiling() {
+        assert!(!should_quarantine(0));
+        assert!(!should_quarantine(MAX_INTERCEPT_RETRIES - 1));
+        assert!(should_quarantine(MAX_INTERCEPT_RETRIES));
+        assert!(should_quarantine(MAX_INTERCEPT_RETRIES + 1));
+    }
+
+    #[test]
+    fn quarantine_failed_file_moves_file_with_error_sidecar() {
+        let tmp = TempDir::new().expect("tempdir");
+        let memory_dir = tmp.path().join("-proj").join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+        let file = memory_dir.join("feedback_bad.md");
+        fs::write(&file, "---\ntype: feedback\n---\nbody").unwrap();
+
+        let dest = quarantine_failed_file(&file, "serendb INSERT failed: boom").unwrap();
+
+        assert!(!file.exists(), "original must leave the live memory dir");
+        assert!(dest.exists(), "file must land in quarantine");
+        assert_eq!(
+            dest.parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str()),
+            Some(QUARANTINE_DIR_NAME)
+        );
+        let sidecar = memory_dir
+            .join(QUARANTINE_DIR_NAME)
+            .join("feedback_bad.md.error");
+        assert!(sidecar.exists(), "error sidecar must be written");
+        assert!(fs::read_to_string(&sidecar).unwrap().contains("boom"));
+        assert!(
+            !should_intercept_path(&dest),
+            "a quarantined file must never be re-intercepted"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_rendered_memory_md_sets_owner_only_perms() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().expect("tempdir");
+        let dir = tmp.path().join("-proj");
+        let path = write_rendered_memory_md(&dir, "## Feedback\n- [a.md](a.md) — x\n").unwrap();
+        let file_mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(file_mode, 0o600, "rendered MEMORY.md must be owner-only");
+        let dir_mode = fs::metadata(dir.join("memory"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(dir_mode, 0o700, "memory dir must be owner-only");
+    }
+
+    // ---- #2639: AppHandle-free headless sync ------------------------------
+
+    #[tokio::test]
+    async fn sync_projects_under_empty_root_is_noop_without_network() {
+        // An empty projects root returns a default report and makes NO network
+        // call — proving the sync core is AppHandle-free and safe to run
+        // headless. The client holds a key that would fail any real request.
+        let tmp = TempDir::new().expect("tempdir");
+        let client = SerenDbSqlClient::new("unused-test-key".to_string());
+        let config = SerenDbConfig {
+            project_id: "p".into(),
+            branch_id: "b".into(),
+            database_name: "d".into(),
+        };
+        let report = sync_projects_under_root(tmp.path(), &client, &config)
+            .await
+            .expect("empty tree must not error");
+        assert_eq!(report.persisted, 0);
+        assert_eq!(report.rendered, 0);
+        assert_eq!(report.failures, 0);
+        assert_eq!(report.render_failures, 0);
     }
 }
 
