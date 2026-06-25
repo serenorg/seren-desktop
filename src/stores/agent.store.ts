@@ -475,7 +475,11 @@ import type {
   ToolCallEvent,
 } from "@/services/providers";
 import * as providerService from "@/services/providers";
-import { authStore, requestSignInModal } from "@/stores/auth.store";
+import {
+  authStore,
+  ensureApiKey,
+  requestSignInModal,
+} from "@/stores/auth.store";
 
 /** Set once we've subscribed to `provider-runtime://ready` so repeated
  *  initialize() calls don't stack listeners. */
@@ -3104,18 +3108,17 @@ export const agentStore = {
           setState("installStatus", null);
         }
 
-        // Get Seren API key to enable MCP tools for the agent.
-        // If null, auth may still be initializing — wait briefly and retry
-        // so the agent gets publisher access on cold start.
+        // Get the Seren API key that authorizes the agent's Seren MCP server.
+        // Without it the MCP config silently omits Seren entirely, so the agent
+        // launches with no publisher tools for the whole session.
+        // getSerenApiKey() only READS storage — if the key isn't there yet
+        // (cold start, or a transient provisioning failure that kept the
+        // session alive without a key, #2497), force-provision it now rather
+        // than spawning without publisher access. See #2655.
         let apiKey = await getSerenApiKey();
-        if (!apiKey) {
-          await new Promise((r) => setTimeout(r, 3000));
+        if (!apiKey && authStore.isAuthenticated) {
+          await ensureApiKey();
           apiKey = await getSerenApiKey();
-          if (apiKey) {
-            console.info(
-              "[AgentStore] API key became available after waiting for auth",
-            );
-          }
         }
         const enabledMcpServers = getEnabledMcpServers();
 
