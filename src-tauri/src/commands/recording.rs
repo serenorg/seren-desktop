@@ -583,6 +583,10 @@ fn recording_targets() -> Vec<RecordingTarget> {
     if native_audio_available {
         window_capabilities.push(RecordingCapability::Microphone);
     }
+    let mut browser_capabilities = vec![RecordingCapability::Video, RecordingCapability::Cursor];
+    if native_audio_available {
+        browser_capabilities.push(RecordingCapability::Microphone);
+    }
     vec![
         RecordingTarget {
             id: "screen".to_string(),
@@ -664,18 +668,13 @@ fn recording_targets() -> Vec<RecordingTarget> {
             id: "browser".to_string(),
             kind: RecordingTargetKind::Browser,
             label: "Browser".to_string(),
-            detail: "Capture a browser workflow with DOM trace when available.".to_string(),
-            is_available: false,
-            capabilities: vec![
-                RecordingCapability::Video,
-                RecordingCapability::Microphone,
-                RecordingCapability::Cursor,
-                RecordingCapability::ActionTrace,
-                RecordingCapability::Transcript,
-            ],
+            detail: "Capture a browser workflow with the native recorder.".to_string(),
+            is_available: native_screen_video_available,
+            capabilities: browser_capabilities,
             limitations: vec![
-                "High-fidelity browser tracing requires the debugger extension spike.".to_string(),
-                "Accessibility fallback depends on the platform capture backend.".to_string(),
+                "Browser recording uses the native video and marker capture fallback.".to_string(),
+                "High-fidelity DOM tracing requires the Seren Workflow Recorder extension."
+                    .to_string(),
             ],
         },
     ]
@@ -796,8 +795,8 @@ fn all_recording_target_kinds() -> Vec<RecordingTargetKind> {
     ]
 }
 
-fn browser_recording_target_kinds() -> Vec<RecordingTargetKind> {
-    vec![RecordingTargetKind::Browser]
+fn no_required_recording_target_kinds() -> Vec<RecordingTargetKind> {
+    Vec::new()
 }
 
 fn recording_permission_preflight_for_statuses(
@@ -836,7 +835,7 @@ fn recording_permission_preflight_for_statuses(
                 RecordingPermissionKey::Accessibility,
                 accessibility_status,
                 "Accessibility",
-                browser_recording_target_kinds(),
+                no_required_recording_target_kinds(),
             ),
         ],
     }
@@ -1378,6 +1377,11 @@ fn build_recording_session(
     id: String,
     output_dir: &Path,
 ) -> RecordingSession {
+    let trace_scope_note = if matches!(request.target_kind, RecordingRequestTargetKind::Browser) {
+        "Browser recording uses native video capture, target anchors, and explicit markers; high-fidelity DOM traces require the Seren Workflow Recorder extension."
+    } else {
+        "Native desktop recording captures video, target context anchors, and explicit markers; accessibility action traces are pending."
+    };
     RecordingSession {
         id,
         target_kind: request_target_kind(request),
@@ -1407,10 +1411,7 @@ fn build_recording_session(
             include_microphone: request.include_microphone,
             include_camera: request.include_camera,
             executable_upgrade: request.executable_upgrade,
-            trace_scope_note: Some(
-                "Native desktop recording captures video, target context anchors, and explicit markers; accessibility action traces are pending."
-                    .to_string(),
-            ),
+            trace_scope_note: Some(trace_scope_note.to_string()),
         }),
         quality_status: None,
         quality_checks: None,
@@ -1429,10 +1430,9 @@ fn start_native_recording_backend(
         RecordingRequestTargetKind::Window => {
             start_window_recording_backend(app, request, output_dir)
         }
-        RecordingRequestTargetKind::Browser => Err(
-            "Native browser recording is not implemented yet; use the browser recorder or extension path for now."
-                .to_string(),
-        ),
+        RecordingRequestTargetKind::Browser => {
+            start_screen_recording_backend(app, request, output_dir)
+        }
     }
 }
 
@@ -3168,7 +3168,12 @@ pub async fn recording_stop(
     session.redacted_event_count = Some(0);
     session.trace_event_count = Some(0);
     session.trace_truncated = Some(false);
-    match write_native_trace(&artifacts.output_dir, &session, &active.markers, duration_ms) {
+    match write_native_trace(
+        &artifacts.output_dir,
+        &session,
+        &active.markers,
+        duration_ms,
+    ) {
         Ok(Some((trace_path, trace_event_count))) => match file_url(&trace_path) {
             Ok(url) => {
                 session.trace_artifact_url = Some(url);
@@ -3539,13 +3544,9 @@ mod tests {
             kind: RecordingTargetKind::Browser,
             label: "Browser".to_string(),
             detail: "Capture a browser workflow.".to_string(),
-            is_available: false,
-            capabilities: vec![
-                RecordingCapability::Video,
-                RecordingCapability::ActionTrace,
-                RecordingCapability::Transcript,
-            ],
-            limitations: vec!["Browser tracing is not available.".to_string()],
+            is_available: true,
+            capabilities: vec![RecordingCapability::Video, RecordingCapability::Cursor],
+            limitations: vec!["Browser recording uses native capture.".to_string()],
         };
 
         let value = serde_json::to_value(target).expect("serialize target");
@@ -3557,9 +3558,9 @@ mod tests {
                 "kind": "browser",
                 "label": "Browser",
                 "detail": "Capture a browser workflow.",
-                "isAvailable": false,
-                "capabilities": ["video", "action_trace", "transcript"],
-                "limitations": ["Browser tracing is not available."]
+                "isAvailable": true,
+                "capabilities": ["video", "cursor"],
+                "limitations": ["Browser recording uses native capture."]
             })
         );
     }
@@ -3575,6 +3576,10 @@ mod tests {
             .iter()
             .find(|target| target.id == "window")
             .expect("window target");
+        let browser = targets
+            .iter()
+            .find(|target| target.id == "browser")
+            .expect("browser target");
 
         assert_eq!(
             screen.is_available,
@@ -3594,6 +3599,20 @@ mod tests {
         );
         assert!(window.capabilities.contains(&RecordingCapability::Video));
         assert!(window.capabilities.contains(&RecordingCapability::Cursor));
+        assert_eq!(browser.is_available, screen.is_available);
+        assert!(browser.capabilities.contains(&RecordingCapability::Video));
+        assert!(browser.capabilities.contains(&RecordingCapability::Cursor));
+        assert!(
+            !browser
+                .capabilities
+                .contains(&RecordingCapability::ActionTrace)
+        );
+        assert!(
+            browser
+                .limitations
+                .iter()
+                .any(|limitation| limitation.contains("native video"))
+        );
         assert_eq!(
             window
                 .capabilities
@@ -3662,7 +3681,7 @@ mod tests {
                         "label": "Accessibility",
                         "message": "Grant Accessibility access in System Settings before executable capture.",
                         "canRequest": true,
-                        "requiredFor": ["browser"]
+                        "requiredFor": []
                     }
                 ]
             })
@@ -3906,6 +3925,23 @@ mod tests {
             err,
             "Workflow recording target does not support microphone capture."
         );
+    }
+
+    #[test]
+    fn recording_start_request_validation_accepts_browser_native_fallback() {
+        let Some(mut browser) = recording_targets()
+            .into_iter()
+            .find(|target| target.id == "browser")
+        else {
+            panic!("browser target");
+        };
+        browser.is_available = true;
+        browser.capabilities = vec![RecordingCapability::Video, RecordingCapability::Cursor];
+        let mut request = start_request("browser", RecordingRequestTargetKind::Browser);
+        request.include_microphone = false;
+        request.executable_upgrade = false;
+
+        assert!(validate_recording_start_request_against_targets(&request, &[browser]).is_ok());
     }
 
     #[test]
