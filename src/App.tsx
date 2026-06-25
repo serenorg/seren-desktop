@@ -181,7 +181,7 @@ function App() {
   createEffect((prevRoot: string | null | undefined) => {
     const root = fileTreeState.rootPath;
     if (root === prevRoot) return root;
-    void skillsStore.refreshInstalled();
+    void skillsStore.refreshInstalled({ inspectSyncStatuses: true });
     void skillsStore.loadProjectConfig(root);
     return root;
   }, fileTreeState.rootPath);

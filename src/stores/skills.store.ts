@@ -41,6 +41,15 @@ export interface RefreshSummary {
   failed: number;
 }
 
+export interface RefreshInstalledOptions {
+  /**
+   * Also inspect upstream sync status after the installed inventory has been
+   * re-read. This is intentionally opt-in because the full refresh path already
+   * performs its own auto-sync sweep.
+   */
+  inspectSyncStatuses?: boolean;
+}
+
 /** Concurrency guard: in-flight refresh promise so concurrent calls coalesce. */
 let activeRefreshPromise: Promise<RefreshSummary> | null = null;
 
@@ -853,7 +862,7 @@ export const skillsStore = {
   /**
    * Refresh installed skills from the file system.
    */
-  async refreshInstalled(): Promise<void> {
+  async refreshInstalled(options: RefreshInstalledOptions = {}): Promise<void> {
     setState("isLoading", true);
     setState("error", null);
 
@@ -888,6 +897,9 @@ export const skillsStore = {
         installed.length,
         "installed skills",
       );
+      if (options.inspectSyncStatuses) {
+        await this.refreshAllSyncStatuses();
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load installed skills";
