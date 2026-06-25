@@ -40,6 +40,41 @@ const GLOBAL_SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
   "global.newTerminal",
 ];
 
+/**
+ * Keys that move or extend the text caret inside an editable field. Inside a
+ * text input these must always perform native cursor movement / selection
+ * (e.g. Cmd/Ctrl+Shift+Arrow) and never be consumed by an app shortcut.
+ */
+export const CARET_MOVEMENT_KEYS: ReadonlySet<string> = new Set([
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+]);
+
+/** True when the event originates from a text-editing element. */
+export function isEditableTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.isContentEditable)
+  );
+}
+
+/**
+ * True when a keydown must be left to the browser's native text editing
+ * (caret movement / selection) rather than consumed by an app shortcut —
+ * i.e. a caret-movement key fired while focus is in an editable field.
+ */
+export function isNativeTextEditingKey(event: KeyboardEvent): boolean {
+  return CARET_MOVEMENT_KEYS.has(event.key) && isEditableTarget(event.target);
+}
+
 class ShortcutManager {
   private handlers: Map<ShortcutAction, ShortcutCallback> = new Map();
   private enabled = true;
@@ -106,11 +141,7 @@ class ShortcutManager {
     const result = this.matcher.handleEvent(e);
     if (result.kind === "none") return;
 
-    const target = e.target as HTMLElement;
-    const isInputField =
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.isContentEditable;
+    const isInputField = isEditableTarget(e.target);
 
     if (result.kind === "pending") {
       if (!isInputField) e.preventDefault();
