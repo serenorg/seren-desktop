@@ -5233,6 +5233,10 @@ export type SerenCloudDeploymentRunsData = {
          */
         offset?: number;
         /**
+         * Filter runs by exact conversation ID
+         */
+        conversation_id?: string;
+        /**
          * Repeat or comma-separate statuses: queued, running, awaiting_approval, completed, failed, cancelled, timeout, blocked, error
          */
         status?: string;
@@ -6364,6 +6368,10 @@ export type SerenCloudRunsData = {
          * Pagination offset (default: 0)
          */
         offset?: number;
+        /**
+         * Filter runs by exact conversation ID
+         */
+        conversation_id?: string;
         /**
          * Repeat or comma-separate statuses: queued, running, awaiting_approval, completed, failed, cancelled, timeout, blocked, error
          */

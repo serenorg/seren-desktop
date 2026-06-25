@@ -305,7 +305,6 @@ export interface EnabledSkillsContentOptions {
  * specific SKILL.md is missing display metadata.
  */
 function skillSummaryToSkill(summary: SkillSummary): Skill {
-  const frontmatterTags = (summary.tags ?? []).filter((tag) => tag.length > 0);
   return {
     id: `seren:${summary.slug}`,
     slug: summary.slug,
@@ -316,7 +315,6 @@ function skillSummaryToSkill(summary: SkillSummary): Skill {
     sourceUrl: `seren-skills:${summary.slug}`,
     tags: [
       ...new Set([
-        ...frontmatterTags,
         summary.visibility,
         summary.discoverability,
         summary.status,

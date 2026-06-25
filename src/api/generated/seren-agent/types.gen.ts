@@ -524,6 +524,11 @@ export type AgentSkillsCapabilityPolicy = {
  */
 export type AgentSpec = {
     /**
+     * Seren Secrets agent identity this managed employee acts as when
+     * resolving `seren-secrets://` references.
+     */
+    agent_identity_id?: string | null;
+    /**
      * Optional stable slug for the agent. If omitted, derived from `name`.
      */
     agent_slug?: string | null;
@@ -572,6 +577,11 @@ export type AgentSpec = {
     name?: string | null;
     private_output_policy?: null | ManagedAgentPrivateOutputPolicy;
     runtime_policy?: null | AgentRuntimePolicy;
+    /**
+     * User-authorized Seren Secrets delegation used by the runtime to renew
+     * deployment-scoped secret grants.
+     */
+    secret_resolution_delegation?: string | null;
     session_database?: null | ManagedAgentSessionDatabase;
     template?: null | ManagedAgentTemplate;
     /**
@@ -601,6 +611,10 @@ export type AgentSpec = {
  * present; partial-workload patching is intentionally out of scope.
  */
 export type AgentSpecUpdate = {
+    /**
+     * Updated Seren Secrets agent identity this managed employee acts as.
+     */
+    agent_identity_id?: string | null;
     /**
      * Updated stable slug for the agent.
      */
@@ -645,6 +659,10 @@ export type AgentSpecUpdate = {
      */
     clear_runtime_policy?: boolean;
     /**
+     * Clear any existing Seren Secrets delegation.
+     */
+    clear_secret_resolution_delegation?: boolean;
+    /**
      * Clear any existing external session database configuration.
      */
     clear_session_database?: boolean;
@@ -684,6 +702,10 @@ export type AgentSpecUpdate = {
     name?: string | null;
     private_output_policy?: null | ManagedAgentPrivateOutputPolicy;
     runtime_policy?: null | AgentRuntimePolicy;
+    /**
+     * Updated user-authorized Seren Secrets delegation.
+     */
+    secret_resolution_delegation?: string | null;
     session_database?: null | ManagedAgentSessionDatabase;
     template?: null | ManagedAgentTemplate;
     /**
@@ -1251,6 +1273,11 @@ export type DataResponseManagedAgentDeploymentDetail = {
          * Current managed-agent revision for this deployment.
          */
         active_revision_id?: string | null;
+        /**
+         * Seren Secrets agent identity this managed employee acts as when
+         * resolving `seren-secrets://` references.
+         */
+        agent_identity_id?: string | null;
         agent_slug: string;
         alert_policy?: null | CloudDeploymentAlertPolicy;
         allowed_publisher_operations: Array<string>;
@@ -1267,6 +1294,10 @@ export type DataResponseManagedAgentDeploymentDetail = {
          */
         conditions?: Array<ManagedDeploymentCondition>;
         config?: unknown;
+        /**
+         * Public provider webhook routes for connector-backed messaging channels.
+         */
+        connector_webhooks?: Array<ManagedAgentConnectorWebhookRoute>;
         context_budget_tokens?: number | null;
         /**
          * Credential references attached to this deployment, when any. Reusable
@@ -1924,11 +1955,25 @@ export type GrantedActions = {
 
 export type ManagedAgentApprovalPolicy = 'read_only' | 'allow_mutations';
 
+export type ManagedAgentConnectorWebhookRoute = {
+    connection_name: string;
+    connector_ref: string;
+    route_id: string;
+    url: string;
+    verification_header_name?: string | null;
+    verification_token?: string | null;
+};
+
 export type ManagedAgentDeploymentDetail = {
     /**
      * Current managed-agent revision for this deployment.
      */
     active_revision_id?: string | null;
+    /**
+     * Seren Secrets agent identity this managed employee acts as when
+     * resolving `seren-secrets://` references.
+     */
+    agent_identity_id?: string | null;
     agent_slug: string;
     alert_policy?: null | CloudDeploymentAlertPolicy;
     allowed_publisher_operations: Array<string>;
@@ -1945,6 +1990,10 @@ export type ManagedAgentDeploymentDetail = {
      */
     conditions?: Array<ManagedDeploymentCondition>;
     config?: unknown;
+    /**
+     * Public provider webhook routes for connector-backed messaging channels.
+     */
+    connector_webhooks?: Array<ManagedAgentConnectorWebhookRoute>;
     context_budget_tokens?: number | null;
     /**
      * Credential references attached to this deployment, when any. Reusable

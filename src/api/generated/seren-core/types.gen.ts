@@ -606,7 +606,7 @@ export type CostEstimate = {
  */
 export type CreateApiKeyRequest = {
     /**
-     * Required when `key_type` is `"agent"`. The seren-passwords identity the agent acts as.
+     * Required when `key_type` is `"agent"`. The Seren Secrets identity the agent acts as.
      */
     agent_identity_id?: string | null;
     expires_in_days?: number | null;
@@ -20782,4 +20782,88 @@ export type HandleStripeWebhookResponses = {
      * Webhook processed
      */
     200: unknown;
+};
+
+export type GetConnectorWebhookData = {
+    body?: never;
+    path: {
+        /**
+         * Opaque connector webhook route id
+         */
+        route_id: string;
+    };
+    query?: never;
+    url: '/webhooks/{route_id}';
+};
+
+export type GetConnectorWebhookErrors = {
+    /**
+     * Invalid route id
+     */
+    400: unknown;
+    /**
+     * Unknown, disabled, or stale route
+     */
+    404: unknown;
+    /**
+     * Connector gateway rejected or failed the callback
+     */
+    502: unknown;
+    /**
+     * Connector route temporarily unavailable
+     */
+    503: unknown;
+};
+
+export type GetConnectorWebhookResponses = {
+    /**
+     * Provider-specific webhook verification response
+     */
+    200: unknown;
+    /**
+     * Webhook verification accepted
+     */
+    202: unknown;
+};
+
+export type PostConnectorWebhookData = {
+    body?: never;
+    path: {
+        /**
+         * Opaque connector webhook route id
+         */
+        route_id: string;
+    };
+    query?: never;
+    url: '/webhooks/{route_id}';
+};
+
+export type PostConnectorWebhookErrors = {
+    /**
+     * Invalid route id
+     */
+    400: unknown;
+    /**
+     * Unknown, disabled, or stale route
+     */
+    404: unknown;
+    /**
+     * Connector gateway rejected or failed the callback
+     */
+    502: unknown;
+    /**
+     * Connector route temporarily unavailable
+     */
+    503: unknown;
+};
+
+export type PostConnectorWebhookResponses = {
+    /**
+     * Provider-specific webhook response
+     */
+    200: unknown;
+    /**
+     * Webhook event accepted
+     */
+    202: unknown;
 };

@@ -72,6 +72,8 @@ export type EmployeeDetail = EmployeeSummary & {
   memoryPolicy: AgentMemoryPolicy | null;
   /// Runtime capability policy declared by the deployment, when set.
   capabilityPolicy: AgentCapabilityPolicy | null;
+  /// Seren Secrets agent identity this employee uses for secret resolution.
+  agentIdentityId: string | null;
   /// Credential references resolved by the control plane.
   credentials: AgentCredentialRef[];
   /// Typed tool refs alongside the coarse tool_presets.
