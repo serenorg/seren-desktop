@@ -221,28 +221,55 @@ pub async fn publish_meeting_notes(
     publish_with_retry(&RETRY_BACKOFFS, || attempt_publish(app, &client, &body)).await
 }
 
-async fn publish_with_retry<F, Fut>(
+/// PATCH an existing seren-notes entry's title so a desktop rename keeps the
+/// cloud note in sync (the share link is preserved — no new note is created).
+/// Returns `NotAuthenticated` so the caller can skip silently when signed out,
+/// and reuses the same cold-start retry/backoff as the create path. #2342.
+pub async fn update_meeting_note_title(
+    app: &AppHandle,
+    note_id: &str,
+    title: &str,
+) -> Result<(), PublishError> {
+    if !has_stored_credentials(app) {
+        return Err(PublishError::NotAuthenticated);
+    }
+    if !is_uuid(note_id) {
+        return Err(PublishError::Other(format!(
+            "refusing to PATCH seren-notes with non-uuid note id: {note_id}"
+        )));
+    }
+    let client = Client::new();
+    let url = format!("{PUBLISH_URL}/{note_id}");
+    let body = serde_json::json!({ "title": title }).to_string();
+
+    publish_with_retry(&RETRY_BACKOFFS, || {
+        attempt_update_note_title(app, &client, &url, &body)
+    })
+    .await
+}
+
+async fn publish_with_retry<T, F, Fut>(
     backoffs: &[Duration],
-    mut attempt_publish: F,
-) -> Result<String, PublishError>
+    mut attempt: F,
+) -> Result<T, PublishError>
 where
     F: FnMut() -> Fut,
-    Fut: Future<Output = Result<String, PublishError>>,
+    Fut: Future<Output = Result<T, PublishError>>,
 {
     let mut last_server: Option<(u16, String)> = None;
     let attempts = backoffs.len() + 1;
-    for attempt in 0..attempts {
-        match attempt_publish().await {
-            Ok(id) => return Ok(id),
+    for attempt_idx in 0..attempts {
+        match attempt().await {
+            Ok(value) => return Ok(value),
             Err(PublishError::Server { status, body: srv }) => {
                 if !is_retryable_publish_status(status) {
                     return Err(PublishError::Server { status, body: srv });
                 }
                 last_server = Some((status, srv));
-                if let Some(delay) = backoffs.get(attempt).copied() {
+                if let Some(delay) = backoffs.get(attempt_idx).copied() {
                     log::warn!(
-                        "[meeting] seren-notes publish retryable status={status} (attempt {}/{attempts}); retrying in {:?} (cold-start expected)",
-                        attempt + 1,
+                        "[meeting] seren-notes request retryable status={status} (attempt {}/{attempts}); retrying in {:?} (cold-start expected)",
+                        attempt_idx + 1,
                         delay,
                     );
                     tokio::time::sleep(delay).await;
@@ -287,6 +314,63 @@ async fn attempt_publish(
         )));
     }
     parse_publish_response_body(&text)
+}
+
+async fn attempt_update_note_title(
+    app: &AppHandle,
+    client: &Client,
+    url: &str,
+    body: &str,
+) -> Result<(), PublishError> {
+    let response = authenticated_request(app, client, |c, token| {
+        c.patch(url)
+            .header("Content-Type", "application/json")
+            .bearer_auth(token)
+            .body(body.to_string())
+    })
+    .await
+    .map_err(PublishError::Other)?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|err| PublishError::Other(format!("seren-notes read body failed: {err}")))?;
+    if status.as_u16() == 408 || status.is_server_error() {
+        return Err(PublishError::Server {
+            status: status.as_u16(),
+            body: text,
+        });
+    }
+    if !status.is_success() {
+        return Err(PublishError::Other(format!(
+            "seren-notes title update returned {status}: {text}"
+        )));
+    }
+    parse_update_response_body(&text)
+}
+
+/// A PATCH success returns the updated note (or an empty body); we only need
+/// to detect a terminal/retryable status hidden inside the Gateway envelope
+/// (e.g. a 5xx cold start, or a 404 if the note was deleted server-side). A
+/// 2xx-or-non-JSON body is treated as success — unlike create, we don't need a
+/// note id back. #2342.
+fn parse_update_response_body(text: &str) -> Result<(), PublishError> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+        return Ok(());
+    };
+    if let Some(status) = publisher_status(&value) {
+        if status >= 400 {
+            return Err(PublishError::Server {
+                status,
+                body: publisher_body_text(&value, text),
+            });
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -432,6 +516,59 @@ mod tests {
     }
 
     #[test]
+    fn parse_update_response_body_accepts_empty_body() {
+        assert!(parse_update_response_body("").is_ok());
+        assert!(parse_update_response_body("   ").is_ok());
+    }
+
+    #[test]
+    fn parse_update_response_body_accepts_2xx_envelope() {
+        let text = json!({
+            "data": {
+                "status": 200,
+                "body": {"data": {"id": "276a4660-e16b-4934-97c6-a1ade2426653", "title": "Renamed"}},
+                "cost": "0"
+            }
+        })
+        .to_string();
+        assert!(parse_update_response_body(&text).is_ok());
+    }
+
+    #[test]
+    fn parse_update_response_body_returns_retryable_server_for_inner_503() {
+        let text = json!({
+            "data": {"status": 503, "body": "upstream cold start", "cost": "0"}
+        })
+        .to_string();
+        match parse_update_response_body(&text) {
+            Err(PublishError::Server { status, body }) => {
+                assert_eq!(status, 503);
+                assert!(is_retryable_publish_status(status));
+                assert_eq!(body, "upstream cold start");
+            }
+            other => panic!("expected inner 503 server error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_update_response_body_returns_terminal_server_for_inner_404() {
+        // Note deleted server-side: 404 is a terminal (non-retryable) status so
+        // the retry loop surfaces it immediately rather than burning the budget.
+        let text = json!({
+            "data": {"status": 404, "body": "note not found", "cost": "0"}
+        })
+        .to_string();
+        match parse_update_response_body(&text) {
+            Err(PublishError::Server { status, body }) => {
+                assert_eq!(status, 404);
+                assert!(!is_retryable_publish_status(status));
+                assert_eq!(body, "note not found");
+            }
+            other => panic!("expected inner 404 server error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_publish_response_body_extracts_note_id_for_2xx_envelope() {
         let text = json!({
             "data": {
@@ -450,7 +587,7 @@ mod tests {
         let backoffs = [Duration::ZERO; RETRY_BACKOFFS.len()];
         let attempts = Arc::new(AtomicUsize::new(0));
         let seen_attempts = attempts.clone();
-        let result = publish_with_retry(&backoffs, move || {
+        let result: Result<String, PublishError> = publish_with_retry(&backoffs, move || {
             let seen_attempts = seen_attempts.clone();
             async move {
                 seen_attempts.fetch_add(1, Ordering::SeqCst);
@@ -474,7 +611,7 @@ mod tests {
         let backoffs = [Duration::ZERO; RETRY_BACKOFFS.len()];
         let attempts = Arc::new(AtomicUsize::new(0));
         let seen_attempts = attempts.clone();
-        let result = publish_with_retry(&backoffs, move || {
+        let result: Result<String, PublishError> = publish_with_retry(&backoffs, move || {
             let seen_attempts = seen_attempts.clone();
             async move {
                 seen_attempts.fetch_add(1, Ordering::SeqCst);
