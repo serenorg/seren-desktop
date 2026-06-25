@@ -172,6 +172,21 @@ describe("skillNeedsSync decides whether the composer Sync button shows (#2613)"
     expect(mockSkillsService.inspectSyncStatus).not.toHaveBeenCalled();
     expect(skillsStore.skillNeedsSync(skill)).toBe(false);
   });
+
+  it("hydrates sync status when installed inventory refresh requests inspection", async () => {
+    const skill = installedSkill("demo");
+    mockSkillsService.listAllInstalled.mockResolvedValue([skill]);
+    mockSkillsService.isUpstreamManagedSkill.mockReturnValue(true);
+    mockSkillsService.inspectSyncStatus.mockResolvedValue(
+      status({ state: "local-changes", hasLocalChanges: true }),
+    );
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.refreshInstalled({ inspectSyncStatuses: true });
+
+    expect(mockSkillsService.inspectSyncStatus).toHaveBeenCalledWith(skill);
+    expect(skillsStore.skillNeedsSync(skill)).toBe(true);
+  });
 });
 
 describe("syncInstalledSkill gates every overwrite on confirmation (#2613)", () => {

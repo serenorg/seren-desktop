@@ -2,7 +2,10 @@
 // ABOUTME: Handles agent session lifecycle and message streaming.
 
 import type { RecordingSession } from "@seren/recording-core";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import {
+  confirm,
+  message as showMessageDialog,
+} from "@tauri-apps/plugin-dialog";
 import type { Component } from "solid-js";
 import {
   createEffect,
@@ -61,7 +64,11 @@ import {
   setCurrentSkillDragPayload,
   skillDragPayload,
 } from "@/lib/skill-drag";
-import { skillCommandAliases, skillMatchesCommandAlias } from "@/lib/skills";
+import {
+  type InstalledSkill,
+  skillCommandAliases,
+  skillMatchesCommandAlias,
+} from "@/lib/skills";
 import {
   buildSkillInvocationDirective,
   buildSkillInvocationDisplay,
@@ -106,6 +113,7 @@ import { PairedModelSelector } from "./PairedModelSelector";
 import { PlanHeader } from "./PlanHeader";
 import { SkillsButton } from "./SkillsButton";
 import { SlashCommandPopup } from "./SlashCommandPopup";
+import { SyncSkillButton } from "./SyncSkillButton";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ThreadProviderSwitcher } from "./ThreadProviderSwitcher";
@@ -321,6 +329,39 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
     return null;
   });
+  // Inspect the active skill's sync status once so agent chat gets the same
+  // composer Sync affordance as Seren chat without opening the Skills panel.
+  createEffect(() => {
+    const skill = recentSkill();
+    if (!skill) return;
+    if (skillsStore.syncStatusFor(skill.path) !== undefined) return;
+    void skillsStore.loadSyncStatus(skill).catch(() => undefined);
+  });
+  const activeSkillNeedsSync = () => {
+    const skill = recentSkill();
+    return skill ? skillsStore.skillNeedsSync(skill) : false;
+  };
+  const handleSyncActiveSkill = async (skill: InstalledSkill) => {
+    try {
+      const result = await skillsStore.syncInstalledSkill(skill);
+      if (
+        (result.outcome === "untracked" || result.outcome === "error") &&
+        result.message
+      ) {
+        await showMessageDialog(result.message, {
+          title: "Sync skill",
+          kind: result.outcome === "error" ? "error" : "warning",
+        });
+      }
+    } catch (err) {
+      await showMessageDialog(
+        `Could not sync ${skill.name}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        { title: "Sync skill", kind: "error" },
+      );
+    }
+  };
 
   // Get streaming content for THIS thread's conversation ID
   const threadStreamingContent = createMemo(() => {
@@ -2192,6 +2233,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     inputRef?.setSelectionRange(len, len);
                   }}
                 />
+                <Show when={activeSkillNeedsSync() && recentSkill()}>
+                  {(skill) => (
+                    <SyncSkillButton
+                      skill={skill()}
+                      onSync={() => void handleSyncActiveSkill(skill())}
+                    />
+                  )}
+                </Show>
 
                 <Show when={messageQueue().length > 0}>
                   <span class="flex items-center gap-2 px-2 py-1 bg-surface-2 border border-border rounded text-xs text-muted-foreground">
