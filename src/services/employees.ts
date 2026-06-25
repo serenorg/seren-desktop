@@ -63,6 +63,25 @@ function nonEmptyToolRefs(
   return refs && refs.length > 0 ? [...refs] : undefined;
 }
 
+function hasSerenSecretCredentialRefs(
+  refs: NewEmployeeInput["credentials"] | undefined,
+): boolean {
+  return (
+    refs?.some((ref) => ref.ref_uri.startsWith("seren-secrets://")) ?? false
+  );
+}
+
+function requireSecretResolutionDelegation(
+  credentials: NewEmployeeInput["credentials"] | undefined,
+  delegation: string | null | undefined,
+) {
+  if (hasSerenSecretCredentialRefs(credentials) && !delegation) {
+    throw new Error(
+      "Seren Secrets credential refs require a user-signed secret resolution delegation.",
+    );
+  }
+}
+
 function defaultEmployeeCapabilityPolicy(): AgentCapabilityPolicy {
   return {
     tool_error_recovery: {
@@ -245,6 +264,10 @@ function artifactFromCloud(
 function specFromInput(input: NewEmployeeInput): AgentSpec {
   const bundle = input.bundle ?? bundleFromInstructions(input.instructions);
   const toolRefs = nonEmptyToolRefs(input.toolRefs);
+  requireSecretResolutionDelegation(
+    input.credentials,
+    input.secretResolutionDelegation,
+  );
   return {
     name: input.name,
     agent_slug: input.slug,
@@ -254,6 +277,12 @@ function specFromInput(input: NewEmployeeInput): AgentSpec {
     template: input.template ?? "research_monitor",
     tool_presets: input.toolPresets ?? ["live_data"],
     ...(toolRefs ? { tool_refs: toolRefs } : {}),
+    ...(input.credentials !== undefined
+      ? { credentials: input.credentials }
+      : {}),
+    ...(input.secretResolutionDelegation !== undefined
+      ? { secret_resolution_delegation: input.secretResolutionDelegation }
+      : {}),
     ...(input.memoryPolicy !== undefined
       ? { memory_policy: input.memoryPolicy }
       : {}),
@@ -289,6 +318,10 @@ function specFromInput(input: NewEmployeeInput): AgentSpec {
 
 function updateSpecFromPatch(patch: EmployeePatch): AgentSpecUpdate {
   const update: AgentSpecUpdate = {};
+  requireSecretResolutionDelegation(
+    patch.credentials,
+    patch.secretResolutionDelegation,
+  );
   if (patch.name !== undefined) update.name = patch.name;
   if (patch.mode === "cron") {
     update.cron_schedule = patch.cronSchedule ?? null;
@@ -301,6 +334,21 @@ function updateSpecFromPatch(patch: EmployeePatch): AgentSpecUpdate {
       update.clear_tool_refs = true;
     } else {
       update.tool_refs = patch.toolRefs;
+    }
+  }
+  if (patch.credentials !== undefined) {
+    if (patch.credentials.length === 0) {
+      update.clear_credentials = true;
+      update.clear_secret_resolution_delegation = true;
+    } else {
+      update.credentials = patch.credentials;
+    }
+  }
+  if (patch.secretResolutionDelegation !== undefined) {
+    if (patch.secretResolutionDelegation === null) {
+      update.clear_secret_resolution_delegation = true;
+    } else {
+      update.secret_resolution_delegation = patch.secretResolutionDelegation;
     }
   }
   if (patch.approvalPolicy !== undefined)
