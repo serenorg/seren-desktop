@@ -378,3 +378,44 @@ describe("MCP Gateway Native Tool Routing (#1329)", () => {
     });
   });
 });
+
+describe("MCP Gateway init recovery (#2654)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it("retries connecting after a transient failure instead of caching the rejection", async () => {
+    const { mcpClient } = await import("@/lib/mcp/client");
+    const connectMock = vi.mocked(mcpClient.connectHttp);
+    // First connect attempt fails transiently; the second succeeds.
+    connectMock
+      .mockRejectedValueOnce(new Error("transient connect failure"))
+      .mockResolvedValue(undefined);
+
+    const { initializeGateway, isGatewayInitInFlight, isGatewayInitialized } =
+      await import("@/services/mcp-gateway");
+
+    // Suppress the expected "[MCP Gateway] Failed to connect" log so output
+    // stays pristine; assert it fired to document the failure path.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // First attempt rejects.
+    await expect(initializeGateway()).rejects.toThrow(
+      "transient connect failure",
+    );
+
+    // The in-flight slot must be cleared — never left holding a rejected
+    // promise, or every later call short-circuits on it (gateway dead until
+    // logout).
+    expect(isGatewayInitInFlight()).toBe(false);
+
+    // A subsequent attempt must re-enter the connect path and succeed.
+    await expect(initializeGateway()).resolves.toBeUndefined();
+    expect(connectMock).toHaveBeenCalledTimes(2);
+    expect(isGatewayInitialized()).toBe(true);
+    expect(errorSpy).toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+  });
+});
