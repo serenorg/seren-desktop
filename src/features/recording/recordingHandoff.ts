@@ -4,21 +4,31 @@
 import type { RecordingSession } from "@seren/recording-core";
 import { createSignal } from "solid-js";
 
-const [pendingSession, setPendingSession] =
-  createSignal<RecordingSession | null>(null);
+export interface RecordingHandoffEntry {
+  session: RecordingSession;
+  releaseArtifacts?: () => void;
+}
+
+const [pendingEntry, setPendingEntry] =
+  createSignal<RecordingHandoffEntry | null>(null);
 
 export const recordingHandoff = {
+  /** The stopped session and release callback awaiting a composer, or null. */
+  get pendingEntry(): RecordingHandoffEntry | null {
+    return pendingEntry();
+  },
   /** The stopped session awaiting a composer, or null. Tracked when read. */
   get pending(): RecordingSession | null {
-    return pendingSession();
+    return pendingEntry()?.session ?? null;
   },
   /** Offer a stopped session for the active composer to pick up. */
-  offer(session: RecordingSession | null): void {
+  offer(session: RecordingSession | null, releaseArtifacts?: () => void): void {
     if (!session) return;
-    setPendingSession(session);
+    pendingEntry()?.releaseArtifacts?.();
+    setPendingEntry({ session, releaseArtifacts });
   },
   /** Drop the pending session once a composer has taken it. */
   clear(): void {
-    setPendingSession(null);
+    setPendingEntry(null);
   },
 };

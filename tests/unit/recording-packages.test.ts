@@ -52,8 +52,14 @@ const desktopAdapterSource = source(
 const recordingComposerSource = source(
   "src/features/recording/recordingComposer.ts",
 );
+const recordingHandoffSource = source(
+  "src/features/recording/recordingHandoff.ts",
+);
 const agentChatSource = source("src/components/chat/AgentChat.tsx");
 const chatContentSource = source("src/components/chat/ChatContent.tsx");
+const recordedSessionCardSource = source(
+  "src/components/recording/RecordedSessionCard.tsx",
+);
 const titlebarSource = source("src/components/layout/Titlebar.tsx");
 const tauriLibSource = source("src-tauri/src/lib.rs");
 const tauriConfigSource = source("src-tauri/tauri.conf.json");
@@ -518,6 +524,14 @@ describe("recording packages", () => {
 
   it("makes stopped-session artifact ownership explicit", () => {
     expect(coreSource).toContain("releaseSessionArtifacts?");
+    expect(uiSource).toContain("releaseArtifactsFor");
+    expect(uiSource).toContain(
+      "props.adapter.releaseSessionArtifacts?.(session)",
+    );
+    expect(titlebarSource).toContain(
+      "recordingHandoff.offer(session, releaseArtifacts)",
+    );
+    expect(recordingHandoffSource).toContain("releaseArtifacts?: () => void");
     const session: RecordingSession = {
       id: "session-urls",
       targetKind: "browser",
@@ -727,8 +741,15 @@ describe("recording packages", () => {
     // stopping with no chat focused. (#2614)
     for (const composer of [agentChatSource, chatContentSource]) {
       expect(composer).toContain("handleRecordingSessionStop");
-      expect(composer).toContain("recordingHandoff.pending");
+      expect(composer).toContain("recordingHandoff.pendingEntry");
+      expect(composer).toContain("releaseRecordedSessionArtifacts");
+      expect(composer).toContain("setRecordedSession(session)");
+      expect(composer).not.toContain(
+        "if (session.outputDir) setRecordedSession(session)",
+      );
     }
+    expect(recordedSessionCardSource).toContain("hasLocalArtifacts");
+    expect(recordedSessionCardSource).toContain("no local folder");
   });
 
   it("builds a correction prompt from an existing draft review", () => {
@@ -1592,6 +1613,12 @@ describe("recording packages", () => {
       buildRecordingSkillBundleTar({
         slug: "../unsafe",
         files: [{ path: "SKILL.md", content: "bad" }],
+      }),
+    ).toThrow("Recording skill bundle file path is not tar-safe");
+    expect(() =>
+      buildRecordingSkillBundleTar({
+        slug: "s",
+        files: [{ path: "é".repeat(50), content: "bad" }],
       }),
     ).toThrow("Recording skill bundle file path is not tar-safe");
   });
