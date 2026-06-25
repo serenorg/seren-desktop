@@ -2307,24 +2307,18 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                           <span class="font-medium text-foreground">
                             {server.name}
                           </span>
-                          <Show
-                            when={
-                              server.autoConnect && server.name !== "Seren MCP"
-                            }
-                          >
+                          <Show when={server.autoConnect}>
                             <span class="px-1.5 py-0.5 bg-primary/20 rounded text-[0.7rem] text-accent">
                               Auto-connect
                             </span>
                           </Show>
                         </div>
                         <span class="text-[0.8rem] text-muted-foreground">
-                          {server.name === "Seren MCP"
-                            ? "Connected to Seren MCP Gateway"
-                            : isLocalServer(server)
-                              ? `Command: ${server.command} ${server.args.join(" ")}`
-                              : isBuiltinServer(server)
-                                ? server.description || "Built-in server"
-                                : "Unknown type"}
+                          {isLocalServer(server)
+                            ? `Command: ${server.command} ${server.args.join(" ")}`
+                            : isBuiltinServer(server)
+                              ? server.description || "Built-in server"
+                              : "Unknown type"}
                         </span>
                       </div>
                       <div class="flex items-center gap-2">

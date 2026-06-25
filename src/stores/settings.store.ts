@@ -515,6 +515,23 @@ async function loadMcpSettings(): Promise<void> {
         };
       });
 
+      // Migration: Drop the legacy builtin Seren gateway entry. It was a
+      // display-only row whose toggle/status/remove controls were never wired
+      // to the in-app gateway (which is driven by login, not this entry), so it
+      // gave false reassurance. The agent and chat gateway connections are
+      // unaffected. See #2652.
+      const beforeCount = parsed.servers.length;
+      parsed.servers = parsed.servers.filter(
+        (server) =>
+          !(
+            server.type === "builtin" &&
+            (server.name === "Seren MCP" || server.name === "SerenDB")
+          ),
+      );
+      if (parsed.servers.length !== beforeCount) {
+        hasChanges = true;
+      }
+
       setSettingsState("mcp", parsed);
       if (hasChanges) {
         await saveMcpSettings();
