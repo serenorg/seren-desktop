@@ -139,6 +139,16 @@ fn set_meeting_notes_record(
     Ok(())
 }
 
+fn get_meeting_seren_notes_id(conn: &Connection, id: &str) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT seren_notes_id FROM meetings WHERE id = ?1",
+        params![id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map(Option::flatten)
+}
+
 fn set_meeting_seren_notes_id_record(
     conn: &Connection,
     id: &str,
@@ -399,19 +409,54 @@ pub async fn set_meeting_routed_skill(
 #[tauri::command]
 pub async fn update_meeting_title(app: AppHandle, id: String, title: String) -> Result<(), String> {
     let lookup = id.clone();
-    run_db(app.clone(), move |conn| {
+    let db_id = id.clone();
+    let db_title = title.clone();
+    // Read back the published-note id inside the same closure so the rename and
+    // the lookup see one consistent row.
+    let seren_notes_id = run_db(app.clone(), move |conn| {
         conn.execute(
             "UPDATE meetings
              SET title = ?1, updated_at = ?2
              WHERE id = ?3",
-            params![title, now_ms(), id],
+            params![db_title, now_ms(), db_id],
         )?;
-        mark_sync_upsert(conn, "meetings", &id)?;
-        Ok(())
+        mark_sync_upsert(conn, "meetings", &db_id)?;
+        get_meeting_seren_notes_id(conn, &db_id)
     })
     .await?;
     emit_meeting_status_by_id(&app, &lookup).await;
+
+    // If this meeting already has a cloud note, keep its title in sync via a
+    // fire-and-forget PATCH so a slow/cold gateway never blocks the rename. The
+    // share link is preserved (no new note). When there is no note yet, the
+    // next (auto or manual) publish reads the fresh title from the DB. #2342.
+    if let Some(note_id) = seren_notes_id {
+        tauri::async_runtime::spawn(sync_seren_notes_title(app, id, note_id, title));
+    }
     Ok(())
+}
+
+// Push a renamed meeting's title to its existing seren-notes entry. Best-effort:
+// the local rename already succeeded, so a terminal failure is logged (not
+// surfaced via the `notes-publish-failed` banner, whose republish CTA would
+// POST a duplicate note). #2342.
+async fn sync_seren_notes_title(app: AppHandle, meeting_id: String, note_id: String, title: String) {
+    use crate::audio::seren_notes_publish::PublishError;
+    match crate::audio::seren_notes_publish::update_meeting_note_title(&app, &note_id, &title).await
+    {
+        Ok(()) => {}
+        Err(PublishError::NotAuthenticated) => {
+            log::info!(
+                "[meeting] seren-notes title sync skipped for {meeting_id} (not authenticated)"
+            );
+        }
+        Err(err) => {
+            log::warn!(
+                "[meeting] seren-notes title sync failed for {meeting_id}: {}",
+                err.into_message()
+            );
+        }
+    }
 }
 
 #[tauri::command]
