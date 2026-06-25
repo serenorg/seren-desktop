@@ -5,10 +5,12 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { ConfirmDialog } from "@/components/catalog/ConfirmDialog";
 import { MeetingDetail } from "@/components/meeting/MeetingDetail";
 import { MeetingSettings } from "@/components/meeting/MeetingSettings";
+import { createMeetingDurationClock } from "@/lib/meeting-duration-clock";
 import {
   formatDuration,
   formatMeetingDate,
   formatTime,
+  isMeetingDurationLive,
   isMeetingProcessingStatus,
   isMeetingReadyStatus,
   meetingProcessingLabel,
@@ -86,6 +88,11 @@ export function MeetingPanel() {
   });
 
   const activeMeeting = () => meetingStore.state.activeMeeting;
+  const durationNow = createMeetingDurationClock(() =>
+    [activeCapture(), activeMeeting()].some(
+      (meeting) => meeting != null && isMeetingDurationLive(meeting),
+    ),
+  );
   const template = () => settingsStore.get("meetingTemplateId");
   const desktopRuntime = isTauriRuntime();
   const deleteConfirmationMessage = () => {
@@ -251,7 +258,7 @@ export function MeetingPanel() {
             <div class="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
               <span class="w-1.5 h-1.5 rounded-full bg-destructive animate-pulse" />
               <span class="font-mono tabular-nums">
-                {formatDuration(meeting())}
+                {formatDuration(meeting(), durationNow())}
               </span>
               <span>{meetingTitle(meeting())}</span>
             </div>
@@ -391,6 +398,7 @@ export function MeetingPanel() {
               {(meeting) => (
                 <MeetingDetail
                   meeting={meeting()}
+                  durationNow={durationNow()}
                   onRequestDelete={(target) => setPendingDelete(target)}
                 />
               )}

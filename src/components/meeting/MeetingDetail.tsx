@@ -14,6 +14,7 @@ import {
   formatDuration,
   formatMeetingDate,
   formatTime,
+  isMeetingDurationLive,
   isMeetingProcessingStatus,
   isMeetingReadyStatus,
   meetingProcessingLabel,
@@ -36,6 +37,7 @@ import { settingsStore } from "@/stores/settings.store";
 
 interface MeetingDetailProps {
   meeting: Meeting;
+  durationNow?: number;
   onRequestDelete?: (meeting: Meeting) => void;
 }
 
@@ -171,6 +173,8 @@ export function MeetingDetail(props: MeetingDetailProps) {
   );
 
   const segments = () => meetingStore.state.liveSegments;
+  const durationNow = () =>
+    isMeetingDurationLive(props.meeting) ? props.durationNow : undefined;
   const processing = () => isMeetingProcessingStatus(props.meeting.status);
   const ready = () => isMeetingReadyStatus(props.meeting.status);
   const notesActionBusy = () =>
@@ -316,7 +320,7 @@ export function MeetingDetail(props: MeetingDetailProps) {
             <div class="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
               <span>{STATUS_LABELS[props.meeting.status]}</span>
               <span class="font-mono tabular-nums">
-                {formatDuration(props.meeting)}
+                {formatDuration(props.meeting, durationNow())}
               </span>
               <span>
                 {formatMeetingDate(props.meeting.startedAt)} ·{" "}

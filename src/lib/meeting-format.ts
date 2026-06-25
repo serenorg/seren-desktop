@@ -42,8 +42,11 @@ export function formatMeetingDate(
   });
 }
 
-export function formatDuration(meeting: Meeting): string {
-  const end = meeting.endedAt ?? Date.now();
+export function formatDuration(
+  meeting: Meeting,
+  now: number = Date.now(),
+): string {
+  const end = meeting.endedAt ?? now;
   const totalSeconds = Math.max(
     0,
     Math.floor((end - meeting.startedAt) / 1000),
@@ -51,6 +54,13 @@ export function formatDuration(meeting: Meeting): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+export function isMeetingDurationLive(meeting: Meeting): boolean {
+  return (
+    (meeting.endedAt === null || meeting.endedAt === undefined) &&
+    (meeting.status === "pending_capture" || meeting.status === "capturing")
+  );
 }
 
 // Auto-generated titles carry seconds so two captures started in the same
