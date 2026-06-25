@@ -1953,20 +1953,30 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 onDragOver={handleSkillDragOver}
                 onDrop={(event) => void handleSkillDrop(event)}
                 onKeyDown={(event) => {
+                  // Arrow keys only drive popup / history navigation on a plain
+                  // arrow. When a modifier is held the arrow is a text-selection
+                  // / caret chord (Shift+Arrow, Cmd/Ctrl+Shift+Arrow,
+                  // Option+Shift+Arrow) and must reach the textarea.
+                  const isPlainArrow =
+                    !event.shiftKey &&
+                    !event.metaKey &&
+                    !event.ctrlKey &&
+                    !event.altKey;
+
                   // Slash command popup keyboard navigation
                   const isSlashInput =
                     input().startsWith("/") && !input().includes(" ");
                   if (isSlashInput) {
                     const matches = getCompletions(input(), "chat");
                     if (matches.length > 0) {
-                      if (event.key === "ArrowUp") {
+                      if (event.key === "ArrowUp" && isPlainArrow) {
                         event.preventDefault();
                         setCommandPopupIndex((i) =>
                           i > 0 ? i - 1 : matches.length - 1,
                         );
                         return;
                       }
-                      if (event.key === "ArrowDown") {
+                      if (event.key === "ArrowDown" && isPlainArrow) {
                         event.preventDefault();
                         setCommandPopupIndex((i) =>
                           i < matches.length - 1 ? i + 1 : 0,
@@ -1998,16 +2008,6 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                   }
 
                   const history = userMessageHistory();
-
-                  // Prompt-history recall only fires on a plain arrow. When a
-                  // modifier is held the arrow is a text-selection / caret
-                  // chord (Shift+Arrow, Cmd/Ctrl+Shift+Arrow,
-                  // Option+Shift+Arrow) and must reach the textarea.
-                  const isPlainArrow =
-                    !event.shiftKey &&
-                    !event.metaKey &&
-                    !event.ctrlKey &&
-                    !event.altKey;
 
                   // Up arrow: navigate to older message
                   if (
