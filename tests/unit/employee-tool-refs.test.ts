@@ -4,9 +4,11 @@ import {
   connectorAccessModeFromToolRefs,
   firstRemoteHttpToolRef,
   mergeConnectorAccessToolRefs,
+  mergePublisherOperationToolRefs,
   mergeRemoteHttpToolRef,
   remoteHttpToolRefDraftError,
   sameToolRefs,
+  selectedPublisherOperationKeysFromToolRefs,
 } from "@/lib/employees/tool-refs";
 
 describe("employee tool-ref helpers", () => {
@@ -193,6 +195,45 @@ describe("employee tool-ref helpers", () => {
       },
     ];
     expect(sameToolRefs(a, b)).toBe(false);
+  });
+
+  it("merges managed publisher operations while preserving custom publisher refs", () => {
+    const custom: AgentToolRef = {
+      kind: "publisher",
+      publisher_slug: "seren-web",
+      operation_id: "fetch",
+    };
+    const existing: AgentToolRef[] = [
+      custom,
+      {
+        kind: "publisher",
+        publisher_slug: "microsoft",
+        operation_id: "calendar.events.list",
+      },
+    ];
+
+    const selected = selectedPublisherOperationKeysFromToolRefs(existing);
+    expect(selected).toEqual(["microsoft:calendar.events.list"]);
+
+    const refs = mergePublisherOperationToolRefs(existing, [
+      "microsoft:mail.messages.send",
+    ]);
+    expect(refs).toHaveLength(2);
+    expect(refs[0]).toEqual(custom);
+    expect(refs[1]).toEqual({
+      kind: "publisher",
+      publisher_slug: "microsoft",
+      operation_id: "mail.messages.send",
+      require_approval: true,
+      permitted_actions: [
+        {
+          action: "mail.messages.send",
+          capability: { kind: "all" },
+        },
+      ],
+    });
+
+    expect(mergePublisherOperationToolRefs(refs, [])).toEqual([custom]);
   });
 
   it("sameToolRefs compares remote http refs structurally", () => {

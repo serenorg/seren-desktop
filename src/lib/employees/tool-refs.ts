@@ -5,6 +5,15 @@ import type { AgentToolRef } from "@/api/seren-agent";
 
 export type ConnectorAccessMode = "none" | "gmail_read" | "gmail_send_approval";
 export type RemoteHttpToolRef = Extract<AgentToolRef, { kind: "remote_http" }>;
+export type PublisherToolRef = Extract<AgentToolRef, { kind: "publisher" }>;
+
+export type PublisherOperationOption = Pick<
+  PublisherToolRef,
+  "publisher_slug" | "operation_id" | "require_approval"
+> & {
+  title: string;
+  sub: string;
+};
 
 export type ConnectorAccessOption = {
   value: ConnectorAccessMode;
@@ -19,6 +28,28 @@ export const CONNECTOR_ACCESS_OPTIONS: ConnectorAccessOption[] = [
     value: "gmail_send_approval",
     title: "Gmail send",
     sub: "Send requires approval",
+  },
+];
+
+export const PUBLISHER_OPERATION_OPTIONS: PublisherOperationOption[] = [
+  {
+    publisher_slug: "microsoft",
+    operation_id: "calendar.events.list",
+    title: "Microsoft calendar read",
+    sub: "Read calendar events",
+  },
+  {
+    publisher_slug: "microsoft",
+    operation_id: "mail.messages.list",
+    title: "Microsoft mail read",
+    sub: "Read mailbox messages",
+  },
+  {
+    publisher_slug: "microsoft",
+    operation_id: "mail.messages.send",
+    title: "Microsoft mail send",
+    sub: "Send mail with approval",
+    require_approval: true,
   },
 ];
 
@@ -116,6 +147,58 @@ export function mergeRemoteHttpToolRef(
     }
   }
   if (!replaced && remoteHttp) refs.push(remoteHttp);
+  return refs;
+}
+
+function publisherOperationKey(
+  ref: Pick<PublisherToolRef, "publisher_slug" | "operation_id">,
+) {
+  return `${ref.publisher_slug}:${ref.operation_id}`;
+}
+
+export function selectedPublisherOperationKeysFromToolRefs(
+  refs: readonly AgentToolRef[],
+): string[] {
+  const known = new Set(
+    PUBLISHER_OPERATION_OPTIONS.map((option) => publisherOperationKey(option)),
+  );
+  return refs
+    .filter((ref): ref is PublisherToolRef => ref.kind === "publisher")
+    .map(publisherOperationKey)
+    .filter((key) => known.has(key));
+}
+
+export function mergePublisherOperationToolRefs(
+  existing: readonly AgentToolRef[],
+  selectedKeys: readonly string[],
+): AgentToolRef[] {
+  const formOwnedKeys = new Set(
+    PUBLISHER_OPERATION_OPTIONS.map((option) => publisherOperationKey(option)),
+  );
+  const selected = new Set(selectedKeys);
+  const refs = existing.filter(
+    (ref) =>
+      ref.kind !== "publisher" ||
+      !formOwnedKeys.has(publisherOperationKey(ref)),
+  );
+
+  for (const option of PUBLISHER_OPERATION_OPTIONS) {
+    const key = publisherOperationKey(option);
+    if (!selected.has(key)) continue;
+    refs.push({
+      kind: "publisher",
+      publisher_slug: option.publisher_slug,
+      operation_id: option.operation_id,
+      require_approval: option.require_approval ?? false,
+      permitted_actions: [
+        {
+          action: option.operation_id,
+          capability: { kind: "all" },
+        },
+      ],
+    });
+  }
+
   return refs;
 }
 

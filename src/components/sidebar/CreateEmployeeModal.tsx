@@ -50,10 +50,13 @@ import {
   connectorAccessModeFromToolRefs,
   firstRemoteHttpToolRef,
   mergeConnectorAccessToolRefs,
+  mergePublisherOperationToolRefs,
   mergeRemoteHttpToolRef,
+  PUBLISHER_OPERATION_OPTIONS,
   type RemoteHttpToolRef,
   remoteHttpToolRefDraftError,
   sameToolRefs,
+  selectedPublisherOperationKeysFromToolRefs,
 } from "@/lib/employees/tool-refs";
 import type {
   EmployeeApprovalPolicy,
@@ -504,6 +507,9 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
     createSignal<ConnectorAccessMode>(
       connectorAccessModeFromToolRefs(initial?.toolRefs ?? []),
     );
+  const [publisherOperationKeys, setPublisherOperationKeys] = createSignal<
+    string[]
+  >(selectedPublisherOperationKeysFromToolRefs(initial?.toolRefs ?? []));
   const initialRemoteHttp = firstRemoteHttpToolRef(initial?.toolRefs ?? []);
   const remoteHttpRefCount = createMemo(
     () =>
@@ -1060,9 +1066,12 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
 
   const currentToolRefs = createMemo(() =>
     mergeRemoteHttpToolRef(
-      mergeConnectorAccessToolRefs(
-        props.employee?.toolRefs ?? [],
-        connectorAccess(),
+      mergePublisherOperationToolRefs(
+        mergeConnectorAccessToolRefs(
+          props.employee?.toolRefs ?? [],
+          connectorAccess(),
+        ),
+        publisherOperationKeys(),
       ),
       remoteHttpToolRef(),
     ),
@@ -1221,6 +1230,14 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
       prev.includes(preset)
         ? prev.filter((p) => p !== preset)
         : [...prev, preset],
+    );
+  };
+
+  const togglePublisherOperation = (key: string) => {
+    setPublisherOperationKeys((prev) =>
+      prev.includes(key)
+        ? prev.filter((current) => current !== key)
+        : [...prev, key],
     );
   };
 
@@ -1918,6 +1935,47 @@ export const CreateEmployeeModal: Component<CreateEmployeeModalProps> = (
                             disabled={submitting()}
                           >
                             {option.label}
+                          </button>
+                        );
+                      }}
+                    </For>
+                  </div>
+                </div>
+
+                <div class="col-span-2">
+                  <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 mb-1.5">
+                    Publisher operations
+                  </div>
+                  <div class="grid grid-cols-3 gap-2">
+                    <For each={PUBLISHER_OPERATION_OPTIONS}>
+                      {(option) => {
+                        const key = `${option.publisher_slug}:${option.operation_id}`;
+                        const active = () =>
+                          publisherOperationKeys().includes(key);
+                        return (
+                          <button
+                            type="button"
+                            aria-pressed={active()}
+                            class="text-left p-2.5 rounded-md border bg-card transition-all duration-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            classList={{
+                              "border-primary bg-primary/[0.08]": active(),
+                              "border-border hover:border-border/90 hover:bg-surface-2":
+                                !active(),
+                            }}
+                            onClick={() => togglePublisherOperation(key)}
+                            disabled={submitting()}
+                          >
+                            <div class="text-[12.5px] font-semibold text-foreground">
+                              {option.title}
+                            </div>
+                            <div class="text-[10.5px] text-muted-foreground leading-tight mt-0.5">
+                              {option.sub}
+                            </div>
+                            <Show when={option.require_approval}>
+                              <div class="mt-1 text-[10px] text-primary">
+                                Requires approval
+                              </div>
+                            </Show>
                           </button>
                         );
                       }}
