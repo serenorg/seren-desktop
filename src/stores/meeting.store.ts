@@ -23,6 +23,8 @@ import {
   type Meeting,
   type MeetingTemplate,
   meetingAutodetect,
+  meetingLifecycleNoteManualStop,
+  meetingLifecycleTick,
   reconcileMeetingSpeakers,
   republishMeetingToSerenNotes,
   selectMeetingSkills,
@@ -104,6 +106,10 @@ const PUBLISH_FAILED_BANNER =
 let autoDetectTimer: number | null = null;
 let autoDetectDismissed = false;
 const AUTO_DETECT_POLL_MS = 5_000;
+
+// The meeting the auto-record lifecycle started, if any. Tracked so each tick
+// passes the silence anchor and so a manual stop can suppress auto-restart.
+let lifecycleMeetingId: string | null = null;
 
 // Shared in-flight guard across every start caller (panel, tray, auto-detect)
 // so a double-trigger can't launch two mic streams for the same session.
@@ -964,24 +970,60 @@ async function pollAutoDetect(): Promise<void> {
     setMeetingState("autoDetectSourceApp", null);
     return;
   }
-  if (isCapturing()) {
+
+  // A lifecycle recording that stopped outside the lifecycle (user hit Stop, or
+  // priming was canceled): suppress auto-restart until the call's mic ends.
+  if (lifecycleMeetingId !== null && !isCapturing()) {
+    await meetingLifecycleNoteManualStop().catch(() => {});
+    lifecycleMeetingId = null;
+  }
+
+  // Don't interfere with a capture the lifecycle didn't start.
+  if (lifecycleMeetingId === null && isCapturing()) {
     setMeetingState("autoDetectSuggested", false);
     setMeetingState("autoDetectSourceApp", null);
     return;
   }
 
   try {
-    const detection = await meetingAutodetect();
-    if (!detection.detected) {
-      autoDetectDismissed = false;
-      setMeetingState("autoDetectSuggested", false);
-      setMeetingState("autoDetectSourceApp", null);
+    const action = await meetingLifecycleTick(lifecycleMeetingId);
+    if (action?.kind === "start_capture") {
+      if (isCapturing()) return;
+      const meeting = await createMeeting({
+        title: `Meeting ${formatTime(Date.now())}`,
+        sourceApp: action.sourceApp ?? "Auto-detect",
+        templateId: settingsStore.get("meetingTemplateId"),
+      });
+      lifecycleMeetingId = meeting.id;
+      await requestCaptureStart(meeting);
       return;
     }
-    setMeetingState("autoDetectSourceApp", detection.sourceApp);
-    setMeetingState("autoDetectSuggested", !autoDetectDismissed);
+    if (action?.kind === "stop_capture") {
+      const id = lifecycleMeetingId;
+      lifecycleMeetingId = null;
+      const meeting =
+        id === null
+          ? undefined
+          : meetingState.meetings.find((item) => item.id === id);
+      if (meeting) await stopAndProcess(meeting);
+      return;
+    }
+
+    // No lifecycle action and nothing recording: surface the arm prompt only
+    // for an unrecognized app (the lifecycle auto-handles known call apps).
+    if (lifecycleMeetingId === null && !isCapturing()) {
+      const detection = await meetingAutodetect();
+      if (detection.detected && !detection.sourceApp) {
+        setMeetingState("autoDetectSourceApp", detection.sourceApp);
+        setMeetingState("autoDetectSuggested", !autoDetectDismissed);
+      } else {
+        autoDetectDismissed = false;
+        setMeetingState("autoDetectSuggested", false);
+        setMeetingState("autoDetectSourceApp", null);
+      }
+    }
   } catch {
-    // Probe failures are non-fatal; leave the prompt as-is.
+    // Probe/tick failures are non-fatal; leave state as-is.
   }
 }
 
