@@ -14,9 +14,15 @@ function formatElapsed(ms: number): string {
 const CONTROL_CLASS =
   "h-6 rounded-md px-2 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent/15 hover:text-foreground";
 
+// Copyable participant disclosure — local capture gives others no automatic
+// signal, so this lets the user paste a heads-up into the meeting chat.
+const DISCLOSURE =
+  "Heads up — I'm using an AI assistant to take notes on this call.";
+
 export function RecordingIndicator() {
   const [now, setNow] = createSignal(Date.now());
   const [confirmingDelete, setConfirmingDelete] = createSignal(false);
+  const [copied, setCopied] = createSignal(false);
 
   let timer: number | undefined;
   onMount(() => {
@@ -54,6 +60,16 @@ export function RecordingIndicator() {
     else void meetingStore.pauseCapture(meeting.id);
   };
 
+  const onNotify = () => {
+    void navigator.clipboard
+      .writeText(DISCLOSURE)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
+
   const onDelete = () => {
     const meeting = active();
     if (!meeting) return;
@@ -89,6 +105,14 @@ export function RecordingIndicator() {
           <span class="text-[10px] font-medium text-destructive">mic lost</span>
         </Show>
         <div class="ml-1 flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            class={CONTROL_CLASS}
+            onClick={onNotify}
+            title="Copy a recording disclosure to paste into the meeting chat"
+          >
+            {copied() ? "Copied" : "Notify"}
+          </button>
           <button type="button" class={CONTROL_CLASS} onClick={onTogglePause}>
             {paused() ? "Resume" : "Pause"}
           </button>

@@ -97,6 +97,12 @@ export const AudioPrimingDialog: Component<AudioPrimingDialogProps> = (
           </div>
         </div>
 
+        <p class="px-5 pb-4 text-[11px] text-muted-foreground leading-relaxed">
+          Recording happens locally — other participants aren't automatically
+          notified. Please let them know you're taking notes; some regions
+          require everyone's consent.
+        </p>
+
         <div class="flex justify-end gap-2 px-5 py-4 border-t border-border">
           <button
             type="button"
