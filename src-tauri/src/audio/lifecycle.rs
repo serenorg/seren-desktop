@@ -62,10 +62,16 @@ pub enum StopReason {
 /// given tick. The wiring creates a fresh meeting per `StartCapture` (so each
 /// call is its own record — no back-to-back merge) and stops capture on
 /// `StopCapture`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LifecycleAction {
-    StartCapture { source_app: Option<String> },
-    StopCapture { reason: StopReason },
+    StartCapture {
+        #[serde(rename = "sourceApp")]
+        source_app: Option<String>,
+    },
+    StopCapture {
+        reason: StopReason,
+    },
 }
 
 /// Pure auto-record decision engine. Holds no I/O — the wiring layer feeds it a
