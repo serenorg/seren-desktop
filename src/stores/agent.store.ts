@@ -3614,6 +3614,14 @@ export const agentStore = {
       return false;
     }
 
+    // Paired (claude-codex) threads are a two-inner-session structure whose
+    // PairedStatus the runtime's flat session info does not expose. Re-adopting
+    // one would drop the paired UI, so leave paired resumes on the existing
+    // terminate+respawn path (which reseeds pairedConfig from metadata). #2672
+    if (liveInfo.agentType === "claude-codex") {
+      return false;
+    }
+
     // Restore the persisted transcript for display. The live session already
     // streamed these turns while connected; re-attach renders them from SQLite
     // rather than replaying from a fresh process.
