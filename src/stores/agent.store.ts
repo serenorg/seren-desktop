@@ -2979,81 +2979,7 @@ export const agentStore = {
 
       // Subscribe once to all agent runtime events before spawning, so early replay events
       // from load_session are buffered instead of dropped.
-      if (!globalUnsubscribe) {
-        globalUnsubscribe = await providerService.subscribeToAllEvents(
-          (event) => {
-            const eventSessionId = event.data.sessionId;
-            if (!eventSessionId) return;
-
-            // Auth failure during spawn — handle BEFORE the session-routing
-            // logic below, because the session is not yet registered in
-            // state.sessions when this fires (the spawn promise is still
-            // pending). Auto-trigger launchLogin so the user can finish
-            // signing in without knowing the CLI command. (#1476)
-            if (event.type === "loginRequired") {
-              const data = event.data;
-              console.log(
-                "[AgentStore] Login required for",
-                data.agentType,
-                "— auto-launching login flow:",
-                data.reason,
-              );
-              setState(
-                "error",
-                `${agentDisplayName(data.agentType)} sign-in required. Opening a Terminal window — finish the login there, then click + New Agent → ${agentDisplayName(data.agentType)} Agent again.`,
-              );
-              providerService
-                .launchLogin(data.agentType)
-                .catch((err) =>
-                  console.error("[AgentStore] launchLogin failed:", err),
-                );
-              return;
-            }
-
-            // Drop events for sessions that have been explicitly terminated —
-            // UNLESS a new spawn is in progress for this ID (spawnContextMap).
-            // Without the first check, late errors from dead sessions leak in.
-            // Without the second check, config events from a respawned session
-            // (same ID) are silently dropped, losing model/mode/effort data.
-            if (
-              terminatedSessionIds.has(eventSessionId) &&
-              !spawnContextMap.has(eventSessionId)
-            ) {
-              return;
-            }
-
-            // Event receipt logs are high-volume during tool-heavy agent runs,
-            // so they stay behind an explicit localStorage debug switch.
-            if (shouldLogAgentRuntimeEvent(event.type)) {
-              const session = state.sessions[eventSessionId];
-              const spawnCtx = session
-                ? undefined
-                : spawnContextMap.get(eventSessionId);
-              console.debug(
-                "[AgentRuntime] Event received - type:",
-                event.type,
-                "agent:",
-                session?.info?.agentType ?? spawnCtx?.agentType ?? "unknown",
-                "sessionId:",
-                eventSessionId,
-                "conversationId:",
-                session?.conversationId ?? spawnCtx?.conversationId,
-              );
-            }
-            if (state.sessions[eventSessionId]) {
-              this.handleSessionEvent(eventSessionId, event);
-              return;
-            }
-
-            const pending = pendingSessionEvents.get(eventSessionId) ?? [];
-            pending.push(event);
-            if (pending.length > PENDING_SESSION_EVENT_LIMIT) {
-              pending.shift();
-            }
-            pendingSessionEvents.set(eventSessionId, pending);
-          },
-        );
-      }
+      await this.ensureAgentEventSubscription();
 
       try {
         // Ensure the underlying CLI is installed and up-to-date before spawning
@@ -3567,6 +3493,206 @@ export const agentStore = {
   },
 
   /**
+   * Install the single global agent-runtime event subscription if it is not
+   * already attached. The frontend loses this subscription on a full webview
+   * reload (the module-level handle resets to null), while the provider
+   * runtime — and its live sessions — survive. Both spawn and re-attach call
+   * this so events from an already-running session are routed again.
+   */
+  async ensureAgentEventSubscription(): Promise<void> {
+    if (globalUnsubscribe) return;
+    globalUnsubscribe = await providerService.subscribeToAllEvents((event) => {
+      const eventSessionId = event.data.sessionId;
+      if (!eventSessionId) return;
+
+      // Auth failure during spawn — handle BEFORE the session-routing
+      // logic below, because the session is not yet registered in
+      // state.sessions when this fires (the spawn promise is still
+      // pending). Auto-trigger launchLogin so the user can finish
+      // signing in without knowing the CLI command. (#1476)
+      if (event.type === "loginRequired") {
+        const data = event.data;
+        console.log(
+          "[AgentStore] Login required for",
+          data.agentType,
+          "— auto-launching login flow:",
+          data.reason,
+        );
+        setState(
+          "error",
+          `${agentDisplayName(data.agentType)} sign-in required. Opening a Terminal window — finish the login there, then click + New Agent → ${agentDisplayName(data.agentType)} Agent again.`,
+        );
+        providerService
+          .launchLogin(data.agentType)
+          .catch((err) =>
+            console.error("[AgentStore] launchLogin failed:", err),
+          );
+        return;
+      }
+
+      // Drop events for sessions that have been explicitly terminated —
+      // UNLESS a new spawn is in progress for this ID (spawnContextMap).
+      // Without the first check, late errors from dead sessions leak in.
+      // Without the second check, config events from a respawned session
+      // (same ID) are silently dropped, losing model/mode/effort data.
+      if (
+        terminatedSessionIds.has(eventSessionId) &&
+        !spawnContextMap.has(eventSessionId)
+      ) {
+        return;
+      }
+
+      // Event receipt logs are high-volume during tool-heavy agent runs,
+      // so they stay behind an explicit localStorage debug switch.
+      if (shouldLogAgentRuntimeEvent(event.type)) {
+        const session = state.sessions[eventSessionId];
+        const spawnCtx = session
+          ? undefined
+          : spawnContextMap.get(eventSessionId);
+        console.debug(
+          "[AgentRuntime] Event received - type:",
+          event.type,
+          "agent:",
+          session?.info?.agentType ?? spawnCtx?.agentType ?? "unknown",
+          "sessionId:",
+          eventSessionId,
+          "conversationId:",
+          session?.conversationId ?? spawnCtx?.conversationId,
+        );
+      }
+      if (state.sessions[eventSessionId]) {
+        this.handleSessionEvent(eventSessionId, event);
+        return;
+      }
+
+      const pending = pendingSessionEvents.get(eventSessionId) ?? [];
+      pending.push(event);
+      if (pending.length > PENDING_SESSION_EVENT_LIMIT) {
+        pending.shift();
+      }
+      pendingSessionEvents.set(eventSessionId, pending);
+    });
+  },
+
+  /**
+   * Re-adopt a live provider-runtime session for this conversation instead of
+   * tearing it down. The provider runtime is app-scoped and outlives webview
+   * reloads/reconnects, so after the frontend loses its in-memory handle the
+   * backend can still hold a running CLI session — together with any in-flight
+   * background subagents (`Agent(run_in_background: true)`) it spawned. The
+   * resume path used to pre-emptively `terminateSession` here, which SIGKILLs
+   * the whole CLI process tree and silently loses that background work; the
+   * orphaned task then surfaces on the next turn as a false "stopped by user"
+   * notification. Re-attaching keeps the process tree — and the background
+   * work — alive. A killed grandchild cannot be recovered after the fact, so
+   * not reaping it is the only fix that preserves it. #2669
+   *
+   * Returns true when a live session was adopted; false when there is no
+   * usable live session and the caller should fall back to terminate+respawn.
+   */
+  async reattachLiveSession(conversationId: string): Promise<boolean> {
+    let liveInfo: AgentSessionInfo | undefined;
+    try {
+      const backendSessions = await providerService.listSessions();
+      liveInfo = backendSessions.find((s) => s.id === conversationId);
+    } catch (err) {
+      // If we cannot ask the runtime, fall back to the normal respawn path.
+      console.warn(
+        "[AgentStore] listSessions during re-attach probe failed:",
+        err,
+      );
+      return false;
+    }
+
+    // No live session, or one the runtime already considers dead — let the
+    // caller terminate (a no-op for a missing session) and respawn fresh.
+    if (
+      !liveInfo ||
+      liveInfo.status === "terminated" ||
+      liveInfo.status === "error"
+    ) {
+      return false;
+    }
+
+    // Restore the persisted transcript for display. The live session already
+    // streamed these turns while connected; re-attach renders them from SQLite
+    // rather than replaying from a fresh process.
+    const restored = await loadPersistedAgentHistory(conversationId);
+    let convo: DbAgentConversation | null = null;
+    try {
+      convo = await getAgentConversation(conversationId);
+    } catch {
+      // Non-fatal — the runtime is the source of truth for the live session.
+    }
+    const agentType = liveInfo.agentType;
+
+    // The webview reload that dropped our session handle also dropped the
+    // global event subscription. Re-install it so events from the live
+    // session (incl. background task completions) are routed again.
+    await this.ensureAgentEventSubscription();
+
+    // This id is alive again — clear any stale terminated marker so the global
+    // subscriber does not drop its events.
+    terminatedSessionIds.delete(conversationId);
+    spawnContextMap.delete(conversationId);
+
+    const hasRestoredMessages = restored.messages.length > 0;
+    const session: ActiveSession = {
+      info: liveInfo,
+      messages: restored.messages,
+      plan: [],
+      pendingToolCalls: new Map(),
+      streamingContent: "",
+      streamingThinking: "",
+      pendingUserMessage: "",
+      cwd: liveInfo.cwd,
+      conversationId,
+      agentSessionId: liveInfo.agentSessionId,
+      skipHistoryReplay: hasRestoredMessages ? true : undefined,
+      restoredMessageCount: hasRestoredMessages
+        ? restored.messages.length
+        : undefined,
+      contextWindowSize: defaultContextWindowFor(
+        agentType,
+        convo?.agent_model_id ?? undefined,
+      ),
+      currentModelId: convo?.agent_model_id ?? undefined,
+      currentModeId: convo?.agent_permission_mode ?? undefined,
+      title: convo?.title,
+      pendingPrompts: [],
+      role: "serving",
+    };
+    setState("sessions", conversationId, session);
+    setState("activeSessionId", conversationId);
+
+    // Drain events buffered by the global subscriber while no session record
+    // existed for this id.
+    const pendingEvents = pendingSessionEvents.get(conversationId);
+    if (pendingEvents?.length) {
+      for (const pendingEvent of pendingEvents) {
+        this.handleSessionEvent(conversationId, pendingEvent);
+      }
+      pendingSessionEvents.delete(conversationId);
+    }
+
+    // The live session is already past initialization — unblock any sendPrompt
+    // that awaits a readiness gate keyed on this id.
+    const readyEntry = sessionReadyPromises.get(conversationId);
+    if (readyEntry) {
+      readyEntry.resolve();
+      sessionReadyPromises.delete(conversationId);
+    }
+
+    console.info(
+      "[AgentStore] Re-attached to live runtime session for conversation",
+      conversationId,
+      "status:",
+      liveInfo.status,
+    );
+    return true;
+  },
+
+  /**
    * Resume a persisted agent conversation by loading its remote agent session.
    *
    * Provider sessions own transcript history; Seren only restores local
@@ -3600,6 +3726,24 @@ export const agentStore = {
     }
 
     setState("error", null);
+
+    // The provider runtime outlives webview reloads/reconnects, so the backend
+    // may still hold a LIVE session for this conversation — along with any
+    // in-flight background subagents it spawned. Adopt it instead of tearing it
+    // down; the pre-emptive terminate below would otherwise SIGKILL the whole
+    // CLI process tree and silently lose that background work. #2669
+    try {
+      const reattached = await this.reattachLiveSession(conversationId);
+      if (reattached) {
+        clearSpawnFailures(conversationId);
+        return conversationId;
+      }
+    } catch (err) {
+      console.warn(
+        "[AgentStore] re-attach failed; falling back to respawn:",
+        err,
+      );
+    }
 
     // Pre-emptively clean up any stale backend session with this conversation id.
     // If the frontend lost track of a session (e.g. after a crash or auth error),
