@@ -301,3 +301,42 @@ export interface MeetingAutodetectResult {
 export function meetingAutodetect(): Promise<MeetingAutodetectResult> {
   return invoke("meeting_autodetect");
 }
+
+/**
+ * One auto-record lifecycle action returned by `meetingLifecycleTick`. The Rust
+ * decision core owns the state machine; the frontend executes the action with
+ * the existing start/stop paths.
+ */
+export type MeetingLifecycleAction =
+  | { kind: "start_capture"; sourceApp: string | null }
+  | {
+      kind: "stop_capture";
+      reason: "app_released" | "silence" | "calendar_end";
+    };
+
+/**
+ * Advance the auto-record lifecycle one tick. Pass the currently-recording
+ * meeting id (for the silence backstop) and an optional matched calendar end.
+ * Returns the action to perform, or `null` when nothing changes this tick.
+ */
+export function meetingLifecycleTick(
+  activeMeetingId: string | null,
+  calendarEndMs: number | null = null,
+): Promise<MeetingLifecycleAction | null> {
+  return invoke("meeting_lifecycle_tick", { activeMeetingId, calendarEndMs });
+}
+
+/** Tell the lifecycle the user manually stopped capture (suppress auto-restart). */
+export function meetingLifecycleNoteManualStop(): Promise<void> {
+  return invoke("meeting_lifecycle_note_manual_stop");
+}
+
+/** Pause a live capture without ending it. Resolves false if none is active. */
+export function pauseMeetingCapture(meetingId: string): Promise<boolean> {
+  return invoke("pause_meeting_capture", { meetingId });
+}
+
+/** Resume a paused capture. Resolves false if none is active. */
+export function resumeMeetingCapture(meetingId: string): Promise<boolean> {
+  return invoke("resume_meeting_capture", { meetingId });
+}

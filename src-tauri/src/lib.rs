@@ -584,6 +584,9 @@ pub fn run() {
         .manage(mcp::HttpMcpState::new())
         .manage(orchestrator::service::OrchestratorState::new())
         .manage(audio::pipeline::CaptureRegistry::default())
+        .manage(std::sync::Mutex::new(
+            audio::lifecycle::LifecycleController::new(audio::lifecycle::LifecycleConfig::default()),
+        ))
         .manage(orchestrator::eval::EvalState::new())
         .manage(orchestrator::tool_bridge::ToolResultBridge::new())
         .manage(provider_runtime::ProviderRuntimeState::new())
@@ -927,6 +930,8 @@ pub fn run() {
             // Meeting Mode capture + intelligence commands
             commands::audio::start_meeting_capture,
             commands::audio::is_meeting_capture_active,
+            commands::audio::pause_meeting_capture,
+            commands::audio::resume_meeting_capture,
             commands::audio::stop_meeting_capture,
             commands::audio::e2e_inject_meeting_capture_audio,
             commands::audio::reconcile_meeting_speakers,
@@ -936,6 +941,8 @@ pub fn run() {
             commands::audio::select_meeting_skills,
             commands::audio::list_meeting_templates,
             commands::audio::meeting_autodetect,
+            commands::audio::meeting_lifecycle_tick,
+            commands::audio::meeting_lifecycle_note_manual_stop,
             // Dictation commands
             commands::audio::transcribe_pcm,
             commands::audio::cleanup_dictation_text,

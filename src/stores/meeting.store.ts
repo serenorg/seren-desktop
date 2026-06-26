@@ -23,8 +23,12 @@ import {
   type Meeting,
   type MeetingTemplate,
   meetingAutodetect,
+  meetingLifecycleNoteManualStop,
+  meetingLifecycleTick,
+  pauseMeetingCapture,
   reconcileMeetingSpeakers,
   republishMeetingToSerenNotes,
+  resumeMeetingCapture,
   selectMeetingSkills,
   setMeetingRoutedSkill,
   startMeetingCapture as startBackendCapture,
@@ -46,6 +50,8 @@ interface MeetingState {
   activeMeeting: Meeting | null;
   liveSegments: TranscriptSegment[];
   captureLevel: number;
+  /** True while the active capture is paused (frame ingestion suspended). */
+  capturePaused: boolean;
   /**
    * True while the native mic is disconnected mid-capture and the backend is
    * re-acquiring it. The panel shows a "microphone disconnected — reconnecting…"
@@ -76,6 +82,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   activeMeeting: null,
   liveSegments: [],
   captureLevel: 0,
+  capturePaused: false,
   micCaptureLost: false,
   isLoading: false,
   error: null,
@@ -104,6 +111,16 @@ const PUBLISH_FAILED_BANNER =
 let autoDetectTimer: number | null = null;
 let autoDetectDismissed = false;
 const AUTO_DETECT_POLL_MS = 5_000;
+
+// The meeting the auto-record lifecycle started, if any. Tracked so each tick
+// passes the silence anchor and so a manual stop can suppress auto-restart.
+let lifecycleMeetingId: string | null = null;
+
+// Quit guard: confirm-on-quit while a capture is live. `quitConfirmed` lets a
+// second close request pass through even if window.destroy() is unavailable,
+// so the guard can never wedge app-quit.
+let closeGuardUnlisten: UnlistenFn | null = null;
+let quitConfirmed = false;
 
 // Shared in-flight guard across every start caller (panel, tray, auto-detect)
 // so a double-trigger can't launch two mic streams for the same session.
@@ -275,6 +292,8 @@ async function startMeetingEventListeners(): Promise<void> {
   stopMeetingEventListeners();
   if (!isTauriRuntime()) return;
 
+  void registerQuitGuard();
+
   transcriptUnlisten = await listen<TranscriptSegment>(
     "meeting://transcript-chunk",
     (event) => {
@@ -408,6 +427,7 @@ function stopMeetingEventListeners(): void {
   notesPublishedUnlisten?.();
   micStatusUnlisten?.();
   trayToggleUnlisten?.();
+  closeGuardUnlisten?.();
   transcriptUnlisten = null;
   statusUnlisten = null;
   levelUnlisten = null;
@@ -416,6 +436,44 @@ function stopMeetingEventListeners(): void {
   notesPublishedUnlisten = null;
   micStatusUnlisten = null;
   trayToggleUnlisten = null;
+  closeGuardUnlisten = null;
+}
+
+// Confirm-on-quit while a capture is live, so a recording is never lost or left
+// running on exit. Built to never block quit: after the user confirms (or on any
+// error) `quitConfirmed` is set, so a second close request passes straight
+// through even if window.destroy() is denied.
+async function registerQuitGuard(): Promise<void> {
+  if (!isTauriRuntime() || closeGuardUnlisten) return;
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const { confirm } = await import("@tauri-apps/plugin-dialog");
+    const appWindow = getCurrentWindow();
+    closeGuardUnlisten = await appWindow.onCloseRequested(async (event) => {
+      if (quitConfirmed || !isCapturing()) return;
+      event.preventDefault();
+      let stopAndQuit = false;
+      try {
+        stopAndQuit = await confirm(
+          "A meeting is still recording. Stop and save it before quitting?",
+          { title: "Recording in progress", kind: "warning" },
+        );
+      } catch {
+        quitConfirmed = true;
+        await appWindow.destroy().catch(() => {});
+        return;
+      }
+      if (!stopAndQuit) return; // user canceled the quit; keep recording
+      const meeting = meetingState.meetings.find(
+        (item) => item.status === "capturing",
+      );
+      if (meeting) await stopAndProcess(meeting).catch(() => {});
+      quitConfirmed = true;
+      await appWindow.destroy().catch(() => {});
+    });
+  } catch {
+    // Window API unavailable (e.g. browser-local) — no guard, nothing blocked.
+  }
 }
 
 async function startCapture(meeting: Meeting): Promise<boolean> {
@@ -457,6 +515,7 @@ async function beginCapture(meeting: Meeting): Promise<void> {
   try {
     const started = await startCapture(meeting);
     if (!started) return;
+    setMeetingState("capturePaused", false);
     await loadMeetings();
     await setActiveMeeting(
       meetingState.meetings.find((item) => item.id === meeting.id) ?? meeting,
@@ -499,6 +558,21 @@ async function cancelPriming(): Promise<void> {
     meeting.id,
     "Capture was canceled before audio permissions were requested.",
   );
+}
+
+// Pause the active capture: backend workers drop frames (a transcript gap)
+// while the session stays alive. No-op if no capture is active.
+async function pauseCapture(meetingId: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  const ok = await pauseMeetingCapture(meetingId).catch(() => false);
+  if (ok) setMeetingState("capturePaused", true);
+}
+
+// Resume a paused capture: frames flow again.
+async function resumeCapture(meetingId: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  const ok = await resumeMeetingCapture(meetingId).catch(() => false);
+  if (ok) setMeetingState("capturePaused", false);
 }
 
 // At startup, backend capture may still be active even though the renderer
@@ -964,24 +1038,61 @@ async function pollAutoDetect(): Promise<void> {
     setMeetingState("autoDetectSourceApp", null);
     return;
   }
-  if (isCapturing()) {
+
+  // A lifecycle recording that stopped outside the lifecycle (user hit Stop, or
+  // priming was canceled): suppress auto-restart until the call's mic ends.
+  if (lifecycleMeetingId !== null && !isCapturing()) {
+    await meetingLifecycleNoteManualStop().catch(() => {});
+    lifecycleMeetingId = null;
+  }
+
+  // Don't interfere with a capture the lifecycle didn't start.
+  if (lifecycleMeetingId === null && isCapturing()) {
     setMeetingState("autoDetectSuggested", false);
     setMeetingState("autoDetectSourceApp", null);
     return;
   }
 
-  try {
-    const detection = await meetingAutodetect();
-    if (!detection.detected) {
+  // 1) Lifecycle auto start/stop for known call apps. A tick failure degrades
+  //    to null so the unrecognized-app prompt below still runs.
+  const action = await meetingLifecycleTick(lifecycleMeetingId).catch(
+    () => null,
+  );
+  if (action?.kind === "start_capture") {
+    if (!isCapturing()) {
+      const meeting = await createMeeting({
+        title: `Meeting ${formatTime(Date.now())}`,
+        sourceApp: action.sourceApp ?? "Auto-detect",
+        templateId: settingsStore.get("meetingTemplateId"),
+      });
+      lifecycleMeetingId = meeting.id;
+      await requestCaptureStart(meeting);
+    }
+    return;
+  }
+  if (action?.kind === "stop_capture") {
+    const id = lifecycleMeetingId;
+    lifecycleMeetingId = null;
+    const meeting =
+      id === null
+        ? undefined
+        : meetingState.meetings.find((item) => item.id === id);
+    if (meeting) await stopAndProcess(meeting);
+    return;
+  }
+
+  // 2) Fallback arm prompt for an unrecognized app the lifecycle won't
+  //    auto-handle. Known apps auto-start above and never reach here.
+  if (lifecycleMeetingId === null && !isCapturing()) {
+    const detection = await meetingAutodetect().catch(() => null);
+    if (detection?.detected && !detection.sourceApp) {
+      setMeetingState("autoDetectSourceApp", detection.sourceApp);
+      setMeetingState("autoDetectSuggested", !autoDetectDismissed);
+    } else {
       autoDetectDismissed = false;
       setMeetingState("autoDetectSuggested", false);
       setMeetingState("autoDetectSourceApp", null);
-      return;
     }
-    setMeetingState("autoDetectSourceApp", detection.sourceApp);
-    setMeetingState("autoDetectSuggested", !autoDetectDismissed);
-  } catch {
-    // Probe failures are non-fatal; leave the prompt as-is.
   }
 }
 
@@ -1053,6 +1164,8 @@ export const meetingStore = {
   reconcileStaleCaptures,
   stopCapture,
   stopAndProcess,
+  pauseCapture,
+  resumeCapture,
   getMeetingSkillCandidates,
   routeMeetingToSkill,
   regenerateNotes,

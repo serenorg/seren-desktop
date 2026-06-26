@@ -5,6 +5,7 @@ use crate::audio::capture::{TARGET_SAMPLE_RATE, to_mono_16k};
 use crate::audio::chunker::{Chunk, ChunkCfg, chunk as chunk_pcm};
 use crate::audio::cleanup::{build_cleanup_prompt, build_transform_prompt};
 use crate::audio::detect::{MeetingAutodetectResult, meeting_detection, probe_audio_activity};
+use crate::audio::lifecycle::{LifecycleAction, LifecycleController, LifecycleSignal};
 use crate::audio::llm::{CompletionRequest, complete};
 use crate::audio::merge::merge_segments;
 use crate::audio::notes::{ParsedNotes, generate_notes};
@@ -637,6 +638,20 @@ pub fn is_meeting_capture_active(registry: State<'_, CaptureRegistry>, meeting_i
     registry.is_active(&meeting_id)
 }
 
+/// Pause a live capture: workers drop frames (no segments) without ending the
+/// session. Returns false when no active capture exists for the meeting.
+#[tauri::command]
+pub fn pause_meeting_capture(registry: State<'_, CaptureRegistry>, meeting_id: String) -> bool {
+    registry.set_paused(&meeting_id, true)
+}
+
+/// Resume a paused capture: frames flow again. Returns false when no active
+/// capture exists for the meeting.
+#[tauri::command]
+pub fn resume_meeting_capture(registry: State<'_, CaptureRegistry>, meeting_id: String) -> bool {
+    registry.set_paused(&meeting_id, false)
+}
+
 #[tauri::command]
 pub async fn stop_meeting_capture(
     app: AppHandle,
@@ -1107,6 +1122,70 @@ pub fn list_meeting_templates() -> Vec<MeetingTemplate> {
 pub fn meeting_autodetect() -> MeetingAutodetectResult {
     let activity = probe_audio_activity();
     meeting_detection(activity)
+}
+
+/// Timestamp of the most recently persisted transcript segment for a meeting —
+/// the silence-backstop anchor. `None` when nothing has landed yet.
+fn select_last_segment_ms(conn: &Connection, meeting_id: &str) -> Result<Option<i64>> {
+    conn.query_row(
+        "SELECT MAX(created_at) FROM transcript_segments WHERE meeting_id = ?1",
+        params![meeting_id],
+        |row| row.get::<_, Option<i64>>(0),
+    )
+    .optional()
+    .map(Option::flatten)
+}
+
+/// Advance the auto-record lifecycle by one tick and return the action to
+/// perform, if any. The frontend poll drives this while auto-detect is enabled;
+/// the controller lives in Tauri-managed state so it persists across ticks.
+/// Signals: the live mic-activity probe (gate + source app), the active
+/// meeting's last-segment time (silence backstop), and an optional matched
+/// calendar end.
+#[tauri::command]
+pub async fn meeting_lifecycle_tick(
+    app: AppHandle,
+    lifecycle: State<'_, std::sync::Mutex<LifecycleController>>,
+    active_meeting_id: Option<String>,
+    calendar_end_ms: Option<i64>,
+) -> Result<Option<LifecycleAction>, String> {
+    let activity = probe_audio_activity();
+    let source_app = activity.source_app;
+    // Gate A: mic active AND a known conferencing app. `source_app` is populated
+    // only when both hold, so its presence is the gate.
+    let gate_open = source_app.is_some();
+
+    let last_segment_ms = match active_meeting_id {
+        Some(id) => run_db(app, move |conn| select_last_segment_ms(conn, &id)).await?,
+        None => None,
+    };
+
+    let signal = LifecycleSignal {
+        now_ms: now_ms(),
+        gate_open,
+        source_app,
+        last_segment_ms,
+        calendar_end_ms,
+    };
+
+    let action = lifecycle
+        .lock()
+        .map_err(|err| err.to_string())?
+        .evaluate(&signal);
+    Ok(action)
+}
+
+/// Record that the user manually stopped the active recording, so auto-start
+/// stays suppressed until the call's mic session ends.
+#[tauri::command]
+pub fn meeting_lifecycle_note_manual_stop(
+    lifecycle: State<'_, std::sync::Mutex<LifecycleController>>,
+) -> Result<(), String> {
+    lifecycle
+        .lock()
+        .map_err(|err| err.to_string())?
+        .note_manual_stop();
+    Ok(())
 }
 
 // --- Dictation (shares the transcribe + cleanup engines with Meeting Mode) --
