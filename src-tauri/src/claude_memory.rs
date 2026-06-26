@@ -1296,9 +1296,9 @@ pub async fn sync_project(
     project_cwd: &Path,
 ) -> Result<MigrationReport, String> {
     let root = claude_projects_root()?;
-    let claude_project_dir = root.join(encode_project_dir(project_cwd));
+    let (claude_project_dir, mut projects_to_render) =
+        sync_project_render_targets(&root, project_cwd);
     let mut report = MigrationReport::default();
-    let mut projects_to_render = BTreeSet::new();
     flush_memory_dir(
         &claude_project_dir,
         client,
@@ -1309,6 +1309,15 @@ pub async fn sync_project(
     .await;
     render_projects(projects_to_render, client, config, &mut report).await;
     Ok(report)
+}
+
+fn sync_project_render_targets(root: &Path, project_cwd: &Path) -> (PathBuf, BTreeSet<PathBuf>) {
+    let claude_project_dir = root.join(encode_project_dir(project_cwd));
+    let mut projects_to_render = BTreeSet::new();
+    // An explicit single-project sync is a reconciliation command: refresh the
+    // requested MEMORY.md even when there are no pending local files to flush.
+    projects_to_render.insert(claude_project_dir.clone());
+    (claude_project_dir, projects_to_render)
 }
 
 /// Persist every interceptable file in `<claude_project_dir>/memory/` and queue
@@ -1347,7 +1356,7 @@ async fn flush_memory_dir(
     }
 }
 
-/// Re-render `MEMORY.md` for each project that had a successful flush.
+/// Re-render `MEMORY.md` for each queued project.
 async fn render_projects(
     projects: BTreeSet<PathBuf>,
     client: &SerenDbSqlClient,
@@ -1887,6 +1896,23 @@ mod tests {
         assert_eq!(report.rendered, 0);
         assert_eq!(report.failures, 0);
         assert_eq!(report.render_failures, 0);
+    }
+
+    #[test]
+    fn sync_project_targets_requested_project_even_without_flushed_files() {
+        let tmp = TempDir::new().expect("tempdir");
+        let root = tmp.path().join(".claude").join("projects");
+        let cwd = tmp.path().join("Projects").join("seren-desktop");
+        fs::create_dir_all(&cwd).expect("fake cwd");
+
+        let (claude_project_dir, projects_to_render) = sync_project_render_targets(&root, &cwd);
+
+        assert_eq!(projects_to_render.len(), 1);
+        assert!(
+            projects_to_render.contains(&claude_project_dir),
+            "single-project sync must refresh the requested MEMORY.md even with no flushed files",
+        );
+        assert_eq!(claude_project_dir, root.join(encode_project_dir(&cwd)));
     }
 }
 
