@@ -1053,10 +1053,13 @@ async function pollAutoDetect(): Promise<void> {
     return;
   }
 
-  try {
-    const action = await meetingLifecycleTick(lifecycleMeetingId);
-    if (action?.kind === "start_capture") {
-      if (isCapturing()) return;
+  // 1) Lifecycle auto start/stop for known call apps. A tick failure degrades
+  //    to null so the unrecognized-app prompt below still runs.
+  const action = await meetingLifecycleTick(lifecycleMeetingId).catch(
+    () => null,
+  );
+  if (action?.kind === "start_capture") {
+    if (!isCapturing()) {
       const meeting = await createMeeting({
         title: `Meeting ${formatTime(Date.now())}`,
         sourceApp: action.sourceApp ?? "Auto-detect",
@@ -1064,34 +1067,32 @@ async function pollAutoDetect(): Promise<void> {
       });
       lifecycleMeetingId = meeting.id;
       await requestCaptureStart(meeting);
-      return;
     }
-    if (action?.kind === "stop_capture") {
-      const id = lifecycleMeetingId;
-      lifecycleMeetingId = null;
-      const meeting =
-        id === null
-          ? undefined
-          : meetingState.meetings.find((item) => item.id === id);
-      if (meeting) await stopAndProcess(meeting);
-      return;
-    }
+    return;
+  }
+  if (action?.kind === "stop_capture") {
+    const id = lifecycleMeetingId;
+    lifecycleMeetingId = null;
+    const meeting =
+      id === null
+        ? undefined
+        : meetingState.meetings.find((item) => item.id === id);
+    if (meeting) await stopAndProcess(meeting);
+    return;
+  }
 
-    // No lifecycle action and nothing recording: surface the arm prompt only
-    // for an unrecognized app (the lifecycle auto-handles known call apps).
-    if (lifecycleMeetingId === null && !isCapturing()) {
-      const detection = await meetingAutodetect();
-      if (detection.detected && !detection.sourceApp) {
-        setMeetingState("autoDetectSourceApp", detection.sourceApp);
-        setMeetingState("autoDetectSuggested", !autoDetectDismissed);
-      } else {
-        autoDetectDismissed = false;
-        setMeetingState("autoDetectSuggested", false);
-        setMeetingState("autoDetectSourceApp", null);
-      }
+  // 2) Fallback arm prompt for an unrecognized app the lifecycle won't
+  //    auto-handle. Known apps auto-start above and never reach here.
+  if (lifecycleMeetingId === null && !isCapturing()) {
+    const detection = await meetingAutodetect().catch(() => null);
+    if (detection?.detected && !detection.sourceApp) {
+      setMeetingState("autoDetectSourceApp", detection.sourceApp);
+      setMeetingState("autoDetectSuggested", !autoDetectDismissed);
+    } else {
+      autoDetectDismissed = false;
+      setMeetingState("autoDetectSuggested", false);
+      setMeetingState("autoDetectSourceApp", null);
     }
-  } catch {
-    // Probe/tick failures are non-fatal; leave state as-is.
   }
 }
 
