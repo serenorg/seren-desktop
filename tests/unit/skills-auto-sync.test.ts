@@ -483,6 +483,113 @@ describe("backfill triggers for slug/dirName mismatch (#1558)", () => {
 
     expect(mockSkillsService.backfillSyncState).toHaveBeenCalled();
   });
+
+  it("triggers backfill when an org-owned catalog folder name matches the install dir", async () => {
+    const installedSkill = {
+      slug: "grant-intake",
+      dirName: "grant-intake",
+      scope: "seren" as const,
+      source: "seren",
+      path: "/skills/grant-intake/SKILL.md",
+      syncState: undefined,
+    };
+    const catalogEntry = {
+      slug: "chief-grants-officer-grant-intake",
+      skillFolderName: "grant-intake",
+      source: "seren",
+      sourceUrl: "seren-skills:chief-grants-officer-grant-intake",
+    };
+
+    mockSkillsService.fetchAllSkills.mockResolvedValue([catalogEntry]);
+    mockSkillsService.listAllInstalled.mockResolvedValue([installedSkill]);
+    mockSkillsService.backfillSyncState.mockResolvedValue(1);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.refresh();
+
+    expect(mockSkillsService.backfillSyncState).toHaveBeenCalled();
+  });
+
+  it("triggers backfill when sync state points at a stale folder alias", async () => {
+    const installedSkill = {
+      slug: "grant-intake",
+      dirName: "grant-intake",
+      scope: "seren" as const,
+      source: "seren",
+      path: "/skills/grant-intake/SKILL.md",
+      upstreamSourceUrl: "seren-skills:grant-intake",
+      syncState: {
+        upstreamSource: "seren",
+        upstreamSourceUrl: "seren-skills:grant-intake",
+        syncedRevision: "old",
+        syncedAt: 1,
+        managedFiles: {},
+      },
+    };
+    const catalogEntry = {
+      slug: "chief-grants-officer-grant-intake",
+      skillFolderName: "grant-intake",
+      source: "seren",
+      sourceUrl: "seren-skills:chief-grants-officer-grant-intake",
+    };
+
+    mockSkillsService.fetchAllSkills.mockResolvedValue([catalogEntry]);
+    mockSkillsService.listAllInstalled.mockResolvedValue([installedSkill]);
+    mockSkillsService.backfillSyncState.mockResolvedValue(1);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.refresh();
+
+    expect(mockSkillsService.backfillSyncState).toHaveBeenCalled();
+  });
+});
+
+describe("isInstalled with org-owned folder aliases (#2676)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("does not mark sibling catalog rows installed when a folder alias is ambiguous", async () => {
+    const installedSkill = {
+      slug: "grant-intake",
+      dirName: "grant-intake",
+      name: "Chief Grants Officer - Grant Intake",
+      scope: "seren" as const,
+      source: "local",
+      path: "/skills/grant-intake/SKILL.md",
+      syncState: undefined,
+    };
+    const chief = {
+      id: "seren:chief-grants-officer-grant-intake",
+      slug: "chief-grants-officer-grant-intake",
+      skillFolderName: "grant-intake",
+      name: "Chief Grants Officer - Grant Intake",
+      description: "",
+      source: "seren" as const,
+      sourceUrl: "seren-skills:chief-grants-officer-grant-intake",
+      tags: [],
+    };
+    const egeria = {
+      id: "seren:egeria-grant-intake",
+      slug: "egeria-grant-intake",
+      skillFolderName: "grant-intake",
+      name: "Egeria Grant Intake",
+      description: "",
+      source: "seren" as const,
+      sourceUrl: "seren-skills:egeria-grant-intake",
+      tags: [],
+    };
+
+    mockSkillsService.listAllInstalled.mockResolvedValue([installedSkill]);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    skillsStore.setAvailableCatalog([chief, egeria]);
+    await skillsStore.refreshInstalled();
+
+    expect(skillsStore.isInstalled(chief.id)).toBe(true);
+    expect(skillsStore.isInstalled(egeria.id)).toBe(false);
+  });
 });
 
 describe("silent skill refresh contract (#1891)", () => {

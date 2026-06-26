@@ -93,6 +93,12 @@ export interface Skill {
    * when the slug diverges from the install directory.
    */
   skillFolderName?: string;
+  /**
+   * Catalog mirror folder when the publisher exposes it. Combined with
+   * `skillFolderName`, this identifies legacy raw GitHub paths whose API slug
+   * is now org-namespaced.
+   */
+  folderSlug?: string | null;
   /** Slug-based name (used for lookups) */
   name: string;
   /** Human-readable display name from frontmatter */
