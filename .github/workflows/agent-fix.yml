@@ -8,6 +8,14 @@ on:
   issues:
     types: [labeled]
 
+env:
+  # Harden cargo against transient crates.io download flakes (curl error 56,
+  # connection reset mid-stream). Cargo's default net.retry is 3 and does not
+  # always recover an in-flight reset; bump retries and disable HTTP/2
+  # multiplexing so a dropped connection cannot fail the agent's cargo build/check.
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_MULTIPLEXING: "false"
+
 jobs:
   fix:
     # Only run when the agent-task label is applied
