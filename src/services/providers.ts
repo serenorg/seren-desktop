@@ -117,6 +117,8 @@ export interface MessageChunkEvent {
   timestamp?: number;
   /** True when this chunk was emitted from session history replay. */
   replay?: boolean;
+  /** True when replay repairs output recovered from provider sidecar history. */
+  recoveryReplay?: boolean;
   /** Producing agent inside a paired thread (claude-code | codex). */
   agentProvider?: string;
 }

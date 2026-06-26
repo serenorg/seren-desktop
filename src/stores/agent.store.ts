@@ -6134,6 +6134,7 @@ export const agentStore = {
           {
             replay: event.data.replay === true,
             messageId: event.data.messageId,
+            recoveryReplay: event.data.recoveryReplay === true,
             agentProvider: event.data.agentProvider,
           },
         );
@@ -6899,13 +6900,29 @@ export const agentStore = {
     text: string,
     isThought?: boolean,
     timestamp?: number,
-    meta?: { replay?: boolean; messageId?: string; agentProvider?: string },
+    meta?: {
+      replay?: boolean;
+      messageId?: string;
+      recoveryReplay?: boolean;
+      agentProvider?: string;
+    },
   ) {
     let session = state.sessions[sessionId];
     if (!session) return;
 
-    // Skip replay assistant/thought chunks when we have restored messages.
-    if (session.skipHistoryReplay) return;
+    const recoveryMessageId =
+      meta?.recoveryReplay === true ? meta?.messageId?.trim() : undefined;
+    if (
+      recoveryMessageId &&
+      session.messages.some((message) => message.id === recoveryMessageId)
+    ) {
+      return;
+    }
+
+    // Skip normal replay assistant/thought chunks when we have restored
+    // messages. Recovered provider sidecar outputs are allowed through only
+    // when their stable message id is absent from restored SQLite history.
+    if (session.skipHistoryReplay && !recoveryMessageId) return;
 
     // Paired threads interleave Claude and Codex output in one stream. A
     // producer change is a message boundary: land the previous agent's
