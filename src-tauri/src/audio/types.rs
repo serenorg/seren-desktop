@@ -154,6 +154,14 @@ pub struct Meeting {
     pub seren_notes_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// How the recording started: "manual", "auto_mic", or "calendar".
+    pub trigger_source: Option<String>,
+    /// Matched calendar event id, when a calendar event was associated.
+    pub calendar_event_id: Option<String>,
+    /// Calendar provider for the matched event (e.g. "google").
+    pub calendar_provider: Option<String>,
+    /// JSON array of attendee names/emails from the matched calendar event.
+    pub attendees_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

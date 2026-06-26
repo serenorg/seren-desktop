@@ -33,6 +33,10 @@ pub async fn create_meeting(
     source_app: Option<String>,
     started_at: Option<i64>,
     template_id: Option<String>,
+    trigger_source: Option<String>,
+    calendar_event_id: Option<String>,
+    calendar_provider: Option<String>,
+    attendees_json: Option<String>,
 ) -> Result<Meeting, String> {
     let now = now_ms();
     let meeting = NewMeeting {
@@ -41,6 +45,10 @@ pub async fn create_meeting(
         source_app,
         started_at: started_at.unwrap_or(now),
         template_id,
+        trigger_source,
+        calendar_event_id,
+        calendar_provider,
+        attendees_json,
         now,
     };
 
@@ -1326,6 +1334,10 @@ pub struct NewMeeting {
     pub source_app: Option<String>,
     pub started_at: i64,
     pub template_id: Option<String>,
+    pub trigger_source: Option<String>,
+    pub calendar_event_id: Option<String>,
+    pub calendar_provider: Option<String>,
+    pub attendees_json: Option<String>,
     pub now: i64,
 }
 
@@ -1350,9 +1362,10 @@ pub fn insert_meeting(conn: &Connection, meeting: NewMeeting) -> Result<Meeting>
             id, title, source_app, started_at, ended_at, status, template_id,
             routed_skill_slug, agent_conversation_id, notes_markdown,
             notes_struct_json, failure_reason, capture_diagnostics_json,
-            seren_notes_id, created_at, updated_at
+            seren_notes_id, created_at, updated_at,
+            trigger_source, calendar_event_id, calendar_provider, attendees_json
          )
-         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?7, ?7)",
+         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?7, ?7, ?8, ?9, ?10, ?11)",
         params![
             meeting.id,
             meeting.title,
@@ -1360,7 +1373,11 @@ pub fn insert_meeting(conn: &Connection, meeting: NewMeeting) -> Result<Meeting>
             meeting.started_at,
             MeetingStatus::PendingCapture.as_str(),
             meeting.template_id,
-            meeting.now
+            meeting.now,
+            meeting.trigger_source,
+            meeting.calendar_event_id,
+            meeting.calendar_provider,
+            meeting.attendees_json
         ],
     )?;
     mark_sync_upsert(conn, "meetings", &meeting.id)?;
@@ -1373,7 +1390,8 @@ pub fn select_meeting(conn: &Connection, id: &str) -> Result<Option<Meeting>> {
         "SELECT id, title, source_app, started_at, ended_at, status, template_id,
                 routed_skill_slug, agent_conversation_id, notes_markdown,
                 notes_struct_json, failure_reason, capture_diagnostics_json,
-                seren_notes_id, created_at, updated_at
+                seren_notes_id, created_at, updated_at,
+                trigger_source, calendar_event_id, calendar_provider, attendees_json
          FROM meetings
          WHERE id = ?1",
         params![id],
@@ -1387,7 +1405,8 @@ pub fn select_meetings(conn: &Connection, limit: i32) -> Result<Vec<Meeting>> {
         "SELECT id, title, source_app, started_at, ended_at, status, template_id,
                 routed_skill_slug, agent_conversation_id, notes_markdown,
                 notes_struct_json, failure_reason, capture_diagnostics_json,
-                seren_notes_id, created_at, updated_at
+                seren_notes_id, created_at, updated_at,
+                trigger_source, calendar_event_id, calendar_provider, attendees_json
          FROM meetings
          ORDER BY started_at DESC
          LIMIT ?1",
@@ -1579,6 +1598,10 @@ fn row_to_meeting(row: &rusqlite::Row<'_>) -> Result<Meeting> {
         seren_notes_id: row.get(13)?,
         created_at: row.get(14)?,
         updated_at: row.get(15)?,
+        trigger_source: row.get(16)?,
+        calendar_event_id: row.get(17)?,
+        calendar_provider: row.get(18)?,
+        attendees_json: row.get(19)?,
     })
 }
 
@@ -1726,6 +1749,10 @@ mod tests {
             source_app: Some("Zoom".to_string()),
             started_at: 10,
             template_id: Some("discovery".to_string()),
+            trigger_source: None,
+            calendar_event_id: None,
+            calendar_provider: None,
+            attendees_json: None,
             now: 20,
         }
     }
