@@ -73,4 +73,10 @@ describe("#2669 — resume re-attaches to a live session instead of reaping it",
     expect(reattachBody).toContain('liveInfo.status === "error"');
     expect(reattachBody).toContain("return false");
   });
+
+  it("reattach skips paired (claude-codex) threads to preserve their UI", () => {
+    // Paired threads carry a two-inner-session PairedStatus the flat runtime
+    // info cannot reconstruct; they must take the respawn path instead. #2672
+    expect(reattachBody).toContain('liveInfo.agentType === "claude-codex"');
+  });
 });
