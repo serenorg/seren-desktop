@@ -2,9 +2,21 @@
 // ABOUTME: Keeps desktop employee chats aligned with web-created employee conversations.
 
 import {
+  assistantTextFromRun,
+  type EmployeeOutputEventEnvelope,
+  formatToolAuditEvent,
+  isFailureStatus,
+  outputEventEnvelopes,
+  timestampMs,
+  toolAuditEventFromEnvelope,
+  truncateTitle,
+} from "@seren/employees-core";
+import {
   type CloudDeploymentRunEvent,
-  type CloudRunOutputEventEnvelope,
-  serenCloudDeploymentRuns,
+  type CloudInteractiveSessionDetailResponse,
+  type CloudInteractiveSessionHistoryMessage,
+  serenCloudGetInteractiveSession,
+  serenCloudInteractiveSessions,
 } from "@/api/seren-cloud";
 import { formatApiError } from "@/lib/api-errors";
 import type { EmployeeSummary } from "@/lib/employees/types";
@@ -16,14 +28,12 @@ import {
   type StoredMessage,
   saveMessage,
 } from "@/lib/tauri-bridge";
-import {
-  formatToolAuditEvent,
-  type ToolAuditEvent,
-} from "@/services/employees-runtime";
 import { conversationStore } from "@/stores/conversation.store";
 import { serializeMetadata, type UnifiedMessage } from "@/types/conversation";
 
 const CLOUD_HISTORY_LIMIT = 100;
+const CLOUD_MESSAGE_PREVIEW_LIMIT = 1;
+const CLOUD_MESSAGE_PAGE_SIZE = 500;
 const EXISTING_MESSAGE_LIMIT = 2_000;
 const DEFAULT_EMPLOYEE_MODEL = "arcee-ai/trinity-large-thinking";
 
@@ -48,57 +58,47 @@ export async function syncCloudEmployeeChats(
 ): Promise<void> {
   if (employees.length === 0) return;
   if (options.shouldContinue?.() === false) return;
-  const employeeById = new Map(
-    employees.map((employee) => [employee.id, employee]),
-  );
-  const runs = await fetchEmployeeRuns(employees);
+  const sessions = await fetchEmployeeSessions(employees);
   if (options.shouldContinue?.() === false) return;
 
-  const grouped = new Map<string, CloudDeploymentRunEvent[]>();
-  for (const run of runs) {
-    if (!employeeById.has(run.deployment_id)) continue;
-    const conversationId = run.conversation_id?.trim();
-    if (!conversationId) continue;
-    const key = `${run.deployment_id}:${conversationId}`;
-    const group = grouped.get(key) ?? [];
-    group.push(run);
-    grouped.set(key, group);
-  }
-
-  for (const group of grouped.values()) {
+  for (const session of sessions) {
     if (options.shouldContinue?.() === false) return;
-    group.sort(
-      (left, right) =>
-        Date.parse(left.started_at) - Date.parse(right.started_at),
+    const employee = employees.find(
+      (candidate) => candidate.id === session.session.deployment_id,
     );
-    const first = group[0];
-    const employee = employeeById.get(first.deployment_id);
-    const conversationId = first.conversation_id?.trim();
-    if (!employee || !conversationId) continue;
-    await ensureEmployeeConversation(conversationId, employee, first);
+    if (!employee) continue;
+    const conversationId = session.session.session_id;
+    await ensureEmployeeConversation(conversationId, employee, session);
     if (options.shouldContinue?.() === false) return;
     const existingMessages = await existingMessageMap(conversationId);
     if (options.shouldContinue?.() === false) return;
-    for (const run of group) {
+    for (const message of session.messages) {
       if (options.shouldContinue?.() === false) return;
-      await persistRunMessages(conversationId, employee, run, existingMessages);
+      await persistSessionMessage(
+        conversationId,
+        employee,
+        message,
+        existingMessages,
+      );
     }
     await conversationStore.loadMessagesFor(conversationId);
   }
 }
 
-async function fetchEmployeeRuns(
+async function fetchEmployeeSessions(
   employees: EmployeeSummary[],
-): Promise<CloudDeploymentRunEvent[]> {
+): Promise<CloudInteractiveSessionDetailResponse[]> {
   const results = await Promise.all(
     employees.map(async (employee) => {
-      const runs: CloudDeploymentRunEvent[] = [];
-      for (let offset = 0; ; offset += CLOUD_HISTORY_LIMIT) {
-        const { data, error, response } = await serenCloudDeploymentRuns({
+      const sessions: CloudInteractiveSessionDetailResponse[] = [];
+      let offset = 0;
+      while (true) {
+        const { data, error, response } = await serenCloudInteractiveSessions({
           path: { id: employee.id },
           query: {
             limit: CLOUD_HISTORY_LIMIT,
             offset,
+            message_limit: CLOUD_MESSAGE_PREVIEW_LIMIT,
           },
           throwOnError: false,
         });
@@ -112,19 +112,69 @@ async function fetchEmployeeRuns(
           );
         }
         const page = data?.data ?? [];
-        runs.push(...page);
-        if (page.length < CLOUD_HISTORY_LIMIT) break;
+        for (const session of page) {
+          sessions.push(await fetchEmployeeSessionMessages(employee, session));
+        }
+        const pagination = data?.pagination;
+        if (!pagination?.has_more) break;
+        const nextOffset = pagination.offset + pagination.count;
+        if (nextOffset <= offset) break;
+        offset = nextOffset;
       }
-      return runs;
+      return sessions;
     }),
   );
   return results.flat();
 }
 
+async function fetchEmployeeSessionMessages(
+  employee: EmployeeSummary,
+  session: CloudInteractiveSessionDetailResponse,
+): Promise<CloudInteractiveSessionDetailResponse> {
+  const messages: CloudInteractiveSessionHistoryMessage[] = [];
+  let messagePagination = session.message_pagination;
+  for (let offset = 0; ; ) {
+    const { data, error, response } = await serenCloudGetInteractiveSession({
+      path: {
+        id: employee.id,
+        session_id: session.session.session_id,
+      },
+      query: {
+        message_limit: CLOUD_MESSAGE_PAGE_SIZE,
+        message_offset: offset,
+        message_order: "asc",
+      },
+      throwOnError: false,
+    });
+    if (error) {
+      throw new Error(
+        `Failed to sync employee chat ${session.session.session_id} for ${employee.name}: ${formatApiError(
+          error,
+          response,
+          "",
+        )}`,
+      );
+    }
+    const detail = data?.data;
+    if (!detail) break;
+    messages.push(...detail.messages);
+    messagePagination = detail.message_pagination;
+    if (!messagePagination.has_more) break;
+    const nextOffset = messagePagination.offset + messagePagination.count;
+    if (nextOffset <= offset) break;
+    offset = nextOffset;
+  }
+  return {
+    ...session,
+    messages,
+    message_pagination: messagePagination,
+  };
+}
+
 async function ensureEmployeeConversation(
   conversationId: string,
   employee: EmployeeSummary,
-  run: CloudDeploymentRunEvent,
+  session: CloudInteractiveSessionDetailResponse,
 ): Promise<void> {
   if (conversationStore.conversations.some((c) => c.id === conversationId)) {
     return;
@@ -132,7 +182,7 @@ async function ensureEmployeeConversation(
   try {
     const row = await createConversation(
       conversationId,
-      titleFromRun(run, employee),
+      titleFromSession(session, employee),
       DEFAULT_EMPLOYEE_MODEL,
       "seren",
       undefined,
@@ -148,14 +198,41 @@ async function ensureEmployeeConversation(
   }
 }
 
-async function persistRunMessages(
+async function persistSessionMessage(
   conversationId: string,
   employee: EmployeeSummary,
-  run: CloudDeploymentRunEvent,
+  message: CloudInteractiveSessionHistoryMessage,
   existingMessages: Map<string, StoredMessage>,
 ): Promise<void> {
-  for (const message of buildRunMessageDrafts(conversationId, employee, run)) {
-    await saveCloudMessage(message, existingMessages);
+  if (!message.run) {
+    await saveCloudMessage(
+      draftFromUnifiedMessage(
+        {
+          id: `${message.message_id}:user`,
+          type: "user",
+          role: "user",
+          content: message.content,
+          timestamp: timestampMs(message.created_at),
+          status: "complete",
+          request: {
+            prompt: message.content,
+            employeeId: employee.id,
+          },
+        },
+        conversationId,
+        null,
+      ),
+      existingMessages,
+    );
+    return;
+  }
+  for (const draft of buildRunMessageDrafts(
+    conversationId,
+    employee,
+    message.run,
+    message.content,
+  )) {
+    await saveCloudMessage(draft, existingMessages);
   }
 }
 
@@ -222,49 +299,27 @@ function isDuplicateWriteError(error: unknown): boolean {
   return message.toLowerCase().includes("unique");
 }
 
-function titleFromRun(
-  run: CloudDeploymentRunEvent,
+function titleFromSession(
+  session: CloudInteractiveSessionDetailResponse,
   employee: EmployeeSummary,
 ): string {
-  const message = messageFromInvocationPayload(run.invocation_payload);
-  if (message) return truncateTitle(message);
-  return run.run_name?.trim() || employee.name;
-}
-
-function messageFromInvocationPayload(payload: unknown): string {
-  if (!payload || typeof payload !== "object") return "";
-  const value = payload as Record<string, unknown>;
-  return stringValue(value.message) ?? stringValue(value.prompt) ?? "";
-}
-
-function assistantTextFromRun(run: CloudDeploymentRunEvent): string {
-  const fromEvents = textFromOutputEvents(run.output_events);
-  if (fromEvents) return fromEvents;
-  return run.output?.trim() ?? "";
-}
-
-function textFromOutputEvents(value: unknown): string {
-  if (!Array.isArray(value)) return "";
-  return value
-    .map((event) => {
-      if (!event || typeof event !== "object") return "";
-      const object = event as Record<string, unknown>;
-      if (object.type !== "text") return "";
-      return stringValue(object.text) ?? "";
-    })
-    .join("")
-    .trim();
+  const firstMessage = session.messages.find((message) =>
+    message.content.trim(),
+  );
+  if (firstMessage) return truncateTitle(firstMessage.content);
+  return employee.name;
 }
 
 function buildRunMessageDrafts(
   conversationId: string,
   employee: EmployeeSummary,
   run: CloudDeploymentRunEvent,
+  userTextOverride?: string,
 ): CloudMessageDraft[] {
   const messages: CloudMessageDraft[] = [];
   const startedAt = timestampMs(run.started_at);
   const completedAt = timestampMs(run.completed_at ?? run.updated_at);
-  const userText = messageFromInvocationPayload(run.invocation_payload);
+  const userText = userTextOverride ?? "";
   if (userText) {
     messages.push(
       draftFromUnifiedMessage(
@@ -506,25 +561,10 @@ function draftFromUnifiedMessage(
   };
 }
 
-function outputEventEnvelopes(value: unknown): CloudRunOutputEventEnvelope[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(isCloudRunOutputEventEnvelope);
-}
-
-function isCloudRunOutputEventEnvelope(
-  value: unknown,
-): value is CloudRunOutputEventEnvelope {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      typeof (value as { type?: unknown }).type === "string",
-  );
-}
-
 function cloudEventRequest(
   employeeId: string,
   runId: string,
-  event: CloudRunOutputEventEnvelope,
+  event: EmployeeOutputEventEnvelope,
 ): UnifiedMessage["request"] {
   return {
     prompt: "",
@@ -541,7 +581,7 @@ function eventTimestamp(startedAt: number, index: number): number {
   return startedAt + index;
 }
 
-function eventKey(event: CloudRunOutputEventEnvelope, index: number): string {
+function eventKey(event: EmployeeOutputEventEnvelope, index: number): string {
   return String(event.sequence_number ?? event.item_id ?? event.kind ?? index);
 }
 
@@ -585,23 +625,6 @@ function toolCallFromMetadata(metadata: string | null) {
   return null;
 }
 
-function toolAuditEventFromEnvelope(
-  event: Extract<CloudRunOutputEventEnvelope, { type: "tool_audit" }>,
-): ToolAuditEvent {
-  return {
-    id: event.id,
-    tool: event.tool,
-    reason: event.reason,
-    toolRefKind: event.tool_ref_kind ?? null,
-    action: event.action ?? null,
-    leaseRef: event.lease_ref ?? null,
-    status: event.status ?? null,
-    inputBytes: event.input_bytes ?? null,
-    outputBytes: event.output_bytes ?? null,
-    latencyMs: event.latency_ms ?? null,
-  };
-}
-
 function advisoryDraft(
   conversationId: string,
   run: CloudDeploymentRunEvent,
@@ -633,7 +656,7 @@ function advisoryDraft(
   );
 }
 
-function advisoryText(event: CloudRunOutputEventEnvelope): string {
+function advisoryText(event: EmployeeOutputEventEnvelope): string {
   switch (event.type) {
     case "approval_wait":
       return `> **Approval required:** ${event.reason ?? "The employee is waiting for approval."}`;
@@ -652,30 +675,4 @@ function advisoryText(event: CloudRunOutputEventEnvelope): string {
     default:
       return "";
   }
-}
-
-function stringValue(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function truncateTitle(value: string): string {
-  const trimmed = value.trim().replace(/\s+/g, " ");
-  if (trimmed.length <= 48) return trimmed;
-  return `${trimmed.slice(0, 45)}...`;
-}
-
-function timestampMs(value: string): number {
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? Date.now() : parsed;
-}
-
-function isFailureStatus(status: string): boolean {
-  return [
-    "failed",
-    "cancelled",
-    "canceled",
-    "timeout",
-    "blocked",
-    "error",
-  ].includes(status);
 }

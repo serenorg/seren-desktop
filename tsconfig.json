@@ -18,6 +18,7 @@
     /* Path aliases */
     "baseUrl": ".",
     "paths": {
+      "@seren/employees-core": ["packages/employees-core/src/index.ts"],
       "@seren/recording-core": ["packages/recording-core/src/index.ts"],
       "@seren/recording-ui": ["packages/recording-ui/src/index.tsx"],
       "@/*": ["src/*"]

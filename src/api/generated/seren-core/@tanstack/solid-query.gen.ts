@@ -728,27 +728,30 @@ export const listResourcesInfiniteQueryKey = (options?: Options<ListResourcesDat
  * List federated resources with optional filtering.
  * Used for cross-publisher resource discovery.
  */
-export const listResourcesInfiniteOptions = (options?: Options<ListResourcesData>) => infiniteQueryOptions<ListResourcesResponse, DefaultError, InfiniteData<ListResourcesResponse>, QueryKey<Options<ListResourcesData>>, number | Pick<QueryKey<Options<ListResourcesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListResourcesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listResources({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listResourcesInfiniteQueryKey(options)
-});
+export const listResourcesInfiniteOptions = (options?: Options<ListResourcesData>) => {
+    const opts = infiniteQueryOptions<ListResourcesResponse, DefaultError, InfiniteData<ListResourcesResponse>, QueryKey<Options<ListResourcesData>>, number | Pick<QueryKey<Options<ListResourcesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListResourcesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listResources({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listResourcesInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * POST /federation
@@ -794,27 +797,30 @@ export const listHistoryInfiniteQueryKey = (options?: Options<ListHistoryData>):
  * GET /federation/history
  * List append-only federation history events.
  */
-export const listHistoryInfiniteOptions = (options?: Options<ListHistoryData>) => infiniteQueryOptions<ListHistoryResponse, DefaultError, InfiniteData<ListHistoryResponse>, QueryKey<Options<ListHistoryData>>, number | Pick<QueryKey<Options<ListHistoryData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListHistoryData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listHistory({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listHistoryInfiniteQueryKey(options)
-});
+export const listHistoryInfiniteOptions = (options?: Options<ListHistoryData>) => {
+    const opts = infiniteQueryOptions<ListHistoryResponse, DefaultError, InfiniteData<ListHistoryResponse>, QueryKey<Options<ListHistoryData>>, number | Pick<QueryKey<Options<ListHistoryData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListHistoryData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listHistory({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listHistoryInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const getHistoryStatsQueryKey = (options?: Options<GetHistoryStatsData>) => createQueryKey('getHistoryStats', options);
 
@@ -1210,27 +1216,30 @@ export const listTasksInfiniteQueryKey = (options: Options<ListTasksData>): Quer
 /**
  * GET /organizations/{organization_id}/agents/tasks
  */
-export const listTasksInfiniteOptions = (options: Options<ListTasksData>) => infiniteQueryOptions<ListTasksResponse, DefaultError, InfiniteData<ListTasksResponse>, QueryKey<Options<ListTasksData>>, number | Pick<QueryKey<Options<ListTasksData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListTasksData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listTasks({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listTasksInfiniteQueryKey(options)
-});
+export const listTasksInfiniteOptions = (options: Options<ListTasksData>) => {
+    const opts = infiniteQueryOptions<ListTasksResponse, DefaultError, InfiniteData<ListTasksResponse>, QueryKey<Options<ListTasksData>>, number | Pick<QueryKey<Options<ListTasksData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListTasksData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listTasks({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listTasksInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const getTaskQueryKey = (options: Options<GetTaskData>) => createQueryKey('getTask', options);
 
@@ -1395,27 +1404,30 @@ export const listAuditLogsInfiniteQueryKey = (options: Options<ListAuditLogsData
 /**
  * List audit logs for an organization
  */
-export const listAuditLogsInfiniteOptions = (options: Options<ListAuditLogsData>) => infiniteQueryOptions<ListAuditLogsResponse, DefaultError, InfiniteData<ListAuditLogsResponse>, QueryKey<Options<ListAuditLogsData>>, number | Pick<QueryKey<Options<ListAuditLogsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListAuditLogsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listAuditLogs({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listAuditLogsInfiniteQueryKey(options)
-});
+export const listAuditLogsInfiniteOptions = (options: Options<ListAuditLogsData>) => {
+    const opts = infiniteQueryOptions<ListAuditLogsResponse, DefaultError, InfiniteData<ListAuditLogsResponse>, QueryKey<Options<ListAuditLogsData>>, number | Pick<QueryKey<Options<ListAuditLogsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListAuditLogsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listAuditLogs({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listAuditLogsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const getAuditLogQueryKey = (options: Options<GetAuditLogData>) => createQueryKey('getAuditLog', options);
 
@@ -2388,27 +2400,30 @@ export const listOrgPublisherPayoutsInfiniteQueryKey = (options: Options<ListOrg
  * GET /organizations/:org_id/publishers/:publisher_id/payouts
  * List payout requests for a publisher.
  */
-export const listOrgPublisherPayoutsInfiniteOptions = (options: Options<ListOrgPublisherPayoutsData>) => infiniteQueryOptions<ListOrgPublisherPayoutsResponse, DefaultError, InfiniteData<ListOrgPublisherPayoutsResponse>, QueryKey<Options<ListOrgPublisherPayoutsData>>, number | null | Pick<QueryKey<Options<ListOrgPublisherPayoutsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListOrgPublisherPayoutsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listOrgPublisherPayouts({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listOrgPublisherPayoutsInfiniteQueryKey(options)
-});
+export const listOrgPublisherPayoutsInfiniteOptions = (options: Options<ListOrgPublisherPayoutsData>) => {
+    const opts = infiniteQueryOptions<ListOrgPublisherPayoutsResponse, DefaultError, InfiniteData<ListOrgPublisherPayoutsResponse>, QueryKey<Options<ListOrgPublisherPayoutsData>>, number | null | Pick<QueryKey<Options<ListOrgPublisherPayoutsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListOrgPublisherPayoutsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listOrgPublisherPayouts({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listOrgPublisherPayoutsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * POST /organizations/:org_id/publishers/:publisher_id/payouts
@@ -2922,27 +2937,30 @@ export const listStorePublishersInfiniteQueryKey = (options?: Options<ListStoreP
  * GET /publishers
  * List publishers with full details and pricing (store view)
  */
-export const listStorePublishersInfiniteOptions = (options?: Options<ListStorePublishersData>) => infiniteQueryOptions<ListStorePublishersResponse, DefaultError, InfiniteData<ListStorePublishersResponse>, QueryKey<Options<ListStorePublishersData>>, number | Pick<QueryKey<Options<ListStorePublishersData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListStorePublishersData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listStorePublishers({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listStorePublishersInfiniteQueryKey(options)
-});
+export const listStorePublishersInfiniteOptions = (options?: Options<ListStorePublishersData>) => {
+    const opts = infiniteQueryOptions<ListStorePublishersResponse, DefaultError, InfiniteData<ListStorePublishersResponse>, QueryKey<Options<ListStorePublishersData>>, number | Pick<QueryKey<Options<ListStorePublishersData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListStorePublishersData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listStorePublishers({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listStorePublishersInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const suggestPublishersQueryKey = (options: Options<SuggestPublishersData>) => createQueryKey('suggestPublishers', options);
 
@@ -3164,27 +3182,30 @@ export const listTemplatesInfiniteQueryKey = (options?: Options<ListTemplatesDat
  * GET /templates
  * List available templates in the catalog
  */
-export const listTemplatesInfiniteOptions = (options?: Options<ListTemplatesData>) => infiniteQueryOptions<ListTemplatesResponse, DefaultError, InfiniteData<ListTemplatesResponse>, QueryKey<Options<ListTemplatesData>>, number | Pick<QueryKey<Options<ListTemplatesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListTemplatesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listTemplates({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listTemplatesInfiniteQueryKey(options)
-});
+export const listTemplatesInfiniteOptions = (options?: Options<ListTemplatesData>) => {
+    const opts = infiniteQueryOptions<ListTemplatesResponse, DefaultError, InfiniteData<ListTemplatesResponse>, QueryKey<Options<ListTemplatesData>>, number | Pick<QueryKey<Options<ListTemplatesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListTemplatesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listTemplates({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listTemplatesInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * POST /templates/publish
@@ -3500,27 +3521,30 @@ export const getTransactionsInfiniteQueryKey = (options?: Options<GetTransaction
 /**
  * Get transaction history including credits and debits
  */
-export const getTransactionsInfiniteOptions = (options?: Options<GetTransactionsData>) => infiniteQueryOptions<GetTransactionsResponse, DefaultError, InfiniteData<GetTransactionsResponse>, QueryKey<Options<GetTransactionsData>>, number | Pick<QueryKey<Options<GetTransactionsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<GetTransactionsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await getTransactions({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: getTransactionsInfiniteQueryKey(options)
-});
+export const getTransactionsInfiniteOptions = (options?: Options<GetTransactionsData>) => {
+    const opts = infiniteQueryOptions<GetTransactionsResponse, DefaultError, InfiniteData<GetTransactionsResponse>, QueryKey<Options<GetTransactionsData>>, number | Pick<QueryKey<Options<GetTransactionsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<GetTransactionsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await getTransactions({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: getTransactionsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const exportTransactionsQueryKey = (options?: Options<ExportTransactionsData>) => createQueryKey('exportTransactions', options);
 
@@ -3581,27 +3605,30 @@ export const listWalletTransfersInfiniteQueryKey = (options?: Options<ListWallet
 /**
  * List SerenBucks wallet transfers.
  */
-export const listWalletTransfersInfiniteOptions = (options?: Options<ListWalletTransfersData>) => infiniteQueryOptions<ListWalletTransfersResponse, DefaultError, InfiniteData<ListWalletTransfersResponse>, QueryKey<Options<ListWalletTransfersData>>, string | null | Pick<QueryKey<Options<ListWalletTransfersData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListWalletTransfersData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                cursor: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listWalletTransfers({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listWalletTransfersInfiniteQueryKey(options)
-});
+export const listWalletTransfersInfiniteOptions = (options?: Options<ListWalletTransfersData>) => {
+    const opts = infiniteQueryOptions<ListWalletTransfersResponse, DefaultError, InfiniteData<ListWalletTransfersResponse>, QueryKey<Options<ListWalletTransfersData>>, string | null | Pick<QueryKey<Options<ListWalletTransfersData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListWalletTransfersData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    cursor: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listWalletTransfers({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listWalletTransfersInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * Execute a SerenBucks wallet transfer.

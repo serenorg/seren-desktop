@@ -265,27 +265,30 @@ const createInfiniteParams = <K extends Pick<QueryKey<Options>[0], 'body' | 'hea
 
 export const listSkillsInfiniteQueryKey = (options?: Options<ListSkillsData>): QueryKey<Options<ListSkillsData>> => createQueryKey('listSkills', options, true);
 
-export const listSkillsInfiniteOptions = (options?: Options<ListSkillsData>) => infiniteQueryOptions<ListSkillsResponse2, DefaultError, InfiniteData<ListSkillsResponse2>, QueryKey<Options<ListSkillsData>>, number | null | Pick<QueryKey<Options<ListSkillsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListSkillsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listSkills({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listSkillsInfiniteQueryKey(options)
-});
+export const listSkillsInfiniteOptions = (options?: Options<ListSkillsData>) => {
+    const opts = infiniteQueryOptions<ListSkillsResponse2, DefaultError, InfiniteData<ListSkillsResponse2>, QueryKey<Options<ListSkillsData>>, number | null | Pick<QueryKey<Options<ListSkillsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListSkillsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listSkills({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listSkillsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const createSkillMutation = (options?: Partial<Options<CreateSkillData>>): MutationOptions<CreateSkillResponse, DefaultError, Options<CreateSkillData>> => {
     const mutationOptions: MutationOptions<CreateSkillResponse, DefaultError, Options<CreateSkillData>> = {
@@ -854,27 +857,30 @@ export const listUsageEventsOptions = (options?: Options<ListUsageEventsData>) =
 
 export const listUsageEventsInfiniteQueryKey = (options?: Options<ListUsageEventsData>): QueryKey<Options<ListUsageEventsData>> => createQueryKey('listUsageEvents', options, true);
 
-export const listUsageEventsInfiniteOptions = (options?: Options<ListUsageEventsData>) => infiniteQueryOptions<ListUsageEventsResponse2, DefaultError, InfiniteData<ListUsageEventsResponse2>, QueryKey<Options<ListUsageEventsData>>, number | null | Pick<QueryKey<Options<ListUsageEventsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListUsageEventsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listUsageEvents({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listUsageEventsInfiniteQueryKey(options)
-});
+export const listUsageEventsInfiniteOptions = (options?: Options<ListUsageEventsData>) => {
+    const opts = infiniteQueryOptions<ListUsageEventsResponse2, DefaultError, InfiniteData<ListUsageEventsResponse2>, QueryKey<Options<ListUsageEventsData>>, number | null | Pick<QueryKey<Options<ListUsageEventsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListUsageEventsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listUsageEvents({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listUsageEventsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const usageSummaryQueryKey = (options?: Options<UsageSummaryData>) => createQueryKey('usageSummary', options);
 

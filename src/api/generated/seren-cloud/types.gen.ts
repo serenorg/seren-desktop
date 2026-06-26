@@ -786,6 +786,69 @@ export type CloudEvalSetScheduleRequest = {
     schedule_timezone: string;
 };
 
+export type CloudInteractiveSessionDetailResponse = {
+    message_pagination: PaginationMeta;
+    messages: Array<CloudInteractiveSessionHistoryMessage>;
+    session: CloudInteractiveSessionResponse;
+};
+
+export type CloudInteractiveSessionHistoryMessage = {
+    client_message_id: string;
+    content: string;
+    created_at: string;
+    deployment_id: string;
+    message_id: string;
+    run?: null | CloudDeploymentRunEvent;
+    session_id: string;
+    updated_at: string;
+};
+
+export type CloudInteractiveSessionMessageRequest = {
+    client_message_id: string;
+    content: string;
+    idempotency_key: string;
+    metadata?: unknown;
+};
+
+export type CloudInteractiveSessionMessageResponse = {
+    client_message_id: string;
+    duplicate: boolean;
+    message_id: string;
+    run?: null | CloudDeploymentRunInvocationResponse;
+    session_id: string;
+    stream_url: string;
+};
+
+export type CloudInteractiveSessionOpenRequest = {
+    actor_label_hint?: string | null;
+};
+
+export type CloudInteractiveSessionOpenResponse = {
+    expires_at: string;
+    idle_expires_at: string;
+    session_id: string;
+    status: string;
+    stream_url: string;
+    ws_ticket: string;
+    ws_url: string;
+};
+
+export type CloudInteractiveSessionResponse = {
+    close_reason?: string | null;
+    closed_at?: string | null;
+    created_at: string;
+    deployment_id: string;
+    idle_expires_at: string;
+    last_message_at?: string | null;
+    organization_id: string;
+    session_id: string;
+    status: string;
+    stream_url: string;
+    updated_at: string;
+    user_id: string;
+    ws_url: string;
+};
+
 /**
  * Awaiting-approval run entry returned by the approval inbox endpoints.
  */
@@ -2764,6 +2827,250 @@ export type DataResponseCloudEvalSet = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseCloudInteractiveSessionDetailResponse = {
+    data: {
+        message_pagination: PaginationMeta;
+        messages: Array<CloudInteractiveSessionHistoryMessage>;
+        session: CloudInteractiveSessionResponse;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudInteractiveSessionMessageResponse = {
+    data: {
+        client_message_id: string;
+        duplicate: boolean;
+        message_id: string;
+        run?: null | CloudDeploymentRunInvocationResponse;
+        session_id: string;
+        stream_url: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudInteractiveSessionOpenResponse = {
+    data: {
+        expires_at: string;
+        idle_expires_at: string;
+        session_id: string;
+        status: string;
+        stream_url: string;
+        ws_ticket: string;
+        ws_url: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseCloudRunEvalsResponse = {
     /**
      * Eval records linked to a run, either as the promoted source or as an actual replay target.
@@ -4068,6 +4375,85 @@ export type DataResponseVecCloudEvalSet = {
         organization_id: string;
         schedule?: null | CloudEvalSetSchedule;
         updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecCloudInteractiveSessionDetailResponse = {
+    data: Array<{
+        message_pagination: PaginationMeta;
+        messages: Array<CloudInteractiveSessionHistoryMessage>;
+        session: CloudInteractiveSessionResponse;
     }>;
     pagination?: null | PaginationMeta;
 };
@@ -5609,6 +5995,168 @@ export type SerenCloudDeploymentRunStreamResponses = {
      */
     200: unknown;
 };
+
+export type SerenCloudInteractiveSessionsData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: {
+        /**
+         * Max sessions to return (default: 50, max: 100)
+         */
+        limit?: number;
+        /**
+         * Session pagination offset
+         */
+        offset?: number;
+        /**
+         * Max messages returned per session (default: 200, max: 500)
+         */
+        message_limit?: number;
+        /**
+         * Message pagination offset per session
+         */
+        message_offset?: number;
+        /**
+         * Message page order, asc or desc (default: asc)
+         */
+        message_order?: string;
+    };
+    url: '/deployments/{id}/sessions';
+};
+
+export type SerenCloudInteractiveSessionsErrors = {
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudInteractiveSessionsResponses = {
+    /**
+     * Interactive sessions listed
+     */
+    200: DataResponseVecCloudInteractiveSessionDetailResponse;
+};
+
+export type SerenCloudInteractiveSessionsResponse = SerenCloudInteractiveSessionsResponses[keyof SerenCloudInteractiveSessionsResponses];
+
+export type SerenCloudCreateInteractiveSessionData = {
+    body?: null | CloudInteractiveSessionOpenRequest;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/sessions';
+};
+
+export type SerenCloudCreateInteractiveSessionErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudCreateInteractiveSessionResponses = {
+    /**
+     * Interactive session created
+     */
+    201: DataResponseCloudInteractiveSessionOpenResponse;
+};
+
+export type SerenCloudCreateInteractiveSessionResponse = SerenCloudCreateInteractiveSessionResponses[keyof SerenCloudCreateInteractiveSessionResponses];
+
+export type SerenCloudGetInteractiveSessionData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+        /**
+         * Interactive session ID
+         */
+        session_id: string;
+    };
+    query?: {
+        /**
+         * Max messages returned (default: 200, max: 500)
+         */
+        message_limit?: number;
+        /**
+         * Message pagination offset
+         */
+        message_offset?: number;
+        /**
+         * Message page order, asc or desc (default: asc)
+         */
+        message_order?: string;
+    };
+    url: '/deployments/{id}/sessions/{session_id}';
+};
+
+export type SerenCloudGetInteractiveSessionErrors = {
+    /**
+     * Deployment or session not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudGetInteractiveSessionResponses = {
+    /**
+     * Interactive session details
+     */
+    200: DataResponseCloudInteractiveSessionDetailResponse;
+};
+
+export type SerenCloudGetInteractiveSessionResponse = SerenCloudGetInteractiveSessionResponses[keyof SerenCloudGetInteractiveSessionResponses];
+
+export type SerenCloudPostInteractiveSessionMessageData = {
+    body: CloudInteractiveSessionMessageRequest;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+        /**
+         * Interactive session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/sessions/{session_id}/messages';
+};
+
+export type SerenCloudPostInteractiveSessionMessageErrors = {
+    /**
+     * Interactive session is closed or idempotency conflict
+     */
+    409: unknown;
+};
+
+export type SerenCloudPostInteractiveSessionMessageResponses = {
+    /**
+     * Duplicate interactive session message replayed
+     */
+    200: DataResponseCloudInteractiveSessionMessageResponse;
+    /**
+     * Interactive session message accepted
+     */
+    202: DataResponseCloudInteractiveSessionMessageResponse;
+};
+
+export type SerenCloudPostInteractiveSessionMessageResponse = SerenCloudPostInteractiveSessionMessageResponses[keyof SerenCloudPostInteractiveSessionMessageResponses];
 
 export type SerenCloudGetDeploymentSpendData = {
     body?: never;

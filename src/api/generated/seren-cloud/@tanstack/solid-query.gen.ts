@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { type Options, serenCloudApprovalInboxDecide, serenCloudApprovalInboxList, serenCloudCompleteDeploymentBundleUpload, serenCloudCreateDeploymentBundle, serenCloudCreateEnvironment, serenCloudCreateEvalSet, serenCloudDelete, serenCloudDeleteEnvironment, serenCloudDeploy, serenCloudDeploymentAudit, serenCloudDeploymentPendingApprovals, serenCloudDeploymentRun, serenCloudDeploymentRunArtifacts, serenCloudDeploymentRunCancel, serenCloudDeploymentRunEvals, serenCloudDeploymentRunEvents, serenCloudDeploymentRunPendingApprovals, serenCloudDeploymentRuns, serenCloudDeploymentRunStreamClose, serenCloudEvalCases, serenCloudEvalRunResults, serenCloudEvalRuns, serenCloudEvalSets, serenCloudGetAuditEntry, serenCloudGetDeployment, serenCloudGetDeploymentBundle, serenCloudGetDeploymentBundleDownload, serenCloudGetDeploymentEvalDrift, serenCloudGetDeploymentSpend, serenCloudGetEnvironment, serenCloudGetEvalCase, serenCloudGetEvalCaseResult, serenCloudGetEvalRun, serenCloudGetEvalSet, serenCloudListAuditEntries, serenCloudListDeployments, serenCloudListEnvironments, serenCloudPendingApprovals, serenCloudPromoteRunToEvalCase, serenCloudRun, serenCloudRunArtifacts, serenCloudRunAudit, serenCloudRunCancel, serenCloudRunCompare, serenCloudRunDetail, serenCloudRunEvals, serenCloudRunEvalSet, serenCloudRunEvents, serenCloudRunPendingApprovals, serenCloudRuns, serenCloudRunStreamClose, serenCloudStart, serenCloudStop, serenCloudUpdateConfig, serenCloudUpdateEnvironment, serenCloudUpdateEvalSet, serenCloudVerifyAudit } from '../sdk.gen';
-import type { SerenCloudApprovalInboxDecideData, SerenCloudApprovalInboxDecideResponse, SerenCloudApprovalInboxListData, SerenCloudApprovalInboxListResponse, SerenCloudCompleteDeploymentBundleUploadData, SerenCloudCompleteDeploymentBundleUploadResponse, SerenCloudCreateDeploymentBundleData, SerenCloudCreateDeploymentBundleResponse, SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentResponse, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetResponse, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentResponse, SerenCloudDeleteResponse, SerenCloudDeployData, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditResponse, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsResponse, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsResponse, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelResponse, SerenCloudDeploymentRunData, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsResponse, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsResponse, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsResponse, SerenCloudDeploymentRunResponse, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsResponse, SerenCloudDeploymentRunStreamCloseData, SerenCloudDeploymentRunStreamCloseResponse, SerenCloudDeployResponse, SerenCloudEvalCasesData, SerenCloudEvalCasesResponse, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsResponse, SerenCloudEvalRunsData, SerenCloudEvalRunsResponse, SerenCloudEvalSetsData, SerenCloudEvalSetsResponse, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryResponse, SerenCloudGetDeploymentBundleData, SerenCloudGetDeploymentBundleDownloadData, SerenCloudGetDeploymentBundleDownloadResponse, SerenCloudGetDeploymentBundleResponse, SerenCloudGetDeploymentData, SerenCloudGetDeploymentEvalDriftData, SerenCloudGetDeploymentEvalDriftResponse, SerenCloudGetDeploymentResponse, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendResponse, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentResponse, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseResponse, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultResponse, SerenCloudGetEvalRunData, SerenCloudGetEvalRunResponse, SerenCloudGetEvalSetData, SerenCloudGetEvalSetResponse, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponse, SerenCloudListDeploymentsData, SerenCloudListDeploymentsResponse, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponse, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsResponse, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseResponse, SerenCloudRunArtifactsData, SerenCloudRunArtifactsResponse, SerenCloudRunAuditData, SerenCloudRunAuditResponse, SerenCloudRunCancelData, SerenCloudRunCancelResponse, SerenCloudRunCompareData, SerenCloudRunCompareResponse, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailResponse, SerenCloudRunEvalsData, SerenCloudRunEvalSetData, SerenCloudRunEvalSetResponse, SerenCloudRunEvalsResponse, SerenCloudRunEventsData, SerenCloudRunEventsResponse, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsResponse, SerenCloudRunResponse, SerenCloudRunsData, SerenCloudRunsResponse, SerenCloudRunStreamCloseData, SerenCloudRunStreamCloseResponse, SerenCloudStartData, SerenCloudStartResponse, SerenCloudStopData, SerenCloudStopResponse, SerenCloudUpdateConfigData, SerenCloudUpdateConfigResponse, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentResponse, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetResponse, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponse } from '../types.gen';
+import { type Options, serenCloudApprovalInboxDecide, serenCloudApprovalInboxList, serenCloudCompleteDeploymentBundleUpload, serenCloudCreateDeploymentBundle, serenCloudCreateEnvironment, serenCloudCreateEvalSet, serenCloudCreateInteractiveSession, serenCloudDelete, serenCloudDeleteEnvironment, serenCloudDeploy, serenCloudDeploymentAudit, serenCloudDeploymentPendingApprovals, serenCloudDeploymentRun, serenCloudDeploymentRunArtifacts, serenCloudDeploymentRunCancel, serenCloudDeploymentRunEvals, serenCloudDeploymentRunEvents, serenCloudDeploymentRunPendingApprovals, serenCloudDeploymentRuns, serenCloudDeploymentRunStreamClose, serenCloudEvalCases, serenCloudEvalRunResults, serenCloudEvalRuns, serenCloudEvalSets, serenCloudGetAuditEntry, serenCloudGetDeployment, serenCloudGetDeploymentBundle, serenCloudGetDeploymentBundleDownload, serenCloudGetDeploymentEvalDrift, serenCloudGetDeploymentSpend, serenCloudGetEnvironment, serenCloudGetEvalCase, serenCloudGetEvalCaseResult, serenCloudGetEvalRun, serenCloudGetEvalSet, serenCloudGetInteractiveSession, serenCloudInteractiveSessions, serenCloudListAuditEntries, serenCloudListDeployments, serenCloudListEnvironments, serenCloudPendingApprovals, serenCloudPostInteractiveSessionMessage, serenCloudPromoteRunToEvalCase, serenCloudRun, serenCloudRunArtifacts, serenCloudRunAudit, serenCloudRunCancel, serenCloudRunCompare, serenCloudRunDetail, serenCloudRunEvals, serenCloudRunEvalSet, serenCloudRunEvents, serenCloudRunPendingApprovals, serenCloudRuns, serenCloudRunStreamClose, serenCloudStart, serenCloudStop, serenCloudUpdateConfig, serenCloudUpdateEnvironment, serenCloudUpdateEvalSet, serenCloudVerifyAudit } from '../sdk.gen';
+import type { SerenCloudApprovalInboxDecideData, SerenCloudApprovalInboxDecideResponse, SerenCloudApprovalInboxListData, SerenCloudApprovalInboxListResponse, SerenCloudCompleteDeploymentBundleUploadData, SerenCloudCompleteDeploymentBundleUploadResponse, SerenCloudCreateDeploymentBundleData, SerenCloudCreateDeploymentBundleResponse, SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentResponse, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetResponse, SerenCloudCreateInteractiveSessionData, SerenCloudCreateInteractiveSessionResponse, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentResponse, SerenCloudDeleteResponse, SerenCloudDeployData, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditResponse, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsResponse, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsResponse, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelResponse, SerenCloudDeploymentRunData, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsResponse, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsResponse, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsResponse, SerenCloudDeploymentRunResponse, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsResponse, SerenCloudDeploymentRunStreamCloseData, SerenCloudDeploymentRunStreamCloseResponse, SerenCloudDeployResponse, SerenCloudEvalCasesData, SerenCloudEvalCasesResponse, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsResponse, SerenCloudEvalRunsData, SerenCloudEvalRunsResponse, SerenCloudEvalSetsData, SerenCloudEvalSetsResponse, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryResponse, SerenCloudGetDeploymentBundleData, SerenCloudGetDeploymentBundleDownloadData, SerenCloudGetDeploymentBundleDownloadResponse, SerenCloudGetDeploymentBundleResponse, SerenCloudGetDeploymentData, SerenCloudGetDeploymentEvalDriftData, SerenCloudGetDeploymentEvalDriftResponse, SerenCloudGetDeploymentResponse, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendResponse, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentResponse, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseResponse, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultResponse, SerenCloudGetEvalRunData, SerenCloudGetEvalRunResponse, SerenCloudGetEvalSetData, SerenCloudGetEvalSetResponse, SerenCloudGetInteractiveSessionData, SerenCloudGetInteractiveSessionResponse, SerenCloudInteractiveSessionsData, SerenCloudInteractiveSessionsResponse, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponse, SerenCloudListDeploymentsData, SerenCloudListDeploymentsResponse, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponse, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsResponse, SerenCloudPostInteractiveSessionMessageData, SerenCloudPostInteractiveSessionMessageResponse, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseResponse, SerenCloudRunArtifactsData, SerenCloudRunArtifactsResponse, SerenCloudRunAuditData, SerenCloudRunAuditResponse, SerenCloudRunCancelData, SerenCloudRunCancelResponse, SerenCloudRunCompareData, SerenCloudRunCompareResponse, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailResponse, SerenCloudRunEvalsData, SerenCloudRunEvalSetData, SerenCloudRunEvalSetResponse, SerenCloudRunEvalsResponse, SerenCloudRunEventsData, SerenCloudRunEventsResponse, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsResponse, SerenCloudRunResponse, SerenCloudRunsData, SerenCloudRunsResponse, SerenCloudRunStreamCloseData, SerenCloudRunStreamCloseResponse, SerenCloudStartData, SerenCloudStartResponse, SerenCloudStopData, SerenCloudStopResponse, SerenCloudUpdateConfigData, SerenCloudUpdateConfigResponse, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentResponse, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetResponse, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -91,27 +91,30 @@ export const serenCloudListAuditEntriesInfiniteQueryKey = (options?: Options<Ser
 /**
  * List tamper-evident audit entries for seren-cloud.
  */
-export const serenCloudListAuditEntriesInfiniteOptions = (options?: Options<SerenCloudListAuditEntriesData>) => infiniteQueryOptions<SerenCloudListAuditEntriesResponse, DefaultError, InfiniteData<SerenCloudListAuditEntriesResponse>, QueryKey<Options<SerenCloudListAuditEntriesData>>, number | Pick<QueryKey<Options<SerenCloudListAuditEntriesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudListAuditEntriesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudListAuditEntries({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudListAuditEntriesInfiniteQueryKey(options)
-});
+export const serenCloudListAuditEntriesInfiniteOptions = (options?: Options<SerenCloudListAuditEntriesData>) => {
+    const opts = infiniteQueryOptions<SerenCloudListAuditEntriesResponse, DefaultError, InfiniteData<SerenCloudListAuditEntriesResponse>, QueryKey<Options<SerenCloudListAuditEntriesData>>, number | Pick<QueryKey<Options<SerenCloudListAuditEntriesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudListAuditEntriesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudListAuditEntries({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudListAuditEntriesInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const serenCloudVerifyAuditQueryKey = (options?: Options<SerenCloudVerifyAuditData>) => createQueryKey('serenCloudVerifyAudit', options);
 
@@ -311,27 +314,30 @@ export const serenCloudDeploymentAuditInfiniteQueryKey = (options: Options<Seren
 /**
  * List tamper-evident audit entries scoped to a deployment.
  */
-export const serenCloudDeploymentAuditInfiniteOptions = (options: Options<SerenCloudDeploymentAuditData>) => infiniteQueryOptions<SerenCloudDeploymentAuditResponse, DefaultError, InfiniteData<SerenCloudDeploymentAuditResponse>, QueryKey<Options<SerenCloudDeploymentAuditData>>, number | Pick<QueryKey<Options<SerenCloudDeploymentAuditData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudDeploymentAuditData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudDeploymentAudit({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudDeploymentAuditInfiniteQueryKey(options)
-});
+export const serenCloudDeploymentAuditInfiniteOptions = (options: Options<SerenCloudDeploymentAuditData>) => {
+    const opts = infiniteQueryOptions<SerenCloudDeploymentAuditResponse, DefaultError, InfiniteData<SerenCloudDeploymentAuditResponse>, QueryKey<Options<SerenCloudDeploymentAuditData>>, number | Pick<QueryKey<Options<SerenCloudDeploymentAuditData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudDeploymentAuditData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudDeploymentAudit({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudDeploymentAuditInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const serenCloudGetDeploymentBundleDownloadQueryKey = (options: Options<SerenCloudGetDeploymentBundleDownloadData>) => createQueryKey('serenCloudGetDeploymentBundleDownload', options);
 
@@ -394,27 +400,30 @@ export const serenCloudDeploymentPendingApprovalsInfiniteQueryKey = (options: Op
 /**
  * List awaiting-approval runs for a deployment.
  */
-export const serenCloudDeploymentPendingApprovalsInfiniteOptions = (options: Options<SerenCloudDeploymentPendingApprovalsData>) => infiniteQueryOptions<SerenCloudDeploymentPendingApprovalsResponse, DefaultError, InfiniteData<SerenCloudDeploymentPendingApprovalsResponse>, QueryKey<Options<SerenCloudDeploymentPendingApprovalsData>>, number | Pick<QueryKey<Options<SerenCloudDeploymentPendingApprovalsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudDeploymentPendingApprovalsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudDeploymentPendingApprovals({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudDeploymentPendingApprovalsInfiniteQueryKey(options)
-});
+export const serenCloudDeploymentPendingApprovalsInfiniteOptions = (options: Options<SerenCloudDeploymentPendingApprovalsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudDeploymentPendingApprovalsResponse, DefaultError, InfiniteData<SerenCloudDeploymentPendingApprovalsResponse>, QueryKey<Options<SerenCloudDeploymentPendingApprovalsData>>, number | Pick<QueryKey<Options<SerenCloudDeploymentPendingApprovalsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudDeploymentPendingApprovalsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudDeploymentPendingApprovals({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudDeploymentPendingApprovalsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const serenCloudDeploymentRunsQueryKey = (options: Options<SerenCloudDeploymentRunsData>) => createQueryKey('serenCloudDeploymentRuns', options);
 
@@ -439,27 +448,30 @@ export const serenCloudDeploymentRunsInfiniteQueryKey = (options: Options<SerenC
 /**
  * List run events (history) for a deployment.
  */
-export const serenCloudDeploymentRunsInfiniteOptions = (options: Options<SerenCloudDeploymentRunsData>) => infiniteQueryOptions<SerenCloudDeploymentRunsResponse, DefaultError, InfiniteData<SerenCloudDeploymentRunsResponse>, QueryKey<Options<SerenCloudDeploymentRunsData>>, number | Pick<QueryKey<Options<SerenCloudDeploymentRunsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudDeploymentRunsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudDeploymentRuns({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudDeploymentRunsInfiniteQueryKey(options)
-});
+export const serenCloudDeploymentRunsInfiniteOptions = (options: Options<SerenCloudDeploymentRunsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudDeploymentRunsResponse, DefaultError, InfiniteData<SerenCloudDeploymentRunsResponse>, QueryKey<Options<SerenCloudDeploymentRunsData>>, number | Pick<QueryKey<Options<SerenCloudDeploymentRunsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudDeploymentRunsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudDeploymentRuns({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudDeploymentRunsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const serenCloudRunMutation = (options?: Partial<Options<SerenCloudRunData>>): MutationOptions<SerenCloudRunResponse, DefaultError, Options<SerenCloudRunData>> => {
     const mutationOptions: MutationOptions<SerenCloudRunResponse, DefaultError, Options<SerenCloudRunData>> = {
@@ -516,27 +528,30 @@ export const serenCloudDeploymentRunArtifactsInfiniteQueryKey = (options: Option
 /**
  * List artifacts emitted by a specific deployment run.
  */
-export const serenCloudDeploymentRunArtifactsInfiniteOptions = (options: Options<SerenCloudDeploymentRunArtifactsData>) => infiniteQueryOptions<SerenCloudDeploymentRunArtifactsResponse, DefaultError, InfiniteData<SerenCloudDeploymentRunArtifactsResponse>, QueryKey<Options<SerenCloudDeploymentRunArtifactsData>>, number | Pick<QueryKey<Options<SerenCloudDeploymentRunArtifactsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudDeploymentRunArtifactsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudDeploymentRunArtifacts({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudDeploymentRunArtifactsInfiniteQueryKey(options)
-});
+export const serenCloudDeploymentRunArtifactsInfiniteOptions = (options: Options<SerenCloudDeploymentRunArtifactsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudDeploymentRunArtifactsResponse, DefaultError, InfiniteData<SerenCloudDeploymentRunArtifactsResponse>, QueryKey<Options<SerenCloudDeploymentRunArtifactsData>>, number | Pick<QueryKey<Options<SerenCloudDeploymentRunArtifactsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudDeploymentRunArtifactsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudDeploymentRunArtifacts({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudDeploymentRunArtifactsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * Cancel a queued/running deployment run.
@@ -596,27 +611,30 @@ export const serenCloudDeploymentRunEventsInfiniteQueryKey = (options: Options<S
 /**
  * List structured output events emitted by a specific deployment run.
  */
-export const serenCloudDeploymentRunEventsInfiniteOptions = (options: Options<SerenCloudDeploymentRunEventsData>) => infiniteQueryOptions<SerenCloudDeploymentRunEventsResponse, DefaultError, InfiniteData<SerenCloudDeploymentRunEventsResponse>, QueryKey<Options<SerenCloudDeploymentRunEventsData>>, number | Pick<QueryKey<Options<SerenCloudDeploymentRunEventsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudDeploymentRunEventsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudDeploymentRunEvents({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudDeploymentRunEventsInfiniteQueryKey(options)
-});
+export const serenCloudDeploymentRunEventsInfiniteOptions = (options: Options<SerenCloudDeploymentRunEventsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudDeploymentRunEventsResponse, DefaultError, InfiniteData<SerenCloudDeploymentRunEventsResponse>, QueryKey<Options<SerenCloudDeploymentRunEventsData>>, number | Pick<QueryKey<Options<SerenCloudDeploymentRunEventsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudDeploymentRunEventsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudDeploymentRunEvents({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudDeploymentRunEventsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const serenCloudDeploymentRunPendingApprovalsQueryKey = (options: Options<SerenCloudDeploymentRunPendingApprovalsData>) => createQueryKey('serenCloudDeploymentRunPendingApprovals', options);
 
@@ -643,6 +661,91 @@ export const serenCloudDeploymentRunStreamCloseMutation = (options?: Partial<Opt
     const mutationOptions: MutationOptions<SerenCloudDeploymentRunStreamCloseResponse, DefaultError, Options<SerenCloudDeploymentRunStreamCloseData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await serenCloudDeploymentRunStreamClose({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const serenCloudInteractiveSessionsQueryKey = (options: Options<SerenCloudInteractiveSessionsData>) => createQueryKey('serenCloudInteractiveSessions', options);
+
+export const serenCloudInteractiveSessionsOptions = (options: Options<SerenCloudInteractiveSessionsData>) => queryOptions<SerenCloudInteractiveSessionsResponse, DefaultError, SerenCloudInteractiveSessionsResponse, ReturnType<typeof serenCloudInteractiveSessionsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await serenCloudInteractiveSessions({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: serenCloudInteractiveSessionsQueryKey(options)
+});
+
+export const serenCloudInteractiveSessionsInfiniteQueryKey = (options: Options<SerenCloudInteractiveSessionsData>): QueryKey<Options<SerenCloudInteractiveSessionsData>> => createQueryKey('serenCloudInteractiveSessions', options, true);
+
+export const serenCloudInteractiveSessionsInfiniteOptions = (options: Options<SerenCloudInteractiveSessionsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudInteractiveSessionsResponse, DefaultError, InfiniteData<SerenCloudInteractiveSessionsResponse>, QueryKey<Options<SerenCloudInteractiveSessionsData>>, number | Pick<QueryKey<Options<SerenCloudInteractiveSessionsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudInteractiveSessionsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudInteractiveSessions({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudInteractiveSessionsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
+
+export const serenCloudCreateInteractiveSessionMutation = (options?: Partial<Options<SerenCloudCreateInteractiveSessionData>>): MutationOptions<SerenCloudCreateInteractiveSessionResponse, DefaultError, Options<SerenCloudCreateInteractiveSessionData>> => {
+    const mutationOptions: MutationOptions<SerenCloudCreateInteractiveSessionResponse, DefaultError, Options<SerenCloudCreateInteractiveSessionData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await serenCloudCreateInteractiveSession({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const serenCloudGetInteractiveSessionQueryKey = (options: Options<SerenCloudGetInteractiveSessionData>) => createQueryKey('serenCloudGetInteractiveSession', options);
+
+export const serenCloudGetInteractiveSessionOptions = (options: Options<SerenCloudGetInteractiveSessionData>) => queryOptions<SerenCloudGetInteractiveSessionResponse, DefaultError, SerenCloudGetInteractiveSessionResponse, ReturnType<typeof serenCloudGetInteractiveSessionQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await serenCloudGetInteractiveSession({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: serenCloudGetInteractiveSessionQueryKey(options)
+});
+
+export const serenCloudPostInteractiveSessionMessageMutation = (options?: Partial<Options<SerenCloudPostInteractiveSessionMessageData>>): MutationOptions<SerenCloudPostInteractiveSessionMessageResponse, DefaultError, Options<SerenCloudPostInteractiveSessionMessageData>> => {
+    const mutationOptions: MutationOptions<SerenCloudPostInteractiveSessionMessageResponse, DefaultError, Options<SerenCloudPostInteractiveSessionMessageData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await serenCloudPostInteractiveSessionMessage({
                 ...options,
                 ...fnOptions,
                 throwOnError: true
@@ -815,27 +918,30 @@ export const serenCloudEvalSetsInfiniteQueryKey = (options?: Options<SerenCloudE
 /**
  * List eval sets for the authenticated organization.
  */
-export const serenCloudEvalSetsInfiniteOptions = (options?: Options<SerenCloudEvalSetsData>) => infiniteQueryOptions<SerenCloudEvalSetsResponse, DefaultError, InfiniteData<SerenCloudEvalSetsResponse>, QueryKey<Options<SerenCloudEvalSetsData>>, number | Pick<QueryKey<Options<SerenCloudEvalSetsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudEvalSetsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudEvalSets({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudEvalSetsInfiniteQueryKey(options)
-});
+export const serenCloudEvalSetsInfiniteOptions = (options?: Options<SerenCloudEvalSetsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudEvalSetsResponse, DefaultError, InfiniteData<SerenCloudEvalSetsResponse>, QueryKey<Options<SerenCloudEvalSetsData>>, number | Pick<QueryKey<Options<SerenCloudEvalSetsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudEvalSetsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudEvalSets({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudEvalSetsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * Create a durable eval set for seren-cloud runs.
@@ -912,27 +1018,30 @@ export const serenCloudEvalCasesInfiniteQueryKey = (options: Options<SerenCloudE
 /**
  * List eval cases within a set.
  */
-export const serenCloudEvalCasesInfiniteOptions = (options: Options<SerenCloudEvalCasesData>) => infiniteQueryOptions<SerenCloudEvalCasesResponse, DefaultError, InfiniteData<SerenCloudEvalCasesResponse>, QueryKey<Options<SerenCloudEvalCasesData>>, number | Pick<QueryKey<Options<SerenCloudEvalCasesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudEvalCasesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudEvalCases({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudEvalCasesInfiniteQueryKey(options)
-});
+export const serenCloudEvalCasesInfiniteOptions = (options: Options<SerenCloudEvalCasesData>) => {
+    const opts = infiniteQueryOptions<SerenCloudEvalCasesResponse, DefaultError, InfiniteData<SerenCloudEvalCasesResponse>, QueryKey<Options<SerenCloudEvalCasesData>>, number | Pick<QueryKey<Options<SerenCloudEvalCasesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudEvalCasesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudEvalCases({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudEvalCasesInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * Promote a terminal run into a durable eval case.
@@ -992,27 +1101,30 @@ export const serenCloudEvalRunsInfiniteQueryKey = (options: Options<SerenCloudEv
 /**
  * List eval runs within a set.
  */
-export const serenCloudEvalRunsInfiniteOptions = (options: Options<SerenCloudEvalRunsData>) => infiniteQueryOptions<SerenCloudEvalRunsResponse, DefaultError, InfiniteData<SerenCloudEvalRunsResponse>, QueryKey<Options<SerenCloudEvalRunsData>>, number | Pick<QueryKey<Options<SerenCloudEvalRunsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudEvalRunsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudEvalRuns({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudEvalRunsInfiniteQueryKey(options)
-});
+export const serenCloudEvalRunsInfiniteOptions = (options: Options<SerenCloudEvalRunsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudEvalRunsResponse, DefaultError, InfiniteData<SerenCloudEvalRunsResponse>, QueryKey<Options<SerenCloudEvalRunsData>>, number | Pick<QueryKey<Options<SerenCloudEvalRunsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudEvalRunsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudEvalRuns({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudEvalRunsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * Execute an eval set against a deployment.
@@ -1072,27 +1184,30 @@ export const serenCloudEvalRunResultsInfiniteQueryKey = (options: Options<SerenC
 /**
  * List case results for an eval run.
  */
-export const serenCloudEvalRunResultsInfiniteOptions = (options: Options<SerenCloudEvalRunResultsData>) => infiniteQueryOptions<SerenCloudEvalRunResultsResponse, DefaultError, InfiniteData<SerenCloudEvalRunResultsResponse>, QueryKey<Options<SerenCloudEvalRunResultsData>>, number | Pick<QueryKey<Options<SerenCloudEvalRunResultsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudEvalRunResultsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudEvalRunResults({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudEvalRunResultsInfiniteQueryKey(options)
-});
+export const serenCloudEvalRunResultsInfiniteOptions = (options: Options<SerenCloudEvalRunResultsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudEvalRunResultsResponse, DefaultError, InfiniteData<SerenCloudEvalRunResultsResponse>, QueryKey<Options<SerenCloudEvalRunResultsData>>, number | Pick<QueryKey<Options<SerenCloudEvalRunResultsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudEvalRunResultsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudEvalRunResults({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudEvalRunResultsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const serenCloudGetEvalCaseResultQueryKey = (options: Options<SerenCloudGetEvalCaseResultData>) => createQueryKey('serenCloudGetEvalCaseResult', options);
 
@@ -1147,27 +1262,30 @@ export const serenCloudApprovalInboxListInfiniteQueryKey = (options?: Options<Se
  * the response includes `next_cursor` when more entries are available, and
  * the caller passes it back in `?cursor=`.
  */
-export const serenCloudApprovalInboxListInfiniteOptions = (options?: Options<SerenCloudApprovalInboxListData>) => infiniteQueryOptions<SerenCloudApprovalInboxListResponse, DefaultError, InfiniteData<SerenCloudApprovalInboxListResponse>, QueryKey<Options<SerenCloudApprovalInboxListData>>, string | Pick<QueryKey<Options<SerenCloudApprovalInboxListData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudApprovalInboxListData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                cursor: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudApprovalInboxList({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudApprovalInboxListInfiniteQueryKey(options)
-});
+export const serenCloudApprovalInboxListInfiniteOptions = (options?: Options<SerenCloudApprovalInboxListData>) => {
+    const opts = infiniteQueryOptions<SerenCloudApprovalInboxListResponse, DefaultError, InfiniteData<SerenCloudApprovalInboxListResponse>, QueryKey<Options<SerenCloudApprovalInboxListData>>, string | Pick<QueryKey<Options<SerenCloudApprovalInboxListData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudApprovalInboxListData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    cursor: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudApprovalInboxList({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudApprovalInboxListInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * Record an operator approve/deny decision for a single inbox entry.
@@ -1216,27 +1334,30 @@ export const serenCloudPendingApprovalsInfiniteQueryKey = (options?: Options<Ser
 /**
  * List awaiting-approval runs across all deployments for the organization.
  */
-export const serenCloudPendingApprovalsInfiniteOptions = (options?: Options<SerenCloudPendingApprovalsData>) => infiniteQueryOptions<SerenCloudPendingApprovalsResponse, DefaultError, InfiniteData<SerenCloudPendingApprovalsResponse>, QueryKey<Options<SerenCloudPendingApprovalsData>>, number | Pick<QueryKey<Options<SerenCloudPendingApprovalsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudPendingApprovalsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudPendingApprovals({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudPendingApprovalsInfiniteQueryKey(options)
-});
+export const serenCloudPendingApprovalsInfiniteOptions = (options?: Options<SerenCloudPendingApprovalsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudPendingApprovalsResponse, DefaultError, InfiniteData<SerenCloudPendingApprovalsResponse>, QueryKey<Options<SerenCloudPendingApprovalsData>>, number | Pick<QueryKey<Options<SerenCloudPendingApprovalsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudPendingApprovalsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudPendingApprovals({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudPendingApprovalsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const serenCloudRunsQueryKey = (options?: Options<SerenCloudRunsData>) => createQueryKey('serenCloudRuns', options);
 
@@ -1261,27 +1382,30 @@ export const serenCloudRunsInfiniteQueryKey = (options?: Options<SerenCloudRunsD
 /**
  * List all runs across all deployments for the organization.
  */
-export const serenCloudRunsInfiniteOptions = (options?: Options<SerenCloudRunsData>) => infiniteQueryOptions<SerenCloudRunsResponse, DefaultError, InfiniteData<SerenCloudRunsResponse>, QueryKey<Options<SerenCloudRunsData>>, number | Pick<QueryKey<Options<SerenCloudRunsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudRunsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudRuns({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudRunsInfiniteQueryKey(options)
-});
+export const serenCloudRunsInfiniteOptions = (options?: Options<SerenCloudRunsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudRunsResponse, DefaultError, InfiniteData<SerenCloudRunsResponse>, QueryKey<Options<SerenCloudRunsData>>, number | Pick<QueryKey<Options<SerenCloudRunsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudRunsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudRuns({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudRunsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const serenCloudRunDetailQueryKey = (options: Options<SerenCloudRunDetailData>) => createQueryKey('serenCloudRunDetail', options);
 
@@ -1324,27 +1448,30 @@ export const serenCloudRunArtifactsInfiniteQueryKey = (options: Options<SerenClo
 /**
  * List artifacts emitted by a run event.
  */
-export const serenCloudRunArtifactsInfiniteOptions = (options: Options<SerenCloudRunArtifactsData>) => infiniteQueryOptions<SerenCloudRunArtifactsResponse, DefaultError, InfiniteData<SerenCloudRunArtifactsResponse>, QueryKey<Options<SerenCloudRunArtifactsData>>, number | Pick<QueryKey<Options<SerenCloudRunArtifactsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudRunArtifactsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudRunArtifacts({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudRunArtifactsInfiniteQueryKey(options)
-});
+export const serenCloudRunArtifactsInfiniteOptions = (options: Options<SerenCloudRunArtifactsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudRunArtifactsResponse, DefaultError, InfiniteData<SerenCloudRunArtifactsResponse>, QueryKey<Options<SerenCloudRunArtifactsData>>, number | Pick<QueryKey<Options<SerenCloudRunArtifactsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudRunArtifactsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudRunArtifacts({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudRunArtifactsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const serenCloudRunAuditQueryKey = (options: Options<SerenCloudRunAuditData>) => createQueryKey('serenCloudRunAudit', options);
 
@@ -1369,27 +1496,30 @@ export const serenCloudRunAuditInfiniteQueryKey = (options: Options<SerenCloudRu
 /**
  * List tamper-evident audit entries scoped to a run.
  */
-export const serenCloudRunAuditInfiniteOptions = (options: Options<SerenCloudRunAuditData>) => infiniteQueryOptions<SerenCloudRunAuditResponse, DefaultError, InfiniteData<SerenCloudRunAuditResponse>, QueryKey<Options<SerenCloudRunAuditData>>, number | Pick<QueryKey<Options<SerenCloudRunAuditData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudRunAuditData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudRunAudit({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudRunAuditInfiniteQueryKey(options)
-});
+export const serenCloudRunAuditInfiniteOptions = (options: Options<SerenCloudRunAuditData>) => {
+    const opts = infiniteQueryOptions<SerenCloudRunAuditResponse, DefaultError, InfiniteData<SerenCloudRunAuditResponse>, QueryKey<Options<SerenCloudRunAuditData>>, number | Pick<QueryKey<Options<SerenCloudRunAuditData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudRunAuditData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudRunAudit({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudRunAuditInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * Cancel a queued/running run by ID.
@@ -1467,27 +1597,30 @@ export const serenCloudRunEventsInfiniteQueryKey = (options: Options<SerenCloudR
 /**
  * List structured output events emitted by a run event.
  */
-export const serenCloudRunEventsInfiniteOptions = (options: Options<SerenCloudRunEventsData>) => infiniteQueryOptions<SerenCloudRunEventsResponse, DefaultError, InfiniteData<SerenCloudRunEventsResponse>, QueryKey<Options<SerenCloudRunEventsData>>, number | Pick<QueryKey<Options<SerenCloudRunEventsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<SerenCloudRunEventsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await serenCloudRunEvents({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: serenCloudRunEventsInfiniteQueryKey(options)
-});
+export const serenCloudRunEventsInfiniteOptions = (options: Options<SerenCloudRunEventsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudRunEventsResponse, DefaultError, InfiniteData<SerenCloudRunEventsResponse>, QueryKey<Options<SerenCloudRunEventsData>>, number | Pick<QueryKey<Options<SerenCloudRunEventsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudRunEventsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudRunEvents({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudRunEventsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const serenCloudRunPendingApprovalsQueryKey = (options: Options<SerenCloudRunPendingApprovalsData>) => createQueryKey('serenCloudRunPendingApprovals', options);
 

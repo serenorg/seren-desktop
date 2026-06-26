@@ -101,27 +101,30 @@ export const listBountiesInfiniteQueryKey = (options?: Options<ListBountiesData>
  * `GET /organizations/me/bounties` instead, so a single path never flips
  * semantics based on whether auth is present.
  */
-export const listBountiesInfiniteOptions = (options?: Options<ListBountiesData>) => infiniteQueryOptions<ListBountiesResponse, DefaultError, InfiniteData<ListBountiesResponse>, QueryKey<Options<ListBountiesData>>, string | null | Pick<QueryKey<Options<ListBountiesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListBountiesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                cursor: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listBounties({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listBountiesInfiniteQueryKey(options)
-});
+export const listBountiesInfiniteOptions = (options?: Options<ListBountiesData>) => {
+    const opts = infiniteQueryOptions<ListBountiesResponse, DefaultError, InfiniteData<ListBountiesResponse>, QueryKey<Options<ListBountiesData>>, string | null | Pick<QueryKey<Options<ListBountiesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListBountiesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    cursor: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listBounties({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listBountiesInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * `POST /bounties` — create a bounty + escrow hold.
@@ -216,27 +219,30 @@ export const listBountyEarningsInfiniteQueryKey = (options: Options<ListBountyEa
 /**
  * `GET /bounties/{id}/earnings` — paginated earnings ledger.
  */
-export const listBountyEarningsInfiniteOptions = (options: Options<ListBountyEarningsData>) => infiniteQueryOptions<ListBountyEarningsResponse, DefaultError, InfiniteData<ListBountyEarningsResponse>, QueryKey<Options<ListBountyEarningsData>>, string | null | Pick<QueryKey<Options<ListBountyEarningsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListBountyEarningsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                cursor: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listBountyEarnings({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listBountyEarningsInfiniteQueryKey(options)
-});
+export const listBountyEarningsInfiniteOptions = (options: Options<ListBountyEarningsData>) => {
+    const opts = infiniteQueryOptions<ListBountyEarningsResponse, DefaultError, InfiniteData<ListBountyEarningsResponse>, QueryKey<Options<ListBountyEarningsData>>, string | null | Pick<QueryKey<Options<ListBountyEarningsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListBountyEarningsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    cursor: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listBountyEarnings({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listBountyEarningsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * `POST /bounties/{id}/earnings/{earning_id}/clawback` — customer claws back
@@ -331,27 +337,30 @@ export const getBountyLeaderboardInfiniteQueryKey = (options: Options<GetBountyL
 /**
  * `GET /bounties/{id}/leaderboard` — top earners in this bounty.
  */
-export const getBountyLeaderboardInfiniteOptions = (options: Options<GetBountyLeaderboardData>) => infiniteQueryOptions<GetBountyLeaderboardResponse, DefaultError, InfiniteData<GetBountyLeaderboardResponse>, QueryKey<Options<GetBountyLeaderboardData>>, number | null | Pick<QueryKey<Options<GetBountyLeaderboardData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<GetBountyLeaderboardData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await getBountyLeaderboard({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: getBountyLeaderboardInfiniteQueryKey(options)
-});
+export const getBountyLeaderboardInfiniteOptions = (options: Options<GetBountyLeaderboardData>) => {
+    const opts = infiniteQueryOptions<GetBountyLeaderboardResponse, DefaultError, InfiniteData<GetBountyLeaderboardResponse>, QueryKey<Options<GetBountyLeaderboardData>>, number | null | Pick<QueryKey<Options<GetBountyLeaderboardData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<GetBountyLeaderboardData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await getBountyLeaderboard({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: getBountyLeaderboardInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const getBountyStatsQueryKey = (options: Options<GetBountyStatsData>) => createQueryKey('getBountyStats', options);
 
@@ -500,27 +509,30 @@ export const getLeaderboardInfiniteQueryKey = (options?: Options<GetLeaderboardD
 /**
  * `GET /leaderboard` — top earners across all bounties.
  */
-export const getLeaderboardInfiniteOptions = (options?: Options<GetLeaderboardData>) => infiniteQueryOptions<GetLeaderboardResponse, DefaultError, InfiniteData<GetLeaderboardResponse>, QueryKey<Options<GetLeaderboardData>>, number | null | Pick<QueryKey<Options<GetLeaderboardData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<GetLeaderboardData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                offset: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await getLeaderboard({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: getLeaderboardInfiniteQueryKey(options)
-});
+export const getLeaderboardInfiniteOptions = (options?: Options<GetLeaderboardData>) => {
+    const opts = infiniteQueryOptions<GetLeaderboardResponse, DefaultError, InfiniteData<GetLeaderboardResponse>, QueryKey<Options<GetLeaderboardData>>, number | null | Pick<QueryKey<Options<GetLeaderboardData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<GetLeaderboardData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await getLeaderboard({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: getLeaderboardInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const listOrganizationBountiesQueryKey = (options?: Options<ListOrganizationBountiesData>) => createQueryKey('listOrganizationBounties', options);
 
@@ -545,27 +557,30 @@ export const listOrganizationBountiesInfiniteQueryKey = (options?: Options<ListO
 /**
  * `GET /bounties` — list bounties in the caller's organization.
  */
-export const listOrganizationBountiesInfiniteOptions = (options?: Options<ListOrganizationBountiesData>) => infiniteQueryOptions<ListOrganizationBountiesResponse, DefaultError, InfiniteData<ListOrganizationBountiesResponse>, QueryKey<Options<ListOrganizationBountiesData>>, string | null | Pick<QueryKey<Options<ListOrganizationBountiesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
-// @ts-ignore
-{
-    queryFn: async ({ pageParam, queryKey, signal }) => {
-        // @ts-ignore
-        const page: Pick<QueryKey<Options<ListOrganizationBountiesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
-            query: {
-                cursor: pageParam
-            }
-        };
-        const params = createInfiniteParams(queryKey, page);
-        const { data } = await listOrganizationBounties({
-            ...options,
-            ...params,
-            signal,
-            throwOnError: true
-        });
-        return data;
-    },
-    queryKey: listOrganizationBountiesInfiniteQueryKey(options)
-});
+export const listOrganizationBountiesInfiniteOptions = (options?: Options<ListOrganizationBountiesData>) => {
+    const opts = infiniteQueryOptions<ListOrganizationBountiesResponse, DefaultError, InfiniteData<ListOrganizationBountiesResponse>, QueryKey<Options<ListOrganizationBountiesData>>, string | null | Pick<QueryKey<Options<ListOrganizationBountiesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListOrganizationBountiesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    cursor: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listOrganizationBounties({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listOrganizationBountiesInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 export const getOverviewQueryKey = (options?: Options<GetOverviewData>) => createQueryKey('getOverview', options);
 
