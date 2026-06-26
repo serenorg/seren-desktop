@@ -116,6 +116,12 @@ const AUTO_DETECT_POLL_MS = 5_000;
 // passes the silence anchor and so a manual stop can suppress auto-restart.
 let lifecycleMeetingId: string | null = null;
 
+// Quit guard: confirm-on-quit while a capture is live. `quitConfirmed` lets a
+// second close request pass through even if window.destroy() is unavailable,
+// so the guard can never wedge app-quit.
+let closeGuardUnlisten: UnlistenFn | null = null;
+let quitConfirmed = false;
+
 // Shared in-flight guard across every start caller (panel, tray, auto-detect)
 // so a double-trigger can't launch two mic streams for the same session.
 let isStarting = false;
@@ -286,6 +292,8 @@ async function startMeetingEventListeners(): Promise<void> {
   stopMeetingEventListeners();
   if (!isTauriRuntime()) return;
 
+  void registerQuitGuard();
+
   transcriptUnlisten = await listen<TranscriptSegment>(
     "meeting://transcript-chunk",
     (event) => {
@@ -419,6 +427,7 @@ function stopMeetingEventListeners(): void {
   notesPublishedUnlisten?.();
   micStatusUnlisten?.();
   trayToggleUnlisten?.();
+  closeGuardUnlisten?.();
   transcriptUnlisten = null;
   statusUnlisten = null;
   levelUnlisten = null;
@@ -427,6 +436,44 @@ function stopMeetingEventListeners(): void {
   notesPublishedUnlisten = null;
   micStatusUnlisten = null;
   trayToggleUnlisten = null;
+  closeGuardUnlisten = null;
+}
+
+// Confirm-on-quit while a capture is live, so a recording is never lost or left
+// running on exit. Built to never block quit: after the user confirms (or on any
+// error) `quitConfirmed` is set, so a second close request passes straight
+// through even if window.destroy() is denied.
+async function registerQuitGuard(): Promise<void> {
+  if (!isTauriRuntime() || closeGuardUnlisten) return;
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const { confirm } = await import("@tauri-apps/plugin-dialog");
+    const appWindow = getCurrentWindow();
+    closeGuardUnlisten = await appWindow.onCloseRequested(async (event) => {
+      if (quitConfirmed || !isCapturing()) return;
+      event.preventDefault();
+      let stopAndQuit = false;
+      try {
+        stopAndQuit = await confirm(
+          "A meeting is still recording. Stop and save it before quitting?",
+          { title: "Recording in progress", kind: "warning" },
+        );
+      } catch {
+        quitConfirmed = true;
+        await appWindow.destroy().catch(() => {});
+        return;
+      }
+      if (!stopAndQuit) return; // user canceled the quit; keep recording
+      const meeting = meetingState.meetings.find(
+        (item) => item.status === "capturing",
+      );
+      if (meeting) await stopAndProcess(meeting).catch(() => {});
+      quitConfirmed = true;
+      await appWindow.destroy().catch(() => {});
+    });
+  } catch {
+    // Window API unavailable (e.g. browser-local) — no guard, nothing blocked.
+  }
 }
 
 async function startCapture(meeting: Meeting): Promise<boolean> {
