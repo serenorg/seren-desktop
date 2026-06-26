@@ -25,6 +25,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Harden cargo against transient crates.io download flakes (curl error 56,
+  # connection reset mid-stream). Cargo's default net.retry is 3 and does not
+  # always recover an in-flight reset; bump retries and disable HTTP/2
+  # multiplexing so one dropped connection cannot fail the Rust test or build job.
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_MULTIPLEXING: "false"
+
 jobs:
   check-commit-subjects:
     # Validates each non-merge commit subject in the PR diff against

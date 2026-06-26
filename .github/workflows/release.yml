@@ -21,6 +21,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # Harden cargo against transient crates.io download flakes (curl error 56,
+  # connection reset mid-stream). Cargo's default net.retry is 3 and does not
+  # always recover an in-flight reset; bump retries and disable HTTP/2
+  # multiplexing so one dropped connection cannot fail a whole platform's build.
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_MULTIPLEXING: "false"
   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
   # Signing availability flags (for conditional steps)

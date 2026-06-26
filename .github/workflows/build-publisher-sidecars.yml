@@ -18,6 +18,14 @@ concurrency:
   group: build-publisher-sidecars-${{ github.event.inputs.publisher_version }}
   cancel-in-progress: false
 
+env:
+  # Harden cargo against transient crates.io download flakes (curl error 56,
+  # connection reset mid-stream). Cargo's default net.retry is 3 and does not
+  # always recover an in-flight reset; bump retries and disable HTTP/2
+  # multiplexing so one dropped connection cannot fail a sidecar build.
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_MULTIPLEXING: "false"
+
 jobs:
   build:
     strategy:
