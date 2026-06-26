@@ -79,4 +79,17 @@ describe("#2669 — resume re-attaches to a live session instead of reaping it",
     // info cannot reconstruct; they must take the respawn path instead. #2672
     expect(reattachBody).toContain('liveInfo.agentType === "claude-codex"');
   });
+
+  it("reattach never sets skipHistoryReplay (no replay occurs on re-attach)", () => {
+    // Re-attach does not respawn, so there are no replay events to suppress.
+    // Setting skipHistoryReplay would drop the entire live in-flight turn. #2674
+    expect(reattachBody).toContain("skipHistoryReplay: undefined");
+    expect(reattachBody).not.toContain("skipHistoryReplay: hasRestoredMessages");
+  });
+
+  it("reattach reflects an in-flight turn when the live session is prompting", () => {
+    // A mid-turn re-attach must show activity, not look idle. #2674
+    expect(reattachBody).toContain('liveInfo.status === "prompting"');
+    expect(reattachBody).toContain("setTurnInFlight(conversationId, true)");
+  });
 });

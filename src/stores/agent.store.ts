@@ -3645,6 +3645,9 @@ export const agentStore = {
     spawnContextMap.delete(conversationId);
 
     const hasRestoredMessages = restored.messages.length > 0;
+    // The live session may be mid-turn at re-attach time (e.g. a reload while
+    // the agent is answering). The runtime reports this as "prompting".
+    const liveTurnInFlight = liveInfo.status === "prompting";
     const session: ActiveSession = {
       info: liveInfo,
       messages: restored.messages,
@@ -3656,10 +3659,19 @@ export const agentStore = {
       cwd: liveInfo.cwd,
       conversationId,
       agentSessionId: liveInfo.agentSessionId,
-      skipHistoryReplay: hasRestoredMessages ? true : undefined,
+      // Re-attach performs NO provider replay (it never respawns the CLI), so
+      // there are no replay events to suppress — only live ones. Setting
+      // skipHistoryReplay here would make every live event handler early-return
+      // and silently drop the entire in-flight turn (and its persistence).
+      // Leave it unset so live chunks/tool calls render; restored history won't
+      // duplicate because the live session only emits new forward events. #2674
+      skipHistoryReplay: undefined,
       restoredMessageCount: hasRestoredMessages
         ? restored.messages.length
         : undefined,
+      // A mid-turn re-attach has no record of when the turn began; seed the
+      // elapsed-time clock now so the "Thinking…" indicator reflects reality.
+      promptStartTime: liveTurnInFlight ? Date.now() : undefined,
       contextWindowSize: defaultContextWindowFor(
         agentType,
         convo?.agent_model_id ?? undefined,
@@ -3672,6 +3684,13 @@ export const agentStore = {
     };
     setState("sessions", conversationId, session);
     setState("activeSessionId", conversationId);
+
+    // Reflect an in-flight turn so the UI shows activity instead of looking
+    // idle while the re-attached agent is actually working. Cleared on the
+    // turn's promptComplete/cancel like any other turn. #2674
+    if (liveTurnInFlight) {
+      this.setTurnInFlight(conversationId, true);
+    }
 
     // Drain events buffered by the global subscriber while no session record
     // existed for this id.
