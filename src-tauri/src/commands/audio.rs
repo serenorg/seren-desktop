@@ -638,6 +638,20 @@ pub fn is_meeting_capture_active(registry: State<'_, CaptureRegistry>, meeting_i
     registry.is_active(&meeting_id)
 }
 
+/// Pause a live capture: workers drop frames (no segments) without ending the
+/// session. Returns false when no active capture exists for the meeting.
+#[tauri::command]
+pub fn pause_meeting_capture(registry: State<'_, CaptureRegistry>, meeting_id: String) -> bool {
+    registry.set_paused(&meeting_id, true)
+}
+
+/// Resume a paused capture: frames flow again. Returns false when no active
+/// capture exists for the meeting.
+#[tauri::command]
+pub fn resume_meeting_capture(registry: State<'_, CaptureRegistry>, meeting_id: String) -> bool {
+    registry.set_paused(&meeting_id, false)
+}
+
 #[tauri::command]
 pub async fn stop_meeting_capture(
     app: AppHandle,

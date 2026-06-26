@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -92,6 +92,9 @@ pub struct CaptureStreamStats {
     emitted_gap_count: AtomicU64,
     transport_failure_count: AtomicU64,
     last_transport_error: StdMutex<Option<String>>,
+    // Pause gate. While set, the capture workers drop frames (no segments, no
+    // buffered Them audio) without tearing down the session.
+    paused: AtomicBool,
 }
 
 #[derive(Default)]
@@ -128,6 +131,14 @@ impl CaptureStreamStats {
 
     fn record_chunk(&self) {
         self.chunk_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+    }
+
+    fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
     }
 
     fn record_ok_segment(&self) {
@@ -231,6 +242,12 @@ pub async fn run_capture_stream(
 ) {
     let mut chunker = StreamingChunker::new(cfg);
     while let Some(frame) = frames.recv().await {
+        // Paused: drop the frame before chunking so no segments are produced and
+        // no Them audio is buffered. The chunker treats the absence as a gap
+        // (already handled); resume simply lets frames flow again.
+        if stats.is_paused() {
+            continue;
+        }
         stats.record_frame(&frame.samples, cfg.rms_threshold);
         if let Some(buffer) = them_buffer.as_ref() {
             buffer_them_samples(buffer, &frame.samples);
@@ -942,6 +959,18 @@ impl CaptureRegistry {
             self.active.lock().unwrap().get(meeting_id),
             Some(CaptureSlot::Active(_))
         )
+    }
+
+    /// Pause or resume frame ingestion for a live capture without ending it.
+    /// Returns false when no active capture exists for `meeting_id`.
+    pub fn set_paused(&self, meeting_id: &str, paused: bool) -> bool {
+        match self.active.lock().unwrap().get(meeting_id) {
+            Some(CaptureSlot::Active(capture)) => {
+                capture.stats.set_paused(paused);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Whether the registry slot for `meeting_id` is taken (live or draining).

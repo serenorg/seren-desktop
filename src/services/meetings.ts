@@ -330,3 +330,13 @@ export function meetingLifecycleTick(
 export function meetingLifecycleNoteManualStop(): Promise<void> {
   return invoke("meeting_lifecycle_note_manual_stop");
 }
+
+/** Pause a live capture without ending it. Resolves false if none is active. */
+export function pauseMeetingCapture(meetingId: string): Promise<boolean> {
+  return invoke("pause_meeting_capture", { meetingId });
+}
+
+/** Resume a paused capture. Resolves false if none is active. */
+export function resumeMeetingCapture(meetingId: string): Promise<boolean> {
+  return invoke("resume_meeting_capture", { meetingId });
+}
