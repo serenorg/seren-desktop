@@ -9,6 +9,7 @@ import { log } from "@/lib/logger";
 import { queryClient } from "@/lib/query-client";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import {
+  catalogSkillMatchesInstalled,
   filterHostCompatibleCatalog,
   type InstalledSkill,
   isSkillCompatibleWithHost,
@@ -115,6 +116,26 @@ function makeProjectConfig(enabled: string[]): ProjectSkillsConfig {
 
 function skillRef(skill: Pick<InstalledSkill, "scope" | "slug">): string {
   return `${skill.scope}:${skill.slug}`;
+}
+
+function normalizeSkillIdentityText(value: string | null | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function skillNamesMatch(candidate: Skill, installed: InstalledSkill): boolean {
+  const candidateNames = new Set(
+    [candidate.displayName, candidate.name]
+      .map(normalizeSkillIdentityText)
+      .filter((value) => value.length > 0),
+  );
+  if (candidateNames.size === 0) return false;
+  return [installed.displayName, installed.name]
+    .map(normalizeSkillIdentityText)
+    .some((value) => value.length > 0 && candidateNames.has(value));
 }
 
 function applyAvailableCatalog(all: Skill[]): void {
@@ -378,12 +399,27 @@ export const skillsStore = {
     const skill = state.available.find((s) => s.id === skillId);
     if (!skill) return false;
     return state.installed.some((s) => {
-      if (s.slug !== skill.slug) return false;
-      // dirName matches slug — genuine install
-      if (s.dirName === s.slug) return true;
-      // dirName differs but has upstream sync state linking to this source — genuine install
-      if (s.syncState && s.upstreamSourceUrl) return true;
-      // dirName differs, no sync state — stale skill with coincidental slug collision
+      if (s.slug === skill.slug) {
+        if (s.dirName === s.slug) return true;
+        if (skill.sourceUrl && s.upstreamSourceUrl === skill.sourceUrl) {
+          return true;
+        }
+        return false;
+      }
+      if (s.dirName === skill.slug) return true;
+      if (
+        !skill.skillFolderName ||
+        (skill.skillFolderName !== s.dirName &&
+          skill.skillFolderName !== s.slug)
+      ) {
+        return false;
+      }
+      if (skill.sourceUrl && s.upstreamSourceUrl === skill.sourceUrl) {
+        return true;
+      }
+      // Folder names are not globally unique across org-owned skills, so an
+      // unsynced local folder also needs the human skill name to line up.
+      if (skillNamesMatch(skill, s)) return true;
       return false;
     });
   },
@@ -950,13 +986,13 @@ export const skillsStore = {
 
     // Backfill sync state for skills installed before the sync feature
     // existed (pre-v2.3.16). Non-blocking: failures are logged and skipped.
-    const needsBackfill = state.installed.some(
-      (s) =>
-        !s.syncState &&
-        state.available.some(
-          (a) =>
-            (a.slug === s.slug || a.slug === s.dirName) && a.source === "seren",
-        ),
+    const needsBackfill = state.installed.some((s) =>
+      state.available.some(
+        (a) =>
+          a.source === "seren" &&
+          catalogSkillMatchesInstalled(a, s) &&
+          (!s.syncState || s.upstreamSourceUrl !== a.sourceUrl),
+      ),
     );
     if (needsBackfill) {
       const count = await skills.backfillSyncState(

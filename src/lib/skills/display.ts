@@ -96,6 +96,7 @@ export function skillsShareCommandAlias(
  * 1. catalog.slug === installed.slug                  (default case)
  * 2. catalog.slug === installed.dirName               (local slug drift)
  * 3. catalog.skillFolderName === installed.dirName    (org-namespaced)
+ * 4. catalog.skillFolderName === installed.slug       (parsed local slug)
  */
 export function catalogSkillMatchesInstalled(
   candidate: Skill,
@@ -105,7 +106,8 @@ export function catalogSkillMatchesInstalled(
   if (candidate.slug === installed.dirName) return true;
   if (
     candidate.skillFolderName &&
-    candidate.skillFolderName === installed.dirName
+    (candidate.skillFolderName === installed.dirName ||
+      candidate.skillFolderName === installed.slug)
   ) {
     return true;
   }

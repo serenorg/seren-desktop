@@ -29,6 +29,7 @@ import {
 import { log } from "@/lib/logger";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import {
+  catalogSkillMatchesInstalled,
   computeBytesHash,
   computeContentHash,
   getSkillPath,
@@ -310,6 +311,7 @@ function skillSummaryToSkill(summary: SkillSummary): Skill {
     id: `seren:${summary.slug}`,
     slug: summary.slug,
     skillFolderName: summary.skill_folder_name,
+    folderSlug: summary.folder_slug ?? null,
     name: humanizeSkillName(summary.name, summary.slug),
     description: summary.description,
     source: "seren",
@@ -342,6 +344,7 @@ function skillToCacheEntry(skill: Skill): Skill {
     id: skill.id,
     slug: skill.slug,
     skillFolderName: skill.skillFolderName,
+    folderSlug: skill.folderSlug,
     name: skill.name,
     displayName: skill.displayName,
     description: skill.description,
@@ -1222,8 +1225,9 @@ async function fetchUpstreamSkillBundle(
   options?: SkillInstallOptions,
 ): Promise<UpstreamSkillBundle | null> {
   const slug =
+    (skill.sourceUrl ? skillSlugFromSourceUrl(skill.sourceUrl) : null) ??
     skill.slug ??
-    (skill.sourceUrl ? skillSlugFromSourceUrl(skill.sourceUrl) : null);
+    null;
   if (!slug) return null;
   const bundle = await downloadSkillBundle(slug, options);
   return {
@@ -1270,6 +1274,55 @@ function isManagedFileMap(value: unknown): value is Record<string, string> {
   return Object.entries(value).every(
     ([path, hash]) => typeof path === "string" && typeof hash === "string",
   );
+}
+
+function normalizeSkillMatchText(value: string | null | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function installedSkillNameMatchesCatalog(
+  installed: InstalledSkill,
+  candidate: Skill,
+): boolean {
+  const installedNames = new Set(
+    [installed.displayName, installed.name]
+      .map(normalizeSkillMatchText)
+      .filter((value) => value.length > 0),
+  );
+  if (installedNames.size === 0) return false;
+  return [candidate.displayName, candidate.name]
+    .map(normalizeSkillMatchText)
+    .some((value) => value.length > 0 && installedNames.has(value));
+}
+
+function findCatalogBackfillMatch(
+  installed: InstalledSkill,
+  available: Skill[],
+): Skill | null {
+  const candidates = available.filter(
+    (candidate) =>
+      candidate.source === "seren" &&
+      Boolean(candidate.sourceUrl) &&
+      catalogSkillMatchesInstalled(candidate, installed),
+  );
+  if (candidates.length === 0) return null;
+
+  const direct = candidates.find(
+    (candidate) =>
+      candidate.slug === installed.slug || candidate.slug === installed.dirName,
+  );
+  if (direct) return direct;
+
+  const nameMatches = candidates.filter((candidate) =>
+    installedSkillNameMatchesCatalog(installed, candidate),
+  );
+  if (nameMatches.length === 1) return nameMatches[0];
+
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 function parseInstalledSyncState(
@@ -2417,9 +2470,12 @@ export const skills = {
 
   /**
    * Backfill sync state for installed skills that were installed before the
-   * sync feature existed (pre-v2.3.16). Matches installed skills missing
-   * sync state to available Seren Skills by slug, then writes a minimal
-   * .seren-sync.json so the upstream refresh flow can detect updates.
+   * sync feature existed (pre-v2.3.16), and repair early sync states that
+   * stored the install folder (`grant-intake`) instead of the canonical
+   * publisher slug (`chief-grants-officer-grant-intake`). Matches installed
+   * skills to available Seren Skills by slug or by org-owned
+   * `skill_folder_name` with name disambiguation, then writes .seren-sync.json
+   * so the upstream refresh flow can detect updates.
    */
   async backfillSyncState(
     installed: InstalledSkill[],
@@ -2427,26 +2483,42 @@ export const skills = {
   ): Promise<number> {
     if (!isTauriRuntime()) return 0;
 
-    const remoteSkillsBySlug = new Map<string, Skill>();
-    for (const skill of available) {
-      if (skill.source === "seren" && skill.sourceUrl) {
-        remoteSkillsBySlug.set(skill.slug, skill);
-      }
-    }
-
     let backfilled = 0;
 
     for (const skill of installed) {
-      // Skip skills that already have sync state
-      if (skill.syncState) continue;
-
-      // Try matching by slug first, then fall back to dirName (which always
-      // equals the marketplace slug even when resolveSkillSlug() derives a
-      // different slug from SKILL.md frontmatter name).
-      const match =
-        remoteSkillsBySlug.get(skill.slug) ??
-        remoteSkillsBySlug.get(skill.dirName);
+      const match = findCatalogBackfillMatch(skill, available);
       if (!match?.sourceUrl) {
+        continue;
+      }
+
+      if (skill.syncState) {
+        if (skill.syncState.upstreamSourceUrl === match.sourceUrl) {
+          continue;
+        }
+
+        const repairedSyncState: SkillSyncState = {
+          ...skill.syncState,
+          upstreamSource: "seren",
+          upstreamSourceUrl: match.sourceUrl,
+          upstreamDeleted: undefined,
+        };
+
+        try {
+          await invoke("write_skill_sync_state", {
+            skillsDir: skill.skillsDir,
+            slug: skill.dirName,
+            stateJson: JSON.stringify(repairedSyncState),
+          });
+          backfilled++;
+          log.info(
+            "[Skills] Repaired sync state for",
+            skill.slug,
+            "→",
+            match.sourceUrl,
+          );
+        } catch (err) {
+          log.warn("[Skills] Failed to repair sync state for", skill.slug, err);
+        }
         continue;
       }
 

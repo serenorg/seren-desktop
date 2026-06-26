@@ -239,6 +239,41 @@ describe("split-download fallback (#2296)", () => {
     expect(mockDownloadSkillManifest).not.toHaveBeenCalled();
   });
 
+  it("uses sourceUrl as the canonical download slug when local slug is a folder alias", async () => {
+    mockDownloadSkill.mockResolvedValueOnce({
+      data: {
+        ...manifest,
+        skill: {
+          ...manifest.skill,
+          slug: "chief-grants-officer-grant-intake",
+          name: "Chief Grants Officer - Grant Intake",
+        },
+        files: [],
+      },
+      error: undefined,
+      response: { status: 200 },
+    });
+
+    await skills.install(
+      {
+        ...catalogSkill,
+        id: "seren:chief-grants-officer-grant-intake",
+        slug: "grant-intake",
+        name: "Chief Grants Officer - Grant Intake",
+        sourceUrl: "seren-skills:chief-grants-officer-grant-intake",
+      },
+      "",
+      "seren",
+      null,
+    );
+
+    expect(mockDownloadSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: { slug: "chief-grants-officer-grant-intake" },
+      }),
+    );
+  });
+
   it("retries a transient 502 from the manifest endpoint and succeeds", async () => {
     vi.useFakeTimers();
     mockDownloadSkillManifest
@@ -276,5 +311,146 @@ describe("split-download fallback (#2296)", () => {
     await expect(
       skills.install(catalogSkill, "", "seren", null),
     ).rejects.toThrow(/republished|version/i);
+  });
+
+  it("backfills org-owned installs through skillFolderName with name disambiguation", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      switch (cmd) {
+        case "read_skill_content":
+          return "# Chief Grants Officer - Grant Intake\n";
+        case "write_skill_sync_state":
+          return null;
+        default:
+          return null;
+      }
+    });
+
+    const count = await skills.backfillSyncState(
+      [
+        {
+          id: "local:grant-intake",
+          slug: "grant-intake",
+          name: "Chief Grants Officer - Grant Intake",
+          description: "",
+          source: "local",
+          tags: [],
+          scope: "seren",
+          skillsDir: "/skills",
+          dirName: "grant-intake",
+          path: "/skills/grant-intake/SKILL.md",
+          installedAt: 1,
+          enabled: true,
+          contentHash: "local-hash",
+        },
+      ],
+      [
+        {
+          id: "seren:egeria-grant-intake",
+          slug: "egeria-grant-intake",
+          skillFolderName: "grant-intake",
+          name: "Egeria Grant Intake",
+          description: "",
+          source: "seren",
+          sourceUrl: "seren-skills:egeria-grant-intake",
+          tags: [],
+        },
+        {
+          id: "seren:chief-grants-officer-grant-intake",
+          slug: "chief-grants-officer-grant-intake",
+          skillFolderName: "grant-intake",
+          name: "Chief Grants Officer - Grant Intake",
+          description: "",
+          source: "seren",
+          sourceUrl: "seren-skills:chief-grants-officer-grant-intake",
+          tags: [],
+        },
+      ],
+    );
+
+    const writeCall = mockInvoke.mock.calls.find(
+      (call) => call[0] === "write_skill_sync_state",
+    );
+    const stateJson = JSON.parse(writeCall?.[1].stateJson);
+
+    expect(count).toBe(1);
+    expect(stateJson.upstreamSourceUrl).toBe(
+      "seren-skills:chief-grants-officer-grant-intake",
+    );
+  });
+
+  it("repairs stale folder-alias sync state to the canonical publisher slug", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      switch (cmd) {
+        case "write_skill_sync_state":
+          return null;
+        default:
+          return null;
+      }
+    });
+
+    const count = await skills.backfillSyncState(
+      [
+        {
+          id: "local:grant-intake",
+          slug: "grant-intake",
+          name: "Chief Grants Officer - Grant Intake",
+          description: "",
+          source: "local",
+          tags: [],
+          scope: "seren",
+          skillsDir: "/skills",
+          dirName: "grant-intake",
+          path: "/skills/grant-intake/SKILL.md",
+          installedAt: 1,
+          enabled: true,
+          contentHash: "local-hash",
+          upstreamSource: "seren",
+          upstreamSourceUrl: "seren-skills:grant-intake",
+          syncState: {
+            version: 1,
+            upstreamSource: "seren",
+            upstreamSourceUrl: "seren-skills:grant-intake",
+            syncedRevision: "old-revision",
+            syncedAt: 1,
+            managedFiles: { "SKILL.md": "old-hash" },
+            upstreamDeleted: true,
+          },
+        },
+      ],
+      [
+        {
+          id: "seren:egeria-grant-intake",
+          slug: "egeria-grant-intake",
+          skillFolderName: "grant-intake",
+          name: "Egeria Grant Intake",
+          description: "",
+          source: "seren",
+          sourceUrl: "seren-skills:egeria-grant-intake",
+          tags: [],
+        },
+        {
+          id: "seren:chief-grants-officer-grant-intake",
+          slug: "chief-grants-officer-grant-intake",
+          skillFolderName: "grant-intake",
+          name: "Chief Grants Officer - Grant Intake",
+          description: "",
+          source: "seren",
+          sourceUrl: "seren-skills:chief-grants-officer-grant-intake",
+          tags: [],
+        },
+      ],
+    );
+
+    const writeCall = mockInvoke.mock.calls.find(
+      (call) => call[0] === "write_skill_sync_state",
+    );
+    const stateJson = JSON.parse(writeCall?.[1].stateJson);
+
+    expect(count).toBe(1);
+    expect(stateJson.upstreamSourceUrl).toBe(
+      "seren-skills:chief-grants-officer-grant-intake",
+    );
+    expect(stateJson.syncedRevision).toBe("old-revision");
+    expect(stateJson.upstreamDeleted).toBeUndefined();
   });
 });

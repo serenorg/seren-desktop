@@ -35,7 +35,10 @@ function skillSummary(slug: string, tags: string[] = []) {
     deleted_at: null,
     description: "Skill description",
     discoverability: "public",
+    folder_slug: null,
+    github_mirror_health: "ok",
     id: `skill-${slug}`,
+    install_count: 0,
     name: "Test Skill",
     owner_kind: "user",
     owner_organization_id: "org-1",
@@ -128,6 +131,7 @@ describe("skills.fetchIndex via Seren Skills API", () => {
         skills: [
           {
             ...skillSummary("pk-lead-intelligence"),
+            folder_slug: "autumn",
             slug: "autumn-pk-lead-intelligence",
             skill_folder_name: "pk-lead-intelligence",
           },
@@ -143,6 +147,7 @@ describe("skills.fetchIndex via Seren Skills API", () => {
     expect(result[0]).toMatchObject({
       slug: "autumn-pk-lead-intelligence",
       skillFolderName: "pk-lead-intelligence",
+      folderSlug: "autumn",
     });
   });
 
