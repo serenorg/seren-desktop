@@ -1049,6 +1049,249 @@ function replayMetaFromHistoryEntry(entry) {
   };
 }
 
+function historyEntryAssistantText(entry) {
+  if (entry?.type !== "assistant") {
+    return "";
+  }
+
+  const blocks = Array.isArray(entry?.message?.content) ? entry.message.content : [];
+  return blocks
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n");
+}
+
+function parseReplayTimestamp(value) {
+  const timestamp =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.length > 0
+        ? Date.parse(value)
+        : undefined;
+  return typeof timestamp === "number" && Number.isFinite(timestamp)
+    ? timestamp
+    : undefined;
+}
+
+function workflowScalarToText(value) {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value && typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function workflowSourcesToText(sources) {
+  if (!Array.isArray(sources) || sources.length === 0) {
+    return "";
+  }
+
+  return sources
+    .map((source) => {
+      if (typeof source === "string") {
+        return source.trim();
+      }
+      if (!source || typeof source !== "object") {
+        return "";
+      }
+      const url = workflowScalarToText(source.url);
+      const title = workflowScalarToText(source.title);
+      if (title && url) {
+        return `${title} (${url})`;
+      }
+      return url || title || workflowScalarToText(source);
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+function workflowFindingToText(finding, index) {
+  if (typeof finding === "string") {
+    return `${index + 1}. ${finding.trim()}`;
+  }
+
+  if (!finding || typeof finding !== "object") {
+    return "";
+  }
+
+  const claim =
+    workflowScalarToText(finding.claim) ||
+    workflowScalarToText(finding.title) ||
+    workflowScalarToText(finding.finding) ||
+    workflowScalarToText(finding);
+  if (!claim) {
+    return "";
+  }
+
+  const lines = [`${index + 1}. ${claim}`];
+  const confidence = workflowScalarToText(finding.confidence);
+  if (confidence) {
+    lines.push(`   Confidence: ${confidence}`);
+  }
+  const evidence = workflowScalarToText(finding.evidence);
+  if (evidence) {
+    lines.push(`   Evidence: ${evidence}`);
+  }
+  const vote = workflowScalarToText(finding.vote);
+  if (vote) {
+    lines.push(`   Vote: ${vote}`);
+  }
+  const sources = workflowSourcesToText(finding.sources);
+  if (sources) {
+    lines.push(`   Sources: ${sources}`);
+  }
+  return lines.join("\n");
+}
+
+function workflowArraySection(title, values, formatter) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return "";
+  }
+
+  const body = values
+    .map((value, index) => formatter(value, index))
+    .filter((line) => typeof line === "string" && line.trim().length > 0)
+    .join("\n");
+  return body ? `#### ${title}\n${body}` : "";
+}
+
+export function formatClaudeWorkflowResultForReplay(workflow) {
+  const result = workflow?.result;
+  if (typeof result === "string") {
+    return result.trim();
+  }
+  if (!result || typeof result !== "object") {
+    return "";
+  }
+
+  const workflowName =
+    typeof workflow?.workflowName === "string" && workflow.workflowName.trim()
+      ? workflow.workflowName.trim()
+      : "Claude workflow";
+  const sections = [`### ${workflowName} result`];
+
+  const summary = workflowScalarToText(result.summary);
+  if (summary) {
+    sections.push(summary);
+  }
+
+  const findings = workflowArraySection(
+    "Findings",
+    result.findings,
+    workflowFindingToText,
+  );
+  if (findings) {
+    sections.push(findings);
+  }
+
+  const caveats = workflowScalarToText(result.caveats);
+  if (caveats) {
+    sections.push(`#### Caveats\n${caveats}`);
+  }
+
+  const openQuestions = workflowArraySection(
+    "Open questions",
+    result.openQuestions,
+    (question, index) => {
+      const text = workflowScalarToText(question);
+      return text ? `${index + 1}. ${text}` : "";
+    },
+  );
+  if (openQuestions) {
+    sections.push(openQuestions);
+  }
+
+  if (sections.length === 1) {
+    try {
+      return JSON.stringify(result, null, 2);
+    } catch {
+      return "";
+    }
+  }
+
+  return sections.join("\n\n").trim();
+}
+
+function workflowResultAlreadyInParentHistory(parentAssistantText, replayText) {
+  if (!parentAssistantText || !replayText) {
+    return false;
+  }
+
+  const normalizedParent = parentAssistantText.replace(/\s+/g, " ");
+  const candidates = [
+    replayText,
+    replayText.replace(/^### [^\n]+\n+/, ""),
+  ];
+  return candidates.some((candidate) => {
+    const fingerprint = candidate.replace(/\s+/g, " ").trim().slice(0, 160);
+    return fingerprint.length >= 80 && normalizedParent.includes(fingerprint);
+  });
+}
+
+export async function readClaudeWorkflowReplayMessages(
+  historyPath,
+  sessionId,
+  parentAssistantText = "",
+) {
+  const workflowDir = path.join(path.dirname(historyPath), sessionId, "workflows");
+  let entries;
+  try {
+    entries = await fs.readdir(workflowDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const messages = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+      continue;
+    }
+
+    const workflowPath = path.join(workflowDir, entry.name);
+    let workflow;
+    try {
+      workflow = await readJson(workflowPath);
+    } catch {
+      continue;
+    }
+
+    const status =
+      typeof workflow?.status === "string"
+        ? workflow.status.toLowerCase()
+        : "";
+    if (status && !["completed", "done", "success", "succeeded"].includes(status)) {
+      continue;
+    }
+
+    const text = formatClaudeWorkflowResultForReplay(workflow);
+    if (!text || workflowResultAlreadyInParentHistory(parentAssistantText, text)) {
+      continue;
+    }
+
+    const runId =
+      typeof workflow?.runId === "string" && workflow.runId.trim()
+        ? workflow.runId.trim()
+        : path.basename(entry.name, ".json");
+    messages.push({
+      messageId: `claude-workflow-result:${runId}`,
+      text,
+      timestamp: parseReplayTimestamp(workflow?.timestamp ?? workflow?.startTime),
+    });
+  }
+
+  messages.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+  return messages;
+}
+
 function replayClaudeHistoryEntry(emit, session, entry) {
   const type = entry?.type;
   if (type !== "user" && type !== "assistant") {
@@ -1149,6 +1392,7 @@ async function replayClaudeHistoryBestEffort(emit, session, cwd, sessionId) {
     return;
   }
 
+  const parentAssistantText = [];
   for (const line of bytes.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -1162,7 +1406,27 @@ async function replayClaudeHistoryBestEffort(emit, session, cwd, sessionId) {
       continue;
     }
 
+    const assistantText = historyEntryAssistantText(entry);
+    if (assistantText) {
+      parentAssistantText.push(assistantText);
+    }
     replayClaudeHistoryEntry(emit, session, entry);
+  }
+
+  const workflowMessages = await readClaudeWorkflowReplayMessages(
+    historyPath,
+    sessionId,
+    parentAssistantText.join("\n"),
+  );
+  for (const message of workflowMessages) {
+    emit("provider://message-chunk", {
+      sessionId: session.id,
+      text: message.text,
+      messageId: message.messageId,
+      timestamp: message.timestamp,
+      replay: true,
+      recoveryReplay: true,
+    });
   }
 
   emit("provider://prompt-complete", {

@@ -84,6 +84,9 @@ describe("agent message persistence guards", () => {
 
     expect(caseBody).toContain("replay: event.data.replay === true");
     expect(caseBody).toContain("messageId: event.data.messageId");
+    expect(caseBody).toContain(
+      "recoveryReplay: event.data.recoveryReplay === true",
+    );
   });
 
   it("handleMessageChunk uses replay message ids as assistant boundaries", () => {
@@ -97,6 +100,23 @@ describe("agent message persistence guards", () => {
     expect(handlerBody).toContain("streamingContentMessageId");
     expect(handlerBody).toContain(
       "this.finalizeStreamingContent(sessionId, { isReplay: true })",
+    );
+  });
+
+  it("recovered provider sidecar chunks can repair missing SQLite history", () => {
+    const handlerIdx = agentStoreSource.indexOf("\n  handleMessageChunk(");
+    expect(handlerIdx).toBeGreaterThan(0);
+    const handlerBody = agentStoreSource.slice(
+      handlerIdx,
+      agentStoreSource.indexOf("enqueueToolEvent(", handlerIdx),
+    );
+
+    expect(handlerBody).toContain("meta?.recoveryReplay === true");
+    expect(handlerBody).toContain(
+      "session.messages.some((message) => message.id === recoveryMessageId)",
+    );
+    expect(handlerBody).toContain(
+      "if (session.skipHistoryReplay && !recoveryMessageId) return",
     );
   });
 
