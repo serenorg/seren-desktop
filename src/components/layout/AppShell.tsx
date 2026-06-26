@@ -29,6 +29,7 @@ import {
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { AudioPrimingDialog } from "@/components/meeting/AudioPrimingDialog";
 import { MeetingPanel } from "@/components/meeting/MeetingPanel";
+import { RecordingIndicator } from "@/components/meeting/RecordingIndicator";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import {
@@ -1087,6 +1088,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
           onCancel={() => void meetingStore.cancelPriming()}
         />
       </Show>
+
+      {/* Always-visible recording indicator while a capture is live (auto- or
+          manually-started): elapsed time + Stop / Pause / Resume / Delete. */}
+      <RecordingIndicator />
 
       {/* Layout-level blocking sign-in modal — fires on mid-session expiry,
           refresh-token failure, and the /login slash command. Distinct from

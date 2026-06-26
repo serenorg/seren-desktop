@@ -25,8 +25,10 @@ import {
   meetingAutodetect,
   meetingLifecycleNoteManualStop,
   meetingLifecycleTick,
+  pauseMeetingCapture,
   reconcileMeetingSpeakers,
   republishMeetingToSerenNotes,
+  resumeMeetingCapture,
   selectMeetingSkills,
   setMeetingRoutedSkill,
   startMeetingCapture as startBackendCapture,
@@ -48,6 +50,8 @@ interface MeetingState {
   activeMeeting: Meeting | null;
   liveSegments: TranscriptSegment[];
   captureLevel: number;
+  /** True while the active capture is paused (frame ingestion suspended). */
+  capturePaused: boolean;
   /**
    * True while the native mic is disconnected mid-capture and the backend is
    * re-acquiring it. The panel shows a "microphone disconnected — reconnecting…"
@@ -78,6 +82,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   activeMeeting: null,
   liveSegments: [],
   captureLevel: 0,
+  capturePaused: false,
   micCaptureLost: false,
   isLoading: false,
   error: null,
@@ -463,6 +468,7 @@ async function beginCapture(meeting: Meeting): Promise<void> {
   try {
     const started = await startCapture(meeting);
     if (!started) return;
+    setMeetingState("capturePaused", false);
     await loadMeetings();
     await setActiveMeeting(
       meetingState.meetings.find((item) => item.id === meeting.id) ?? meeting,
@@ -505,6 +511,21 @@ async function cancelPriming(): Promise<void> {
     meeting.id,
     "Capture was canceled before audio permissions were requested.",
   );
+}
+
+// Pause the active capture: backend workers drop frames (a transcript gap)
+// while the session stays alive. No-op if no capture is active.
+async function pauseCapture(meetingId: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  const ok = await pauseMeetingCapture(meetingId).catch(() => false);
+  if (ok) setMeetingState("capturePaused", true);
+}
+
+// Resume a paused capture: frames flow again.
+async function resumeCapture(meetingId: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  const ok = await resumeMeetingCapture(meetingId).catch(() => false);
+  if (ok) setMeetingState("capturePaused", false);
 }
 
 // At startup, backend capture may still be active even though the renderer
@@ -1095,6 +1116,8 @@ export const meetingStore = {
   reconcileStaleCaptures,
   stopCapture,
   stopAndProcess,
+  pauseCapture,
+  resumeCapture,
   getMeetingSkillCandidates,
   routeMeetingToSkill,
   regenerateNotes,
