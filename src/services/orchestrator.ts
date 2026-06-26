@@ -28,6 +28,11 @@ import {
 } from "@/services/memory";
 import { serializeHistory } from "@/services/orchestrator-history";
 import {
+  createOrchestratorProgressWatchdog,
+  OrchestratorNoProgressTimeoutError,
+  type OrchestratorProgressWatchdog,
+} from "@/services/orchestrator-watchdog";
+import {
   allowsClaudeAgent,
   allowsCodexAgent,
   allowsSerenPrivateAgent,
@@ -265,12 +270,33 @@ export async function orchestrate(
   let unlistenTransition: UnlistenFn | null = null;
   let unlistenEvent: UnlistenFn | null = null;
   let unlistenToolRequest: UnlistenFn | null = null;
+  let watchdog: OrchestratorProgressWatchdog | null = null;
 
   try {
+    watchdog = createOrchestratorProgressWatchdog({
+      conversationId,
+      onStallChange: (stalled, id) =>
+        conversationStore.setStreamingStalled(stalled, id),
+      onTimeout: async (id) => {
+        try {
+          await invoke("cancel_orchestration", { conversationId: id });
+        } catch (error) {
+          console.warn("[orchestrator] Watchdog cancel failed:", error);
+        }
+      },
+      onTimeoutError: (error, id) => {
+        console.warn(
+          `[orchestrator] Watchdog timeout cleanup failed for ${id}:`,
+          error,
+        );
+      },
+    });
+
     unlistenTransition = await listen<TransitionEvent>(
       "orchestrator://transition",
       (event) => {
         if (event.payload.conversation_id === conversationId) {
+          watchdog?.markProgress();
           handleTransition(event.payload);
         }
       },
@@ -280,6 +306,7 @@ export async function orchestrate(
       "orchestrator://event",
       (event) => {
         if (event.payload.conversation_id === conversationId) {
+          watchdog?.markProgress();
           handleWorkerEvent(event.payload);
         }
       },
@@ -287,7 +314,12 @@ export async function orchestrate(
 
     unlistenToolRequest = await listen<ToolExecutionRequest>(
       "orchestrator://tool-request",
-      (event) => handleToolRequest(event.payload),
+      (event) => {
+        watchdog?.pause();
+        void handleToolRequest(event.payload).finally(() => {
+          watchdog?.resume();
+        });
+      },
     );
 
     // 5. Invoke the Rust orchestrator (auth token read from store on Rust side)
@@ -296,18 +328,32 @@ export async function orchestrate(
       mime_type: img.mimeType,
       base64: img.base64,
     }));
-    await invoke("orchestrate", {
-      conversationId,
-      assistantMessageId: stream.messageId,
-      prompt,
-      history,
-      capabilities,
-      images: imagePayload,
-    });
+    await Promise.race([
+      invoke("orchestrate", {
+        conversationId,
+        assistantMessageId: stream.messageId,
+        prompt,
+        history,
+        capabilities,
+        images: imagePayload,
+      }),
+      watchdog.waitForTimeout(),
+    ]);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    handleError(message, conversationId);
+    const completedTurn =
+      error instanceof OrchestratorNoProgressTimeoutError &&
+      conversationStore.getMessagesFor(conversationId).some((msg) => {
+        if (msg.id !== stream.messageId || msg.status !== "complete") {
+          return false;
+        }
+        return Boolean(msg.content.trim() || msg.thinking?.trim());
+      });
+    if (!completedTurn) {
+      handleError(message, conversationId);
+    }
   } finally {
+    watchdog?.stop();
     unlistenTransition?.();
     unlistenEvent?.();
     unlistenToolRequest?.();
