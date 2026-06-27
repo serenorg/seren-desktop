@@ -77,21 +77,32 @@ export function chunkTranscript(
  * (Re)index one meeting's transcript: chunk it, embed the chunks via seren-embed,
  * and replace the meeting's stored vectors. Returns the number of chunks indexed.
  */
+const indexing = new Set<string>();
+
 export async function indexMeeting(meetingId: string): Promise<number> {
-  const segments = await getTranscriptSegments(meetingId);
-  const chunks = chunkTranscript(segments);
-  if (chunks.length === 0) {
-    await invoke("delete_meeting_transcript_index", { meetingId });
-    return 0;
+  if (indexing.has(meetingId)) return 0;
+  indexing.add(meetingId);
+  try {
+    const segments = await getTranscriptSegments(meetingId);
+    const chunks = chunkTranscript(segments);
+    if (chunks.length === 0) {
+      await invoke("delete_meeting_transcript_index", { meetingId });
+      return 0;
+    }
+    const embeddings = await embedTexts(chunks.map((chunk) => chunk.text));
+    const payload = chunks.map((chunk, index) => ({
+      seqStart: chunk.seqStart,
+      seqEnd: chunk.seqEnd,
+      text: chunk.text,
+      embedding: embeddings.data[index].embedding,
+    }));
+    return await invoke("index_meeting_transcript", {
+      meetingId,
+      chunks: payload,
+    });
+  } finally {
+    indexing.delete(meetingId);
   }
-  const embeddings = await embedTexts(chunks.map((chunk) => chunk.text));
-  const payload = chunks.map((chunk, index) => ({
-    seqStart: chunk.seqStart,
-    seqEnd: chunk.seqEnd,
-    text: chunk.text,
-    embedding: embeddings.data[index].embedding,
-  }));
-  return invoke("index_meeting_transcript", { meetingId, chunks: payload });
 }
 
 /** Semantic search across all indexed transcripts. Empty query → no results. */
@@ -103,6 +114,13 @@ export async function searchTranscripts(
   if (!trimmed) return [];
   const queryEmbedding = await embedText(trimmed);
   return invoke("search_transcripts", { queryEmbedding, limit });
+}
+
+/** Drop a meeting's transcript vectors (best-effort; called on delete). */
+export async function deleteMeetingIndex(meetingId: string): Promise<void> {
+  await invoke("delete_meeting_transcript_index", { meetingId }).catch(
+    () => {},
+  );
 }
 
 /** Index any of the given meetings that aren't already indexed (best-effort). */

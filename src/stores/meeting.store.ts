@@ -44,6 +44,10 @@ import {
   updateMeetingTitle,
 } from "@/services/meetings";
 import { orchestrate } from "@/services/orchestrator";
+import {
+  backfillTranscriptIndex,
+  deleteMeetingIndex,
+} from "@/services/transcript-search";
 import { onTrayToggleCapture, setTrayRecording } from "@/services/tray";
 import { conversationStore } from "@/stores/conversation.store";
 import { providerStore } from "@/stores/provider.store";
@@ -235,6 +239,7 @@ async function loadMeetings(): Promise<void> {
   try {
     const meetings = await listMeetings();
     setMeetingState("meetings", meetings);
+    void backfillTranscriptIndex(meetings.map((item) => item.id));
   } catch (error) {
     setMeetingState(
       "error",
@@ -1022,6 +1027,7 @@ async function deleteMeeting(meeting: Meeting): Promise<void> {
   }
   try {
     await deleteMeetingRecord(meeting.id);
+    void deleteMeetingIndex(meeting.id);
     const remaining = meetingState.meetings.filter(
       (item) => item.id !== meeting.id,
     );
