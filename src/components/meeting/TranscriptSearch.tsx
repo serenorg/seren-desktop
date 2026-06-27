@@ -14,6 +14,8 @@ export function TranscriptSearch() {
   const [searching, setSearching] = createSignal(false);
   const [searched, setSearched] = createSignal(false);
   const [semanticUnavailable, setSemanticUnavailable] = createSignal(false);
+  const [semanticUnavailableReason, setSemanticUnavailableReason] =
+    createSignal<string | null>(null);
   let inputRef: HTMLInputElement | undefined;
 
   // The global "Search transcripts" shortcut opens this panel and asks the input
@@ -32,12 +34,15 @@ export function TranscriptSearch() {
     if (!trimmed) {
       setHits([]);
       setSearched(false);
+      setSemanticUnavailable(false);
+      setSemanticUnavailableReason(null);
       return;
     }
     setSearching(true);
     const result = await searchTranscripts(trimmed, 20);
     setHits(result.hits);
     setSemanticUnavailable(result.semanticUnavailable);
+    setSemanticUnavailableReason(result.semanticUnavailableReason ?? null);
     setSearching(false);
     setSearched(true);
   };
@@ -81,7 +86,9 @@ export function TranscriptSearch() {
       <Show when={searched() && !searching()}>
         <Show when={semanticUnavailable()}>
           <div class="mt-2 text-[11px] text-warning">
-            Semantic search unavailable — showing exact matches.
+            {semanticUnavailableReason()
+              ? `Semantic search unavailable: ${semanticUnavailableReason()} — showing exact matches.`
+              : "Semantic search unavailable — showing exact matches."}
           </div>
         </Show>
         <Show
