@@ -75,6 +75,20 @@ pub async fn delete_meeting(app: AppHandle, id: String) -> Result<(), String> {
         Ok(())
     })
     .await?;
+    // Drop the transcript search index for this meeting too, so a delete can't
+    // orphan its vectors. Best-effort: a missing index isn't a delete failure.
+    let app_for_index = app.clone();
+    let index_id = deleted_id.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(conn) =
+            crate::services::transcript_vectors::open_transcript_db(&app_for_index)
+        {
+            let _ = crate::services::transcript_vectors::delete_meeting_chunks(
+                &conn, &index_id,
+            );
+        }
+    })
+    .await;
     let _ = app.emit(
         "meeting://deleted",
         serde_json::json!({ "meetingId": deleted_id }),
