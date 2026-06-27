@@ -120,6 +120,16 @@ impl LifecycleController {
         self.suppress_until_gate_closes = true;
     }
 
+    /// The wiring failed to start the proposed capture (createMeeting / capture
+    /// start threw). Reset to `Idle` so the next tick can re-propose — no
+    /// suppression, since this was not a user-initiated stop.
+    pub fn note_start_failed(&mut self) {
+        self.state = LifecycleState::Idle;
+        self.recording_since = None;
+        self.app_release_since = None;
+        self.gate_open_since = None;
+    }
+
     /// Advance the state machine by one observation, returning the side effect to
     /// perform (at most one per tick).
     pub fn evaluate(&mut self, signal: &LifecycleSignal) -> Option<LifecycleAction> {

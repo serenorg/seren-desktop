@@ -1099,7 +1099,8 @@ fn load_meeting(conn: &Connection, id: &str) -> rusqlite::Result<Option<MeetingR
                 routed_skill_slug, agent_conversation_id, notes_markdown, notes_struct_json,
                 CASE WHEN deleted_at IS NULL THEN NULL ELSE deleted_at END, deleted_at,
                 created_at, updated_at, row_version, failure_reason, capture_diagnostics_json,
-                seren_notes_id
+                seren_notes_id, trigger_source, calendar_event_id, calendar_provider,
+                attendees_json
          FROM meetings
          WHERE id = ?1",
         params![id],
@@ -1109,6 +1110,10 @@ fn load_meeting(conn: &Connection, id: &str) -> rusqlite::Result<Option<MeetingR
                 "failure_reason": row.get::<_, Option<String>>(16)?,
                 "capture_diagnostics_json": parse_json_opt(row.get::<_, Option<String>>(17)?),
                 "seren_notes_id": row.get::<_, Option<String>>(18)?,
+                "trigger_source": row.get::<_, Option<String>>(19)?,
+                "calendar_event_id": row.get::<_, Option<String>>(20)?,
+                "calendar_provider": row.get::<_, Option<String>>(21)?,
+                "attendees_json": row.get::<_, Option<String>>(22)?,
             }))
             .map_err(to_sqlite_invalid)?;
             Ok(MeetingRow {
@@ -1536,9 +1541,10 @@ fn apply_remote_meeting(conn: &Connection, row: PgRow) -> rusqlite::Result<()> {
             id, title, source_app, started_at, ended_at, status, template_id,
             routed_skill_slug, agent_conversation_id, notes_markdown,
             notes_struct_json, failure_reason, capture_diagnostics_json,
-            seren_notes_id, created_at, updated_at, row_version, synced_at, deleted_at
+            seren_notes_id, created_at, updated_at, row_version, synced_at, deleted_at,
+            trigger_source, calendar_event_id, calendar_provider, attendees_json
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, NULL)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, NULL, ?19, ?20, ?21, ?22)
          ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             source_app = excluded.source_app,
@@ -1552,6 +1558,10 @@ fn apply_remote_meeting(conn: &Connection, row: PgRow) -> rusqlite::Result<()> {
             failure_reason = excluded.failure_reason,
             capture_diagnostics_json = excluded.capture_diagnostics_json,
             seren_notes_id = excluded.seren_notes_id,
+            trigger_source = excluded.trigger_source,
+            calendar_event_id = excluded.calendar_event_id,
+            calendar_provider = excluded.calendar_provider,
+            attendees_json = excluded.attendees_json,
             updated_at = excluded.updated_at,
             row_version = excluded.row_version,
             synced_at = excluded.synced_at,
@@ -1576,6 +1586,10 @@ fn apply_remote_meeting(conn: &Connection, row: PgRow) -> rusqlite::Result<()> {
             pg_get::<i64>(&row, "updated_at")?,
             pg_get::<i64>(&row, "row_version")?,
             now_ms(),
+            value_opt_str(&payload, "trigger_source"),
+            value_opt_str(&payload, "calendar_event_id"),
+            value_opt_str(&payload, "calendar_provider"),
+            value_opt_str(&payload, "attendees_json"),
         ],
     )?;
     Ok(())

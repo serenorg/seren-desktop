@@ -135,7 +135,7 @@ export function MeetingPanel() {
     if (!desktopRuntime || !meeting || stopping()) return;
     setStopping(true);
     try {
-      await meetingStore.stopAndProcess(meeting);
+      await meetingStore.stopByUser(meeting);
       meetingStore.resetAutoDetectDismissal();
     } finally {
       setStopping(false);

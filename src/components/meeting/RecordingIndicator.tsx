@@ -50,7 +50,7 @@ export function RecordingIndicator() {
 
   const onStop = () => {
     const meeting = active();
-    if (meeting) void meetingStore.stopAndProcess(meeting);
+    if (meeting) void meetingStore.stopByUser(meeting);
   };
 
   const onTogglePause = () => {
