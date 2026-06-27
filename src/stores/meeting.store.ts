@@ -1192,6 +1192,25 @@ function acknowledgeReviewReady(meetingId?: string): void {
   }
 }
 
+// Start a recording from an upcoming calendar event (one-tap from the Upcoming
+// panel): stamps the event's title + attendees + id, then starts through the
+// shared priming gate. Treated as a manual capture, so the user stops it.
+async function startFromCalendarEvent(event: CalendarEvent): Promise<void> {
+  if (!isTauriRuntime() || isStarting || meetingState.primingRequest) return;
+  if (isCapturing()) return;
+  const meeting = await createMeeting({
+    title: event.title,
+    sourceApp: "Calendar",
+    templateId: settingsStore.get("meetingTemplateId"),
+    triggerSource: "calendar",
+    calendarEventId: event.id,
+    calendarProvider: "google",
+    attendeesJson:
+      event.attendees.length > 0 ? JSON.stringify(event.attendees) : null,
+  });
+  await requestCaptureStart(meeting);
+}
+
 export const meetingStore = {
   get state(): MeetingState {
     return meetingState;
@@ -1221,6 +1240,7 @@ export const meetingStore = {
   startAutoDetect,
   stopAutoDetect,
   acceptAutoDetect,
+  startFromCalendarEvent,
   dismissAutoDetect,
   resetAutoDetectDismissal,
   acknowledgeReviewReady,
