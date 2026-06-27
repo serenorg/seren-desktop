@@ -15,7 +15,8 @@ export type ShortcutAction =
   | "global.focusEditor"
   | "global.openFiles"
   | "global.newChat"
-  | "global.newTerminal";
+  | "global.newTerminal"
+  | "global.searchMeetings";
 
 /**
  * A shortcut handler may return `false` to signal it did not consume the key,
@@ -38,6 +39,7 @@ const GLOBAL_SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
   "global.openFiles",
   "global.newChat",
   "global.newTerminal",
+  "global.searchMeetings",
 ];
 
 /**

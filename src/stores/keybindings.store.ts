@@ -27,6 +27,7 @@ export type KeybindingActionId =
   | "global.openFiles"
   | "global.newChat"
   | "global.newTerminal"
+  | "global.searchMeetings"
   | "workspace.next"
   | "workspace.previous"
   | "workspace.switch1"
@@ -161,6 +162,13 @@ const keybindingDefinitions = [
     label: "New terminal",
     description: "Open a new terminal thread.",
     defaults: [{ sequence: [{ mod: true, key: "t" }] }],
+  },
+  {
+    id: "global.searchMeetings",
+    group: "Global",
+    label: "Search transcripts",
+    description: "Open the meetings panel and focus transcript search.",
+    defaults: [{ sequence: [{ mod: true, shift: true, key: "f" }] }],
   },
   {
     id: "workspace.next",

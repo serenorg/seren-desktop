@@ -1,7 +1,7 @@
 // ABOUTME: Semantic search field over meeting transcripts with jump-to-meeting results.
 // ABOUTME: Calls the transcript-search service; clicking a hit opens its meeting.
 
-import { createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, Show } from "solid-js";
 import {
   searchTranscripts,
   type TranscriptHit,
@@ -14,6 +14,18 @@ export function TranscriptSearch() {
   const [searching, setSearching] = createSignal(false);
   const [searched, setSearched] = createSignal(false);
   const [semanticUnavailable, setSemanticUnavailable] = createSignal(false);
+  let inputRef: HTMLInputElement | undefined;
+
+  // The global "Search transcripts" shortcut opens this panel and asks the input
+  // to focus. Consume the request whether the panel was already open (this effect
+  // re-runs) or just mounted (it runs once with the flag already set), then clear
+  // it so reopening the panel later never steals focus.
+  createEffect(() => {
+    if (meetingStore.state.pendingSearchFocus) {
+      inputRef?.focus();
+      meetingStore.clearSearchFocus();
+    }
+  });
 
   const run = async () => {
     const trimmed = query().trim();
@@ -53,6 +65,7 @@ export function TranscriptSearch() {
         }}
       >
         <input
+          ref={inputRef}
           type="search"
           value={query()}
           onInput={(event) => setQuery(event.currentTarget.value)}

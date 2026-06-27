@@ -56,6 +56,7 @@ const SHORTCUT_SECTIONS: ShortcutSectionConfig[] = [
       "global.openFiles",
       "global.newChat",
       "global.newTerminal",
+      "global.searchMeetings",
     ],
   },
   {
