@@ -52,6 +52,7 @@
     "@lmstudio/sdk": "1.5.0",
     "@monaco-editor/loader": "^1.7.0",
     "@playwright/mcp": "^0.0.76",
+    "@seren/chat-ui": "workspace:*",
     "@seren/employees-core": "workspace:*",
     "@seren/recording-core": "workspace:*",
     "@seren/recording-ui": "workspace:*",
