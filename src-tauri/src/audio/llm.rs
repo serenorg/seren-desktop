@@ -65,7 +65,7 @@ pub async fn complete(app: &AppHandle, request: CompletionRequest) -> Result<Str
                 Ok(content) => Ok(content),
                 Err(err) if is_provider_fallback_error(&err) => {
                     log::warn!(
-                        "[audio-llm] provider one-shot unavailable (auth/capacity); retrying via SerenModels fallback: {err}"
+                        "[audio-llm] provider one-shot unavailable (auth/capacity/transport); retrying via SerenModels fallback: {err}"
                     );
                     complete_via_seren_models(
                         app,
@@ -286,15 +286,18 @@ fn seren_models_fallback_model(requested_model: &str) -> String {
 }
 
 /// A provider one-shot error that should retry on the wallet-billed SerenModels
-/// fallback instead of failing the prompt. Covers two classes:
+/// fallback instead of failing the prompt. Covers three classes:
 /// the provider isn't authenticated, or the provider's subscription has no
-/// remaining capacity (quota/rate-limit). A long meeting that exhausts the
-/// user's Claude/Codex/Gemini subscription mid-pass must still produce notes,
-/// and must not keep hammering a throttled subscription that also serves the
-/// user's interactive chat. Non-capacity safety errors (e.g. a tool-call abort)
-/// are deliberately excluded so they still fail closed. #2397.
+/// remaining capacity (quota/rate-limit), or the local provider runtime
+/// transport dropped mid one-shot. A long meeting that exhausts the user's
+/// Claude/Codex/Gemini subscription mid-pass must still produce notes, and a
+/// Windows loopback socket reset must not strand a saved transcript without
+/// notes. Safety errors (e.g. a tool-call abort) are deliberately excluded so
+/// they still fail closed. #2397 #2680.
 fn is_provider_fallback_error(error: &str) -> bool {
-    is_provider_auth_error(error) || is_provider_capacity_error(error)
+    is_provider_auth_error(error)
+        || is_provider_capacity_error(error)
+        || is_provider_runtime_transport_error(error)
 }
 
 fn is_provider_auth_error(error: &str) -> bool {
@@ -325,6 +328,21 @@ fn is_provider_capacity_error(error: &str) -> bool {
         || lower.contains("overloaded")
         || lower.contains("capacity")
         || lower.contains("429")
+}
+
+/// Detect local provider-runtime transport failures. These are infrastructure
+/// failures between Rust and the bundled localhost runtime, not provider model
+/// safety decisions, so meeting notes can safely fall back to SerenModels.
+fn is_provider_runtime_transport_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("provider runtime socket error")
+        || lower.contains("provider runtime socket closed")
+        || lower.contains("failed to connect to provider runtime")
+        || lower.contains("failed to authenticate provider runtime socket")
+        || lower.contains("failed to send provider runtime request")
+        || lower.contains("failed to send provider prompt")
+        || lower.contains("provider runtime socket reset")
+        || lower.contains("os error 10054")
 }
 
 #[cfg(test)]
@@ -442,7 +460,7 @@ mod tests {
     #[test]
     fn provider_capacity_error_does_not_match_safety_or_transport_errors() {
         // A tool-call/permission abort is a non-capacity safety error and MUST
-        // fail closed, never fall back. Transport closes are not capacity.
+        // fail closed. Transport closes are not capacity.
         assert!(!is_provider_capacity_error(
             "provider one-shot attempted a tool call; toolless completion aborted"
         ));
@@ -455,16 +473,35 @@ mod tests {
     }
 
     #[test]
-    fn fallback_predicate_covers_auth_and_capacity_but_not_safety() {
+    fn provider_transport_error_detection_covers_windows_socket_reset() {
+        assert!(is_provider_runtime_transport_error(
+            "Provider runtime socket error: IO error: An existing connection was forcibly closed by the remote host. (os error 10054)"
+        ));
+        assert!(is_provider_runtime_transport_error(
+            "Provider runtime socket closed before prompt completed."
+        ));
+        assert!(is_provider_runtime_transport_error(
+            "Failed to connect to provider runtime: Connection refused"
+        ));
+        assert!(!is_provider_runtime_transport_error(
+            "provider one-shot attempted a tool call; toolless completion aborted"
+        ));
+        assert!(!is_provider_runtime_transport_error(
+            "provider one-shot returned no content"
+        ));
+    }
+
+    #[test]
+    fn fallback_predicate_covers_auth_capacity_and_transport_but_not_safety() {
         assert!(is_provider_fallback_error("not logged in"));
         assert!(is_provider_fallback_error("429 Too Many Requests"));
         assert!(is_provider_fallback_error("usage limit reached"));
-        // Safety / transport failures fail closed (no SerenModels fallback).
+        assert!(is_provider_fallback_error(
+            "Provider runtime socket error: IO error: An existing connection was forcibly closed by the remote host. (os error 10054)"
+        ));
+        // Safety failures fail closed (no SerenModels fallback).
         assert!(!is_provider_fallback_error(
             "provider one-shot attempted a tool call; toolless completion aborted"
-        ));
-        assert!(!is_provider_fallback_error(
-            "Provider runtime socket closed before prompt completed."
         ));
     }
 }
