@@ -171,7 +171,7 @@ export async function deleteFileIndex(
 
 /**
  * Index a batch of code chunks.
- * Generates embeddings via SerenEmbed and stores in local vector db.
+ * Generates embeddings via the embedding publisher and stores in local vector db.
  */
 export async function indexChunks(
   projectPath: string,

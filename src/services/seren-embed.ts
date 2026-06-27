@@ -1,4 +1,4 @@
-// ABOUTME: SerenEmbed API client for generating text embeddings.
+// ABOUTME: Publisher API client for generating text embeddings.
 // ABOUTME: Uses SerenBucks via /publishers endpoint for paid embedding generation.
 
 import { apiBase } from "@/lib/config";
@@ -7,7 +7,7 @@ import { publisherStatus, unwrapPublisherBody } from "@/lib/publisher-response";
 import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
-const PUBLISHER_SLUG = "seren-embed";
+const PUBLISHER_SLUG = "openai-embeddings";
 
 /** Default model for embeddings */
 const DEFAULT_MODEL = "text-embedding-3-small";
@@ -38,7 +38,7 @@ interface EmbeddingResponse {
 
 /**
  * Generate embeddings for a single text string.
- * Uses SerenEmbed publisher via Seren Gateway.
+ * Uses the direct OpenAI Embeddings publisher via Seren Gateway.
  */
 export async function embedText(
   text: string,
@@ -81,14 +81,16 @@ export async function embedTexts(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`SerenEmbed API error: ${response.status} - ${errorText}`);
+    throw new Error(
+      `Embedding publisher API error: ${response.status} - ${errorText}`,
+    );
   }
 
   const result = await response.json();
 
   const status = publisherStatus(result);
   if (status && status !== 200) {
-    throw new Error(`SerenEmbed upstream error: ${status}`);
+    throw new Error(`Embedding publisher upstream error: ${status}`);
   }
 
   return unwrapPublisherBody<EmbeddingResponse>(result) as EmbeddingResponse;

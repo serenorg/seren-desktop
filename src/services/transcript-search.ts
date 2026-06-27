@@ -1,5 +1,5 @@
 // ABOUTME: Semantic transcript search — chunk, embed, index, and query meeting transcripts.
-// ABOUTME: Embeddings come from seren-embed; vectors are stored locally via Tauri commands.
+// ABOUTME: Embeddings come from the shared publisher client; vectors are stored locally via Tauri commands.
 
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -85,8 +85,9 @@ export function chunkTranscript(
 }
 
 /**
- * (Re)index one meeting's transcript: chunk it, embed the chunks via seren-embed,
- * and replace the meeting's stored vectors. Returns the number of chunks indexed.
+ * (Re)index one meeting's transcript: chunk it, embed the chunks via the
+ * embedding publisher, and replace the meeting's stored vectors. Returns the
+ * number of chunks indexed.
  */
 const indexing = new Set<string>();
 
@@ -151,7 +152,7 @@ export async function searchTranscripts(
       limit,
     });
   } catch {
-    // Offline / unauthenticated / out of balance / seren-embed down.
+    // Offline / unauthenticated / out of balance / embedding publisher down.
     semanticUnavailable = true;
   }
 
@@ -185,7 +186,7 @@ export async function deleteMeetingIndex(meetingId: string): Promise<void> {
 }
 
 // Per-meeting failed-attempt counter so a meeting that embeds (a paid
-// seren-embed call) but then fails to persist isn't re-embedded on every
+// publisher call) but then fails to persist isn't re-embedded on every
 // loadMeetings(). Bounded retries cap the wasted spend; resets on app restart.
 const MAX_BACKFILL_ATTEMPTS = 3;
 const backfillAttempts = new Map<string, number>();
