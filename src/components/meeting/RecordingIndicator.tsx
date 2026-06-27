@@ -105,6 +105,28 @@ export function RecordingIndicator() {
     };
   };
 
+  // Clamping otherwise only runs mid-drag, so a position restored at a smaller
+  // window size — or a window shrunk after dragging — could strand the pill
+  // off-screen (and the drag handle out of reach). Re-clamp on window resize and
+  // whenever the indicator becomes visible.
+  const onResize = () => {
+    const current = position();
+    if (current) setPosition(clampToViewport(current.x, current.y));
+  };
+  onMount(() => {
+    window.addEventListener("resize", onResize);
+    onCleanup(() => window.removeEventListener("resize", onResize));
+  });
+  createEffect(() => {
+    if (!active()) return;
+    const current = position();
+    if (!current || !containerRef) return;
+    const clamped = clampToViewport(current.x, current.y);
+    if (clamped.x !== current.x || clamped.y !== current.y) {
+      setPosition(clamped);
+    }
+  });
+
   const onDragStart = (event: PointerEvent) => {
     if (!containerRef) return;
     const rect = containerRef.getBoundingClientRect();
