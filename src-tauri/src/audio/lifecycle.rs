@@ -203,6 +203,16 @@ impl LifecycleController {
         self.recording_since = None;
         self.app_release_since = None;
         self.gate_open_since = None;
+        // A stop that fires while the call is still live must not instantly
+        // re-record. The silence backstop and calendar-end stop both trigger
+        // with the gate (mic + known app) still open, so without suppression the
+        // next idle tick would re-arm and start another recording — turning the
+        // runaway guard into an endless loop of back-to-back recordings instead
+        // of a hard stop. AppReleased already implies the gate has closed, so it
+        // re-arms naturally when the next call begins.
+        if matches!(reason, StopReason::Silence | StopReason::CalendarEnd) {
+            self.suppress_until_gate_closes = true;
+        }
         LifecycleAction::StopCapture { reason }
     }
 }
@@ -301,5 +311,76 @@ mod tests {
                 source_app: Some("Zoom".to_string())
             })
         );
+    }
+
+    /// Runaway guard: a Silence stop fires with the gate (mic + known app) still
+    /// open. The controller must NOT re-arm and re-record while that gate stays
+    /// open — otherwise the 15-minute silence backstop becomes a 15-minute cycle
+    /// of back-to-back recordings (the P0 runaway). Re-arm only resumes once the
+    /// call actually ends and a new one begins.
+    #[test]
+    fn silence_stop_suppresses_rearm_until_gate_closes() {
+        let mut c = LifecycleController::new(CFG);
+        c.evaluate(&gate(0, true));
+        assert_eq!(
+            c.evaluate(&gate(CFG.start_debounce_ms, true)),
+            Some(LifecycleAction::StartCapture {
+                source_app: Some("Zoom".to_string())
+            })
+        );
+        // No transcript ever lands; the silence backstop stops the recording
+        // while the call app keeps the mic open.
+        let stop_at = CFG.start_debounce_ms + CFG.silence_timeout_ms;
+        assert_eq!(
+            c.evaluate(&gate(stop_at, true)),
+            Some(LifecycleAction::StopCapture {
+                reason: StopReason::Silence
+            })
+        );
+        assert_eq!(c.state(), LifecycleState::Idle);
+        // Gate stays open well past another full debounce + silence window:
+        // without suppression this would emit a second StartCapture. It must not.
+        assert_eq!(c.evaluate(&gate(stop_at + CFG.start_debounce_ms, true)), None);
+        assert_eq!(c.evaluate(&gate(stop_at + CFG.silence_timeout_ms, true)), None);
+        assert_eq!(c.state(), LifecycleState::Idle);
+        // The call ends (gate closes) → suppression lifts...
+        assert_eq!(c.evaluate(&gate(stop_at + CFG.silence_timeout_ms, false)), None);
+        // ...and a genuinely new call re-arms and records again.
+        c.evaluate(&gate(stop_at + CFG.silence_timeout_ms + 10_000, true));
+        assert_eq!(
+            c.evaluate(&gate(
+                stop_at + CFG.silence_timeout_ms + 10_000 + CFG.start_debounce_ms,
+                true
+            )),
+            Some(LifecycleAction::StartCapture {
+                source_app: Some("Zoom".to_string())
+            })
+        );
+    }
+
+    /// A calendar-end stop likewise fires while the call is still live (the
+    /// meeting ran long past its scheduled end). It must suppress re-arm rather
+    /// than immediately resume recording the same ongoing call.
+    #[test]
+    fn calendar_end_stop_suppresses_rearm_until_gate_closes() {
+        let mut c = LifecycleController::new(CFG);
+        c.evaluate(&gate(0, true));
+        c.evaluate(&gate(CFG.start_debounce_ms, true));
+        assert_eq!(c.state(), LifecycleState::Recording);
+        let end_ms = CFG.start_debounce_ms + 60_000;
+        let stop_at = end_ms + CFG.calendar_end_tail_ms;
+        let mut sig = gate(stop_at, true);
+        sig.calendar_end_ms = Some(end_ms);
+        assert_eq!(
+            c.evaluate(&sig),
+            Some(LifecycleAction::StopCapture {
+                reason: StopReason::CalendarEnd
+            })
+        );
+        // Gate held open: no re-arm while the call continues.
+        let mut later = gate(stop_at + CFG.start_debounce_ms + 1, true);
+        later.calendar_end_ms = Some(end_ms);
+        assert_eq!(c.evaluate(&later), None);
+        assert_eq!(c.state(), LifecycleState::Idle);
     }
 }
