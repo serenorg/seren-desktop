@@ -56,6 +56,20 @@ pub fn search_transcripts(
         .map_err(|err| err.to_string())
 }
 
+/// Local literal-substring search over indexed transcript text. The offline /
+/// unauthenticated fallback for semantic search, and the exact-match path for
+/// names, emails, and phrases.
+#[tauri::command]
+pub fn search_transcripts_like(
+    app: AppHandle,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<TranscriptHit>, String> {
+    let conn = open_transcript_db(&app).map_err(|err| err.to_string())?;
+    transcript_vectors::search_transcript_chunks_like(&conn, &query, limit.unwrap_or(20))
+        .map_err(|err| err.to_string())
+}
+
 /// Meeting ids that already have indexed transcript chunks (for backfill).
 #[tauri::command]
 pub fn indexed_transcript_meeting_ids(app: AppHandle) -> Result<Vec<String>, String> {

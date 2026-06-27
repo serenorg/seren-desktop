@@ -116,15 +116,58 @@ export async function indexMeeting(meetingId: string): Promise<number> {
   }
 }
 
-/** Semantic search across all indexed transcripts. Empty query → no results. */
+export interface TranscriptSearchResult {
+  hits: TranscriptHit[];
+  /** True when semantic search failed (offline/unauthenticated/embed down) and
+   *  only the local exact-match results are shown. */
+  semanticUnavailable: boolean;
+}
+
+/**
+ * Search transcripts, combining semantic (vector) hits with a local exact-text
+ * pass. The exact pass always runs (it works offline / unauthenticated), so an
+ * embedding failure degrades to exact matches rather than an empty result. Never
+ * throws: callers distinguish "no matches" from "semantic unavailable" via the
+ * returned flag.
+ */
 export async function searchTranscripts(
   query: string,
   limit = 20,
-): Promise<TranscriptHit[]> {
+): Promise<TranscriptSearchResult> {
   const trimmed = query.trim();
-  if (!trimmed) return [];
-  const queryEmbedding = await embedText(trimmed);
-  return invoke("search_transcripts", { queryEmbedding, limit });
+  if (!trimmed) return { hits: [], semanticUnavailable: false };
+
+  const exact = await invoke<TranscriptHit[]>("search_transcripts_like", {
+    query: trimmed,
+    limit,
+  }).catch(() => [] as TranscriptHit[]);
+
+  let semantic: TranscriptHit[] = [];
+  let semanticUnavailable = false;
+  try {
+    const queryEmbedding = await embedText(trimmed);
+    semantic = await invoke<TranscriptHit[]>("search_transcripts", {
+      queryEmbedding,
+      limit,
+    });
+  } catch {
+    // Offline / unauthenticated / out of balance / seren-embed down.
+    semanticUnavailable = true;
+  }
+
+  // Semantic hits rank first; append exact hits not already covered.
+  const seen = new Set(
+    semantic.map((hit) => `${hit.meetingId}:${hit.seqStart}`),
+  );
+  const merged = [...semantic];
+  for (const hit of exact) {
+    const key = `${hit.meetingId}:${hit.seqStart}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(hit);
+    }
+  }
+  return { hits: merged.slice(0, limit), semanticUnavailable };
 }
 
 /** Drop a meeting's transcript vectors (best-effort; called on delete). */

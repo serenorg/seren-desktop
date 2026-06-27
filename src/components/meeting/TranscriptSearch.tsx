@@ -13,6 +13,7 @@ export function TranscriptSearch() {
   const [hits, setHits] = createSignal<TranscriptHit[]>([]);
   const [searching, setSearching] = createSignal(false);
   const [searched, setSearched] = createSignal(false);
+  const [semanticUnavailable, setSemanticUnavailable] = createSignal(false);
 
   const run = async () => {
     const trimmed = query().trim();
@@ -22,14 +23,11 @@ export function TranscriptSearch() {
       return;
     }
     setSearching(true);
-    try {
-      setHits(await searchTranscripts(trimmed, 20));
-    } catch {
-      setHits([]);
-    } finally {
-      setSearching(false);
-      setSearched(true);
-    }
+    const result = await searchTranscripts(trimmed, 20);
+    setHits(result.hits);
+    setSemanticUnavailable(result.semanticUnavailable);
+    setSearching(false);
+    setSearched(true);
   };
 
   const meetingTitleFor = (meetingId: string) =>
@@ -68,6 +66,11 @@ export function TranscriptSearch() {
       </Show>
 
       <Show when={searched() && !searching()}>
+        <Show when={semanticUnavailable()}>
+          <div class="mt-2 text-[11px] text-warning">
+            Semantic search unavailable — showing exact matches.
+          </div>
+        </Show>
         <Show
           when={hits().length > 0}
           fallback={
