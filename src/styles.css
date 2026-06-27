@@ -791,8 +791,9 @@ footer.status-bar {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .recording-card-enter {
-    animation: none;
+  .recording-card-enter,
+  .meeting-recording-glow,
+  [class*="animate-[voicePulse"] {
+    animation: none !important;
   }
 }
-
