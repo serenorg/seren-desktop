@@ -1196,6 +1196,19 @@ pub fn meeting_lifecycle_note_manual_stop(
     Ok(())
 }
 
+/// The frontend failed to start an auto-proposed capture — reset the controller
+/// to Idle so it can re-propose (no suppression).
+#[tauri::command]
+pub fn meeting_lifecycle_note_start_failed(
+    lifecycle: State<'_, std::sync::Mutex<LifecycleController>>,
+) -> Result<(), String> {
+    lifecycle
+        .lock()
+        .map_err(|err| err.to_string())?
+        .note_start_failed();
+    Ok(())
+}
+
 // --- Dictation (shares the transcribe + cleanup engines with Meeting Mode) --
 
 /// Transcribe a single dictation chunk; returns "" for silence rather than erroring.

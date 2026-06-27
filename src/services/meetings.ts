@@ -347,6 +347,11 @@ export function meetingLifecycleNoteManualStop(): Promise<void> {
   return invoke("meeting_lifecycle_note_manual_stop");
 }
 
+/** Tell the lifecycle the wiring failed to start a proposed capture. */
+export function meetingLifecycleNoteStartFailed(): Promise<void> {
+  return invoke("meeting_lifecycle_note_start_failed");
+}
+
 /** Pause a live capture without ending it. Resolves false if none is active. */
 export function pauseMeetingCapture(meetingId: string): Promise<boolean> {
   return invoke("pause_meeting_capture", { meetingId });

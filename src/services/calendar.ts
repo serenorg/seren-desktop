@@ -53,16 +53,25 @@ function eventTimeMs(
 }
 
 function videoLinkFor(event: RawGoogleEvent): string | null {
-  if (event.hangoutLink) return event.hangoutLink;
-  const video = event.conferenceData?.entryPoints?.find(
-    (entry) => entry.entryPointType === "video" && entry.uri,
-  );
-  if (video?.uri) return video.uri;
-  // Zoom/Meet links sometimes live only in the location field.
-  const match = (event.location ?? "").match(
-    /https?:\/\/\S*(zoom\.us|meet\.google\.com)\S*/i,
-  );
-  return match ? match[0] : null;
+  const candidate =
+    event.hangoutLink ??
+    event.conferenceData?.entryPoints?.find(
+      (entry) => entry.entryPointType === "video" && entry.uri,
+    )?.uri ??
+    // Zoom/Meet links sometimes live only in the location field; stop at the
+    // first whitespace/delimiter so trailing text isn't captured.
+    (event.location ?? "").match(
+      /https?:\/\/[^\s,;]*(?:zoom\.us|meet\.google\.com)[^\s,;]*/i,
+    )?.[0] ??
+    null;
+  if (!candidate) return null;
+  // Only trust a well-formed https URL (location text comes from third-party invites).
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Normalize a raw Google event, dropping cancelled/non-meeting entries. */
@@ -71,6 +80,9 @@ export function normalizeEvent(event: RawGoogleEvent): CalendarEvent | null {
   if (event.eventType && NON_MEETING_EVENT_TYPES.has(event.eventType)) {
     return null;
   }
+  // All-day events (date, not dateTime) span 24h+ and aren't recordable
+  // meetings — exclude them so they can't hijack the recording match.
+  if (!event.start?.dateTime || !event.end?.dateTime) return null;
   const startMs = eventTimeMs(event.start);
   const endMs = eventTimeMs(event.end);
   if (startMs === null || endMs === null) return null;
@@ -103,25 +115,23 @@ export async function getUpcomingEvents(
     maxResults: "20",
   });
   const url = `${apiBase}/publishers/${PUBLISHER_SLUG}/events?${params.toString()}`;
-  const headers: Record<string, string> = {};
-  if (!shouldUseRustGatewayAuth(url)) {
-    const token = await getToken();
-    if (!token) return [];
-    headers.Authorization = `Bearer ${token}`;
-  }
-
   try {
+    const headers: Record<string, string> = {};
+    if (!shouldUseRustGatewayAuth(url)) {
+      const token = await getToken();
+      if (!token) return [];
+      headers.Authorization = `Bearer ${token}`;
+    }
     const response = await appFetch(url, { method: "GET", headers });
     if (!response.ok) return [];
     const result = await response.json();
-    if (publisherStatus(result) === 200 || publisherStatus(result) === null) {
-      const body = unwrapPublisherBody(result) as { items?: RawGoogleEvent[] };
-      return (body?.items ?? [])
-        .map(normalizeEvent)
-        .filter((event): event is CalendarEvent => event !== null)
-        .sort((a, b) => a.startMs - b.startMs);
-    }
-    return [];
+    const status = publisherStatus(result);
+    if (status !== undefined && (status < 200 || status >= 300)) return [];
+    const body = unwrapPublisherBody(result) as { items?: RawGoogleEvent[] };
+    return (body?.items ?? [])
+      .map(normalizeEvent)
+      .filter((event): event is CalendarEvent => event !== null)
+      .sort((a, b) => a.startMs - b.startMs);
   } catch {
     return [];
   }

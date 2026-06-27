@@ -242,9 +242,10 @@ pub async fn run_capture_stream(
 ) {
     let mut chunker = StreamingChunker::new(cfg);
     while let Some(frame) = frames.recv().await {
-        // Paused: drop the frame before chunking so no segments are produced and
-        // no Them audio is buffered. The chunker treats the absence as a gap
-        // (already handled); resume simply lets frames flow again.
+        // Paused: drop frames at this worker before chunking, so paused audio
+        // produces no segments and isn't buffered. A few frames already queued
+        // upstream when pause flips may still be processed once; the chunker
+        // treats the absence as a gap. Resume simply lets frames flow again.
         if stats.is_paused() {
             continue;
         }

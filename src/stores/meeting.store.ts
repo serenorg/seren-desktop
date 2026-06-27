@@ -29,6 +29,7 @@ import {
   type MeetingTemplate,
   meetingAutodetect,
   meetingLifecycleNoteManualStop,
+  meetingLifecycleNoteStartFailed,
   meetingLifecycleTick,
   pauseMeetingCapture,
   reconcileMeetingSpeakers,
@@ -690,7 +691,7 @@ async function toggleCaptureFromTray(): Promise<void> {
     (meeting) => meeting.status === "capturing",
   );
   if (active) {
-    await stopAndProcess(active);
+    await stopByUser(active);
     return;
   }
   if (isStarting || meetingState.primingRequest) return;
@@ -1099,23 +1100,32 @@ async function pollAutoDetect(): Promise<void> {
   ).catch(() => null);
   if (action?.kind === "start_capture") {
     if (!isCapturing()) {
-      const now = Date.now();
-      const event = matchActiveEvent(cachedUpcomingEvents, now);
-      const meeting = await createMeeting({
-        title: event?.title ?? `Meeting ${formatTime(now)}`,
-        sourceApp: action.sourceApp ?? "Auto-detect",
-        templateId: settingsStore.get("meetingTemplateId"),
-        triggerSource: "auto_mic",
-        calendarEventId: event?.id ?? null,
-        calendarProvider: event ? "google" : null,
-        attendeesJson:
-          event && event.attendees.length > 0
-            ? JSON.stringify(event.attendees)
-            : null,
-      });
-      lifecycleMeetingId = meeting.id;
-      lifecycleEventEndMs = event?.endMs ?? null;
-      await requestCaptureStart(meeting);
+      try {
+        const now = Date.now();
+        const event = matchActiveEvent(cachedUpcomingEvents, now);
+        const meeting = await createMeeting({
+          title: event?.title ?? `Meeting ${formatTime(now)}`,
+          sourceApp: action.sourceApp ?? "Auto-detect",
+          templateId: settingsStore.get("meetingTemplateId"),
+          triggerSource: "auto_mic",
+          calendarEventId: event?.id ?? null,
+          calendarProvider: event ? "google" : null,
+          attendeesJson:
+            event && event.attendees.length > 0
+              ? JSON.stringify(event.attendees)
+              : null,
+        });
+        lifecycleMeetingId = meeting.id;
+        lifecycleEventEndMs = event?.endMs ?? null;
+        await requestCaptureStart(meeting);
+      } catch {
+        // Start failed — reset the controller so it can re-propose, and clear
+        // the dangling id so a wedged "Recording" controller can't block all
+        // future auto-records for this call.
+        lifecycleMeetingId = null;
+        lifecycleEventEndMs = null;
+        await meetingLifecycleNoteStartFailed().catch(() => {});
+      }
     }
     return;
   }
@@ -1217,6 +1227,15 @@ async function startFromCalendarEvent(event: CalendarEvent): Promise<void> {
   await requestCaptureStart(meeting);
 }
 
+// A user-initiated stop. Suppresses lifecycle auto-restart until the call ends
+// (covers manually-started captures too) and clears lifecycle tracking.
+async function stopByUser(meeting: Meeting): Promise<void> {
+  await meetingLifecycleNoteManualStop().catch(() => {});
+  lifecycleMeetingId = null;
+  lifecycleEventEndMs = null;
+  await stopAndProcess(meeting);
+}
+
 export const meetingStore = {
   get state(): MeetingState {
     return meetingState;
@@ -1233,6 +1252,7 @@ export const meetingStore = {
   reconcileStaleCaptures,
   stopCapture,
   stopAndProcess,
+  stopByUser,
   pauseCapture,
   resumeCapture,
   getMeetingSkillCandidates,
