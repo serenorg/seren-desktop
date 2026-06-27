@@ -62,6 +62,14 @@ interface MeetingState {
   captureLevel: number;
   /** True while the active capture is paused (frame ingestion suspended). */
   capturePaused: boolean;
+  /**
+   * Timestamp (ms) the current pause began, or null when not paused. Used to
+   * freeze the displayed elapsed time and exclude paused spans from it, matching
+   * the backend transcript gap.
+   */
+  capturePausedAt: number | null;
+  /** Total paused duration (ms) accumulated across completed pauses this capture. */
+  capturePausedAccumMs: number;
   /** Upcoming calendar events (empty unless Google Calendar is connected). */
   upcomingEvents: CalendarEvent[];
   /**
@@ -97,6 +105,8 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   liveSegments: [],
   captureLevel: 0,
   capturePaused: false,
+  capturePausedAt: null,
+  capturePausedAccumMs: 0,
   upcomingEvents: [],
   micCaptureLost: false,
   isLoading: false,
@@ -542,6 +552,8 @@ async function beginCapture(meeting: Meeting): Promise<void> {
     const started = await startCapture(meeting);
     if (!started) return;
     setMeetingState("capturePaused", false);
+    setMeetingState("capturePausedAt", null);
+    setMeetingState("capturePausedAccumMs", 0);
     await loadMeetings();
     await setActiveMeeting(
       meetingState.meetings.find((item) => item.id === meeting.id) ?? meeting,
@@ -591,14 +603,28 @@ async function cancelPriming(): Promise<void> {
 async function pauseCapture(meetingId: string): Promise<void> {
   if (!isTauriRuntime()) return;
   const ok = await pauseMeetingCapture(meetingId).catch(() => false);
-  if (ok) setMeetingState("capturePaused", true);
+  if (ok) {
+    setMeetingState("capturePaused", true);
+    setMeetingState("capturePausedAt", Date.now());
+  }
 }
 
-// Resume a paused capture: frames flow again.
+// Resume a paused capture: frames flow again. Fold the just-ended pause span into
+// the accumulator so elapsed time continues to exclude paused time.
 async function resumeCapture(meetingId: string): Promise<void> {
   if (!isTauriRuntime()) return;
   const ok = await resumeMeetingCapture(meetingId).catch(() => false);
-  if (ok) setMeetingState("capturePaused", false);
+  if (ok) {
+    const pausedAt = meetingState.capturePausedAt;
+    if (pausedAt !== null) {
+      setMeetingState(
+        "capturePausedAccumMs",
+        meetingState.capturePausedAccumMs + Math.max(0, Date.now() - pausedAt),
+      );
+    }
+    setMeetingState("capturePausedAt", null);
+    setMeetingState("capturePaused", false);
+  }
 }
 
 // At startup, backend capture may still be active even though the renderer
@@ -1239,6 +1265,44 @@ async function stopByUser(meeting: Meeting): Promise<void> {
   await stopAndProcess(meeting);
 }
 
+// Discard an in-progress recording from the floating indicator: stop the live
+// backend capture immediately (frames stop, mic released), then hard-delete the
+// meeting and its transcript/index WITHOUT running the notes pipeline. This is
+// the privacy escape hatch for an unwanted auto-record — deleteMeeting() refuses
+// active captures, so the indicator routes here instead. Suppresses lifecycle
+// auto-restart so the same live call can't instantly re-record.
+async function stopAndDelete(meeting: Meeting): Promise<void> {
+  if (!isTauriRuntime()) return;
+  setMeetingState("error", null);
+  await meetingLifecycleNoteManualStop().catch(() => {});
+  lifecycleMeetingId = null;
+  lifecycleEventEndMs = null;
+  // Stop the live capture first so no further frames land, then delete. We
+  // intentionally bypass stopAndProcess so the discarded audio is never
+  // transcribed or routed to the support pipeline.
+  await stopCapture(meeting.id).catch(() => {});
+  try {
+    await deleteMeetingRecord(meeting.id);
+    void deleteMeetingIndex(meeting.id);
+    const remaining = meetingState.meetings.filter(
+      (item) => item.id !== meeting.id,
+    );
+    setMeetingState("meetings", remaining);
+    if (meetingState.activeMeeting?.id === meeting.id) {
+      await setActiveMeeting(remaining[0] ?? null);
+    }
+    setMeetingState("capturePaused", false);
+    setMeetingState("capturePausedAt", null);
+    setMeetingState("capturePausedAccumMs", 0);
+  } catch (error) {
+    setMeetingState(
+      "error",
+      error instanceof Error ? error.message : "Failed to delete recording",
+    );
+    await loadMeetings();
+  }
+}
+
 // A search hit asks the transcript view to scroll/highlight a segment; the
 // MeetingDetail effect consumes the target once that meeting's segments load.
 function requestSegmentScroll(meetingId: string, seq: number): void {
@@ -1266,6 +1330,7 @@ export const meetingStore = {
   stopCapture,
   stopAndProcess,
   stopByUser,
+  stopAndDelete,
   pauseCapture,
   resumeCapture,
   getMeetingSkillCandidates,
