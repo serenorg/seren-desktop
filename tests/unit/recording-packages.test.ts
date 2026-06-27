@@ -2339,9 +2339,7 @@ describe("recording packages", () => {
     );
     expect(uiSource).toContain(".slice(0, 24)");
     expect(uiSource).toContain("props.onPreviewImageError");
-    expect(uiSource).toContain(
-      'props.browserExtensionReadiness.status !== "unsupported"',
-    );
+    expect(uiSource).toContain("supportedBrowserExtensionReadiness");
     expect(uiSource).toContain("refreshCaptureWindows");
     expect(uiSource).toContain("onRefreshWindows");
     expect(uiSource).toContain("clearWindowPreviewState");

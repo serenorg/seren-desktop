@@ -1680,6 +1680,11 @@ function RecordingDialog(props: RecordingDialogProps) {
     Boolean(props.selectedTarget?.capabilities.includes("microphone"));
   const supportsCamera = () =>
     Boolean(props.selectedTarget?.capabilities.includes("camera"));
+  const supportedBrowserExtensionReadiness = () =>
+    props.selectedTarget?.kind === "browser" &&
+    props.browserExtensionReadiness?.status !== "unsupported"
+      ? props.browserExtensionReadiness
+      : null;
 
   let goalInput: HTMLInputElement | undefined;
   onMount(() => {
@@ -1809,13 +1814,7 @@ function RecordingDialog(props: RecordingDialogProps) {
               />
             </Show>
 
-            <Show
-              when={
-                props.selectedTarget?.kind === "browser" &&
-                props.browserExtensionReadiness &&
-                props.browserExtensionReadiness.status !== "unsupported"
-              }
-            >
+            <Show when={supportedBrowserExtensionReadiness()}>
               {(readiness) => (
                 <BrowserExtensionReadinessStrip
                   readiness={readiness()}
