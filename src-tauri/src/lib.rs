@@ -23,6 +23,7 @@ pub mod commands {
     pub mod provider_runtime;
     pub mod recording;
     pub mod session;
+    pub mod transcript_search;
     pub mod updater;
     pub mod web;
 }
@@ -33,6 +34,7 @@ pub mod services {
     pub mod database;
     pub mod history_sync;
     pub mod indexer;
+    pub mod transcript_vectors;
     pub mod vector_store;
 }
 
@@ -1062,6 +1064,10 @@ pub fn run() {
             commands::indexing::file_needs_reindex,
             commands::indexing::search_codebase,
             commands::indexing::get_embedding_dimension,
+            commands::transcript_search::index_meeting_transcript,
+            commands::transcript_search::search_transcripts,
+            commands::transcript_search::indexed_transcript_meeting_ids,
+            commands::transcript_search::delete_meeting_transcript_index,
             commands::indexing::discover_project_files,
             commands::indexing::chunk_file,
             commands::indexing::estimate_indexing,

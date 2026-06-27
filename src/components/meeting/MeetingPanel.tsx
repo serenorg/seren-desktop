@@ -5,6 +5,7 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { ConfirmDialog } from "@/components/catalog/ConfirmDialog";
 import { MeetingDetail } from "@/components/meeting/MeetingDetail";
 import { MeetingSettings } from "@/components/meeting/MeetingSettings";
+import { TranscriptSearch } from "@/components/meeting/TranscriptSearch";
 import { UpcomingMeetings } from "@/components/meeting/UpcomingMeetings";
 import { createMeetingDurationClock } from "@/lib/meeting-duration-clock";
 import {
@@ -331,6 +332,7 @@ export function MeetingPanel() {
           in-panel banner was a dead spot (only visible with this panel open). */}
 
       <Show when={!showSettings()}>
+        <TranscriptSearch />
         <UpcomingMeetings />
       </Show>
 
