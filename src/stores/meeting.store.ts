@@ -11,6 +11,7 @@ import {
 import { captureSupportError } from "@/lib/support/hook";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import {
+  type CalendarConnectionStatus,
   type CalendarEvent,
   getUpcomingEvents,
   matchActiveEvent,
@@ -73,6 +74,8 @@ interface MeetingState {
   capturePausedAccumMs: number;
   /** Upcoming calendar events (empty unless Google Calendar is connected). */
   upcomingEvents: CalendarEvent[];
+  /** Last calendar fetch outcome, so the peek can show connect/retry states. */
+  upcomingStatus: CalendarConnectionStatus;
   /**
    * True while the native mic is disconnected mid-capture and the backend is
    * re-acquiring it. The panel shows a "microphone disconnected — reconnecting…"
@@ -111,6 +114,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   capturePausedAt: null,
   capturePausedAccumMs: 0,
   upcomingEvents: [],
+  upcomingStatus: "connected",
   micCaptureLost: false,
   isLoading: false,
   error: null,
@@ -1116,8 +1120,10 @@ async function refreshUpcomingEventsIfStale(): Promise<void> {
   const now = Date.now();
   if (now - lastCalendarFetchMs < CALENDAR_REFRESH_MS) return;
   lastCalendarFetchMs = now;
-  cachedUpcomingEvents = await getUpcomingEvents();
-  setMeetingState("upcomingEvents", cachedUpcomingEvents);
+  const result = await getUpcomingEvents();
+  cachedUpcomingEvents = result.events;
+  setMeetingState("upcomingEvents", result.events);
+  setMeetingState("upcomingStatus", result.status);
 }
 
 async function pollAutoDetect(): Promise<void> {
@@ -1156,7 +1162,11 @@ async function pollAutoDetect(): Promise<void> {
     if (!isCapturing()) {
       try {
         const now = Date.now();
-        const event = matchActiveEvent(cachedUpcomingEvents, now);
+        const event = matchActiveEvent(
+          cachedUpcomingEvents,
+          now,
+          action.sourceApp,
+        );
         const meeting = await createMeeting({
           title: event?.title ?? `Meeting ${formatTime(now)}`,
           sourceApp: action.sourceApp ?? "Auto-detect",
