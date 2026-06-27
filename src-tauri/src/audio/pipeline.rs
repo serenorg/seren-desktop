@@ -241,12 +241,44 @@ pub async fn run_capture_stream(
     them_buffer: Option<Arc<StdMutex<Vec<i16>>>>,
 ) {
     let mut chunker = StreamingChunker::new(cfg);
+    // Only the Me stream records pause markers, so a single Gap is persisted per
+    // pause even though Me and Them run as separate workers over the same
+    // seq/sink. A system-audio-only capture (no Me stream) records no marker.
+    let emit_pause_markers = matches!(speaker, Speaker::Me);
+    let mut was_paused = false;
     while let Some(frame) = frames.recv().await {
+        let now_paused = stats.is_paused();
+        if emit_pause_markers && was_paused && !now_paused {
+            // Resume edge: flush any in-progress utterance, then record the paused
+            // span as a Gap at the current audio position so paused/redacted time
+            // leaves a durable transcript marker instead of silently vanishing.
+            for chunk in chunker.finish() {
+                emit_segment(
+                    &meeting_id,
+                    &speaker,
+                    chunk,
+                    transcriber.as_ref(),
+                    retry,
+                    &seq,
+                    sink.as_ref(),
+                    stats.as_ref(),
+                )
+                .await;
+            }
+            sink.segment(pause_gap_segment(
+                &meeting_id,
+                &speaker,
+                &seq,
+                chunker.base_ms() as i64,
+            ))
+            .await;
+        }
+        was_paused = now_paused;
         // Paused: drop frames at this worker before chunking, so paused audio
         // produces no segments and isn't buffered. A few frames already queued
-        // upstream when pause flips may still be processed once; the chunker
-        // treats the absence as a gap. Resume simply lets frames flow again.
-        if stats.is_paused() {
+        // upstream when pause flips may still be processed once. Resume simply
+        // lets frames flow again (and records the gap above).
+        if now_paused {
             continue;
         }
         stats.record_frame(&frame.samples, cfg.rms_threshold);
@@ -279,6 +311,45 @@ pub async fn run_capture_stream(
             stats.as_ref(),
         )
         .await;
+    }
+    // Stopped while paused: record the trailing pause so it isn't lost.
+    if emit_pause_markers && was_paused {
+        sink.segment(pause_gap_segment(
+            &meeting_id,
+            &speaker,
+            &seq,
+            chunker.base_ms() as i64,
+        ))
+        .await;
+    }
+}
+
+/// Text marker carried by a pause Gap segment so the transcript view can show
+/// "Recording paused" rather than the generic transcription-failure "Transcript
+/// gap". Empty-text Gaps remain transcription failures.
+const PAUSE_MARKER_TEXT: &str = "Recording paused";
+
+/// Build a zero-width `Gap` segment anchored at `base_ms` (the current audio
+/// position) marking a pause/resume boundary. Distinguished from a
+/// transcription-failure gap by its non-empty marker text.
+fn pause_gap_segment(
+    meeting_id: &str,
+    speaker: &Speaker,
+    seq: &AtomicI64,
+    base_ms: i64,
+) -> TranscriptSegment {
+    TranscriptSegment {
+        id: Uuid::new_v4().to_string(),
+        meeting_id: meeting_id.to_string(),
+        seq: seq.fetch_add(1, Ordering::SeqCst),
+        speaker: speaker.clone(),
+        text: PAUSE_MARKER_TEXT.to_string(),
+        start_ms: base_ms,
+        end_ms: base_ms,
+        status: SegmentStatus::Gap,
+        speaker_label: None,
+        speaker_source: SpeakerSource::Channel,
+        created_at: now_ms(),
     }
 }
 
@@ -1411,6 +1482,90 @@ mod tests {
         assert_eq!(summary.emitted_gap_count, 1);
         // Empty is genuine silence, not a service outage: no surfaced cause.
         assert_eq!(summary.transcription_error, None);
+    }
+
+    #[tokio::test]
+    async fn pause_then_resume_records_a_gap_marker() {
+        // A pause/resume must leave a durable "Recording paused" Gap between the
+        // before- and after-pause utterances, so paused/redacted time isn't
+        // silently dropped from the transcript.
+        async fn drain() {
+            for _ in 0..8 {
+                tokio::task::yield_now().await;
+            }
+        }
+
+        let (tx, rx) = unbounded_channel();
+        let transcriber: Arc<dyn ChunkTranscriber + Send + Sync> = Arc::new(SequenceTranscriber {
+            texts: Mutex::new(vec!["before".to_string(), "after".to_string()]),
+        });
+        let sink = Arc::new(CollectingSink::default());
+        let collected: Arc<dyn SegmentSink> = sink.clone();
+        let stats = Arc::new(CaptureStreamStats::default());
+
+        let handle = tokio::spawn(run_capture_stream(
+            "m1".to_string(),
+            Speaker::Me,
+            rx,
+            transcriber,
+            Arc::new(AtomicI64::new(0)),
+            test_cfg(),
+            RetryConfig {
+                max_attempts: 1,
+                initial_backoff_ms: 0,
+                max_backoff_ms: 0,
+                retry_on_empty: true,
+            },
+            collected,
+            stats.clone(),
+            None,
+        ));
+
+        // First utterance: speech then silence completes a chunk.
+        tx.send(PcmFrame {
+            samples: pcm(1_000, 80),
+        })
+        .unwrap();
+        tx.send(PcmFrame {
+            samples: pcm(0, 60),
+        })
+        .unwrap();
+        drain().await;
+
+        // Pause: a frame arriving now is dropped, producing no segment.
+        stats.set_paused(true);
+        tx.send(PcmFrame {
+            samples: pcm(1_000, 80),
+        })
+        .unwrap();
+        drain().await;
+
+        // Resume: the next frame trips the resume edge and records the gap, then
+        // the second utterance transcribes.
+        stats.set_paused(false);
+        tx.send(PcmFrame {
+            samples: pcm(1_000, 80),
+        })
+        .unwrap();
+        tx.send(PcmFrame {
+            samples: pcm(0, 60),
+        })
+        .unwrap();
+        drain().await;
+
+        drop(tx);
+        handle.await.unwrap();
+
+        let segments = sink.segments.lock().unwrap();
+        let gaps: Vec<_> = segments
+            .iter()
+            .filter(|s| s.status == SegmentStatus::Gap)
+            .collect();
+        assert_eq!(gaps.len(), 1, "exactly one pause gap recorded");
+        assert_eq!(gaps[0].text, PAUSE_MARKER_TEXT);
+        // The gap sits between the two transcribed utterances.
+        let texts: Vec<&str> = segments.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(texts, vec!["before", PAUSE_MARKER_TEXT, "after"]);
     }
 
     #[test]

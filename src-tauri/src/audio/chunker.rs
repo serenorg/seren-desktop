@@ -145,6 +145,13 @@ impl StreamingChunker {
         self.drain(true)
     }
 
+    /// Absolute ms of audio consumed so far — the position the next chunk starts
+    /// from. Used to anchor a pause-gap marker at the current point in the
+    /// transcript timeline.
+    pub fn base_ms(&self) -> u32 {
+        sample_to_ms(self.base_sample, self.cfg.sample_rate)
+    }
+
     fn drain(&mut self, at_end: bool) -> Vec<Chunk> {
         let base_ms = sample_to_ms(self.base_sample, self.cfg.sample_rate);
         let (mut chunks, consumed) = chunk_stream(&self.buffer, self.cfg, at_end);

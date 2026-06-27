@@ -619,7 +619,9 @@ export function MeetingDetail(props: MeetingDetailProps) {
                       "text-foreground": segment.status === "ok",
                     }}
                   >
-                    {segment.status === "gap" ? "Transcript gap" : segment.text}
+                    {segment.status === "gap"
+                      ? segment.text || "Transcript gap"
+                      : segment.text}
                   </div>
                 </div>
               )}
