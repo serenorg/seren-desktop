@@ -24,6 +24,7 @@ import {
   getMeetingTranscriptText,
   getTranscriptSegments,
   isMeetingCaptureActive,
+  isMeetingCapturePaused,
   listMeetings,
   listMeetingTemplates,
   type Meeting,
@@ -684,6 +685,16 @@ async function reconcileStaleCaptures(): Promise<void> {
         if (active) {
           void setTrayRecording(true);
           reattached = true;
+          // The backend pause flag survives a renderer reload but the store's
+          // pause fields reset to defaults, so the indicator would show a live
+          // "Rec" with a running timer while the backend is actually paused.
+          // Restore pause state from the backend on reattach.
+          const backendPaused = await isMeetingCapturePaused(meeting.id).catch(
+            () => false,
+          );
+          setMeetingState("capturePaused", backendPaused);
+          setMeetingState("capturePausedAt", backendPaused ? Date.now() : null);
+          setMeetingState("capturePausedAccumMs", 0);
           if (!meetingState.activeMeeting) {
             await setActiveMeeting(meeting);
           }

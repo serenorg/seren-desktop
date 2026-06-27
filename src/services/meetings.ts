@@ -209,6 +209,10 @@ export function isMeetingCaptureActive(meetingId: string): Promise<boolean> {
   return invoke("is_meeting_capture_active", { meetingId });
 }
 
+export function isMeetingCapturePaused(meetingId: string): Promise<boolean> {
+  return invoke("is_meeting_capture_paused", { meetingId });
+}
+
 export interface CaptureStopOutcome {
   hadCapture: boolean;
   nativeMicReady: boolean;
