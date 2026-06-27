@@ -825,6 +825,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
       setSlidePanel(null);
       void threadStore.createTerminalThread({ title: "Terminal" });
     });
+    shortcuts.register("global.searchMeetings", () => {
+      setSlidePanel("meetings");
+      meetingStore.requestSearchFocus();
+    });
   });
 
   onCleanup(() => {
@@ -849,6 +853,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     shortcuts.unregister("global.openFiles");
     shortcuts.unregister("global.newChat");
     shortcuts.unregister("global.newTerminal");
+    shortcuts.unregister("global.searchMeetings");
   });
 
   const recordPromptVisible = () =>

@@ -98,6 +98,8 @@ interface MeetingState {
   reviewReadyMeetingId: string | null;
   /** A search hit asked to scroll the transcript to a segment (meeting + seq). */
   searchScrollTarget: { meetingId: string; seq: number } | null;
+  /** Set by the global search shortcut so TranscriptSearch focuses its input. */
+  pendingSearchFocus: boolean;
 }
 
 const [meetingState, setMeetingState] = createStore<MeetingState>({
@@ -117,6 +119,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   primingRequest: null,
   reviewReadyMeetingId: null,
   searchScrollTarget: null,
+  pendingSearchFocus: false,
 });
 
 let transcriptUnlisten: UnlistenFn | null = null;
@@ -1335,6 +1338,17 @@ function clearSegmentScroll(): void {
   setMeetingState("searchScrollTarget", null);
 }
 
+// The global search shortcut requests focus; TranscriptSearch consumes and
+// clears it once its input is focused (works whether the panel was already
+// open or is opening in the same gesture).
+function requestSearchFocus(): void {
+  setMeetingState("pendingSearchFocus", true);
+}
+
+function clearSearchFocus(): void {
+  setMeetingState("pendingSearchFocus", false);
+}
+
 export const meetingStore = {
   get state(): MeetingState {
     return meetingState;
@@ -1372,4 +1386,6 @@ export const meetingStore = {
   acknowledgeReviewReady,
   requestSegmentScroll,
   clearSegmentScroll,
+  requestSearchFocus,
+  clearSearchFocus,
 };
