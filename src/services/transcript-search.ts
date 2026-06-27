@@ -122,6 +122,46 @@ export interface TranscriptSearchResult {
   /** True when semantic search failed (offline/unauthenticated/embed down) and
    *  only the local exact-match results are shown. */
   semanticUnavailable: boolean;
+  semanticUnavailableReason?: string;
+}
+
+function describeSemanticSearchFailure(error: unknown): string {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes("not authenticated") ||
+    lower.includes("unauthorized") ||
+    lower.includes("401")
+  ) {
+    return "sign in is required";
+  }
+  if (
+    lower.includes("402") ||
+    lower.includes("balance") ||
+    lower.includes("payment") ||
+    lower.includes("out of balance") ||
+    lower.includes("insufficient")
+  ) {
+    return "embedding publisher needs payment or balance";
+  }
+  if (lower.includes("404") || lower.includes("not found")) {
+    return "embedding endpoint was not found";
+  }
+  if (
+    lower.includes("timeout") ||
+    lower.includes("network") ||
+    lower.includes("failed to fetch")
+  ) {
+    return "could not reach the embedding publisher";
+  }
+
+  return "embedding request failed";
 }
 
 /**
@@ -145,15 +185,17 @@ export async function searchTranscripts(
 
   let semantic: TranscriptHit[] = [];
   let semanticUnavailable = false;
+  let semanticUnavailableReason: string | undefined;
   try {
     const queryEmbedding = await embedText(trimmed);
     semantic = await invoke<TranscriptHit[]>("search_transcripts", {
       queryEmbedding,
       limit,
     });
-  } catch {
+  } catch (error) {
     // Offline / unauthenticated / out of balance / embedding publisher down.
     semanticUnavailable = true;
+    semanticUnavailableReason = describeSemanticSearchFailure(error);
   }
 
   // Merge semantic + exact, guaranteeing exact matches aren't truncated away
@@ -175,7 +217,7 @@ export async function searchTranscripts(
     if (merged.length >= limit) break;
     merged.push(hit);
   }
-  return { hits: merged, semanticUnavailable };
+  return { hits: merged, semanticUnavailable, semanticUnavailableReason };
 }
 
 /** Drop a meeting's transcript vectors (best-effort; called on delete). */
