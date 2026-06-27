@@ -179,6 +179,16 @@ export function RecordButton(props: RecordButtonProps) {
     activeSession()?.context?.prep.successState.trim() || null;
   const supportsExecutableTrace = () =>
     Boolean(selectedTarget()?.capabilities.includes("action_trace"));
+  const preferredCaptureWindowId = (
+    windows: RecordingCaptureWindow[],
+    currentWindowId: string | null,
+  ) =>
+    windows.find(
+      (window) => window.id === currentWindowId && window.isRecordable,
+    )?.id ??
+    windows.find((window) => window.isFocused && window.isRecordable)?.id ??
+    windows.find((window) => window.isRecordable)?.id ??
+    null;
   const startRequest = (): RecordingStartRequest | null => {
     const target = selectedTarget();
     if (!target) return null;
@@ -303,22 +313,20 @@ export function RecordButton(props: RecordButtonProps) {
       setPermissionPreflight(nextPermissionPreflight);
       setBrowserExtensionReadiness(nextBrowserExtensionReadiness);
       setCaptureWindows(nextCaptureWindows);
-      if (
-        !nextCaptureWindows.some(
-          (window) => window.id === selectedCaptureWindowId(),
-        )
-      ) {
-        setSelectedCaptureWindowId(
-          nextCaptureWindows.find((window) => window.isFocused)?.id ??
-            nextCaptureWindows.find((window) => window.isRecordable)?.id ??
-            null,
-        );
-      }
+      const nextSelectedCaptureWindowId = preferredCaptureWindowId(
+        nextCaptureWindows,
+        selectedCaptureWindowId(),
+      );
+      setSelectedCaptureWindowId(nextSelectedCaptureWindowId);
       const initial = findInitialRecordingTarget(
         nextTargets,
         selectedTargetId(),
       );
+      const nextSelectedTargetId = initial?.id ?? selectedTargetId();
       if (initial) setSelectedTargetId(initial.id);
+      if (nextSelectedTargetId === "window" && nextSelectedCaptureWindowId) {
+        await previewCaptureWindow(nextSelectedCaptureWindowId);
+      }
       setStatus("idle");
     } catch (err) {
       fail(err);
@@ -332,17 +340,15 @@ export function RecordButton(props: RecordButtonProps) {
     try {
       const nextCaptureWindows = await props.adapter.listCaptureWindows();
       setCaptureWindows(nextCaptureWindows);
-      if (
-        !nextCaptureWindows.some(
-          (window) => window.id === selectedCaptureWindowId(),
-        )
-      ) {
-        setSelectedCaptureWindowId(
-          nextCaptureWindows.find((window) => window.isFocused)?.id ??
-            nextCaptureWindows.find((window) => window.isRecordable)?.id ??
-            null,
-        );
+      const nextSelectedCaptureWindowId = preferredCaptureWindowId(
+        nextCaptureWindows,
+        selectedCaptureWindowId(),
+      );
+      setSelectedCaptureWindowId(nextSelectedCaptureWindowId);
+      if (!nextSelectedCaptureWindowId) {
         setWindowPreview(null);
+      } else if (selectedTarget()?.kind === "window") {
+        await previewCaptureWindow(nextSelectedCaptureWindowId);
       }
     } catch (err) {
       setWindowPreviewError(formatRecordingError(err));
@@ -355,6 +361,10 @@ export function RecordButton(props: RecordButtonProps) {
     setSelectedTargetId(targetId);
     setWindowPreview(null);
     setWindowPreviewError(null);
+    const windowId = selectedCaptureWindowId();
+    if (targetId === "window" && windowId) {
+      void previewCaptureWindow(windowId);
+    }
   };
 
   const clearWindowPreviewState = () => {
@@ -383,6 +393,14 @@ export function RecordButton(props: RecordButtonProps) {
     } finally {
       setPreviewingWindowId(null);
     }
+  };
+
+  const handleWindowPreviewImageError = () => {
+    if (!windowPreview()) return;
+    setWindowPreview(null);
+    setWindowPreviewError(
+      "Window preview image could not be loaded. Refresh windows and try again.",
+    );
   };
 
   const start = async () => {
@@ -586,6 +604,7 @@ export function RecordButton(props: RecordButtonProps) {
           onClose={closeDialog}
           onSelectTarget={selectTarget}
           onPreviewWindow={(windowId) => void previewCaptureWindow(windowId)}
+          onPreviewImageError={handleWindowPreviewImageError}
           onRefreshWindows={() => void refreshCaptureWindows()}
           onPrepChange={updatePrep}
           onIncludeMicrophone={setIncludeMicrophone}
@@ -1203,6 +1222,7 @@ interface RecordingDialogProps {
   onClose: () => void;
   onSelectTarget: (targetId: string) => void;
   onPreviewWindow: (windowId: string) => void;
+  onPreviewImageError: () => void;
   onRefreshWindows: () => void;
   onPrepChange: <K extends keyof RecordingPrep>(
     key: K,
@@ -1518,6 +1538,7 @@ function WindowCapturePreviewPanel(props: {
   selectedWindowId: string | null;
   error: string | null;
   onPreviewWindow: (windowId: string) => void;
+  onPreviewImageError: () => void;
   onRefresh: () => void;
   classNames?: RecordingUiClassNames;
 }) {
@@ -1531,7 +1552,7 @@ function WindowCapturePreviewPanel(props: {
         }
         return left.appName.localeCompare(right.appName);
       })
-      .slice(0, 8);
+      .slice(0, 24);
 
   return (
     <div
@@ -1633,6 +1654,7 @@ function WindowCapturePreviewPanel(props: {
                   src={preview().artifactUrl}
                   alt="Window preview"
                   class="max-h-56 w-full object-contain"
+                  onError={props.onPreviewImageError}
                 />
               )}
             </Show>
@@ -1781,6 +1803,7 @@ function RecordingDialog(props: RecordingDialogProps) {
                 selectedWindowId={props.selectedCaptureWindowId}
                 error={props.windowPreviewError}
                 onPreviewWindow={props.onPreviewWindow}
+                onPreviewImageError={props.onPreviewImageError}
                 onRefresh={props.onRefreshWindows}
                 classNames={props.classNames}
               />
@@ -1789,7 +1812,8 @@ function RecordingDialog(props: RecordingDialogProps) {
             <Show
               when={
                 props.selectedTarget?.kind === "browser" &&
-                props.browserExtensionReadiness
+                props.browserExtensionReadiness &&
+                props.browserExtensionReadiness.status !== "unsupported"
               }
             >
               {(readiness) => (

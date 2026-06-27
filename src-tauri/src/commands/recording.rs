@@ -669,13 +669,12 @@ fn recording_targets() -> Vec<RecordingTarget> {
             id: "browser".to_string(),
             kind: RecordingTargetKind::Browser,
             label: "Browser".to_string(),
-            detail: "Capture a browser workflow with the native recorder.".to_string(),
+            detail: "Capture browser workflows with native desktop recording.".to_string(),
             is_available: native_screen_video_available,
             capabilities: browser_capabilities,
             limitations: vec![
-                "Browser recording uses the native video and marker capture fallback.".to_string(),
-                "High-fidelity DOM tracing requires the Seren Workflow Recorder extension."
-                    .to_string(),
+                "Records browser activity with native video, cursor, microphone when available, and explicit markers.".to_string(),
+                "Use App window to pin one browser window, or Full screen for browser workflows that span windows.".to_string(),
             ],
         },
     ]
@@ -1209,6 +1208,33 @@ fn validate_capture_window_selection(
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn is_macos_system_capture_window(app_name: &str) -> bool {
+    const SYSTEM_OWNERS: &[&str] = &[
+        "Control Center",
+        "Dock",
+        "loginwindow",
+        "Notification Center",
+        "SystemUIServer",
+        "Window Server",
+    ];
+    SYSTEM_OWNERS
+        .iter()
+        .any(|owner| app_name.eq_ignore_ascii_case(owner))
+}
+
+fn is_capture_window_candidate(app_name: &str, width: u32, height: u32) -> bool {
+    let app_name = app_name.trim();
+    if app_name.is_empty() || width == 0 || height == 0 {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    if is_macos_system_capture_window(app_name) {
+        return false;
+    }
+    true
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn xcap_window_summary(window: &xcap::Window) -> Option<RecordingCaptureWindow> {
     let id = window.id().ok()?;
@@ -1221,7 +1247,7 @@ fn xcap_window_summary(window: &xcap::Window) -> Option<RecordingCaptureWindow> 
     let height = window.height().ok()?;
     let is_minimized = window.is_minimized().unwrap_or(false);
     let is_focused = window.is_focused().unwrap_or(false);
-    if app_name.is_empty() || width == 0 || height == 0 {
+    if !is_capture_window_candidate(&app_name, width, height) {
         return None;
     }
     Some(RecordingCaptureWindow {
@@ -3615,6 +3641,9 @@ mod tests {
                 .iter()
                 .any(|limitation| limitation.contains("native video"))
         );
+        assert!(!browser.limitations.iter().any(
+            |limitation| limitation.contains("DOM tracing") || limitation.contains("extension")
+        ));
         assert_eq!(
             window
                 .capabilities
@@ -3633,6 +3662,26 @@ mod tests {
                     .iter()
                     .any(|limitation| limitation.contains("frame capture backend"))
             );
+        }
+    }
+
+    #[test]
+    fn capture_window_candidates_exclude_non_app_system_windows() {
+        assert!(!is_capture_window_candidate("", 800, 600));
+        assert!(!is_capture_window_candidate("Preview App", 0, 600));
+        assert!(!is_capture_window_candidate("Preview App", 800, 0));
+        assert!(is_capture_window_candidate("Preview App", 800, 600));
+
+        if cfg!(target_os = "macos") {
+            assert!(!is_capture_window_candidate("Control Center", 120, 60));
+            assert!(!is_capture_window_candidate("loginwindow", 1728, 1117));
+            assert!(!is_capture_window_candidate(
+                "Notification Center",
+                320,
+                240
+            ));
+        } else {
+            assert!(is_capture_window_candidate("Control Center", 120, 60));
         }
     }
 

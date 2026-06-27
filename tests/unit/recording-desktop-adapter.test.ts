@@ -117,18 +117,16 @@ describe("desktopRecordingAdapter", () => {
     });
   });
 
-  it("surfaces browser extension readiness before capture", async () => {
+  it("surfaces browser recording readiness without extension-only UX", async () => {
     const readiness = await desktopRecordingAdapter.checkBrowserExtension?.();
 
     expect(invokeMock).not.toHaveBeenCalled();
     expect(readiness).toEqual({
-      status: "unknown",
-      label: "Browser extension",
+      status: "unsupported",
+      label: "Native browser recording",
       message:
-        "High-fidelity DOM tracing requires the Seren Workflow Recorder extension and an attachable Chromium tab.",
-      canContinueWithFallback: true,
-      bannerDisclosure:
-        'Chrome may show a "Seren is debugging this browser" banner while DOM tracing is active.',
+        "Browser workflows record through Seren Desktop native video capture. Use App window to pin recording to one browser window.",
+      canContinueWithFallback: false,
     });
   });
 

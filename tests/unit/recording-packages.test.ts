@@ -2333,6 +2333,15 @@ describe("recording packages", () => {
     expect(uiSource).toContain("props.adapter.listCaptureWindows");
     expect(uiSource).toContain("props.adapter.captureWindowPreview");
     expect(uiSource).toContain("props.adapter.clearWindowPreviews");
+    expect(uiSource).toContain("preferredCaptureWindowId");
+    expect(uiSource).toContain(
+      "await previewCaptureWindow(nextSelectedCaptureWindowId)",
+    );
+    expect(uiSource).toContain(".slice(0, 24)");
+    expect(uiSource).toContain("props.onPreviewImageError");
+    expect(uiSource).toContain(
+      'props.browserExtensionReadiness.status !== "unsupported"',
+    );
     expect(uiSource).toContain("refreshCaptureWindows");
     expect(uiSource).toContain("onRefreshWindows");
     expect(uiSource).toContain("clearWindowPreviewState");
