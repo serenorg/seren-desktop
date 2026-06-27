@@ -1067,6 +1067,7 @@ pub fn run() {
             commands::indexing::get_embedding_dimension,
             commands::transcript_search::index_meeting_transcript,
             commands::transcript_search::search_transcripts,
+            commands::transcript_search::search_transcripts_like,
             commands::transcript_search::indexed_transcript_meeting_ids,
             commands::transcript_search::delete_meeting_transcript_index,
             commands::indexing::discover_project_files,
