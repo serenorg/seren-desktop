@@ -39,9 +39,20 @@ function speakerLabel(speaker: TranscriptSegment["speaker"]): string {
 export function chunkTranscript(
   segments: TranscriptSegment[],
 ): TranscriptChunk[] {
-  const usable = segments.filter(
-    (segment) => segment.status === "ok" && segment.text.trim().length > 0,
-  );
+  // Order by capture time before windowing. `seq` is assigned when each chunk's
+  // transcription request returns, so the fast Me vs slow Them streams complete
+  // out of order; chunking in seq order would glue together turns that aren't
+  // chronologically adjacent. startMs is the capture offset; seq only breaks
+  // exact-start ties (mirrors sortSegmentsByCapture in the meeting store).
+  const usable = [...segments]
+    .sort((left, right) =>
+      left.startMs !== right.startMs
+        ? left.startMs - right.startMs
+        : left.seq - right.seq,
+    )
+    .filter(
+      (segment) => segment.status === "ok" && segment.text.trim().length > 0,
+    );
   const chunks: TranscriptChunk[] = [];
   let current: TranscriptSegment[] = [];
   let chars = 0;
@@ -123,6 +134,12 @@ export async function deleteMeetingIndex(meetingId: string): Promise<void> {
   );
 }
 
+// Per-meeting failed-attempt counter so a meeting that embeds (a paid
+// seren-embed call) but then fails to persist isn't re-embedded on every
+// loadMeetings(). Bounded retries cap the wasted spend; resets on app restart.
+const MAX_BACKFILL_ATTEMPTS = 3;
+const backfillAttempts = new Map<string, number>();
+
 /** Index any of the given meetings that aren't already indexed (best-effort). */
 export async function backfillTranscriptIndex(
   meetingIds: string[],
@@ -131,8 +148,17 @@ export async function backfillTranscriptIndex(
     await invoke<string[]>("indexed_transcript_meeting_ids").catch(() => []),
   );
   for (const meetingId of meetingIds) {
-    if (!indexed.has(meetingId)) {
-      await indexMeeting(meetingId).catch(() => {});
+    if (indexed.has(meetingId)) continue;
+    if ((backfillAttempts.get(meetingId) ?? 0) >= MAX_BACKFILL_ATTEMPTS)
+      continue;
+    try {
+      await indexMeeting(meetingId);
+      backfillAttempts.delete(meetingId);
+    } catch {
+      backfillAttempts.set(
+        meetingId,
+        (backfillAttempts.get(meetingId) ?? 0) + 1,
+      );
     }
   }
 }

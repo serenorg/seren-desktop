@@ -48,6 +48,7 @@ import { orchestrate } from "@/services/orchestrator";
 import {
   backfillTranscriptIndex,
   deleteMeetingIndex,
+  indexMeeting,
 } from "@/services/transcript-search";
 import { onTrayToggleCapture, setTrayRecording } from "@/services/tray";
 import { conversationStore } from "@/stores/conversation.store";
@@ -240,6 +241,17 @@ async function failMeeting(
   }
 }
 
+// Only meetings whose transcript is finalized are worth indexing. Backfilling a
+// still-capturing/transcribing meeting would index a partial transcript and then
+// permanently skip it (it already has chunks), so search would miss the rest.
+// transcript_ready and later states all have a stable transcript.
+const INDEXABLE_STATUSES: ReadonlySet<Meeting["status"]> = new Set([
+  "transcript_ready",
+  "notes_ready",
+  "agent_running",
+  "done",
+]);
+
 async function loadMeetings(): Promise<void> {
   setMeetingState("isLoading", true);
   setMeetingState("error", null);
@@ -253,7 +265,11 @@ async function loadMeetings(): Promise<void> {
   try {
     const meetings = await listMeetings();
     setMeetingState("meetings", meetings);
-    void backfillTranscriptIndex(meetings.map((item) => item.id));
+    void backfillTranscriptIndex(
+      meetings
+        .filter((item) => INDEXABLE_STATUSES.has(item.status))
+        .map((item) => item.id),
+    );
   } catch (error) {
     setMeetingState(
       "error",
@@ -342,6 +358,12 @@ async function startMeetingEventListeners(): Promise<void> {
 
   statusUnlisten = await listen<Meeting>("meeting://status", (event) => {
     trackReadyTransition(event.payload);
+    // The transcript is finalized at transcript_ready — (re)index it now so the
+    // final content replaces any earlier partial chunks. index_meeting_transcript
+    // does an atomic delete-then-insert, so this is safe to call once per ready.
+    if (event.payload.status === "transcript_ready") {
+      void indexMeeting(event.payload.id).catch(() => {});
+    }
     setMeetingState("meetings", (meetings) => {
       const next = meetings.some((meeting) => meeting.id === event.payload.id)
         ? meetings.map((meeting) =>
