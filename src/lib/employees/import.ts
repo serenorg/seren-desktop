@@ -32,10 +32,15 @@ export function normalizeResourcePath(path: string): string | null {
     const trimmed = part.trim();
     if (!trimmed || trimmed === ".") continue;
     if (trimmed === "..") return null;
-    if (trimmed.startsWith(".") && !(index === 0 && trimmed.toLowerCase() === ".skills")) {
+    if (
+      trimmed.startsWith(".") &&
+      !(index === 0 && trimmed.toLowerCase() === ".skills")
+    ) {
       return null;
     }
-    parts.push(index === 0 && trimmed.toLowerCase() === ".skills" ? ".skills" : trimmed);
+    parts.push(
+      index === 0 && trimmed.toLowerCase() === ".skills" ? ".skills" : trimmed,
+    );
   }
 
   return parts.length > 0 ? parts.join("/") : null;

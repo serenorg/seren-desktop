@@ -14,7 +14,8 @@
       "**/vite.config.ts",
       "!**/.worktrees/**/*",
       "!**/src/api/generated/**/*",
-      "!**/src-tauri/target/**/*"
+      "!**/src-tauri/target/**/*",
+      "!**/mcp-servers/**"
     ]
   },
   "formatter": {
