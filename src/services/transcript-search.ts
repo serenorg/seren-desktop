@@ -155,19 +155,26 @@ export async function searchTranscripts(
     semanticUnavailable = true;
   }
 
-  // Semantic hits rank first; append exact hits not already covered.
-  const seen = new Set(
-    semantic.map((hit) => `${hit.meetingId}:${hit.seqStart}`),
-  );
-  const merged = [...semantic];
-  for (const hit of exact) {
-    const key = `${hit.meetingId}:${hit.seqStart}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      merged.push(hit);
-    }
+  // Merge semantic + exact, guaranteeing exact matches aren't truncated away
+  // when semantic saturates the limit (a literal email/name match must surface
+  // even with 20 fuzzy semantic hits). Reserve up to half the slots for exact
+  // hits, fill the rest with semantic, then top up from whichever side has more.
+  const key = (hit: TranscriptHit) => `${hit.meetingId}:${hit.seqStart}`;
+  const seen = new Set(semantic.map(key));
+  const exactUnique = exact.filter((hit) => !seen.has(key(hit)));
+  const reserve = Math.min(exactUnique.length, Math.floor(limit / 2));
+  const merged = [
+    ...semantic.slice(0, limit - reserve),
+    ...exactUnique.slice(0, reserve),
+  ];
+  for (const hit of [
+    ...semantic.slice(limit - reserve),
+    ...exactUnique.slice(reserve),
+  ]) {
+    if (merged.length >= limit) break;
+    merged.push(hit);
   }
-  return { hits: merged.slice(0, limit), semanticUnavailable };
+  return { hits: merged, semanticUnavailable };
 }
 
 /** Drop a meeting's transcript vectors (best-effort; called on delete). */

@@ -49,7 +49,6 @@ import { orchestrate } from "@/services/orchestrator";
 import {
   backfillTranscriptIndex,
   deleteMeetingIndex,
-  indexMeeting,
 } from "@/services/transcript-search";
 import { onTrayToggleCapture, setTrayRecording } from "@/services/tray";
 import { conversationStore } from "@/stores/conversation.store";
@@ -365,11 +364,12 @@ async function startMeetingEventListeners(): Promise<void> {
 
   statusUnlisten = await listen<Meeting>("meeting://status", (event) => {
     trackReadyTransition(event.payload);
-    // The transcript is finalized at transcript_ready — (re)index it now so the
-    // final content replaces any earlier partial chunks. index_meeting_transcript
-    // does an atomic delete-then-insert, so this is safe to call once per ready.
+    // The transcript is finalized at transcript_ready — index it now. Route
+    // through backfillTranscriptIndex so this shares the bounded retry budget;
+    // a transcript_ready that re-fires (notes-failure fallback, stale-reconcile)
+    // can't trigger unbounded paid re-embeds.
     if (event.payload.status === "transcript_ready") {
-      void indexMeeting(event.payload.id).catch(() => {});
+      void backfillTranscriptIndex([event.payload.id]);
     }
     setMeetingState("meetings", (meetings) => {
       const next = meetings.some((meeting) => meeting.id === event.payload.id)
@@ -1308,15 +1308,22 @@ async function stopByUser(meeting: Meeting): Promise<void> {
 // auto-restart so the same live call can't instantly re-record.
 async function stopAndDelete(meeting: Meeting): Promise<void> {
   if (!isTauriRuntime()) return;
+  // Claim the meeting in the processing guard *synchronously* (before any await)
+  // so a stopAndProcess that hasn't started yet — the lifecycle auto-stop, or a
+  // Stop click — sees the claim and no-ops, never transcribing or publishing the
+  // recording the user is discarding. If stopAndProcess already owns the claim
+  // we still delete (the user asked to); we just don't release its claim here.
+  const ownedByProcessing = processingMeetings.has(meeting.id);
+  processingMeetings.add(meeting.id);
   setMeetingState("error", null);
   await meetingLifecycleNoteManualStop().catch(() => {});
   lifecycleMeetingId = null;
   lifecycleEventEndMs = null;
-  // Stop the live capture first so no further frames land, then delete. We
-  // intentionally bypass stopAndProcess so the discarded audio is never
-  // transcribed or routed to the support pipeline.
-  await stopCapture(meeting.id).catch(() => {});
   try {
+    // Stop the live capture first so no further frames land, then delete. We
+    // intentionally bypass stopAndProcess so the discarded audio is never
+    // transcribed or routed to the support pipeline.
+    await stopCapture(meeting.id).catch(() => {});
     await deleteMeetingRecord(meeting.id);
     void deleteMeetingIndex(meeting.id);
     const remaining = meetingState.meetings.filter(
@@ -1335,6 +1342,8 @@ async function stopAndDelete(meeting: Meeting): Promise<void> {
       error instanceof Error ? error.message : "Failed to delete recording",
     );
     await loadMeetings();
+  } finally {
+    if (!ownedByProcessing) processingMeetings.delete(meeting.id);
   }
 }
 

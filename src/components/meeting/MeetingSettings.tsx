@@ -200,7 +200,7 @@ export function MeetingSettings() {
 
       <section>
         <label class="flex items-center justify-between gap-3 cursor-pointer">
-          <FieldLabel hint="Recognized call apps (Zoom, Meet, Teams, Discord, …) auto-start recording after your one-time audio-permission acknowledgment. Other detected microphone activity only shows a titlebar prompt — you choose whether to record.">
+          <FieldLabel hint="Recognized call apps (Zoom, Meet, Teams, Discord, …) auto-start recording on active microphone input, after your one-time audio-permission acknowledgment. Other active microphone input only shows a titlebar prompt — you choose whether to record.">
             Auto-detect meetings
           </FieldLabel>
           <input
