@@ -11,6 +11,11 @@ import {
 import { captureSupportError } from "@/lib/support/hook";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import {
+  type CalendarEvent,
+  getUpcomingEvents,
+  matchActiveEvent,
+} from "@/services/calendar";
+import {
   type CaptureStopOutcome,
   createMeeting,
   deleteMeeting as deleteMeetingRecord,
@@ -52,6 +57,8 @@ interface MeetingState {
   captureLevel: number;
   /** True while the active capture is paused (frame ingestion suspended). */
   capturePaused: boolean;
+  /** Upcoming calendar events (empty unless Google Calendar is connected). */
+  upcomingEvents: CalendarEvent[];
   /**
    * True while the native mic is disconnected mid-capture and the backend is
    * re-acquiring it. The panel shows a "microphone disconnected — reconnecting…"
@@ -83,6 +90,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   liveSegments: [],
   captureLevel: 0,
   capturePaused: false,
+  upcomingEvents: [],
   micCaptureLost: false,
   isLoading: false,
   error: null,
@@ -115,6 +123,15 @@ const AUTO_DETECT_POLL_MS = 5_000;
 // The meeting the auto-record lifecycle started, if any. Tracked so each tick
 // passes the silence anchor and so a manual stop can suppress auto-restart.
 let lifecycleMeetingId: string | null = null;
+
+// The matched calendar event's end for the active lifecycle recording, fed to
+// the lifecycle tick so it can auto-stop at scheduled-end + tail.
+let lifecycleEventEndMs: number | null = null;
+
+// Upcoming calendar events, refreshed lazily (~5 min) and matched to recordings.
+let cachedUpcomingEvents: CalendarEvent[] = [];
+let lastCalendarFetchMs = 0;
+const CALENDAR_REFRESH_MS = 5 * 60_000;
 
 // Quit guard: confirm-on-quit while a capture is live. `quitConfirmed` lets a
 // second close request pass through even if window.destroy() is unavailable,
@@ -1031,6 +1048,17 @@ function isCapturing(ignoreMeetingId?: string): boolean {
 // Opt-in poll: while "auto-detect meetings" is on and nothing is capturing,
 // probe for active input and surface an arm prompt. The user still presses
 // start; capture is never auto-armed without consent.
+// Refresh the upcoming-events cache at most every CALENDAR_REFRESH_MS. Failures
+// (not connected, offline) leave the cache empty so matching degrades to no
+// calendar metadata. Fire-and-forget so it never blocks a poll.
+async function refreshUpcomingEventsIfStale(): Promise<void> {
+  const now = Date.now();
+  if (now - lastCalendarFetchMs < CALENDAR_REFRESH_MS) return;
+  lastCalendarFetchMs = now;
+  cachedUpcomingEvents = await getUpcomingEvents();
+  setMeetingState("upcomingEvents", cachedUpcomingEvents);
+}
+
 async function pollAutoDetect(): Promise<void> {
   if (!isTauriRuntime()) return;
   if (!settingsStore.get("meetingAutoDetectEnabled")) {
@@ -1039,11 +1067,14 @@ async function pollAutoDetect(): Promise<void> {
     return;
   }
 
+  void refreshUpcomingEventsIfStale();
+
   // A lifecycle recording that stopped outside the lifecycle (user hit Stop, or
   // priming was canceled): suppress auto-restart until the call's mic ends.
   if (lifecycleMeetingId !== null && !isCapturing()) {
     await meetingLifecycleNoteManualStop().catch(() => {});
     lifecycleMeetingId = null;
+    lifecycleEventEndMs = null;
   }
 
   // Don't interfere with a capture the lifecycle didn't start.
@@ -1054,18 +1085,30 @@ async function pollAutoDetect(): Promise<void> {
   }
 
   // 1) Lifecycle auto start/stop for known call apps. A tick failure degrades
-  //    to null so the unrecognized-app prompt below still runs.
-  const action = await meetingLifecycleTick(lifecycleMeetingId).catch(
-    () => null,
-  );
+  //    to null so the unrecognized-app prompt below still runs. The matched
+  //    calendar event's end feeds the tick's scheduled-end auto-stop.
+  const action = await meetingLifecycleTick(
+    lifecycleMeetingId,
+    lifecycleEventEndMs,
+  ).catch(() => null);
   if (action?.kind === "start_capture") {
     if (!isCapturing()) {
+      const now = Date.now();
+      const event = matchActiveEvent(cachedUpcomingEvents, now);
       const meeting = await createMeeting({
-        title: `Meeting ${formatTime(Date.now())}`,
+        title: event?.title ?? `Meeting ${formatTime(now)}`,
         sourceApp: action.sourceApp ?? "Auto-detect",
         templateId: settingsStore.get("meetingTemplateId"),
+        triggerSource: "auto_mic",
+        calendarEventId: event?.id ?? null,
+        calendarProvider: event ? "google" : null,
+        attendeesJson:
+          event && event.attendees.length > 0
+            ? JSON.stringify(event.attendees)
+            : null,
       });
       lifecycleMeetingId = meeting.id;
+      lifecycleEventEndMs = event?.endMs ?? null;
       await requestCaptureStart(meeting);
     }
     return;
@@ -1073,6 +1116,7 @@ async function pollAutoDetect(): Promise<void> {
   if (action?.kind === "stop_capture") {
     const id = lifecycleMeetingId;
     lifecycleMeetingId = null;
+    lifecycleEventEndMs = null;
     const meeting =
       id === null
         ? undefined
