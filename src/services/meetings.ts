@@ -31,6 +31,14 @@ export interface Meeting {
   captureDiagnosticsJson?: string | null;
   /** UUID of the auto-published seren-notes entry, when one exists. */
   serenNotesId?: string | null;
+  /** How the recording started: "manual", "auto_mic", or "calendar". */
+  triggerSource?: string | null;
+  /** Matched calendar event id, when associated with a calendar event. */
+  calendarEventId?: string | null;
+  /** Calendar provider for the matched event (e.g. "google"). */
+  calendarProvider?: string | null;
+  /** JSON array of attendee names/emails from the matched calendar event. */
+  attendeesJson?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -58,6 +66,10 @@ export interface CreateMeetingInput {
   sourceApp?: string | null;
   startedAt?: number | null;
   templateId?: string | null;
+  triggerSource?: string | null;
+  calendarEventId?: string | null;
+  calendarProvider?: string | null;
+  attendeesJson?: string | null;
 }
 
 export interface AppendTranscriptSegmentInput {
@@ -76,6 +88,10 @@ export function createMeeting(input: CreateMeetingInput): Promise<Meeting> {
     sourceApp: input.sourceApp ?? null,
     startedAt: input.startedAt ?? null,
     templateId: input.templateId ?? null,
+    triggerSource: input.triggerSource ?? null,
+    calendarEventId: input.calendarEventId ?? null,
+    calendarProvider: input.calendarProvider ?? null,
+    attendeesJson: input.attendeesJson ?? null,
   });
 }
 

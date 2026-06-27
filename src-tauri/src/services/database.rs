@@ -492,6 +492,10 @@ fn setup_history_sync_schema(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "meetings", "deleted_at", "INTEGER")?;
     add_column_if_missing(conn, "meetings", "synced_at", "INTEGER")?;
     add_column_if_missing(conn, "meetings", "updated_at", "INTEGER")?;
+    add_column_if_missing(conn, "meetings", "trigger_source", "TEXT")?;
+    add_column_if_missing(conn, "meetings", "calendar_event_id", "TEXT")?;
+    add_column_if_missing(conn, "meetings", "calendar_provider", "TEXT")?;
+    add_column_if_missing(conn, "meetings", "attendees_json", "TEXT")?;
     conn.execute(
         "UPDATE meetings
          SET updated_at = created_at

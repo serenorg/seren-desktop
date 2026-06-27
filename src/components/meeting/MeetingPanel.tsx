@@ -5,6 +5,7 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { ConfirmDialog } from "@/components/catalog/ConfirmDialog";
 import { MeetingDetail } from "@/components/meeting/MeetingDetail";
 import { MeetingSettings } from "@/components/meeting/MeetingSettings";
+import { UpcomingMeetings } from "@/components/meeting/UpcomingMeetings";
 import { createMeetingDurationClock } from "@/lib/meeting-duration-clock";
 import {
   formatDuration,
@@ -328,6 +329,10 @@ export function MeetingPanel() {
 
       {/* Auto-detect now surfaces app-wide via RecordPrompt (titlebar); the
           in-panel banner was a dead spot (only visible with this panel open). */}
+
+      <Show when={!showSettings()}>
+        <UpcomingMeetings />
+      </Show>
 
       <Show when={!showSettings()} fallback={<MeetingSettings />}>
         <div class="min-h-0 flex-1 grid grid-cols-[220px_1fr]">
