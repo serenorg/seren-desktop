@@ -1,5 +1,5 @@
 // ABOUTME: Critical-path coverage for calendar event normalization + recording match.
-// ABOUTME: Pure logic that decides a recording's title/attendees and pre-arm window.
+// ABOUTME: Pure logic that decides a recording's title/attendees from a calendar event.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -95,5 +95,42 @@ describe("calendar matchActiveEvent", () => {
       endMs: now + 90 * 60_000,
     });
     expect(matchActiveEvent([later], now)).toBeNull();
+  });
+
+  it("disambiguates overlapping events by the detected app's link domain", () => {
+    const now = 1_000_000;
+    const zoom = event({
+      id: "zoom",
+      startMs: now - 1000,
+      endMs: now + 60_000,
+      meetingUrl: "https://us02web.zoom.us/j/123",
+    });
+    const meet = event({
+      id: "meet",
+      startMs: now - 1000,
+      endMs: now + 60_000,
+      meetingUrl: "https://meet.google.com/abc",
+    });
+    expect(matchActiveEvent([zoom, meet], now, "Zoom")?.id).toBe("zoom");
+    expect(matchActiveEvent([zoom, meet], now, "Google Chrome")).toBeNull();
+  });
+
+  it("returns null for multiple linked overlapping events with no app match", () => {
+    const now = 1_000_000;
+    const a = event({
+      id: "a",
+      startMs: now - 1000,
+      endMs: now + 60_000,
+      meetingUrl: "https://us02web.zoom.us/j/1",
+    });
+    const b = event({
+      id: "b",
+      startMs: now - 1000,
+      endMs: now + 60_000,
+      meetingUrl: "https://meet.google.com/2",
+    });
+    // No detected app → cannot tell which call is live → leave unmatched
+    // rather than stamp the wrong attendees.
+    expect(matchActiveEvent([a, b], now)).toBeNull();
   });
 });
