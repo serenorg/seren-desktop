@@ -1886,8 +1886,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               Semantic Code Indexing
             </h3>
             <p class="m-0 mb-6 text-muted-foreground leading-normal">
-              Enable semantic search across your codebase. Powered by
-              SerenEmbed.
+              Enable semantic search across your codebase. Powered by OpenAI
+              Embeddings.
             </p>
 
             <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
@@ -1909,8 +1909,9 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   </span>
                   <span class="text-[0.8rem] text-muted-foreground">
                     Index your codebase for AI-powered semantic code search.
-                    Embeddings are generated via SerenEmbed (paid via
-                    SerenBucks) and stored locally for instant retrieval.
+                    Embeddings are generated via the OpenAI Embeddings publisher
+                    (charged through Seren Gateway) and stored locally for
+                    instant retrieval.
                   </span>
                 </span>
               </label>
@@ -1923,7 +1924,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               <ul class="m-0 pl-4 text-[0.8rem] text-muted-foreground space-y-2">
                 <li>Your code is chunked at function/class boundaries</li>
                 <li>
-                  SerenEmbed generates embeddings (charged via SerenBucks)
+                  OpenAI Embeddings generates vectors through Seren Gateway
                 </li>
                 <li>
                   Embeddings are stored locally in sqlite-vec for instant search

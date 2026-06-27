@@ -104,7 +104,7 @@ export async function runIndexing(
         const batch = chunked.chunks.slice(j, j + BATCH_SIZE);
         const texts = batch.map((c: { content: string }) => c.content);
 
-        // Generate embeddings via SerenEmbed
+        // Generate embeddings via the shared publisher client.
         const embeddingResponse = await embedTexts(texts);
         totalTokens += embeddingResponse.usage.total_tokens;
 
@@ -204,7 +204,7 @@ export async function reindexFile(
       return;
     }
 
-    // Generate embeddings
+    // Generate embeddings via the shared publisher client.
     const texts = chunked.chunks.map((c: FileChunk) => c.content);
     const embeddingResponse = await embedTexts(texts);
 
