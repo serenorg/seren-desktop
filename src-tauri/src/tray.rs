@@ -14,6 +14,12 @@ const MENU_SHOW_HIDE: &str = "tray-show-hide";
 const TOOLTIP_IDLE: &str = "Seren";
 const TOOLTIP_RECORDING: &str = "Seren — recording";
 
+// Menu-bar text badge shown beside the tray icon while recording. On macOS this
+// keeps the recording state visible even when the Seren window is hidden or
+// behind another app — the "never silent" guarantee. A no-op where tray titles
+// aren't supported (Windows/Linux fall back to the tooltip).
+const TRAY_TITLE_RECORDING: &str = "● Rec";
+
 /// Build the system tray and attach its menu. Called once from `setup`. The
 /// tray reflects capture state through its tooltip (idle vs recording) so we
 /// never reference a second icon asset that might not ship.
@@ -79,9 +85,10 @@ fn toggle_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
-/// Flip the tray tooltip to reflect whether a meeting capture is recording.
-/// Called from the frontend on capture start/stop so the tray tracks the
-/// live state. No-op if the tray hasn't been created (e.g. mobile).
+/// Reflect whether a meeting capture is recording in the tray: tooltip plus a
+/// menu-bar title badge so the state is visible even when the window is hidden
+/// or backgrounded. Called from the frontend on capture start/stop. No-op if the
+/// tray hasn't been created (e.g. mobile).
 #[tauri::command]
 pub fn set_tray_recording(app: tauri::AppHandle, recording: bool) {
     if let Some(tray) = app.tray_by_id(&TrayIconId::new(TRAY_ID)) {
@@ -91,5 +98,10 @@ pub fn set_tray_recording(app: tauri::AppHandle, recording: bool) {
             TOOLTIP_IDLE
         };
         let _ = tray.set_tooltip(Some(tooltip));
+        if recording {
+            let _ = tray.set_title(Some(TRAY_TITLE_RECORDING));
+        } else {
+            let _ = tray.set_title(None::<&str>);
+        }
     }
 }
