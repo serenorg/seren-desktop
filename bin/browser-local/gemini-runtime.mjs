@@ -505,16 +505,45 @@ function handleSessionUpdate(emit, session, params) {
  * Handle an inbound ACP request from the agent. Today the only one we expect
  * is `session/request_permission` for tool approvals.
  */
+function buildPermissionRequestEvent(session, requestId, params) {
+  return {
+    sessionId: session.id,
+    requestId,
+    toolCall: {
+      name: params.toolCall?.name ?? "tool",
+      title: params.toolCall?.title ?? "Tool call",
+      input: params.toolCall ?? {},
+    },
+    options: (params.options ?? []).map((opt) => ({
+      optionId: opt.optionId,
+      label: opt.name ?? opt.optionId,
+      description: opt.kind,
+    })),
+  };
+}
+
+function listPendingPermissions(session) {
+  return Array.from(session.pendingPermissions.values()).map(
+    (pending) => pending.permissionRequest,
+  );
+}
+
 function handleAgentRequest(emit, session, payload) {
   if (payload.method === "session/request_permission") {
     const params = payload.params ?? {};
     const requestId = randomUUID();
+    const permissionRequest = buildPermissionRequestEvent(
+      session,
+      requestId,
+      params,
+    );
     session.pendingPermissions.set(requestId, {
       requestId,
       jsonRpcId: payload.id,
       // Store the ACP option list verbatim so respondToPermission can map
       // a desktop optionId back to the agent's expected outcome.
       options: Array.isArray(params.options) ? params.options : [],
+      permissionRequest,
     });
 
     // Auto-approve in YOLO / auto_edit mode for non-destructive tools.
@@ -536,20 +565,7 @@ function handleAgentRequest(emit, session, payload) {
       return;
     }
 
-    emit("provider://permission-request", {
-      sessionId: session.id,
-      requestId,
-      toolCall: {
-        name: params.toolCall?.name ?? "tool",
-        title: params.toolCall?.title ?? "Tool call",
-        input: params.toolCall ?? {},
-      },
-      options: (params.options ?? []).map((opt) => ({
-        optionId: opt.optionId,
-        label: opt.name ?? opt.optionId,
-        description: opt.kind,
-      })),
-    });
+    emit("provider://permission-request", permissionRequest);
     return;
   }
 
@@ -950,6 +966,9 @@ export function createGeminiRuntime({ emit, runtimeMode = "provider-runtime" }) 
       createdAt: session.createdAt,
       agentSessionId: session.agentSessionId,
       timeoutSecs: session.timeoutSecs,
+      currentModelId: session.currentModelId,
+      currentModeId: session.currentModeId,
+      pendingPermissions: listPendingPermissions(session),
     }));
   }
 

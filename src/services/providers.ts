@@ -68,6 +68,12 @@ export interface AgentSessionInfo {
    * runtime could not report a PID. #2313
    */
   pid?: number | null;
+  /** Runtime-authoritative model id for a live session. */
+  currentModelId?: string | null;
+  /** Runtime-authoritative permission/mode id for a live session. */
+  currentModeId?: string | null;
+  /** Pending approval dialogs that must be re-surfaced after UI re-attach. */
+  pendingPermissions?: PermissionRequestEvent[];
 }
 
 export interface AgentInfo {

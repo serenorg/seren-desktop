@@ -1231,6 +1231,45 @@ async function runChatCompletion({ session, tools, signal, onContent }) {
   }
 }
 
+function buildPermissionOptions() {
+  return [
+    {
+      optionId: "accept",
+      label: "Approve once",
+      description: "Run this tool call one time.",
+    },
+    {
+      optionId: "acceptForSession",
+      label: "Approve session",
+      description: "Allow this tool for the rest of the session.",
+    },
+    {
+      optionId: "decline",
+      label: "Deny",
+      description: "Return a denial to the model.",
+    },
+  ];
+}
+
+function buildPermissionRequestEvent(session, requestId, toolCall, args) {
+  return {
+    sessionId: session.id,
+    requestId,
+    toolCall: {
+      name: toolCall.function.name,
+      title: toolCall.function.name,
+      input: args,
+    },
+    options: buildPermissionOptions(),
+  };
+}
+
+function listPendingPermissions(session) {
+  return Array.from(session.pendingPermissions.values()).map(
+    (pending) => pending.permissionRequest,
+  );
+}
+
 async function requestPermission(session, toolCall, args) {
   if (
     session.currentModeId === "auto" ||
@@ -1240,36 +1279,21 @@ async function requestPermission(session, toolCall, args) {
   }
 
   const requestId = randomUUID();
+  const permissionRequest = buildPermissionRequestEvent(
+    session,
+    requestId,
+    toolCall,
+    args,
+  );
   const permission = new Promise((resolve) => {
-    session.pendingPermissions.set(requestId, { resolve, toolName: toolCall.function.name });
+    session.pendingPermissions.set(requestId, {
+      resolve,
+      toolName: toolCall.function.name,
+      permissionRequest,
+    });
   });
 
-  session.emit("provider://permission-request", {
-    sessionId: session.id,
-    requestId,
-    toolCall: {
-      name: toolCall.function.name,
-      title: toolCall.function.name,
-      input: args,
-    },
-    options: [
-      {
-        optionId: "accept",
-        label: "Approve once",
-        description: "Run this tool call one time.",
-      },
-      {
-        optionId: "acceptForSession",
-        label: "Approve session",
-        description: "Allow this tool for the rest of the session.",
-      },
-      {
-        optionId: "decline",
-        label: "Deny",
-        description: "Return a denial to the model.",
-      },
-    ],
-  });
+  session.emit("provider://permission-request", permissionRequest);
 
   return permission;
 }
@@ -1597,6 +1621,9 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
       createdAt: session.createdAt,
       agentSessionId: session.agentSessionId,
       timeoutSecs: session.timeoutSecs,
+      currentModelId: session.currentModelId,
+      currentModeId: session.currentModeId,
+      pendingPermissions: listPendingPermissions(session),
     }));
   }
 
