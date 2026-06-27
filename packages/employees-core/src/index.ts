@@ -55,6 +55,7 @@ export interface EmployeeRunInvocationLike {
 
 export interface EmployeeInteractiveSessionLike {
   session_id: string;
+  conversation_id?: string | null;
 }
 
 export interface EmployeeInteractiveSessionMessageLike {
@@ -242,6 +243,8 @@ export interface RunOptions extends RunCallbacks {
   extraPayload?: Record<string, unknown>;
   interactiveSessionId?: string | null;
   createInteractiveSession?: boolean;
+  clientMessageId?: string;
+  idempotencyKey?: string;
   startupRetryDelayMs?: number;
   startupRetryTimeoutMs?: number;
 }
@@ -263,6 +266,7 @@ export interface EmployeeRuntimeApi {
   }): Promise<string | null>;
   createSession?(input: {
     deploymentId: string;
+    conversationId?: string;
     signal: AbortSignal;
   }): Promise<EmployeeInteractiveSessionLike>;
   postSessionMessage?(input: {
@@ -603,12 +607,13 @@ async function startEmployeeRun(
     signal,
   );
   if (sessionId && api.postSessionMessage) {
+    const clientMessageId = options.clientMessageId ?? createClientMessageId();
     const posted = await api.postSessionMessage({
       deploymentId,
       sessionId,
       content: message,
-      clientMessageId: createClientMessageId(),
-      idempotencyKey: createClientMessageId(),
+      clientMessageId,
+      idempotencyKey: options.idempotencyKey ?? clientMessageId,
       metadata: options.extraPayload ?? null,
       signal,
     });
@@ -648,7 +653,13 @@ async function resolveInteractiveSessionId(
     if (sessionId) return sessionId;
   }
   if (options.createInteractiveSession && api.createSession) {
-    return (await api.createSession({ deploymentId, signal })).session_id;
+    return (
+      await api.createSession({
+        deploymentId,
+        conversationId: options.conversationId,
+        signal,
+      })
+    ).session_id;
   }
   return null;
 }

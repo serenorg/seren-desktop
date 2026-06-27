@@ -991,6 +991,8 @@ async function runEmployeeTurn(
   try {
     const result = await runEmployeeMessage(deploymentId, prompt, {
       conversationId,
+      clientMessageId: stream.messageId,
+      idempotencyKey: stream.messageId,
       onStartupWait: () => {
         markProgress();
         if (startupNoticeShown) return;

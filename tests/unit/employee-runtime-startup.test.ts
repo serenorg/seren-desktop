@@ -163,9 +163,11 @@ describe("runEmployeeMessage startup retry", () => {
           },
           session: {
             closed_at: null,
+            conversation_id: "thread_1",
             created_at: "2026-06-26T00:00:00Z",
             deployment_id: "dep_1",
             idle_expires_at: futureIso(),
+            interactive_session_id: "0a5a4cb1-dade-467f-9f98-3a934ff25414",
             organization_id: "org_1",
             session_id: "0a5a4cb1-dade-467f-9f98-3a934ff25414",
             status: "open",
@@ -216,6 +218,76 @@ describe("runEmployeeMessage startup retry", () => {
     );
   });
 
+  it("creates a live session attached to the requested conversation", async () => {
+    vi.mocked(serenCloudGetInteractiveSession).mockResolvedValueOnce({
+      data: undefined,
+      error: { message: "not found" },
+      response: new Response(null, { status: 404 }),
+    } as never);
+    vi.mocked(serenCloudCreateInteractiveSession).mockResolvedValueOnce({
+      data: {
+        data: {
+          conversation_id: "thread_1",
+          expires_at: "2026-06-26T00:01:00Z",
+          idle_expires_at: futureIso(),
+          session_id: "11111111-1111-4111-8111-111111111111",
+          status: "open",
+          stream_url: "",
+          ws_ticket: "ticket_1",
+          ws_url: "",
+        },
+      },
+      error: undefined,
+      response: new Response(null, { status: 201 }),
+    } as never);
+    vi.mocked(serenCloudPostInteractiveSessionMessage).mockResolvedValueOnce({
+      data: {
+        data: {
+          client_message_id: "client_1",
+          duplicate: false,
+          message_id: "message_1",
+          run: {
+            result: { text: "Created session reply." },
+            run_id: null,
+            status: "completed",
+          },
+          session_id: "11111111-1111-4111-8111-111111111111",
+          stream_url: "",
+        },
+      },
+      error: undefined,
+      response: new Response(null, { status: 202 }),
+    } as never);
+
+    const result = await runEmployeeMessage("dep_1", "hello", {
+      conversationId: "thread_1",
+      createInteractiveSession: true,
+      clientMessageId: "local-message-1",
+      idempotencyKey: "idem-local-message-1",
+    });
+
+    expect(result.text).toBe("Created session reply.");
+    expect(serenCloudCreateInteractiveSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: { id: "dep_1" },
+        body: { conversation_id: "thread_1" },
+      }),
+    );
+    expect(serenCloudPostInteractiveSessionMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: {
+          id: "dep_1",
+          session_id: "11111111-1111-4111-8111-111111111111",
+        },
+        body: expect.objectContaining({
+          client_message_id: "local-message-1",
+          content: "hello",
+          idempotency_key: "idem-local-message-1",
+        }),
+      }),
+    );
+  });
+
   it("falls back to one-shot runs when the resolved cloud session is closed", async () => {
     vi.mocked(serenCloudGetInteractiveSession).mockResolvedValueOnce({
       data: {
@@ -231,9 +303,11 @@ describe("runEmployeeMessage startup retry", () => {
           session: {
             closed_at: "2026-06-26T00:30:00Z",
             close_reason: "idle_timeout",
+            conversation_id: "0a5a4cb1-dade-467f-9f98-3a934ff25414",
             created_at: "2026-06-26T00:00:00Z",
             deployment_id: "dep_1",
             idle_expires_at: futureIso(),
+            interactive_session_id: null,
             organization_id: "org_1",
             session_id: "0a5a4cb1-dade-467f-9f98-3a934ff25414",
             status: "closed",
@@ -289,9 +363,11 @@ describe("runEmployeeMessage startup retry", () => {
           },
           session: {
             closed_at: null,
+            conversation_id: "0a5a4cb1-dade-467f-9f98-3a934ff25414",
             created_at: "2026-06-26T00:00:00Z",
             deployment_id: "dep_1",
             idle_expires_at: pastIso(),
+            interactive_session_id: null,
             organization_id: "org_1",
             session_id: "0a5a4cb1-dade-467f-9f98-3a934ff25414",
             status: "open",

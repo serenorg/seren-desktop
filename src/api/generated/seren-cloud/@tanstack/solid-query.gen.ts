@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { type Options, serenCloudApprovalInboxDecide, serenCloudApprovalInboxList, serenCloudCompleteDeploymentBundleUpload, serenCloudCreateDeploymentBundle, serenCloudCreateEnvironment, serenCloudCreateEvalSet, serenCloudCreateInteractiveSession, serenCloudDelete, serenCloudDeleteEnvironment, serenCloudDeploy, serenCloudDeploymentAudit, serenCloudDeploymentPendingApprovals, serenCloudDeploymentRun, serenCloudDeploymentRunArtifacts, serenCloudDeploymentRunCancel, serenCloudDeploymentRunEvals, serenCloudDeploymentRunEvents, serenCloudDeploymentRunPendingApprovals, serenCloudDeploymentRuns, serenCloudDeploymentRunStreamClose, serenCloudEvalCases, serenCloudEvalRunResults, serenCloudEvalRuns, serenCloudEvalSets, serenCloudGetAuditEntry, serenCloudGetDeployment, serenCloudGetDeploymentBundle, serenCloudGetDeploymentBundleDownload, serenCloudGetDeploymentEvalDrift, serenCloudGetDeploymentSpend, serenCloudGetEnvironment, serenCloudGetEvalCase, serenCloudGetEvalCaseResult, serenCloudGetEvalRun, serenCloudGetEvalSet, serenCloudGetInteractiveSession, serenCloudInteractiveSessions, serenCloudListAuditEntries, serenCloudListDeployments, serenCloudListEnvironments, serenCloudPendingApprovals, serenCloudPostInteractiveSessionMessage, serenCloudPromoteRunToEvalCase, serenCloudRun, serenCloudRunArtifacts, serenCloudRunAudit, serenCloudRunCancel, serenCloudRunCompare, serenCloudRunDetail, serenCloudRunEvals, serenCloudRunEvalSet, serenCloudRunEvents, serenCloudRunPendingApprovals, serenCloudRuns, serenCloudRunStreamClose, serenCloudStart, serenCloudStop, serenCloudUpdateConfig, serenCloudUpdateEnvironment, serenCloudUpdateEvalSet, serenCloudVerifyAudit } from '../sdk.gen';
-import type { SerenCloudApprovalInboxDecideData, SerenCloudApprovalInboxDecideResponse, SerenCloudApprovalInboxListData, SerenCloudApprovalInboxListResponse, SerenCloudCompleteDeploymentBundleUploadData, SerenCloudCompleteDeploymentBundleUploadResponse, SerenCloudCreateDeploymentBundleData, SerenCloudCreateDeploymentBundleResponse, SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentResponse, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetResponse, SerenCloudCreateInteractiveSessionData, SerenCloudCreateInteractiveSessionResponse, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentResponse, SerenCloudDeleteResponse, SerenCloudDeployData, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditResponse, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsResponse, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsResponse, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelResponse, SerenCloudDeploymentRunData, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsResponse, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsResponse, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsResponse, SerenCloudDeploymentRunResponse, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsResponse, SerenCloudDeploymentRunStreamCloseData, SerenCloudDeploymentRunStreamCloseResponse, SerenCloudDeployResponse, SerenCloudEvalCasesData, SerenCloudEvalCasesResponse, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsResponse, SerenCloudEvalRunsData, SerenCloudEvalRunsResponse, SerenCloudEvalSetsData, SerenCloudEvalSetsResponse, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryResponse, SerenCloudGetDeploymentBundleData, SerenCloudGetDeploymentBundleDownloadData, SerenCloudGetDeploymentBundleDownloadResponse, SerenCloudGetDeploymentBundleResponse, SerenCloudGetDeploymentData, SerenCloudGetDeploymentEvalDriftData, SerenCloudGetDeploymentEvalDriftResponse, SerenCloudGetDeploymentResponse, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendResponse, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentResponse, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseResponse, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultResponse, SerenCloudGetEvalRunData, SerenCloudGetEvalRunResponse, SerenCloudGetEvalSetData, SerenCloudGetEvalSetResponse, SerenCloudGetInteractiveSessionData, SerenCloudGetInteractiveSessionResponse, SerenCloudInteractiveSessionsData, SerenCloudInteractiveSessionsResponse, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponse, SerenCloudListDeploymentsData, SerenCloudListDeploymentsResponse, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponse, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsResponse, SerenCloudPostInteractiveSessionMessageData, SerenCloudPostInteractiveSessionMessageResponse, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseResponse, SerenCloudRunArtifactsData, SerenCloudRunArtifactsResponse, SerenCloudRunAuditData, SerenCloudRunAuditResponse, SerenCloudRunCancelData, SerenCloudRunCancelResponse, SerenCloudRunCompareData, SerenCloudRunCompareResponse, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailResponse, SerenCloudRunEvalsData, SerenCloudRunEvalSetData, SerenCloudRunEvalSetResponse, SerenCloudRunEvalsResponse, SerenCloudRunEventsData, SerenCloudRunEventsResponse, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsResponse, SerenCloudRunResponse, SerenCloudRunsData, SerenCloudRunsResponse, SerenCloudRunStreamCloseData, SerenCloudRunStreamCloseResponse, SerenCloudStartData, SerenCloudStartResponse, SerenCloudStopData, SerenCloudStopResponse, SerenCloudUpdateConfigData, SerenCloudUpdateConfigResponse, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentResponse, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetResponse, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponse } from '../types.gen';
+import { type Options, serenCloudApprovalInboxDecide, serenCloudApprovalInboxList, serenCloudCompleteDeploymentBundleUpload, serenCloudCreateDeploymentBundle, serenCloudCreateEnvironment, serenCloudCreateEvalSet, serenCloudCreateInteractiveSession, serenCloudDelete, serenCloudDeleteEnvironment, serenCloudDeploy, serenCloudDeploymentAudit, serenCloudDeploymentPendingApprovals, serenCloudDeploymentRun, serenCloudDeploymentRunArtifacts, serenCloudDeploymentRunCancel, serenCloudDeploymentRunEvals, serenCloudDeploymentRunEvents, serenCloudDeploymentRunPendingApprovals, serenCloudDeploymentRuns, serenCloudDeploymentRunStreamClose, serenCloudEvalCases, serenCloudEvalRunResults, serenCloudEvalRuns, serenCloudEvalSets, serenCloudGetAuditEntry, serenCloudGetConversationMessages, serenCloudGetDeployment, serenCloudGetDeploymentBundle, serenCloudGetDeploymentBundleDownload, serenCloudGetDeploymentEvalDrift, serenCloudGetDeploymentSpend, serenCloudGetEnvironment, serenCloudGetEvalCase, serenCloudGetEvalCaseResult, serenCloudGetEvalRun, serenCloudGetEvalSet, serenCloudGetInteractiveSession, serenCloudInteractiveSessions, serenCloudListAuditEntries, serenCloudListConversations, serenCloudListDeployments, serenCloudListEnvironments, serenCloudPendingApprovals, serenCloudPostInteractiveSessionMessage, serenCloudPromoteRunToEvalCase, serenCloudRun, serenCloudRunArtifacts, serenCloudRunAudit, serenCloudRunCancel, serenCloudRunCompare, serenCloudRunDetail, serenCloudRunEvals, serenCloudRunEvalSet, serenCloudRunEvents, serenCloudRunPendingApprovals, serenCloudRuns, serenCloudRunStreamClose, serenCloudStart, serenCloudStop, serenCloudUpdateConfig, serenCloudUpdateEnvironment, serenCloudUpdateEvalSet, serenCloudVerifyAudit } from '../sdk.gen';
+import type { SerenCloudApprovalInboxDecideData, SerenCloudApprovalInboxDecideResponse, SerenCloudApprovalInboxListData, SerenCloudApprovalInboxListResponse, SerenCloudCompleteDeploymentBundleUploadData, SerenCloudCompleteDeploymentBundleUploadResponse, SerenCloudCreateDeploymentBundleData, SerenCloudCreateDeploymentBundleResponse, SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentResponse, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetResponse, SerenCloudCreateInteractiveSessionData, SerenCloudCreateInteractiveSessionResponse, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentResponse, SerenCloudDeleteResponse, SerenCloudDeployData, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditResponse, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsResponse, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsResponse, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelResponse, SerenCloudDeploymentRunData, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsResponse, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsResponse, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsResponse, SerenCloudDeploymentRunResponse, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsResponse, SerenCloudDeploymentRunStreamCloseData, SerenCloudDeploymentRunStreamCloseResponse, SerenCloudDeployResponse, SerenCloudEvalCasesData, SerenCloudEvalCasesResponse, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsResponse, SerenCloudEvalRunsData, SerenCloudEvalRunsResponse, SerenCloudEvalSetsData, SerenCloudEvalSetsResponse, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryResponse, SerenCloudGetConversationMessagesData, SerenCloudGetConversationMessagesResponse, SerenCloudGetDeploymentBundleData, SerenCloudGetDeploymentBundleDownloadData, SerenCloudGetDeploymentBundleDownloadResponse, SerenCloudGetDeploymentBundleResponse, SerenCloudGetDeploymentData, SerenCloudGetDeploymentEvalDriftData, SerenCloudGetDeploymentEvalDriftResponse, SerenCloudGetDeploymentResponse, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendResponse, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentResponse, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseResponse, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultResponse, SerenCloudGetEvalRunData, SerenCloudGetEvalRunResponse, SerenCloudGetEvalSetData, SerenCloudGetEvalSetResponse, SerenCloudGetInteractiveSessionData, SerenCloudGetInteractiveSessionResponse, SerenCloudInteractiveSessionsData, SerenCloudInteractiveSessionsResponse, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponse, SerenCloudListConversationsData, SerenCloudListConversationsResponse, SerenCloudListDeploymentsData, SerenCloudListDeploymentsResponse, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponse, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsResponse, SerenCloudPostInteractiveSessionMessageData, SerenCloudPostInteractiveSessionMessageResponse, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseResponse, SerenCloudRunArtifactsData, SerenCloudRunArtifactsResponse, SerenCloudRunAuditData, SerenCloudRunAuditResponse, SerenCloudRunCancelData, SerenCloudRunCancelResponse, SerenCloudRunCompareData, SerenCloudRunCompareResponse, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailResponse, SerenCloudRunEvalsData, SerenCloudRunEvalSetData, SerenCloudRunEvalSetResponse, SerenCloudRunEvalsResponse, SerenCloudRunEventsData, SerenCloudRunEventsResponse, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsResponse, SerenCloudRunResponse, SerenCloudRunsData, SerenCloudRunsResponse, SerenCloudRunStreamCloseData, SerenCloudRunStreamCloseResponse, SerenCloudStartData, SerenCloudStartResponse, SerenCloudStopData, SerenCloudStopResponse, SerenCloudUpdateConfigData, SerenCloudUpdateConfigResponse, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentResponse, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetResponse, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -335,6 +335,90 @@ export const serenCloudDeploymentAuditInfiniteOptions = (options: Options<SerenC
             return data;
         },
         queryKey: serenCloudDeploymentAuditInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
+
+export const serenCloudListConversationsQueryKey = (options: Options<SerenCloudListConversationsData>) => createQueryKey('serenCloudListConversations', options);
+
+export const serenCloudListConversationsOptions = (options: Options<SerenCloudListConversationsData>) => queryOptions<SerenCloudListConversationsResponse, DefaultError, SerenCloudListConversationsResponse, ReturnType<typeof serenCloudListConversationsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await serenCloudListConversations({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: serenCloudListConversationsQueryKey(options)
+});
+
+export const serenCloudListConversationsInfiniteQueryKey = (options: Options<SerenCloudListConversationsData>): QueryKey<Options<SerenCloudListConversationsData>> => createQueryKey('serenCloudListConversations', options, true);
+
+export const serenCloudListConversationsInfiniteOptions = (options: Options<SerenCloudListConversationsData>) => {
+    const opts = infiniteQueryOptions<SerenCloudListConversationsResponse, DefaultError, InfiniteData<SerenCloudListConversationsResponse>, QueryKey<Options<SerenCloudListConversationsData>>, string | Pick<QueryKey<Options<SerenCloudListConversationsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudListConversationsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    cursor: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudListConversations({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudListConversationsInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
+
+export const serenCloudGetConversationMessagesQueryKey = (options: Options<SerenCloudGetConversationMessagesData>) => createQueryKey('serenCloudGetConversationMessages', options);
+
+export const serenCloudGetConversationMessagesOptions = (options: Options<SerenCloudGetConversationMessagesData>) => queryOptions<SerenCloudGetConversationMessagesResponse, DefaultError, SerenCloudGetConversationMessagesResponse, ReturnType<typeof serenCloudGetConversationMessagesQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await serenCloudGetConversationMessages({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: serenCloudGetConversationMessagesQueryKey(options)
+});
+
+export const serenCloudGetConversationMessagesInfiniteQueryKey = (options: Options<SerenCloudGetConversationMessagesData>): QueryKey<Options<SerenCloudGetConversationMessagesData>> => createQueryKey('serenCloudGetConversationMessages', options, true);
+
+export const serenCloudGetConversationMessagesInfiniteOptions = (options: Options<SerenCloudGetConversationMessagesData>) => {
+    const opts = infiniteQueryOptions<SerenCloudGetConversationMessagesResponse, DefaultError, InfiniteData<SerenCloudGetConversationMessagesResponse>, QueryKey<Options<SerenCloudGetConversationMessagesData>>, string | Pick<QueryKey<Options<SerenCloudGetConversationMessagesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<SerenCloudGetConversationMessagesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    cursor: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await serenCloudGetConversationMessages({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: serenCloudGetConversationMessagesInfiniteQueryKey(options)
     });
     return opts as Omit<typeof opts, 'initialData'>;
 };

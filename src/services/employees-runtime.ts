@@ -55,12 +55,12 @@ const employeeRunManager = createEmployeeRunManager(
       if (isInactiveSession(detail)) {
         return null;
       }
-      return detail.session_id;
+      return detail.interactive_session_id ?? null;
     },
-    async createSession({ deploymentId, signal }) {
+    async createSession({ deploymentId, conversationId, signal }) {
       const created = await serenCloudCreateInteractiveSession({
         path: { id: deploymentId },
-        body: null,
+        body: conversationId ? { conversation_id: conversationId } : null,
         signal,
         throwOnError: false,
       });
@@ -176,6 +176,8 @@ export const runEmployeeMessage = employeeRunManager.runEmployeeMessage;
 type SessionStatusDetail = {
   closed_at?: string | null;
   idle_expires_at: string;
+  interactive_session_id?: string | null;
+  session_id: string;
   status: string;
 };
 

@@ -241,6 +241,48 @@ export type AuditEntry = {
     sequence_number: number;
 };
 
+export type CloudConversationListResponse = {
+    conversations: Array<CloudConversationResponse>;
+    next_cursor?: string | null;
+};
+
+export type CloudConversationMessageResponse = {
+    client_message_id?: string | null;
+    content: string;
+    conversation_id: string;
+    created_at: string;
+    deleted_at?: string | null;
+    deployment_id: string;
+    edited_at?: string | null;
+    events?: unknown;
+    message_id: string;
+    organization_id: string;
+    role: string;
+    run?: null | CloudDeploymentRunEvent;
+    source: string;
+    updated_at: string;
+    user_id: string;
+};
+
+export type CloudConversationMessagesResponse = {
+    messages: Array<CloudConversationMessageResponse>;
+    next_cursor?: string | null;
+};
+
+export type CloudConversationResponse = {
+    conversation_id: string;
+    created_at: string;
+    deployment_id: string;
+    id: string;
+    last_activity_at: string;
+    last_source?: string | null;
+    message_count: number;
+    organization_id: string;
+    title?: string | null;
+    updated_at: string;
+    user_id: string;
+};
+
 /**
  * Generic status payload used by cloud deployment lifecycle endpoints.
  */
@@ -821,9 +863,11 @@ export type CloudInteractiveSessionMessageResponse = {
 
 export type CloudInteractiveSessionOpenRequest = {
     actor_label_hint?: string | null;
+    conversation_id?: string | null;
 };
 
 export type CloudInteractiveSessionOpenResponse = {
+    conversation_id: string;
     expires_at: string;
     idle_expires_at: string;
     session_id: string;
@@ -836,9 +880,11 @@ export type CloudInteractiveSessionOpenResponse = {
 export type CloudInteractiveSessionResponse = {
     close_reason?: string | null;
     closed_at?: string | null;
+    conversation_id: string;
     created_at: string;
     deployment_id: string;
     idle_expires_at: string;
+    interactive_session_id?: string | null;
     last_message_at?: string | null;
     organization_id: string;
     session_id: string;
@@ -1477,6 +1523,162 @@ export type DataResponseAuditEntry = {
         prev_hash: string;
         publisher_id?: string | null;
         sequence_number: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudConversationListResponse = {
+    data: {
+        conversations: Array<CloudConversationResponse>;
+        next_cursor?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudConversationMessagesResponse = {
+    data: {
+        messages: Array<CloudConversationMessageResponse>;
+        next_cursor?: string | null;
     };
     pagination?: null | PaginationMeta;
 };
@@ -2990,6 +3192,7 @@ export type DataResponseCloudInteractiveSessionMessageResponse = {
  */
 export type DataResponseCloudInteractiveSessionOpenResponse = {
     data: {
+        conversation_id: string;
         expires_at: string;
         idle_expires_at: string;
         session_id: string;
@@ -5468,6 +5671,88 @@ export type SerenCloudDeploymentAuditResponses = {
 
 export type SerenCloudDeploymentAuditResponse = SerenCloudDeploymentAuditResponses[keyof SerenCloudDeploymentAuditResponses];
 
+export type SerenCloudListConversationsData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: {
+        /**
+         * Max conversations to return (default: 50, max: 100)
+         */
+        limit?: number;
+        /**
+         * Opaque keyset cursor returned by the previous page
+         */
+        cursor?: string;
+    };
+    url: '/deployments/{id}/conversations';
+};
+
+export type SerenCloudListConversationsErrors = {
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudListConversationsResponses = {
+    /**
+     * Conversations listed
+     */
+    200: DataResponseCloudConversationListResponse;
+};
+
+export type SerenCloudListConversationsResponse = SerenCloudListConversationsResponses[keyof SerenCloudListConversationsResponses];
+
+export type SerenCloudGetConversationMessagesData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+        /**
+         * Durable conversation ID
+         */
+        conversation_id: string;
+    };
+    query?: {
+        /**
+         * Max messages to return (default: 50, max: 200)
+         */
+        limit?: number;
+        /**
+         * Opaque keyset cursor returned by the previous page
+         */
+        cursor?: string;
+        /**
+         * Message page order, asc or desc (default: desc)
+         */
+        order?: string;
+    };
+    url: '/deployments/{id}/conversations/{conversation_id}/messages';
+};
+
+export type SerenCloudGetConversationMessagesErrors = {
+    /**
+     * Conversation not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudGetConversationMessagesResponses = {
+    /**
+     * Conversation messages listed
+     */
+    200: DataResponseCloudConversationMessagesResponse;
+};
+
+export type SerenCloudGetConversationMessagesResponse = SerenCloudGetConversationMessagesResponses[keyof SerenCloudGetConversationMessagesResponses];
+
 export type SerenCloudGetDeploymentBundleDownloadData = {
     body?: never;
     path: {
@@ -6085,7 +6370,7 @@ export type SerenCloudGetInteractiveSessionData = {
          */
         id: string;
         /**
-         * Interactive session ID
+         * Interactive session ID or durable conversation ID
          */
         session_id: string;
     };

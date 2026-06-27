@@ -12,11 +12,11 @@ import {
   truncateTitle,
 } from "@seren/employees-core";
 import {
+  type CloudConversationMessageResponse,
+  type CloudConversationResponse,
   type CloudDeploymentRunEvent,
-  type CloudInteractiveSessionDetailResponse,
-  type CloudInteractiveSessionHistoryMessage,
-  serenCloudGetInteractiveSession,
-  serenCloudInteractiveSessions,
+  serenCloudGetConversationMessages,
+  serenCloudListConversations,
 } from "@/api/seren-cloud";
 import { formatApiError } from "@/lib/api-errors";
 import type { EmployeeSummary } from "@/lib/employees/types";
@@ -32,8 +32,7 @@ import { conversationStore } from "@/stores/conversation.store";
 import { serializeMetadata, type UnifiedMessage } from "@/types/conversation";
 
 const CLOUD_HISTORY_LIMIT = 100;
-const CLOUD_MESSAGE_PREVIEW_LIMIT = 1;
-const CLOUD_MESSAGE_PAGE_SIZE = 500;
+const CLOUD_MESSAGE_PAGE_SIZE = 200;
 const EXISTING_MESSAGE_LIMIT = 2_000;
 const DEFAULT_EMPLOYEE_MODEL = "arcee-ai/trinity-large-thinking";
 
@@ -52,29 +51,34 @@ interface SyncCloudEmployeeChatsOptions {
   shouldContinue?: () => boolean;
 }
 
+interface CloudEmployeeConversation {
+  conversation: CloudConversationResponse;
+  messages: CloudConversationMessageResponse[];
+}
+
 export async function syncCloudEmployeeChats(
   employees: EmployeeSummary[],
   options: SyncCloudEmployeeChatsOptions = {},
 ): Promise<void> {
   if (employees.length === 0) return;
   if (options.shouldContinue?.() === false) return;
-  const sessions = await fetchEmployeeSessions(employees);
+  const conversations = await fetchEmployeeConversations(employees);
   if (options.shouldContinue?.() === false) return;
 
-  for (const session of sessions) {
+  for (const item of conversations) {
     if (options.shouldContinue?.() === false) return;
     const employee = employees.find(
-      (candidate) => candidate.id === session.session.deployment_id,
+      (candidate) => candidate.id === item.conversation.deployment_id,
     );
     if (!employee) continue;
-    const conversationId = session.session.session_id;
-    await ensureEmployeeConversation(conversationId, employee, session);
+    const conversationId = item.conversation.conversation_id;
+    await ensureEmployeeConversation(conversationId, employee, item);
     if (options.shouldContinue?.() === false) return;
     const existingMessages = await existingMessageMap(conversationId);
     if (options.shouldContinue?.() === false) return;
-    for (const message of session.messages) {
+    for (const message of item.messages) {
       if (options.shouldContinue?.() === false) return;
-      await persistSessionMessage(
+      await persistConversationMessage(
         conversationId,
         employee,
         message,
@@ -85,20 +89,19 @@ export async function syncCloudEmployeeChats(
   }
 }
 
-async function fetchEmployeeSessions(
+async function fetchEmployeeConversations(
   employees: EmployeeSummary[],
-): Promise<CloudInteractiveSessionDetailResponse[]> {
+): Promise<CloudEmployeeConversation[]> {
   const results = await Promise.all(
     employees.map(async (employee) => {
-      const sessions: CloudInteractiveSessionDetailResponse[] = [];
-      let offset = 0;
+      const conversations: CloudEmployeeConversation[] = [];
+      let cursor: string | undefined;
       while (true) {
-        const { data, error, response } = await serenCloudInteractiveSessions({
+        const { data, error, response } = await serenCloudListConversations({
           path: { id: employee.id },
           query: {
             limit: CLOUD_HISTORY_LIMIT,
-            offset,
-            message_limit: CLOUD_MESSAGE_PREVIEW_LIMIT,
+            cursor,
           },
           throwOnError: false,
         });
@@ -111,70 +114,69 @@ async function fetchEmployeeSessions(
             )}`,
           );
         }
-        const page = data?.data ?? [];
-        for (const session of page) {
-          sessions.push(await fetchEmployeeSessionMessages(employee, session));
+        const page = data?.data.conversations ?? [];
+        for (const conversation of page) {
+          conversations.push({
+            conversation,
+            messages: await fetchEmployeeConversationMessages(
+              employee,
+              conversation,
+            ),
+          });
         }
-        const pagination = data?.pagination;
-        if (!pagination?.has_more) break;
-        const nextOffset = pagination.offset + pagination.count;
-        if (nextOffset <= offset) break;
-        offset = nextOffset;
+        const nextCursor = data?.data.next_cursor ?? undefined;
+        if (!nextCursor || nextCursor === cursor) break;
+        cursor = nextCursor;
       }
-      return sessions;
+      return conversations;
     }),
   );
   return results.flat();
 }
 
-async function fetchEmployeeSessionMessages(
+async function fetchEmployeeConversationMessages(
   employee: EmployeeSummary,
-  session: CloudInteractiveSessionDetailResponse,
-): Promise<CloudInteractiveSessionDetailResponse> {
-  const messages: CloudInteractiveSessionHistoryMessage[] = [];
-  let messagePagination = session.message_pagination;
-  for (let offset = 0; ; ) {
-    const { data, error, response } = await serenCloudGetInteractiveSession({
+  conversation: CloudConversationResponse,
+): Promise<CloudConversationMessageResponse[]> {
+  const messages: CloudConversationMessageResponse[] = [];
+  let cursor: string | undefined;
+  while (true) {
+    const { data, error, response } = await serenCloudGetConversationMessages({
       path: {
         id: employee.id,
-        session_id: session.session.session_id,
+        conversation_id: conversation.conversation_id,
       },
       query: {
-        message_limit: CLOUD_MESSAGE_PAGE_SIZE,
-        message_offset: offset,
-        message_order: "asc",
+        limit: CLOUD_MESSAGE_PAGE_SIZE,
+        cursor,
+        // Desktop bulk sync persists messages in chronological order.
+        order: "asc",
       },
       throwOnError: false,
     });
     if (error) {
       throw new Error(
-        `Failed to sync employee chat ${session.session.session_id} for ${employee.name}: ${formatApiError(
+        `Failed to sync employee chat ${conversation.conversation_id} for ${employee.name}: ${formatApiError(
           error,
           response,
           "",
         )}`,
       );
     }
-    const detail = data?.data;
-    if (!detail) break;
-    messages.push(...detail.messages);
-    messagePagination = detail.message_pagination;
-    if (!messagePagination.has_more) break;
-    const nextOffset = messagePagination.offset + messagePagination.count;
-    if (nextOffset <= offset) break;
-    offset = nextOffset;
+    const page = data?.data;
+    if (!page) break;
+    messages.push(...page.messages);
+    const nextCursor = page.next_cursor ?? undefined;
+    if (!nextCursor || nextCursor === cursor) break;
+    cursor = nextCursor;
   }
-  return {
-    ...session,
-    messages,
-    message_pagination: messagePagination,
-  };
+  return messages;
 }
 
 async function ensureEmployeeConversation(
   conversationId: string,
   employee: EmployeeSummary,
-  session: CloudInteractiveSessionDetailResponse,
+  item: CloudEmployeeConversation,
 ): Promise<void> {
   if (conversationStore.conversations.some((c) => c.id === conversationId)) {
     return;
@@ -182,7 +184,7 @@ async function ensureEmployeeConversation(
   try {
     const row = await createConversation(
       conversationId,
-      titleFromSession(session, employee),
+      titleFromConversation(item, employee),
       DEFAULT_EMPLOYEE_MODEL,
       "seren",
       undefined,
@@ -198,19 +200,31 @@ async function ensureEmployeeConversation(
   }
 }
 
-async function persistSessionMessage(
+async function persistConversationMessage(
   conversationId: string,
   employee: EmployeeSummary,
-  message: CloudInteractiveSessionHistoryMessage,
+  message: CloudConversationMessageResponse,
   existingMessages: Map<string, StoredMessage>,
 ): Promise<void> {
-  if (!message.run) {
+  if (message.run && message.role === "assistant") return;
+  if (message.run) {
+    for (const draft of buildRunMessageDrafts(
+      conversationId,
+      employee,
+      message.run,
+      message.content,
+    )) {
+      await saveCloudMessage(draft, existingMessages);
+    }
+    return;
+  }
+  if (message.content.trim()) {
     await saveCloudMessage(
       draftFromUnifiedMessage(
         {
-          id: `${message.message_id}:user`,
-          type: "user",
-          role: "user",
+          id: message.message_id,
+          type: message.role === "user" ? "user" : "assistant",
+          role: message.role === "user" ? "user" : "assistant",
           content: message.content,
           timestamp: timestampMs(message.created_at),
           status: "complete",
@@ -224,15 +238,6 @@ async function persistSessionMessage(
       ),
       existingMessages,
     );
-    return;
-  }
-  for (const draft of buildRunMessageDrafts(
-    conversationId,
-    employee,
-    message.run,
-    message.content,
-  )) {
-    await saveCloudMessage(draft, existingMessages);
   }
 }
 
@@ -299,13 +304,12 @@ function isDuplicateWriteError(error: unknown): boolean {
   return message.toLowerCase().includes("unique");
 }
 
-function titleFromSession(
-  session: CloudInteractiveSessionDetailResponse,
+function titleFromConversation(
+  item: CloudEmployeeConversation,
   employee: EmployeeSummary,
 ): string {
-  const firstMessage = session.messages.find((message) =>
-    message.content.trim(),
-  );
+  if (item.conversation.title?.trim()) return item.conversation.title;
+  const firstMessage = item.messages.find((message) => message.content.trim());
   if (firstMessage) return truncateTitle(firstMessage.content);
   return employee.name;
 }
