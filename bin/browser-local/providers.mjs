@@ -694,6 +694,36 @@ function buildApprovalToolCall(method, params) {
   };
 }
 
+function buildApprovalOptions() {
+  return [
+    {
+      optionId: "accept",
+      label: "Approve once",
+      description: "Allow this action one time.",
+    },
+    {
+      optionId: "acceptForSession",
+      label: "Approve session",
+      description: "Allow similar actions for the rest of this session.",
+    },
+  ];
+}
+
+function buildPermissionRequestEvent(session, requestId, method, params) {
+  return {
+    sessionId: session.id,
+    requestId,
+    toolCall: buildApprovalToolCall(method, params),
+    options: buildApprovalOptions(),
+  };
+}
+
+function listPendingPermissions(session) {
+  return Array.from(session.pendingPermissions.values()).map(
+    (pending) => pending.permissionRequest,
+  );
+}
+
 function isRecoverableResumeError(message) {
   const lower = String(message).toLowerCase();
   return (
@@ -786,10 +816,17 @@ function handleResponse(session, payload) {
 function handleServerRequest(emit, session, payload) {
   const method = payload.method;
   const requestId = randomUUID();
+  const params = payload.params ?? {};
   const pendingPermission = {
     requestId,
     jsonRpcId: payload.id,
     method,
+    permissionRequest: buildPermissionRequestEvent(
+      session,
+      requestId,
+      method,
+      params,
+    ),
   };
 
   if (session.currentModeId === "auto") {
@@ -805,23 +842,7 @@ function handleServerRequest(emit, session, payload) {
 
   session.pendingPermissions.set(requestId, pendingPermission);
 
-  emit("provider://permission-request", {
-    sessionId: session.id,
-    requestId,
-    toolCall: buildApprovalToolCall(method, payload.params ?? {}),
-    options: [
-      {
-        optionId: "accept",
-        label: "Approve once",
-        description: "Allow this action one time.",
-      },
-      {
-        optionId: "acceptForSession",
-        label: "Approve session",
-        description: "Allow similar actions for the rest of this session.",
-      },
-    ],
-  });
+  emit("provider://permission-request", pendingPermission.permissionRequest);
 }
 
 function handleNotification(emit, session, payload) {
@@ -1504,6 +1525,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         createdAt: session.createdAt,
         agentSessionId: session.agentSessionId,
         timeoutSecs: session.timeoutSecs,
+        currentModelId: session.currentModelId,
+        currentModeId: session.currentModeId,
+        pendingPermissions: listPendingPermissions(session),
       })),
       ...(await claudeRuntime.listSessions()),
       ...(await geminiRuntime.listSessions()),

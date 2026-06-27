@@ -748,6 +748,51 @@ function buildPermissionToolCall(toolName, input, toolUseId) {
   };
 }
 
+function buildPermissionOptions() {
+  return [
+    {
+      optionId: "allow_once",
+      label: "Allow once",
+      description: "Allow this action one time.",
+    },
+    {
+      optionId: "allow_session",
+      label: "Allow session",
+      description: "Allow this tool for the rest of this session.",
+    },
+    {
+      optionId: "deny",
+      label: "Reject",
+      description: "Reject this action but keep the turn running.",
+    },
+    {
+      optionId: "cancel",
+      label: "Cancel turn",
+      description: "Reject this action and interrupt the turn.",
+    },
+  ];
+}
+
+function buildPermissionRequestEvent(session, requestId, pending) {
+  return {
+    sessionId: session.id,
+    requestId,
+    toolCall: buildPermissionToolCall(
+      pending.toolName,
+      pending.toolInput,
+      pending.toolUseId,
+    ),
+    options: buildPermissionOptions(),
+  };
+}
+
+function listPendingPermissions(session) {
+  return Array.from(session.pendingPermissions.entries()).map(
+    ([requestId, pending]) =>
+      buildPermissionRequestEvent(session, requestId, pending),
+  );
+}
+
 function stringifyToolResultContent(content) {
   if (typeof content === "string") {
     return content;
@@ -1596,33 +1641,14 @@ function handlePermissionRequest(emit, session, payload) {
     toolUseId,
   });
 
-  emit("provider://permission-request", {
-    sessionId: session.id,
-    requestId,
-    toolCall: buildPermissionToolCall(toolName, toolInput, toolUseId),
-    options: [
-      {
-        optionId: "allow_once",
-        label: "Allow once",
-        description: "Allow this action one time.",
-      },
-      {
-        optionId: "allow_session",
-        label: "Allow session",
-        description: "Allow this tool for the rest of this session.",
-      },
-      {
-        optionId: "deny",
-        label: "Reject",
-        description: "Reject this action but keep the turn running.",
-      },
-      {
-        optionId: "cancel",
-        label: "Cancel turn",
-        description: "Reject this action and interrupt the turn.",
-      },
-    ],
-  });
+  emit(
+    "provider://permission-request",
+    buildPermissionRequestEvent(session, requestId, {
+      toolName,
+      toolInput,
+      toolUseId,
+    }),
+  );
 }
 
 function handleSystemMessage(emit, session, payload) {
@@ -2476,6 +2502,9 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       createdAt: session.createdAt,
       agentSessionId: session.agentSessionId,
       timeoutSecs: session.timeoutSecs,
+      currentModelId: session.currentModelId,
+      currentModeId: session.currentModeId,
+      pendingPermissions: listPendingPermissions(session),
     }));
   }
 

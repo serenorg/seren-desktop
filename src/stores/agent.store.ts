@@ -52,6 +52,10 @@ const sessionReadyPromises = new Map<
  *  when selectThread fires twice before the first spawn registers the session. */
 const spawningConversations = new Set<string>();
 
+/** Conversations with a live-session re-attach currently in progress.
+ *  Multiple resume triggers can race before the adopted session reaches state. */
+const reattachingConversations = new Map<string, Promise<boolean>>();
+
 /** Session IDs that have been explicitly terminated. The global event subscriber
  *  drops events for these IDs to prevent stale errors from dead sessions leaking
  *  into new/live sessions. Cleared when the global subscriber is torn down. */
@@ -3591,132 +3595,175 @@ export const agentStore = {
    * usable live session and the caller should fall back to terminate+respawn.
    */
   async reattachLiveSession(conversationId: string): Promise<boolean> {
-    let liveInfo: AgentSessionInfo | undefined;
-    try {
-      const backendSessions = await providerService.listSessions();
-      liveInfo = backendSessions.find((s) => s.id === conversationId);
-    } catch (err) {
-      // If we cannot ask the runtime, fall back to the normal respawn path.
-      console.warn(
-        "[AgentStore] listSessions during re-attach probe failed:",
-        err,
-      );
-      return false;
+    const inFlight = reattachingConversations.get(conversationId);
+    if (inFlight) {
+      return inFlight;
     }
 
-    // No live session, or one the runtime already considers dead — let the
-    // caller terminate (a no-op for a missing session) and respawn fresh.
-    if (
-      !liveInfo ||
-      liveInfo.status === "terminated" ||
-      liveInfo.status === "error"
-    ) {
-      return false;
-    }
-
-    // Paired (claude-codex) threads are a two-inner-session structure whose
-    // PairedStatus the runtime's flat session info does not expose. Re-adopting
-    // one would drop the paired UI, so leave paired resumes on the existing
-    // terminate+respawn path (which reseeds pairedConfig from metadata). #2672
-    if (liveInfo.agentType === "claude-codex") {
-      return false;
-    }
-
-    // Restore the persisted transcript for display. The live session already
-    // streamed these turns while connected; re-attach renders them from SQLite
-    // rather than replaying from a fresh process.
-    const restored = await loadPersistedAgentHistory(conversationId);
-    let convo: DbAgentConversation | null = null;
-    try {
-      convo = await getAgentConversation(conversationId);
-    } catch {
-      // Non-fatal — the runtime is the source of truth for the live session.
-    }
-    const agentType = liveInfo.agentType;
-
-    // The webview reload that dropped our session handle also dropped the
-    // global event subscription. Re-install it so events from the live
-    // session (incl. background task completions) are routed again.
-    await this.ensureAgentEventSubscription();
-
-    // This id is alive again — clear any stale terminated marker so the global
-    // subscriber does not drop its events.
-    terminatedSessionIds.delete(conversationId);
-    spawnContextMap.delete(conversationId);
-
-    const hasRestoredMessages = restored.messages.length > 0;
-    // The live session may be mid-turn at re-attach time (e.g. a reload while
-    // the agent is answering). The runtime reports this as "prompting".
-    const liveTurnInFlight = liveInfo.status === "prompting";
-    const session: ActiveSession = {
-      info: liveInfo,
-      messages: restored.messages,
-      plan: [],
-      pendingToolCalls: new Map(),
-      streamingContent: "",
-      streamingThinking: "",
-      pendingUserMessage: "",
-      cwd: liveInfo.cwd,
-      conversationId,
-      agentSessionId: liveInfo.agentSessionId,
-      // Re-attach performs NO provider replay (it never respawns the CLI), so
-      // there are no replay events to suppress — only live ones. Setting
-      // skipHistoryReplay here would make every live event handler early-return
-      // and silently drop the entire in-flight turn (and its persistence).
-      // Leave it unset so live chunks/tool calls render; restored history won't
-      // duplicate because the live session only emits new forward events. #2674
-      skipHistoryReplay: undefined,
-      restoredMessageCount: hasRestoredMessages
-        ? restored.messages.length
-        : undefined,
-      // A mid-turn re-attach has no record of when the turn began; seed the
-      // elapsed-time clock now so the "Thinking…" indicator reflects reality.
-      promptStartTime: liveTurnInFlight ? Date.now() : undefined,
-      contextWindowSize: defaultContextWindowFor(
-        agentType,
-        convo?.agent_model_id ?? undefined,
-      ),
-      currentModelId: convo?.agent_model_id ?? undefined,
-      currentModeId: convo?.agent_permission_mode ?? undefined,
-      title: convo?.title,
-      pendingPrompts: [],
-      role: "serving",
-    };
-    setState("sessions", conversationId, session);
-    setState("activeSessionId", conversationId);
-
-    // Reflect an in-flight turn so the UI shows activity instead of looking
-    // idle while the re-attached agent is actually working. Cleared on the
-    // turn's promptComplete/cancel like any other turn. #2674
-    if (liveTurnInFlight) {
-      this.setTurnInFlight(conversationId, true);
-    }
-
-    // Drain events buffered by the global subscriber while no session record
-    // existed for this id.
-    const pendingEvents = pendingSessionEvents.get(conversationId);
-    if (pendingEvents?.length) {
-      for (const pendingEvent of pendingEvents) {
-        this.handleSessionEvent(conversationId, pendingEvent);
+    const attempt = (async () => {
+      let liveInfo: AgentSessionInfo | undefined;
+      try {
+        const backendSessions = await providerService.listSessions();
+        liveInfo = backendSessions.find((s) => s.id === conversationId);
+      } catch (err) {
+        // If we cannot ask the runtime, fall back to the normal respawn path.
+        console.warn(
+          "[AgentStore] listSessions during re-attach probe failed:",
+          err,
+        );
+        return false;
       }
-      pendingSessionEvents.delete(conversationId);
-    }
 
-    // The live session is already past initialization — unblock any sendPrompt
-    // that awaits a readiness gate keyed on this id.
-    const readyEntry = sessionReadyPromises.get(conversationId);
-    if (readyEntry) {
-      readyEntry.resolve();
-      sessionReadyPromises.delete(conversationId);
-    }
+      // No live session, or one the runtime already considers dead — let the
+      // caller terminate (a no-op for a missing session) and respawn fresh.
+      if (
+        !liveInfo ||
+        liveInfo.status === "terminated" ||
+        liveInfo.status === "error"
+      ) {
+        return false;
+      }
 
-    console.info(
-      "[AgentStore] Re-attached to live runtime session for conversation",
-      conversationId,
-      "status:",
-      liveInfo.status,
-    );
-    return true;
+      // Paired (claude-codex) threads are a two-inner-session structure whose
+      // PairedStatus the runtime's flat session info does not expose. Re-adopting
+      // one would drop the paired UI, so leave paired resumes on the existing
+      // terminate+respawn path (which reseeds pairedConfig from metadata). #2672
+      if (liveInfo.agentType === "claude-codex") {
+        return false;
+      }
+
+      // Restore the persisted transcript for display. The live session already
+      // streamed these turns while connected; re-attach renders them from SQLite
+      // rather than replaying from a fresh process.
+      const restored = await loadPersistedAgentHistory(conversationId);
+      let convo: DbAgentConversation | null = null;
+      try {
+        convo = await getAgentConversation(conversationId);
+      } catch {
+        // Non-fatal — the runtime is the source of truth for the live session.
+      }
+      const agentType = liveInfo.agentType;
+      const runtimeModelId =
+        liveInfo.currentModelId ?? convo?.agent_model_id ?? undefined;
+      const runtimeModeId =
+        liveInfo.currentModeId ?? convo?.agent_permission_mode ?? undefined;
+      const rehydratedPendingPermissions = (
+        liveInfo.pendingPermissions ?? []
+      ).filter(
+        (permission) =>
+          permission?.sessionId === conversationId &&
+          typeof permission.requestId === "string" &&
+          Array.isArray(permission.options),
+      );
+
+      // The webview reload that dropped our session handle also dropped the
+      // global event subscription. Re-install it so events from the live
+      // session (incl. background task completions) are routed again.
+      await this.ensureAgentEventSubscription();
+
+      // This id is alive again — clear any stale terminated marker so the global
+      // subscriber does not drop its events.
+      terminatedSessionIds.delete(conversationId);
+      spawnContextMap.delete(conversationId);
+
+      const hasRestoredMessages = restored.messages.length > 0;
+      // The live session may be mid-turn at re-attach time (e.g. a reload while
+      // the agent is answering). The runtime reports this as "prompting".
+      const liveTurnInFlight = liveInfo.status === "prompting";
+      const session: ActiveSession = {
+        info: liveInfo,
+        messages: restored.messages,
+        plan: [],
+        pendingToolCalls: new Map(),
+        streamingContent: "",
+        streamingThinking: "",
+        pendingUserMessage: "",
+        cwd: liveInfo.cwd,
+        conversationId,
+        agentSessionId: liveInfo.agentSessionId,
+        // Re-attach performs NO provider replay (it never respawns the CLI), so
+        // there are no replay events to suppress — only live ones. Setting
+        // skipHistoryReplay here would make every live event handler early-return
+        // and silently drop the entire in-flight turn (and its persistence).
+        // Leave it unset so live chunks/tool calls render; restored history won't
+        // duplicate because the live session only emits new forward events. #2674
+        skipHistoryReplay: undefined,
+        restoredMessageCount: hasRestoredMessages
+          ? restored.messages.length
+          : undefined,
+        // A mid-turn re-attach has no record of when the turn began; seed the
+        // elapsed-time clock now so the "Thinking…" indicator reflects reality.
+        promptStartTime: liveTurnInFlight ? Date.now() : undefined,
+        contextWindowSize: defaultContextWindowFor(
+          agentType,
+          runtimeModelId ?? undefined,
+        ),
+        currentModelId: runtimeModelId ?? undefined,
+        currentModeId: runtimeModeId ?? undefined,
+        title: convo?.title,
+        pendingPrompts: [],
+        role: "serving",
+      };
+      setState("sessions", conversationId, session);
+      setState("activeSessionId", conversationId);
+
+      if (rehydratedPendingPermissions.length > 0) {
+        const seenRequestIds = new Set(
+          state.pendingPermissions.map((permission) => permission.requestId),
+        );
+        const nextPendingPermissions = [...state.pendingPermissions];
+        for (const permission of rehydratedPendingPermissions) {
+          if (seenRequestIds.has(permission.requestId)) {
+            continue;
+          }
+          seenRequestIds.add(permission.requestId);
+          nextPendingPermissions.push(permission);
+        }
+        setState("pendingPermissions", nextPendingPermissions);
+      }
+
+      // Reflect an in-flight turn so the UI shows activity instead of looking
+      // idle while the re-attached agent is actually working. Cleared on the
+      // turn's promptComplete/cancel like any other turn. #2674
+      if (liveTurnInFlight) {
+        this.setTurnInFlight(conversationId, true);
+      }
+
+      // Drain events buffered by the global subscriber while no session record
+      // existed for this id.
+      const pendingEvents = pendingSessionEvents.get(conversationId);
+      if (pendingEvents?.length) {
+        for (const pendingEvent of pendingEvents) {
+          this.handleSessionEvent(conversationId, pendingEvent);
+        }
+        pendingSessionEvents.delete(conversationId);
+      }
+
+      // The live session is already past initialization — unblock any sendPrompt
+      // that awaits a readiness gate keyed on this id.
+      const readyEntry = sessionReadyPromises.get(conversationId);
+      if (readyEntry) {
+        readyEntry.resolve();
+        sessionReadyPromises.delete(conversationId);
+      }
+
+      console.info(
+        "[AgentStore] Re-attached to live runtime session for conversation",
+        conversationId,
+        "status:",
+        liveInfo.status,
+      );
+      return true;
+    })();
+
+    reattachingConversations.set(conversationId, attempt);
+    try {
+      return await attempt;
+    } finally {
+      if (reattachingConversations.get(conversationId) === attempt) {
+        reattachingConversations.delete(conversationId);
+      }
+    }
   },
 
   /**
@@ -6242,6 +6289,7 @@ export const agentStore = {
     sessionResetGeneration += 1;
     disposeAgentStoreRuntimeBindings();
     spawningConversations.clear();
+    reattachingConversations.clear();
     expectedTerminateSessionIds.clear();
     restartTimers.forEach((timer) => clearTimeout(timer));
     restartTimers.clear();
@@ -6958,6 +7006,13 @@ export const agentStore = {
                 "unknown",
             ),
         );
+        if (
+          state.pendingPermissions.some(
+            (permission) => permission.requestId === permEvent.requestId,
+          )
+        ) {
+          break;
+        }
         setState("pendingPermissions", [
           ...state.pendingPermissions,
           permEvent,
