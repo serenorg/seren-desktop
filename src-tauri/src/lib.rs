@@ -932,6 +932,7 @@ pub fn run() {
             // Meeting Mode capture + intelligence commands
             commands::audio::start_meeting_capture,
             commands::audio::is_meeting_capture_active,
+            commands::audio::is_meeting_capture_paused,
             commands::audio::pause_meeting_capture,
             commands::audio::resume_meeting_capture,
             commands::audio::stop_meeting_capture,

@@ -1045,6 +1045,16 @@ impl CaptureRegistry {
         }
     }
 
+    /// Whether the live capture for `meeting_id` is currently paused. `None` when
+    /// no active capture exists. The backend pause flag outlives a renderer
+    /// reload, so the indicator queries this on reattach to restore its state.
+    pub fn is_paused(&self, meeting_id: &str) -> Option<bool> {
+        match self.active.lock().unwrap().get(meeting_id) {
+            Some(CaptureSlot::Active(capture)) => Some(capture.stats.is_paused()),
+            _ => None,
+        }
+    }
+
     /// Whether the registry slot for `meeting_id` is taken (live or draining).
     /// This is the predicate `start` guards on, so a draining slot blocks a
     /// new capture for the same id until the drain completes.

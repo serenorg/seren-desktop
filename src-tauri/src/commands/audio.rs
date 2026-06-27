@@ -660,6 +660,13 @@ pub fn is_meeting_capture_active(registry: State<'_, CaptureRegistry>, meeting_i
     registry.is_active(&meeting_id)
 }
 
+/// Whether the live capture for the meeting is currently paused. False when no
+/// active capture exists. Used on reattach to restore the indicator pause state.
+#[tauri::command]
+pub fn is_meeting_capture_paused(registry: State<'_, CaptureRegistry>, meeting_id: String) -> bool {
+    registry.is_paused(&meeting_id).unwrap_or(false)
+}
+
 /// Pause a live capture: workers drop frames (no segments) without ending the
 /// session. Returns false when no active capture exists for the meeting.
 #[tauri::command]
