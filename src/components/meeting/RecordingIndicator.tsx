@@ -22,6 +22,7 @@ const DISCLOSURE =
 export function RecordingIndicator() {
   const [now, setNow] = createSignal(Date.now());
   const [confirmingDelete, setConfirmingDelete] = createSignal(false);
+  const [deleting, setDeleting] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
 
   let timer: number | undefined;
@@ -43,9 +44,17 @@ export function RecordingIndicator() {
     if (active() === null && confirmingDelete()) setConfirmingDelete(false);
   });
 
+  // Elapsed excludes paused spans and freezes while paused: the anchor is the
+  // pause-start timestamp when paused, otherwise the live clock, minus the time
+  // already accumulated across completed pauses.
   const elapsed = () => {
     const meeting = active();
-    return meeting ? formatElapsed(now() - meeting.startedAt) : "0:00";
+    if (!meeting) return "0:00";
+    const state = meetingStore.state;
+    const anchor = state.capturePausedAt ?? now();
+    return formatElapsed(
+      anchor - meeting.startedAt - state.capturePausedAccumMs,
+    );
   };
 
   const onStop = () => {
@@ -70,15 +79,19 @@ export function RecordingIndicator() {
       .catch(() => {});
   };
 
+  // Discard an unwanted recording: first click asks to confirm, second click
+  // stops the live capture and deletes it. deleteMeeting() refuses active
+  // captures, so this routes through stopAndDelete instead.
   const onDelete = () => {
     const meeting = active();
-    if (!meeting) return;
+    if (!meeting || deleting()) return;
     if (!confirmingDelete()) {
       setConfirmingDelete(true);
       return;
     }
     setConfirmingDelete(false);
-    void meetingStore.deleteMeeting(meeting);
+    setDeleting(true);
+    void meetingStore.stopAndDelete(meeting).finally(() => setDeleting(false));
   };
 
   return (
@@ -104,6 +117,13 @@ export function RecordingIndicator() {
         <Show when={meetingStore.state.micCaptureLost}>
           <span class="text-[10px] font-medium text-destructive">mic lost</span>
         </Show>
+        <Show when={meetingStore.state.error}>
+          {(message) => (
+            <span class="max-w-[200px] truncate text-[10px] font-medium text-destructive">
+              {message()}
+            </span>
+          )}
+        </Show>
         <div class="ml-1 flex shrink-0 items-center gap-1">
           <button
             type="button"
@@ -123,8 +143,17 @@ export function RecordingIndicator() {
           >
             Stop
           </button>
-          <button type="button" class={CONTROL_CLASS} onClick={onDelete}>
-            {confirmingDelete() ? "Confirm?" : "Delete"}
+          <button
+            type="button"
+            class={CONTROL_CLASS}
+            onClick={onDelete}
+            disabled={deleting()}
+          >
+            {deleting()
+              ? "Deleting…"
+              : confirmingDelete()
+                ? "Confirm?"
+                : "Delete"}
           </button>
         </div>
       </div>
