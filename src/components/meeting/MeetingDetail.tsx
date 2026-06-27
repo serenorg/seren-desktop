@@ -210,6 +210,21 @@ export function MeetingDetail(props: MeetingDetailProps) {
     }
   };
 
+  // A search hit requested a jump to a specific segment — scroll + highlight it
+  // once this meeting's transcript has loaded, then consume the request.
+  createEffect(() => {
+    const target = meetingStore.state.searchScrollTarget;
+    if (!target || props.meeting.id !== target.meetingId) return;
+    if (!segments().some((segment) => segment.meetingId === target.meetingId)) {
+      return;
+    }
+    setHighlightedSeq(target.seq);
+    rows
+      .get(target.seq)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    meetingStore.clearSegmentScroll();
+  });
+
   const regenerate = async () => {
     if (regenerating()) return;
     setRegenerating(true);

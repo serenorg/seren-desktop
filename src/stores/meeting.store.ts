@@ -87,6 +87,8 @@ interface MeetingState {
   primingRequest: Meeting | null;
   /** Most recent meeting that became reviewable while the user was elsewhere. */
   reviewReadyMeetingId: string | null;
+  /** A search hit asked to scroll the transcript to a segment (meeting + seq). */
+  searchScrollTarget: { meetingId: string; seq: number } | null;
 }
 
 const [meetingState, setMeetingState] = createStore<MeetingState>({
@@ -103,6 +105,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   autoDetectSourceApp: null,
   primingRequest: null,
   reviewReadyMeetingId: null,
+  searchScrollTarget: null,
 });
 
 let transcriptUnlisten: UnlistenFn | null = null;
@@ -1236,6 +1239,16 @@ async function stopByUser(meeting: Meeting): Promise<void> {
   await stopAndProcess(meeting);
 }
 
+// A search hit asks the transcript view to scroll/highlight a segment; the
+// MeetingDetail effect consumes the target once that meeting's segments load.
+function requestSegmentScroll(meetingId: string, seq: number): void {
+  setMeetingState("searchScrollTarget", { meetingId, seq });
+}
+
+function clearSegmentScroll(): void {
+  setMeetingState("searchScrollTarget", null);
+}
+
 export const meetingStore = {
   get state(): MeetingState {
     return meetingState;
@@ -1270,4 +1283,6 @@ export const meetingStore = {
   dismissAutoDetect,
   resetAutoDetectDismissal,
   acknowledgeReviewReady,
+  requestSegmentScroll,
+  clearSegmentScroll,
 };

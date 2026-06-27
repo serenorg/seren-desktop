@@ -40,7 +40,10 @@ export function TranscriptSearch() {
     const meeting = meetingStore.state.meetings.find(
       (item) => item.id === hit.meetingId,
     );
-    if (meeting) void meetingStore.setActiveMeeting(meeting);
+    if (meeting) {
+      void meetingStore.setActiveMeeting(meeting);
+      meetingStore.requestSegmentScroll(hit.meetingId, hit.seqStart);
+    }
   };
 
   return (
