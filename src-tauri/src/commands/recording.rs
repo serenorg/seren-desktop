@@ -1135,6 +1135,15 @@ fn recording_preview_root_if_exists(app: &tauri::AppHandle) -> Result<Option<Pat
     Ok(root.is_dir().then_some(root))
 }
 
+fn allow_recording_preview_asset<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    path: &Path,
+) -> Result<(), String> {
+    app.asset_protocol_scope()
+        .allow_file(path)
+        .map_err(|error| format!("Failed to allow recording preview asset: {error}"))
+}
+
 fn prune_recording_previews(root: &Path) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
@@ -1319,6 +1328,7 @@ fn capture_window_preview(
         image
             .save(&path)
             .map_err(|error| format!("Failed to write window preview: {error}"))?;
+        allow_recording_preview_asset(app, &path)?;
         let metadata = fs::metadata(&path)
             .map_err(|error| format!("Failed to stat window preview: {error}"))?;
         Ok(RecordingCaptureWindowPreview {
@@ -5029,6 +5039,24 @@ mod tests {
 
         assert!(!preview_root.join("window-preview-1.png").exists());
         assert!(root.path().join("window-preview-2.png").exists());
+    }
+
+    #[test]
+    fn preview_asset_scope_allows_hidden_preview_files() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        let root = tempfile::tempdir().expect("tempdir");
+        let preview_root = root.path().join(".previews");
+        fs::create_dir_all(&preview_root).expect("preview dir");
+        let path = preview_root.join("window-preview-123.png");
+        fs::write(&path, b"png").expect("preview");
+
+        assert!(!app.asset_protocol_scope().is_allowed(&path));
+
+        allow_recording_preview_asset(app.handle(), &path).expect("allow preview");
+
+        assert!(app.asset_protocol_scope().is_allowed(&path));
     }
 
     #[test]
