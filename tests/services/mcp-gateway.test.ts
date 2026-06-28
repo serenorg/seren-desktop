@@ -1,7 +1,7 @@
 // ABOUTME: Tests for MCP Gateway cache validity logic.
 // ABOUTME: Focused on critical caching behavior that affects tool availability.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock tauri-bridge to avoid localStorage dependency in Node.
 vi.mock("@/lib/tauri-bridge", () => ({
@@ -379,42 +379,81 @@ describe("MCP Gateway Native Tool Routing (#1329)", () => {
   });
 });
 
-describe("MCP Gateway init recovery (#2654)", () => {
+describe("MCP Gateway init recovery (#2654, #2743)", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    vi.useFakeTimers();
   });
 
-  it("retries connecting after a transient failure instead of caching the rejection", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("retries transient startup 503s and preserves the live MCP initialize contract", async () => {
     const { mcpClient } = await import("@/lib/mcp/client");
     const connectMock = vi.mocked(mcpClient.connectHttp);
     // First connect attempt fails transiently; the second succeeds.
     connectMock
-      .mockRejectedValueOnce(new Error("transient connect failure"))
+      .mockRejectedValueOnce(
+        new Error(
+          'HTTP 503 Service Unavailable: {"error":"server_error","error_description":"Authentication backend unavailable"}',
+        ),
+      )
       .mockResolvedValue(undefined);
 
+    const { MCP_GATEWAY_INITIALIZE_METHOD, MCP_GATEWAY_URL } = await import(
+      "@/lib/config"
+    );
     const { initializeGateway, isGatewayInitInFlight, isGatewayInitialized } =
       await import("@/services/mcp-gateway");
 
-    // Suppress the expected "[MCP Gateway] Failed to connect" log so output
-    // stays pristine; assert it fired to document the failure path.
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(MCP_GATEWAY_INITIALIZE_METHOD).toBe("POST");
+    expect(MCP_GATEWAY_URL).toBe("https://mcp.serendb.com/mcp");
 
-    // First attempt rejects.
-    await expect(initializeGateway()).rejects.toThrow(
-      "transient connect failure",
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const init = initializeGateway();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(init).resolves.toBeUndefined();
+    expect(connectMock).toHaveBeenCalledTimes(2);
+    expect(connectMock).toHaveBeenNthCalledWith(
+      1,
+      "seren-gateway",
+      MCP_GATEWAY_URL,
+      "test-api-key",
+    );
+    expect(connectMock).toHaveBeenNthCalledWith(
+      2,
+      "seren-gateway",
+      MCP_GATEWAY_URL,
+      "test-api-key",
+    );
+    expect(isGatewayInitInFlight()).toBe(false);
+    expect(isGatewayInitialized()).toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "POST https://mcp.serendb.com/mcp attempt 1/4 failed",
+      ),
+      expect.any(Error),
     );
 
-    // The in-flight slot must be cleared — never left holding a rejected
-    // promise, or every later call short-circuits on it (gateway dead until
-    // logout).
-    expect(isGatewayInitInFlight()).toBe(false);
+    warnSpy.mockRestore();
+  });
 
-    // A subsequent attempt must re-enter the connect path and succeed.
-    await expect(initializeGateway()).resolves.toBeUndefined();
-    expect(connectMock).toHaveBeenCalledTimes(2);
-    expect(isGatewayInitialized()).toBe(true);
-    expect(errorSpy).toHaveBeenCalled();
+  it("does not retry non-transient MCP auth failures", async () => {
+    const { mcpClient } = await import("@/lib/mcp/client");
+    const connectMock = vi.mocked(mcpClient.connectHttp);
+    connectMock.mockRejectedValueOnce(new Error("HTTP 401 Unauthorized"));
+
+    const { initializeGateway, isGatewayInitInFlight, isGatewayInitialized } =
+      await import("@/services/mcp-gateway");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(initializeGateway()).rejects.toThrow("HTTP 401 Unauthorized");
+    expect(connectMock).toHaveBeenCalledTimes(1);
+    expect(isGatewayInitInFlight()).toBe(false);
+    expect(isGatewayInitialized()).toBe(false);
 
     errorSpy.mockRestore();
   });

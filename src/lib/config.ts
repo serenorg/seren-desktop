@@ -16,6 +16,12 @@ export const MCP_GATEWAY_URL =
   import.meta.env.VITE_MCP_GATEWAY_URL ?? "https://mcp.serendb.com/mcp";
 
 /**
+ * MCP Streamable HTTP initialize uses POST to the configured gateway URL.
+ * Keep this visible so mocked tests can assert the live production contract.
+ */
+export const MCP_GATEWAY_INITIALIZE_METHOD = "POST" as const;
+
+/**
  * MCP OAuth base URL (for OAuth flows against the MCP server).
  */
 export const MCP_OAUTH_BASE =

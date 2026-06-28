@@ -1,7 +1,7 @@
 // ABOUTME: MCP Gateway service for connecting to Seren MCP gateway via MCP protocol.
 // ABOUTME: Uses rmcp HTTP streaming transport to connect to mcp.serendb.com/mcp.
 
-import { MCP_GATEWAY_URL } from "@/lib/config";
+import { MCP_GATEWAY_INITIALIZE_METHOD, MCP_GATEWAY_URL } from "@/lib/config";
 import { mcpClient } from "@/lib/mcp/client";
 import type { McpTool, McpToolResult } from "@/lib/mcp/types";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
@@ -12,6 +12,7 @@ const SEREN_MCP_SERVER_NAME = "seren-gateway";
 
 // Cache configuration
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const GATEWAY_CONNECT_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 
 // Types for gateway tools (with publisher info parsed from tool name)
 export interface GatewayTool {
@@ -93,6 +94,59 @@ const nativeMcpTools: Map<string, string> = new Map();
 function isCacheValid(): boolean {
   if (!lastFetchedAt || cachedTools.length === 0) return false;
   return Date.now() - lastFetchedAt < CACHE_TTL_MS;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isRetryableGatewayConnectError(error: unknown): boolean {
+  if (error instanceof McpGatewayError && error.status < 500) {
+    return false;
+  }
+
+  const message = errorMessage(error);
+  if (/\b(401|403)\b|unauthorized|forbidden|api key required/i.test(message)) {
+    return false;
+  }
+
+  return (
+    /\bHTTP 5\d\d\b/i.test(message) ||
+    /Service Unavailable|server_error|Authentication backend unavailable/i.test(
+      message,
+    ) ||
+    /network|timeout|temporar|ECONN|ETIMEDOUT|ERR_/i.test(message)
+  );
+}
+
+function waitForRetryDelay(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function connectGatewayWithRetry(apiKey: string): Promise<void> {
+  const maxAttempts = GATEWAY_CONNECT_RETRY_DELAYS_MS.length + 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await mcpClient.connectHttp(
+        SEREN_MCP_SERVER_NAME,
+        MCP_GATEWAY_URL,
+        apiKey,
+      );
+      return;
+    } catch (error) {
+      const retryDelay = GATEWAY_CONNECT_RETRY_DELAYS_MS[attempt - 1];
+      if (retryDelay === undefined || !isRetryableGatewayConnectError(error)) {
+        throw error;
+      }
+
+      console.warn(
+        `[MCP Gateway] ${MCP_GATEWAY_INITIALIZE_METHOD} ${MCP_GATEWAY_URL} attempt ${attempt}/${maxAttempts} failed with retryable error; retrying in ${retryDelay}ms:`,
+        error,
+      );
+      await waitForRetryDelay(retryDelay);
+    }
+  }
 }
 
 /**
@@ -323,13 +377,9 @@ export async function initializeGateway(): Promise<void> {
       // Connect to Seren MCP Gateway via HTTP streaming transport
       // The API key is passed as the bearer token
       verboseRuntimeConsole.debug(
-        `[MCP Gateway] Connecting to ${MCP_GATEWAY_URL}...`,
+        `[MCP Gateway] Connecting to ${MCP_GATEWAY_INITIALIZE_METHOD} ${MCP_GATEWAY_URL}...`,
       );
-      await mcpClient.connectHttp(
-        SEREN_MCP_SERVER_NAME,
-        MCP_GATEWAY_URL,
-        apiKey,
-      );
+      await connectGatewayWithRetry(apiKey);
       isConnected = true;
       verboseRuntimeConsole.debug("[MCP Gateway] Connected successfully");
 
