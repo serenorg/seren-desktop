@@ -559,6 +559,11 @@ export const AppShell: Component<AppShellProps> = (props) => {
     }
   }) as EventListener;
 
+  const handleSearchTranscripts = ((e: CustomEvent) => {
+    setSlidePanel("meetings");
+    meetingStore.requestSearchFocus(String(e.detail ?? ""));
+  }) as EventListener;
+
   const workspaceKeybindingMatcher = createKeybindingMatcher(
     WORKSPACE_KEYBINDING_ACTIONS,
     () => ({
@@ -796,6 +801,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
     meetingStore.startAutoDetect();
 
     window.addEventListener("seren:open-panel", handleOpenPanel);
+    window.addEventListener(
+      "seren:search-transcripts",
+      handleSearchTranscripts,
+    );
     window.addEventListener("seren:open-settings", handleOpenSettings);
     document.addEventListener("focusin", handleFocusIn);
     // Capture phase so descendants calling stopPropagation (Monaco)
@@ -837,6 +846,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
     meetingStore.stopMeetingEventListeners();
     meetingStore.stopAutoDetect();
     window.removeEventListener("seren:open-panel", handleOpenPanel);
+    window.removeEventListener(
+      "seren:search-transcripts",
+      handleSearchTranscripts,
+    );
     window.removeEventListener("seren:open-settings", handleOpenSettings);
     document.removeEventListener("focusin", handleFocusIn);
     window.removeEventListener("keydown", handleKeyDown, true);

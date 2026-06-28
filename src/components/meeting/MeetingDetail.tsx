@@ -14,6 +14,7 @@ import {
   formatDuration,
   formatMeetingDate,
   formatTime,
+  formatTranscriptSpeakerLabel,
   isMeetingDurationLive,
   isMeetingProcessingStatus,
   isMeetingReadyStatus,
@@ -598,19 +599,19 @@ export function MeetingDetail(props: MeetingDetailProps) {
               {(segment) => (
                 <div
                   ref={(el) => rows.set(segment.seq, el)}
-                  class="grid grid-cols-[64px_minmax(0,1fr)] gap-3 py-2 border-b border-border/50 last:border-b-0 transition-colors"
+                  class="grid grid-cols-[112px_minmax(0,1fr)] gap-3 py-2 border-b border-border/50 last:border-b-0 transition-colors"
                   classList={{
                     "bg-primary/10": highlightedSeq() === segment.seq,
                   }}
                 >
                   <div
-                    class="text-[11px] font-mono tabular-nums"
+                    class="truncate text-[11px] font-mono tabular-nums"
                     classList={{
                       "text-foreground": segment.speaker === "me",
                       "text-muted-foreground": segment.speaker === "them",
                     }}
                   >
-                    {segment.speaker === "me" ? "Me" : "Them"}
+                    {formatTranscriptSpeakerLabel(segment)}
                   </div>
                   <div
                     class="min-w-0 break-words text-[13px] leading-5"

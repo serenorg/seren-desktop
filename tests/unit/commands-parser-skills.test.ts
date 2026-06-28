@@ -190,6 +190,48 @@ describe("slash command palette ordering and fuzzy ranking", () => {
     expect(skillIdx).toBeLessThan(builtinIdx);
   });
 
+  it("exposes transcript search from the slash command palette", async () => {
+    const { getCompletions } = await import("@/lib/commands/parser");
+    const results = getCompletions("/trans", "chat");
+
+    expect(results.map((r) => r.name)).toContain("transcripts");
+  });
+
+  it("executes transcript search by opening meetings with the query", async () => {
+    const { parseCommand } = await import("@/lib/commands/parser");
+    const parsed = parseCommand("/transcripts budget review", "chat");
+    const openPanel = vi.fn();
+    const clearInput = vi.fn();
+    const showStatus = vi.fn();
+    const eventTarget = new EventTarget();
+    const listener = vi.fn();
+    vi.stubGlobal("window", eventTarget);
+    eventTarget.addEventListener("seren:search-transcripts", listener);
+
+    try {
+      const handled = await parsed?.command.execute({
+        rawInput: "/transcripts budget review",
+        args: parsed.args,
+        panel: "chat",
+        openPanel,
+        clearInput,
+        showStatus,
+      });
+
+      expect(handled).toBe(true);
+      expect(openPanel).toHaveBeenCalledWith("meetings");
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect((listener.mock.calls[0]?.[0] as CustomEvent).detail).toBe(
+        "budget review",
+      );
+      expect(clearInput).toHaveBeenCalledOnce();
+      expect(showStatus).not.toHaveBeenCalled();
+    } finally {
+      eventTarget.removeEventListener("seren:search-transcripts", listener);
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("does not let a skill shadow a built-in with the same name", async () => {
     mockSkillsService.listAllInstalled.mockResolvedValue([
       installedSkill("clear"),

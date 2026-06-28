@@ -208,6 +208,22 @@ registry.register({
   },
 });
 
+registry.register({
+  name: "transcripts",
+  description: "Search meeting transcripts",
+  argHint: "<query>",
+  panels: ["chat", "agent"],
+  execute: (ctx) => {
+    ctx.openPanel("meetings");
+    window.dispatchEvent(
+      new CustomEvent("seren:search-transcripts", { detail: ctx.args }),
+    );
+    ctx.clearInput();
+    if (!ctx.args) ctx.showStatus("Transcript search opened.");
+    return true;
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Tier 3: Power User Commands
 // ---------------------------------------------------------------------------
