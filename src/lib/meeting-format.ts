@@ -1,7 +1,7 @@
 // ABOUTME: Shared display formatting for Meeting Mode surfaces.
 // ABOUTME: Time, duration, title, and status labels used by the panel and detail view.
 
-import type { Meeting } from "@/services/meetings";
+import type { Meeting, TranscriptSegment } from "@/services/meetings";
 
 export function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString([], {
@@ -114,4 +114,28 @@ export function meetingReadyLabel(status: Meeting["status"]): string {
   return status === "transcript_ready"
     ? "Transcript ready to view"
     : "Notes ready to view";
+}
+
+function normalizeDiarizedLabel(label: string | null | undefined): string {
+  const trimmed = label?.trim();
+  if (!trimmed) return "";
+  if (/^(me|them)$/i.test(trimmed)) return "";
+
+  const readable = trimmed
+    .replace(/^speaker[_\s-]*/i, "")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (!readable) return "";
+
+  if (/^speaker\s+/i.test(trimmed)) return `Speaker ${readable}`;
+  if (/^[a-z0-9]{1,3}$/i.test(readable)) return `Speaker ${readable}`;
+  return readable;
+}
+
+export function formatTranscriptSpeakerLabel(
+  segment: Pick<TranscriptSegment, "speaker" | "speakerLabel">,
+): string {
+  const channel = segment.speaker === "me" ? "Me" : "Them";
+  const diarized = normalizeDiarizedLabel(segment.speakerLabel);
+  return diarized ? `${channel} · ${diarized}` : channel;
 }

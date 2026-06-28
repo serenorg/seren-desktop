@@ -2,8 +2,11 @@
 // ABOUTME: Embeddings come from the shared publisher client; vectors are stored locally via Tauri commands.
 
 import { invoke } from "@tauri-apps/api/core";
+import { formatTranscriptSpeakerLabel } from "@/lib/meeting-format";
 import {
   getTranscriptSegments,
+  type Meeting,
+  type Speaker,
   type TranscriptSegment,
 } from "@/services/meetings";
 import { embedText, embedTexts } from "@/services/seren-embed";
@@ -28,8 +31,92 @@ export interface TranscriptHit {
   distance: number;
 }
 
-function speakerLabel(speaker: TranscriptSegment["speaker"]): string {
-  return speaker === "me" ? "Me" : "Them";
+export interface TranscriptSearchFilters {
+  speaker?: Speaker | "all" | "";
+  startedAfterMs?: number | null;
+  startedBeforeMs?: number | null;
+  attendee?: string | null;
+}
+
+export interface TranscriptSearchOptions {
+  limit?: number;
+  filters?: TranscriptSearchFilters;
+  meetings?: readonly Meeting[];
+}
+
+function hasActiveFilters(filters: TranscriptSearchFilters | undefined) {
+  if (!filters) return false;
+  return Boolean(
+    (filters.speaker && filters.speaker !== "all") ||
+      filters.startedAfterMs != null ||
+      filters.startedBeforeMs != null ||
+      filters.attendee?.trim(),
+  );
+}
+
+function parseAttendees(meeting: Pick<Meeting, "attendeesJson">): string[] {
+  if (!meeting.attendeesJson) return [];
+  try {
+    const parsed = JSON.parse(meeting.attendeesJson) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalized(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function hitHasSpeaker(hit: TranscriptHit, speaker: Speaker): boolean {
+  const expected = speaker === "me" ? "me" : "them";
+  return hit.text
+    .split("\n")
+    .some((line) => normalized(line).startsWith(expected));
+}
+
+export function transcriptHitMatchesFilters(
+  hit: TranscriptHit,
+  filters: TranscriptSearchFilters | undefined,
+  meetings: readonly Meeting[] = [],
+): boolean {
+  if (!hasActiveFilters(filters)) return true;
+
+  if (filters?.speaker && filters.speaker !== "all") {
+    if (!hitHasSpeaker(hit, filters.speaker)) return false;
+  }
+
+  const needsMeeting =
+    filters?.startedAfterMs != null ||
+    filters?.startedBeforeMs != null ||
+    Boolean(filters?.attendee?.trim());
+  if (!needsMeeting) return true;
+
+  const meeting = meetings.find((item) => item.id === hit.meetingId);
+  if (!meeting) return false;
+
+  if (
+    filters?.startedAfterMs != null &&
+    meeting.startedAt < filters.startedAfterMs
+  ) {
+    return false;
+  }
+  if (
+    filters?.startedBeforeMs != null &&
+    meeting.startedAt > filters.startedBeforeMs
+  ) {
+    return false;
+  }
+
+  const attendee = normalized(filters?.attendee ?? "");
+  if (attendee) {
+    const attendees = parseAttendees(meeting).map(normalized);
+    if (!attendees.some((item) => item.includes(attendee))) return false;
+  }
+
+  return true;
 }
 
 /**
@@ -65,7 +152,7 @@ export function chunkTranscript(
       text: current
         .map(
           (segment) =>
-            `${speakerLabel(segment.speaker)}: ${segment.text.trim()}`,
+            `${formatTranscriptSpeakerLabel(segment)}: ${segment.text.trim()}`,
         )
         .join("\n"),
     });
@@ -173,14 +260,22 @@ function describeSemanticSearchFailure(error: unknown): string {
  */
 export async function searchTranscripts(
   query: string,
-  limit = 20,
+  limitOrOptions: number | TranscriptSearchOptions = 20,
 ): Promise<TranscriptSearchResult> {
   const trimmed = query.trim();
   if (!trimmed) return { hits: [], semanticUnavailable: false };
+  const options =
+    typeof limitOrOptions === "number"
+      ? { limit: limitOrOptions }
+      : limitOrOptions;
+  const limit = options.limit ?? 20;
+  const fetchLimit = hasActiveFilters(options.filters)
+    ? Math.max(limit * 5, 100)
+    : limit;
 
   const exact = await invoke<TranscriptHit[]>("search_transcripts_like", {
     query: trimmed,
-    limit,
+    limit: fetchLimit,
   }).catch(() => [] as TranscriptHit[]);
 
   let semantic: TranscriptHit[] = [];
@@ -190,7 +285,7 @@ export async function searchTranscripts(
     const queryEmbedding = await embedText(trimmed);
     semantic = await invoke<TranscriptHit[]>("search_transcripts", {
       queryEmbedding,
-      limit,
+      limit: fetchLimit,
     });
   } catch (error) {
     // Offline / unauthenticated / out of balance / embedding publisher down.
@@ -205,19 +300,24 @@ export async function searchTranscripts(
   const key = (hit: TranscriptHit) => `${hit.meetingId}:${hit.seqStart}`;
   const seen = new Set(semantic.map(key));
   const exactUnique = exact.filter((hit) => !seen.has(key(hit)));
-  const reserve = Math.min(exactUnique.length, Math.floor(limit / 2));
+  const reserve = Math.min(exactUnique.length, Math.floor(fetchLimit / 2));
   const merged = [
-    ...semantic.slice(0, limit - reserve),
+    ...semantic.slice(0, fetchLimit - reserve),
     ...exactUnique.slice(0, reserve),
   ];
   for (const hit of [
-    ...semantic.slice(limit - reserve),
+    ...semantic.slice(fetchLimit - reserve),
     ...exactUnique.slice(reserve),
   ]) {
-    if (merged.length >= limit) break;
+    if (merged.length >= fetchLimit) break;
     merged.push(hit);
   }
-  return { hits: merged, semanticUnavailable, semanticUnavailableReason };
+  const filtered = merged
+    .filter((hit) =>
+      transcriptHitMatchesFilters(hit, options.filters, options.meetings),
+    )
+    .slice(0, limit);
+  return { hits: filtered, semanticUnavailable, semanticUnavailableReason };
 }
 
 /** Drop a meeting's transcript vectors (best-effort; called on delete). */
