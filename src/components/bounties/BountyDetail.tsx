@@ -355,6 +355,12 @@ function statusTone(status: string): string {
   return "bg-muted-foreground/15 text-muted-foreground border-border";
 }
 
+function isVerifierDegraded(bounty: BountyView): boolean {
+  return (
+    bounty.health_status !== "healthy" || bounty.verifier_failure_count > 0
+  );
+}
+
 function earningStatusTone(status: string): string {
   if (status === "paid")
     return "bg-emerald-500/10 text-emerald-700 border-emerald-600/25 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30";
@@ -629,13 +635,26 @@ export const BountyDetail: Component<BountyDetailProps> = (props) => {
     return "Bounty unavailable.";
   });
 
-  const canJoinBounty = createMemo(() => {
+  const showJoinBounty = createMemo(() => {
     const b = bounty();
     if (!b) return false;
     // Joining only makes sense on bounties that can actually pay out.
     // Funding/draft are pre-open; exhausted/expired/cancelled are dead.
     return b.status === "open";
   });
+
+  const joinDisabledReason = createMemo(() => {
+    const b = bounty();
+    if (!b || !showJoinBounty()) return null;
+    if (isVerifierDegraded(b)) {
+      return "Bounty verifier is currently failing; joining is paused until it recovers.";
+    }
+    return null;
+  });
+
+  const canJoinBounty = createMemo(
+    () => showJoinBounty() && !joinDisabledReason(),
+  );
 
   const [joining, setJoining] = createSignal(false);
   const [joinError, setJoinError] = createSignal<string | null>(null);
@@ -734,7 +753,7 @@ export const BountyDetail: Component<BountyDetailProps> = (props) => {
 
   const handleJoinBounty = async () => {
     const b = bounty();
-    if (!b || joining()) return;
+    if (!b || joining() || !canJoinBounty()) return;
     setJoining(true);
     setJoinError(null);
     try {
@@ -885,22 +904,35 @@ export const BountyDetail: Component<BountyDetailProps> = (props) => {
             )}
           </Show>
         </div>
-        <Show when={canJoinBounty()}>
+        <Show when={showJoinBounty()}>
           <button
             type="button"
             class="group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/15 border border-primary/40 text-primary text-[13px] font-medium hover:bg-primary/25 hover:border-primary/60 active:bg-primary/30 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background"
             onClick={handleJoinBounty}
-            disabled={joining()}
+            disabled={joining() || !canJoinBounty()}
             aria-busy={joining()}
-            title="Join this bounty and open a chat seeded with its context"
+            title={
+              joinDisabledReason() ??
+              "Join this bounty and open a chat seeded with its context"
+            }
           >
             <Show
-              when={!joining()}
+              when={!joining() && canJoinBounty()}
               fallback={
-                <span
-                  class="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin"
-                  aria-hidden="true"
-                />
+                <Show
+                  when={!joining()}
+                  fallback={
+                    <span
+                      class="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin"
+                      aria-hidden="true"
+                    />
+                  }
+                >
+                  <span
+                    class="w-3 h-3 rounded-full border border-amber-500/50 bg-amber-500/20"
+                    aria-hidden="true"
+                  />
+                </Show>
               }
             >
               <svg
@@ -920,7 +952,13 @@ export const BountyDetail: Component<BountyDetailProps> = (props) => {
                 />
               </svg>
             </Show>
-            <span>{joining() ? "Joining..." : "Join the bounty"}</span>
+            <span>
+              {joining()
+                ? "Joining..."
+                : joinDisabledReason()
+                  ? "Verifier unavailable"
+                  : "Join the bounty"}
+            </span>
           </button>
         </Show>
       </header>
