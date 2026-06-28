@@ -78,6 +78,13 @@ export function MeetingPanel() {
       (meeting) => meeting.status === "capturing",
     ),
   );
+  const captureOwner = createMemo(
+    () =>
+      activeCapture() ??
+      meetingStore.state.meetings.find(
+        (meeting) => meeting.status === "pending_capture",
+      ),
+  );
   const activeProcessing = createMemo(() =>
     meetingStore.state.meetings.find((meeting) =>
       isMeetingProcessingStatus(meeting.status),
@@ -91,7 +98,7 @@ export function MeetingPanel() {
 
   const activeMeeting = () => meetingStore.state.activeMeeting;
   const durationNow = createMeetingDurationClock(() =>
-    [activeCapture(), activeMeeting()].some(
+    [captureOwner(), activeMeeting()].some(
       (meeting) => meeting != null && isMeetingDurationLive(meeting),
     ),
   );
@@ -115,6 +122,8 @@ export function MeetingPanel() {
     if (!desktopRuntime || starting()) return;
     // A priming dialog is already pending a start; don't create a second one.
     if (meetingStore.state.primingRequest) return;
+    // `pending_capture` already owns the start path while native audio spins up.
+    if (captureOwner()) return;
     setStarting(true);
     try {
       const meeting = await createMeeting({
@@ -224,10 +233,10 @@ export function MeetingPanel() {
                 void startManualCapture();
               }
             }}
-            disabled={activeCapture() !== undefined}
+            disabled={captureOwner() !== undefined}
           />
           <Show
-            when={activeCapture()}
+            when={captureOwner()}
             fallback={
               <button
                 type="button"
@@ -242,23 +251,50 @@ export function MeetingPanel() {
               </button>
             }
           >
-            <button
-              type="button"
-              class="h-8 w-9 flex items-center justify-center rounded-md border border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15 disabled:opacity-60"
-              onClick={stopManualCapture}
-              disabled={stopping() || !desktopRuntime}
-              title={
-                desktopRuntime ? "Stop capture" : "Desktop runtime required"
-              }
-            >
-              <StopGlyph />
-            </button>
+            {(meeting) => (
+              <Show
+                when={meeting().status === "capturing"}
+                fallback={
+                  <button
+                    type="button"
+                    class="h-8 w-9 flex items-center justify-center rounded-md border border-warning/40 bg-warning/10 text-warning disabled:opacity-70"
+                    disabled
+                    title="Starting capture"
+                  >
+                    <MicGlyph />
+                  </button>
+                }
+              >
+                <button
+                  type="button"
+                  class="h-8 w-9 flex items-center justify-center rounded-md border border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15 disabled:opacity-60"
+                  onClick={stopManualCapture}
+                  disabled={stopping() || !desktopRuntime}
+                  title={
+                    desktopRuntime ? "Stop capture" : "Desktop runtime required"
+                  }
+                >
+                  <StopGlyph />
+                </button>
+              </Show>
+            )}
           </Show>
         </div>
-        <Show when={activeCapture()}>
+        <Show when={captureOwner()}>
           {(meeting) => (
             <div class="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
-              <span class="w-1.5 h-1.5 rounded-full bg-destructive animate-pulse" />
+              <span
+                class="w-1.5 h-1.5 rounded-full animate-pulse"
+                classList={{
+                  "bg-destructive": meeting().status === "capturing",
+                  "bg-warning": meeting().status === "pending_capture",
+                }}
+              />
+              <span>
+                {meeting().status === "pending_capture"
+                  ? "Starting capture"
+                  : "Recording"}
+              </span>
               <span class="font-mono tabular-nums">
                 {formatDuration(meeting(), durationNow())}
               </span>

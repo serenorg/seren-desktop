@@ -101,3 +101,18 @@ describe("Meeting delete affordance (#2231)", () => {
     expect(lib).toContain("commands::audio::delete_meeting");
   });
 });
+
+describe("Meeting pending capture ownership (#2745)", () => {
+  it("treats pending capture as owning the start controls without exposing stop", () => {
+    const panel = source("src/components/meeting/MeetingPanel.tsx");
+    const store = source("src/stores/meeting.store.ts");
+
+    expect(panel).toContain("const captureOwner = createMemo");
+    expect(panel).toContain('meeting.status === "pending_capture"');
+    expect(panel).toContain("if (captureOwner()) return;");
+    expect(panel).toContain("disabled={captureOwner() !== undefined}");
+    expect(panel).toContain('title="Starting capture"');
+    expect(panel).toContain('meeting().status === "capturing"');
+    expect(store).toContain("if (isCapturing()) return;");
+  });
+});

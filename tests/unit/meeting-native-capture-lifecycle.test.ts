@@ -7,7 +7,27 @@ const eventBus = vi.hoisted(() => ({
   listeners: new Map<string, (event: { payload: unknown }) => void>(),
 }));
 
+const tray = vi.hoisted(() => ({
+  handler: null as (() => void) | null,
+}));
+
 const m = vi.hoisted(() => ({
+  createMeeting: vi.fn(async (): Promise<Meeting> => ({
+    id: "created-from-tray",
+    title: "Tray",
+    sourceApp: "Tray",
+    startedAt: 0,
+    endedAt: null,
+    status: "pending_capture",
+    templateId: null,
+    routedSkillSlug: null,
+    agentConversationId: null,
+    notesMarkdown: null,
+    notesStructJson: null,
+    failureReason: null,
+    createdAt: 0,
+    updatedAt: 0,
+  })),
   startMeetingCapture: vi.fn(async () => {}),
   stopMeetingCapture: vi.fn(async () => ({
     hadCapture: true,
@@ -46,6 +66,12 @@ const m = vi.hoisted(() => ({
   getTranscriptSegments: vi.fn(async () => []),
   isMeetingCaptureActive: vi.fn(async () => false),
   setTrayRecording: vi.fn(),
+  onTrayToggleCapture: vi.fn((handler: () => void) => {
+    tray.handler = handler;
+    return () => {
+      tray.handler = null;
+    };
+  }),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -62,6 +88,7 @@ vi.mock("@/lib/tauri-bridge", async (importOriginal) => ({
 }));
 vi.mock("@/services/meetings", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/meetings")>()),
+  createMeeting: m.createMeeting,
   startMeetingCapture: m.startMeetingCapture,
   stopMeetingCapture: m.stopMeetingCapture,
   updateMeetingStatus: m.updateMeetingStatus,
@@ -72,7 +99,7 @@ vi.mock("@/services/meetings", async (importOriginal) => ({
 vi.mock("@/services/orchestrator", () => ({ orchestrate: vi.fn() }));
 vi.mock("@/services/tray", () => ({
   setTrayRecording: m.setTrayRecording,
-  onTrayToggleCapture: vi.fn(() => () => {}),
+  onTrayToggleCapture: m.onTrayToggleCapture,
 }));
 vi.mock("@/stores/settings.store", () => ({
   settingsStore: {
@@ -120,6 +147,7 @@ describe("meetingStore native capture lifecycle (#2225)", () => {
   beforeEach(async () => {
     for (const fn of Object.values(m)) fn.mockClear();
     eventBus.listeners.clear();
+    tray.handler = null;
     m.listMeetings.mockResolvedValue([]);
     m.isMeetingCaptureActive.mockResolvedValue(false);
     await meetingStore.loadMeetings();
@@ -171,5 +199,17 @@ describe("meetingStore native capture lifecycle (#2225)", () => {
       expect.anything(),
       expect.anything(),
     );
+  });
+
+  it("does not create a second meeting from the tray while startup is pending", async () => {
+    m.listMeetings.mockResolvedValue([meeting({ status: "pending_capture" })]);
+
+    await meetingStore.loadMeetings();
+    await meetingStore.startMeetingEventListeners();
+    tray.handler?.();
+
+    expect(m.createMeeting).not.toHaveBeenCalled();
+    expect(m.startMeetingCapture).not.toHaveBeenCalled();
+    meetingStore.stopMeetingEventListeners();
   });
 });

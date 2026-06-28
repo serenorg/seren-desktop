@@ -766,6 +766,7 @@ async function toggleCaptureFromTray(): Promise<void> {
     await stopByUser(active);
     return;
   }
+  if (isCapturing()) return;
   if (isStarting || meetingState.primingRequest) return;
   const meeting = await createMeeting({
     title: `Meeting ${formatTime(Date.now())}`,
