@@ -13,6 +13,14 @@ const bountyDetailTsx = readFileSync(
   resolve("src/components/bounties/BountyDetail.tsx"),
   "utf-8",
 );
+const bountyClientGenTs = readFileSync(
+  resolve("src/api/generated/seren-bounty/client.gen.ts"),
+  "utf-8",
+);
+const bountySdkGenTs = readFileSync(
+  resolve("src/api/generated/seren-bounty/sdk.gen.ts"),
+  "utf-8",
+);
 const bountiesSectionTsx = readFileSync(
   resolve("src/components/sidebar/BountiesSection.tsx"),
   "utf-8",
@@ -54,6 +62,33 @@ describe("Seren Bounties wiring", () => {
   it("only reuses the Seren-scoped bounty skill installation", () => {
     expect(bountyDetailTsx).toMatch(
       /s\.scope === "seren" &&\s+s\.slug === SEREN_BOUNTY_SLUG/,
+    );
+  });
+
+  it("pauses bounty join while the verifier is degraded", () => {
+    expect(bountyDetailTsx).toContain("function isVerifierDegraded");
+    expect(bountyDetailTsx).toContain("bounty.verifier_failure_count > 0");
+    expect(bountyDetailTsx).toContain("joinDisabledReason");
+    expect(bountyDetailTsx).toContain("!canJoinBounty()");
+    expect(bountyDetailTsx).toContain("Verifier unavailable");
+  });
+
+  it("keeps seren-bounty production paths aligned to the live publisher contract", () => {
+    // Verified against the live Seren MCP publisher metadata on 2026-06-28.
+    expect(bountyClientGenTs).toContain(
+      "baseUrl: '/publishers/seren-bounty'",
+    );
+    expect(bountySdkGenTs).toMatch(
+      /listBounties[\s\S]*\.get<[\s\S]*url: '\/bounties'/,
+    );
+    expect(bountySdkGenTs).toMatch(
+      /getBountyStats[\s\S]*\.get<[\s\S]*url: '\/bounties\/\{id\}\/stats'/,
+    );
+    expect(bountySdkGenTs).toMatch(
+      /getBountyLeaderboard[\s\S]*\.get<[\s\S]*url: '\/bounties\/\{id\}\/leaderboard'/,
+    );
+    expect(bountySdkGenTs).toMatch(
+      /joinBounty[\s\S]*\.post<[\s\S]*url: '\/bounties\/\{id\}\/join'/,
     );
   });
 
