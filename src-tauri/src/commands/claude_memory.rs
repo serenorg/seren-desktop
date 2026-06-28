@@ -218,6 +218,35 @@ pub async fn claude_memory_render_memory_md(
     Ok(final_path.to_string_lossy().to_string())
 }
 
+/// Recall one stored Claude-memory body by stable `pref_key`.
+///
+/// This is the read side of the Claude-memory SerenDB contract: after the
+/// watcher persists a memory row it removes the original plaintext file, so
+/// callers must read bodies from `claude_agent_preferences` rather than from a
+/// sibling `.md` file.
+#[tauri::command]
+pub async fn claude_memory_recall_preference(
+    app: AppHandle,
+    project_cwd: String,
+    project_id: String,
+    branch_id: String,
+    database_name: String,
+    pref_key: String,
+) -> Result<Option<claude_memory::ClaudeMemoryPreference>, String> {
+    let pref_key = pref_key.trim();
+    if pref_key.is_empty() {
+        return Err("claude_memory_recall_preference requires non-empty prefKey".to_string());
+    }
+    if project_cwd.trim().is_empty() {
+        return Err("claude_memory_recall_preference requires non-empty projectCwd".to_string());
+    }
+
+    let config = build_config(project_id, branch_id, database_name)?;
+    let project_path = claude_memory::encode_project_dir(Path::new(&project_cwd));
+    let client = claude_memory::build_sql_client(&app)?;
+    claude_memory::recall_preference_from_db(&client, &config, &project_path, pref_key).await
+}
+
 /// Execute a SQL statement against a SerenDB database from the frontend via
 /// the Rust-side `SerenDbSqlClient` (reqwest + SerenDB API key).
 ///

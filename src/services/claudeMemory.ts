@@ -201,6 +201,15 @@ export interface ClaudeMemoryMigrationReport {
   render_failures: number;
 }
 
+export interface ClaudeMemoryPreference {
+  pref_key: string;
+  pref_type: string;
+  description: string | null;
+  content: string;
+  source_file: string | null;
+  updated_at: string | null;
+}
+
 export interface ClaudeMemoryProjectIdentity {
   identifier: string;
   source: "git_remote" | "persisted_uuid" | "generated_uuid";
@@ -523,4 +532,29 @@ export async function renderClaudeMemoryMd(
     branchId: provisioning.branchId,
     databaseName: provisioning.databaseName,
   });
+}
+
+/**
+ * Recall one Claude Code auto-memory body from SerenDB by `pref_key`.
+ * This is the supported read path for bodies listed in MEMORY.md; the
+ * original sibling `.md` files are removed after a successful cloud write.
+ */
+export async function recallClaudeMemoryPreference(
+  projectCwd: string,
+  prefKey: string,
+): Promise<ClaudeMemoryPreference | null> {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  const provisioning = await ensureClaudeMemoryProvisioned();
+  return invoke<ClaudeMemoryPreference | null>(
+    "claude_memory_recall_preference",
+    {
+      projectCwd,
+      prefKey,
+      projectId: provisioning.projectId,
+      branchId: provisioning.branchId,
+      databaseName: provisioning.databaseName,
+    },
+  );
 }
