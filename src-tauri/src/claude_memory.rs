@@ -30,6 +30,7 @@ const SEREN_API_KEY_KEY: &str = "seren_api_key";
 const RENDERED_INDEX_FILENAME: &str = "MEMORY.md";
 const PROJECT_ID_FILENAME: &str = "project_id";
 const DEFAULT_PREF_TYPE: &str = "claude_preference";
+const AUTO_INDEX_RECALL_CONTRACT: &str = "_Bodies live in SerenDB (`claude_agent_preferences`), not in sibling `.md` files. Use `pref_key` with `claude_memory_recall_preference` to read the full body; do not recreate a memory just because its original file is absent._";
 
 /// Maximum number of entries listed in the MEMORY.md auto-index. Rows beyond
 /// this are summarized in an overflow footer instead of being listed — their
@@ -59,6 +60,7 @@ const QUARANTINE_DIR_NAME: &str = ".quarantine";
 /// the same path through the generated SDK; we hit it directly from Rust so the
 /// watcher can persist files without round-tripping through JS.
 const SERENDB_QUERY_URL: &str = "https://api.serendb.com/publishers/seren-db/query";
+const SERENDB_QUERY_METHOD: &str = "POST";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -102,6 +104,16 @@ pub struct SerenDbConfig {
     pub project_id: String,
     pub branch_id: String,
     pub database_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClaudeMemoryPreference {
+    pub pref_key: String,
+    pub pref_type: String,
+    pub description: Option<String>,
+    pub content: String,
+    pub source_file: Option<String>,
+    pub updated_at: Option<String>,
 }
 
 /// Event emitted to the frontend after a successful SerenDB SQL INSERT.
@@ -494,6 +506,20 @@ pub fn build_select_preferences_sql(project_path: &str) -> String {
     )
 }
 
+/// Build a SELECT that recalls one stored Claude-memory body by stable
+/// `(project_path, pref_key)`. This backs the MEMORY.md contract that bodies
+/// live in SerenDB after plaintext files are removed from disk.
+pub fn build_recall_preference_sql(project_path: &str, pref_key: &str) -> String {
+    format!(
+        "SELECT pref_key, pref_type, description, content, source_file, updated_at \
+         FROM claude_agent_preferences \
+         WHERE project_path = {project_path} AND pref_key = {pref_key} \
+         LIMIT 1;",
+        project_path = quote_sql_string(project_path),
+        pref_key = quote_sql_string(pref_key),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // MEMORY.md rendering
 // ---------------------------------------------------------------------------
@@ -654,11 +680,13 @@ fn merge_auto_index_block(existing: &str, new_block: &str) -> String {
 
 /// Render rows from `claude_agent_preferences` as the auto-index body that
 /// goes between MEMORY.md's marker block. Output is grouped by `pref_type`
-/// into `## <Title>` sections, with one `- [file.md](file.md) — description`
-/// bullet per row. Bodies stay in SerenDB.
+/// into `## <Title>` sections, with one non-link `pref_key` bullet per row.
+/// Bodies stay in SerenDB and are recalled by `pref_key`.
 pub fn render_preferences_as_markdown(rows: &[Vec<serde_json::Value>]) -> String {
+    let mut out = format!("{AUTO_INDEX_RECALL_CONTRACT}\n");
+
     if rows.is_empty() {
-        return String::new();
+        return out;
     }
 
     // Rows arrive most-recent-first (see build_select_preferences_sql). Cap the
@@ -689,20 +717,17 @@ pub fn render_preferences_as_markdown(rows: &[Vec<serde_json::Value>]) -> String
         ));
     }
 
-    let mut out = String::new();
-    let mut first = true;
     for (pref_type, entries) in &sections {
-        if !first {
-            out.push('\n');
-        }
-        first = false;
+        out.push('\n');
         out.push_str(&format!("## {}\n", titleize(pref_type)));
-        for (_pref_key, source_file, description) in entries {
+        for (pref_key, source_file, description) in entries {
+            let pref_key = markdown_inline_code(pref_key);
+            let source_file = markdown_inline_code(source_file);
             if description.is_empty() {
-                out.push_str(&format!("- [{source_file}]({source_file})\n"));
+                out.push_str(&format!("- {pref_key} (original file: {source_file})\n"));
             } else {
                 out.push_str(&format!(
-                    "- [{source_file}]({source_file}) — {description}\n"
+                    "- {pref_key} — {description} (original file: {source_file})\n"
                 ));
             }
         }
@@ -716,6 +741,16 @@ pub fn render_preferences_as_markdown(rows: &[Vec<serde_json::Value>]) -> String
         ));
     }
     out
+}
+
+fn markdown_inline_code(value: &str) -> String {
+    let longest_backtick_run = value.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat(longest_backtick_run + 1);
+    if value.starts_with('`') || value.ends_with('`') {
+        format!("{fence} {value} {fence}")
+    } else {
+        format!("{fence}{value}{fence}")
+    }
 }
 
 /// True when a rendered MEMORY.md exceeds the soft size budget. Pulled out so
@@ -790,9 +825,16 @@ impl SerenDbSqlClient {
             "read_only": read_only,
         });
 
-        let resp = self
-            .http
-            .post(SERENDB_QUERY_URL)
+        let request = match SERENDB_QUERY_METHOD {
+            "POST" => self.http.post(SERENDB_QUERY_URL),
+            method => {
+                return Err(format!(
+                    "unsupported SerenDB query HTTP method configured: {method}"
+                ));
+            }
+        };
+
+        let resp = request
             .bearer_auth(&self.api_key)
             .header("Content-Type", "application/json")
             .json(&body)
@@ -942,6 +984,62 @@ pub async fn render_memory_md_from_db(
     );
     let rendered = render_preferences_as_markdown(&result.rows);
     write_rendered_memory_md(claude_project_dir, &rendered)
+}
+
+fn preference_from_query_row(row: &[serde_json::Value]) -> Result<ClaudeMemoryPreference, String> {
+    let pref_key = row
+        .first()
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "claude memory recall row missing pref_key".to_string())?;
+    let pref_type = row
+        .get(1)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "claude memory recall row missing pref_type".to_string())?;
+    let description = row
+        .get(2)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    let content = row
+        .get(3)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "claude memory recall row missing content".to_string())?;
+    let source_file = row
+        .get(4)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    let updated_at = row
+        .get(5)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
+    Ok(ClaudeMemoryPreference {
+        pref_key: pref_key.to_string(),
+        pref_type: pref_type.to_string(),
+        description,
+        content: content.to_string(),
+        source_file,
+        updated_at,
+    })
+}
+
+pub async fn recall_preference_from_db(
+    client: &SerenDbSqlClient,
+    config: &SerenDbConfig,
+    project_path: &str,
+    pref_key: &str,
+) -> Result<Option<ClaudeMemoryPreference>, String> {
+    let sql = build_recall_preference_sql(project_path, pref_key);
+    let result = client
+        .run_sql(config, &sql, /* read_only */ true)
+        .await
+        .map_err(|e| format!("serendb recall SELECT failed: {e}"))?;
+    match result.rows.first() {
+        Some(row) => Ok(Some(preference_from_query_row(row)?)),
+        None => Ok(None),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1730,13 +1828,34 @@ mod tests {
     }
 
     #[test]
-    fn render_preferences_as_markdown_groups_rows_into_section_bullets() {
+    fn serendb_query_contract_matches_live_publisher_metadata() {
+        // Verified against the live `seren-db` publisher and
+        // openapi/openapi-seren-db.json: base `/publishers/seren-db`,
+        // operation `POST /query`.
+        assert_eq!(SERENDB_QUERY_METHOD, "POST");
+        assert_eq!(
+            SERENDB_QUERY_URL,
+            "https://api.serendb.com/publishers/seren-db/query"
+        );
+    }
+
+    #[test]
+    fn build_recall_preference_sql_selects_body_by_project_and_pref_key() {
+        let sql = build_recall_preference_sql("-Users-x-evil'project", "pref_'; DROP TABLE foo;");
+        assert!(sql.contains("SELECT pref_key, pref_type, description, content, source_file"));
+        assert!(sql.contains("FROM claude_agent_preferences"));
+        assert!(sql.contains("WHERE project_path = '-Users-x-evil''project'"));
+        assert!(sql.contains("AND pref_key = 'pref_''; DROP TABLE foo;'"));
+        assert!(sql.contains("LIMIT 1"));
+    }
+
+    #[test]
+    fn render_preferences_as_markdown_groups_rows_without_dead_file_links() {
         // The auto-index body is the only thing that goes between the
         // MEMORY.md marker block. It MUST be a section-grouped bullet
-        // index — `## <Type>` headings with `- [file.md](file.md) — desc`
-        // bullets — to match the curated MEMORY.md format. Bodies and
-        // frontmatter are NOT emitted (those live in SerenDB and would
-        // bloat the index).
+        // index. Since the interceptor deletes plaintext files after a
+        // successful SerenDB write, entries MUST NOT render as relative
+        // Markdown links to those deleted files.
         let rows = vec![
             vec![
                 serde_json::json!("feedback_one"),
@@ -1755,10 +1874,20 @@ mod tests {
         ];
         let rendered = render_preferences_as_markdown(&rows);
 
+        assert!(rendered.contains(AUTO_INDEX_RECALL_CONTRACT));
         assert!(rendered.contains("## Feedback"));
-        assert!(rendered.contains("- [feedback_one.md](feedback_one.md) — first description"));
+        assert!(
+            rendered.contains(
+                "- `feedback_one` — first description (original file: `feedback_one.md`)"
+            ),
+            "entry must be keyed by pref_key, not by a deleted file link: {rendered}"
+        );
         assert!(rendered.contains("## Project"));
-        assert!(rendered.contains("- [project_two.md](project_two.md)"));
+        assert!(rendered.contains("- `project_two` (original file: `project_two.md`)"));
+        assert!(
+            !rendered.contains("]("),
+            "auto-index must not advertise deleted sibling files as links: {rendered}"
+        );
         assert!(
             !rendered.contains("must NOT appear"),
             "bodies must not bleed into the auto-index"
@@ -1788,7 +1917,10 @@ mod tests {
             })
             .collect();
         let rendered = render_preferences_as_markdown(&rows);
-        let listed = rendered.matches("](").count();
+        let listed = rendered
+            .lines()
+            .filter(|line| line.starts_with("- `pref_"))
+            .count();
         assert_eq!(
             listed, MAX_AUTO_INDEX_ENTRIES,
             "must list exactly the cap, not every row"
@@ -1810,6 +1942,30 @@ mod tests {
         ]];
         let rendered = render_preferences_as_markdown(&rows);
         assert!(!rendered.contains("more memor"));
+    }
+
+    #[test]
+    fn preference_from_query_row_returns_recalled_body() {
+        let row = vec![
+            serde_json::json!("feedback_one"),
+            serde_json::json!("feedback"),
+            serde_json::json!("first description"),
+            serde_json::json!("full body from SerenDB"),
+            serde_json::json!("feedback_one.md"),
+            serde_json::json!("2026-06-27T12:00:00Z"),
+        ];
+
+        let preference = preference_from_query_row(&row).expect("valid row");
+
+        assert_eq!(preference.pref_key, "feedback_one");
+        assert_eq!(preference.pref_type, "feedback");
+        assert_eq!(preference.description.as_deref(), Some("first description"));
+        assert_eq!(preference.content, "full body from SerenDB");
+        assert_eq!(preference.source_file.as_deref(), Some("feedback_one.md"));
+        assert_eq!(
+            preference.updated_at.as_deref(),
+            Some("2026-06-27T12:00:00Z")
+        );
     }
 
     #[test]

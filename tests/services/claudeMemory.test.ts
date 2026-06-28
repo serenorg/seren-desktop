@@ -59,6 +59,7 @@ import {
   ensureClaudeMemoryProvisioned,
   getClaudeMemoryStatus,
   migrateExistingClaudeMemory,
+  recallClaudeMemoryPreference,
   renderClaudeMemoryMd,
   startClaudeMemoryInterceptor,
   stopClaudeMemoryInterceptor,
@@ -467,6 +468,37 @@ describe("startClaudeMemoryInterceptor wiring", () => {
       branchId: "b",
       databaseName: "d",
     });
+  });
+
+  it("recall provisions then forwards project cwd and pref key to the Tauri recall command", async () => {
+    settingsState.claudeMemoryProjectId = "p";
+    settingsState.claudeMemoryBranchId = "b";
+    settingsState.claudeMemoryDatabaseName = "d";
+    invokeMock.mockResolvedValue({
+      pref_key: "feedback_one",
+      pref_type: "feedback",
+      description: "first description",
+      content: "full body from SerenDB",
+      source_file: "feedback_one.md",
+      updated_at: "2026-06-27T12:00:00Z",
+    });
+
+    const preference = await recallClaudeMemoryPreference(
+      "/home/a/proj",
+      "feedback_one",
+    );
+
+    expect(preference?.content).toBe("full body from SerenDB");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "claude_memory_recall_preference",
+      {
+        projectCwd: "/home/a/proj",
+        prefKey: "feedback_one",
+        projectId: "p",
+        branchId: "b",
+        databaseName: "d",
+      },
+    );
   });
 
   it("no-ops in non-Tauri runtime (never calls invoke or databases)", async () => {
