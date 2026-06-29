@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createEmployeeRunManager,
+  employeeTextFromConversationMessage,
+  errorTextFromOutputEvents,
   type EmployeeOutputEventEnvelope,
   type EmployeeRunEventLike,
   type EmployeeRuntimeApi,
@@ -67,6 +69,77 @@ function runtimeApi(frames: unknown[], terminal: EmployeeRunEventLike) {
 }
 
 describe("employees-core sequenced run stream", () => {
+  it("selects assistant conversation text from typed events before raw content", () => {
+    const text = employeeTextFromConversationMessage({
+      role: "assistant",
+      content: JSON.stringify({
+        iterations: 1,
+        output_events: [{ type: "text", text: "raw envelope text" }],
+        response: "raw envelope response",
+        workflow: { status: "completed" },
+      }),
+      events: [{ type: "text", text: "Rendered assistant text." }],
+      run_summary: {
+        status: "completed",
+      },
+    });
+
+    expect(text).toBe("Rendered assistant text.");
+  });
+
+  it("selects assistant error event text for failed conversation messages", () => {
+    const text = employeeTextFromConversationMessage({
+      role: "assistant",
+      content: JSON.stringify({
+        partial_response: JSON.stringify({ data: { publishers: [] } }),
+        workflow: { status: "failed" },
+      }),
+      events: [
+        {
+          type: "text",
+          text: JSON.stringify({ data: { publishers: [] } }),
+        },
+        {
+          type: "error",
+          message: "The employee hit an error while responding.",
+        },
+      ],
+      run_summary: {
+        status: "failed",
+      },
+    });
+
+    expect(text).toBe("The employee hit an error while responding.");
+  });
+
+  it("keeps normal text event precedence for non-failed conversation messages", () => {
+    const text = employeeTextFromConversationMessage({
+      role: "assistant",
+      content: "Stored fallback.",
+      events: [
+        {
+          type: "text",
+          text: "Normal assistant text.",
+        },
+        {
+          type: "error",
+          message: "Non-terminal warning.",
+        },
+      ],
+      run_summary: {
+        status: "completed",
+      },
+    });
+
+    expect(text).toBe("Normal assistant text.");
+    expect(
+      errorTextFromOutputEvents([
+        { type: "error", message: "First error." },
+        { type: "error", message: "Second error." },
+      ]),
+    ).toBe("First error.\nSecond error.");
+  });
+
   it("applies sequenced event envelopes and resolves terminal via one poll", async () => {
     const firstText: EmployeeOutputEventEnvelope = {
       type: "text",

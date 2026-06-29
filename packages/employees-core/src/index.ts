@@ -86,6 +86,26 @@ export interface EmployeeInteractiveSessionMessageLike {
   run?: EmployeeRunInvocationLike | null;
 }
 
+export interface EmployeeMessageRunSummaryInput {
+  status?: string | null;
+  status_message?: string | null;
+}
+
+export interface EmployeeMessageRunInput {
+  output?: string | null;
+  output_events?: unknown;
+  status?: string | null;
+  status_message?: string | null;
+}
+
+export interface EmployeeMessageTextInput {
+  role?: string | null;
+  content?: string | null;
+  events?: unknown;
+  run_summary?: EmployeeMessageRunSummaryInput | null;
+  run?: EmployeeMessageRunInput | null;
+}
+
 export type EmployeeOutputEventEnvelope =
   | {
       type: "text";
@@ -937,6 +957,42 @@ export function textFromOutputEvents(value: unknown): string {
     .map((event) => (event.type === "text" ? event.text : ""))
     .join("")
     .trim();
+}
+
+export function errorTextFromOutputEvents(value: unknown): string {
+  return outputEventEnvelopes(value)
+    .map((event) => (event.type === "error" ? event.message : ""))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+export function employeeTextFromConversationMessage(
+  message: EmployeeMessageTextInput,
+): string {
+  if (message.role !== "assistant") return message.content?.trim() ?? "";
+  const status = message.run_summary?.status ?? message.run?.status ?? "";
+  const errorText = errorTextFromOutputEvents(message.events);
+  const eventText = textFromOutputEvents(message.events);
+  const preferredEventText =
+    errorText && isFailureStatus(status) ? errorText : eventText;
+  return (
+    preferredEventText ||
+    message.content?.trim() ||
+    message.run_summary?.status_message?.trim() ||
+    message.run?.status_message?.trim() ||
+    assistantTextFromRunOutput(message.run) ||
+    ""
+  );
+}
+
+function assistantTextFromRunOutput(
+  run: EmployeeMessageRunInput | null | undefined,
+): string {
+  if (!run) return "";
+  const fromEvents = textFromOutputEvents(run.output_events);
+  if (fromEvents) return fromEvents;
+  return run.output?.trim() ?? "";
 }
 
 export function outputEventEnvelopes(
