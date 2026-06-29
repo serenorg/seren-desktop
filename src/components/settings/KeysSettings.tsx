@@ -72,7 +72,10 @@ const MIN_MASTER_PASSWORD_BITS = 60;
 const PASSWORDS_IDLE_LOCK_HOURS = 4;
 const PASSWORDS_IDLE_LOCK_MS = PASSWORDS_IDLE_LOCK_HOURS * 60 * 60 * 1000;
 const PASSWORD_FIELD_ROW_GRID_CLASS =
-  "grid grid-cols-[minmax(6rem,0.85fr)_minmax(0,1fr)_2rem] items-center gap-2";
+  "grid grid-cols-[minmax(5.5rem,10rem)_minmax(0,1fr)_2rem] items-start gap-2";
+const PASSWORD_VALUE_INPUT_CLASS =
+  "min-w-0 rounded-md border border-border-strong bg-surface-3/80 px-3 py-2 font-mono text-[0.82rem] leading-relaxed text-foreground focus:border-accent focus:outline-none";
+const PASSWORD_VALUE_TEXTAREA_MAX_HEIGHT = 160;
 const DECISION_LABELS: Record<SecretAuditEvent["decision"], string> = {
   approved_by_user: "Approved by you",
   auto_approved: "Auto-approved",
@@ -177,13 +180,24 @@ function estimateMasterPasswordBits(password: string): number {
   );
 }
 
+function resizePasswordValueTextarea(textarea: HTMLTextAreaElement): void {
+  requestAnimationFrame(() => {
+    textarea.style.height = "auto";
+    const height = Math.min(
+      textarea.scrollHeight,
+      PASSWORD_VALUE_TEXTAREA_MAX_HEIGHT,
+    );
+    textarea.style.height = `${height}px`;
+    textarea.style.overflowY =
+      textarea.scrollHeight > PASSWORD_VALUE_TEXTAREA_MAX_HEIGHT
+        ? "auto"
+        : "hidden";
+  });
+}
+
 export const KeysSettings: Component = () => {
   const [tab, setTab] = createSignal<KeysTab>("stored");
   const [showAddForm, setShowAddForm] = createSignal(false);
-  const [prefillCredential, setPrefillCredential] = createSignal<{
-    vaultId: string;
-    itemId: string;
-  } | null>(null);
   const [selectedServiceId, setSelectedServiceId] =
     createSignal(DEFAULT_SERVICE_ID);
   const [selectedSkillId, setSelectedSkillId] = createSignal(DEFAULT_SKILL_ID);
@@ -339,7 +353,6 @@ export const KeysSettings: Component = () => {
       setRecoveryKeyDisplay(null);
       // Granting needs an unlocked vault, so close any open create flow.
       setShowAddForm(false);
-      setPrefillCredential(null);
     } finally {
       setVaultBusy(false);
     }
@@ -540,6 +553,7 @@ export const KeysSettings: Component = () => {
 
   const handleSaveVaultItem = async (input: {
     itemId?: string | null;
+    itemKind?: string | null;
     title: string;
     fields: { name: string; value: string }[];
   }) => {
@@ -656,20 +670,11 @@ export const KeysSettings: Component = () => {
         `Granted ${input.agentLabel || input.agentId} access to ${input.serviceName}.`,
       );
       setShowAddForm(false);
-      setPrefillCredential(null);
       await refetchBindings();
       await refetchAudit();
     } catch (error) {
       setSaveMessage(`Could not grant access: ${String(error)}`);
     }
-  };
-
-  const handleUseSelectedVaultItem = () => {
-    const detail = selectedVaultItem();
-    if (!detail) return;
-    setPrefillCredential({ vaultId: detail.vaultId, itemId: detail.itemId });
-    setShowAddForm(true);
-    setSaveMessage("Choose an agent to grant access to this credential.");
   };
 
   const openGrantAccessForm = (serviceId = selectedServiceId()) => {
@@ -679,7 +684,6 @@ export const KeysSettings: Component = () => {
         .map((name) => `${name}=`)
         .join("\n"),
     );
-    setPrefillCredential(null);
     setShowAddForm(true);
   };
 
@@ -740,7 +744,6 @@ export const KeysSettings: Component = () => {
     setReferenceLines(
       binding.variableNames.map((name) => `${name}=`).join("\n"),
     );
-    setPrefillCredential(null);
     setShowAddForm(true);
     setSaveMessage(
       `Re-select a credential to update ${binding.skillName}'s access, or use Advanced to edit the raw references.`,
@@ -793,7 +796,6 @@ export const KeysSettings: Component = () => {
         onSelectVault={(vaultId) => void handleSelectVault(vaultId)}
         onSelectItem={(item) => void handleSelectVaultItem(item)}
         onSaveItem={(input) => void handleSaveVaultItem(input)}
-        onUseForBinding={handleUseSelectedVaultItem}
       />
 
       <Show when={tab() === "stored"}>
@@ -870,13 +872,11 @@ export const KeysSettings: Component = () => {
             agents={agents()}
             entries={credentialEntries()}
             vaultUnlocked={vaults().length > 0}
-            prefill={prefillCredential()}
             loadEntryFields={loadEntryFields}
             findBinding={findBindingFor}
             onGrant={(input) => void handleGrantAccess(input)}
             onCancel={() => {
               setShowAddForm(false);
-              setPrefillCredential(null);
             }}
           >
             <AddKeyForm
@@ -899,7 +899,6 @@ export const KeysSettings: Component = () => {
               }}
               onCancel={() => {
                 setShowAddForm(false);
-                setPrefillCredential(null);
               }}
               onSave={handleSaveKey}
             />
@@ -1134,12 +1133,6 @@ const IconEyeOff = (props: IconProps) => (
   </Svg>
 );
 
-const IconArrowRight = (props: IconProps) => (
-  <Svg {...props}>
-    <path d="M5 12h14M13 6l6 6-6 6" />
-  </Svg>
-);
-
 const PasswordsVaultEditor: Component<{
   vaults: PasswordsVaultSummary[];
   selectedVaultId: string;
@@ -1162,10 +1155,10 @@ const PasswordsVaultEditor: Component<{
   onSelectItem: (item: PasswordsItemSummary) => void;
   onSaveItem: (input: {
     itemId?: string | null;
+    itemKind?: string | null;
     title: string;
     fields: { name: string; value: string }[];
   }) => void;
-  onUseForBinding: () => void;
 }> = (props) => {
   const [masterPassword, setMasterPassword] = createSignal("");
   const [confirmPassword, setConfirmPassword] = createSignal("");
@@ -1189,23 +1182,36 @@ const PasswordsVaultEditor: Component<{
   const [newVaultDescription, setNewVaultDescription] = createSignal("");
   const unlocked = () => props.vaults.length > 0;
   const writable = () => props.selectedVault?.writable === true;
+  const editingItemKind = () =>
+    editingItemId() ? props.selectedItem?.itemKind : "api_credential";
   const editableEntry = () =>
     editingItemId() === null ||
-    props.selectedItem?.itemKind === "api_credential";
+    editingItemKind() === "api_credential" ||
+    editingItemKind() === "login";
   const namedRows = () => fieldRows().filter((row) => row.name.trim());
+  const editingApiCredential = () =>
+    editingItemId() === null || editingItemKind() === "api_credential";
+  const normalizedFieldName = (name: string) =>
+    editingApiCredential() ? name.trim().toUpperCase() : name.trim();
   const masterPasswordBits = () => estimateMasterPasswordBits(masterPassword());
   const saveDisabledReason = createMemo(() => {
     if (!unlocked()) return "Unlock your vault first";
     if (!writable()) return "Select a writable vault";
     if (props.busy) return "Vault is busy";
     if (!editableEntry())
-      return "Only API credential entries can be edited here";
+      return "Only login and API credential entries can be edited here";
     if (!entryTitle().trim()) return "Add a title";
     const named = namedRows();
     if (named.length === 0) return "Add at least one field";
-    if (named.some((row) => !isEnvVarName(row.name)))
+    if (
+      editingApiCredential() &&
+      named.some((row) => !isEnvVarName(row.name))
+    ) {
       return "Field names must be valid env vars";
-    const names = named.map((row) => row.name.trim().toUpperCase());
+    }
+    const names = named.map((row) =>
+      normalizedFieldName(row.name).toLowerCase(),
+    );
     if (new Set(names).size !== names.length)
       return "Field names must be unique";
     if (named.some((row) => !row.value.trim()))
@@ -1358,9 +1364,10 @@ const PasswordsVaultEditor: Component<{
     if (saveDisabledReason()) return;
     props.onSaveItem({
       itemId: editingItemId(),
+      itemKind: editingItemKind(),
       title: entryTitle().trim() || "Credential",
       fields: namedRows().map((row) => ({
-        name: row.name.trim().toUpperCase(),
+        name: normalizedFieldName(row.name),
         value: row.value,
       })),
     });
@@ -1854,7 +1861,7 @@ const PasswordsVaultEditor: Component<{
               }
             >
               <div class="p-5">
-                <div class="mb-5 flex items-start justify-between gap-4">
+                <div class="mb-5">
                   <div>
                     <h4 class="m-0 mb-1 text-[1.1rem] font-semibold text-foreground">
                       {editingItemId() ? "Edit vault entry" : "New vault entry"}
@@ -1864,17 +1871,6 @@ const PasswordsVaultEditor: Component<{
                       {props.selectedVault?.name ?? "your vault"}.
                     </p>
                   </div>
-                  <Show when={editingItemId()}>
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1.5 rounded-md border border-accent/50 bg-accent/10 px-3 py-2 text-[0.85rem] font-medium text-accent transition hover:bg-accent/15 disabled:opacity-60"
-                      disabled={(props.selectedItem?.fields.length ?? 0) === 0}
-                      onClick={props.onUseForBinding}
-                    >
-                      Use for binding
-                      <IconArrowRight size={14} />
-                    </button>
-                  </Show>
                 </div>
 
                 <label class="mb-4 flex flex-col gap-2">
@@ -1943,8 +1939,10 @@ const PasswordsVaultEditor: Component<{
                     {(row, index) => (
                       <div class={PASSWORD_FIELD_ROW_GRID_CLASS}>
                         <input
-                          class="min-w-0 rounded-md border border-border-strong bg-surface-3/80 px-3 py-2 font-mono text-[0.82rem] uppercase text-foreground focus:border-accent focus:outline-none"
-                          placeholder="ENV_NAME"
+                          class={`min-w-0 rounded-md border border-border-strong bg-surface-3/80 px-3 py-2 font-mono text-[0.82rem] text-foreground focus:border-accent focus:outline-none ${editingApiCredential() ? "uppercase" : ""}`}
+                          placeholder={
+                            editingApiCredential() ? "ENV_NAME" : "field name"
+                          }
                           value={row.name}
                           readOnly={!editableEntry()}
                           onInput={(event) =>
@@ -1953,19 +1951,41 @@ const PasswordsVaultEditor: Component<{
                             })
                           }
                         />
-                        <input
-                          type={showValues() ? "text" : "password"}
-                          autocomplete="off"
-                          class="min-w-0 rounded-md border border-border-strong bg-surface-3/80 px-3 py-2 font-mono text-[0.82rem] text-foreground focus:border-accent focus:outline-none"
-                          placeholder="value"
-                          value={row.value}
-                          readOnly={!editableEntry()}
-                          onInput={(event) =>
-                            updateFieldRow(index(), {
-                              value: event.currentTarget.value,
-                            })
+                        <Show
+                          when={showValues()}
+                          fallback={
+                            <input
+                              type="password"
+                              autocomplete="off"
+                              class={PASSWORD_VALUE_INPUT_CLASS}
+                              placeholder="value"
+                              value={row.value}
+                              readOnly={!editableEntry()}
+                              onInput={(event) =>
+                                updateFieldRow(index(), {
+                                  value: event.currentTarget.value,
+                                })
+                              }
+                            />
                           }
-                        />
+                        >
+                          <textarea
+                            autocomplete="off"
+                            class={`${PASSWORD_VALUE_INPUT_CLASS} min-h-[2.5rem] resize-y overflow-hidden whitespace-pre-wrap break-all`}
+                            ref={resizePasswordValueTextarea}
+                            rows={1}
+                            spellcheck={false}
+                            placeholder="value"
+                            value={row.value}
+                            readOnly={!editableEntry()}
+                            onInput={(event) => {
+                              updateFieldRow(index(), {
+                                value: event.currentTarget.value,
+                              });
+                              resizePasswordValueTextarea(event.currentTarget);
+                            }}
+                          />
+                        </Show>
                         <button
                           type="button"
                           class="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-destructive disabled:opacity-40"
@@ -2030,7 +2050,6 @@ const GrantAccessForm: Component<{
   agents: GrantTargetChoice[];
   entries: { vaultId: string; itemId: string; title: string }[];
   vaultUnlocked: boolean;
-  prefill: { vaultId: string; itemId: string } | null;
   loadEntryFields: (vaultId: string, itemId: string) => Promise<string[]>;
   findBinding: (
     serviceId: string,
@@ -2066,9 +2085,6 @@ const GrantAccessForm: Component<{
   const [checked, setChecked] = createSignal<Record<string, boolean>>({});
   const [loadingFields, setLoadingFields] = createSignal(false);
   const [serviceOverride, setServiceOverride] = createSignal("");
-  const [appliedPrefillKey, setAppliedPrefillKey] = createSignal<string | null>(
-    null,
-  );
 
   const entryKey = (entry: { vaultId: string; itemId: string }) =>
     `${entry.vaultId}::${entry.itemId}`;
@@ -2114,21 +2130,6 @@ const GrantAccessForm: Component<{
       setChecked({});
     }
   };
-
-  // Apply a "Use for binding" prefill once the entry is in the list. Guarded by
-  // the applied key so a later reactive update does not override a manual pick.
-  createEffect(() => {
-    const pre = props.prefill;
-    if (!pre) return;
-    const key = entryKey(pre);
-    if (
-      appliedPrefillKey() !== key &&
-      props.entries.some((entry) => entryKey(entry) === key)
-    ) {
-      setAppliedPrefillKey(key);
-      selectCredential(key);
-    }
-  });
 
   const disabledReason = () => {
     if (!agentId().trim()) return "Choose an agent";

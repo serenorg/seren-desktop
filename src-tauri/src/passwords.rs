@@ -15,10 +15,10 @@ use seren_secrets_crypto::keys::{
 use seren_secrets_crypto::protocol::account::{AccountSecrets, account_setup, unlock_account};
 use seren_secrets_crypto::protocol::item::{
     ApiCredentialContent, ApiCredentialKind, CustomField, CustomFieldKind, DecryptedItemContent,
-    FieldPurpose, ItemContent, LoginContent, decrypt_item_with_content_key, decrypt_metadata_json,
-    decrypt_tags, decrypt_title, encrypt_item_with_content_key, encrypt_metadata_json,
-    encrypt_tags, encrypt_title, generate_item_content_key, unwrap_item_content_key,
-    wrap_item_content_key,
+    FieldPurpose, ItemContent, LoginContent, LoginUrl, TotpAlgorithm, TotpConfig,
+    decrypt_item_with_content_key, decrypt_metadata_json, decrypt_tags, decrypt_title,
+    encrypt_item_with_content_key, encrypt_metadata_json, encrypt_tags, encrypt_title,
+    generate_item_content_key, unwrap_item_content_key, wrap_item_content_key,
 };
 use seren_secrets_crypto::protocol::vault::{
     decrypt_vault_name, encrypt_vault_description, encrypt_vault_name, generate_vault_key,
@@ -329,11 +329,12 @@ struct ItemListMetadata {
     reprompt: bool,
 }
 
-struct ExistingApiCredentialState {
+struct ExistingItemState {
     metadata: ItemListMetadata,
     content_key: ItemContentKey,
     content_key_wrap: String,
     tags_ciphertext: Option<String>,
+    content: DecryptedItemContent,
 }
 
 fn default_item_kind() -> String {
@@ -454,10 +455,10 @@ pub async fn save_passwords_api_credential(
         Some(value) if !value.trim().is_empty() => Some(parse_uuid(value, "item_id")?),
         _ => None,
     };
-    let mut fields = sanitize_fields(request.fields)?;
+    let mut fields = request.fields;
     let title = sanitize_title(&request.title, &request.service_name);
 
-    let result = save_passwords_api_credential_inner(&app, vault_id, item_id, &title, &fields)
+    let result = save_passwords_api_credential_inner(&app, vault_id, item_id, &title, &mut fields)
         .await
         .map_err(|err| err.to_string());
 
@@ -717,7 +718,7 @@ async fn save_passwords_api_credential_inner(
     vault_id: Uuid,
     item_id: Option<Uuid>,
     title: &str,
-    fields: &[PasswordsSecretFieldInput],
+    fields: &mut [PasswordsSecretFieldInput],
 ) -> anyhow::Result<CreatePasswordsApiCredentialResponse> {
     let vault = unlocked_vault(vault_id).await?;
     if !vault.writable {
@@ -727,17 +728,35 @@ async fn save_passwords_api_credential_inner(
     let update_existing = item_id.is_some();
     let item_id = item_id.unwrap_or_else(Uuid::new_v4);
     let client = reqwest::Client::new();
-    let mut content = build_secret_reference_content(fields);
     let existing_state = if update_existing {
-        match merge_existing_item(app, &client, &vault, item_id, &mut content).await {
-            Ok(state) => Some(state),
-            Err(err) => {
-                zeroize_item_content(&mut content);
-                return Err(err);
-            }
-        }
+        Some(load_existing_item_state(app, &client, &vault, item_id).await?)
     } else {
         None
+    };
+    let mut existing_state = existing_state;
+    let mut content = match existing_state.as_mut() {
+        Some(state) => match state.metadata.item_kind.as_str() {
+            "api_credential" => {
+                sanitize_fields_in_place(fields).map_err(anyhow::Error::msg)?;
+                let mut content = build_secret_reference_content(fields);
+                merge_api_credential_content(&mut content, state.content.as_mut());
+                content
+            }
+            "login" => {
+                sanitize_password_item_fields_in_place(fields).map_err(anyhow::Error::msg)?;
+                merge_login_content_fields(state.content.as_mut(), fields)?;
+                state.content.as_ref().clone()
+            }
+            item_kind => {
+                return Err(anyhow::anyhow!(
+                    "Existing entry is a {item_kind} item; only login and API credential entries can be edited here"
+                ));
+            }
+        },
+        None => {
+            sanitize_fields_in_place(fields).map_err(anyhow::Error::msg)?;
+            build_secret_reference_content(fields)
+        }
     };
     let body = match existing_state.as_ref() {
         Some(state) => {
@@ -801,16 +820,13 @@ async fn save_passwords_api_credential_inner(
 
 /// Fetches and decrypts the item being updated so the new request preserves
 /// what the editor does not model: the stored metadata (item kind, favorite,
-/// sensitive, reprompt) and the content fields the editor never surfaces.
-/// Refuses to overwrite items that are not API credentials, since the editor
-/// only submits API-credential content and would destroy any other kind.
-async fn merge_existing_item(
+/// sensitive, reprompt), the item content key, tags, and hidden content fields.
+async fn load_existing_item_state(
     app: &AppHandle,
     client: &reqwest::Client,
     vault: &UnlockedVault,
     item_id: Uuid,
-    content: &mut ItemContent,
-) -> anyhow::Result<ExistingApiCredentialState> {
+) -> anyhow::Result<ExistingItemState> {
     let record = get_item_record(app, client, vault.vault_id, item_id).await?;
     let metadata_json = decrypt_metadata_json(
         &vault.vault_key,
@@ -819,19 +835,13 @@ async fn merge_existing_item(
     )?;
     let metadata: ItemListMetadata = serde_json::from_str(&metadata_json)
         .map_err(|err| anyhow::anyhow!("Existing item metadata is malformed: {err}"))?;
-    if metadata.item_kind != "api_credential" {
-        return Err(anyhow::anyhow!(
-            "Existing entry is a {} item; only API credential entries can be edited here",
-            metadata.item_kind
-        ));
-    }
-    let (content_key, mut existing) = decrypt_item_content(&vault.vault_key, &record)?;
-    merge_api_credential_content(content, &mut existing);
-    Ok(ExistingApiCredentialState {
+    let (content_key, content) = decrypt_item_content(&vault.vault_key, &record)?;
+    Ok(ExistingItemState {
         metadata,
         content_key,
         content_key_wrap: record.content_key_wrap,
         tags_ciphertext: record.tags_ciphertext,
+        content,
     })
 }
 
@@ -879,6 +889,107 @@ fn editor_surfaced_alias(existing: &ApiCredentialContent, alias: ApiCredentialAl
         .custom_fields
         .iter()
         .any(|field| api_credential_alias(&field.name) == Some(alias))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoginFieldAlias {
+    Username,
+    Password,
+    Url,
+    Totp,
+    Notes,
+}
+
+fn login_field_alias(name: &str) -> Option<LoginFieldAlias> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "username" | "user" | "login" => Some(LoginFieldAlias::Username),
+        "password" | "pass" => Some(LoginFieldAlias::Password),
+        "url" | "uri" | "website" | "site" => Some(LoginFieldAlias::Url),
+        "totp" | "otp" | "one_time_password" | "one-time password" => Some(LoginFieldAlias::Totp),
+        "notes" | "note" => Some(LoginFieldAlias::Notes),
+        _ => None,
+    }
+}
+
+fn merge_login_content_fields(
+    content: &mut ItemContent,
+    fields: &[PasswordsSecretFieldInput],
+) -> anyhow::Result<()> {
+    let ItemContent::Login(login) = content else {
+        return Err(anyhow::anyhow!("Existing item content is not a login"));
+    };
+
+    let mut username: Option<String> = None;
+    let mut password: Option<String> = None;
+    let mut url: Option<String> = None;
+    let mut totp: Option<String> = None;
+    let mut notes: Option<String> = None;
+    let mut custom_fields = Vec::new();
+    let mut existing_custom = std::mem::take(&mut login.custom_fields)
+        .into_iter()
+        .map(|field| (field.name.to_ascii_lowercase(), field))
+        .collect::<BTreeMap<_, _>>();
+
+    for field in fields {
+        match login_field_alias(&field.name) {
+            Some(LoginFieldAlias::Username) => username = Some(field.value.clone()),
+            Some(LoginFieldAlias::Password) => password = Some(field.value.clone()),
+            Some(LoginFieldAlias::Url) => url = Some(field.value.clone()),
+            Some(LoginFieldAlias::Totp) => totp = Some(field.value.clone()),
+            Some(LoginFieldAlias::Notes) => notes = Some(field.value.clone()),
+            None => {
+                let key = field.name.to_ascii_lowercase();
+                let mut custom = existing_custom.remove(&key).unwrap_or_else(|| CustomField {
+                    name: field.name.clone(),
+                    kind: CustomFieldKind::Concealed,
+                    value: String::new(),
+                    purpose: field_purpose_for_name(&field.name),
+                    section_id: None,
+                });
+                custom.name = field.name.clone();
+                custom.value = field.value.clone();
+                if custom.purpose.is_none() {
+                    custom.purpose = field_purpose_for_name(&field.name);
+                }
+                custom_fields.push(custom);
+            }
+        }
+    }
+
+    login.username = username.unwrap_or_default();
+    login.password = password.unwrap_or_default();
+    match url {
+        Some(value) => {
+            if let Some(first) = login.urls.first_mut() {
+                first.url = value;
+            } else {
+                login.urls.push(LoginUrl::plain(value));
+            }
+        }
+        None => {
+            if !login.urls.is_empty() {
+                login.urls.remove(0);
+            }
+        }
+    }
+    if let Some(secret_base32) = totp {
+        let mut existing = login.totp.take().unwrap_or(TotpConfig {
+            secret_base32: String::new(),
+            algorithm: TotpAlgorithm::Sha1,
+            digits: 6,
+            period_seconds: 30,
+        });
+        existing.secret_base32 = secret_base32;
+        login.totp = Some(existing);
+    } else {
+        login.totp = None;
+    }
+    let notes = notes.unwrap_or_default();
+    let (notes_doc, notes_text) = seren_secrets_crypto::prose::from_plaintext(&notes);
+    login.notes = notes_doc;
+    login.notes_text = notes_text;
+    login.custom_fields = custom_fields;
+    Ok(())
 }
 
 fn passwords_url(path: &str) -> String {
@@ -1730,6 +1841,41 @@ fn sanitize_fields_in_place(fields: &mut [PasswordsSecretFieldInput]) -> Result<
     Ok(())
 }
 
+fn sanitize_password_item_fields_in_place(
+    fields: &mut [PasswordsSecretFieldInput],
+) -> Result<(), String> {
+    if fields.is_empty() {
+        return Err("Add at least one field to store in Seren Passwords".to_string());
+    }
+    if fields.len() > MAX_SECRET_FIELDS {
+        return Err(format!(
+            "At most {MAX_SECRET_FIELDS} fields can be saved at once"
+        ));
+    }
+
+    let mut names = BTreeSet::new();
+    for field in fields.iter_mut() {
+        field.name = field.name.trim().to_string();
+        if field.name.is_empty() {
+            return Err("Each field name must have a label".to_string());
+        }
+        if field.name.len() > MAX_FIELD_NAME_LEN {
+            return Err("Field names are too long".to_string());
+        }
+        if field.value.is_empty() {
+            return Err(format!("{} is empty", field.name));
+        }
+        if field.value.len() > MAX_FIELD_VALUE_LEN {
+            return Err(format!("{} is too large", field.name));
+        }
+        let normalized = field.name.to_ascii_lowercase();
+        if !names.insert(normalized) {
+            return Err(format!("{} is duplicated", field.name));
+        }
+    }
+    Ok(())
+}
+
 fn is_valid_env_name(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some('_' | 'A'..='Z'))
@@ -1971,6 +2117,32 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn sanitizes_password_item_fields_without_env_name_rules() {
+        let mut fields = vec![
+            PasswordsSecretFieldInput {
+                name: " username ".into(),
+                value: "taariq@example.com".into(),
+            },
+            PasswordsSecretFieldInput {
+                name: "workspace".into(),
+                value: "Glide".into(),
+            },
+        ];
+
+        sanitize_password_item_fields_in_place(&mut fields).unwrap();
+
+        assert_eq!(fields[0].name, "username");
+        assert_eq!(fields[1].name, "workspace");
+
+        fields.push(PasswordsSecretFieldInput {
+            name: "WORKSPACE".into(),
+            value: "duplicate".into(),
+        });
+        let err = sanitize_password_item_fields_in_place(&mut fields).unwrap_err();
+        assert!(err.contains("duplicated"));
     }
 
     #[test]
@@ -2756,5 +2928,92 @@ mod tests {
         assert!(merged.notes.plain_text().is_empty());
         // SECRET was never surfaced, so the stored value survives.
         assert_eq!(merged.secondary_value, "foreign-secondary");
+    }
+
+    #[test]
+    fn merge_login_content_fields_updates_visible_fields_only() {
+        let (notes, notes_text) = seren_secrets_crypto::prose::from_plaintext("old note");
+        let mut content = ItemContent::Login(LoginContent {
+            username: "old-user".to_string(),
+            password: "old-password".to_string(),
+            urls: vec![
+                LoginUrl::plain("https://old.example.com"),
+                LoginUrl::plain("https://secondary.example.com"),
+            ],
+            totp: Some(TotpConfig {
+                secret_base32: "OLDTOTP".to_string(),
+                algorithm: TotpAlgorithm::Sha256,
+                digits: 8,
+                period_seconds: 45,
+            }),
+            notes,
+            notes_text,
+            custom_fields: vec![CustomField {
+                name: "workspace".to_string(),
+                kind: CustomFieldKind::String,
+                value: "Old".to_string(),
+                purpose: None,
+                section_id: Some("details".to_string()),
+            }],
+            autofill_on_page_load: Some(true),
+            ..Default::default()
+        });
+        let mut fields = vec![
+            PasswordsSecretFieldInput {
+                name: "username".into(),
+                value: "new-user".into(),
+            },
+            PasswordsSecretFieldInput {
+                name: "password".into(),
+                value: "new-password".into(),
+            },
+            PasswordsSecretFieldInput {
+                name: "url".into(),
+                value: "https://new.example.com".into(),
+            },
+            PasswordsSecretFieldInput {
+                name: "totp".into(),
+                value: "NEWTOTP".into(),
+            },
+            PasswordsSecretFieldInput {
+                name: "notes".into(),
+                value: "new note".into(),
+            },
+            PasswordsSecretFieldInput {
+                name: "workspace".into(),
+                value: "Glide".into(),
+            },
+            PasswordsSecretFieldInput {
+                name: "team secret".into(),
+                value: "shared".into(),
+            },
+        ];
+        sanitize_password_item_fields_in_place(&mut fields).unwrap();
+
+        merge_login_content_fields(&mut content, &fields).unwrap();
+
+        let ItemContent::Login(login) = content else {
+            panic!("expected login content");
+        };
+        assert_eq!(login.username, "new-user");
+        assert_eq!(login.password, "new-password");
+        assert_eq!(login.urls[0].url, "https://new.example.com");
+        assert_eq!(login.urls[1].url, "https://secondary.example.com");
+        let totp = login.totp.unwrap();
+        assert_eq!(totp.secret_base32, "NEWTOTP");
+        assert_eq!(totp.algorithm, TotpAlgorithm::Sha256);
+        assert_eq!(totp.digits, 8);
+        assert_eq!(totp.period_seconds, 45);
+        assert_eq!(login.notes_text, "new note");
+        assert_eq!(login.autofill_on_page_load, Some(true));
+        assert_eq!(login.custom_fields.len(), 2);
+        assert_eq!(login.custom_fields[0].name, "workspace");
+        assert_eq!(login.custom_fields[0].kind, CustomFieldKind::String);
+        assert_eq!(
+            login.custom_fields[0].section_id.as_deref(),
+            Some("details")
+        );
+        assert_eq!(login.custom_fields[1].name, "team secret");
+        assert_eq!(login.custom_fields[1].kind, CustomFieldKind::Concealed);
     }
 }

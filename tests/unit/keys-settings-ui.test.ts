@@ -46,7 +46,7 @@ describe("KeysSettings Seren Passwords contract (#1823)", () => {
     expect(keysSettings).toContain("Save your recovery key");
     expect(keysSettings).toContain("New vault entry");
     expect(keysSettings).toContain("Edit vault entry");
-    expect(keysSettings).toContain("Use for binding");
+    expect(keysSettings).not.toContain("Use for binding");
   });
 
   it("requires acknowledging the recovery key and states local-only derivation", () => {
@@ -84,10 +84,16 @@ describe("KeysSettings Seren Passwords contract (#1823)", () => {
     expect(keysSettings).toContain("selectedVaultId() !== item.vaultId");
   });
 
-  it("keeps restored password field variable labels readable", () => {
+  it("keeps restored password fields editable and readable", () => {
     expect(keysSettings).toContain(
-      "grid-cols-[minmax(6rem,0.85fr)_minmax(0,1fr)_2rem]",
+      "grid-cols-[minmax(5.5rem,10rem)_minmax(0,1fr)_2rem]",
     );
-    expect(keysSettings).toContain("min-w-0 rounded-md border");
+    expect(keysSettings).toContain(
+      'editingItemKind() === "api_credential" ||',
+    );
+    expect(keysSettings).toContain('editingItemKind() === "login"');
+    expect(keysSettings).toContain("Only login and API credential entries");
+    expect(keysSettings).toContain("<textarea");
+    expect(keysSettings).toContain("break-all");
   });
 });
