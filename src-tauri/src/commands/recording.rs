@@ -31,11 +31,26 @@ use image::{ColorType, codecs::jpeg::JpegEncoder};
 
 #[cfg(target_os = "macos")]
 use core_foundation::{
-    base::TCFType,
+    ConcreteCFType,
+    array::CFArray,
+    base::{CFType, TCFType},
     boolean::CFBoolean,
     dictionary::CFDictionary,
+    number::CFNumber,
     string::{CFString, CFStringRef},
 };
+#[cfg(target_os = "macos")]
+use core_graphics::{
+    geometry::{CGPoint, CGRect, CGSize},
+    window::{
+        CGWindowListCopyWindowInfo, create_image, kCGWindowBounds, kCGWindowImageDefault,
+        kCGWindowIsOnscreen, kCGWindowLayer, kCGWindowListExcludeDesktopElements,
+        kCGWindowListOptionIncludingWindow, kCGWindowListOptionOnScreenOnly, kCGWindowName,
+        kCGWindowNumber, kCGWindowOwnerName, kCGWindowOwnerPID, kCGWindowSharingState,
+    },
+};
+#[cfg(target_os = "macos")]
+use image::RgbaImage;
 #[cfg(target_os = "macos")]
 use objc2::runtime::NSObject;
 #[cfg(target_os = "macos")]
@@ -673,8 +688,8 @@ fn recording_targets() -> Vec<RecordingTarget> {
             is_available: native_screen_video_available,
             capabilities: browser_capabilities,
             limitations: vec![
-                "Records browser activity with native video, cursor, microphone when available, and explicit markers.".to_string(),
-                "Use App window to pin one browser window, or Full screen for browser workflows that span windows.".to_string(),
+                "Records one selected browser window with native video, cursor, microphone when available, and explicit markers.".to_string(),
+                "Use Full screen for browser workflows that span windows.".to_string(),
             ],
         },
     ]
@@ -1021,7 +1036,10 @@ fn validate_recording_start_request_against_targets(
             target.label
         ));
     }
-    if matches!(request.target_kind, RecordingRequestTargetKind::Window) {
+    if matches!(
+        request.target_kind,
+        RecordingRequestTargetKind::Window | RecordingRequestTargetKind::Browser
+    ) {
         if let Some(selection) = &request.capture_window {
             validate_capture_window_selection(selection)?;
             if request
@@ -1035,9 +1053,22 @@ fn validate_recording_start_request_against_targets(
             }
         }
         let Some(capture_window_id) = request_capture_window_id(request) else {
-            return Err("Select an app window before recording.".to_string());
+            let message = if matches!(request.target_kind, RecordingRequestTargetKind::Browser) {
+                "Select a browser window before recording."
+            } else {
+                "Select an app window before recording."
+            };
+            return Err(message.to_string());
         };
         validate_capture_window_id(capture_window_id)?;
+        if matches!(request.target_kind, RecordingRequestTargetKind::Browser)
+            && !request
+                .capture_window
+                .as_ref()
+                .is_some_and(|selection| is_browser_capture_app(&selection.app_name))
+        {
+            return Err("Select a browser window before recording.".to_string());
+        }
     }
     if request.include_microphone
         && !target
@@ -1196,9 +1227,17 @@ fn request_capture_window_id(request: &RecordingStartRequest) -> Option<&str> {
 fn request_capture_window_platform_id(
     request: &RecordingStartRequest,
 ) -> Result<Option<u32>, String> {
-    if matches!(request.target_kind, RecordingRequestTargetKind::Window) {
-        let id = request_capture_window_id(request)
-            .ok_or_else(|| "Select an app window before recording.".to_string())?;
+    if matches!(
+        request.target_kind,
+        RecordingRequestTargetKind::Window | RecordingRequestTargetKind::Browser
+    ) {
+        let id = request_capture_window_id(request).ok_or_else(|| {
+            if matches!(request.target_kind, RecordingRequestTargetKind::Browser) {
+                "Select a browser window before recording.".to_string()
+            } else {
+                "Select an app window before recording.".to_string()
+            }
+        })?;
         return validate_capture_window_id(id).map(Some);
     }
     Ok(None)
@@ -1244,7 +1283,38 @@ fn is_capture_window_candidate(app_name: &str, width: u32, height: u32) -> bool 
     true
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn normalized_capture_app_name(app_name: &str) -> String {
+    app_name
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn is_browser_capture_app(app_name: &str) -> bool {
+    let normalized = normalized_capture_app_name(app_name);
+    if normalized.is_empty() {
+        return false;
+    }
+    const EXACT_BROWSER_APPS: &[&str] = &[
+        "arc",
+        "bravebrowser",
+        "dia",
+        "firefox",
+        "googlechrome",
+        "googlechromecanary",
+        "microsoftedge",
+        "opera",
+        "operagx",
+        "safari",
+        "vivaldi",
+    ];
+    EXACT_BROWSER_APPS.contains(&normalized.as_str())
+        || normalized.contains("chromium")
+        || normalized.ends_with("browser")
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn xcap_window_summary(window: &xcap::Window) -> Option<RecordingCaptureWindow> {
     let id = window.id().ok()?;
     let pid = window.pid().ok()?;
@@ -1277,16 +1347,202 @@ fn xcap_window_summary(window: &xcap::Window) -> Option<RecordingCaptureWindow> 
     })
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+#[cfg(target_os = "macos")]
+type MacosWindowInfoDictionary = CFDictionary<CFString, CFType>;
+
+#[cfg(target_os = "macos")]
+fn macos_cg_dictionary_value<T: ConcreteCFType>(
+    dictionary: &MacosWindowInfoDictionary,
+    key: CFStringRef,
+) -> Option<T> {
+    let key = unsafe { CFString::wrap_under_get_rule(key) };
+    dictionary
+        .find(&key)
+        .and_then(|value| value.downcast::<T>())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_cg_number_i32(dictionary: &MacosWindowInfoDictionary, key: CFStringRef) -> Option<i32> {
+    macos_cg_dictionary_value::<CFNumber>(dictionary, key).and_then(|number| number.to_i32())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_cg_string(dictionary: &MacosWindowInfoDictionary, key: CFStringRef) -> Option<String> {
+    macos_cg_dictionary_value::<CFString>(dictionary, key)
+        .map(|value| value.to_string())
+        .and_then(|value| clean_native_context_text(&value, 200))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_cg_bool(dictionary: &MacosWindowInfoDictionary, key: CFStringRef) -> Option<bool> {
+    macos_cg_dictionary_value::<CFBoolean>(dictionary, key).map(bool::from)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_cg_window_bounds(
+    dictionary: &MacosWindowInfoDictionary,
+) -> Option<RecordingCaptureWindowBounds> {
+    let bounds = macos_cg_dictionary_value::<CFDictionary>(dictionary, unsafe { kCGWindowBounds })?;
+    let rect = CGRect::from_dict_representation(&bounds)?;
+    let width = macos_cg_dimension_to_u32(rect.size.width)?;
+    let height = macos_cg_dimension_to_u32(rect.size.height)?;
+    Some(RecordingCaptureWindowBounds {
+        x: macos_cg_coordinate_to_i32(rect.origin.x)?,
+        y: macos_cg_coordinate_to_i32(rect.origin.y)?,
+        width,
+        height,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_cg_coordinate_to_i32(value: f64) -> Option<i32> {
+    if !value.is_finite() {
+        return None;
+    }
+    let rounded = value.round();
+    if rounded < i32::MIN as f64 || rounded > i32::MAX as f64 {
+        return None;
+    }
+    Some(rounded as i32)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_cg_dimension_to_u32(value: f64) -> Option<u32> {
+    if !value.is_finite() || value <= 0.0 {
+        return None;
+    }
+    let rounded = value.round();
+    if rounded <= 0.0 || rounded > u32::MAX as f64 {
+        return None;
+    }
+    Some(rounded as u32)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_window_summary_from_info(
+    dictionary: &MacosWindowInfoDictionary,
+) -> Option<RecordingCaptureWindow> {
+    let platform_id =
+        u32::try_from(macos_cg_number_i32(dictionary, unsafe { kCGWindowNumber })?).ok()?;
+    let pid = u32::try_from(macos_cg_number_i32(dictionary, unsafe {
+        kCGWindowOwnerPID
+    })?)
+    .ok()?;
+    let app_name = macos_cg_string(dictionary, unsafe { kCGWindowOwnerName })?;
+    let title = macos_cg_string(dictionary, unsafe { kCGWindowName }).unwrap_or_default();
+    let bounds = macos_cg_window_bounds(dictionary)?;
+    let layer = macos_cg_number_i32(dictionary, unsafe { kCGWindowLayer }).unwrap_or(0);
+    let sharing_state =
+        macos_cg_number_i32(dictionary, unsafe { kCGWindowSharingState }).unwrap_or(0);
+    let is_on_screen = macos_cg_bool(dictionary, unsafe { kCGWindowIsOnscreen }).unwrap_or(true);
+    if layer != 0 || sharing_state == 0 {
+        return None;
+    }
+    if !is_capture_window_candidate(&app_name, bounds.width, bounds.height) {
+        return None;
+    }
+    Some(RecordingCaptureWindow {
+        id: platform_id.to_string(),
+        platform_id,
+        pid,
+        app_name,
+        title,
+        bounds,
+        is_focused: false,
+        is_minimized: !is_on_screen,
+        is_recordable: is_on_screen,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_window_summaries() -> Result<Vec<RecordingCaptureWindow>, String> {
+    let raw_windows = unsafe {
+        CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            0,
+        )
+    };
+    if raw_windows.is_null() {
+        return Ok(Vec::new());
+    }
+    let windows: CFArray<MacosWindowInfoDictionary> =
+        unsafe { TCFType::wrap_under_create_rule(raw_windows) };
+    Ok(windows
+        .iter()
+        .filter_map(|dictionary| macos_window_summary_from_info(&dictionary))
+        .collect())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_window_summary_by_id(platform_id: u32) -> Result<RecordingCaptureWindow, String> {
+    macos_window_summaries()?
+        .into_iter()
+        .find(|window| window.platform_id == platform_id)
+        .ok_or_else(|| format!("Capture window not found: {platform_id}"))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_cg_rect_from_bounds(bounds: &RecordingCaptureWindowBounds) -> CGRect {
+    CGRect::new(
+        &CGPoint::new(bounds.x as f64, bounds.y as f64),
+        &CGSize::new(bounds.width as f64, bounds.height as f64),
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn macos_cg_image_to_rgba(image: &core_graphics::image::CGImage) -> Option<RgbaImage> {
+    let width = image.width();
+    let height = image.height();
+    let bytes_per_row = image.bytes_per_row();
+    if width == 0 || height == 0 || bytes_per_row < width.saturating_mul(4) {
+        return None;
+    }
+    let data = image.data();
+    let mut buffer = Vec::with_capacity(width.saturating_mul(height).saturating_mul(4));
+    for row in data.chunks_exact(bytes_per_row).take(height) {
+        buffer.extend_from_slice(&row[..width * 4]);
+    }
+    if buffer.len() != width.saturating_mul(height).saturating_mul(4) {
+        return None;
+    }
+    for bgra in buffer.chunks_exact_mut(4) {
+        bgra.swap(0, 2);
+    }
+    RgbaImage::from_raw(width as u32, height as u32, buffer)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_capture_window_image(platform_id: u32) -> Result<RgbaImage, String> {
+    let summary = macos_window_summary_by_id(platform_id)?;
+    if !summary.is_recordable {
+        return Err("Capture window is minimized.".to_string());
+    }
+    let rect = macos_cg_rect_from_bounds(&summary.bounds);
+    let image = create_image(
+        rect,
+        kCGWindowListOptionIncludingWindow,
+        platform_id,
+        kCGWindowImageDefault,
+    )
+    .ok_or_else(|| "Failed to capture window preview.".to_string())?;
+    macos_cg_image_to_rgba(&image)
+        .ok_or_else(|| "Failed to decode window preview image.".to_string())
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn xcap_windows() -> Result<Vec<xcap::Window>, String> {
     xcap::Window::all().map_err(|error| format!("Failed to list capture windows: {error}"))
 }
 
 fn list_capture_windows() -> Result<Vec<RecordingCaptureWindow>, String> {
-    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
-        #[cfg(target_os = "macos")]
         ensure_macos_window_listing_permission()?;
+        return macos_window_summaries();
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
         let windows = xcap_windows()?;
         Ok(windows
             .iter()
@@ -1304,10 +1560,41 @@ fn capture_window_preview(
     app: &tauri::AppHandle,
     window_id: &str,
 ) -> Result<RecordingCaptureWindowPreview, String> {
-    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
-        #[cfg(target_os = "macos")]
         ensure_macos_window_listing_permission()?;
+        let platform_id = validate_capture_window_id(window_id)?;
+        let summary = macos_window_summary_by_id(platform_id)?;
+        if !summary.is_recordable {
+            return Err("Capture window is minimized.".to_string());
+        }
+        let image = macos_capture_window_image(platform_id)?;
+        let preview_width = image.width();
+        let preview_height = image.height();
+        let preview_root = recording_preview_root(app)?;
+        prune_recording_previews(&preview_root);
+        let captured_at_ms = unix_time_ms();
+        let path = preview_root.join(format!("window-preview-{platform_id}-{captured_at_ms}.png"));
+        image
+            .save(&path)
+            .map_err(|error| format!("Failed to write window preview: {error}"))?;
+        allow_recording_preview_asset(app, &path)?;
+        let metadata = fs::metadata(&path)
+            .map_err(|error| format!("Failed to stat window preview: {error}"))?;
+        return Ok(RecordingCaptureWindowPreview {
+            window_id: platform_id.to_string(),
+            captured_at_ms,
+            artifact_url: file_url(&path)?,
+            artifact_path: path.to_string_lossy().into_owned(),
+            mime_type: "image/png".to_string(),
+            width: preview_width,
+            height: preview_height,
+            size_bytes: metadata.len(),
+        });
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
         let platform_id = validate_capture_window_id(window_id)?;
         let window = xcap_windows()?
             .into_iter()
@@ -1353,12 +1640,7 @@ fn capture_window_preview(
 
 #[cfg(target_os = "macos")]
 fn ensure_capture_window_recordable(platform_id: u32) -> Result<(), String> {
-    let window = xcap_windows()?
-        .into_iter()
-        .find(|window| window.id().ok() == Some(platform_id))
-        .ok_or_else(|| format!("Capture window not found: {platform_id}"))?;
-    let summary =
-        xcap_window_summary(&window).ok_or_else(|| "Capture window is not visible.".to_string())?;
+    let summary = macos_window_summary_by_id(platform_id)?;
     if !summary.is_recordable {
         return Err("Capture window is minimized.".to_string());
     }
@@ -1469,7 +1751,7 @@ fn start_native_recording_backend(
             start_window_recording_backend(app, request, output_dir)
         }
         RecordingRequestTargetKind::Browser => {
-            start_screen_recording_backend(app, request, output_dir)
+            start_window_recording_backend(app, request, output_dir)
         }
     }
 }
@@ -2591,7 +2873,10 @@ fn recording_marker_action_context_for_session(
     session: &RecordingSession,
     fallback_context: Option<NativeActionContext>,
 ) -> Option<NativeActionContext> {
-    if matches!(session.target_kind, RecordingTargetKind::Window) {
+    if matches!(
+        session.target_kind,
+        RecordingTargetKind::Window | RecordingTargetKind::Browser
+    ) {
         return selected_window_action_context(session);
     }
     fallback_context
@@ -2739,18 +3024,26 @@ fn capture_xcap_keyframe_image(
     capture_window_platform_id: Option<u32>,
 ) -> Result<xcap::image::RgbaImage, String> {
     if let Some(platform_id) = capture_window_platform_id {
-        let window = xcap_windows()?
-            .into_iter()
-            .find(|window| window.id().ok() == Some(platform_id))
-            .ok_or_else(|| format!("Capture window not found: {platform_id}"))?;
-        let summary = xcap_window_summary(&window)
-            .ok_or_else(|| "Capture window is not visible.".to_string())?;
-        if !summary.is_recordable {
-            return Err("Capture window is minimized.".to_string());
+        #[cfg(target_os = "macos")]
+        {
+            return macos_capture_window_image(platform_id);
         }
-        return window
-            .capture_image()
-            .map_err(|error| format!("Failed to capture window keyframe: {error}"));
+
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        {
+            let window = xcap_windows()?
+                .into_iter()
+                .find(|window| window.id().ok() == Some(platform_id))
+                .ok_or_else(|| format!("Capture window not found: {platform_id}"))?;
+            let summary = xcap_window_summary(&window)
+                .ok_or_else(|| "Capture window is not visible.".to_string())?;
+            if !summary.is_recordable {
+                return Err("Capture window is minimized.".to_string());
+            }
+            return window
+                .capture_image()
+                .map_err(|error| format!("Failed to capture window keyframe: {error}"));
+        }
     }
 
     let monitors = xcap::Monitor::all()
@@ -3681,6 +3974,10 @@ mod tests {
         assert!(!is_capture_window_candidate("Preview App", 0, 600));
         assert!(!is_capture_window_candidate("Preview App", 800, 0));
         assert!(is_capture_window_candidate("Preview App", 800, 600));
+        assert!(is_browser_capture_app("Google Chrome"));
+        assert!(is_browser_capture_app("Microsoft Edge"));
+        assert!(is_browser_capture_app("Safari"));
+        assert!(!is_browser_capture_app("Preview App"));
 
         if cfg!(target_os = "macos") {
             assert!(!is_capture_window_candidate("Control Center", 120, 60));
@@ -3989,7 +4286,7 @@ mod tests {
     }
 
     #[test]
-    fn recording_start_request_validation_accepts_browser_native_fallback() {
+    fn recording_start_request_validation_requires_browser_window_selection() {
         let Some(mut browser) = recording_targets()
             .into_iter()
             .find(|target| target.id == "browser")
@@ -4002,6 +4299,37 @@ mod tests {
         request.include_microphone = false;
         request.executable_upgrade = false;
 
+        let err = validate_recording_start_request_against_targets(&request, &[browser.clone()])
+            .expect_err("missing browser window");
+        assert_eq!(err, "Select a browser window before recording.");
+
+        request.capture_window_id = Some("123".to_string());
+        request.capture_window = Some(RecordingCaptureWindowSelection {
+            id: "123".to_string(),
+            app_name: "Preview App".to_string(),
+            title: "Workflow".to_string(),
+            bounds: RecordingCaptureWindowBounds {
+                x: 10,
+                y: 20,
+                width: 640,
+                height: 480,
+            },
+        });
+        let err = validate_recording_start_request_against_targets(&request, &[browser.clone()])
+            .expect_err("not a browser window");
+        assert_eq!(err, "Select a browser window before recording.");
+
+        request.capture_window = Some(RecordingCaptureWindowSelection {
+            id: "123".to_string(),
+            app_name: "Google Chrome".to_string(),
+            title: "Workflow".to_string(),
+            bounds: RecordingCaptureWindowBounds {
+                x: 10,
+                y: 20,
+                width: 640,
+                height: 480,
+            },
+        });
         assert!(validate_recording_start_request_against_targets(&request, &[browser]).is_ok());
     }
 

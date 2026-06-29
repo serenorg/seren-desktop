@@ -22,6 +22,7 @@ import {
   findRecordingPermissionBlocker,
   findInitialRecordingTarget,
   getRecordingSessionArtifactUrls,
+  isBrowserCaptureAppName,
   normalizeRecordingBrowserExtensionSession,
   normalizeRecordingSkillDraft,
   parseRecordingSkillDraftText,
@@ -257,6 +258,48 @@ describe("recording packages", () => {
         },
       }),
     ).toBe("Capture window bounds are invalid.");
+
+    const browserTarget = {
+      ...DEFAULT_RECORDING_TARGETS[2],
+      isAvailable: true,
+      capabilities: ["video"] satisfies RecordingCapability[],
+    };
+    const browserRequest = {
+      ...request,
+      targetId: browserTarget.id,
+      targetKind: browserTarget.kind,
+      includeMicrophone: false,
+    };
+    expect(
+      validateRecordingStartRequest([browserTarget], browserRequest),
+    ).toBe("Select a browser window before recording.");
+    expect(
+      validateRecordingStartRequest([browserTarget], {
+        ...browserRequest,
+        captureWindowId: "456",
+        captureWindow: {
+          id: "456",
+          appName: "Preview App",
+          title: "Workflow",
+          bounds: { x: 10, y: 20, width: 640, height: 480 },
+        },
+      }),
+    ).toBe("Select a browser window before recording.");
+    expect(
+      validateRecordingStartRequest([browserTarget], {
+        ...browserRequest,
+        captureWindowId: "456",
+        captureWindow: {
+          id: "456",
+          appName: "Google Chrome",
+          title: "Workflow",
+          bounds: { x: 10, y: 20, width: 640, height: 480 },
+        },
+      }),
+    ).toBeNull();
+    expect(isBrowserCaptureAppName("Safari")).toBe(true);
+    expect(isBrowserCaptureAppName("Microsoft Edge")).toBe(true);
+    expect(isBrowserCaptureAppName("Preview App")).toBe(false);
   });
 
   it("finds permission blockers for requested capture features", () => {
@@ -2334,6 +2377,8 @@ describe("recording packages", () => {
     expect(uiSource).toContain("props.adapter.captureWindowPreview");
     expect(uiSource).toContain("props.adapter.clearWindowPreviews");
     expect(uiSource).toContain("preferredCaptureWindowId");
+    expect(uiSource).toContain("captureWindowsForTargetKind");
+    expect(uiSource).toContain("isBrowserCaptureAppName(window.appName)");
     expect(uiSource).toContain(
       "await previewCaptureWindow(nextSelectedCaptureWindowId)",
     );
@@ -2344,6 +2389,7 @@ describe("recording packages", () => {
     expect(uiSource).toContain("onRefreshWindows");
     expect(uiSource).toContain("clearWindowPreviewState");
     expect(uiSource).toContain("WindowCapturePreviewPanel");
+    expect(uiSource).toContain("Browser preview");
     expect(uiSource).toContain("selectedCaptureWindowId");
     expect(uiSource).toContain("selectedCaptureWindow");
     expect(uiSource).toContain("captureWindowId:");
