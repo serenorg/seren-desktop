@@ -2337,6 +2337,12 @@ export type ToolDefinition = {
     max_output_bytes?: number | null;
     name: string;
     /**
+     * Whether this tool can perform non-read work. Side-effecting tools are
+     * protected so an interrupted run never silently re-runs them; set `false`
+     * only for deterministic, side-effect-free reads.
+     */
+    side_effecting?: boolean | null;
+    /**
      * Per-tool timeout override in seconds. Overrides the deployment-level tool timeout.
      */
     timeout_override_seconds?: number | null;

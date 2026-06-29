@@ -18,6 +18,7 @@ import {
   cancelEmployeeRun,
   formatToolAuditEvent,
   runEmployeeMessage,
+  runLiveStateLabel,
   type ToolAuditEvent,
   type ToolCallEvent,
   type ToolResultEvent,
@@ -1001,6 +1002,14 @@ async function runEmployeeTurn(
           "Starting employee runtime. I'll send your message once it is ready.",
           conversationId,
         );
+      },
+      onRunState: (event) => {
+        markProgress();
+        if (!startupNoticeShown) return;
+        const label = runLiveStateLabel(event);
+        if (!label) return;
+        conversationStore.clearStreamingContent(conversationId);
+        conversationStore.appendStreamingContent(label, conversationId);
       },
       onText: (chunk) => {
         markProgress();

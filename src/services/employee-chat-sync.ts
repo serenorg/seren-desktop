@@ -2,7 +2,6 @@
 // ABOUTME: Keeps desktop employee chats aligned with web-created employee conversations.
 
 import {
-  assistantTextFromRun,
   type EmployeeOutputEventEnvelope,
   formatToolAuditEvent,
   isFailureStatus,
@@ -14,7 +13,6 @@ import {
 import {
   type CloudConversationMessageResponse,
   type CloudConversationResponse,
-  type CloudDeploymentRunEvent,
   serenCloudGetConversationMessages,
   serenCloudListConversations,
 } from "@/api/seren-cloud";
@@ -151,6 +149,7 @@ async function fetchEmployeeConversationMessages(
         cursor,
         // Desktop bulk sync persists messages in chronological order.
         order: "asc",
+        include_run: false,
       },
       throwOnError: false,
     });
@@ -206,23 +205,26 @@ async function persistConversationMessage(
   message: CloudConversationMessageResponse,
   existingMessages: Map<string, StoredMessage>,
 ): Promise<void> {
-  if (message.run && message.role === "assistant") return;
-  if (message.run) {
-    for (const draft of buildRunMessageDrafts(
+  if (message.role === "assistant") {
+    for (const draft of buildAssistantMessageDrafts(
       conversationId,
       employee,
-      message.run,
-      message.content,
+      message,
     )) {
       await saveCloudMessage(draft, existingMessages);
     }
     return;
   }
   if (message.content.trim()) {
+    const runId =
+      message.run_id ?? message.run_summary?.run_id ?? message.run?.id ?? null;
     await saveCloudMessage(
       draftFromUnifiedMessage(
         {
-          id: message.message_id,
+          id:
+            message.role === "user" && runId
+              ? `${runId}:user`
+              : message.message_id,
           type: message.role === "user" ? "user" : "assistant",
           role: message.role === "user" ? "user" : "assistant",
           content: message.content,
@@ -231,6 +233,7 @@ async function persistConversationMessage(
           request: {
             prompt: message.content,
             employeeId: employee.id,
+            runId: runId ?? undefined,
           },
         },
         conversationId,
@@ -314,43 +317,35 @@ function titleFromConversation(
   return employee.name;
 }
 
-function buildRunMessageDrafts(
+function buildAssistantMessageDrafts(
   conversationId: string,
   employee: EmployeeSummary,
-  run: CloudDeploymentRunEvent,
-  userTextOverride?: string,
+  message: CloudConversationMessageResponse,
 ): CloudMessageDraft[] {
   const messages: CloudMessageDraft[] = [];
-  const startedAt = timestampMs(run.started_at);
-  const completedAt = timestampMs(run.completed_at ?? run.updated_at);
-  const userText = userTextOverride ?? "";
-  if (userText) {
-    messages.push(
-      draftFromUnifiedMessage(
-        {
-          id: `${run.id}:user`,
-          type: "user",
-          role: "user",
-          content: userText,
-          timestamp: startedAt,
-          status: "complete",
-          request: {
-            prompt: userText,
-            employeeId: employee.id,
-            runId: run.id,
-          },
-        },
-        conversationId,
-        null,
-      ),
-    );
-  }
-
+  const run = message.run ?? null;
+  const runSummary = message.run_summary ?? null;
+  const runId = message.run_id ?? runSummary?.run_id ?? run?.id ?? null;
+  const turnId = runId ?? message.message_id;
+  const startedAt = timestampMs(
+    runSummary?.started_at ?? run?.started_at ?? message.created_at,
+  );
+  const completedAt = timestampMs(
+    runSummary?.completed_at ??
+      run?.completed_at ??
+      runSummary?.updated_at ??
+      run?.updated_at ??
+      message.updated_at,
+  );
+  const runStatus = runSummary?.status ?? run?.status ?? "completed";
+  const statusMessage = runSummary?.status_message ?? run?.status_message ?? "";
   const textParts: string[] = [];
   const thinkingParts: string[] = [];
   const eventDrafts = new Map<string, CloudMessageDraft>();
   const eventOrder: string[] = [];
-  const events = outputEventEnvelopes(run.output_events);
+  const events = outputEventEnvelopes(
+    message.events.length > 0 ? message.events : run?.output_events,
+  );
 
   const setEventDraft = (draft: CloudMessageDraft) => {
     if (!eventDrafts.has(draft.id)) eventOrder.push(draft.id);
@@ -359,7 +354,7 @@ function buildRunMessageDrafts(
 
   events.forEach((event, index) => {
     const timestamp = eventTimestamp(startedAt, index);
-    const request = cloudEventRequest(employee.id, run.id, event);
+    const request = cloudEventRequest(employee.id, runId, event);
     switch (event.type) {
       case "text":
         textParts.push(event.text);
@@ -368,7 +363,7 @@ function buildRunMessageDrafts(
         thinkingParts.push(event.text);
         break;
       case "tool_call": {
-        const id = `${run.id}:tool_call:${event.id}`;
+        const id = `${turnId}:tool_call:${event.id}`;
         const parameters = parseJsonObject(event.arguments);
         const previous = eventDrafts.get(id);
         const previousToolCall = previous
@@ -408,7 +403,7 @@ function buildRunMessageDrafts(
         break;
       }
       case "tool_result": {
-        const callId = `${run.id}:tool_call:${event.id}`;
+        const callId = `${turnId}:tool_call:${event.id}`;
         const existing = eventDrafts.get(callId);
         if (existing) {
           const existingToolCall = toolCallFromMetadata(existing.metadata);
@@ -444,7 +439,7 @@ function buildRunMessageDrafts(
         setEventDraft(
           draftFromUnifiedMessage(
             {
-              id: `${run.id}:tool_result:${event.id}:${eventKey(event, index)}`,
+              id: `${turnId}:tool_result:${event.id}:${eventKey(event, index)}`,
               type: "tool_result",
               role: "assistant",
               content: event.content,
@@ -472,7 +467,7 @@ function buildRunMessageDrafts(
         setEventDraft(
           advisoryDraft(
             conversationId,
-            run,
+            turnId,
             employee,
             `tool_audit:${event.id}:${eventKey(event, index)}`,
             `> **Tool audit:** ${formatToolAuditEvent(
@@ -496,7 +491,7 @@ function buildRunMessageDrafts(
           setEventDraft(
             advisoryDraft(
               conversationId,
-              run,
+              turnId,
               employee,
               `${event.type}:${eventKey(event, index)}`,
               content,
@@ -519,24 +514,24 @@ function buildRunMessageDrafts(
     }),
   );
 
-  const assistantText = textParts.join("").trim() || assistantTextFromRun(run);
-  if (assistantText || run.status_message || thinkingParts.length > 0) {
+  const assistantText = textParts.join("").trim() || message.content.trim();
+  if (assistantText || statusMessage || thinkingParts.length > 0) {
     messages.push(
       draftFromUnifiedMessage(
         {
-          id: `${run.id}:assistant`,
+          id: runId ? `${runId}:assistant` : message.message_id,
           type: "assistant",
           role: "assistant",
-          content: assistantText || run.status_message || "",
+          content: assistantText || statusMessage,
           timestamp: completedAt,
-          status: isFailureStatus(run.status) ? "error" : "complete",
+          status: isFailureStatus(runStatus) ? "error" : "complete",
           workerType: "employee",
           provider: "seren",
           thinking: thinkingParts.join("").trim() || undefined,
           request: {
-            prompt: userText,
+            prompt: "",
             employeeId: employee.id,
-            runId: run.id,
+            runId: runId ?? undefined,
           },
         },
         conversationId,
@@ -567,13 +562,13 @@ function draftFromUnifiedMessage(
 
 function cloudEventRequest(
   employeeId: string,
-  runId: string,
+  runId: string | null,
   event: EmployeeOutputEventEnvelope,
 ): UnifiedMessage["request"] {
   return {
     prompt: "",
     employeeId,
-    runId,
+    runId: runId ?? undefined,
     sequenceNumber: event.sequence_number ?? undefined,
     eventType: event.event_type ?? undefined,
     eventKind: event.kind ?? undefined,
@@ -631,7 +626,7 @@ function toolCallFromMetadata(metadata: string | null) {
 
 function advisoryDraft(
   conversationId: string,
-  run: CloudDeploymentRunEvent,
+  turnId: string,
   employee: EmployeeSummary,
   suffix: string,
   content: string,
@@ -640,7 +635,7 @@ function advisoryDraft(
 ): CloudMessageDraft {
   return draftFromUnifiedMessage(
     {
-      id: `${run.id}:${suffix}`,
+      id: `${turnId}:${suffix}`,
       type: "assistant",
       role: "assistant",
       content,
@@ -652,7 +647,6 @@ function advisoryDraft(
         ...request,
         prompt: request?.prompt ?? "",
         employeeId: employee.id,
-        runId: run.id,
       },
     },
     conversationId,

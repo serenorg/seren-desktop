@@ -11320,6 +11320,10 @@ export type EndpointDefinition = {
      */
     method: HttpMethod;
     /**
+     * Stable operation identifier used for scoped agent/publisher grants.
+     */
+    operation_id?: string | null;
+    /**
      * Path relative to api_url (e.g., "/chat/completions")
      */
     path: string;

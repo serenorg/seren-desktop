@@ -20509,6 +20509,13 @@
             "$ref": "#/components/schemas/HttpMethod",
             "description": "HTTP method (GET, POST, PUT, DELETE, PATCH)"
           },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable operation identifier used for scoped agent/publisher grants."
+          },
           "path": {
             "type": "string",
             "description": "Path relative to api_url (e.g., \"/chat/completions\")"

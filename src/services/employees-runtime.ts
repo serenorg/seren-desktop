@@ -4,8 +4,11 @@
 import {
   createEmployeeRunManager,
   formatToolAuditEvent,
+  type RunLiveStateEvent,
   type RunOptions,
   type RunResult,
+  runLiveStateLabel,
+  STREAM_TERMINAL_EVENTS,
   type StartupWaitEvent,
   type ToolAuditEvent,
   type ToolCallEvent,
@@ -24,8 +27,10 @@ import { formatApiError } from "@/lib/api-errors";
 
 export {
   formatToolAuditEvent,
+  type RunLiveStateEvent,
   type RunOptions,
   type RunResult,
+  runLiveStateLabel,
   type StartupWaitEvent,
   type ToolAuditEvent,
   type ToolCallEvent,
@@ -144,14 +149,60 @@ const employeeRunManager = createEmployeeRunManager(
       }
       return run.data.data;
     },
-    async streamRun({ deploymentId, runId, signal, maxRetryAttempts }) {
-      const { stream } = await serenCloudDeploymentRunStream({
-        path: { id: deploymentId, run_id: runId },
-        signal,
-        sseMaxRetryAttempts: maxRetryAttempts,
-        throwOnError: false,
-      });
-      return stream as AsyncIterable<unknown>;
+    async streamRun({
+      deploymentId,
+      runId,
+      signal,
+      maxRetryAttempts,
+      lastEventId,
+    }) {
+      return (async function* () {
+        let resumeEventId = lastEventId ?? null;
+        let cleanCloseReconnects = 0;
+        while (true) {
+          let streamError: unknown;
+          let sawTerminalEvent = false;
+          // The SSE iterator yields only the parsed payload; pair each yielded
+          // payload with the event metadata captured by HeyAPI. A queue (not a
+          // single slot) keeps pairing correct even if callbacks ever batch.
+          const pendingFrames: Array<{ event?: string; id?: string }> = [];
+          const headers: Record<string, string> = {
+            Accept: "text/event-stream",
+          };
+          if (resumeEventId) headers["Last-Event-ID"] = resumeEventId;
+          const { stream } = await serenCloudDeploymentRunStream({
+            headers,
+            onSseEvent(event) {
+              if (event.data !== undefined) {
+                pendingFrames.push({ event: event.event, id: event.id });
+              }
+            },
+            onSseError(error) {
+              streamError = error;
+            },
+            path: { id: deploymentId, run_id: runId },
+            signal,
+            sseMaxRetryAttempts: maxRetryAttempts,
+            throwOnError: false,
+          });
+          for await (const data of stream as AsyncIterable<unknown>) {
+            streamError = undefined;
+            const frame = pendingFrames.shift();
+            if (frame?.id) resumeEventId = frame.id;
+            if (frame?.event && STREAM_TERMINAL_EVENTS.has(frame.event)) {
+              sawTerminalEvent = true;
+            }
+            yield { event: frame?.event, id: frame?.id, data };
+          }
+          if (streamError !== undefined) throw streamError;
+          // Clean EOF without a terminal frame means the connection dropped
+          // mid-run; resume from the last sequence instead of restarting.
+          if (sawTerminalEvent || cleanCloseReconnects >= maxRetryAttempts) {
+            return;
+          }
+          cleanCloseReconnects += 1;
+        }
+      })();
     },
     async cancelRun({ deploymentId, runId }) {
       await serenCloudDeploymentRunCancel({

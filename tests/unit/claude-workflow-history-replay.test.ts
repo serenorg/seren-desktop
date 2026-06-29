@@ -7,10 +7,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 // @ts-expect-error - .mjs source is JS; type info isn't generated.
-import {
-  formatClaudeWorkflowResultForReplay,
-  readClaudeWorkflowReplayMessages,
-} from "../../bin/browser-local/claude-runtime.mjs";
+import * as claudeRuntime from "../../bin/browser-local/claude-runtime.mjs";
+
+const { formatClaudeWorkflowResultForReplay, readClaudeWorkflowReplayMessages } =
+  claudeRuntime;
 
 describe("#2666 - Claude workflow sidecar history replay", () => {
   it("formats completed workflow result metadata as visible assistant text", () => {

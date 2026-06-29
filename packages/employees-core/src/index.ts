@@ -2,11 +2,35 @@ export const EMPLOYEE_RUN_SOURCE_API = "api";
 
 const DEFAULT_POLL_INTERVAL_MS = 600;
 const DEFAULT_POLL_TIMEOUT_MS = 5 * 60 * 1000;
-const DEFAULT_STREAM_MAX_RETRY_ATTEMPTS = 1;
+const DEFAULT_STREAM_MAX_RETRY_ATTEMPTS = 4;
+// If the live stream goes silent this long without a terminal frame, stop
+// waiting on it and fall back to polling. Guards against a stalled SSE
+// connection that neither errors nor closes (which would otherwise hang the run
+// indefinitely since the for-await loop never completes).
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 60 * 1000;
 const DEFAULT_STARTUP_RETRY_INTERVAL_MS = 2_000;
 const DEFAULT_STARTUP_RETRY_TIMEOUT_MS = 2 * 60 * 1000;
 
 const STARTUP_NOT_READY_MARKERS = ["deployment is still starting"];
+
+// Frame names emitted by the sequenced run-event stream. `run.event` carries a
+// durable event envelope; the rest are control frames. Frame ids are sequence
+// numbers, so an EventSource resumes from the last id after a disconnect.
+const STREAM_EVENT_LOG = "run.event";
+const STREAM_EVENT_STATE = "run.state";
+const STREAM_EVENT_REPLAY_COMPLETE = "replay_complete";
+const STREAM_EVENT_END = "end";
+const STREAM_EVENT_TIMEOUT = "timeout";
+const STREAM_EVENT_ERROR = "error";
+
+/// Control frames that close the stream for good: after one of these the run is
+/// terminal (or hit a hard limit) and a clean EOF must NOT trigger a reconnect.
+/// Shared with the SDK adapters so reconnect logic stays consistent.
+export const STREAM_TERMINAL_EVENTS: ReadonlySet<string> = new Set([
+  STREAM_EVENT_END,
+  STREAM_EVENT_TIMEOUT,
+  STREAM_EVENT_ERROR,
+]);
 
 const TERMINAL_STATUSES = new Set([
   "completed",
@@ -227,12 +251,30 @@ export interface StartupWaitEvent {
   message: string;
 }
 
+export interface RunLiveStateEvent {
+  checkpoint_id?: string | null;
+  current_step?: string | null;
+  current_tool?: string | null;
+  deployment_id: string;
+  latest_event_kind?: string | null;
+  latest_sequence: number;
+  pending_approval_count: number;
+  phase: string;
+  run_id: string;
+  started_at: string;
+  status: string;
+  status_message?: string | null;
+  terminal: boolean;
+  updated_at: string;
+}
+
 export interface RunCallbacks {
   onText?: (chunk: string) => void;
   onThinking?: (chunk: string) => void;
   onToolCall?: (event: ToolCallEvent) => void;
   onToolResult?: (event: ToolResultEvent) => void;
   onToolAudit?: (event: ToolAuditEvent) => void;
+  onRunState?: (event: RunLiveStateEvent) => void;
   onStartupWait?: (event: StartupWaitEvent) => void;
 }
 
@@ -293,6 +335,7 @@ export interface EmployeeRuntimeApi {
     runId: string;
     signal: AbortSignal;
     maxRetryAttempts: number;
+    lastEventId?: string | null;
   }): Promise<AsyncIterable<unknown>>;
   cancelRun(input: { deploymentId: string; runId: string }): Promise<void>;
 }
@@ -301,6 +344,7 @@ export interface EmployeeRunManagerOptions {
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
   streamMaxRetryAttempts?: number;
+  streamIdleTimeoutMs?: number;
   startupRetryDelayMs?: number;
   startupRetryTimeoutMs?: number;
   onStreamOpenError?: (error: unknown) => void;
@@ -316,6 +360,8 @@ interface RunState {
   text: string;
   thinking: string;
   errorMessage: string | null;
+  seenTextEvents: Set<string>;
+  seenThinkingEvents: Set<string>;
   seenToolEvents: Set<string>;
 }
 
@@ -323,6 +369,178 @@ interface TerminalRun {
   status: string;
   statusMessage: string | null;
   output: string | null;
+}
+
+type ToolEventDedupeEnvelope = Extract<
+  EmployeeOutputEventEnvelope,
+  { type: "tool_call" | "tool_result" | "tool_audit" }
+>;
+
+function applyRunSnapshot(
+  event: EmployeeRunEventLike,
+  state: RunState,
+  callbacks: RunCallbacks,
+  runId?: string,
+): void {
+  const recovered: RunState = {
+    text: "",
+    thinking: "",
+    errorMessage: null,
+    seenTextEvents: new Set<string>(),
+    seenThinkingEvents: new Set<string>(),
+    seenToolEvents: state.seenToolEvents,
+  };
+  const replayCallbacks: RunCallbacks = {
+    onToolCall: callbacks.onToolCall,
+    onToolResult: callbacks.onToolResult,
+    onToolAudit: callbacks.onToolAudit,
+  };
+  for (const raw of outputEventEnvelopes(event.output_events)) {
+    applyEnvelope(raw, recovered, replayCallbacks, runId);
+  }
+  const snapshotText = recovered.text || event.output || "";
+  if (snapshotText) {
+    // Terminal snapshots can carry cumulative text in output_events or, for
+    // older/fallback rows, in output. Reconcile either source so polling after a
+    // partial stream still returns the authoritative final text.
+    const textDiff = reconcileCumulativeText(state.text, snapshotText);
+    if (textDiff.next !== state.text) {
+      state.text = textDiff.next;
+      if (textDiff.diff) callbacks.onText?.(textDiff.diff);
+    }
+  }
+  if (recovered.thinking) {
+    const thinkingDiff = reconcileCumulativeText(
+      state.thinking,
+      recovered.thinking,
+    );
+    if (thinkingDiff.next !== state.thinking) {
+      state.thinking = thinkingDiff.next;
+      if (thinkingDiff.diff) callbacks.onThinking?.(thinkingDiff.diff);
+    }
+  }
+  if (recovered.errorMessage && !state.errorMessage) {
+    state.errorMessage = recovered.errorMessage;
+  }
+}
+
+// Snapshots are cumulative. Normally each one extends the previous text, so we
+// emit only the appended suffix. If a snapshot diverges (server rewrote/trimmed
+// earlier text) or shrinks, resync `state` to the authoritative cumulative text
+// without emitting an append-only chunk; callers replace from the returned
+// result at terminal reconciliation.
+function reconcileCumulativeText(
+  prev: string,
+  next: string,
+): { diff: string; next: string } {
+  if (next === prev) return { diff: "", next: prev };
+  if (next.length >= prev.length && next.startsWith(prev)) {
+    return { diff: next.slice(prev.length), next };
+  }
+  return { diff: "", next };
+}
+
+// A frame from the sequenced stream: a control `event` name plus its parsed
+// payload `data`. The adapter pairs each yielded payload with the SSE event
+// name; an unwrapped value is treated as a `run.event` envelope by default.
+interface EmployeeStreamFrame {
+  event?: string;
+  id?: string;
+  data: unknown;
+}
+
+function streamFrameFromMessage(raw: unknown): EmployeeStreamFrame {
+  if (raw && typeof raw === "object" && "data" in raw) {
+    const frame = raw as { event?: unknown; id?: unknown; data: unknown };
+    return {
+      event: typeof frame.event === "string" ? frame.event : undefined,
+      id: typeof frame.id === "string" ? frame.id : undefined,
+      data: frame.data,
+    };
+  }
+  return { data: raw };
+}
+
+function streamFrameCursor(frame: EmployeeStreamFrame): string | null {
+  if (typeof frame.id === "string" && frame.id.trim()) return frame.id;
+  if (frame.data && typeof frame.data === "object") {
+    const sequence = (frame.data as { sequence_number?: unknown })
+      .sequence_number;
+    if (typeof sequence === "number" && Number.isFinite(sequence)) {
+      return String(sequence);
+    }
+  }
+  return null;
+}
+
+function streamControlErrorMessage(data: unknown): string | null {
+  if (data && typeof data === "object" && "error" in data) {
+    const message = (data as { error?: unknown }).error;
+    if (typeof message === "string" && message.length > 0) return message;
+  }
+  return null;
+}
+
+function isRunLiveStateEvent(value: unknown): value is RunLiveStateEvent {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Record<string, unknown>;
+  return (
+    typeof event.deployment_id === "string" &&
+    typeof event.latest_sequence === "number" &&
+    typeof event.pending_approval_count === "number" &&
+    typeof event.phase === "string" &&
+    typeof event.run_id === "string" &&
+    typeof event.started_at === "string" &&
+    typeof event.status === "string" &&
+    typeof event.terminal === "boolean" &&
+    typeof event.updated_at === "string"
+  );
+}
+
+function applyRunLiveState(raw: unknown, callbacks: RunCallbacks): void {
+  if (!isRunLiveStateEvent(raw)) return;
+  callbacks.onRunState?.(raw);
+}
+
+type StreamStep =
+  | { kind: "value"; value: unknown }
+  | { kind: "done" }
+  | { kind: "idle" };
+
+// Read the next stream frame, racing the underlying async iterator against an
+// idle timeout. Returns "idle" if no frame arrives in time so the caller can
+// fall back to polling instead of blocking forever on a stalled connection.
+async function nextStreamFrame(
+  iterator: AsyncIterator<unknown>,
+  idleTimeoutMs: number,
+  signal: AbortSignal,
+): Promise<StreamStep> {
+  const next = iterator
+    .next()
+    .then(
+      (result): StreamStep =>
+        result.done ? { kind: "done" } : { kind: "value", value: result.value },
+    );
+  if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) {
+    return next;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const interrupt = new Promise<StreamStep>((resolve) => {
+    timer = setTimeout(() => resolve({ kind: "idle" }), idleTimeoutMs);
+    if (signal.aborted) {
+      resolve({ kind: "done" });
+      return;
+    }
+    onAbort = () => resolve({ kind: "done" });
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([next, interrupt]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
 }
 
 export function createEmployeeRunManager(
@@ -335,6 +553,8 @@ export function createEmployeeRunManager(
   const pollTimeoutMs = managerOptions.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS;
   const streamMaxRetryAttempts =
     managerOptions.streamMaxRetryAttempts ?? DEFAULT_STREAM_MAX_RETRY_ATTEMPTS;
+  const streamIdleTimeoutMs =
+    managerOptions.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
   const defaultStartupRetryDelayMs =
     managerOptions.startupRetryDelayMs ?? DEFAULT_STARTUP_RETRY_INTERVAL_MS;
   const defaultStartupRetryTimeoutMs =
@@ -367,39 +587,7 @@ export function createEmployeeRunManager(
       signal.throwIfAborted();
       const event = await api.getRun({ deploymentId, runId, signal });
       if (TERMINAL_STATUSES.has(event.status)) {
-        const recovered: RunState = {
-          text: "",
-          thinking: "",
-          errorMessage: null,
-          seenToolEvents: state.seenToolEvents,
-        };
-        const replayCallbacks: RunCallbacks = {
-          onToolCall: callbacks.onToolCall,
-          onToolResult: callbacks.onToolResult,
-          onToolAudit: callbacks.onToolAudit,
-        };
-        for (const raw of outputEventEnvelopes(event.output_events)) {
-          applyEnvelope(raw, recovered, replayCallbacks, runId);
-        }
-        if (
-          recovered.text.length > state.text.length &&
-          recovered.text.startsWith(state.text)
-        ) {
-          const diff = recovered.text.slice(state.text.length);
-          state.text = recovered.text;
-          callbacks.onText?.(diff);
-        }
-        if (
-          recovered.thinking.length > state.thinking.length &&
-          recovered.thinking.startsWith(state.thinking)
-        ) {
-          const diff = recovered.thinking.slice(state.thinking.length);
-          state.thinking = recovered.thinking;
-          callbacks.onThinking?.(diff);
-        }
-        if (recovered.errorMessage && !state.errorMessage) {
-          state.errorMessage = recovered.errorMessage;
-        }
+        applyRunSnapshot(event, state, callbacks, runId);
         return {
           status: event.status,
           statusMessage: event.status_message ?? null,
@@ -428,6 +616,7 @@ export function createEmployeeRunManager(
       onToolCall: options.onToolCall,
       onToolResult: options.onToolResult,
       onToolAudit: options.onToolAudit,
+      onRunState: options.onRunState,
       onStartupWait: options.onStartupWait,
     };
     const registryKey = options.runKey ?? options.conversationId;
@@ -528,24 +717,91 @@ export function createEmployeeRunManager(
         text: "",
         thinking: "",
         errorMessage: null,
+        seenTextEvents: new Set<string>(),
+        seenThinkingEvents: new Set<string>(),
         seenToolEvents: new Set<string>(),
       };
-      try {
-        const stream = await api.streamRun({
-          deploymentId,
-          runId,
-          signal,
-          maxRetryAttempts: streamMaxRetryAttempts,
-        });
-        for await (const raw of stream) {
-          signal.throwIfAborted();
-          applyEnvelope(raw, state, callbacks, runId);
+      let lastEventId: string | null = null;
+      let shouldPoll = false;
+      while (!shouldPoll) {
+        try {
+          const stream = await api.streamRun({
+            deploymentId,
+            runId,
+            signal,
+            maxRetryAttempts: streamMaxRetryAttempts,
+            lastEventId,
+          });
+          const iterator = stream[Symbol.asyncIterator]();
+          try {
+            let live = true;
+            while (live) {
+              signal.throwIfAborted();
+              const step = await nextStreamFrame(
+                iterator,
+                streamIdleTimeoutMs,
+                signal,
+              );
+              if (step.kind === "idle") {
+                shouldPoll = true;
+                break;
+              }
+              if (step.kind === "done") {
+                shouldPoll = true;
+                break;
+              }
+              const frame = streamFrameFromMessage(step.value);
+              const cursor = streamFrameCursor(frame);
+              if (cursor) lastEventId = cursor;
+              switch (frame.event) {
+                case STREAM_EVENT_END:
+                case STREAM_EVENT_TIMEOUT:
+                  // Terminal/limit boundary reached. pollUntilTerminal confirms
+                  // the authoritative status, output, and status message.
+                  shouldPoll = true;
+                  live = false;
+                  break;
+                case STREAM_EVENT_ERROR: {
+                  const message = streamControlErrorMessage(frame.data);
+                  if (message && !state.errorMessage)
+                    state.errorMessage = message;
+                  shouldPoll = true;
+                  live = false;
+                  break;
+                }
+                case STREAM_EVENT_REPLAY_COMPLETE:
+                  // Cursor replay finished; the live tail follows. Nothing to apply.
+                  break;
+                case STREAM_EVENT_STATE:
+                  applyRunLiveState(frame.data, callbacks);
+                  break;
+                case STREAM_EVENT_LOG:
+                  applyEnvelope(frame.data, state, callbacks, runId);
+                  break;
+                default:
+                  // Unnamed frame: treat it as a durable event envelope.
+                  applyEnvelope(frame.data, state, callbacks, runId);
+                  break;
+              }
+            }
+          } finally {
+            // Best-effort close. Do NOT await: a stalled async generator can be
+            // suspended at an await that never settles, so awaiting return() would
+            // re-introduce the very hang the idle timeout exists to prevent. The
+            // manager's abort controller drives real cancellation.
+            void Promise.resolve(iterator.return?.()).catch(() => {});
+          }
+          if (shouldPoll) break;
+        } catch (error) {
+          if (signal.aborted) throw error;
+          managerOptions.onStreamOpenError?.(error);
+          shouldPoll = true;
         }
-      } catch (error) {
-        if (signal.aborted) throw error;
-        managerOptions.onStreamOpenError?.(error);
       }
 
+      // The sequenced stream emits deltas, not the terminal row. One poll
+      // resolves the authoritative final status, output, and status message
+      // (and reconciles any trailing events the stream missed).
       const final = await pollUntilTerminal(
         deploymentId,
         runId,
@@ -802,6 +1058,25 @@ export function runStatusLabel(
   return statusMessage || status.replace(/_/g, " ");
 }
 
+export function runLiveStateLabel(
+  state: RunLiveStateEvent,
+): string | undefined {
+  if (state.current_tool && state.current_step === "Using tool") {
+    return `Using ${state.current_tool}`;
+  }
+  if (state.current_tool && state.current_step === "Tool audited") {
+    return `${state.current_tool} reviewed`;
+  }
+  if (state.current_tool && state.phase === "handoff") {
+    return `Handing off to ${state.current_tool}`;
+  }
+  if (state.current_step) return state.current_step;
+  return runStatusLabel(
+    state.phase || state.status,
+    state.status_message ?? null,
+  );
+}
+
 export interface ToolAuditFormatOptions {
   escapeMarkdown?: boolean;
 }
@@ -840,19 +1115,21 @@ function applyEnvelope(
   if (!isEmployeeOutputEventEnvelope(raw)) return;
   switch (raw.type) {
     case "text":
+      if (hasSeenTextEvent("text", raw, state.seenTextEvents)) break;
       if (raw.text.length > 0) {
         state.text += raw.text;
         callbacks.onText?.(raw.text);
       }
       break;
     case "thinking":
+      if (hasSeenTextEvent("thinking", raw, state.seenThinkingEvents)) break;
       if (raw.text.length > 0) {
         state.thinking += raw.text;
         callbacks.onThinking?.(raw.text);
       }
       break;
     case "tool_call": {
-      const key = `call:${raw.id}:${raw.kind ?? ""}`;
+      const key = toolEventDedupeKey("call", raw);
       if (state.seenToolEvents.has(key)) break;
       state.seenToolEvents.add(key);
       callbacks.onToolCall?.({
@@ -869,7 +1146,7 @@ function applyEnvelope(
       break;
     }
     case "tool_result": {
-      const key = `result:${raw.id}:${raw.kind ?? ""}`;
+      const key = toolEventDedupeKey("result", raw);
       if (state.seenToolEvents.has(key)) break;
       state.seenToolEvents.add(key);
       callbacks.onToolResult?.({
@@ -885,7 +1162,7 @@ function applyEnvelope(
       break;
     }
     case "tool_audit": {
-      const key = `audit:${raw.id}:${raw.kind ?? ""}`;
+      const key = toolEventDedupeKey("audit", raw);
       if (state.seenToolEvents.has(key)) break;
       state.seenToolEvents.add(key);
       callbacks.onToolAudit?.({
@@ -899,6 +1176,85 @@ function applyEnvelope(
       break;
     default:
       break;
+  }
+}
+
+function hasSeenTextEvent(
+  channel: string,
+  event: Extract<EmployeeOutputEventEnvelope, { type: "text" | "thinking" }>,
+  seenEvents: Set<string>,
+): boolean {
+  const key = textEventDedupeKey(channel, event);
+  if (!key) return false;
+  if (seenEvents.has(key)) return true;
+  seenEvents.add(key);
+  return false;
+}
+
+function textEventDedupeKey(
+  channel: string,
+  event: Extract<EmployeeOutputEventEnvelope, { type: "text" | "thinking" }>,
+): string | null {
+  if (
+    typeof event.sequence_number === "number" &&
+    Number.isFinite(event.sequence_number)
+  ) {
+    return `${channel}:seq:${event.sequence_number}`;
+  }
+  return `${channel}:content:${JSON.stringify([
+    event.event_type ?? null,
+    event.kind ?? null,
+    event.item_id ?? null,
+    event.text,
+  ])}`;
+}
+
+// Dedupe identity is content-based (channel + id + fingerprint), independent of
+// sequence_number. Snapshots are cumulative, so the same event reappears in
+// every snapshot; keying on content collapses those replays. We deliberately do
+// NOT key on sequence_number alone: it can be null in one cumulative snapshot
+// and backfilled in a later one for the same logical event, which would defeat
+// dedupe and double-fire the callback. sequence_number is still forwarded to
+// callbacks for ordering.
+function toolEventDedupeKey(
+  channel: string,
+  event: ToolEventDedupeEnvelope,
+): string {
+  return `${channel}:event:${event.id ?? "noid"}:${legacyToolEventFingerprint(event)}`;
+}
+
+function legacyToolEventFingerprint(event: ToolEventDedupeEnvelope): string {
+  const common = [
+    event.item_id ?? null,
+    event.kind ?? null,
+    event.event_type ?? null,
+  ];
+  switch (event.type) {
+    case "tool_call":
+      return JSON.stringify([
+        ...common,
+        event.name,
+        event.status ?? "",
+        event.arguments ?? "",
+      ]);
+    case "tool_result":
+      return JSON.stringify([
+        ...common,
+        event.is_error ? "error" : "ok",
+        event.content,
+      ]);
+    case "tool_audit":
+      return JSON.stringify([
+        ...common,
+        event.tool,
+        event.reason,
+        event.status ?? "",
+        event.action ?? "",
+        event.lease_ref ?? "",
+        event.input_bytes ?? null,
+        event.output_bytes ?? null,
+        event.latency_ms ?? null,
+      ]);
   }
 }
 

@@ -32,6 +32,7 @@ import { employeesArchiveStore } from "@/services/employees-archive";
 import {
   cancelEmployeeRun,
   runEmployeeMessage,
+  runLiveStateLabel,
 } from "@/services/employees-runtime";
 import { conversationStore } from "@/stores/conversation.store";
 import { employeeStore } from "@/stores/employees.store";
@@ -401,6 +402,15 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
             kind: "running",
             partial:
               "Starting employee runtime. The run will begin once it is ready.",
+          });
+        },
+        onRunState: (event) => {
+          const label = runLiveStateLabel(event);
+          if (!label) return;
+          setManualRun((prev) => {
+            if (prev?.kind !== "running" || prev.partial) return prev;
+            startupNoticeShown = true;
+            return { kind: "running", partial: label };
           });
         },
         onText: (chunk) => {

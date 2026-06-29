@@ -3,6 +3,7 @@
 
 import {
   type Component,
+  createMemo,
   createResource,
   createSignal,
   For,
@@ -13,6 +14,8 @@ import {
 import { formatRelativeTime } from "@/lib/employees/relative-time";
 import {
   type SessionCheckpoint,
+  type SessionCheckpointToolCallResolutionStatus,
+  type SessionCheckpointUnresolvedToolCall,
   sessionCheckpoints,
 } from "@/services/session-checkpoints";
 
@@ -50,6 +53,64 @@ function parseKey(key: string): { org: string; dep: string } {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function isResolvedToolStatus(status: string): boolean {
+  const normalized = status.toLowerCase();
+  return (
+    normalized === "completed" ||
+    normalized === "complete" ||
+    normalized === "resolved" ||
+    normalized === "error" ||
+    normalized === "errored" ||
+    normalized === "failed" ||
+    normalized === "cancelled" ||
+    normalized === "canceled"
+  );
+}
+
+function unresolvedToolCallsFromState(
+  state: unknown,
+): SessionCheckpointUnresolvedToolCall[] {
+  if (!isRecord(state)) return [];
+
+  const byId = new Map<string, SessionCheckpointUnresolvedToolCall>();
+  const calls = Array.isArray(state.calls) ? state.calls : [];
+  for (const item of calls) {
+    if (!isRecord(item)) continue;
+    const id = stringField(item.id);
+    if (!id) continue;
+    const status = stringField(item.status) ?? "dispatched";
+    if (isResolvedToolStatus(status)) continue;
+    byId.set(id, {
+      id,
+      tool: stringField(item.tool),
+      status,
+    });
+  }
+
+  const pending = Array.isArray(state.pending) ? state.pending : [];
+  for (const item of pending) {
+    const id = stringField(item);
+    if (!id || byId.has(id)) continue;
+    byId.set(id, { id, status: "dispatched" });
+  }
+
+  return [...byId.values()].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
+}
+
+function toolCallLabel(call: SessionCheckpointUnresolvedToolCall): string {
+  return call.tool ? `${call.id} (${call.tool})` : call.id;
+}
+
 type CheckpointInitialPage = {
   org: string;
   dep: string;
@@ -58,60 +119,163 @@ type CheckpointInitialPage = {
 };
 
 const CheckpointRow: Component<{
+  organizationId: string;
+  deploymentId: string;
   row: SessionCheckpoint;
   first: boolean;
   last: boolean;
-}> = (props) => (
-  <div
-    class="relative pl-9 pr-3 py-3 group"
-    data-checkpoint-id={props.row.checkpoint_id}
-  >
-    {/* Rail segment above this row, hidden on the first row. */}
-    <Show when={!props.first}>
-      <span
-        class="absolute left-[15px] top-0 h-3 w-px bg-border/50"
-        aria-hidden="true"
-      />
-    </Show>
-    {/* Rail segment below this row, hidden on the last row. */}
-    <Show when={!props.last}>
-      <span
-        class="absolute left-[15px] top-[24px] bottom-0 w-px bg-border/50"
-        aria-hidden="true"
-      />
-    </Show>
-    {/* Node on the rail. */}
-    <span
-      class="absolute left-[11px] top-[14px] w-[9px] h-[9px] rounded-full border border-border bg-surface-2 transition-colors group-hover:border-primary/60 group-hover:bg-primary/20"
-      aria-hidden="true"
-    />
-    <div class="flex items-baseline gap-3 flex-wrap min-w-0">
-      <div class="flex items-baseline gap-1.5 min-w-0">
-        <span class="font-mono text-[11.5px] text-foreground tracking-tight">
-          {props.row.session_id.slice(0, 12)}
-        </span>
-        <span class="text-muted-foreground/40 text-[11px]">/</span>
-        <span class="font-mono text-[11.5px] tabular-nums text-muted-foreground">
-          #{props.row.sequence_number}
-        </span>
-      </div>
-      <div class="ml-auto flex items-center gap-2 text-[10.5px] text-muted-foreground/80 tabular-nums whitespace-nowrap">
-        <span class="px-1.5 py-px rounded bg-surface-2/40 ring-1 ring-inset ring-border/60">
-          iter {props.row.iteration_count}
-        </span>
-        <span title={props.row.created_at}>
-          {formatRelativeTime(props.row.created_at)}
-        </span>
-      </div>
-    </div>
+  latestForSession: boolean;
+  onResolved: () => void;
+}> = (props) => {
+  const [resolving, setResolving] = createSignal<string | null>(null);
+  const [resolveError, setResolveError] = createSignal<string | null>(null);
+
+  const unresolved = () =>
+    props.latestForSession
+      ? unresolvedToolCallsFromState(props.row.tool_call_state)
+      : [];
+  const handleResolve = async (
+    call: SessionCheckpointUnresolvedToolCall,
+    status: SessionCheckpointToolCallResolutionStatus,
+  ) => {
+    const key = `${call.id}:${status}`;
+    setResolving(key);
+    setResolveError(null);
+    try {
+      await sessionCheckpoints.resolveToolCall(
+        props.organizationId,
+        props.deploymentId,
+        props.row.session_id,
+        call.id,
+        status,
+        call.tool,
+      );
+      props.onResolved();
+    } catch (err) {
+      setResolveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResolving(null);
+    }
+  };
+
+  return (
     <div
-      class="mt-1 text-[12px] text-muted-foreground/90 truncate"
-      title={props.row.reason}
+      class="relative pl-9 pr-3 py-3 group"
+      data-checkpoint-id={props.row.checkpoint_id}
     >
-      {props.row.reason}
+      {/* Rail segment above this row, hidden on the first row. */}
+      <Show when={!props.first}>
+        <span
+          class="absolute left-[15px] top-0 h-3 w-px bg-border/50"
+          aria-hidden="true"
+        />
+      </Show>
+      {/* Rail segment below this row, hidden on the last row. */}
+      <Show when={!props.last}>
+        <span
+          class="absolute left-[15px] top-[24px] bottom-0 w-px bg-border/50"
+          aria-hidden="true"
+        />
+      </Show>
+      {/* Node on the rail. */}
+      <span
+        class="absolute left-[11px] top-[14px] w-[9px] h-[9px] rounded-full border border-border bg-surface-2 transition-colors group-hover:border-primary/60 group-hover:bg-primary/20"
+        aria-hidden="true"
+      />
+      <div class="flex items-baseline gap-3 flex-wrap min-w-0">
+        <div class="flex items-baseline gap-1.5 min-w-0">
+          <span class="font-mono text-[11.5px] text-foreground tracking-tight">
+            {props.row.session_id.slice(0, 12)}
+          </span>
+          <span class="text-muted-foreground/40 text-[11px]">/</span>
+          <span class="font-mono text-[11.5px] tabular-nums text-muted-foreground">
+            #{props.row.sequence_number}
+          </span>
+        </div>
+        <div class="ml-auto flex items-center gap-2 text-[10.5px] text-muted-foreground/80 tabular-nums whitespace-nowrap">
+          <span class="px-1.5 py-px rounded bg-surface-2/40 ring-1 ring-inset ring-border/60">
+            iter {props.row.iteration_count}
+          </span>
+          <span title={props.row.created_at}>
+            {formatRelativeTime(props.row.created_at)}
+          </span>
+        </div>
+      </div>
+      <div
+        class="mt-1 text-[12px] text-muted-foreground/90 truncate"
+        title={props.row.reason}
+      >
+        {props.row.reason}
+      </div>
+      <Show when={unresolved().length > 0}>
+        <div class="mt-3 rounded-md border border-amber-500/35 bg-amber-500/10 px-2.5 py-2">
+          <div class="text-[12px] font-medium text-foreground">
+            Interrupted tool call
+          </div>
+          <div class="mt-0.5 text-[11.5px] text-muted-foreground">
+            Resolve only after confirming the external side effect outcome.
+          </div>
+          <div class="mt-2 grid gap-2">
+            <For each={unresolved()}>
+              {(call) => (
+                <div class="rounded border border-border/60 bg-surface-1/40 px-2 py-2">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="font-mono text-[11px] text-foreground truncate">
+                      {toolCallLabel(call)}
+                    </span>
+                    <span class="ml-auto shrink-0 rounded bg-surface-2/70 px-1.5 py-px text-[10.5px] text-muted-foreground">
+                      {call.status}
+                    </span>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      class="px-2 py-1 rounded border border-border text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                      disabled={resolving() !== null}
+                      onClick={() => void handleResolve(call, "completed")}
+                    >
+                      {resolving() === `${call.id}:completed`
+                        ? "Saving..."
+                        : "Mark completed"}
+                    </button>
+                    <button
+                      type="button"
+                      class="px-2 py-1 rounded border border-border text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                      disabled={resolving() !== null}
+                      onClick={() => void handleResolve(call, "error")}
+                    >
+                      {resolving() === `${call.id}:error`
+                        ? "Saving..."
+                        : "Mark failed"}
+                    </button>
+                    <button
+                      type="button"
+                      class="px-2 py-1 rounded border border-destructive/40 text-[11px] font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                      disabled={resolving() !== null}
+                      onClick={() => void handleResolve(call, "cancelled")}
+                    >
+                      {resolving() === `${call.id}:cancelled`
+                        ? "Saving..."
+                        : "Cancel"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </For>
+          </div>
+          <Show when={resolveError()}>
+            <div
+              class="mt-2 rounded border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-[11.5px] text-destructive"
+              role="alert"
+            >
+              {resolveError()}
+            </div>
+          </Show>
+        </div>
+      </Show>
     </div>
-  </div>
-);
+  );
+};
 
 const EmptyState: Component = () => (
   <div class="flex items-start gap-3 px-1 py-1">
@@ -162,7 +326,7 @@ export const EmployeeCheckpointsList: Component<
   const [loadingMore, setLoadingMore] = createSignal(false);
   const [loadMoreError, setLoadMoreError] = createSignal<string | null>(null);
 
-  const [initial] = createResource(
+  const [initial, { refetch }] = createResource(
     () => makeKey(props.organizationId, props.deploymentId),
     async (key): Promise<CheckpointInitialPage> => {
       const { org, dep } = parseKey(key);
@@ -199,6 +363,20 @@ export const EmployeeCheckpointsList: Component<
   };
 
   const all = () => [...(visibleInitial()?.entries ?? []), ...extras()];
+  const reloadInitialPage = () => {
+    setExtras([]);
+    setCursor(null);
+    void refetch();
+  };
+  const latestCheckpointBySession = createMemo(() => {
+    const latest = new Map<string, string>();
+    for (const row of all()) {
+      if (!latest.has(row.session_id)) {
+        latest.set(row.session_id, row.checkpoint_id);
+      }
+    }
+    return latest;
+  });
   const shouldShowLoading = () => initial.loading && visibleInitial() === null;
   const shouldShowEmpty = () =>
     !initial.loading &&
@@ -276,9 +454,16 @@ export const EmployeeCheckpointsList: Component<
             <For each={all()}>
               {(row, index) => (
                 <CheckpointRow
+                  organizationId={props.organizationId}
+                  deploymentId={props.deploymentId}
                   row={row}
                   first={index() === 0}
                   last={index() === all().length - 1}
+                  latestForSession={
+                    latestCheckpointBySession().get(row.session_id) ===
+                    row.checkpoint_id
+                  }
+                  onResolved={reloadInitialPage}
                 />
               )}
             </For>

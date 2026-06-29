@@ -29,6 +29,17 @@ export interface SessionCheckpointListResponse {
   next_cursor?: string | null;
 }
 
+export interface SessionCheckpointUnresolvedToolCall {
+  id: string;
+  tool?: string | null;
+  status: string;
+}
+
+export type SessionCheckpointToolCallResolutionStatus =
+  | "completed"
+  | "error"
+  | "cancelled";
+
 export interface SessionCheckpointListQuery {
   limit?: number;
   cursor?: string;
@@ -64,6 +75,7 @@ type ListResponses = {
   };
 };
 type LatestResponses = { 200: { data: SessionCheckpointWire } };
+type ResolveToolCallResponses = { 200: { data: SessionCheckpointWire } };
 
 function normalizeCheckpoint(
   row: SessionCheckpointWire,
@@ -168,5 +180,46 @@ export const sessionCheckpoints = {
       );
     }
     return data?.data ? normalizeCheckpoint(data.data) : null;
+  },
+
+  async resolveToolCall(
+    organizationId: string,
+    deploymentId: string,
+    sessionId: string,
+    toolCallId: string,
+    status: SessionCheckpointToolCallResolutionStatus,
+    tool?: string | null,
+  ): Promise<SessionCheckpointHydrated> {
+    const body: { status: string; tool?: string } = { status };
+    if (tool) {
+      body.tool = tool;
+    }
+    const { data, error, response } = await client.post<
+      ResolveToolCallResponses,
+      unknown,
+      false
+    >({
+      url: "/deployments/{id}/sessions/{session_id}/tool-calls/{tool_call_id}/resolution",
+      path: {
+        id: deploymentId,
+        session_id: sessionId,
+        tool_call_id: toolCallId,
+      },
+      body,
+      headers: organizationHeader(organizationId),
+      security: [{ scheme: "bearer", type: "http" }],
+      throwOnError: false,
+    });
+    if (error) {
+      throw new Error(
+        `Failed to resolve interrupted tool call: ${formatApiError(error, response, "")}`,
+      );
+    }
+    if (!data?.data) {
+      throw new Error(
+        "Tool call resolution response did not include a checkpoint",
+      );
+    }
+    return normalizeCheckpoint(data.data);
   },
 };

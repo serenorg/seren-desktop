@@ -243,6 +243,7 @@ export type AuditEntry = {
 
 export type CloudConversationListResponse = {
     conversations: Array<CloudConversationResponse>;
+    has_more: boolean;
     next_cursor?: string | null;
 };
 
@@ -254,17 +255,30 @@ export type CloudConversationMessageResponse = {
     deleted_at?: string | null;
     deployment_id: string;
     edited_at?: string | null;
-    events?: unknown;
+    events: Array<CloudRunOutputEventEnvelope>;
     message_id: string;
     organization_id: string;
     role: string;
     run?: null | CloudDeploymentRunEvent;
+    run_id?: string | null;
+    run_summary?: null | CloudConversationMessageRunSummary;
     source: string;
     updated_at: string;
     user_id: string;
 };
 
+export type CloudConversationMessageRunSummary = {
+    completed_at?: string | null;
+    run_id: string;
+    started_at: string;
+    status: string;
+    status_message?: string | null;
+    stop_reason?: string | null;
+    updated_at: string;
+};
+
 export type CloudConversationMessagesResponse = {
+    has_more: boolean;
     messages: Array<CloudConversationMessageResponse>;
     next_cursor?: string | null;
 };
@@ -288,6 +302,36 @@ export type CloudConversationResponse = {
  */
 export type CloudDeploymentActionStatusResponse = {
     status: string;
+};
+
+export type CloudDeploymentAgentSchedule = {
+    attempts: number;
+    created_at: string;
+    cron_schedule?: string | null;
+    cron_timezone?: string | null;
+    deployment_id: string;
+    id: string;
+    last_error?: string | null;
+    last_run_at?: string | null;
+    last_run_event_id?: string | null;
+    max_attempts: number;
+    next_run_at: string;
+    schedule_key: string;
+    schedule_kind: string;
+    status: string;
+    updated_at: string;
+};
+
+export type CloudDeploymentAgentScheduleRequest = {
+    conversation_id?: string | null;
+    cron?: string | null;
+    delay_seconds?: number | null;
+    max_attempts?: number | null;
+    message?: string | null;
+    payload?: unknown;
+    run_at?: string | null;
+    schedule_key?: string | null;
+    timezone?: string | null;
 };
 
 /**
@@ -586,6 +630,12 @@ export type CloudDeploymentRunRequest = {
      * Optional client-provided run identifier (used by some orchestrators).
      */
     run_id?: string | null;
+};
+
+export type CloudDeploymentRunResumeRequest = {
+    approval_decisions?: unknown;
+    include_raw_tool_outputs?: boolean | null;
+    message?: string | null;
 };
 
 /**
@@ -961,6 +1011,26 @@ export type CloudRunGuardrailAction = 'retry' | 'block' | 'fix' | 'human';
 export type CloudRunGuardrailTarget = 'input' | 'output' | 'tool_input' | 'tool_output';
 
 /**
+ * Operator-safe live status projection for a run.
+ */
+export type CloudRunLiveState = {
+    checkpoint_id?: string | null;
+    current_step?: string | null;
+    current_tool?: string | null;
+    deployment_id: string;
+    latest_event_kind?: string | null;
+    latest_sequence: number;
+    pending_approval_count: number;
+    phase: string;
+    run_id: string;
+    started_at: string;
+    status: string;
+    status_message?: string | null;
+    terminal: boolean;
+    updated_at: string;
+};
+
+/**
  * A single event in the structured output trace.
  *
  * Matches the seren-desktop `WorkerEvent` model for consistency.
@@ -1138,15 +1208,6 @@ export type CloudRunReplayFieldComparison = {
 };
 
 /**
- * Response payload for explicitly closing an active run stream session.
- */
-export type CloudRunStreamCloseResponse = {
-    run_id: string;
-    session_id: string;
-    status: string;
-};
-
-/**
  * Success/failure status reported by a `tool_audit` event.
  */
 export type CloudRunToolAuditStatus = 'success' | 'failure';
@@ -1157,6 +1218,8 @@ export type CloudRunToolAuditStatus = 'success' | 'failure';
  * MCP, connector, remote-agent, remote-HTTP, or preset-group invocations.
  */
 export type CloudRunToolRefKind = 'publisher' | 'mcp' | 'connector' | 'remote_agent' | 'remote_http' | 'preset_group' | 'builtin' | 'unknown';
+
+export type ConversationMessageOrder = 'asc' | 'desc';
 
 /**
  * Request body for registering a content-addressed deployment bundle.
@@ -1600,6 +1663,7 @@ export type DataResponseAuditEntry = {
 export type DataResponseCloudConversationListResponse = {
     data: {
         conversations: Array<CloudConversationResponse>;
+        has_more: boolean;
         next_cursor?: string | null;
     };
     pagination?: null | PaginationMeta;
@@ -1677,6 +1741,7 @@ export type DataResponseCloudConversationListResponse = {
  */
 export type DataResponseCloudConversationMessagesResponse = {
     data: {
+        has_more: boolean;
         messages: Array<CloudConversationMessageResponse>;
         next_cursor?: string | null;
     };
@@ -1759,6 +1824,97 @@ export type DataResponseCloudDeploymentActionStatusResponse = {
      */
     data: {
         status: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudDeploymentAgentSchedule = {
+    data: {
+        attempts: number;
+        created_at: string;
+        cron_schedule?: string | null;
+        cron_timezone?: string | null;
+        deployment_id: string;
+        id: string;
+        last_error?: string | null;
+        last_run_at?: string | null;
+        last_run_event_id?: string | null;
+        max_attempts: number;
+        next_run_at: string;
+        schedule_key: string;
+        schedule_kind: string;
+        status: string;
+        updated_at: string;
     };
     pagination?: null | PaginationMeta;
 };
@@ -3356,6 +3512,99 @@ export type DataResponseCloudRunEvalsResponse = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseCloudRunLiveState = {
+    /**
+     * Operator-safe live status projection for a run.
+     */
+    data: {
+        checkpoint_id?: string | null;
+        current_step?: string | null;
+        current_tool?: string | null;
+        deployment_id: string;
+        latest_event_kind?: string | null;
+        latest_sequence: number;
+        pending_approval_count: number;
+        phase: string;
+        run_id: string;
+        started_at: string;
+        status: string;
+        status_message?: string | null;
+        terminal: boolean;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseCloudRunPendingApprovalsResponse = {
     /**
      * Current approval state for a run.
@@ -3458,88 +3707,6 @@ export type DataResponseCloudRunReplayComparison = {
         first_event_mismatch?: null | CloudRunReplayEventMismatch;
         notes?: Array<string>;
         overall_match: boolean;
-    };
-    pagination?: null | PaginationMeta;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- * Publisher endpoints use the same wrapper for non-streaming JSON success
- * responses, including first-class publishers. Streaming endpoints such as
- * SSE responses carry metering in response headers and are not wrapped.
- * Payment-required and error responses are also not wrapped so clients can
- * parse their existing wire contracts directly.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type DataResponseCloudRunStreamCloseResponse = {
-    /**
-     * Response payload for explicitly closing an active run stream session.
-     */
-    data: {
-        run_id: string;
-        session_id: string;
-        status: string;
     };
     pagination?: null | PaginationMeta;
 };
@@ -3801,6 +3968,97 @@ export type DataResponseVecAuditEntry = {
         prev_hash: string;
         publisher_id?: string | null;
         sequence_number: number;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecCloudDeploymentAgentSchedule = {
+    data: Array<{
+        attempts: number;
+        created_at: string;
+        cron_schedule?: string | null;
+        cron_timezone?: string | null;
+        deployment_id: string;
+        id: string;
+        last_error?: string | null;
+        last_run_at?: string | null;
+        last_run_event_id?: string | null;
+        max_attempts: number;
+        next_run_at: string;
+        schedule_key: string;
+        schedule_kind: string;
+        status: string;
+        updated_at: string;
     }>;
     pagination?: null | PaginationMeta;
 };
@@ -5138,6 +5396,12 @@ export type ToolDefinition = {
     max_output_bytes?: number | null;
     name: string;
     /**
+     * Whether this tool can perform non-read work. Side-effecting tools are
+     * protected so an interrupted run never silently re-runs them; set `false`
+     * only for deterministic, side-effect-free reads.
+     */
+    side_effecting?: boolean | null;
+    /**
      * Per-tool timeout override in seconds. Overrides the deployment-level tool timeout.
      */
     timeout_override_seconds?: number | null;
@@ -5732,7 +5996,11 @@ export type SerenCloudGetConversationMessagesData = {
         /**
          * Message page order, asc or desc (default: desc)
          */
-        order?: string;
+        order?: ConversationMessageOrder;
+        /**
+         * Include full run records for run-backed messages (default: true)
+         */
+        include_run?: boolean;
     };
     url: '/deployments/{id}/conversations/{conversation_id}/messages';
 };
@@ -6213,14 +6481,8 @@ export type SerenCloudDeploymentRunPendingApprovalsResponses = {
 
 export type SerenCloudDeploymentRunPendingApprovalsResponse = SerenCloudDeploymentRunPendingApprovalsResponses[keyof SerenCloudDeploymentRunPendingApprovalsResponses];
 
-export type SerenCloudDeploymentRunStreamCloseData = {
-    body?: never;
-    headers: {
-        /**
-         * Active stream session ID to close
-         */
-        'x-seren-stream-session-id': string;
-    };
+export type SerenCloudDeploymentRunResumeData = {
+    body?: null | CloudDeploymentRunResumeRequest;
     path: {
         /**
          * Deployment ID
@@ -6232,27 +6494,77 @@ export type SerenCloudDeploymentRunStreamCloseData = {
         run_id: string;
     };
     query?: never;
-    url: '/deployments/{id}/runs/{run_id}/stream';
+    url: '/deployments/{id}/runs/{run_id}/resume';
 };
 
-export type SerenCloudDeploymentRunStreamCloseErrors = {
+export type SerenCloudDeploymentRunResumeErrors = {
+    /**
+     * Malformed resume request or runtime rejected the request before execution
+     */
+    400: unknown;
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Run does not require durable resume
+     */
+    409: unknown;
+    /**
+     * Deployment could not be woken for resume
+     */
+    503: unknown;
+};
+
+export type SerenCloudDeploymentRunResumeResponses = {
+    /**
+     * Run resumed and recorded
+     */
+    200: DataResponseCloudDeploymentRunEvent;
+};
+
+export type SerenCloudDeploymentRunResumeResponse = SerenCloudDeploymentRunResumeResponses[keyof SerenCloudDeploymentRunResumeResponses];
+
+export type SerenCloudDeploymentRunStateData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+        /**
+         * Run event ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/runs/{run_id}/state';
+};
+
+export type SerenCloudDeploymentRunStateErrors = {
     /**
      * Not found
      */
     404: unknown;
 };
 
-export type SerenCloudDeploymentRunStreamCloseResponses = {
+export type SerenCloudDeploymentRunStateResponses = {
     /**
-     * Stream session closed
+     * Current run state
      */
-    200: DataResponseCloudRunStreamCloseResponse;
+    200: DataResponseCloudRunLiveState;
 };
 
-export type SerenCloudDeploymentRunStreamCloseResponse = SerenCloudDeploymentRunStreamCloseResponses[keyof SerenCloudDeploymentRunStreamCloseResponses];
+export type SerenCloudDeploymentRunStateResponse = SerenCloudDeploymentRunStateResponses[keyof SerenCloudDeploymentRunStateResponses];
 
 export type SerenCloudDeploymentRunStreamData = {
     body?: never;
+    headers?: {
+        /**
+         * Highest event sequence number already received; replay resumes after it.
+         */
+        'Last-Event-ID'?: string | null;
+    };
     path: {
         /**
          * Deployment ID
@@ -6276,10 +6588,115 @@ export type SerenCloudDeploymentRunStreamErrors = {
 
 export type SerenCloudDeploymentRunStreamResponses = {
     /**
-     * SSE stream of run updates
+     * SSE stream of sequenced run events
      */
     200: unknown;
 };
+
+export type SerenCloudListAgentSchedulesData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: {
+        /**
+         * Max schedules to return (default: 50, max: 100)
+         */
+        limit?: number;
+        /**
+         * Pagination offset
+         */
+        offset?: number;
+    };
+    url: '/deployments/{id}/schedules';
+};
+
+export type SerenCloudListAgentSchedulesErrors = {
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudListAgentSchedulesResponses = {
+    /**
+     * Agent schedules listed
+     */
+    200: DataResponseVecCloudDeploymentAgentSchedule;
+};
+
+export type SerenCloudListAgentSchedulesResponse = SerenCloudListAgentSchedulesResponses[keyof SerenCloudListAgentSchedulesResponses];
+
+export type SerenCloudCreateAgentScheduleData = {
+    body: CloudDeploymentAgentScheduleRequest;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/schedules';
+};
+
+export type SerenCloudCreateAgentScheduleErrors = {
+    /**
+     * Invalid schedule request
+     */
+    400: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudCreateAgentScheduleResponses = {
+    /**
+     * Agent schedule created
+     */
+    201: DataResponseCloudDeploymentAgentSchedule;
+};
+
+export type SerenCloudCreateAgentScheduleResponse = SerenCloudCreateAgentScheduleResponses[keyof SerenCloudCreateAgentScheduleResponses];
+
+export type SerenCloudCancelAgentScheduleData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+        /**
+         * Schedule ID
+         */
+        schedule_id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/schedules/{schedule_id}';
+};
+
+export type SerenCloudCancelAgentScheduleErrors = {
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+    /**
+     * Schedule is not active
+     */
+    409: unknown;
+};
+
+export type SerenCloudCancelAgentScheduleResponses = {
+    /**
+     * Agent schedule cancelled
+     */
+    200: DataResponseCloudDeploymentAgentSchedule;
+};
+
+export type SerenCloudCancelAgentScheduleResponse = SerenCloudCancelAgentScheduleResponses[keyof SerenCloudCancelAgentScheduleResponses];
 
 export type SerenCloudInteractiveSessionsData = {
     body?: never;
@@ -7528,14 +7945,8 @@ export type SerenCloudRunPendingApprovalsResponses = {
 
 export type SerenCloudRunPendingApprovalsResponse = SerenCloudRunPendingApprovalsResponses[keyof SerenCloudRunPendingApprovalsResponses];
 
-export type SerenCloudRunStreamCloseData = {
-    body?: never;
-    headers: {
-        /**
-         * Active stream session ID to close
-         */
-        'x-seren-stream-session-id': string;
-    };
+export type SerenCloudRunResumeData = {
+    body?: null | CloudDeploymentRunResumeRequest;
     path: {
         /**
          * Run event ID
@@ -7543,27 +7954,73 @@ export type SerenCloudRunStreamCloseData = {
         run_id: string;
     };
     query?: never;
-    url: '/runs/{run_id}/stream';
+    url: '/runs/{run_id}/resume';
 };
 
-export type SerenCloudRunStreamCloseErrors = {
+export type SerenCloudRunResumeErrors = {
+    /**
+     * Malformed resume request or runtime rejected the request before execution
+     */
+    400: unknown;
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Run does not require durable resume
+     */
+    409: unknown;
+    /**
+     * Deployment could not be woken for resume
+     */
+    503: unknown;
+};
+
+export type SerenCloudRunResumeResponses = {
+    /**
+     * Run resumed and recorded
+     */
+    200: DataResponseCloudDeploymentRunEvent;
+};
+
+export type SerenCloudRunResumeResponse = SerenCloudRunResumeResponses[keyof SerenCloudRunResumeResponses];
+
+export type SerenCloudRunStateData = {
+    body?: never;
+    path: {
+        /**
+         * Run event ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/runs/{run_id}/state';
+};
+
+export type SerenCloudRunStateErrors = {
     /**
      * Not found
      */
     404: unknown;
 };
 
-export type SerenCloudRunStreamCloseResponses = {
+export type SerenCloudRunStateResponses = {
     /**
-     * Stream session closed
+     * Current run state
      */
-    200: DataResponseCloudRunStreamCloseResponse;
+    200: DataResponseCloudRunLiveState;
 };
 
-export type SerenCloudRunStreamCloseResponse = SerenCloudRunStreamCloseResponses[keyof SerenCloudRunStreamCloseResponses];
+export type SerenCloudRunStateResponse = SerenCloudRunStateResponses[keyof SerenCloudRunStateResponses];
 
 export type SerenCloudRunStreamData = {
     body?: never;
+    headers?: {
+        /**
+         * Highest event sequence number already received; replay resumes after it.
+         */
+        'Last-Event-ID'?: string | null;
+    };
     path: {
         /**
          * Run event ID
@@ -7583,7 +8040,7 @@ export type SerenCloudRunStreamErrors = {
 
 export type SerenCloudRunStreamResponses = {
     /**
-     * SSE stream of run updates
+     * SSE stream of sequenced run events
      */
     200: unknown;
 };
