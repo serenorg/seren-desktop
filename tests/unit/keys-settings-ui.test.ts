@@ -83,4 +83,11 @@ describe("KeysSettings Seren Passwords contract (#1823)", () => {
     expect(keysSettings).toContain("selectedVaultId() !== vaultId");
     expect(keysSettings).toContain("selectedVaultId() !== item.vaultId");
   });
+
+  it("keeps restored password field variable labels readable", () => {
+    expect(keysSettings).toContain(
+      "grid-cols-[minmax(6rem,0.85fr)_minmax(0,1fr)_2rem]",
+    );
+    expect(keysSettings).toContain("min-w-0 rounded-md border");
+  });
 });
