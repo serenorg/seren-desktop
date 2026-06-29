@@ -125,7 +125,7 @@ describe("desktopRecordingAdapter", () => {
       status: "unsupported",
       label: "Native browser recording",
       message:
-        "Browser workflows record through Seren Desktop native video capture. Use App window to pin recording to one browser window.",
+        "Browser workflows record through Seren Desktop native video capture of the selected browser window.",
       canContinueWithFallback: false,
     });
   });

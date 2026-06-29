@@ -834,7 +834,7 @@ export const DEFAULT_RECORDING_TARGETS: RecordingTarget[] = [
     id: "browser",
     kind: "browser",
     label: "Browser",
-    detail: "Record a browser workflow with DOM trace when available.",
+    detail: "Record one selected browser window with DOM trace when available.",
     isAvailable: true,
     capabilities: [
       "video",
@@ -854,6 +854,47 @@ export function recordingCanStart(
   return Boolean(target?.isAvailable && prep.tosAcknowledged);
 }
 
+export function normalizeRecordingCaptureAppName(appName: string): string {
+  return appName
+    .split("")
+    .filter((character) => /[a-z0-9]/i.test(character))
+    .join("")
+    .toLowerCase();
+}
+
+export function isBrowserCaptureAppName(appName: string): boolean {
+  const normalized = normalizeRecordingCaptureAppName(appName);
+  if (!normalized) return false;
+  const exactBrowserApps = new Set([
+    "arc",
+    "bravebrowser",
+    "dia",
+    "firefox",
+    "googlechrome",
+    "googlechromecanary",
+    "microsoftedge",
+    "opera",
+    "operagx",
+    "safari",
+    "vivaldi",
+  ]);
+  return (
+    exactBrowserApps.has(normalized) ||
+    normalized.includes("chromium") ||
+    normalized.endsWith("browser")
+  );
+}
+
+function captureWindowRequiredMessage(kind: RecordingTargetKind): string {
+  return kind === "browser"
+    ? "Select a browser window before recording."
+    : "Select an app window before recording.";
+}
+
+function targetKindRequiresCaptureWindow(kind: RecordingTargetKind): boolean {
+  return kind === "window" || kind === "browser";
+}
+
 export function validateRecordingStartRequest(
   targets: RecordingTarget[],
   request: RecordingStartRequest,
@@ -871,10 +912,25 @@ export function validateRecordingStartRequest(
   if (!target.isAvailable) {
     return `Workflow recording target is not available: ${target.label}.`;
   }
-  if (request.targetKind === "window" && !request.captureWindowId?.trim()) {
-    return "Select an app window before recording.";
+  if (
+    targetKindRequiresCaptureWindow(request.targetKind) &&
+    !request.captureWindowId?.trim()
+  ) {
+    return captureWindowRequiredMessage(request.targetKind);
   }
-  if (request.targetKind === "window" && request.captureWindow) {
+  if (request.targetKind === "browser" && !request.captureWindow) {
+    return captureWindowRequiredMessage(request.targetKind);
+  }
+  if (
+    targetKindRequiresCaptureWindow(request.targetKind) &&
+    request.captureWindow
+  ) {
+    if (
+      request.targetKind === "browser" &&
+      !isBrowserCaptureAppName(request.captureWindow.appName)
+    ) {
+      return captureWindowRequiredMessage(request.targetKind);
+    }
     if (
       request.captureWindowId &&
       request.captureWindow.id !== request.captureWindowId

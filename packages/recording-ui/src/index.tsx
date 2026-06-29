@@ -7,6 +7,7 @@ import {
   findInitialRecordingTarget,
   findRecordingPermissionBlocker,
   formatRecordingError,
+  isBrowserCaptureAppName,
   type RecordingBrowserExtensionReadiness,
   type RecordingCaptureWindow,
   type RecordingCaptureWindowPreview,
@@ -127,6 +128,17 @@ function formatElapsed(ms: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function captureWindowsForTargetKind(
+  windows: RecordingCaptureWindow[],
+  kind: RecordingTarget["kind"] | null | undefined,
+): RecordingCaptureWindow[] {
+  if (kind === "browser") {
+    return windows.filter((window) => isBrowserCaptureAppName(window.appName));
+  }
+  if (kind === "window") return windows;
+  return [];
+}
+
 export function RecordButton(props: RecordButtonProps) {
   const [status, setStatus] = createSignal<RecordingStatus>("idle");
   const [dialogOpen, setDialogOpen] = createSignal(false);
@@ -171,8 +183,10 @@ export function RecordButton(props: RecordButtonProps) {
 
   const selectedTarget = () =>
     targets().find((target) => target.id === selectedTargetId()) ?? null;
+  const selectedTargetCaptureWindows = () =>
+    captureWindowsForTargetKind(captureWindows(), selectedTarget()?.kind);
   const selectedCaptureWindow = () =>
-    captureWindows().find(
+    selectedTargetCaptureWindows().find(
       (window) => window.id === selectedCaptureWindowId(),
     ) ?? null;
   const activeSuccessState = () =>
@@ -197,9 +211,11 @@ export function RecordButton(props: RecordButtonProps) {
       targetId: target.id,
       targetKind: target.kind,
       captureWindowId:
-        target.kind === "window" ? selectedCaptureWindowId() : null,
+        target.kind === "window" || target.kind === "browser"
+          ? selectedCaptureWindowId()
+          : null,
       captureWindow:
-        target.kind === "window" && captureWindow
+        (target.kind === "window" || target.kind === "browser") && captureWindow
           ? {
               id: captureWindow.id,
               appName: captureWindow.appName,
@@ -313,18 +329,27 @@ export function RecordButton(props: RecordButtonProps) {
       setPermissionPreflight(nextPermissionPreflight);
       setBrowserExtensionReadiness(nextBrowserExtensionReadiness);
       setCaptureWindows(nextCaptureWindows);
-      const nextSelectedCaptureWindowId = preferredCaptureWindowId(
-        nextCaptureWindows,
-        selectedCaptureWindowId(),
-      );
-      setSelectedCaptureWindowId(nextSelectedCaptureWindowId);
       const initial = findInitialRecordingTarget(
         nextTargets,
         selectedTargetId(),
       );
       const nextSelectedTargetId = initial?.id ?? selectedTargetId();
+      const nextSelectedTargetKind =
+        initial?.kind ??
+        nextTargets.find((target) => target.id === nextSelectedTargetId)
+          ?.kind ??
+        null;
       if (initial) setSelectedTargetId(initial.id);
-      if (nextSelectedTargetId === "window" && nextSelectedCaptureWindowId) {
+      const nextSelectedCaptureWindowId = preferredCaptureWindowId(
+        captureWindowsForTargetKind(nextCaptureWindows, nextSelectedTargetKind),
+        selectedCaptureWindowId(),
+      );
+      setSelectedCaptureWindowId(nextSelectedCaptureWindowId);
+      if (
+        (nextSelectedTargetKind === "window" ||
+          nextSelectedTargetKind === "browser") &&
+        nextSelectedCaptureWindowId
+      ) {
         await previewCaptureWindow(nextSelectedCaptureWindowId);
       }
       setStatus("idle");
@@ -340,14 +365,15 @@ export function RecordButton(props: RecordButtonProps) {
     try {
       const nextCaptureWindows = await props.adapter.listCaptureWindows();
       setCaptureWindows(nextCaptureWindows);
+      const targetKind = selectedTarget()?.kind ?? null;
       const nextSelectedCaptureWindowId = preferredCaptureWindowId(
-        nextCaptureWindows,
+        captureWindowsForTargetKind(nextCaptureWindows, targetKind),
         selectedCaptureWindowId(),
       );
       setSelectedCaptureWindowId(nextSelectedCaptureWindowId);
       if (!nextSelectedCaptureWindowId) {
         setWindowPreview(null);
-      } else if (selectedTarget()?.kind === "window") {
+      } else if (targetKind === "window" || targetKind === "browser") {
         await previewCaptureWindow(nextSelectedCaptureWindowId);
       }
     } catch (err) {
@@ -361,8 +387,14 @@ export function RecordButton(props: RecordButtonProps) {
     setSelectedTargetId(targetId);
     setWindowPreview(null);
     setWindowPreviewError(null);
-    const windowId = selectedCaptureWindowId();
-    if (targetId === "window" && windowId) {
+    const targetKind =
+      targets().find((target) => target.id === targetId)?.kind ?? null;
+    const windowId = preferredCaptureWindowId(
+      captureWindowsForTargetKind(captureWindows(), targetKind),
+      selectedCaptureWindowId(),
+    );
+    setSelectedCaptureWindowId(windowId);
+    if ((targetKind === "window" || targetKind === "browser") && windowId) {
       void previewCaptureWindow(windowId);
     }
   };
@@ -586,7 +618,7 @@ export function RecordButton(props: RecordButtonProps) {
           permissionRequestKey={permissionRequestKey()}
           selectedTarget={selectedTarget()}
           selectedTargetId={selectedTargetId()}
-          captureWindows={captureWindows()}
+          captureWindows={selectedTargetCaptureWindows()}
           windowPreview={windowPreview()}
           previewingWindowId={previewingWindowId()}
           refreshingCaptureWindows={refreshingCaptureWindows()}
@@ -1531,6 +1563,7 @@ function RecordingPermissionStrip(props: {
 }
 
 function WindowCapturePreviewPanel(props: {
+  targetKind: RecordingTarget["kind"];
   windows: RecordingCaptureWindow[];
   preview: RecordingCaptureWindowPreview | null;
   previewingWindowId: string | null;
@@ -1553,6 +1586,16 @@ function WindowCapturePreviewPanel(props: {
         return left.appName.localeCompare(right.appName);
       })
       .slice(0, 24);
+  const panelTitle = () =>
+    props.targetKind === "browser" ? "Browser preview" : "Window preview";
+  const panelDescription = () =>
+    props.targetKind === "browser"
+      ? "Choose a browser window to preview and record."
+      : "Choose an app window to preview and record.";
+  const emptyMessage = () =>
+    props.targetKind === "browser"
+      ? "No previewable browser windows found."
+      : "No previewable app windows found.";
 
   return (
     <div
@@ -1565,10 +1608,10 @@ function WindowCapturePreviewPanel(props: {
       <div class="flex items-center justify-between gap-3">
         <div>
           <div class="text-[12px] font-semibold text-rec-fg">
-            Window preview
+            {panelTitle()}
           </div>
           <div class="mt-0.5 text-[11px] text-rec-fg-muted">
-            Choose an app window to preview and record.
+            {panelDescription()}
           </div>
         </div>
         <button
@@ -1593,7 +1636,7 @@ function WindowCapturePreviewPanel(props: {
         when={visibleWindows().length > 0}
         fallback={
           <div class="mt-2 rounded-md border border-rec-border bg-rec-surface px-2 py-2 text-[11px] text-rec-fg-muted">
-            No previewable app windows found.
+            {emptyMessage()}
           </div>
         }
       >
@@ -1799,8 +1842,14 @@ function RecordingDialog(props: RecordingDialogProps) {
               )}
             </Show>
 
-            <Show when={props.selectedTarget?.kind === "window"}>
+            <Show
+              when={
+                props.selectedTarget?.kind === "window" ||
+                props.selectedTarget?.kind === "browser"
+              }
+            >
               <WindowCapturePreviewPanel
+                targetKind={props.selectedTarget?.kind ?? "window"}
                 windows={props.captureWindows}
                 preview={props.windowPreview}
                 previewingWindowId={props.previewingWindowId}
