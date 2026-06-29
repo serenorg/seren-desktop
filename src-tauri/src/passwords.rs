@@ -15,9 +15,10 @@ use seren_secrets_crypto::keys::{
 use seren_secrets_crypto::protocol::account::{AccountSecrets, account_setup, unlock_account};
 use seren_secrets_crypto::protocol::item::{
     ApiCredentialContent, ApiCredentialKind, CustomField, CustomFieldKind, DecryptedItemContent,
-    FieldPurpose, ItemContent, decrypt_item_with_content_key, decrypt_metadata_json, decrypt_tags,
-    decrypt_title, encrypt_item_with_content_key, encrypt_metadata_json, encrypt_tags,
-    encrypt_title, generate_item_content_key, unwrap_item_content_key, wrap_item_content_key,
+    FieldPurpose, ItemContent, LoginContent, decrypt_item_with_content_key, decrypt_metadata_json,
+    decrypt_tags, decrypt_title, encrypt_item_with_content_key, encrypt_metadata_json,
+    encrypt_tags, encrypt_title, generate_item_content_key, unwrap_item_content_key,
+    wrap_item_content_key,
 };
 use seren_secrets_crypto::protocol::vault::{
     decrypt_vault_name, encrypt_vault_description, encrypt_vault_name, generate_vault_key,
@@ -880,12 +881,24 @@ fn editor_surfaced_alias(existing: &ApiCredentialContent, alias: ApiCredentialAl
         .any(|field| api_credential_alias(&field.name) == Some(alias))
 }
 
+fn passwords_url(path: &str) -> String {
+    format!("{PASSWORDS_BASE_URL}{path}")
+}
+
+fn list_items_path(vault_id: Uuid) -> String {
+    format!("/vaults/{vault_id}/items?state=active")
+}
+
+fn item_path(vault_id: Uuid, item_id: Uuid) -> String {
+    format!("/vaults/{vault_id}/items/{item_id}")
+}
+
 async fn get_data<T: for<'de> Deserialize<'de>>(
     app: &AppHandle,
     client: &reqwest::Client,
     path: &str,
 ) -> anyhow::Result<T> {
-    let url = format!("{PASSWORDS_BASE_URL}{path}");
+    let url = passwords_url(path);
     let response = crate::auth::authenticated_request(app, client, |client, token| {
         client.get(&url).bearer_auth(token)
     })
@@ -907,12 +920,7 @@ async fn list_item_summaries(
     client: &reqwest::Client,
     vault_id: Uuid,
 ) -> anyhow::Result<Vec<ItemSummaryRecord>> {
-    get_data(
-        app,
-        client,
-        &format!("/vaults/{vault_id}/items?state=active"),
-    )
-    .await
+    get_data(app, client, &list_items_path(vault_id)).await
 }
 
 async fn get_item_record(
@@ -921,7 +929,7 @@ async fn get_item_record(
     vault_id: Uuid,
     item_id: Uuid,
 ) -> anyhow::Result<ItemRecord> {
-    get_data(app, client, &format!("/vaults/{vault_id}/items/{item_id}")).await
+    get_data(app, client, &item_path(vault_id, item_id)).await
 }
 
 async fn put_account_setup(
@@ -1286,13 +1294,12 @@ fn decrypt_item_detail(
             "This entry requires a master password reprompt in Seren Passwords"
         ));
     }
-    // Only api_credential content has editable fields and a matching scrub
-    // path; other kinds are left encrypted so their plaintext is never
-    // materialized in a form this module cannot zeroize.
-    let fields = if metadata.item_kind == "api_credential" {
+    // Only credential-like content is surfaced in the key/value editor. Other
+    // kinds stay encrypted so their plaintext is not materialized in a form
+    // this module cannot present or zeroize correctly.
+    let fields = if matches!(metadata.item_kind.as_str(), "api_credential" | "login") {
         let (_content_key, content) = decrypt_item_content(&vault.vault_key, &item)?;
-        let fields = api_credential_fields(&content);
-        fields
+        item_content_fields(&content)
     } else {
         Vec::new()
     };
@@ -1324,30 +1331,24 @@ fn decrypt_item_content(
     Ok((content_key, content))
 }
 
-fn api_credential_fields(content: &ItemContent) -> Vec<PasswordsItemField> {
-    let ItemContent::ApiCredential(content) = content else {
-        return Vec::new();
-    };
+fn item_content_fields(content: &ItemContent) -> Vec<PasswordsItemField> {
+    match content {
+        ItemContent::ApiCredential(content) => api_credential_fields(content),
+        ItemContent::Login(content) => login_fields(content),
+        _ => Vec::new(),
+    }
+}
+
+fn api_credential_fields(content: &ApiCredentialContent) -> Vec<PasswordsItemField> {
     let mut fields = Vec::new();
     if content.custom_fields.is_empty() {
-        if !content.primary_value.is_empty() {
-            fields.push(PasswordsItemField {
-                name: "PRIMARY".to_string(),
-                value: content.primary_value.clone(),
-            });
-        }
-        if !content.secondary_value.is_empty() {
-            fields.push(PasswordsItemField {
-                name: "SECONDARY".to_string(),
-                value: content.secondary_value.clone(),
-            });
-        }
-        if !content.notes_text.is_empty() {
-            fields.push(PasswordsItemField {
-                name: "NOTES".to_string(),
-                value: content.notes_text.clone(),
-            });
-        }
+        push_field(&mut fields, "PRIMARY", &content.primary_value);
+        push_field(&mut fields, "SECONDARY", &content.secondary_value);
+        push_field(
+            &mut fields,
+            "NOTES",
+            &projected_prose_text(&content.notes_text, &content.notes),
+        );
         return fields;
     }
 
@@ -1359,6 +1360,50 @@ fn api_credential_fields(content: &ItemContent) -> Vec<PasswordsItemField> {
             value: field.value.clone(),
         })
         .collect()
+}
+
+fn login_fields(content: &LoginContent) -> Vec<PasswordsItemField> {
+    let mut fields = Vec::new();
+    push_field(&mut fields, "username", &content.username);
+    push_field(&mut fields, "password", &content.password);
+    if let Some(url) = content.urls.first() {
+        push_field(&mut fields, "url", &url.url);
+    }
+    if let Some(totp) = content.totp.as_ref() {
+        push_field(&mut fields, "totp", &totp.secret_base32);
+    }
+    push_field(
+        &mut fields,
+        "notes",
+        &projected_prose_text(&content.notes_text, &content.notes),
+    );
+    fields.extend(
+        content
+            .custom_fields
+            .iter()
+            .map(|field| PasswordsItemField {
+                name: field.name.clone(),
+                value: field.value.clone(),
+            }),
+    );
+    fields
+}
+
+fn push_field(fields: &mut Vec<PasswordsItemField>, name: &str, value: &str) {
+    if value.is_empty() {
+        return;
+    }
+    fields.push(PasswordsItemField {
+        name: name.to_string(),
+        value: value.to_string(),
+    });
+}
+
+fn projected_prose_text(text: &str, doc: &seren_secrets_crypto::prose::ProseDoc) -> String {
+    if !text.is_empty() {
+        return text.to_string();
+    }
+    doc.plain_text()
 }
 
 fn build_create_item_request(
@@ -1793,6 +1838,21 @@ mod tests {
 
         assert_eq!(record.kdf_params.version, 1);
         assert_eq!(record.account_key_wrap, "AA==");
+    }
+
+    #[test]
+    fn passwords_item_paths_match_live_publisher_contract() {
+        let vault_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let item_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+
+        assert_eq!(
+            passwords_url(&list_items_path(vault_id)),
+            "https://api.serendb.com/publishers/seren-passwords/vaults/11111111-1111-4111-8111-111111111111/items?state=active"
+        );
+        assert_eq!(
+            passwords_url(&item_path(vault_id, item_id)),
+            "https://api.serendb.com/publishers/seren-passwords/vaults/11111111-1111-4111-8111-111111111111/items/22222222-2222-4222-8222-222222222222"
+        );
     }
 
     #[test]
@@ -2306,6 +2366,96 @@ mod tests {
     }
 
     #[test]
+    fn decrypt_item_detail_returns_login_fields() {
+        use seren_secrets_crypto::protocol::item::{LoginUrl, TotpAlgorithm, TotpConfig};
+        use seren_secrets_crypto::protocol::vault::generate_vault_key;
+
+        let (notes, notes_text) = seren_secrets_crypto::prose::from_plaintext("shared team login");
+        let totp_value = "fixture";
+        let content = ItemContent::Login(LoginContent {
+            username: "taariq@example.com".into(),
+            password: "vault-password".into(),
+            urls: vec![LoginUrl::plain("https://www.canva.com")],
+            totp: Some(TotpConfig {
+                secret_base32: totp_value.into(),
+                algorithm: TotpAlgorithm::Sha1,
+                digits: 6,
+                period_seconds: 30,
+            }),
+            notes,
+            notes_text,
+            custom_fields: vec![CustomField {
+                name: "workspace".into(),
+                kind: CustomFieldKind::String,
+                value: "Glide".into(),
+                purpose: None,
+                section_id: None,
+            }],
+            ..Default::default()
+        });
+        let vault_key = generate_vault_key();
+        let item_id = Uuid::new_v4();
+        let vault_uuid = Uuid::new_v4();
+        let metadata = ItemListMetadata {
+            item_kind: "login".to_string(),
+            favorite: false,
+            sensitive: true,
+            reprompt: false,
+        };
+
+        let request =
+            build_create_item_request(&vault_key, item_id, &content, "Canva", &[], &metadata, 1)
+                .unwrap();
+
+        let vault = UnlockedVault {
+            vault_id: vault_uuid,
+            name: "Glide".to_string(),
+            vault_key,
+            vault_key_version: 1,
+            writable: true,
+            item_count: 0,
+        };
+        let record = ItemRecord {
+            item_id,
+            vault_id: vault_uuid,
+            title_ciphertext: request.title_ciphertext.clone(),
+            content_ciphertext: request.content_ciphertext.clone(),
+            content_key_wrap: request.content_key_wrap.clone(),
+            tags_ciphertext: request.tags_ciphertext.clone(),
+            metadata_ciphertext: request.metadata_ciphertext.clone(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let detail = decrypt_item_detail(&vault, record).unwrap();
+
+        assert_eq!(detail.title, "Canva");
+        assert_eq!(detail.item_kind, "login");
+        let by_name: BTreeMap<_, _> = detail
+            .fields
+            .iter()
+            .map(|field| (field.name.clone(), field.value.clone()))
+            .collect();
+        assert_eq!(
+            by_name.get("username").map(String::as_str),
+            Some("taariq@example.com")
+        );
+        assert_eq!(
+            by_name.get("password").map(String::as_str),
+            Some("vault-password")
+        );
+        assert_eq!(
+            by_name.get("url").map(String::as_str),
+            Some("https://www.canva.com")
+        );
+        assert_eq!(by_name.get("totp").map(String::as_str), Some(totp_value));
+        assert_eq!(
+            by_name.get("notes").map(String::as_str),
+            Some("shared team login")
+        );
+        assert_eq!(by_name.get("workspace").map(String::as_str), Some("Glide"));
+    }
+
+    #[test]
     fn decrypt_item_detail_refuses_reprompt_items() {
         use seren_secrets_crypto::protocol::vault::generate_vault_key;
 
@@ -2365,17 +2515,17 @@ mod tests {
     }
 
     #[test]
-    fn decrypt_item_detail_skips_content_for_non_api_kinds() {
+    fn decrypt_item_detail_skips_content_for_non_credential_kinds() {
         use seren_secrets_crypto::protocol::vault::generate_vault_key;
 
         let vault_key = generate_vault_key();
         let item_id = Uuid::new_v4();
         let vault_uuid = Uuid::new_v4();
-        let title_ct = encrypt_title(&vault_key, item_id.as_bytes(), "A login");
+        let title_ct = encrypt_title(&vault_key, item_id.as_bytes(), "A secure note");
         let metadata_ct = encrypt_metadata_json(
             &vault_key,
             item_id.as_bytes(),
-            r#"{"item_kind":"login","favorite":false,"sensitive":false,"reprompt":false}"#,
+            r#"{"item_kind":"secure_note","favorite":false,"sensitive":false,"reprompt":false}"#,
         );
 
         let vault = UnlockedVault {
@@ -2386,8 +2536,8 @@ mod tests {
             writable: true,
             item_count: 0,
         };
-        // Garbage content blobs prove the content path is never decrypted
-        // for kinds the editor does not surface.
+        // Garbage content blobs prove the content path is never decrypted for
+        // non-credential kinds the editor does not surface.
         let record = ItemRecord {
             item_id,
             vault_id: vault_uuid,
@@ -2401,7 +2551,7 @@ mod tests {
 
         let detail = decrypt_item_detail(&vault, record).unwrap();
 
-        assert_eq!(detail.item_kind, "login");
+        assert_eq!(detail.item_kind, "secure_note");
         assert!(detail.fields.is_empty());
     }
 
