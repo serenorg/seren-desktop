@@ -26,6 +26,7 @@ const PULL_ORDER: &[&str] = &[
     "thread_drafts",
     "meetings",
     "transcript_segments",
+    "meeting_speaker_assignments",
 ];
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -156,6 +157,21 @@ pub fn remote_schema_sql() -> &'static [&'static str] {
             row_version     bigint NOT NULL DEFAULT 1,
             UNIQUE (meeting_id, seq)
         )",
+        "CREATE TABLE IF NOT EXISTS seren_desktop.meeting_speaker_assignments (
+            id              text PRIMARY KEY,
+            meeting_id      text NOT NULL REFERENCES seren_desktop.meetings(id) ON DELETE CASCADE,
+            source          text NOT NULL,
+            source_key      text NOT NULL,
+            display_name    text NOT NULL,
+            attendee_email  text,
+            scope           text NOT NULL,
+            segment_id      text REFERENCES seren_desktop.transcript_segments(id) ON DELETE CASCADE,
+            created_at      bigint NOT NULL,
+            updated_at      bigint NOT NULL,
+            deleted_at      bigint,
+            payload         jsonb NOT NULL DEFAULT '{}'::jsonb,
+            row_version     bigint NOT NULL DEFAULT 1
+        )",
         "CREATE TABLE IF NOT EXISTS seren_desktop.sync_state (
             table_name      text NOT NULL,
             device_id       text NOT NULL,
@@ -168,6 +184,8 @@ pub fn remote_schema_sql() -> &'static [&'static str] {
             ON seren_desktop.message_events(message_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_seren_desktop_segments_meeting
             ON seren_desktop.transcript_segments(meeting_id, seq)",
+        "CREATE INDEX IF NOT EXISTS idx_seren_desktop_speaker_assignments_meeting
+            ON seren_desktop.meeting_speaker_assignments(meeting_id)",
     ]
 }
 
@@ -598,6 +616,16 @@ fn push_outbox_item(
                 false
             }
         }
+        "meeting_speaker_assignments" => {
+            if let Some(row) = with_local_db(app, |conn| {
+                load_meeting_speaker_assignment(conn, &item.row_id)
+            })? {
+                push_meeting_speaker_assignment(client, row)?;
+                true
+            } else {
+                false
+            }
+        }
         _ => false,
     };
     Ok(if pushed_row {
@@ -672,6 +700,9 @@ fn mark_synced(app: &AppHandle, table_name: &str, row_id: &str) -> Result<(), St
             "message_events" => "UPDATE message_events SET synced_at = ?1 WHERE id = ?2",
             "meetings" => "UPDATE meetings SET synced_at = ?1 WHERE id = ?2",
             "transcript_segments" => "UPDATE transcript_segments SET synced_at = ?1 WHERE id = ?2",
+            "meeting_speaker_assignments" => {
+                "UPDATE meeting_speaker_assignments SET synced_at = ?1 WHERE id = ?2"
+            }
             "thread_drafts" => "UPDATE conversations SET synced_at = ?1 WHERE id = ?2",
             _ => return Ok(()),
         };
@@ -736,6 +767,14 @@ fn push_tombstone(client: &mut PgClient, item: &OutboxItem) -> Result<(), String
                     &[&item.row_id, &deleted_at],
                 )
                 .map_err(|err| err.to_string())?;
+            client
+                .execute(
+                    "UPDATE seren_desktop.meeting_speaker_assignments
+                     SET deleted_at = $2, row_version = row_version + 1
+                     WHERE meeting_id = $1",
+                    &[&item.row_id, &deleted_at],
+                )
+                .map_err(|err| err.to_string())?;
         }
         "thread_drafts" => {
             client
@@ -745,7 +784,7 @@ fn push_tombstone(client: &mut PgClient, item: &OutboxItem) -> Result<(), String
                 )
                 .map_err(|err| err.to_string())?;
         }
-        "message_events" | "transcript_segments" => {
+        "message_events" | "transcript_segments" | "meeting_speaker_assignments" => {
             update_deleted_at(client, &item.table_name, &item.row_id, deleted_at)?;
         }
         _ => {}
@@ -1286,6 +1325,98 @@ fn push_transcript_segment(client: &mut PgClient, row: TranscriptSegmentRow) -> 
     Ok(())
 }
 
+#[derive(Debug)]
+struct MeetingSpeakerAssignmentRow {
+    id: String,
+    meeting_id: String,
+    source: String,
+    source_key: String,
+    display_name: String,
+    attendee_email: Option<String>,
+    scope: String,
+    segment_id: Option<String>,
+    created_at: i64,
+    updated_at: i64,
+    deleted_at: Option<i64>,
+    payload: Value,
+    row_version: i64,
+}
+
+fn load_meeting_speaker_assignment(
+    conn: &Connection,
+    id: &str,
+) -> rusqlite::Result<Option<MeetingSpeakerAssignmentRow>> {
+    conn.query_row(
+        "SELECT id, meeting_id, source, source_key, display_name, attendee_email,
+                scope, segment_id, created_at, COALESCE(updated_at, created_at),
+                deleted_at, row_version
+         FROM meeting_speaker_assignments
+         WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(MeetingSpeakerAssignmentRow {
+                id: row.get(0)?,
+                meeting_id: row.get(1)?,
+                source: row.get(2)?,
+                source_key: row.get(3)?,
+                display_name: row.get(4)?,
+                attendee_email: row.get(5)?,
+                scope: row.get(6)?,
+                segment_id: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+                deleted_at: row.get(10)?,
+                row_version: row.get(11)?,
+                payload: checked_payload(json!({})).map_err(to_sqlite_invalid)?,
+            })
+        },
+    )
+    .optional()
+}
+
+fn push_meeting_speaker_assignment(
+    client: &mut PgClient,
+    row: MeetingSpeakerAssignmentRow,
+) -> Result<(), String> {
+    client
+        .execute(
+            "INSERT INTO seren_desktop.meeting_speaker_assignments
+            (id, meeting_id, source, source_key, display_name, attendee_email,
+             scope, segment_id, created_at, updated_at, deleted_at, payload, row_version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         ON CONFLICT(id) DO UPDATE SET
+            meeting_id = excluded.meeting_id,
+            source = excluded.source,
+            source_key = excluded.source_key,
+            display_name = excluded.display_name,
+            attendee_email = excluded.attendee_email,
+            scope = excluded.scope,
+            segment_id = excluded.segment_id,
+            updated_at = excluded.updated_at,
+            deleted_at = excluded.deleted_at,
+            payload = excluded.payload,
+            row_version = excluded.row_version
+         WHERE excluded.row_version >= seren_desktop.meeting_speaker_assignments.row_version",
+            &[
+                &row.id,
+                &row.meeting_id,
+                &row.source,
+                &row.source_key,
+                &row.display_name,
+                &row.attendee_email,
+                &row.scope,
+                &row.segment_id,
+                &row.created_at,
+                &row.updated_at,
+                &row.deleted_at,
+                &row.payload,
+                &row.row_version,
+            ],
+        )
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
 fn pull_remote(app: &AppHandle, client: &mut PgClient, sync_scope: &str) -> Result<usize, String> {
     let mut pulled = 0usize;
     for table_name in PULL_ORDER {
@@ -1356,6 +1487,7 @@ fn apply_remote_row(app: &AppHandle, table_name: &str, row: PgRow) -> Result<(),
         "thread_drafts" => apply_remote_thread_draft(conn, row),
         "meetings" => apply_remote_meeting(conn, row),
         "transcript_segments" => apply_remote_transcript_segment(conn, row),
+        "meeting_speaker_assignments" => apply_remote_meeting_speaker_assignment(conn, row),
         _ => Ok(()),
     })
 }
@@ -1644,6 +1776,53 @@ fn apply_remote_transcript_segment(conn: &Connection, row: PgRow) -> rusqlite::R
     Ok(())
 }
 
+fn apply_remote_meeting_speaker_assignment(conn: &Connection, row: PgRow) -> rusqlite::Result<()> {
+    let id: String = pg_get(&row, "id")?;
+    if pg_get::<Option<i64>>(&row, "deleted_at")?.is_some() {
+        conn.execute(
+            "DELETE FROM meeting_speaker_assignments WHERE id = ?1",
+            params![id],
+        )?;
+        return Ok(());
+    }
+    conn.execute(
+        "INSERT INTO meeting_speaker_assignments (
+            id, meeting_id, source, source_key, display_name, attendee_email,
+            scope, segment_id, created_at, row_version, updated_at, synced_at,
+            deleted_at
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL)
+         ON CONFLICT(id) DO UPDATE SET
+            meeting_id = excluded.meeting_id,
+            source = excluded.source,
+            source_key = excluded.source_key,
+            display_name = excluded.display_name,
+            attendee_email = excluded.attendee_email,
+            scope = excluded.scope,
+            segment_id = excluded.segment_id,
+            row_version = excluded.row_version,
+            updated_at = excluded.updated_at,
+            synced_at = excluded.synced_at,
+            deleted_at = NULL
+         WHERE COALESCE(meeting_speaker_assignments.row_version, 0) <= excluded.row_version",
+        params![
+            id,
+            pg_get::<String>(&row, "meeting_id")?,
+            pg_get::<String>(&row, "source")?,
+            pg_get::<String>(&row, "source_key")?,
+            pg_get::<String>(&row, "display_name")?,
+            pg_get::<Option<String>>(&row, "attendee_email")?,
+            pg_get::<String>(&row, "scope")?,
+            pg_get::<Option<String>>(&row, "segment_id")?,
+            pg_get::<i64>(&row, "created_at")?,
+            pg_get::<i64>(&row, "row_version")?,
+            pg_get::<i64>(&row, "updated_at")?,
+            now_ms(),
+        ],
+    )?;
+    Ok(())
+}
+
 fn delete_conversation_local(conn: &Connection, id: &str) -> rusqlite::Result<()> {
     conn.execute(
         "DELETE FROM message_events WHERE conversation_id = ?1",
@@ -1658,6 +1837,10 @@ fn delete_conversation_local(conn: &Connection, id: &str) -> rusqlite::Result<()
 }
 
 fn delete_meeting_local(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "DELETE FROM meeting_speaker_assignments WHERE meeting_id = ?1",
+        params![id],
+    )?;
     conn.execute(
         "DELETE FROM transcript_segments WHERE meeting_id = ?1",
         params![id],

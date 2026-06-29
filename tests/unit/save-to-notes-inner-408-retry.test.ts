@@ -83,6 +83,18 @@ describe("saveToSerenNotes — publisher-inner 408 cold-start retry", () => {
     await promise;
 
     expect(mockAppFetch).toHaveBeenCalledTimes(2);
+    const [url, init] = mockAppFetch.mock.calls[0] ?? [];
+    expect(url).toBe("https://api.serendb.com/publishers/seren-notes/notes");
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toMatchObject({
+      Authorization: "Bearer test-token",
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      title: "Chat History",
+      content: "# hi",
+      format: "markdown",
+    });
     expect(mockOpenExternalLink).toHaveBeenCalledWith(
       `https://notes.serendb.com/notes/${UUID}`,
     );

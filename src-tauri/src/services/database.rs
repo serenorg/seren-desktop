@@ -18,6 +18,7 @@ pub const HISTORY_SYNC_TABLES: &[&str] = &[
     "thread_drafts",
     "meetings",
     "transcript_segments",
+    "meeting_speaker_assignments",
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -214,6 +215,16 @@ pub fn mark_sync_upsert(conn: &Connection, table_name: &str, row_id: &str) -> Re
         "transcript_segments" => {
             conn.execute(
                 "UPDATE transcript_segments
+                 SET row_version = COALESCE(row_version, 1) + 1,
+                     updated_at = ?1,
+                     deleted_at = NULL
+                 WHERE id = ?2",
+                rusqlite::params![updated_at, row_id],
+            )?;
+        }
+        "meeting_speaker_assignments" => {
+            conn.execute(
+                "UPDATE meeting_speaker_assignments
                  SET row_version = COALESCE(row_version, 1) + 1,
                      updated_at = ?1,
                      deleted_at = NULL
@@ -521,6 +532,23 @@ fn setup_history_sync_schema(conn: &Connection) -> Result<()> {
     )
     .ok();
 
+    add_column_if_missing(
+        conn,
+        "meeting_speaker_assignments",
+        "row_version",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    add_column_if_missing(conn, "meeting_speaker_assignments", "deleted_at", "INTEGER")?;
+    add_column_if_missing(conn, "meeting_speaker_assignments", "synced_at", "INTEGER")?;
+    add_column_if_missing(conn, "meeting_speaker_assignments", "updated_at", "INTEGER")?;
+    conn.execute(
+        "UPDATE meeting_speaker_assignments
+         SET updated_at = created_at
+         WHERE updated_at IS NULL OR updated_at = 0",
+        [],
+    )
+    .ok();
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sync_outbox (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -736,6 +764,45 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_segments_meeting
          ON transcript_segments(meeting_id, seq)",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS meeting_speaker_assignments (
+            id TEXT PRIMARY KEY,
+            meeting_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_key TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            attendee_email TEXT,
+            scope TEXT NOT NULL,
+            segment_id TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            row_version INTEGER NOT NULL DEFAULT 1,
+            deleted_at INTEGER,
+            synced_at INTEGER,
+            FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE,
+            FOREIGN KEY (segment_id) REFERENCES transcript_segments(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_speaker_assignments_meeting
+         ON meeting_speaker_assignments(meeting_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_speaker_assignments_meeting_scope
+         ON meeting_speaker_assignments(meeting_id, source, source_key, scope)
+         WHERE scope = 'meeting' AND deleted_at IS NULL",
+        [],
+    )?;
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_speaker_assignments_segment_scope
+         ON meeting_speaker_assignments(meeting_id, segment_id, scope)
+         WHERE scope = 'segment' AND deleted_at IS NULL",
         [],
     )?;
 

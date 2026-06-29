@@ -13,6 +13,7 @@ import { openExternalLink } from "@/lib/external-link";
 import {
   formatDuration,
   formatMeetingDate,
+  formatRawTranscriptSpeakerLabel,
   formatTime,
   formatTranscriptSpeakerLabel,
   isMeetingDurationLive,
@@ -40,6 +41,69 @@ interface MeetingDetailProps {
   meeting: Meeting;
   durationNow?: number;
   onRequestDelete?: (meeting: Meeting) => void;
+}
+
+interface AttendeeOption {
+  label: string;
+  name: string;
+  email: string | null;
+}
+
+interface SpeakerEditorState {
+  segmentId: string;
+  displayName: string;
+  attendeeEmail: string | null;
+  scope: "meeting" | "segment";
+}
+
+function parseAttendeeOption(value: unknown): AttendeeOption | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const match = trimmed.match(/^(.*?)\s*<([^>]+)>$/);
+    if (match) {
+      const name = (match[1] || match[2]).trim();
+      const email = match[2].trim();
+      return { label: `${name} <${email}>`, name, email };
+    }
+    const email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : null;
+    return { label: trimmed, name: trimmed, email };
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const name =
+      typeof record.name === "string" ? record.name.trim() : undefined;
+    const email =
+      typeof record.email === "string" ? record.email.trim() : undefined;
+    const display = name || email;
+    if (!display) return null;
+    return {
+      label: email && name ? `${name} <${email}>` : display,
+      name: display,
+      email: email || null,
+    };
+  }
+  return null;
+}
+
+function parseAttendees(json: string | null | undefined): AttendeeOption[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set<string>();
+    return parsed
+      .map(parseAttendeeOption)
+      .filter((item): item is AttendeeOption => item !== null)
+      .filter((item) => {
+        const key = `${item.name}\n${item.email ?? ""}`.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  } catch {
+    return [];
+  }
 }
 
 function PencilGlyph() {
@@ -140,6 +204,8 @@ export function MeetingDetail(props: MeetingDetailProps) {
   >([]);
   const [selectedSkillSlug, setSelectedSkillSlug] = createSignal("");
   const [routing, setRouting] = createSignal(false);
+  const [speakerEditor, setSpeakerEditor] =
+    createSignal<SpeakerEditorState | null>(null);
 
   const rows = new Map<number, HTMLElement>();
 
@@ -174,6 +240,12 @@ export function MeetingDetail(props: MeetingDetailProps) {
   );
 
   const segments = () => meetingStore.state.liveSegments;
+  const attendeeOptions = createMemo(() =>
+    parseAttendees(props.meeting.attendeesJson),
+  );
+  const attendeeDatalistId = createMemo(
+    () => `meeting-speaker-attendees-${props.meeting.id}`,
+  );
   const durationNow = () =>
     isMeetingDurationLive(props.meeting) ? props.durationNow : undefined;
   const processing = () => isMeetingProcessingStatus(props.meeting.status);
@@ -275,6 +347,63 @@ export function MeetingDetail(props: MeetingDetailProps) {
     } finally {
       setRouting(false);
     }
+  };
+
+  const startSpeakerEdit = (segment: TranscriptSegment) => {
+    setSpeakerEditor({
+      segmentId: segment.id,
+      displayName: segment.speakerDisplayName ?? "",
+      attendeeEmail: null,
+      scope: segment.speakerAssignmentScope ?? "meeting",
+    });
+  };
+
+  const speakerEditorFor = (segment: TranscriptSegment) => {
+    const editor = speakerEditor();
+    return editor?.segmentId === segment.id ? editor : null;
+  };
+
+  const updateSpeakerDraft = (value: string) => {
+    const editor = speakerEditor();
+    if (!editor) return;
+    const match = attendeeOptions().find(
+      (option) => option.label === value || option.name === value,
+    );
+    setSpeakerEditor({
+      ...editor,
+      displayName: match?.name ?? value,
+      attendeeEmail: match?.email ?? null,
+    });
+  };
+
+  const setSpeakerScope = (scope: "meeting" | "segment") => {
+    const editor = speakerEditor();
+    if (!editor) return;
+    setSpeakerEditor({ ...editor, scope });
+  };
+
+  const commitSpeakerEdit = async (segment: TranscriptSegment) => {
+    const editor = speakerEditor();
+    if (!editor || editor.segmentId !== segment.id) return;
+    const displayName = editor.displayName.trim();
+    if (!displayName) return;
+    await meetingStore.assignSpeakerName({
+      meeting: props.meeting,
+      segment,
+      displayName,
+      attendeeEmail: editor.attendeeEmail,
+      scope: editor.scope,
+    });
+    setSpeakerEditor(null);
+  };
+
+  const clearSpeakerEdit = async (segment: TranscriptSegment) => {
+    if (!segment.speakerAssignmentId) return;
+    await meetingStore.clearSpeakerAssignment(
+      props.meeting,
+      segment.speakerAssignmentId,
+    );
+    setSpeakerEditor(null);
   };
 
   // Manual republish for #2343. The backend uses PublishGuard so a
@@ -595,24 +724,38 @@ export function MeetingDetail(props: MeetingDetailProps) {
           }
         >
           <div class="rounded-md border border-border bg-surface-0/50 px-3">
+            <datalist id={attendeeDatalistId()}>
+              <For each={attendeeOptions()}>
+                {(attendee) => <option value={attendee.label} />}
+              </For>
+            </datalist>
             <For each={segments()}>
               {(segment) => (
                 <div
                   ref={(el) => rows.set(segment.seq, el)}
-                  class="grid grid-cols-[112px_minmax(0,1fr)] gap-3 py-2 border-b border-border/50 last:border-b-0 transition-colors"
+                  class="grid grid-cols-[160px_minmax(0,1fr)] gap-x-3 gap-y-2 py-2 border-b border-border/50 last:border-b-0 transition-colors"
                   classList={{
                     "bg-primary/10": highlightedSeq() === segment.seq,
                   }}
                 >
-                  <div
-                    class="truncate text-[11px] font-mono tabular-nums"
+                  <button
+                    type="button"
+                    class="group inline-flex min-w-0 max-w-full items-center gap-1 rounded border border-transparent px-1 py-0.5 text-left text-[11px] font-mono tabular-nums transition-colors hover:border-border hover:bg-surface-1 focus:outline-none focus:border-primary/60"
                     classList={{
                       "text-foreground": segment.speaker === "me",
                       "text-muted-foreground": segment.speaker === "them",
                     }}
+                    onClick={() => startSpeakerEdit(segment)}
+                    title={`Assign speaker: ${formatRawTranscriptSpeakerLabel(segment)}`}
+                    aria-label={`Assign speaker for ${formatRawTranscriptSpeakerLabel(segment)}`}
                   >
-                    {formatTranscriptSpeakerLabel(segment)}
-                  </div>
+                    <span class="min-w-0 truncate">
+                      {formatTranscriptSpeakerLabel(segment)}
+                    </span>
+                    <span class="shrink-0 opacity-0 transition-opacity group-hover:opacity-70 group-focus:opacity-70">
+                      <PencilGlyph />
+                    </span>
+                  </button>
                   <div
                     class="min-w-0 break-words text-[13px] leading-5"
                     classList={{
@@ -624,6 +767,100 @@ export function MeetingDetail(props: MeetingDetailProps) {
                       ? segment.text || "Transcript gap"
                       : segment.text}
                   </div>
+                  <Show when={speakerEditorFor(segment)}>
+                    {(editor) => (
+                      <div class="col-span-2 rounded-md border border-border bg-surface-1 p-2.5">
+                        <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                          <input
+                            ref={(el) => queueMicrotask(() => el.focus())}
+                            class="h-8 min-w-0 rounded-md border border-border bg-surface-0 px-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary/60"
+                            value={editor().displayName}
+                            list={attendeeDatalistId()}
+                            placeholder="Speaker name"
+                            aria-label="Speaker name"
+                            onInput={(event) =>
+                              updateSpeakerDraft(event.currentTarget.value)
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void commitSpeakerEdit(segment);
+                              } else if (event.key === "Escape") {
+                                event.preventDefault();
+                                setSpeakerEditor(null);
+                              }
+                            }}
+                          />
+                          <div
+                            class="inline-flex h-8 overflow-hidden rounded-md border border-border bg-surface-0"
+                            role="group"
+                            aria-label="Speaker assignment scope"
+                          >
+                            <button
+                              type="button"
+                              class="px-2.5 text-[12px] transition-colors"
+                              classList={{
+                                "bg-primary/15 text-primary":
+                                  editor().scope === "segment",
+                                "text-muted-foreground hover:text-foreground":
+                                  editor().scope !== "segment",
+                              }}
+                              onClick={() => setSpeakerScope("segment")}
+                            >
+                              One
+                            </button>
+                            <button
+                              type="button"
+                              class="border-l border-border px-2.5 text-[12px] transition-colors"
+                              classList={{
+                                "bg-primary/15 text-primary":
+                                  editor().scope === "meeting",
+                                "text-muted-foreground hover:text-foreground":
+                                  editor().scope !== "meeting",
+                              }}
+                              onClick={() => setSpeakerScope("meeting")}
+                            >
+                              All
+                            </button>
+                          </div>
+                        </div>
+                        <div class="mt-2 flex items-center justify-between gap-2">
+                          <span
+                            class="min-w-0 truncate text-[11px] text-muted-foreground"
+                            title={formatRawTranscriptSpeakerLabel(segment)}
+                          >
+                            {formatRawTranscriptSpeakerLabel(segment)}
+                          </span>
+                          <div class="flex shrink-0 items-center gap-2">
+                            <Show when={segment.speakerAssignmentId}>
+                              <button
+                                type="button"
+                                class="h-7 px-2 rounded-md border border-border text-[12px] text-muted-foreground hover:text-foreground"
+                                onClick={() => void clearSpeakerEdit(segment)}
+                              >
+                                Clear
+                              </button>
+                            </Show>
+                            <button
+                              type="button"
+                              class="h-7 px-2 rounded-md border border-border text-[12px] text-muted-foreground hover:text-foreground"
+                              onClick={() => setSpeakerEditor(null)}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              class="h-7 px-2.5 rounded-md border border-primary/40 bg-primary/10 text-[12px] text-primary hover:bg-primary/15 disabled:opacity-50"
+                              disabled={!editor().displayName.trim()}
+                              onClick={() => void commitSpeakerEdit(segment)}
+                            >
+                              Save
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </Show>
                 </div>
               )}
             </For>

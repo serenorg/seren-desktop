@@ -44,6 +44,20 @@ export interface Meeting {
 }
 
 export type SpeakerSource = "channel" | "diarization";
+export type SpeakerAssignmentScope = "meeting" | "segment";
+
+export interface MeetingSpeakerAssignment {
+  id: string;
+  meetingId: string;
+  source: SpeakerSource;
+  sourceKey: string;
+  displayName: string;
+  attendeeEmail?: string | null;
+  scope: SpeakerAssignmentScope;
+  segmentId?: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
 
 export interface TranscriptSegment {
   id: string;
@@ -58,6 +72,11 @@ export interface TranscriptSegment {
   speakerLabel?: string | null;
   /** Whether `speaker` came from the capture channel or model diarization. */
   speakerSource?: SpeakerSource;
+  /** User-corrected speaker name resolved from assignment state, if present. */
+  speakerDisplayName?: string | null;
+  /** Assignment that supplied `speakerDisplayName`, useful for undo/change UI. */
+  speakerAssignmentId?: string | null;
+  speakerAssignmentScope?: SpeakerAssignmentScope | null;
   createdAt: number;
 }
 
@@ -170,10 +189,114 @@ export function appendTranscriptSegment(
   });
 }
 
-export function getTranscriptSegments(
+export interface SegmentSpeakerKey {
+  source: SpeakerSource;
+  sourceKey: string;
+}
+
+export function segmentSpeakerKey(
+  segment: TranscriptSegment,
+): SegmentSpeakerKey {
+  const diarized = segment.speakerLabel?.trim();
+  if (diarized) {
+    return { source: "diarization", sourceKey: diarized };
+  }
+  return { source: "channel", sourceKey: segment.speaker };
+}
+
+export function resolveSpeakerAssignment(
+  segment: TranscriptSegment,
+  assignments: readonly MeetingSpeakerAssignment[],
+): MeetingSpeakerAssignment | null {
+  const segmentAssignment =
+    assignments.find(
+      (assignment) =>
+        assignment.scope === "segment" && assignment.segmentId === segment.id,
+    ) ?? null;
+  if (segmentAssignment) return segmentAssignment;
+
+  const key = segmentSpeakerKey(segment);
+  const meetingAssignment = assignments.find(
+    (assignment) =>
+      assignment.scope === "meeting" &&
+      assignment.source === key.source &&
+      assignment.sourceKey === key.sourceKey,
+  );
+  if (meetingAssignment) return meetingAssignment;
+
+  if (key.source === "diarization") {
+    return (
+      assignments.find(
+        (assignment) =>
+          assignment.scope === "meeting" &&
+          assignment.source === "channel" &&
+          assignment.sourceKey === segment.speaker,
+      ) ?? null
+    );
+  }
+
+  return null;
+}
+
+export function applySpeakerAssignmentsToSegments(
+  segments: readonly TranscriptSegment[],
+  assignments: readonly MeetingSpeakerAssignment[],
+): TranscriptSegment[] {
+  return segments.map((segment) => {
+    const assignment = resolveSpeakerAssignment(segment, assignments);
+    if (!assignment) {
+      return {
+        ...segment,
+        speakerDisplayName: null,
+        speakerAssignmentId: null,
+        speakerAssignmentScope: null,
+      };
+    }
+    return {
+      ...segment,
+      speakerDisplayName: assignment.displayName,
+      speakerAssignmentId: assignment.id,
+      speakerAssignmentScope: assignment.scope,
+    };
+  });
+}
+
+export function listMeetingSpeakerAssignments(
+  meetingId: string,
+): Promise<MeetingSpeakerAssignment[]> {
+  return invoke("list_meeting_speaker_assignments", { meetingId });
+}
+
+export interface UpsertMeetingSpeakerAssignmentInput {
+  meetingId: string;
+  source: SpeakerSource;
+  sourceKey: string;
+  displayName: string;
+  attendeeEmail?: string | null;
+  scope: SpeakerAssignmentScope;
+  segmentId?: string | null;
+}
+
+export function upsertMeetingSpeakerAssignment(
+  input: UpsertMeetingSpeakerAssignmentInput,
+): Promise<MeetingSpeakerAssignment> {
+  return invoke("upsert_meeting_speaker_assignment", { input });
+}
+
+export function deleteMeetingSpeakerAssignment(id: string): Promise<void> {
+  return invoke("delete_meeting_speaker_assignment", { id });
+}
+
+export async function getTranscriptSegments(
   meetingId: string,
 ): Promise<TranscriptSegment[]> {
-  return invoke("get_transcript_segments", { meetingId });
+  const [segments, assignments] = await Promise.all([
+    invoke<TranscriptSegment[]>("get_transcript_segments", { meetingId }),
+    listMeetingSpeakerAssignments(meetingId).catch(
+      () => [] as MeetingSpeakerAssignment[],
+    ),
+  ]);
+  return applySpeakerAssignmentsToSegments(segments, assignments);
 }
 
 export interface StructuredNotes {

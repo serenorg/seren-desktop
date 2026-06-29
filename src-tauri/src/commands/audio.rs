@@ -17,12 +17,13 @@ use crate::audio::transcribe::{
     transcribe_full_recording,
 };
 use crate::audio::types::{
-    Meeting, MeetingStatus, SegmentStatus, Speaker, SpeakerSource, TranscriptSegment,
+    Meeting, MeetingSpeakerAssignment, MeetingStatus, SegmentStatus, Speaker,
+    SpeakerAssignmentScope, SpeakerSource, TranscriptSegment,
 };
 use crate::orchestrator::types::SkillRef;
 use crate::services::database::{DbPool, enqueue_sync_tombstone, mark_sync_upsert};
 use rusqlite::{Connection, OptionalExtension, Result, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
@@ -80,12 +81,8 @@ pub async fn delete_meeting(app: AppHandle, id: String) -> Result<(), String> {
     let app_for_index = app.clone();
     let index_id = deleted_id.clone();
     let _ = tauri::async_runtime::spawn_blocking(move || {
-        if let Ok(conn) =
-            crate::services::transcript_vectors::open_transcript_db(&app_for_index)
-        {
-            let _ = crate::services::transcript_vectors::delete_meeting_chunks(
-                &conn, &index_id,
-            );
+        if let Ok(conn) = crate::services::transcript_vectors::open_transcript_db(&app_for_index) {
+            let _ = crate::services::transcript_vectors::delete_meeting_chunks(&conn, &index_id);
         }
     })
     .await;
@@ -416,7 +413,12 @@ pub async fn republish_meeting_to_seren_notes(
         select_transcript_segments(conn, &transcript_id)
     })
     .await?;
-    let transcript = assemble_transcript(segments);
+    let assignment_lookup = meeting_id.clone();
+    let assignments = run_db(app.clone(), move |conn| {
+        select_meeting_speaker_assignments(conn, &assignment_lookup)
+    })
+    .await?;
+    let transcript = assemble_transcript(segments, &assignments);
     tauri::async_runtime::spawn(async move {
         spawn_seren_notes_publish(app, meeting_id, notes_markdown, action_items, transcript).await;
     });
@@ -587,6 +589,88 @@ pub async fn get_transcript_segments(
         select_transcript_segments(conn, &meeting_id)
     })
     .await
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerAssignmentInput {
+    pub meeting_id: String,
+    pub source: SpeakerSource,
+    pub source_key: String,
+    pub display_name: String,
+    pub attendee_email: Option<String>,
+    pub scope: SpeakerAssignmentScope,
+    pub segment_id: Option<String>,
+}
+
+#[tauri::command]
+pub async fn list_meeting_speaker_assignments(
+    app: AppHandle,
+    meeting_id: String,
+) -> Result<Vec<MeetingSpeakerAssignment>, String> {
+    run_db(app, move |conn| {
+        select_meeting_speaker_assignments(conn, &meeting_id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn upsert_meeting_speaker_assignment(
+    app: AppHandle,
+    input: SpeakerAssignmentInput,
+) -> Result<MeetingSpeakerAssignment, String> {
+    let display_name = input.display_name.trim().to_string();
+    if display_name.is_empty() {
+        return Err("speaker display name is required".to_string());
+    }
+    let source_key = input.source_key.trim().to_string();
+    if source_key.is_empty() {
+        return Err("speaker source key is required".to_string());
+    }
+    if input.scope == SpeakerAssignmentScope::Segment && input.segment_id.is_none() {
+        return Err("segment assignment requires a segment id".to_string());
+    }
+
+    let meeting_id = input.meeting_id.clone();
+    let attendee_email = input.attendee_email.as_ref().and_then(|email| {
+        let trimmed = email.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
+    let normalized = SpeakerAssignmentInput {
+        meeting_id: input.meeting_id,
+        source: input.source,
+        source_key,
+        display_name,
+        attendee_email,
+        scope: input.scope,
+        segment_id: input.segment_id,
+    };
+    let assignment = run_db(app.clone(), move |conn| {
+        upsert_speaker_assignment_record(conn, normalized)
+    })
+    .await?;
+    let _ = app.emit(
+        "meeting://segments-updated",
+        serde_json::json!({ "meetingId": meeting_id }),
+    );
+    Ok(assignment)
+}
+
+#[tauri::command]
+pub async fn delete_meeting_speaker_assignment(app: AppHandle, id: String) -> Result<(), String> {
+    let meeting_id = run_db(app.clone(), move |conn| {
+        delete_speaker_assignment_record(conn, &id)
+    })
+    .await?;
+    let _ = app.emit(
+        "meeting://segments-updated",
+        serde_json::json!({ "meetingId": meeting_id }),
+    );
+    Ok(())
 }
 
 // --- Capture lifecycle + Tier-1 intelligence -------------------------------
@@ -1085,7 +1169,12 @@ pub async fn generate_meeting_notes(
         select_transcript_segments(conn, &lookup)
     })
     .await?;
-    let transcript = assemble_transcript(segments);
+    let assignment_lookup = meeting_id.clone();
+    let assignments = run_db(app.clone(), move |conn| {
+        select_meeting_speaker_assignments(conn, &assignment_lookup)
+    })
+    .await?;
+    let transcript = assemble_transcript(segments, &assignments);
     if transcript.trim().is_empty() {
         return Err("no transcript to summarize".to_string());
     }
@@ -1127,11 +1216,16 @@ pub async fn get_meeting_transcript_text(
     app: AppHandle,
     meeting_id: String,
 ) -> Result<String, String> {
-    let segments = run_db(app, move |conn| {
-        select_transcript_segments(conn, &meeting_id)
+    let segment_lookup = meeting_id.clone();
+    let segments = run_db(app.clone(), move |conn| {
+        select_transcript_segments(conn, &segment_lookup)
     })
     .await?;
-    Ok(assemble_transcript(segments))
+    let assignments = run_db(app, move |conn| {
+        select_meeting_speaker_assignments(conn, &meeting_id)
+    })
+    .await?;
+    Ok(assemble_transcript(segments, &assignments))
 }
 
 /// Return the slugs of installed skills tagged to handle meetings (0 / 1 / many).
@@ -1342,8 +1436,11 @@ pub async fn transform_selection(
     .await
 }
 
-/// Assemble persisted segments into a chronological "Me/Them" transcript.
-fn assemble_transcript(segments: Vec<TranscriptSegment>) -> String {
+/// Assemble persisted segments into a chronological per-speaker transcript.
+fn assemble_transcript(
+    segments: Vec<TranscriptSegment>,
+    assignments: &[MeetingSpeakerAssignment],
+) -> String {
     let (me, them): (Vec<_>, Vec<_>) = segments
         .into_iter()
         .partition(|segment| segment.speaker == Speaker::Me);
@@ -1351,14 +1448,107 @@ fn assemble_transcript(segments: Vec<TranscriptSegment>) -> String {
         .into_iter()
         .filter(|segment| segment.status == SegmentStatus::Ok && !segment.text.trim().is_empty())
         .map(|segment| {
-            let speaker = match segment.speaker {
-                Speaker::Me => "Me",
-                Speaker::Them => "Them",
-            };
+            let speaker = resolved_transcript_speaker_label(&segment, assignments);
             format!("{speaker}: {}", segment.text.trim())
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn raw_transcript_speaker_label(segment: &TranscriptSegment) -> String {
+    let channel = match segment.speaker {
+        Speaker::Me => "Me",
+        Speaker::Them => "Them",
+    };
+    let Some(label) = normalize_diarized_label(segment.speaker_label.as_deref()) else {
+        return channel.to_string();
+    };
+    format!("{channel} · {label}")
+}
+
+fn normalize_diarized_label(label: Option<&str>) -> Option<String> {
+    let trimmed = label?.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("me")
+        || trimmed.eq_ignore_ascii_case("them")
+    {
+        return None;
+    }
+    let mut readable = trimmed.to_string();
+    let lower = readable.to_lowercase();
+    if lower.starts_with("speaker_") {
+        readable = readable[8..].to_string();
+    } else if lower.starts_with("speaker-") {
+        readable = readable[8..].to_string();
+    } else if lower.starts_with("speaker ") {
+        readable = readable[8..].to_string();
+    }
+    readable = readable.replace(['_', '-'], " ").trim().to_string();
+    if readable.is_empty() {
+        return None;
+    }
+    let compact = readable.chars().filter(|c| !c.is_whitespace()).count();
+    if lower.starts_with("speaker") || compact <= 3 {
+        return Some(format!("Speaker {readable}"));
+    }
+    Some(readable)
+}
+
+fn speaker_assignment_key(segment: &TranscriptSegment) -> (SpeakerSource, String) {
+    if let Some(label) = segment
+        .speaker_label
+        .as_deref()
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+    {
+        return (SpeakerSource::Diarization, label.to_string());
+    }
+    (SpeakerSource::Channel, segment.speaker.as_str().to_string())
+}
+
+fn matching_assignment<'a>(
+    segment: &TranscriptSegment,
+    assignments: &'a [MeetingSpeakerAssignment],
+) -> Option<&'a MeetingSpeakerAssignment> {
+    let segment_assignment = assignments.iter().find(|assignment| {
+        assignment.scope == SpeakerAssignmentScope::Segment
+            && assignment.segment_id.as_deref() == Some(segment.id.as_str())
+    });
+    if segment_assignment.is_some() {
+        return segment_assignment;
+    }
+
+    let (source, source_key) = speaker_assignment_key(segment);
+    let meeting_assignment = assignments.iter().find(|assignment| {
+        assignment.scope == SpeakerAssignmentScope::Meeting
+            && assignment.source == source
+            && assignment.source_key == source_key
+    });
+    if meeting_assignment.is_some() {
+        return meeting_assignment;
+    }
+
+    if source == SpeakerSource::Diarization {
+        let channel_key = segment.speaker.as_str();
+        return assignments.iter().find(|assignment| {
+            assignment.scope == SpeakerAssignmentScope::Meeting
+                && assignment.source == SpeakerSource::Channel
+                && assignment.source_key == channel_key
+        });
+    }
+
+    None
+}
+
+fn resolved_transcript_speaker_label(
+    segment: &TranscriptSegment,
+    assignments: &[MeetingSpeakerAssignment],
+) -> String {
+    matching_assignment(segment, assignments)
+        .map(|assignment| assignment.display_name.trim())
+        .filter(|display_name| !display_name.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| raw_transcript_speaker_label(segment))
 }
 
 #[derive(Debug, Clone)]
@@ -1457,10 +1647,23 @@ pub fn delete_meeting_record(conn: &Connection, id: &str) -> Result<usize> {
         .query_map(params![id], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(stmt);
+    let mut stmt =
+        tx.prepare("SELECT id FROM meeting_speaker_assignments WHERE meeting_id = ?1")?;
+    let assignment_ids = stmt
+        .query_map(params![id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
     for segment_id in &segment_ids {
         enqueue_sync_tombstone(&tx, "transcript_segments", segment_id)?;
     }
+    for assignment_id in &assignment_ids {
+        enqueue_sync_tombstone(&tx, "meeting_speaker_assignments", assignment_id)?;
+    }
     enqueue_sync_tombstone(&tx, "meetings", id)?;
+    tx.execute(
+        "DELETE FROM meeting_speaker_assignments WHERE meeting_id = ?1",
+        params![id],
+    )?;
     tx.execute(
         "DELETE FROM transcript_segments WHERE meeting_id = ?1",
         params![id],
@@ -1607,6 +1810,163 @@ pub fn update_transcript_segment_speaker(conn: &Connection, id: &str, label: &st
     Ok(())
 }
 
+pub fn select_meeting_speaker_assignments(
+    conn: &Connection,
+    meeting_id: &str,
+) -> Result<Vec<MeetingSpeakerAssignment>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, meeting_id, source, source_key, display_name, attendee_email,
+                scope, segment_id, created_at, updated_at
+         FROM meeting_speaker_assignments
+         WHERE meeting_id = ?1 AND deleted_at IS NULL
+         ORDER BY scope ASC, created_at ASC",
+    )?;
+
+    stmt.query_map(params![meeting_id], row_to_speaker_assignment)?
+        .collect::<Result<Vec<_>>>()
+}
+
+pub fn upsert_speaker_assignment_record(
+    conn: &Connection,
+    input: SpeakerAssignmentInput,
+) -> Result<MeetingSpeakerAssignment> {
+    if input.scope == SpeakerAssignmentScope::Segment {
+        let Some(segment_id) = input.segment_id.as_deref() else {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "segment assignment requires segment id".to_string(),
+            ));
+        };
+        let belongs_to_meeting: bool = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM transcript_segments
+                WHERE id = ?1 AND meeting_id = ?2
+             )",
+            params![segment_id, &input.meeting_id],
+            |row| row.get::<_, i64>(0).map(|value| value != 0),
+        )?;
+        if !belongs_to_meeting {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "segment does not belong to meeting".to_string(),
+            ));
+        }
+    }
+
+    let existing_id: Option<String> = match &input.scope {
+        SpeakerAssignmentScope::Meeting => conn
+            .query_row(
+                "SELECT id FROM meeting_speaker_assignments
+                 WHERE meeting_id = ?1
+                   AND source = ?2
+                   AND source_key = ?3
+                   AND scope = 'meeting'
+                   AND deleted_at IS NULL
+                 LIMIT 1",
+                params![&input.meeting_id, input.source.as_str(), &input.source_key],
+                |row| row.get(0),
+            )
+            .optional()?,
+        SpeakerAssignmentScope::Segment => conn
+            .query_row(
+                "SELECT id FROM meeting_speaker_assignments
+                 WHERE meeting_id = ?1
+                   AND segment_id = ?2
+                   AND scope = 'segment'
+                   AND deleted_at IS NULL
+                 LIMIT 1",
+                params![&input.meeting_id, &input.segment_id],
+                |row| row.get(0),
+            )
+            .optional()?,
+    };
+
+    let now = now_ms();
+    let id = existing_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    if assignment_exists(conn, &id)? {
+        conn.execute(
+            "UPDATE meeting_speaker_assignments
+             SET source = ?1,
+                 source_key = ?2,
+                 display_name = ?3,
+                 attendee_email = ?4,
+                 scope = ?5,
+                 segment_id = ?6,
+                 updated_at = ?7
+             WHERE id = ?8",
+            params![
+                input.source.as_str(),
+                &input.source_key,
+                &input.display_name,
+                &input.attendee_email,
+                input.scope.as_str(),
+                &input.segment_id,
+                now,
+                &id
+            ],
+        )?;
+    } else {
+        conn.execute(
+            "INSERT INTO meeting_speaker_assignments (
+                id, meeting_id, source, source_key, display_name, attendee_email,
+                scope, segment_id, created_at, updated_at
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+            params![
+                &id,
+                &input.meeting_id,
+                input.source.as_str(),
+                &input.source_key,
+                &input.display_name,
+                &input.attendee_email,
+                input.scope.as_str(),
+                &input.segment_id,
+                now
+            ],
+        )?;
+    }
+    mark_sync_upsert(conn, "meeting_speaker_assignments", &id)?;
+    select_speaker_assignment(conn, &id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
+fn assignment_exists(conn: &Connection, id: &str) -> Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM meeting_speaker_assignments WHERE id = ?1
+         )",
+        params![id],
+        |row| row.get::<_, i64>(0).map(|value| value != 0),
+    )
+}
+
+fn select_speaker_assignment(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<MeetingSpeakerAssignment>> {
+    conn.query_row(
+        "SELECT id, meeting_id, source, source_key, display_name, attendee_email,
+                scope, segment_id, created_at, updated_at
+         FROM meeting_speaker_assignments
+         WHERE id = ?1 AND deleted_at IS NULL",
+        params![id],
+        row_to_speaker_assignment,
+    )
+    .optional()
+}
+
+pub fn delete_speaker_assignment_record(conn: &Connection, id: &str) -> Result<String> {
+    let meeting_id: String = conn.query_row(
+        "SELECT meeting_id FROM meeting_speaker_assignments
+         WHERE id = ?1 AND deleted_at IS NULL",
+        params![id],
+        |row| row.get(0),
+    )?;
+    enqueue_sync_tombstone(conn, "meeting_speaker_assignments", id)?;
+    conn.execute(
+        "DELETE FROM meeting_speaker_assignments WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(meeting_id)
+}
+
 fn row_to_meeting(row: &rusqlite::Row<'_>) -> Result<Meeting> {
     let status: String = row.get(5)?;
     Ok(Meeting {
@@ -1636,6 +1996,35 @@ fn row_to_meeting(row: &rusqlite::Row<'_>) -> Result<Meeting> {
         calendar_event_id: row.get(17)?,
         calendar_provider: row.get(18)?,
         attendees_json: row.get(19)?,
+    })
+}
+
+fn row_to_speaker_assignment(row: &rusqlite::Row<'_>) -> Result<MeetingSpeakerAssignment> {
+    let source: String = row.get(2)?;
+    let scope: String = row.get(6)?;
+    Ok(MeetingSpeakerAssignment {
+        id: row.get(0)?,
+        meeting_id: row.get(1)?,
+        source: SpeakerSource::try_from(source.as_str()).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                2,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err)),
+            )
+        })?,
+        source_key: row.get(3)?,
+        display_name: row.get(4)?,
+        attendee_email: row.get(5)?,
+        scope: SpeakerAssignmentScope::try_from(scope.as_str()).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                6,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err)),
+            )
+        })?,
+        segment_id: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 
@@ -1971,6 +2360,158 @@ mod tests {
     }
 
     #[test]
+    fn speaker_assignments_upsert_and_delete_by_scope() {
+        let conn = setup();
+        insert_meeting(&conn, meeting("meeting-1")).unwrap();
+        insert_transcript_segment(
+            &conn,
+            NewTranscriptSegment {
+                id: "segment-1".to_string(),
+                meeting_id: "meeting-1".to_string(),
+                seq: 0,
+                speaker: Speaker::Them,
+                text: "hello".to_string(),
+                start_ms: 0,
+                end_ms: 100,
+                status: SegmentStatus::Ok,
+                speaker_label: Some("A".to_string()),
+                speaker_source: SpeakerSource::Diarization,
+                created_at: 30,
+            },
+        )
+        .unwrap();
+
+        let first = upsert_speaker_assignment_record(
+            &conn,
+            SpeakerAssignmentInput {
+                meeting_id: "meeting-1".to_string(),
+                source: SpeakerSource::Diarization,
+                source_key: "A".to_string(),
+                display_name: "Ada Lovelace".to_string(),
+                attendee_email: Some("ada@example.com".to_string()),
+                scope: SpeakerAssignmentScope::Meeting,
+                segment_id: None,
+            },
+        )
+        .unwrap();
+        let second = upsert_speaker_assignment_record(
+            &conn,
+            SpeakerAssignmentInput {
+                meeting_id: "meeting-1".to_string(),
+                source: SpeakerSource::Diarization,
+                source_key: "A".to_string(),
+                display_name: "Grace Hopper".to_string(),
+                attendee_email: None,
+                scope: SpeakerAssignmentScope::Meeting,
+                segment_id: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(first.id, second.id);
+        let assignments = select_meeting_speaker_assignments(&conn, "meeting-1").unwrap();
+        assert_eq!(assignments.len(), 1);
+        assert_eq!(assignments[0].display_name, "Grace Hopper");
+        assert_eq!(
+            delete_speaker_assignment_record(&conn, &first.id).unwrap(),
+            "meeting-1"
+        );
+        assert!(
+            select_meeting_speaker_assignments(&conn, "meeting-1")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn assemble_transcript_prefers_segment_then_meeting_assignment() {
+        let segments = vec![
+            TranscriptSegment {
+                id: "segment-1".to_string(),
+                meeting_id: "meeting-1".to_string(),
+                seq: 0,
+                speaker: Speaker::Them,
+                text: "first".to_string(),
+                start_ms: 0,
+                end_ms: 100,
+                status: SegmentStatus::Ok,
+                speaker_label: Some("A".to_string()),
+                speaker_source: SpeakerSource::Diarization,
+                created_at: 30,
+            },
+            TranscriptSegment {
+                id: "segment-2".to_string(),
+                meeting_id: "meeting-1".to_string(),
+                seq: 1,
+                speaker: Speaker::Them,
+                text: "second".to_string(),
+                start_ms: 100,
+                end_ms: 200,
+                status: SegmentStatus::Ok,
+                speaker_label: Some("A".to_string()),
+                speaker_source: SpeakerSource::Diarization,
+                created_at: 31,
+            },
+            TranscriptSegment {
+                id: "segment-3".to_string(),
+                meeting_id: "meeting-1".to_string(),
+                seq: 2,
+                speaker: Speaker::Them,
+                text: "third".to_string(),
+                start_ms: 200,
+                end_ms: 300,
+                status: SegmentStatus::Ok,
+                speaker_label: Some("B".to_string()),
+                speaker_source: SpeakerSource::Diarization,
+                created_at: 32,
+            },
+        ];
+        let assignments = vec![
+            MeetingSpeakerAssignment {
+                id: "assignment-1".to_string(),
+                meeting_id: "meeting-1".to_string(),
+                source: SpeakerSource::Diarization,
+                source_key: "A".to_string(),
+                display_name: "Ada Lovelace".to_string(),
+                attendee_email: None,
+                scope: SpeakerAssignmentScope::Meeting,
+                segment_id: None,
+                created_at: 40,
+                updated_at: 40,
+            },
+            MeetingSpeakerAssignment {
+                id: "assignment-2".to_string(),
+                meeting_id: "meeting-1".to_string(),
+                source: SpeakerSource::Diarization,
+                source_key: "A".to_string(),
+                display_name: "Grace Hopper".to_string(),
+                attendee_email: None,
+                scope: SpeakerAssignmentScope::Segment,
+                segment_id: Some("segment-2".to_string()),
+                created_at: 41,
+                updated_at: 41,
+            },
+            MeetingSpeakerAssignment {
+                id: "assignment-3".to_string(),
+                meeting_id: "meeting-1".to_string(),
+                source: SpeakerSource::Channel,
+                source_key: "them".to_string(),
+                display_name: "Customer".to_string(),
+                attendee_email: None,
+                scope: SpeakerAssignmentScope::Meeting,
+                segment_id: None,
+                created_at: 42,
+                updated_at: 42,
+            },
+        ];
+
+        assert_eq!(
+            assemble_transcript(segments, &assignments),
+            "Ada Lovelace: first\nGrace Hopper: second\nCustomer: third"
+        );
+    }
+
+    #[test]
     fn delete_meeting_record_removes_notes_and_transcript_segments() {
         let conn = setup();
         insert_meeting(&conn, meeting("meeting-1")).unwrap();
@@ -1992,11 +2533,29 @@ mod tests {
             },
         )
         .unwrap();
+        upsert_speaker_assignment_record(
+            &conn,
+            SpeakerAssignmentInput {
+                meeting_id: "meeting-1".to_string(),
+                source: SpeakerSource::Channel,
+                source_key: "me".to_string(),
+                display_name: "Taariq".to_string(),
+                attendee_email: None,
+                scope: SpeakerAssignmentScope::Meeting,
+                segment_id: None,
+            },
+        )
+        .unwrap();
 
         assert_eq!(delete_meeting_record(&conn, "meeting-1").unwrap(), 1);
         assert!(select_meeting(&conn, "meeting-1").unwrap().is_none());
         assert!(
             select_transcript_segments(&conn, "meeting-1")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            select_meeting_speaker_assignments(&conn, "meeting-1")
                 .unwrap()
                 .is_empty()
         );
