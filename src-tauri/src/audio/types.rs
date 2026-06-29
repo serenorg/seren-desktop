@@ -109,6 +109,34 @@ impl TryFrom<&str> for SpeakerSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum SpeakerAssignmentScope {
+    Meeting,
+    Segment,
+}
+
+impl SpeakerAssignmentScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Meeting => "meeting",
+            Self::Segment => "segment",
+        }
+    }
+}
+
+impl TryFrom<&str> for SpeakerAssignmentScope {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "meeting" => Ok(Self::Meeting),
+            "segment" => Ok(Self::Segment),
+            _ => Err(format!("Unknown speaker assignment scope: {}", value)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum SegmentStatus {
     Ok,
     Gap,
@@ -180,6 +208,21 @@ pub struct TranscriptSegment {
     /// Whether `speaker` was assigned by the capture channel or by diarization.
     pub speaker_source: SpeakerSource,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingSpeakerAssignment {
+    pub id: String,
+    pub meeting_id: String,
+    pub source: SpeakerSource,
+    pub source_key: String,
+    pub display_name: String,
+    pub attendee_email: Option<String>,
+    pub scope: SpeakerAssignmentScope,
+    pub segment_id: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[cfg(test)]

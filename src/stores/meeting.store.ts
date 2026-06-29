@@ -17,17 +17,21 @@ import {
   matchActiveEvent,
 } from "@/services/calendar";
 import {
+  applySpeakerAssignmentsToSegments,
   type CaptureStopOutcome,
   createMeeting,
   deleteMeeting as deleteMeetingRecord,
+  deleteMeetingSpeakerAssignment,
   generateMeetingNotes,
   getMeetingTranscriptText,
   getTranscriptSegments,
   isMeetingCaptureActive,
   isMeetingCapturePaused,
+  listMeetingSpeakerAssignments,
   listMeetings,
   listMeetingTemplates,
   type Meeting,
+  type MeetingSpeakerAssignment,
   type MeetingTemplate,
   meetingAutodetect,
   meetingLifecycleNoteManualStop,
@@ -37,6 +41,7 @@ import {
   reconcileMeetingSpeakers,
   republishMeetingToSerenNotes,
   resumeMeetingCapture,
+  segmentSpeakerKey,
   selectMeetingSkills,
   setMeetingRoutedSkill,
   startMeetingCapture as startBackendCapture,
@@ -45,11 +50,13 @@ import {
   updateMeetingStatus,
   updateMeetingTemplate,
   updateMeetingTitle,
+  upsertMeetingSpeakerAssignment,
 } from "@/services/meetings";
 import { orchestrate } from "@/services/orchestrator";
 import {
   backfillTranscriptIndex,
   deleteMeetingIndex,
+  indexMeeting,
 } from "@/services/transcript-search";
 import { onTrayToggleCapture, setTrayRecording } from "@/services/tray";
 import { conversationStore } from "@/stores/conversation.store";
@@ -61,6 +68,7 @@ interface MeetingState {
   meetings: Meeting[];
   activeMeeting: Meeting | null;
   liveSegments: TranscriptSegment[];
+  speakerAssignments: MeetingSpeakerAssignment[];
   captureLevel: number;
   /** True while the active capture is paused (frame ingestion suspended). */
   capturePaused: boolean;
@@ -111,6 +119,7 @@ const [meetingState, setMeetingState] = createStore<MeetingState>({
   meetings: [],
   activeMeeting: null,
   liveSegments: [],
+  speakerAssignments: [],
   captureLevel: 0,
   capturePaused: false,
   capturePausedAt: null,
@@ -294,15 +303,23 @@ async function setActiveMeeting(meeting: Meeting | null): Promise<void> {
   setMeetingState("activeMeeting", meeting);
   if (!meeting) {
     setMeetingState("liveSegments", []);
+    setMeetingState("speakerAssignments", []);
     return;
   }
   if (!isTauriRuntime()) {
     setMeetingState("liveSegments", []);
+    setMeetingState("speakerAssignments", []);
     return;
   }
 
   try {
-    const segments = await getTranscriptSegments(meeting.id);
+    const [segments, assignments] = await Promise.all([
+      getTranscriptSegments(meeting.id),
+      listMeetingSpeakerAssignments(meeting.id).catch(
+        () => [] as MeetingSpeakerAssignment[],
+      ),
+    ]);
+    setMeetingState("speakerAssignments", assignments);
     setMeetingState("liveSegments", sortSegmentsByCapture(segments));
   } catch (error) {
     setMeetingState(
@@ -329,9 +346,13 @@ export function sortSegmentsByCapture(
 }
 
 function appendLiveSegment(segment: TranscriptSegment): void {
+  const [assigned] = applySpeakerAssignmentsToSegments(
+    [segment],
+    meetingState.speakerAssignments,
+  );
   setMeetingState("liveSegments", (segments) => {
-    const withoutDuplicate = segments.filter((item) => item.id !== segment.id);
-    return sortSegmentsByCapture([...withoutDuplicate, segment]);
+    const withoutDuplicate = segments.filter((item) => item.id !== assigned.id);
+    return sortSegmentsByCapture([...withoutDuplicate, assigned]);
   });
 }
 
@@ -411,10 +432,16 @@ async function startMeetingEventListeners(): Promise<void> {
     (event) => {
       const active = meetingState.activeMeeting;
       if (active?.id !== event.payload.meetingId) return;
-      void getTranscriptSegments(event.payload.meetingId)
-        .then((segments) =>
-          setMeetingState("liveSegments", sortSegmentsByCapture(segments)),
-        )
+      void Promise.all([
+        getTranscriptSegments(event.payload.meetingId),
+        listMeetingSpeakerAssignments(event.payload.meetingId).catch(
+          () => [] as MeetingSpeakerAssignment[],
+        ),
+      ])
+        .then(([segments, assignments]) => {
+          setMeetingState("speakerAssignments", assignments);
+          setMeetingState("liveSegments", sortSegmentsByCapture(segments));
+        })
         .catch(() => {
           // Non-fatal: the existing labels stay; a manual refresh will reload.
         });
@@ -1087,6 +1114,73 @@ async function setMeetingTemplate(
   }
 }
 
+async function refreshSpeakerAssignments(meetingId: string): Promise<void> {
+  const assignments = await listMeetingSpeakerAssignments(meetingId).catch(
+    () => [] as MeetingSpeakerAssignment[],
+  );
+  setMeetingState("speakerAssignments", assignments);
+  setMeetingState("liveSegments", (segments) =>
+    sortSegmentsByCapture(
+      applySpeakerAssignmentsToSegments(segments, assignments),
+    ),
+  );
+}
+
+async function assignSpeakerName(input: {
+  meeting: Meeting;
+  segment: TranscriptSegment;
+  displayName: string;
+  attendeeEmail?: string | null;
+  scope: "meeting" | "segment";
+}): Promise<void> {
+  if (!isTauriRuntime()) return;
+  const name = input.displayName.trim();
+  if (!name) {
+    setMeetingState("error", "Speaker name is required.");
+    return;
+  }
+  try {
+    const key = segmentSpeakerKey(input.segment);
+    await upsertMeetingSpeakerAssignment({
+      meetingId: input.meeting.id,
+      source: key.source,
+      sourceKey: key.sourceKey,
+      displayName: name,
+      attendeeEmail: input.attendeeEmail ?? null,
+      scope: input.scope,
+      segmentId: input.scope === "segment" ? input.segment.id : null,
+    });
+    await refreshSpeakerAssignments(input.meeting.id);
+    if (INDEXABLE_STATUSES.has(input.meeting.status)) {
+      void indexMeeting(input.meeting.id).catch(() => {});
+    }
+  } catch (error) {
+    setMeetingState(
+      "error",
+      error instanceof Error ? error.message : "Failed to assign speaker",
+    );
+  }
+}
+
+async function clearSpeakerAssignment(
+  meeting: Meeting,
+  assignmentId: string,
+): Promise<void> {
+  if (!isTauriRuntime() || !assignmentId) return;
+  try {
+    await deleteMeetingSpeakerAssignment(assignmentId);
+    await refreshSpeakerAssignments(meeting.id);
+    if (INDEXABLE_STATUSES.has(meeting.status)) {
+      void indexMeeting(meeting.id).catch(() => {});
+    }
+  } catch (error) {
+    setMeetingState(
+      "error",
+      error instanceof Error ? error.message : "Failed to clear speaker",
+    );
+  }
+}
+
 async function deleteMeeting(meeting: Meeting): Promise<void> {
   if (!isTauriRuntime()) return;
   setMeetingState("error", null);
@@ -1416,6 +1510,8 @@ export const meetingStore = {
   republishToSerenNotes,
   renameMeeting,
   setMeetingTemplate,
+  assignSpeakerName,
+  clearSpeakerAssignment,
   deleteMeeting,
   clearError,
   startAutoDetect,

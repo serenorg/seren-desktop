@@ -132,10 +132,20 @@ function normalizeDiarizedLabel(label: string | null | undefined): string {
   return readable;
 }
 
-export function formatTranscriptSpeakerLabel(
+export function formatRawTranscriptSpeakerLabel(
   segment: Pick<TranscriptSegment, "speaker" | "speakerLabel">,
 ): string {
   const channel = segment.speaker === "me" ? "Me" : "Them";
   const diarized = normalizeDiarizedLabel(segment.speakerLabel);
   return diarized ? `${channel} · ${diarized}` : channel;
+}
+
+export function formatTranscriptSpeakerLabel(
+  segment: Pick<
+    TranscriptSegment,
+    "speaker" | "speakerLabel" | "speakerDisplayName"
+  >,
+): string {
+  const corrected = segment.speakerDisplayName?.trim();
+  return corrected || formatRawTranscriptSpeakerLabel(segment);
 }

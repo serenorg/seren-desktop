@@ -47,6 +47,18 @@ describe("chunkTranscript", () => {
     expect(chunks[0].text).toBe("Them · Speaker 0: roadmap update");
   });
 
+  it("uses corrected speaker names when chunking for search snippets", () => {
+    const chunks = chunkTranscript([
+      seg(0, "roadmap update", {
+        speaker: "them",
+        speakerLabel: "speaker_0",
+        speakerDisplayName: "Ada Lovelace",
+      }),
+    ]);
+
+    expect(chunks[0].text).toBe("Ada Lovelace: roadmap update");
+  });
+
   it("splits into contiguous, non-overlapping chunks past the segment cap", () => {
     const many = Array.from({ length: 20 }, (_, index) =>
       seg(index, `turn ${index}`),

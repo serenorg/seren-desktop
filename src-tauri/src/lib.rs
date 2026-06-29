@@ -929,6 +929,9 @@ pub fn run() {
             commands::audio::set_meeting_routed_skill,
             commands::audio::append_transcript_segment,
             commands::audio::get_transcript_segments,
+            commands::audio::list_meeting_speaker_assignments,
+            commands::audio::upsert_meeting_speaker_assignment,
+            commands::audio::delete_meeting_speaker_assignment,
             // Meeting Mode capture + intelligence commands
             commands::audio::start_meeting_capture,
             commands::audio::is_meeting_capture_active,
