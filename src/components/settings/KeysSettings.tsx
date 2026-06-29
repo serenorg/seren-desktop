@@ -1187,12 +1187,17 @@ const PasswordsVaultEditor: Component<{
   const [newVaultDescription, setNewVaultDescription] = createSignal("");
   const unlocked = () => props.vaults.length > 0;
   const writable = () => props.selectedVault?.writable === true;
+  const editableEntry = () =>
+    editingItemId() === null ||
+    props.selectedItem?.itemKind === "api_credential";
   const namedRows = () => fieldRows().filter((row) => row.name.trim());
   const masterPasswordBits = () => estimateMasterPasswordBits(masterPassword());
   const saveDisabledReason = createMemo(() => {
     if (!unlocked()) return "Unlock your vault first";
     if (!writable()) return "Select a writable vault";
     if (props.busy) return "Vault is busy";
+    if (!editableEntry())
+      return "Only API credential entries can be edited here";
     if (!entryTitle().trim()) return "Add a title";
     const named = namedRows();
     if (named.length === 0) return "Add at least one field";
@@ -1878,6 +1883,7 @@ const PasswordsVaultEditor: Component<{
                     class="rounded-md border border-border-strong bg-surface-3/80 px-3 py-2.5 text-foreground focus:border-accent focus:outline-none"
                     value={entryTitle()}
                     placeholder="Credential name"
+                    readOnly={!editableEntry()}
                     onInput={(event) =>
                       setEntryTitle(event.currentTarget.value)
                     }
@@ -1936,6 +1942,7 @@ const PasswordsVaultEditor: Component<{
                           class="w-2/5 rounded-md border border-border-strong bg-surface-3/80 px-3 py-2 font-mono text-[0.82rem] uppercase text-foreground focus:border-accent focus:outline-none"
                           placeholder="ENV_NAME"
                           value={row.name}
+                          readOnly={!editableEntry()}
                           onInput={(event) =>
                             updateFieldRow(index(), {
                               name: event.currentTarget.value,
@@ -1948,6 +1955,7 @@ const PasswordsVaultEditor: Component<{
                           class="flex-1 rounded-md border border-border-strong bg-surface-3/80 px-3 py-2 font-mono text-[0.82rem] text-foreground focus:border-accent focus:outline-none"
                           placeholder="value"
                           value={row.value}
+                          readOnly={!editableEntry()}
                           onInput={(event) =>
                             updateFieldRow(index(), {
                               value: event.currentTarget.value,
@@ -1958,7 +1966,7 @@ const PasswordsVaultEditor: Component<{
                           type="button"
                           class="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-destructive disabled:opacity-40"
                           aria-label="Remove field"
-                          disabled={fieldRows().length <= 1}
+                          disabled={!editableEntry() || fieldRows().length <= 1}
                           onClick={() => removeFieldRow(index())}
                         >
                           <IconX size={14} />
@@ -1969,7 +1977,8 @@ const PasswordsVaultEditor: Component<{
                 </div>
                 <button
                   type="button"
-                  class="mt-2 inline-flex items-center gap-1.5 text-[0.82rem] text-accent hover:underline"
+                  class="mt-2 inline-flex items-center gap-1.5 text-[0.82rem] text-accent hover:underline disabled:text-muted-foreground disabled:no-underline"
+                  disabled={!editableEntry()}
                   onClick={addFieldRow}
                 >
                   <IconPlus size={13} />
