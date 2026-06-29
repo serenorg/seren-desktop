@@ -71,6 +71,8 @@ const MIN_MASTER_PASSWORD_LENGTH = 8;
 const MIN_MASTER_PASSWORD_BITS = 60;
 const PASSWORDS_IDLE_LOCK_HOURS = 4;
 const PASSWORDS_IDLE_LOCK_MS = PASSWORDS_IDLE_LOCK_HOURS * 60 * 60 * 1000;
+const PASSWORD_FIELD_ROW_GRID_CLASS =
+  "grid grid-cols-[minmax(6rem,0.85fr)_minmax(0,1fr)_2rem] items-center gap-2";
 const DECISION_LABELS: Record<SecretAuditEvent["decision"], string> = {
   approved_by_user: "Approved by you",
   auto_approved: "Auto-approved",
@@ -1930,16 +1932,18 @@ const PasswordsVaultEditor: Component<{
                   </button>
                 </div>
                 <div class="flex flex-col gap-2">
-                  <div class="flex items-center gap-2 px-1 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground">
-                    <span class="w-2/5">Variable</span>
-                    <span class="flex-1">Value</span>
+                  <div
+                    class={`${PASSWORD_FIELD_ROW_GRID_CLASS} px-1 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground`}
+                  >
+                    <span class="min-w-0">Variable</span>
+                    <span class="min-w-0">Value</span>
                     <span class="w-8" />
                   </div>
                   <For each={fieldRows()}>
                     {(row, index) => (
-                      <div class="flex items-center gap-2">
+                      <div class={PASSWORD_FIELD_ROW_GRID_CLASS}>
                         <input
-                          class="w-2/5 rounded-md border border-border-strong bg-surface-3/80 px-3 py-2 font-mono text-[0.82rem] uppercase text-foreground focus:border-accent focus:outline-none"
+                          class="min-w-0 rounded-md border border-border-strong bg-surface-3/80 px-3 py-2 font-mono text-[0.82rem] uppercase text-foreground focus:border-accent focus:outline-none"
                           placeholder="ENV_NAME"
                           value={row.name}
                           readOnly={!editableEntry()}
@@ -1952,7 +1956,7 @@ const PasswordsVaultEditor: Component<{
                         <input
                           type={showValues() ? "text" : "password"}
                           autocomplete="off"
-                          class="flex-1 rounded-md border border-border-strong bg-surface-3/80 px-3 py-2 font-mono text-[0.82rem] text-foreground focus:border-accent focus:outline-none"
+                          class="min-w-0 rounded-md border border-border-strong bg-surface-3/80 px-3 py-2 font-mono text-[0.82rem] text-foreground focus:border-accent focus:outline-none"
                           placeholder="value"
                           value={row.value}
                           readOnly={!editableEntry()}
