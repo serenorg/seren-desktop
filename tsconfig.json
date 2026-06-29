@@ -20,6 +20,7 @@
     "paths": {
       "@seren/chat-ui": ["packages/chat-ui/src/index.tsx"],
       "@seren/employees-core": ["packages/employees-core/src/index.ts"],
+      "@seren/passwords-core": ["packages/passwords-core/src/index.ts"],
       "@seren/recording-core": ["packages/recording-core/src/index.ts"],
       "@seren/recording-ui": ["packages/recording-ui/src/index.tsx"],
       "@/*": ["src/*"]

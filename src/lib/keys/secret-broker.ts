@@ -1,6 +1,14 @@
 // ABOUTME: Client-side policy helpers for Seren Passwords reference bindings.
 // ABOUTME: Keeps service/skill binding and migration behavior testable without Tauri.
 
+import {
+  buildSerenSecretsFieldReferences,
+  isEnvVarName,
+  isSerenSecretsReference,
+} from "@seren/passwords-core";
+
+export { isEnvVarName, isSerenSecretsReference };
+
 export type KeyApprovalMode = "always_ask" | "auto_approve_cap";
 export type SecretBindingSource = "local_store" | "seren_passwords";
 
@@ -226,10 +234,6 @@ export function buildSkillSecretBindingId(
   return `${identity.serviceId}::${identity.skillId}`;
 }
 
-export function isEnvVarName(name: string): boolean {
-  return /^[_A-Z][_A-Z0-9]*$/.test(name.trim().toUpperCase());
-}
-
 /**
  * Build the ENV -> seren-secrets:// reference map a binding stores, from a vault
  * entry's chosen field names. A vault entry's fields are already named as env
@@ -242,14 +246,7 @@ export function buildBindingReferences(
   itemId: string,
   fieldNames: string[],
 ): Record<string, string> {
-  const references: Record<string, string> = {};
-  for (const field of fieldNames) {
-    const name = field.trim();
-    if (!name || !isEnvVarName(name)) continue;
-    references[name.toUpperCase()] =
-      `seren-secrets://${vaultId}/${itemId}/${name}`;
-  }
-  return references;
+  return buildSerenSecretsFieldReferences(vaultId, itemId, fieldNames);
 }
 
 /**
@@ -264,40 +261,6 @@ export function inferServiceFromFieldNames(
     if (service) return service;
   }
   return null;
-}
-
-export function isSerenSecretsReference(value: string): boolean {
-  const trimmed = value.trim();
-  if (/\s/.test(trimmed)) return false;
-  try {
-    const parsed = new URL(trimmed);
-    // Match the native validator: a reference is exactly
-    // seren-secrets://<vault>/<item>/<field> with no userinfo, port,
-    // query, or fragment. Accepting any of those here lets the UI treat
-    // a reference as valid that the Rust broker then rejects on save.
-    if (
-      parsed.username !== "" ||
-      parsed.password !== "" ||
-      parsed.port !== "" ||
-      parsed.search !== "" ||
-      parsed.hash !== ""
-    ) {
-      return false;
-    }
-    const uuidPattern =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    const pathSegments = parsed.pathname.split("/");
-    return (
-      parsed.protocol === "seren-secrets:" &&
-      uuidPattern.test(parsed.hostname) &&
-      pathSegments.length === 3 &&
-      pathSegments[0] === "" &&
-      uuidPattern.test(pathSegments[1]) &&
-      pathSegments[2].length > 0
-    );
-  } catch {
-    return false;
-  }
 }
 
 interface EnvAssignment {

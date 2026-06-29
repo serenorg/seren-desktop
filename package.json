@@ -54,6 +54,7 @@
     "@playwright/mcp": "^0.0.76",
     "@seren/chat-ui": "workspace:*",
     "@seren/employees-core": "workspace:*",
+    "@seren/passwords-core": "workspace:*",
     "@seren/recording-core": "workspace:*",
     "@seren/recording-ui": "workspace:*",
     "@tailwindcss/vite": "4",
