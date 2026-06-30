@@ -4,7 +4,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Mutex, mpsc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -15,7 +15,6 @@ use std::process::{Child, Command};
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use std::{
     io::{Seek, SeekFrom, Write},
-    sync::mpsc,
     thread,
 };
 
@@ -52,11 +51,17 @@ use core_graphics::{
 #[cfg(target_os = "macos")]
 use image::RgbaImage;
 #[cfg(target_os = "macos")]
+use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
 use objc2::runtime::NSObject;
 #[cfg(target_os = "macos")]
 use objc2::{ClassType, extern_class, msg_send};
 #[cfg(target_os = "macos")]
-use objc2_foundation::NSString;
+use objc2_core_foundation::CGRect as ScCGRect;
+#[cfg(target_os = "macos")]
+use objc2_foundation::{NSError, NSString};
+#[cfg(target_os = "macos")]
+use objc2_screen_capture_kit::{SCShareableContent, SCWindow};
 
 #[derive(Default)]
 pub struct RecordingState {
@@ -1418,6 +1423,22 @@ fn macos_cg_dimension_to_u32(value: f64) -> Option<u32> {
     Some(rounded as u32)
 }
 
+fn merge_capture_window_summaries(
+    primary: Vec<RecordingCaptureWindow>,
+    fallback: Vec<RecordingCaptureWindow>,
+) -> Vec<RecordingCaptureWindow> {
+    let mut merged = Vec::with_capacity(primary.len().saturating_add(fallback.len()));
+    for window in primary.into_iter().chain(fallback) {
+        if !merged
+            .iter()
+            .any(|existing: &RecordingCaptureWindow| existing.platform_id == window.platform_id)
+        {
+            merged.push(window);
+        }
+    }
+    merged
+}
+
 #[cfg(target_os = "macos")]
 fn macos_window_summary_from_info(
     dictionary: &MacosWindowInfoDictionary,
@@ -1455,7 +1476,7 @@ fn macos_window_summary_from_info(
 }
 
 #[cfg(target_os = "macos")]
-fn macos_window_summaries() -> Result<Vec<RecordingCaptureWindow>, String> {
+fn macos_core_graphics_window_summaries() -> Result<Vec<RecordingCaptureWindow>, String> {
     let raw_windows = unsafe {
         CGWindowListCopyWindowInfo(
             kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
@@ -1471,6 +1492,127 @@ fn macos_window_summaries() -> Result<Vec<RecordingCaptureWindow>, String> {
         .iter()
         .filter_map(|dictionary| macos_window_summary_from_info(&dictionary))
         .collect())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_ns_error_message(error: *mut NSError, fallback: &str) -> String {
+    let Some(error) = (unsafe { Retained::<NSError>::retain(error) }) else {
+        return fallback.to_string();
+    };
+    let description = error.localizedDescription().to_string();
+    clean_native_context_text(&description, 400).unwrap_or_else(|| fallback.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_sc_rect_bounds(frame: ScCGRect) -> Option<RecordingCaptureWindowBounds> {
+    let width = macos_cg_dimension_to_u32(frame.size.width)?;
+    let height = macos_cg_dimension_to_u32(frame.size.height)?;
+    Some(RecordingCaptureWindowBounds {
+        x: macos_cg_coordinate_to_i32(frame.origin.x)?,
+        y: macos_cg_coordinate_to_i32(frame.origin.y)?,
+        width,
+        height,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_screen_capturekit_window_summary(window: &SCWindow) -> Option<RecordingCaptureWindow> {
+    let platform_id = unsafe { window.windowID() };
+    let layer = unsafe { window.windowLayer() };
+    if layer != 0 {
+        return None;
+    }
+    let owner = unsafe { window.owningApplication() }?;
+    let pid = u32::try_from(unsafe { owner.processID() }).ok()?;
+    let app_name = clean_native_context_text(&unsafe { owner.applicationName() }.to_string(), 200)?;
+    let title = unsafe { window.title() }
+        .and_then(|title| clean_native_context_text(&title.to_string(), 200))
+        .unwrap_or_default();
+    let bounds = macos_sc_rect_bounds(unsafe { window.frame() })?;
+    if !is_capture_window_candidate(&app_name, bounds.width, bounds.height) {
+        return None;
+    }
+    let is_on_screen = unsafe { window.isOnScreen() };
+    Some(RecordingCaptureWindow {
+        id: platform_id.to_string(),
+        platform_id,
+        pid,
+        app_name,
+        title,
+        bounds,
+        is_focused: unsafe { window.isActive() },
+        is_minimized: !is_on_screen,
+        is_recordable: is_on_screen,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_screen_capturekit_window_summaries() -> Result<Vec<RecordingCaptureWindow>, String> {
+    let (tx, rx) = mpsc::channel::<Result<Vec<RecordingCaptureWindow>, String>>();
+    let handler = block2::RcBlock::new(
+        move |content: *mut SCShareableContent, error: *mut NSError| {
+            if !error.is_null() {
+                let _ = tx.send(Err(format!(
+                    "ScreenCaptureKit failed to list windows: {}",
+                    macos_ns_error_message(error, "unknown error")
+                )));
+                return;
+            }
+            let Some(content) = (unsafe { Retained::<SCShareableContent>::retain(content) }) else {
+                let _ = tx.send(Err(
+                    "ScreenCaptureKit returned an empty shareable content response.".to_string(),
+                ));
+                return;
+            };
+            let windows = unsafe { content.windows() };
+            let summaries = windows
+                .iter()
+                .filter_map(|window| macos_screen_capturekit_window_summary(&window))
+                .collect::<Vec<_>>();
+            let _ = tx.send(Ok(summaries));
+        },
+    );
+
+    unsafe {
+        SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(
+            true,
+            true,
+            &handler,
+        );
+    }
+
+    rx.recv_timeout(Duration::from_secs(5))
+        .map_err(|_| "Timed out while listing ScreenCaptureKit windows.".to_string())?
+}
+
+#[cfg(target_os = "macos")]
+fn macos_window_summaries() -> Result<Vec<RecordingCaptureWindow>, String> {
+    match macos_screen_capturekit_window_summaries() {
+        Ok(screen_capturekit_windows) if !screen_capturekit_windows.is_empty() => {
+            let core_graphics_windows = macos_core_graphics_window_summaries().unwrap_or_else(
+                |error| {
+                    log::warn!(
+                        "CoreGraphics fallback window listing failed after ScreenCaptureKit succeeded: {error}"
+                    );
+                    Vec::new()
+                },
+            );
+            Ok(merge_capture_window_summaries(
+                screen_capturekit_windows,
+                core_graphics_windows,
+            ))
+        }
+        Ok(_) => {
+            log::warn!(
+                "ScreenCaptureKit returned no capture windows; falling back to CoreGraphics."
+            );
+            macos_core_graphics_window_summaries()
+        }
+        Err(error) => {
+            log::warn!("{error}; falling back to CoreGraphics.");
+            macos_core_graphics_window_summaries()
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -3990,6 +4132,53 @@ mod tests {
         } else {
             assert!(is_capture_window_candidate("Control Center", 120, 60));
         }
+    }
+
+    #[test]
+    fn capture_window_summary_merge_prefers_primary_backend_by_platform_id() {
+        let primary = RecordingCaptureWindow {
+            id: "100".to_string(),
+            platform_id: 100,
+            pid: 10,
+            app_name: "Firefox".to_string(),
+            title: "Primary".to_string(),
+            bounds: RecordingCaptureWindowBounds {
+                x: 0,
+                y: 0,
+                width: 1200,
+                height: 800,
+            },
+            is_focused: true,
+            is_minimized: false,
+            is_recordable: true,
+        };
+        let duplicate_fallback = RecordingCaptureWindow {
+            title: "Fallback duplicate".to_string(),
+            ..primary.clone()
+        };
+        let fallback_only = RecordingCaptureWindow {
+            id: "200".to_string(),
+            platform_id: 200,
+            pid: 20,
+            app_name: "Notes".to_string(),
+            title: "Fallback".to_string(),
+            bounds: RecordingCaptureWindowBounds {
+                x: 10,
+                y: 10,
+                width: 640,
+                height: 480,
+            },
+            is_focused: false,
+            is_minimized: false,
+            is_recordable: true,
+        };
+
+        let merged = merge_capture_window_summaries(
+            vec![primary.clone()],
+            vec![duplicate_fallback, fallback_only.clone()],
+        );
+
+        assert_eq!(merged, vec![primary, fallback_only]);
     }
 
     #[test]

@@ -125,9 +125,13 @@ windows = { version = "0.62", features = [
 
 # System-audio ("Them") process-tap capture for Meeting Mode (CoreAudio + ObjC FFI).
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
 cpal = "0.18.1"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSValue", "NSUUID"] }
+objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
+objc2-core-graphics = { version = "0.3", features = ["CGWindow"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSError", "NSValue", "NSUUID"] }
+objc2-screen-capture-kit = "0.3.2"
 core-foundation = "0.10"
 core-graphics = "0.25"
 
