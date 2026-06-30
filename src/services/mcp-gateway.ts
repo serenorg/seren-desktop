@@ -115,7 +115,14 @@ function isRetryableGatewayConnectError(error: unknown): boolean {
     /Service Unavailable|server_error|Authentication backend unavailable/i.test(
       message,
     ) ||
-    /network|timeout|temporar|ECONN|ETIMEDOUT|ERR_/i.test(message)
+    /network|timeout|temporar|ECONN|ETIMEDOUT|ERR_/i.test(message) ||
+    // A dropped MCP transport stream mid-handshake (rmcp surfaces this as
+    // "Transport channel closed" while sending the initialize request or the
+    // initialized notification) is a transient connect race, not a hard
+    // gateway error — retry it like any other transient.
+    /Transport channel closed|channel closed|connection (?:closed|reset|aborted)|stream closed/i.test(
+      message,
+    )
   );
 }
 
