@@ -44,8 +44,8 @@ use core_graphics::{
     window::{
         CGWindowListCopyWindowInfo, create_image, kCGWindowBounds, kCGWindowImageDefault,
         kCGWindowIsOnscreen, kCGWindowLayer, kCGWindowListExcludeDesktopElements,
-        kCGWindowListOptionIncludingWindow, kCGWindowListOptionOnScreenOnly, kCGWindowName,
-        kCGWindowNumber, kCGWindowOwnerName, kCGWindowOwnerPID, kCGWindowSharingState,
+        kCGWindowListOptionIncludingWindow, kCGWindowName, kCGWindowNumber, kCGWindowOwnerName,
+        kCGWindowOwnerPID, kCGWindowSharingState,
     },
 };
 #[cfg(target_os = "macos")]
@@ -1296,6 +1296,46 @@ fn normalized_capture_app_name(app_name: &str) -> String {
         .collect()
 }
 
+#[cfg(target_os = "macos")]
+fn is_macos_helper_capture_window(app_name: &str, title: &str) -> bool {
+    let app_name = app_name.trim();
+    let title = title.trim();
+    if is_macos_system_capture_window(app_name) {
+        return true;
+    }
+    let normalized = normalized_capture_app_name(app_name);
+    normalized == "cursoruiviewservice"
+        || normalized.starts_with("autofill")
+        || normalized.starts_with("openandsavepanelservice")
+        || (normalized == "finder" && title.eq_ignore_ascii_case("desktop"))
+}
+
+#[cfg(target_os = "macos")]
+fn is_macos_capture_window_candidate(
+    app_name: &str,
+    title: &str,
+    width: u32,
+    height: u32,
+    is_on_screen: bool,
+) -> bool {
+    const MIN_MACOS_CAPTURE_WINDOW_WIDTH: u32 = 160;
+    const MIN_MACOS_CAPTURE_WINDOW_HEIGHT: u32 = 120;
+
+    if !is_capture_window_candidate(app_name, width, height) {
+        return false;
+    }
+    if is_macos_helper_capture_window(app_name, title) {
+        return false;
+    }
+    if width < MIN_MACOS_CAPTURE_WINDOW_WIDTH || height < MIN_MACOS_CAPTURE_WINDOW_HEIGHT {
+        return false;
+    }
+    if !is_on_screen && title.trim().is_empty() {
+        return false;
+    }
+    true
+}
+
 fn is_browser_capture_app(app_name: &str) -> bool {
     let normalized = normalized_capture_app_name(app_name);
     if normalized.is_empty() {
@@ -1459,7 +1499,13 @@ fn macos_window_summary_from_info(
     if layer != 0 || sharing_state == 0 {
         return None;
     }
-    if !is_capture_window_candidate(&app_name, bounds.width, bounds.height) {
+    if !is_macos_capture_window_candidate(
+        &app_name,
+        &title,
+        bounds.width,
+        bounds.height,
+        is_on_screen,
+    ) {
         return None;
     }
     Some(RecordingCaptureWindow {
@@ -1470,19 +1516,14 @@ fn macos_window_summary_from_info(
         title,
         bounds,
         is_focused: false,
-        is_minimized: !is_on_screen,
-        is_recordable: is_on_screen,
+        is_minimized: false,
+        is_recordable: true,
     })
 }
 
 #[cfg(target_os = "macos")]
 fn macos_core_graphics_window_summaries() -> Result<Vec<RecordingCaptureWindow>, String> {
-    let raw_windows = unsafe {
-        CGWindowListCopyWindowInfo(
-            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
-            0,
-        )
-    };
+    let raw_windows = unsafe { CGWindowListCopyWindowInfo(kCGWindowListExcludeDesktopElements, 0) };
     if raw_windows.is_null() {
         return Ok(Vec::new());
     }
@@ -1529,10 +1570,16 @@ fn macos_screen_capturekit_window_summary(window: &SCWindow) -> Option<Recording
         .and_then(|title| clean_native_context_text(&title.to_string(), 200))
         .unwrap_or_default();
     let bounds = macos_sc_rect_bounds(unsafe { window.frame() })?;
-    if !is_capture_window_candidate(&app_name, bounds.width, bounds.height) {
+    let is_on_screen = unsafe { window.isOnScreen() };
+    if !is_macos_capture_window_candidate(
+        &app_name,
+        &title,
+        bounds.width,
+        bounds.height,
+        is_on_screen,
+    ) {
         return None;
     }
-    let is_on_screen = unsafe { window.isOnScreen() };
     Some(RecordingCaptureWindow {
         id: platform_id.to_string(),
         platform_id,
@@ -1540,9 +1587,9 @@ fn macos_screen_capturekit_window_summary(window: &SCWindow) -> Option<Recording
         app_name,
         title,
         bounds,
-        is_focused: unsafe { window.isActive() },
-        is_minimized: !is_on_screen,
-        is_recordable: is_on_screen,
+        is_focused: is_on_screen && unsafe { window.isActive() },
+        is_minimized: false,
+        is_recordable: true,
     })
 }
 
@@ -1576,7 +1623,7 @@ fn macos_screen_capturekit_window_summaries() -> Result<Vec<RecordingCaptureWind
     unsafe {
         SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(
             true,
-            true,
+            false,
             &handler,
         );
     }
@@ -1671,6 +1718,32 @@ fn macos_capture_window_image(platform_id: u32) -> Result<RgbaImage, String> {
         .ok_or_else(|| "Failed to decode window preview image.".to_string())
 }
 
+#[cfg(target_os = "macos")]
+fn macos_capture_window_preview_file(platform_id: u32, path: &Path) -> Result<(), String> {
+    let output = Command::new("/usr/sbin/screencapture")
+        .arg("-x")
+        .arg("-l")
+        .arg(platform_id.to_string())
+        .arg(path)
+        .output()
+        .map_err(|error| format!("Failed to capture window preview: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Failed to capture window preview.".to_string()
+        } else {
+            format!("Failed to capture window preview: {stderr}")
+        });
+    }
+    let metadata =
+        fs::metadata(path).map_err(|error| format!("Failed to stat window preview: {error}"))?;
+    if metadata.len() == 0 {
+        let _ = fs::remove_file(path);
+        return Err("Failed to capture window preview: empty image.".to_string());
+    }
+    Ok(())
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 fn xcap_windows() -> Result<Vec<xcap::Window>, String> {
     xcap::Window::all().map_err(|error| format!("Failed to list capture windows: {error}"))
@@ -1710,16 +1783,11 @@ fn capture_window_preview(
         if !summary.is_recordable {
             return Err("Capture window is minimized.".to_string());
         }
-        let image = macos_capture_window_image(platform_id)?;
-        let preview_width = image.width();
-        let preview_height = image.height();
         let preview_root = recording_preview_root(app)?;
         prune_recording_previews(&preview_root);
         let captured_at_ms = unix_time_ms();
         let path = preview_root.join(format!("window-preview-{platform_id}-{captured_at_ms}.png"));
-        image
-            .save(&path)
-            .map_err(|error| format!("Failed to write window preview: {error}"))?;
+        macos_capture_window_preview_file(platform_id, &path)?;
         allow_recording_preview_asset(app, &path)?;
         let metadata = fs::metadata(&path)
             .map_err(|error| format!("Failed to stat window preview: {error}"))?;
@@ -1729,8 +1797,8 @@ fn capture_window_preview(
             artifact_url: file_url(&path)?,
             artifact_path: path.to_string_lossy().into_owned(),
             mime_type: "image/png".to_string(),
-            width: preview_width,
-            height: preview_height,
+            width: summary.bounds.width,
+            height: summary.bounds.height,
             size_bytes: metadata.len(),
         });
     }
@@ -4132,6 +4200,71 @@ mod tests {
         } else {
             assert!(is_capture_window_candidate("Control Center", 120, 60));
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_capture_window_candidates_keep_capturable_off_space_windows() {
+        assert!(is_macos_capture_window_candidate(
+            "Google Chrome",
+            "Record workflow picker lists open windows",
+            1577,
+            1046,
+            false,
+        ));
+        assert!(is_macos_capture_window_candidate(
+            "Brave Browser",
+            "Private Lending Landing Page",
+            1681,
+            1059,
+            false,
+        ));
+        assert!(is_macos_capture_window_candidate(
+            "Thunderbird",
+            "Inbox - taariq@serendb.com",
+            1556,
+            1084,
+            true,
+        ));
+
+        assert!(!is_macos_capture_window_candidate(
+            "Google Chrome",
+            "",
+            1577,
+            1046,
+            false,
+        ));
+        assert!(!is_macos_capture_window_candidate(
+            "Google Chrome",
+            "",
+            1,
+            1,
+            false,
+        ));
+        assert!(!is_macos_capture_window_candidate(
+            "CursorUIViewService",
+            "",
+            64,
+            64,
+            false,
+        ));
+        assert!(!is_macos_capture_window_candidate(
+            "AutoFill (Google Chrome)",
+            "",
+            312,
+            237,
+            false,
+        ));
+        assert!(!is_macos_capture_window_candidate(
+            "Open and Save Panel Service (Thunderbird)",
+            "",
+            64,
+            64,
+            false,
+        ));
+        assert!(!is_macos_capture_window_candidate(
+            "Finder", "Desktop", 1288, 758, false,
+        ));
     }
 
     #[test]
