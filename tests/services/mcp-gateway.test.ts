@@ -441,6 +441,47 @@ describe("MCP Gateway init recovery (#2654, #2743)", () => {
     warnSpy.mockRestore();
   });
 
+  it("retries a transient transport-channel-closed handshake drop (#2778)", async () => {
+    const { mcpClient } = await import("@/lib/mcp/client");
+    const connectMock = vi.mocked(mcpClient.connectHttp);
+    // rmcp surfaces a dropped MCP stream mid-handshake as "Transport channel
+    // closed" — here while sending the initialized notification. The first
+    // attempt drops transiently; the second succeeds.
+    connectMock
+      .mockRejectedValueOnce(
+        new Error(
+          "Failed to connect to MCP server: Send message error Transport [rmcp::transport::streamable_http_client::StreamableHttpClientWorker] error: Transport channel closed, when send initialized notification",
+        ),
+      )
+      .mockResolvedValue(undefined);
+
+    const { MCP_GATEWAY_URL } = await import("@/lib/config");
+    const { initializeGateway, isGatewayInitInFlight, isGatewayInitialized } =
+      await import("@/services/mcp-gateway");
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const init = initializeGateway();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(init).resolves.toBeUndefined();
+    expect(connectMock).toHaveBeenCalledTimes(2);
+    expect(connectMock).toHaveBeenNthCalledWith(
+      2,
+      "seren-gateway",
+      MCP_GATEWAY_URL,
+      "test-api-key",
+    );
+    expect(isGatewayInitInFlight()).toBe(false);
+    expect(isGatewayInitialized()).toBe(true);
+    // A recovered transient must not leave a console.error — that is what the
+    // Windows e2e console gate fails the release on.
+    expect(errorSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
   it("does not retry non-transient MCP auth failures", async () => {
     const { mcpClient } = await import("@/lib/mcp/client");
     const connectMock = vi.mocked(mcpClient.connectHttp);
