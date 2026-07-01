@@ -37,6 +37,10 @@ pub struct LifecycleSignal {
     pub source_app: Option<String>,
     /// Timestamp of the most recent persisted transcript segment, if any.
     pub last_segment_ms: Option<i64>,
+    /// Timestamp of the most recent persisted remote/system transcript segment.
+    /// This protects call recordings when local mic noise keeps producing
+    /// bogus "Me" segments after the other side has gone quiet.
+    pub last_remote_segment_ms: Option<i64>,
     /// Scheduled end of the matched calendar event, if any.
     pub calendar_end_ms: Option<i64>,
 }
@@ -214,7 +218,17 @@ impl LifecycleController {
             }
         }
 
-        // 3) Matched calendar end + tail.
+        // 3) Remote stream backstop. The generic silence guard above can be
+        // defeated when a quiet room produces local mic hallucinations, while
+        // the call app process keeps the gate open. Once the remote/system
+        // channel has existed, it must keep advancing too.
+        if let Some(anchor) = signal.last_remote_segment_ms {
+            if signal.now_ms - anchor >= self.config.silence_timeout_ms {
+                return Some(self.stop(StopReason::Silence));
+            }
+        }
+
+        // 4) Matched calendar end + tail.
         if let Some(end) = signal.calendar_end_ms {
             if signal.now_ms >= end + self.config.calendar_end_tail_ms {
                 return Some(self.stop(StopReason::CalendarEnd));
@@ -261,6 +275,7 @@ mod tests {
             gate_open: open,
             source_app: open.then(|| "Zoom".to_string()),
             last_segment_ms: None,
+            last_remote_segment_ms: None,
             calendar_end_ms: None,
         }
     }
@@ -395,6 +410,40 @@ mod tests {
                 source_app: Some("Zoom".to_string())
             })
         );
+    }
+
+    /// Discord can remain open after a call, and Seren's own active mic capture
+    /// can keep the input-device gate looking open. If local mic noise keeps
+    /// producing bogus "Me" transcript segments after the remote side stops,
+    /// the remote-channel backstop must still end the recording.
+    #[test]
+    fn remote_silence_stops_when_local_segments_keep_advancing() {
+        let mut c = LifecycleController::new(CFG);
+        c.evaluate(&gate(0, true));
+        assert_eq!(
+            c.evaluate(&gate(CFG.start_debounce_ms, true)),
+            Some(LifecycleAction::StartCapture {
+                source_app: Some("Zoom".to_string())
+            })
+        );
+
+        let last_remote = 10 * 60_000;
+        let stop_at = last_remote + CFG.silence_timeout_ms;
+        let mut active_local = gate(stop_at - 1, true);
+        active_local.last_segment_ms = Some(stop_at - 1);
+        active_local.last_remote_segment_ms = Some(last_remote);
+        assert_eq!(c.evaluate(&active_local), None);
+
+        let mut remote_stale = gate(stop_at, true);
+        remote_stale.last_segment_ms = Some(stop_at);
+        remote_stale.last_remote_segment_ms = Some(last_remote);
+        assert_eq!(
+            c.evaluate(&remote_stale),
+            Some(LifecycleAction::StopCapture {
+                reason: StopReason::Silence
+            })
+        );
+        assert_eq!(c.state(), LifecycleState::Idle);
     }
 
     /// A calendar-end stop likewise fires while the call is still live (the
