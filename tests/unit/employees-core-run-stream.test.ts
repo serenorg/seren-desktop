@@ -118,7 +118,7 @@ describe("employees-core sequenced run stream", () => {
       'LLM error: LLM publisher returned 400: Provider returned error - {"error":{"code":400,"message":"Provider returned error","metadata":{"previous_errors":[{"provider_name":"OpenAI","raw":"{\\n \\"error\\": {\\n \\"message\\": \\"No tool call found for function call output with call_id call_123.\\",\\n \\"type\\": \\"invalid_request_error\\"\\n }\\n}"}],"provider_name":"Azure"}}}';
 
     expect(sanitizeEmployeeErrorText(rawError)).toBe(
-      "The employee could not complete this request because the model provider rejected the tool response.",
+      "The configured model route could not process the tool response. Change this employee to a tool-capable model route in employee settings.",
     );
 
     expect(
@@ -130,7 +130,7 @@ describe("employees-core sequenced run stream", () => {
         },
       }),
     ).toBe(
-      "The employee could not complete this request because the model provider rejected the tool response.",
+      "The configured model route could not process the tool response. Change this employee to a tool-capable model route in employee settings.",
     );
   });
 
@@ -146,7 +146,7 @@ describe("employees-core sequenced run stream", () => {
         "Error: seren client unavailable for publisher request tool",
       ),
     ).toBe(
-      "The employee is not configured to use the required tool. Enable live data or publisher tools for this employee to allow this request.",
+      "The required tool is not enabled for this employee. Enable live data or publisher tools in employee settings.",
     );
   });
 
@@ -156,7 +156,7 @@ describe("employees-core sequenced run stream", () => {
         "publisher operation is not allowed by allowed_publisher_operations",
       ),
     ).toBe(
-      "The employee is not allowed to use the required publisher operation. Enable the needed publisher permission for this employee.",
+      "This employee is not allowed to use that publisher operation. Update tool permissions in employee settings.",
     );
   });
 
