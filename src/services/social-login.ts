@@ -11,6 +11,7 @@ import {
   storeRefreshToken,
   storeToken,
 } from "@/lib/tauri-bridge";
+import { getDesktopOAuthCallbackUrl } from "@/services/oauth-callback";
 
 export type SocialLoginProvider = "github" | "google" | "microsoft";
 
@@ -36,7 +37,6 @@ interface TokenPayload {
 }
 
 const CLIENT_ID = "seren-desktop";
-const REDIRECT_URI = "http://127.0.0.1:8787/auth/callback";
 const CODE_VERIFIER_LENGTH = 64;
 const STATE_LENGTH = 32;
 // Stop waiting on the loopback callback after this long so an abandoned or
@@ -61,16 +61,21 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
   return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+async function getRedirectUri(): Promise<string> {
+  return getDesktopOAuthCallbackUrl("/auth/callback");
+}
+
 function buildAuthorizeUrl(
   provider: SocialLoginProvider,
   state: string,
   codeChallenge: string,
+  redirectUri: string,
 ): string {
   const url = new URL("/oauth2/authorize", apiBase);
   url.search = new URLSearchParams({
     client_id: CLIENT_ID,
     response_type: "code",
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUri,
     state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
@@ -110,12 +115,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function exchangeCodeForTokens(
   code: string,
   codeVerifier: string,
+  redirectUri: string,
 ): Promise<TokenPayload> {
   const tokenUrl = new URL("/oauth2/token", apiBase).toString();
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUri,
     client_id: CLIENT_ID,
     code_verifier: codeVerifier,
   });
@@ -211,7 +217,13 @@ export async function startSocialLogin(
   const codeVerifier = generateRandomString(CODE_VERIFIER_LENGTH);
   const codeChallenge = await generateCodeChallenge(codeVerifier);
   const state = generateRandomString(STATE_LENGTH);
-  const authUrl = buildAuthorizeUrl(provider, state, codeChallenge);
+  const redirectUri = await getRedirectUri();
+  const authUrl = buildAuthorizeUrl(
+    provider,
+    state,
+    codeChallenge,
+    redirectUri,
+  );
   const callbackWaiter = createCallbackWaiter(state);
   const unlisten: UnlistenFn = await listen<SocialLoginCallbackPayload>(
     "social-login-callback",
@@ -236,6 +248,7 @@ export async function startSocialLogin(
     const tokenPayload = await exchangeCodeForTokens(
       callback.code ?? "",
       codeVerifier,
+      redirectUri,
     );
     await storeToken(tokenPayload.access_token);
     await storeRefreshToken(tokenPayload.refresh_token);

@@ -14,6 +14,7 @@ import { installExternalLinkInterceptor } from "@/lib/external-link";
 import { queryClient } from "@/lib/query-client";
 import { installSupportReporting } from "@/lib/support/hook";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
+import { installValidationControlBridge } from "@/services/validation-control";
 import { hydrateAppearanceSync } from "@/stores/appearance.store";
 import App from "./App";
 
@@ -40,6 +41,7 @@ if (isTauriRuntime()) {
 // Prevent external URLs from navigating the webview
 installExternalLinkInterceptor();
 installSupportReporting();
+installValidationControlBridge();
 
 render(
   () => (

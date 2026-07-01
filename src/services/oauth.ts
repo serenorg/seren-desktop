@@ -5,6 +5,10 @@ import { appFetch } from "@/lib/fetch";
 import type { OAuthCredentials, ProviderId } from "@/lib/providers/types";
 import { PROVIDER_CONFIGS, supportsOAuth } from "@/lib/providers/types";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
+import {
+  getDesktopOAuthCallbackUrl,
+  getValidationRuntimeInfo,
+} from "@/services/oauth-callback";
 
 // OAuth state storage (in-memory during auth flow)
 interface OAuthState {
@@ -44,11 +48,12 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
  * In dev mode, use localhost callback server to avoid launching the production app.
  * In production, use the seren:// deep link scheme.
  */
-function getRedirectUri(): string {
+async function getRedirectUri(): Promise<string> {
   if (isTauriRuntime()) {
-    if (import.meta.env.DEV) {
-      // Dev mode: use localhost callback server (avoids launching production app)
-      return "http://localhost:8787/oauth/callback";
+    const runtime = await getValidationRuntimeInfo();
+    if (runtime.isValidation || import.meta.env.DEV) {
+      // Dev and validation modes use loopback to avoid launching the production app.
+      return getDesktopOAuthCallbackUrl("/oauth/callback");
     }
     // Production: use deep link scheme
     return "seren://oauth/callback";
@@ -82,7 +87,7 @@ export async function startOAuthFlow(providerId: ProviderId): Promise<void> {
   const codeVerifier = generateRandomString(64);
   const codeChallenge = await generateCodeChallenge(codeVerifier);
   const state = generateRandomString(32);
-  const redirectUri = getRedirectUri();
+  const redirectUri = await getRedirectUri();
 
   // Store state for callback verification
   pendingOAuthState = {

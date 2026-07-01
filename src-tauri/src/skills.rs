@@ -63,6 +63,13 @@ fn project_config_path(project_root: &str) -> Result<PathBuf, String> {
 }
 
 fn seren_config_dir() -> Result<PathBuf, String> {
+    if let Some(validation_config_home) = std::env::var_os("SEREN_VALIDATION_CONFIG_HOME") {
+        let path = PathBuf::from(validation_config_home);
+        if !path.as_os_str().is_empty() && path.is_absolute() {
+            return Ok(path.join("seren"));
+        }
+    }
+
     if let Some(xdg_config_home) = std::env::var_os("XDG_CONFIG_HOME") {
         let path = PathBuf::from(xdg_config_home);
         if !path.as_os_str().is_empty() && path.is_absolute() {
@@ -75,6 +82,13 @@ fn seren_config_dir() -> Result<PathBuf, String> {
 }
 
 fn default_project_dir() -> Result<PathBuf, String> {
+    if let Some(validation_project_dir) = std::env::var_os("SEREN_VALIDATION_PROJECT_DIR") {
+        let path = PathBuf::from(validation_project_dir);
+        if !path.as_os_str().is_empty() && path.is_absolute() {
+            return Ok(path);
+        }
+    }
+
     let home = dirs::home_dir().ok_or("Could not determine home directory")?;
     let docs = home.join("Documents");
     if docs.is_dir() {
@@ -133,6 +147,18 @@ pub fn get_seren_skill_authoring_dir() -> Result<String, String> {
 /// Creates the directory if it doesn't exist.
 #[tauri::command]
 pub fn get_claude_skills_dir() -> Result<String, String> {
+    if let Some(validation_claude_home) = std::env::var_os("SEREN_VALIDATION_CLAUDE_HOME") {
+        let path = PathBuf::from(validation_claude_home);
+        if !path.as_os_str().is_empty() && path.is_absolute() {
+            let skills_dir = path.join("skills");
+            if !skills_dir.exists() {
+                fs::create_dir_all(&skills_dir)
+                    .map_err(|e| format!("Failed to create skills directory: {}", e))?;
+            }
+            return Ok(skills_dir.to_string_lossy().to_string());
+        }
+    }
+
     let home = dirs::home_dir().ok_or("Could not determine home directory")?;
     let skills_dir = home.join(".claude").join("skills");
 

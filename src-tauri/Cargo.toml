@@ -137,6 +137,7 @@ core-graphics = "0.25"
 
 [features]
 default = []
+validation = []
 messaging = []
 telegram = ["messaging", "dep:teloxide"]
 discord = ["messaging", "dep:serenity"]
