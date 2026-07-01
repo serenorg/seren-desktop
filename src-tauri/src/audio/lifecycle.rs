@@ -91,6 +91,12 @@ pub struct LifecycleController {
     /// stopping a recording while the call is still live can't instantly
     /// re-record it.
     suppress_until_gate_closes: bool,
+    /// Whether app-release should auto-stop the current capture. Auto-started
+    /// captures begin with this enabled. Externally-started captures begin with
+    /// it disabled so a user can press Record before the call app opens without
+    /// getting stopped after the release grace; the first observed gate-open
+    /// tick enables it for the remainder of that capture.
+    app_release_stop_enabled: bool,
 }
 
 impl LifecycleController {
@@ -102,6 +108,7 @@ impl LifecycleController {
             app_release_since: None,
             recording_since: None,
             suppress_until_gate_closes: false,
+            app_release_stop_enabled: true,
         }
     }
 
@@ -118,6 +125,20 @@ impl LifecycleController {
         self.app_release_since = None;
         self.gate_open_since = None;
         self.suppress_until_gate_closes = true;
+        self.app_release_stop_enabled = true;
+    }
+
+    /// Record that capture was started outside the lifecycle auto-start path
+    /// (manual button / tray / calendar one-tap). This lets the same auto-stop
+    /// signals protect every active Meeting capture, while avoiding a premature
+    /// AppReleased stop before a call app has ever taken the mic.
+    pub fn note_capture_started(&mut self, now_ms: i64, app_release_stop_enabled: bool) {
+        self.state = LifecycleState::Recording;
+        self.recording_since = Some(now_ms);
+        self.app_release_since = None;
+        self.gate_open_since = None;
+        self.suppress_until_gate_closes = false;
+        self.app_release_stop_enabled = app_release_stop_enabled;
     }
 
     /// The wiring failed to start the proposed capture (createMeeting / capture
@@ -128,6 +149,7 @@ impl LifecycleController {
         self.recording_since = None;
         self.app_release_since = None;
         self.gate_open_since = None;
+        self.app_release_stop_enabled = true;
     }
 
     /// Advance the state machine by one observation, returning the side effect to
@@ -157,6 +179,7 @@ impl LifecycleController {
                 self.recording_since = Some(signal.now_ms);
                 self.gate_open_since = None;
                 self.app_release_since = None;
+                self.app_release_stop_enabled = true;
                 return Some(LifecycleAction::StartCapture {
                     source_app: signal.source_app.clone(),
                 });
@@ -170,7 +193,10 @@ impl LifecycleController {
     fn evaluate_recording(&mut self, signal: &LifecycleSignal) -> Option<LifecycleAction> {
         // 1) App-release grace. If the gate reopens inside the window, cancel the
         //    pending stop and keep recording.
-        if !signal.gate_open {
+        if signal.gate_open {
+            self.app_release_stop_enabled = true;
+            self.app_release_since = None;
+        } else if self.app_release_stop_enabled {
             let released_at = *self.app_release_since.get_or_insert(signal.now_ms);
             if signal.now_ms - released_at >= self.config.app_release_grace_ms {
                 return Some(self.stop(StopReason::AppReleased));
@@ -203,6 +229,7 @@ impl LifecycleController {
         self.recording_since = None;
         self.app_release_since = None;
         self.gate_open_since = None;
+        self.app_release_stop_enabled = true;
         // A stop that fires while the call is still live must not instantly
         // re-record. The silence backstop and calendar-end stop both trigger
         // with the gate (mic + known app) still open, so without suppression the
@@ -282,7 +309,10 @@ mod tests {
                 source_app: Some("Zoom".to_string())
             })
         );
-        assert_eq!(c.evaluate(&gate(CFG.start_debounce_ms + 60_000, true)), None);
+        assert_eq!(
+            c.evaluate(&gate(CFG.start_debounce_ms + 60_000, true)),
+            None
+        );
         assert_eq!(
             c.evaluate(&gate(CFG.start_debounce_ms + CFG.silence_timeout_ms, true)),
             Some(LifecycleAction::StopCapture {
@@ -340,11 +370,20 @@ mod tests {
         assert_eq!(c.state(), LifecycleState::Idle);
         // Gate stays open well past another full debounce + silence window:
         // without suppression this would emit a second StartCapture. It must not.
-        assert_eq!(c.evaluate(&gate(stop_at + CFG.start_debounce_ms, true)), None);
-        assert_eq!(c.evaluate(&gate(stop_at + CFG.silence_timeout_ms, true)), None);
+        assert_eq!(
+            c.evaluate(&gate(stop_at + CFG.start_debounce_ms, true)),
+            None
+        );
+        assert_eq!(
+            c.evaluate(&gate(stop_at + CFG.silence_timeout_ms, true)),
+            None
+        );
         assert_eq!(c.state(), LifecycleState::Idle);
         // The call ends (gate closes) → suppression lifts...
-        assert_eq!(c.evaluate(&gate(stop_at + CFG.silence_timeout_ms, false)), None);
+        assert_eq!(
+            c.evaluate(&gate(stop_at + CFG.silence_timeout_ms, false)),
+            None
+        );
         // ...and a genuinely new call re-arms and records again.
         c.evaluate(&gate(stop_at + CFG.silence_timeout_ms + 10_000, true));
         assert_eq!(
@@ -382,5 +421,39 @@ mod tests {
         later.calendar_end_ms = Some(end_ms);
         assert_eq!(c.evaluate(&later), None);
         assert_eq!(c.state(), LifecycleState::Idle);
+    }
+
+    /// Manual/calendar one-tap captures are started outside evaluate_idle().
+    /// They still need the silence backstop, but must not AppReleased-stop after
+    /// 90s if the user pressed Record before the call app took the mic.
+    #[test]
+    fn external_capture_uses_silence_backstop_without_premature_app_release() {
+        let mut c = LifecycleController::new(CFG);
+        c.note_capture_started(0, false);
+
+        assert_eq!(c.evaluate(&gate(CFG.app_release_grace_ms, false)), None);
+        assert_eq!(
+            c.evaluate(&gate(CFG.silence_timeout_ms, false)),
+            Some(LifecycleAction::StopCapture {
+                reason: StopReason::Silence
+            })
+        );
+    }
+
+    /// Once an externally-started capture observes a real call gate, app-release
+    /// stop is safe and should protect the user when the meeting ends.
+    #[test]
+    fn external_capture_enables_app_release_after_gate_is_seen() {
+        let mut c = LifecycleController::new(CFG);
+        c.note_capture_started(0, false);
+
+        assert_eq!(c.evaluate(&gate(10_000, true)), None);
+        assert_eq!(c.evaluate(&gate(20_000, false)), None);
+        assert_eq!(
+            c.evaluate(&gate(20_000 + CFG.app_release_grace_ms, false)),
+            Some(LifecycleAction::StopCapture {
+                reason: StopReason::AppReleased
+            })
+        );
     }
 }

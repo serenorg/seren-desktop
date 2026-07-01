@@ -116,3 +116,22 @@ describe("Meeting pending capture ownership (#2745)", () => {
     expect(store).toContain("if (isCapturing()) return;");
   });
 });
+
+describe("Meeting upcoming recording removal (#2780)", () => {
+  it("wires the Upcoming delete button to calendar skip state and auto-match filtering", () => {
+    const upcoming = source("src/components/meeting/UpcomingMeetings.tsx");
+    const store = source("src/stores/meeting.store.ts");
+    const settings = source("src/stores/settings.store.ts");
+
+    expect(upcoming).toContain("TrashIcon");
+    expect(upcoming).toContain("skipUpcomingEvent(event)");
+    expect(upcoming).toContain(
+      "Remove ${event.title} from upcoming recordings",
+    );
+    expect(settings).toContain("meetingSkippedCalendarEvents");
+    expect(store).toContain("function skipUpcomingEvent");
+    expect(store).toContain("recordableCalendarEvents(cachedUpcomingEvents, now)");
+    expect(store).toContain("suppressMeetingCalendarEvent(meeting)");
+    expect(store).toContain("meetingLifecycleNoteCaptureStarted");
+  });
+});
