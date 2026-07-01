@@ -949,6 +949,7 @@ pub fn run() {
             commands::audio::meeting_autodetect,
             commands::audio::meeting_lifecycle_tick,
             commands::audio::meeting_lifecycle_note_manual_stop,
+            commands::audio::meeting_lifecycle_note_capture_started,
             commands::audio::meeting_lifecycle_note_start_failed,
             // Dictation commands
             commands::audio::transcribe_pcm,

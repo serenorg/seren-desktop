@@ -175,6 +175,8 @@ export interface Settings {
   meetingAutoDetectEnabled: boolean;
   meetingTemplateId: string;
   meetingCustomTemplates: { id: string; name: string; prompt: string }[];
+  /** Calendar events locally skipped from Upcoming and auto-match until end. */
+  meetingSkippedCalendarEvents: { id: string; untilMs: number }[];
   /**
    * Run the post-call Them diarization pass that stamps meeting-stable speaker
    * labels. Default off because it re-transcribes Them audio and no current UI
@@ -293,6 +295,7 @@ const DEFAULT_SETTINGS: Settings = {
   meetingAutoDetectEnabled: true,
   meetingTemplateId: "discovery",
   meetingCustomTemplates: [],
+  meetingSkippedCalendarEvents: [],
   meetingStableSpeakers: false,
   meetingAudioPrimed: false,
   // General

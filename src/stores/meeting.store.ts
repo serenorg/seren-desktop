@@ -34,6 +34,7 @@ import {
   type MeetingSpeakerAssignment,
   type MeetingTemplate,
   meetingAutodetect,
+  meetingLifecycleNoteCaptureStarted,
   meetingLifecycleNoteManualStop,
   meetingLifecycleNoteStartFailed,
   meetingLifecycleTick,
@@ -170,6 +171,20 @@ let lifecycleEventEndMs: number | null = null;
 let cachedUpcomingEvents: CalendarEvent[] = [];
 let lastCalendarFetchMs = 0;
 const CALENDAR_REFRESH_MS = 5 * 60_000;
+const DEFAULT_CALENDAR_SUPPRESS_MS = 2 * 60 * 60_000;
+
+interface LifecycleCaptureOptions {
+  appReleaseStopEnabled: boolean;
+  calendarEndMs?: number | null;
+}
+
+const DEFAULT_LIFECYCLE_CAPTURE_OPTIONS: LifecycleCaptureOptions = {
+  appReleaseStopEnabled: false,
+  calendarEndMs: null,
+};
+
+let primingLifecycleOptions: LifecycleCaptureOptions | null = null;
+const calendarEventEndByMeetingId = new Map<string, number>();
 
 // Quit guard: confirm-on-quit while a capture is live. `quitConfirmed` lets a
 // second close request pass through even if window.destroy() is unavailable,
@@ -233,6 +248,103 @@ function captureStartupFailureReason(error: unknown): string {
     return "Microphone capture is unavailable in this desktop WebView. Restart Seren and try capture again.";
   }
   return `Meeting capture could not start: ${meetingErrorMessage(error)}`;
+}
+
+function skippedCalendarEvents(): { id: string; untilMs: number }[] {
+  const skipped = settingsStore.get("meetingSkippedCalendarEvents");
+  return Array.isArray(skipped) ? skipped : [];
+}
+
+function pruneSkippedCalendarEvents(now = Date.now()): Set<string> {
+  const skipped = skippedCalendarEvents();
+  const active = skipped.filter((item) => item.untilMs > now);
+  if (active.length !== skipped.length) {
+    settingsStore.set("meetingSkippedCalendarEvents", active);
+  }
+  return new Set(active.map((item) => item.id));
+}
+
+function recordableCalendarEvents(
+  events: readonly CalendarEvent[] = cachedUpcomingEvents,
+  now = Date.now(),
+): CalendarEvent[] {
+  const skipped = pruneSkippedCalendarEvents(now);
+  return events.filter((event) => !skipped.has(event.id));
+}
+
+function setUpcomingEvents(events: readonly CalendarEvent[]): void {
+  setMeetingState("upcomingEvents", recordableCalendarEvents(events));
+}
+
+function skipUpcomingEvent(event: CalendarEvent): void {
+  const untilMs = Math.max(event.endMs, Date.now() + 60_000);
+  const existing = skippedCalendarEvents();
+  const kept = existing.filter(
+    (item) => item.untilMs > Date.now() && item.id !== event.id,
+  );
+  settingsStore.set("meetingSkippedCalendarEvents", [
+    ...kept,
+    { id: event.id, untilMs },
+  ]);
+  cachedUpcomingEvents = cachedUpcomingEvents.filter(
+    (item) => item.id !== event.id,
+  );
+  setUpcomingEvents(cachedUpcomingEvents);
+}
+
+function rememberMeetingCalendarEnd(
+  meetingId: string,
+  endMs: number | null | undefined,
+): void {
+  if (typeof endMs === "number" && Number.isFinite(endMs)) {
+    calendarEventEndByMeetingId.set(meetingId, endMs);
+  }
+}
+
+function calendarEndForMeeting(meeting: Meeting): number | null {
+  const remembered = calendarEventEndByMeetingId.get(meeting.id);
+  if (remembered !== undefined) return remembered;
+  if (!meeting.calendarEventId) return null;
+  return (
+    cachedUpcomingEvents.find((event) => event.id === meeting.calendarEventId)
+      ?.endMs ?? null
+  );
+}
+
+function suppressMeetingCalendarEvent(meeting: Meeting): void {
+  const eventId = meeting.calendarEventId;
+  if (!eventId) return;
+  const endMs =
+    calendarEndForMeeting(meeting) ??
+    (meeting.id === lifecycleMeetingId ? lifecycleEventEndMs : null);
+  const now = Date.now();
+  if (endMs !== null && now >= endMs) return;
+  const untilMs = endMs !== null ? endMs : now + DEFAULT_CALENDAR_SUPPRESS_MS;
+  const existing = skippedCalendarEvents();
+  const kept = existing.filter(
+    (item) => item.untilMs > now && item.id !== eventId,
+  );
+  settingsStore.set("meetingSkippedCalendarEvents", [
+    ...kept,
+    { id: eventId, untilMs },
+  ]);
+  cachedUpcomingEvents = cachedUpcomingEvents.filter(
+    (event) => event.id !== eventId,
+  );
+  setUpcomingEvents(cachedUpcomingEvents);
+  calendarEventEndByMeetingId.delete(meeting.id);
+}
+
+async function armLifecycleForCapture(
+  meeting: Meeting,
+  options: LifecycleCaptureOptions = DEFAULT_LIFECYCLE_CAPTURE_OPTIONS,
+): Promise<void> {
+  lifecycleMeetingId = meeting.id;
+  lifecycleEventEndMs = options.calendarEndMs ?? calendarEndForMeeting(meeting);
+  rememberMeetingCalendarEnd(meeting.id, lifecycleEventEndMs);
+  await meetingLifecycleNoteCaptureStarted(options.appReleaseStopEnabled).catch(
+    () => {},
+  );
 }
 
 function notesFailureReason(error: unknown): string {
@@ -604,7 +716,10 @@ async function startCapture(meeting: Meeting): Promise<boolean> {
 // Start a freshly-created meeting and surface it as the active one. Shared by
 // every start caller (panel, tray, auto-detect) behind a single in-flight guard
 // so a double-trigger can't launch two mic streams.
-async function beginCapture(meeting: Meeting): Promise<void> {
+async function beginCapture(
+  meeting: Meeting,
+  lifecycleOptions: LifecycleCaptureOptions = DEFAULT_LIFECYCLE_CAPTURE_OPTIONS,
+): Promise<void> {
   if (!isTauriRuntime() || isStarting) return;
   if (isCapturing(meeting.id)) return;
   isStarting = true;
@@ -614,6 +729,7 @@ async function beginCapture(meeting: Meeting): Promise<void> {
     setMeetingState("capturePaused", false);
     setMeetingState("capturePausedAt", null);
     setMeetingState("capturePausedAccumMs", 0);
+    await armLifecycleForCapture(meeting, lifecycleOptions);
     await loadMeetings();
     await setActiveMeeting(
       meetingState.meetings.find((item) => item.id === meeting.id) ?? meeting,
@@ -626,12 +742,16 @@ async function beginCapture(meeting: Meeting): Promise<void> {
 // First-run gate shared by every start path. If the user has already
 // acknowledged the audio-permission explainer, start immediately; otherwise
 // stash the meeting and let the app-wide priming dialog drive the decision.
-async function requestCaptureStart(meeting: Meeting): Promise<void> {
+async function requestCaptureStart(
+  meeting: Meeting,
+  lifecycleOptions: LifecycleCaptureOptions = DEFAULT_LIFECYCLE_CAPTURE_OPTIONS,
+): Promise<void> {
   if (!isTauriRuntime()) return;
   if (settingsStore.get("meetingAudioPrimed")) {
-    await beginCapture(meeting);
+    await beginCapture(meeting, lifecycleOptions);
     return;
   }
+  primingLifecycleOptions = lifecycleOptions;
   setMeetingState("primingRequest", meeting);
 }
 
@@ -639,10 +759,13 @@ async function requestCaptureStart(meeting: Meeting): Promise<void> {
 // and clear the request.
 async function confirmPriming(): Promise<void> {
   const meeting = meetingState.primingRequest;
+  const lifecycleOptions =
+    primingLifecycleOptions ?? DEFAULT_LIFECYCLE_CAPTURE_OPTIONS;
+  primingLifecycleOptions = null;
   setMeetingState("primingRequest", null);
   if (!meeting) return;
   settingsStore.set("meetingAudioPrimed", true);
-  await beginCapture(meeting);
+  await beginCapture(meeting, lifecycleOptions);
 }
 
 // User dismissed the explainer: abort the pending start. The meeting row was
@@ -650,6 +773,7 @@ async function confirmPriming(): Promise<void> {
 // isCapturing() stays true forever and blocks every future capture.
 async function cancelPriming(): Promise<void> {
   const meeting = meetingState.primingRequest;
+  primingLifecycleOptions = null;
   setMeetingState("primingRequest", null);
   if (!meeting || !isTauriRuntime()) return;
   await failMeeting(
@@ -725,6 +849,10 @@ async function reconcileStaleCaptures(): Promise<void> {
           setMeetingState("capturePaused", backendPaused);
           setMeetingState("capturePausedAt", backendPaused ? Date.now() : null);
           setMeetingState("capturePausedAccumMs", 0);
+          await armLifecycleForCapture(meeting, {
+            appReleaseStopEnabled: meeting.triggerSource === "auto_mic",
+            calendarEndMs: calendarEndForMeeting(meeting),
+          });
           if (!meetingState.activeMeeting) {
             await setActiveMeeting(meeting);
           }
@@ -828,6 +956,7 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
   if (processingMeetings.has(meeting.id)) return;
   processingMeetings.add(meeting.id);
   try {
+    suppressMeetingCalendarEvent(meeting);
     const stopOutcome = await stopCapture(meeting.id);
     await loadMeetings();
     if (!isTauriRuntime()) return;
@@ -906,6 +1035,7 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
       meetingState.meetings.find((m) => m.id === meeting.id) ?? null;
     await setActiveMeeting(refreshed);
   } finally {
+    calendarEventEndByMeetingId.delete(meeting.id);
     processingMeetings.delete(meeting.id);
   }
 }
@@ -1231,7 +1361,7 @@ async function refreshUpcomingEventsIfStale(): Promise<void> {
   lastCalendarFetchMs = now;
   const result = await getUpcomingEvents();
   cachedUpcomingEvents = result.events;
-  setMeetingState("upcomingEvents", result.events);
+  setUpcomingEvents(result.events);
   setMeetingState("upcomingStatus", result.status);
 }
 
@@ -1272,7 +1402,7 @@ async function pollAutoDetect(): Promise<void> {
       try {
         const now = Date.now();
         const event = matchActiveEvent(
-          cachedUpcomingEvents,
+          recordableCalendarEvents(cachedUpcomingEvents, now),
           now,
           action.sourceApp,
         );
@@ -1290,7 +1420,11 @@ async function pollAutoDetect(): Promise<void> {
         });
         lifecycleMeetingId = meeting.id;
         lifecycleEventEndMs = event?.endMs ?? null;
-        await requestCaptureStart(meeting);
+        rememberMeetingCalendarEnd(meeting.id, lifecycleEventEndMs);
+        await requestCaptureStart(meeting, {
+          appReleaseStopEnabled: true,
+          calendarEndMs: lifecycleEventEndMs,
+        });
       } catch {
         // Start failed — reset the controller so it can re-propose, and clear
         // the dangling id so a wedged "Recording" controller can't block all
@@ -1397,13 +1531,18 @@ async function startFromCalendarEvent(event: CalendarEvent): Promise<void> {
     attendeesJson:
       event.attendees.length > 0 ? JSON.stringify(event.attendees) : null,
   });
-  await requestCaptureStart(meeting);
+  rememberMeetingCalendarEnd(meeting.id, event.endMs);
+  await requestCaptureStart(meeting, {
+    appReleaseStopEnabled: false,
+    calendarEndMs: event.endMs,
+  });
 }
 
 // A user-initiated stop. Suppresses lifecycle auto-restart until the call ends
 // (covers manually-started captures too) and clears lifecycle tracking.
 async function stopByUser(meeting: Meeting): Promise<void> {
   await meetingLifecycleNoteManualStop().catch(() => {});
+  suppressMeetingCalendarEvent(meeting);
   lifecycleMeetingId = null;
   lifecycleEventEndMs = null;
   await stopAndProcess(meeting);
@@ -1426,6 +1565,7 @@ async function stopAndDelete(meeting: Meeting): Promise<void> {
   processingMeetings.add(meeting.id);
   setMeetingState("error", null);
   await meetingLifecycleNoteManualStop().catch(() => {});
+  suppressMeetingCalendarEvent(meeting);
   lifecycleMeetingId = null;
   lifecycleEventEndMs = null;
   try {
@@ -1518,6 +1658,7 @@ export const meetingStore = {
   stopAutoDetect,
   acceptAutoDetect,
   startFromCalendarEvent,
+  skipUpcomingEvent,
   dismissAutoDetect,
   resetAutoDetectDismissal,
   acknowledgeReviewReady,

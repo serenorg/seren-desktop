@@ -1311,6 +1311,23 @@ pub fn meeting_lifecycle_note_manual_stop(
     Ok(())
 }
 
+/// Record that capture started outside the lifecycle auto-start path (manual
+/// button, tray, or calendar one-tap) so the existing auto-stop signals still
+/// protect it. `app_release_stop_enabled=false` defers AppReleased until a
+/// real gate-open tick is observed, avoiding premature stops before a call app
+/// has actually taken the mic.
+#[tauri::command]
+pub fn meeting_lifecycle_note_capture_started(
+    lifecycle: State<'_, std::sync::Mutex<LifecycleController>>,
+    app_release_stop_enabled: bool,
+) -> Result<(), String> {
+    lifecycle
+        .lock()
+        .map_err(|err| err.to_string())?
+        .note_capture_started(now_ms(), app_release_stop_enabled);
+    Ok(())
+}
+
 /// The frontend failed to start an auto-proposed capture — reset the controller
 /// to Idle so it can re-propose (no suppression).
 #[tauri::command]

@@ -2,6 +2,7 @@
 // ABOUTME: Shows the next events and offers one-tap recording with metadata.
 
 import { For, Show } from "solid-js";
+import { TrashIcon } from "@/components/recording/icons";
 import { formatTime } from "@/lib/meeting-format";
 import { meetingStore } from "@/stores/meeting.store";
 
@@ -59,6 +60,15 @@ export function UpcomingMeetings() {
                     }
                   >
                     Record
+                  </button>
+                  <button
+                    type="button"
+                    class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border bg-surface-1 text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground"
+                    aria-label={`Remove ${event.title} from upcoming recordings`}
+                    title="Remove from upcoming recordings"
+                    onClick={() => meetingStore.skipUpcomingEvent(event)}
+                  >
+                    <TrashIcon />
                   </button>
                 </div>
               )}

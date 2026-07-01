@@ -474,6 +474,18 @@ export function meetingLifecycleNoteManualStop(): Promise<void> {
   return invoke("meeting_lifecycle_note_manual_stop");
 }
 
+/**
+ * Tell the lifecycle a capture was started outside auto-start (manual/tray/
+ * calendar), so auto-stop still protects it.
+ */
+export function meetingLifecycleNoteCaptureStarted(
+  appReleaseStopEnabled = false,
+): Promise<void> {
+  return invoke("meeting_lifecycle_note_capture_started", {
+    appReleaseStopEnabled,
+  });
+}
+
 /** Tell the lifecycle the wiring failed to start a proposed capture. */
 export function meetingLifecycleNoteStartFailed(): Promise<void> {
   return invoke("meeting_lifecycle_note_start_failed");

@@ -61,6 +61,7 @@ const m = vi.hoisted(() => ({
     captureDiagnosticsJson: "{}",
     failureReason: null,
   })),
+  meetingLifecycleNoteCaptureStarted: vi.fn(async () => {}),
   updateMeetingStatus: vi.fn(async () => {}),
   listMeetings: vi.fn(async (): Promise<Meeting[]> => []),
   getTranscriptSegments: vi.fn(async () => []),
@@ -91,6 +92,7 @@ vi.mock("@/services/meetings", async (importOriginal) => ({
   createMeeting: m.createMeeting,
   startMeetingCapture: m.startMeetingCapture,
   stopMeetingCapture: m.stopMeetingCapture,
+  meetingLifecycleNoteCaptureStarted: m.meetingLifecycleNoteCaptureStarted,
   updateMeetingStatus: m.updateMeetingStatus,
   listMeetings: m.listMeetings,
   getTranscriptSegments: m.getTranscriptSegments,
@@ -161,6 +163,7 @@ describe("meetingStore native capture lifecycle (#2225)", () => {
     await meetingStore.requestCaptureStart(meeting());
 
     expect(m.startMeetingCapture).toHaveBeenCalledWith("m1");
+    expect(m.meetingLifecycleNoteCaptureStarted).toHaveBeenCalledWith(false);
     expect(m.setTrayRecording).toHaveBeenCalledWith(true);
   });
 
@@ -193,6 +196,7 @@ describe("meetingStore native capture lifecycle (#2225)", () => {
 
     expect(m.isMeetingCaptureActive).toHaveBeenCalledWith("active");
     expect(m.setTrayRecording).toHaveBeenCalledWith(true);
+    expect(m.meetingLifecycleNoteCaptureStarted).toHaveBeenCalledWith(false);
     expect(m.updateMeetingStatus).not.toHaveBeenCalledWith(
       "active",
       "failed",
