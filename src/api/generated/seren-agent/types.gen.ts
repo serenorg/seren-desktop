@@ -1267,6 +1267,88 @@ export type DataResponseCloudDeploymentSummary = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseManagedAgentDeploymentActivityReport = {
+    data: {
+        deployment: ManagedAgentActivityDeploymentSummary;
+        deployment_id: string;
+        generated_at: string;
+        organization_id: string;
+        runs: Array<ManagedAgentRunActivity>;
+        summary: ManagedAgentActivitySummary;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseManagedAgentDeploymentDetail = {
     data: {
         /**
@@ -1345,6 +1427,176 @@ export type DataResponseManagedAgentDeploymentDetail = {
          */
         tool_refs?: Array<AgentToolRef>;
         visibility: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseManagedAgentDeploymentHealthReport = {
+    data: {
+        deployment: ManagedAgentDeploymentHealth;
+        findings: Array<ManagedAgentHealthFinding>;
+        generated_at: string;
+        organization_id: string;
+        status: ManagedAgentHealthStatus;
+        storage?: null | ManagedAgentStorageHealth;
+        summary: ManagedAgentHealthSummary;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseManagedAgentDeploymentResources = {
+    data: {
+        capabilities: ManagedAgentCapabilityResources;
+        connectors: Array<ManagedAgentConnectorResource>;
+        deployment: ManagedAgentDeploymentResourceSummary;
+        deployment_id: string;
+        generated_at: string;
+        memory: ManagedAgentMemoryResources;
+        organization_id: string;
+        runtime: ManagedAgentRuntimeResources;
+        schedule: ManagedAgentScheduleResources;
+        storage: ManagedAgentObjectStorageResources;
+        tools: ManagedAgentToolResources;
     };
     pagination?: null | PaginationMeta;
 };
@@ -1508,6 +1760,89 @@ export type DataResponseManagedAgentDeploymentUpdatePreview = {
         deployment_id: string;
         eval_gate_status?: null | CloudDeploymentEvalGateStatus;
         proposed: ManagedAgentDeploymentDetail;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseManagedAgentHealthReport = {
+    data: {
+        deployments: Array<ManagedAgentDeploymentHealth>;
+        findings: Array<ManagedAgentHealthFinding>;
+        generated_at: string;
+        organization_id: string;
+        status: ManagedAgentHealthStatus;
+        storage: ManagedAgentStorageHealth;
+        summary: ManagedAgentHealthSummary;
     };
     pagination?: null | PaginationMeta;
 };
@@ -1953,7 +2288,57 @@ export type GrantedActions = {
     kind: 'specific';
 };
 
+export type ManagedAgentActivityDeploymentSummary = {
+    active_revision_id?: string | null;
+    agent_slug: string;
+    compute_backend: CloudDeploymentComputeBackend;
+    mode: CloudDeploymentMode;
+    name: string;
+    runtime_kind: CloudDeploymentRuntimeKind;
+    status: CloudDeploymentStatus;
+};
+
+export type ManagedAgentActivitySummary = {
+    artifact_count: number;
+    awaiting_approval_run_count: number;
+    blocked_run_count: number;
+    cancelled_run_count: number;
+    completed_run_count: number;
+    compute_cost_usd: string;
+    failed_run_count: number;
+    inference_cost_usd: string;
+    inference_input_tokens: number;
+    inference_output_tokens: number;
+    last_run_at?: string | null;
+    running_run_count: number;
+    total_run_count: number;
+};
+
 export type ManagedAgentApprovalPolicy = 'read_only' | 'allow_mutations';
+
+export type ManagedAgentCapabilityResources = {
+    audio_enabled: boolean;
+    browser_enabled: boolean;
+    code_execution_enabled: boolean;
+    eval_harness_enabled: boolean;
+    policy_configured: boolean;
+    realtime_sessions_enabled: boolean;
+    skills_enabled: boolean;
+    tool_error_recovery_enabled: boolean;
+    workflows_enabled: boolean;
+};
+
+export type ManagedAgentConnectorResource = {
+    connection_name: string;
+    connector_ref: string;
+    webhook_routes: Array<ManagedAgentConnectorWebhookResource>;
+};
+
+export type ManagedAgentConnectorWebhookResource = {
+    route_id: string;
+    seren_verification_header_name?: string | null;
+    url: string;
+};
 
 export type ManagedAgentConnectorWebhookRoute = {
     connection_name: string;
@@ -1962,6 +2347,15 @@ export type ManagedAgentConnectorWebhookRoute = {
     url: string;
     verification_header_name?: string | null;
     verification_token?: string | null;
+};
+
+export type ManagedAgentDeploymentActivityReport = {
+    deployment: ManagedAgentActivityDeploymentSummary;
+    deployment_id: string;
+    generated_at: string;
+    organization_id: string;
+    runs: Array<ManagedAgentRunActivity>;
+    summary: ManagedAgentActivitySummary;
 };
 
 export type ManagedAgentDeploymentDetail = {
@@ -2043,6 +2437,60 @@ export type ManagedAgentDeploymentDetail = {
     visibility: string;
 };
 
+export type ManagedAgentDeploymentHealth = {
+    active_revision_id?: string | null;
+    agent_slug: string;
+    approval_policy?: null | ManagedAgentApprovalPolicy;
+    compute_backend: CloudDeploymentComputeBackend;
+    created_at: string;
+    deployment_id: string;
+    last_error?: string | null;
+    mode: CloudDeploymentMode;
+    model_id?: string | null;
+    model_policy?: null | ManagedAgentModelPolicy;
+    name: string;
+    runtime_kind: CloudDeploymentRuntimeKind;
+    status: CloudDeploymentStatus;
+    template?: null | ManagedAgentTemplate;
+    updated_at: string;
+};
+
+export type ManagedAgentDeploymentHealthReport = {
+    deployment: ManagedAgentDeploymentHealth;
+    findings: Array<ManagedAgentHealthFinding>;
+    generated_at: string;
+    organization_id: string;
+    status: ManagedAgentHealthStatus;
+    storage?: null | ManagedAgentStorageHealth;
+    summary: ManagedAgentHealthSummary;
+};
+
+export type ManagedAgentDeploymentResourceSummary = {
+    active_revision_id?: string | null;
+    agent_slug: string;
+    approval_policy: ManagedAgentApprovalPolicy;
+    mode: CloudDeploymentMode;
+    model_policy: ManagedAgentModelPolicy;
+    name: string;
+    status: CloudDeploymentStatus;
+    template: ManagedAgentTemplate;
+    visibility: string;
+};
+
+export type ManagedAgentDeploymentResources = {
+    capabilities: ManagedAgentCapabilityResources;
+    connectors: Array<ManagedAgentConnectorResource>;
+    deployment: ManagedAgentDeploymentResourceSummary;
+    deployment_id: string;
+    generated_at: string;
+    memory: ManagedAgentMemoryResources;
+    organization_id: string;
+    runtime: ManagedAgentRuntimeResources;
+    schedule: ManagedAgentScheduleResources;
+    storage: ManagedAgentObjectStorageResources;
+    tools: ManagedAgentToolResources;
+};
+
 export type ManagedAgentDeploymentRevisionSummary = {
     agent_slug: string;
     approval_policy: ManagedAgentApprovalPolicy;
@@ -2087,17 +2535,122 @@ export type ManagedAgentFieldChange = {
     proposed_value: unknown;
 };
 
+export type ManagedAgentHealthFinding = {
+    category: string;
+    detail: string;
+    id: string;
+    recommendation: string;
+    severity: ManagedAgentHealthSeverity;
+    source: string;
+    title: string;
+};
+
+export type ManagedAgentHealthReport = {
+    deployments: Array<ManagedAgentDeploymentHealth>;
+    findings: Array<ManagedAgentHealthFinding>;
+    generated_at: string;
+    organization_id: string;
+    status: ManagedAgentHealthStatus;
+    storage: ManagedAgentStorageHealth;
+    summary: ManagedAgentHealthSummary;
+};
+
+export type ManagedAgentHealthSeverity = 'info' | 'warning' | 'critical';
+
+export type ManagedAgentHealthStatus = 'ok' | 'attention' | 'critical';
+
+export type ManagedAgentHealthSummary = {
+    building_deployment_count: number;
+    critical_count: number;
+    deployment_count: number;
+    failed_deployment_count: number;
+    info_count: number;
+    pending_deployment_count: number;
+    running_deployment_count: number;
+    stopped_deployment_count: number;
+    warning_count: number;
+};
+
 export type ManagedAgentLlmConnection = {
     provider: 'seren_private_models';
 };
 
+export type ManagedAgentMemoryResources = {
+    compaction_configured: boolean;
+    graph_memory_enabled: boolean;
+    knowledge_enabled: boolean;
+    policy_configured: boolean;
+    semantic_memory_enabled: boolean;
+    transcript_retention_days?: number | null;
+};
+
 export type ManagedAgentModelPolicy = 'fast' | 'balanced' | 'deep';
+
+export type ManagedAgentObjectStorageResources = {
+    available: boolean;
+    bucket_count: number;
+    configured: boolean;
+    delete_failed_count: number;
+    pending_upload_count: number;
+    scope: ManagedAgentResourceScope;
+    uploaded_bytes: number;
+    uploaded_object_count: number;
+};
 
 export type ManagedAgentPrivateOutputPolicy = 'control_plane' | 'private_session_database';
 
+export type ManagedAgentResourceScope = 'organization';
+
 export type ManagedAgentRevisionChangeKind = 'create' | 'update' | 'rollback';
 
+export type ManagedAgentRunActivity = {
+    artifact_count: number;
+    billed_duration_ms: number;
+    completed_at?: string | null;
+    compute_backend: CloudDeploymentComputeBackend;
+    compute_cost_usd: string;
+    execution_id: string;
+    execution_time_ms: number;
+    inference_cost_usd: string;
+    inference_input_tokens: number;
+    inference_output_tokens: number;
+    run_id: string;
+    run_name?: string | null;
+    source: string;
+    started_at: string;
+    status: string;
+    status_message?: string | null;
+    stop_reason?: string | null;
+    updated_at: string;
+};
+
 export type ManagedAgentRuntimeAdapter = 'seren_agent';
+
+export type ManagedAgentRuntimeResources = {
+    alert_policy_configured: boolean;
+    compute_backend: CloudDeploymentComputeBackend;
+    deployment_network_policy_configured: boolean;
+    filesystem_policy_configured: boolean;
+    llm_connection?: null | ManagedAgentLlmConnection;
+    model_id?: string | null;
+    network_policy_configured: boolean;
+    private_output_policy: ManagedAgentPrivateOutputPolicy;
+    process_policy_configured: boolean;
+    runtime_adapter: ManagedAgentRuntimeAdapter;
+    runtime_class?: null | AgentRuntimeClass;
+    runtime_kind: CloudDeploymentRuntimeKind;
+    runtime_policy_configured: boolean;
+    runtime_resources?: null | AgentResourcePolicy;
+    session_database?: null | ManagedAgentSessionDatabaseResource;
+};
+
+export type ManagedAgentScheduleResources = {
+    cron_schedule?: string | null;
+    cron_timezone?: string | null;
+    eval_gate_configured: boolean;
+    eval_gate_schedule_configured: boolean;
+    mode: CloudDeploymentMode;
+};
 
 export type ManagedAgentSessionDatabase = {
     /**
@@ -2122,6 +2675,33 @@ export type ManagedAgentSessionDatabaseEngine = 'postgres' | 'aurora_postgres';
 
 export type ManagedAgentSessionDatabaseProvider = 'direct_url' | 'seren_organization_database';
 
+export type ManagedAgentSessionDatabaseResource = {
+    database_name?: string | null;
+    engine: ManagedAgentSessionDatabaseEngine;
+    provider: ManagedAgentSessionDatabaseProvider;
+    url_secret_key_configured: boolean;
+};
+
+export type ManagedAgentStorageBucketHealth = {
+    display_name?: string | null;
+    id: string;
+    slug: string;
+    updated_at: string;
+    uploaded_bytes: number;
+    uploaded_object_count: number;
+};
+
+export type ManagedAgentStorageHealth = {
+    available: boolean;
+    bucket_count: number;
+    buckets: Array<ManagedAgentStorageBucketHealth>;
+    configured: boolean;
+    delete_failed_count: number;
+    pending_upload_count: number;
+    uploaded_bytes: number;
+    uploaded_object_count: number;
+};
+
 export type ManagedAgentSummary = {
     allowed_publisher_operations: Array<string>;
     allowed_remote_agent_origins?: Array<string>;
@@ -2140,6 +2720,16 @@ export type ManagedAgentSummary = {
 export type ManagedAgentTemplate = 'research_monitor' | 'workflow_agent';
 
 export type ManagedAgentToolPreset = 'live_data' | 'publisher_actions' | 'database';
+
+export type ManagedAgentToolResources = {
+    allowed_publisher_operations: Array<string>;
+    allowed_remote_agent_origins: Array<string>;
+    credential_count: number;
+    guardrail_count: number;
+    resolved_tools: Array<string>;
+    tool_presets: Array<ManagedAgentToolPreset>;
+    tool_ref_count: number;
+};
 
 /**
  * Structured condition reported on a managed deployment's status. Mirrors the
@@ -2554,6 +3144,95 @@ export type SerenAgentDeleteManagedDeploymentResponses = {
 
 export type SerenAgentDeleteManagedDeploymentResponse = SerenAgentDeleteManagedDeploymentResponses[keyof SerenAgentDeleteManagedDeploymentResponses];
 
+export type SerenAgentGetDeploymentActivityData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: {
+        /**
+         * Max run activity entries to return (default: 20, max: 100)
+         */
+        limit?: number;
+        /**
+         * Pagination offset
+         */
+        offset?: number;
+    };
+    url: '/deployments/{id}/activity';
+};
+
+export type SerenAgentGetDeploymentActivityErrors = {
+    /**
+     * Deployment is not managed by seren-agent
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenAgentGetDeploymentActivityResponses = {
+    /**
+     * Managed deployment activity retrieved
+     */
+    200: DataResponseManagedAgentDeploymentActivityReport;
+};
+
+export type SerenAgentGetDeploymentActivityResponse = SerenAgentGetDeploymentActivityResponses[keyof SerenAgentGetDeploymentActivityResponses];
+
+export type SerenAgentGetDeploymentHealthData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/health';
+};
+
+export type SerenAgentGetDeploymentHealthErrors = {
+    /**
+     * Deployment is not managed by seren-agent
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenAgentGetDeploymentHealthResponses = {
+    /**
+     * Managed deployment health retrieved
+     */
+    200: DataResponseManagedAgentDeploymentHealthReport;
+};
+
+export type SerenAgentGetDeploymentHealthResponse = SerenAgentGetDeploymentHealthResponses[keyof SerenAgentGetDeploymentHealthResponses];
+
 export type SerenAgentGetManagedDeploymentData = {
     body?: never;
     path: {
@@ -2798,6 +3477,46 @@ export type SerenAgentPreviewManagedDeploymentRollbackResponses = {
 
 export type SerenAgentPreviewManagedDeploymentRollbackResponse = SerenAgentPreviewManagedDeploymentRollbackResponses[keyof SerenAgentPreviewManagedDeploymentRollbackResponses];
 
+export type SerenAgentGetDeploymentResourcesData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/resources';
+};
+
+export type SerenAgentGetDeploymentResourcesErrors = {
+    /**
+     * Deployment is not managed by seren-agent
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenAgentGetDeploymentResourcesResponses = {
+    /**
+     * Managed deployment resources retrieved
+     */
+    200: DataResponseManagedAgentDeploymentResources;
+};
+
+export type SerenAgentGetDeploymentResourcesResponse = SerenAgentGetDeploymentResourcesResponses[keyof SerenAgentGetDeploymentResourcesResponses];
+
 export type SerenAgentStartManagedDeploymentData = {
     body?: never;
     path: {
@@ -2861,6 +3580,33 @@ export type SerenAgentStopManagedDeploymentResponses = {
 };
 
 export type SerenAgentStopManagedDeploymentResponse = SerenAgentStopManagedDeploymentResponses[keyof SerenAgentStopManagedDeploymentResponses];
+
+export type SerenAgentHealthData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/health';
+};
+
+export type SerenAgentHealthErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+};
+
+export type SerenAgentHealthResponses = {
+    /**
+     * Managed agent health retrieved
+     */
+    200: DataResponseManagedAgentHealthReport;
+};
+
+export type SerenAgentHealthResponse = SerenAgentHealthResponses[keyof SerenAgentHealthResponses];
 
 export type SerenAgentPrivateModelsData = {
     body?: never;

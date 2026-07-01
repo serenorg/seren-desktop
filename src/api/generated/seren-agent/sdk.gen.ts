@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponses, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentErrors, SerenAgentDeleteManagedDeploymentResponses, SerenAgentDeployData, SerenAgentDeployErrors, SerenAgentDeployResponses, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentErrors, SerenAgentGetManagedDeploymentResponses, SerenAgentListDeploymentsData, SerenAgentListDeploymentsErrors, SerenAgentListDeploymentsResponses, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsErrors, SerenAgentListManagedDeploymentRevisionsResponses, SerenAgentPatchManagedDeploymentFilesData, SerenAgentPatchManagedDeploymentFilesErrors, SerenAgentPatchManagedDeploymentFilesResponses, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackErrors, SerenAgentPreviewManagedDeploymentRollbackResponses, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateErrors, SerenAgentPreviewManagedDeploymentUpdateResponses, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponses, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentErrors, SerenAgentRollbackManagedDeploymentResponses, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentErrors, SerenAgentStartManagedDeploymentResponses, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentErrors, SerenAgentStopManagedDeploymentResponses, SerenAgentTestRunData, SerenAgentTestRunErrors, SerenAgentTestRunResponses, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentErrors, SerenAgentUpdateManagedDeploymentResponses } from './types.gen';
+import type { SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponses, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentErrors, SerenAgentDeleteManagedDeploymentResponses, SerenAgentDeployData, SerenAgentDeployErrors, SerenAgentDeployResponses, SerenAgentGetDeploymentActivityData, SerenAgentGetDeploymentActivityErrors, SerenAgentGetDeploymentActivityResponses, SerenAgentGetDeploymentHealthData, SerenAgentGetDeploymentHealthErrors, SerenAgentGetDeploymentHealthResponses, SerenAgentGetDeploymentResourcesData, SerenAgentGetDeploymentResourcesErrors, SerenAgentGetDeploymentResourcesResponses, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentErrors, SerenAgentGetManagedDeploymentResponses, SerenAgentHealthData, SerenAgentHealthErrors, SerenAgentHealthResponses, SerenAgentListDeploymentsData, SerenAgentListDeploymentsErrors, SerenAgentListDeploymentsResponses, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsErrors, SerenAgentListManagedDeploymentRevisionsResponses, SerenAgentPatchManagedDeploymentFilesData, SerenAgentPatchManagedDeploymentFilesErrors, SerenAgentPatchManagedDeploymentFilesResponses, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackErrors, SerenAgentPreviewManagedDeploymentRollbackResponses, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateErrors, SerenAgentPreviewManagedDeploymentUpdateResponses, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponses, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentErrors, SerenAgentRollbackManagedDeploymentResponses, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentErrors, SerenAgentStartManagedDeploymentResponses, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentErrors, SerenAgentStopManagedDeploymentResponses, SerenAgentTestRunData, SerenAgentTestRunErrors, SerenAgentTestRunResponses, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentErrors, SerenAgentUpdateManagedDeploymentResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -59,7 +59,31 @@ export const serenAgentDeleteManagedDeployment = <ThrowOnError extends boolean =
 });
 
 /**
+ * Get recent activity for a managed seren-agent deployment.
+ *
+ * Returns redacted managed-agent activity with run status, timing, cost, token, and artifact-count summaries. This endpoint omits prompt, output, and tool payload details; use seren-cloud run-history APIs for full runtime history.
+ */
+export const serenAgentGetDeploymentActivity = <ThrowOnError extends boolean = false>(options: Options<SerenAgentGetDeploymentActivityData, ThrowOnError>): RequestResult<SerenAgentGetDeploymentActivityResponses, SerenAgentGetDeploymentActivityErrors, ThrowOnError> => (options.client ?? client).get<SerenAgentGetDeploymentActivityResponses, SerenAgentGetDeploymentActivityErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/activity',
+    ...options
+});
+
+/**
+ * Get health for a managed seren-agent deployment.
+ *
+ * Returns a managed-agent health projection for a seren-agent deployment. Use seren-cloud deployment APIs for raw runtime state and run history.
+ */
+export const serenAgentGetDeploymentHealth = <ThrowOnError extends boolean = false>(options: Options<SerenAgentGetDeploymentHealthData, ThrowOnError>): RequestResult<SerenAgentGetDeploymentHealthResponses, SerenAgentGetDeploymentHealthErrors, ThrowOnError> => (options.client ?? client).get<SerenAgentGetDeploymentHealthResponses, SerenAgentGetDeploymentHealthErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/health',
+    ...options
+});
+
+/**
  * Get the resolved managed spec for a seren-agent deployment.
+ *
+ * Returns the resolved managed-agent configuration for a seren-agent deployment. Use seren-cloud deployment APIs for raw runtime operations.
  */
 export const serenAgentGetManagedDeployment = <ThrowOnError extends boolean = false>(options: Options<SerenAgentGetManagedDeploymentData, ThrowOnError>): RequestResult<SerenAgentGetManagedDeploymentResponses, SerenAgentGetManagedDeploymentErrors, ThrowOnError> => (options.client ?? client).get<SerenAgentGetManagedDeploymentResponses, SerenAgentGetManagedDeploymentErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -142,6 +166,17 @@ export const serenAgentPreviewManagedDeploymentRollback = <ThrowOnError extends 
 });
 
 /**
+ * Get platform resources available to a managed seren-agent deployment.
+ *
+ * Returns a redacted managed-agent resource inventory. This endpoint is a managed-agent projection; use seren-cloud deployment APIs for full runtime operations.
+ */
+export const serenAgentGetDeploymentResources = <ThrowOnError extends boolean = false>(options: Options<SerenAgentGetDeploymentResourcesData, ThrowOnError>): RequestResult<SerenAgentGetDeploymentResourcesResponses, SerenAgentGetDeploymentResourcesErrors, ThrowOnError> => (options.client ?? client).get<SerenAgentGetDeploymentResourcesResponses, SerenAgentGetDeploymentResourcesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/resources',
+    ...options
+});
+
+/**
  * Start a managed seren-agent deployment.
  */
 export const serenAgentStartManagedDeployment = <ThrowOnError extends boolean = false>(options: Options<SerenAgentStartManagedDeploymentData, ThrowOnError>): RequestResult<SerenAgentStartManagedDeploymentResponses, SerenAgentStartManagedDeploymentErrors, ThrowOnError> => (options.client ?? client).post<SerenAgentStartManagedDeploymentResponses, SerenAgentStartManagedDeploymentErrors, ThrowOnError>({
@@ -156,6 +191,17 @@ export const serenAgentStartManagedDeployment = <ThrowOnError extends boolean = 
 export const serenAgentStopManagedDeployment = <ThrowOnError extends boolean = false>(options: Options<SerenAgentStopManagedDeploymentData, ThrowOnError>): RequestResult<SerenAgentStopManagedDeploymentResponses, SerenAgentStopManagedDeploymentErrors, ThrowOnError> => (options.client ?? client).post<SerenAgentStopManagedDeploymentResponses, SerenAgentStopManagedDeploymentErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/deployments/{id}/stop',
+    ...options
+});
+
+/**
+ * Get organization-level health for managed seren-agent deployments.
+ *
+ * Returns an organization-level managed-agent health projection. Use seren-cloud deployment APIs for raw runtime state and run history.
+ */
+export const serenAgentHealth = <ThrowOnError extends boolean = false>(options?: Options<SerenAgentHealthData, ThrowOnError>): RequestResult<SerenAgentHealthResponses, SerenAgentHealthErrors, ThrowOnError> => (options?.client ?? client).get<SerenAgentHealthResponses, SerenAgentHealthErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/health',
     ...options
 });
 
