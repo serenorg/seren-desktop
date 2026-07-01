@@ -7,6 +7,7 @@ import {
   type EmployeeRunEventLike,
   type EmployeeRuntimeApi,
   runLiveStateLabel,
+  sanitizeEmployeeErrorText,
 } from "@seren/employees-core";
 
 function runEvent(
@@ -110,6 +111,53 @@ describe("employees-core sequenced run stream", () => {
     });
 
     expect(text).toBe("The employee hit an error while responding.");
+  });
+
+  it("sanitizes nested model-provider tool response errors for display", () => {
+    const rawError =
+      'LLM error: LLM publisher returned 400: Provider returned error - {"error":{"code":400,"message":"Provider returned error","metadata":{"previous_errors":[{"provider_name":"OpenAI","raw":"{\\n \\"error\\": {\\n \\"message\\": \\"No tool call found for function call output with call_id call_123.\\",\\n \\"type\\": \\"invalid_request_error\\"\\n }\\n}"}],"provider_name":"Azure"}}}';
+
+    expect(sanitizeEmployeeErrorText(rawError)).toBe(
+      "The employee could not complete this request because the model provider rejected the tool response.",
+    );
+
+    expect(
+      employeeTextFromConversationMessage({
+        role: "assistant",
+        events: [{ type: "error", message: rawError }],
+        run_summary: {
+          status: "failed",
+        },
+      }),
+    ).toBe(
+      "The employee could not complete this request because the model provider rejected the tool response.",
+    );
+  });
+
+  it("keeps ordinary human-readable failure messages", () => {
+    expect(sanitizeEmployeeErrorText("Approval was denied.")).toBe(
+      "Approval was denied.",
+    );
+  });
+
+  it("explains missing tool configuration separately from provider failures", () => {
+    expect(
+      sanitizeEmployeeErrorText(
+        "Error: seren client unavailable for publisher request tool",
+      ),
+    ).toBe(
+      "The employee is not configured to use the required tool. Enable live data or publisher tools for this employee to allow this request.",
+    );
+  });
+
+  it("explains missing publisher permissions separately from provider failures", () => {
+    expect(
+      sanitizeEmployeeErrorText(
+        "publisher operation is not allowed by allowed_publisher_operations",
+      ),
+    ).toBe(
+      "The employee is not allowed to use the required publisher operation. Enable the needed publisher permission for this employee.",
+    );
   });
 
   it("keeps normal text event precedence for non-failed conversation messages", () => {

@@ -106,6 +106,22 @@ export interface EmployeeMessageTextInput {
   run?: EmployeeMessageRunInput | null;
 }
 
+export interface EmployeeCapabilityInput {
+  modelPolicy?: string | null;
+  modelId?: string | null;
+  routingReason?: string | null;
+  toolPresets?: readonly string[] | null;
+  resolvedTools?: readonly string[] | null;
+  allowedPublisherOperations?: readonly string[] | null;
+  approvalPolicy?: string | null;
+}
+
+export interface EmployeeCapabilityBadge {
+  label: string;
+  tone: "neutral" | "success" | "warning";
+  title: string;
+}
+
 export type EmployeeOutputEventEnvelope =
   | {
       type: "text";
@@ -961,10 +977,102 @@ export function textFromOutputEvents(value: unknown): string {
 
 export function errorTextFromOutputEvents(value: unknown): string {
   return outputEventEnvelopes(value)
-    .map((event) => (event.type === "error" ? event.message : ""))
+    .map((event) =>
+      event.type === "error" ? sanitizeEmployeeErrorText(event.message) : "",
+    )
     .filter(Boolean)
+    .filter((message, index, messages) => messages.indexOf(message) === index)
     .join("\n")
     .trim();
+}
+
+const TOOL_RESPONSE_ERROR_TEXT =
+  "The configured model route could not process the tool response. Change this employee to a tool-capable model route in employee settings.";
+
+const MODEL_PROVIDER_ERROR_TEXT =
+  "The employee could not complete this request because the model provider rejected it.";
+
+const MODEL_TOOL_SUPPORT_ERROR_TEXT =
+  "The configured model does not support tool calls. Choose a tool-capable model route in employee settings.";
+
+const TOOL_CONFIGURATION_ERROR_TEXT =
+  "The required tool is not enabled for this employee. Enable live data or publisher tools in employee settings.";
+
+const TOOL_PERMISSION_ERROR_TEXT =
+  "This employee is not allowed to use that publisher operation. Update tool permissions in employee settings.";
+
+const GENERIC_EMPLOYEE_ERROR_TEXT =
+  "The employee could not complete this request.";
+
+export function sanitizeEmployeeErrorText(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const normalized = trimmed.toLowerCase();
+
+  if (looksLikeToolConfigurationError(normalized)) {
+    return TOOL_CONFIGURATION_ERROR_TEXT;
+  }
+
+  if (looksLikeToolPermissionError(normalized)) {
+    return TOOL_PERMISSION_ERROR_TEXT;
+  }
+
+  if (looksLikeModelToolSupportError(normalized)) {
+    return MODEL_TOOL_SUPPORT_ERROR_TEXT;
+  }
+
+  if (
+    normalized.includes("no tool call found for function call output") ||
+    normalized.includes("function_call_output") ||
+    normalized.includes("tool response could not be processed")
+  ) {
+    return TOOL_RESPONSE_ERROR_TEXT;
+  }
+
+  if (
+    normalized.includes("llm publisher returned") ||
+    normalized.includes("provider returned error") ||
+    normalized.includes("previous_errors") ||
+    normalized.includes("provider_name") ||
+    normalized.includes('"is_byok"')
+  ) {
+    return MODEL_PROVIDER_ERROR_TEXT;
+  }
+
+  if (looksLikeStructuredError(trimmed)) {
+    return GENERIC_EMPLOYEE_ERROR_TEXT;
+  }
+
+  return trimmed;
+}
+
+function looksLikeToolConfigurationError(value: string): boolean {
+  return (
+    value.includes("seren client unavailable") ||
+    value.includes("tool is not supported") ||
+    value.includes("tool_definitions") ||
+    value.includes("only use tools that are actually declared") ||
+    value.includes("unknown tool")
+  );
+}
+
+function looksLikeToolPermissionError(value: string): boolean {
+  return (
+    value.includes("publisher operation is not allowed") ||
+    value.includes("publisher operation not allowed") ||
+    value.includes("allowed_publisher_operations") ||
+    value.includes("publisher_tool_grants") ||
+    value.includes("not granted")
+  );
+}
+
+function looksLikeModelToolSupportError(value: string): boolean {
+  return (
+    (value.includes("tool") || value.includes("function")) &&
+    (value.includes("not support") ||
+      value.includes("does not support") ||
+      value.includes("unsupported"))
+  );
 }
 
 export function employeeTextFromConversationMessage(
@@ -976,14 +1084,26 @@ export function employeeTextFromConversationMessage(
   const eventText = textFromOutputEvents(message.events);
   const preferredEventText =
     errorText && isFailureStatus(status) ? errorText : eventText;
-  return (
+  const text =
     preferredEventText ||
     message.content?.trim() ||
     message.run_summary?.status_message?.trim() ||
     message.run?.status_message?.trim() ||
     assistantTextFromRunOutput(message.run) ||
-    ""
-  );
+    "";
+  return isFailureStatus(status) ? sanitizeEmployeeErrorText(text) : text;
+}
+
+function looksLikeStructuredError(value: string): boolean {
+  if (value.length > 500 && /[{[]/.test(value)) return true;
+  if (!value.startsWith("{") && !value.startsWith("[")) return false;
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object") return false;
+    return JSON.stringify(parsed).toLowerCase().includes('"error"');
+  } catch {
+    return false;
+  }
 }
 
 function assistantTextFromRunOutput(
@@ -1104,6 +1224,95 @@ export function timestampMs(value: string): number {
 
 export function isFailureStatus(status: string): boolean {
   return FAILURE_STATUSES.has(status);
+}
+
+export function employeeModelPolicyLabel(policy: string | null | undefined) {
+  if (policy === "fast") return "Fast model";
+  if (policy === "deep") return "Deep model";
+  return "Balanced model";
+}
+
+export function employeeApprovalPolicyLabel(policy: string | null | undefined) {
+  if (policy === "allow_mutations") return "Actions allowed";
+  return "Read-only tools";
+}
+
+export function employeeToolPresetLabel(preset: string): string {
+  if (preset === "live_data") return "Live data";
+  if (preset === "publisher_actions") return "Publisher actions";
+  if (preset === "database") return "Database";
+  return preset.replace(/_/g, " ");
+}
+
+export function employeeCapabilityBadges(
+  input: EmployeeCapabilityInput,
+): EmployeeCapabilityBadge[] {
+  const toolPresets = input.toolPresets ?? [];
+  const resolvedTools = input.resolvedTools ?? [];
+  const allowedOperations = input.allowedPublisherOperations ?? [];
+  const hasTools = resolvedTools.length > 0 || toolPresets.length > 0;
+  const badges: EmployeeCapabilityBadge[] = [
+    {
+      label: employeeModelPolicyLabel(input.modelPolicy),
+      tone: "neutral",
+      title: input.modelId
+        ? `Model ${input.modelId}`
+        : "Standard managed model policy",
+    },
+  ];
+
+  if (toolPresets.length > 0) {
+    badges.push(
+      ...toolPresets.map((preset) => ({
+        label: employeeToolPresetLabel(preset),
+        tone: "success" as const,
+        title: "Enabled employee tool preset",
+      })),
+    );
+  } else {
+    badges.push({
+      label: "No tool presets",
+      tone: "warning",
+      title:
+        "Enable a tool preset when the employee needs live data, publishers, or database access",
+    });
+  }
+
+  badges.push({
+    label: employeeApprovalPolicyLabel(input.approvalPolicy),
+    tone: input.approvalPolicy === "allow_mutations" ? "warning" : "neutral",
+    title:
+      input.approvalPolicy === "allow_mutations"
+        ? "This employee can run mutating publisher operations"
+        : "This employee can only run read-only publisher operations",
+  });
+
+  badges.push({
+    label: hasTools
+      ? `${resolvedTools.length || toolPresets.length} ${
+          resolvedTools.length === 1 || toolPresets.length === 1
+            ? "tool"
+            : "tools"
+        }`
+      : "No tools",
+    tone: hasTools ? "neutral" : "warning",
+    title: hasTools
+      ? `${resolvedTools.length || toolPresets.length} resolved employee tools`
+      : "No runtime tools are currently enabled",
+  });
+
+  if (allowedOperations.length > 0) {
+    badges.push({
+      label:
+        allowedOperations.length === 1
+          ? "1 publisher permission"
+          : `${allowedOperations.length} publisher permissions`,
+      tone: "neutral",
+      title: "Allowed publisher operation count",
+    });
+  }
+
+  return badges;
 }
 
 export function runStatusLabel(

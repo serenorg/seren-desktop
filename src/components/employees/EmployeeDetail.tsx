@@ -1,6 +1,7 @@
 // ABOUTME: Detail view for a single virtual employee - status, suspend/wake, manage actions.
 // ABOUTME: Replaces the main content area when an employee row is selected in the sidebar.
 
+import { employeeCapabilityBadges } from "@seren/employees-core";
 import {
   type Component,
   createMemo,
@@ -81,6 +82,16 @@ function statusPillClass(status: EmployeeStatus): string {
   if (status === "stopped")
     return "bg-slate-500/15 text-slate-300 border-slate-500/30";
   return "bg-sky-500/15 text-sky-300 border-sky-500/30";
+}
+
+function capabilityBadgeClass(tone: "neutral" | "success" | "warning") {
+  if (tone === "success") {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+  }
+  if (tone === "warning") {
+    return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+  }
+  return "border-border bg-surface-2 text-muted-foreground";
 }
 
 function primaryCtaLabel(mode: EmployeeMode): string {
@@ -201,6 +212,17 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     () => props.employeeId,
     async (id) => employeeStore.loadDetail(id),
   );
+  const capabilityBadges = createMemo(() => {
+    const employee = detail();
+    if (!employee) return [];
+    return employeeCapabilityBadges({
+      modelPolicy: employee.modelPolicy,
+      modelId: employee.modelId,
+      toolPresets: employee.toolPresets,
+      resolvedTools: employee.resolvedTools,
+      approvalPolicy: employee.approvalPolicy,
+    });
+  });
 
   // Surface only conditions that warrant operator attention.
   // `Accepted`/`Ready` are positive conditions whose healthy steady state is
@@ -658,6 +680,22 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     <span class="font-mono">{emp().cronSchedule}</span>
                   </Show>
                 </div>
+                <Show when={capabilityBadges().length > 0}>
+                  <div class="mt-2 flex flex-wrap gap-1.5">
+                    <For each={capabilityBadges()}>
+                      {(badge) => (
+                        <span
+                          class={`max-w-[190px] truncate rounded-full border px-2 py-0.5 text-[11px] font-medium ${capabilityBadgeClass(
+                            badge.tone,
+                          )}`}
+                          title={badge.title}
+                        >
+                          {badge.label}
+                        </span>
+                      )}
+                    </For>
+                  </div>
+                </Show>
                 <Show when={alertConditions().length > 0}>
                   <div class="mt-2 flex items-center gap-1.5 flex-wrap">
                     <For each={alertConditions()}>
