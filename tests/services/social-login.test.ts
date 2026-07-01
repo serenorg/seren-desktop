@@ -28,6 +28,7 @@ vi.mock("@/api", () => ({
 }));
 
 vi.mock("@/lib/tauri-bridge", () => ({
+  isTauriRuntime: vi.fn(() => true),
   storeDefaultOrganizationId: vi.fn(),
   storeRefreshToken: vi.fn(),
   storeToken: vi.fn(),
@@ -55,10 +56,18 @@ function jsonResponse(body: unknown): Response {
 
 async function waitForInvoke() {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    if (invokeMock.mock.calls.length > 0) return;
+    if (findStartSocialLoginCall()) return;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   throw new Error("start_social_login was not invoked");
+}
+
+function findStartSocialLoginCall():
+  | [string, { provider: string; authUrl: string }]
+  | undefined {
+  return invokeMock.mock.calls.find(
+    (call) => call[0] === "start_social_login",
+  ) as [string, { provider: string; authUrl: string }] | undefined;
 }
 
 async function s256(verifier: string): Promise<string> {
@@ -75,7 +84,12 @@ async function startAndCompleteSocialLogin(provider: "github" | "google") {
     return unlisten;
   });
 
-  invokeMock.mockResolvedValue(undefined);
+  invokeMock.mockImplementation(async (command) => {
+    if (command === "get_desktop_oauth_callback_url") {
+      return "http://127.0.0.1:49152/auth/callback";
+    }
+    return undefined;
+  });
   appFetchMock.mockResolvedValue(
     jsonResponse({
       access_token: "access-token",
@@ -93,10 +107,7 @@ async function startAndCompleteSocialLogin(provider: "github" | "google") {
   const promise = startSocialLogin(provider);
   await waitForInvoke();
 
-  const [, { authUrl }] = invokeMock.mock.calls[0] as [
-    string,
-    { provider: string; authUrl: string },
-  ];
+  const [, { authUrl }] = findStartSocialLoginCall()!;
   const authorizeUrl = new URL(authUrl);
   const state = authorizeUrl.searchParams.get("state");
   expect(state).toBeTruthy();
@@ -124,7 +135,7 @@ describe("social login", () => {
     expect(authorizeUrl.searchParams.get("client_id")).toBe("seren-desktop");
     expect(authorizeUrl.searchParams.get("response_type")).toBe("code");
     expect(authorizeUrl.searchParams.get("redirect_uri")).toBe(
-      "http://127.0.0.1:8787/auth/callback",
+      "http://127.0.0.1:49152/auth/callback",
     );
     expect(authorizeUrl.searchParams.get("provider")).toBe("github");
     expect(authorizeUrl.searchParams.get("code_challenge_method")).toBe("S256");
@@ -152,7 +163,7 @@ describe("social login", () => {
     expect(tokenBody.get("code")).toBe("auth-code");
     expect(tokenBody.get("client_id")).toBe("seren-desktop");
     expect(tokenBody.get("redirect_uri")).toBe(
-      "http://127.0.0.1:8787/auth/callback",
+      "http://127.0.0.1:49152/auth/callback",
     );
     expect(tokenBody.get("code_verifier")).toBeTruthy();
 
@@ -171,7 +182,12 @@ describe("social login", () => {
       callback = handler as SocialLoginCallback;
       return unlisten;
     });
-    invokeMock.mockResolvedValue(undefined);
+    invokeMock.mockImplementation(async (command) => {
+      if (command === "get_desktop_oauth_callback_url") {
+        return "http://127.0.0.1:49152/auth/callback";
+      }
+      return undefined;
+    });
 
     const promise = startSocialLogin("github");
     await waitForInvoke();
@@ -193,7 +209,10 @@ describe("social login", () => {
     let resolveInvoke: (() => void) | undefined;
     listenMock.mockResolvedValue(unlisten);
     invokeMock.mockImplementation(
-      () =>
+      (command) =>
+        command === "get_desktop_oauth_callback_url"
+          ? Promise.resolve("http://127.0.0.1:49152/auth/callback")
+          :
         new Promise<void>((resolve) => {
           resolveInvoke = resolve;
         }),
@@ -224,9 +243,12 @@ describe("social login", () => {
   it("propagates native string failures and unregisters the callback listener", async () => {
     const unlisten = vi.fn();
     listenMock.mockResolvedValue(unlisten);
-    invokeMock.mockRejectedValue(
-      "Social login unexpectedly routed through console.serendb.com",
-    );
+    invokeMock.mockImplementation(async (command) => {
+      if (command === "get_desktop_oauth_callback_url") {
+        return "http://127.0.0.1:49152/auth/callback";
+      }
+      throw "Social login unexpectedly routed through console.serendb.com";
+    });
 
     await expect(startSocialLogin("google")).rejects.toBe(
       "Social login unexpectedly routed through console.serendb.com",

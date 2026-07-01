@@ -3,10 +3,14 @@
 
 use serde::Serialize;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::thread;
 use tauri::{AppHandle, Emitter};
 use tiny_http::{Response, Server};
 use url::form_urlencoded;
+
+const DEFAULT_CALLBACK_PORT: u16 = 8787;
+static ACTIVE_CALLBACK_PORT: AtomicU16 = AtomicU16::new(DEFAULT_CALLBACK_PORT);
 
 #[derive(Clone, Debug, Default, Serialize)]
 struct SocialLoginCallbackPayload {
@@ -30,23 +34,34 @@ impl Drop for OAuthServerHandle {
 }
 
 /// Start the OAuth callback server.
-/// Listens on http://localhost:8787/oauth/callback
+/// Listens on the configured loopback port.
 /// Emits oauth-callback events to the frontend.
 /// Returns a handle that stops the server when dropped.
-pub fn start_oauth_callback_server(app_handle: AppHandle) -> Option<OAuthServerHandle> {
-    let server = match Server::http("127.0.0.1:8787") {
+pub fn start_oauth_callback_server(
+    app_handle: AppHandle,
+    validation_instance: bool,
+) -> Option<OAuthServerHandle> {
+    let bind_port = configured_callback_bind_port(validation_instance);
+    let server = match Server::http(("127.0.0.1", bind_port)) {
         Ok(s) => Arc::new(s),
         Err(e) => {
             log::error!("[OAuth Server] Failed to start: {}", e);
             return None;
         }
     };
+    let port = server
+        .server_addr()
+        .to_ip()
+        .map(|addr| addr.port())
+        .unwrap_or(bind_port);
+    ACTIVE_CALLBACK_PORT.store(port, Ordering::SeqCst);
 
     let thread_server = Arc::clone(&server);
 
     thread::spawn(move || {
         log::info!(
-            "[OAuth Server] Listening on http://localhost:8787/oauth/callback and /auth/callback"
+            "[OAuth Server] Listening on http://127.0.0.1:{}/oauth/callback and /auth/callback",
+            port
         );
 
         for request in thread_server.incoming_requests() {
@@ -112,8 +127,7 @@ pub fn start_oauth_callback_server(app_handle: AppHandle) -> Option<OAuthServerH
             } else if url.starts_with("/oauth/callback") {
                 log::info!("[OAuth Server] Received publisher OAuth callback: {}", url);
 
-                // Build full callback URL (localhost:8787 + path + query)
-                let callback_url = format!("http://localhost:8787{}", url);
+                let callback_url = format!("http://127.0.0.1:{}{}", port, url);
 
                 // Emit oauth-callback event to frontend
                 if let Err(e) = app_handle.emit("oauth-callback", callback_url.clone()) {
@@ -182,6 +196,33 @@ pub fn start_oauth_callback_server(app_handle: AppHandle) -> Option<OAuthServerH
     });
 
     Some(OAuthServerHandle { server })
+}
+
+pub fn active_callback_port() -> u16 {
+    ACTIVE_CALLBACK_PORT.load(Ordering::SeqCst)
+}
+
+pub fn active_auth_callback_url() -> String {
+    format!("http://127.0.0.1:{}/auth/callback", active_callback_port())
+}
+
+fn configured_callback_bind_port(validation_instance: bool) -> u16 {
+    if let Ok(raw) = std::env::var("SEREN_OAUTH_CALLBACK_PORT") {
+        match raw.parse::<u16>() {
+            Ok(port) => return port,
+            Err(error) => {
+                log::warn!(
+                    "[OAuth Server] Ignoring invalid SEREN_OAUTH_CALLBACK_PORT={raw}: {error}"
+                );
+            }
+        }
+    }
+
+    if validation_instance {
+        0
+    } else {
+        DEFAULT_CALLBACK_PORT
+    }
 }
 
 fn parse_social_login_callback(url: &str) -> SocialLoginCallbackPayload {

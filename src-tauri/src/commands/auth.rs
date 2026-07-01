@@ -1,12 +1,10 @@
 // ABOUTME: Host-side authentication commands for native SerenDB sign-in.
 // ABOUTME: Opens system-browser OAuth flows without exposing token material.
 
-use std::collections::HashMap;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
 const CLIENT_ID: &str = "seren-desktop";
-const REDIRECT_URI: &str = "http://127.0.0.1:8787/auth/callback";
 const CONSOLE_HOST: &str = "console.serendb.com";
 const CONSOLE_CLI_LOGIN_PATH: &str = "/login/cli";
 
@@ -16,7 +14,8 @@ pub async fn start_social_login(
     provider: String,
     auth_url: String,
 ) -> Result<(), String> {
-    let auth_url = validate_authorize_url(&auth_url, &provider)?;
+    let redirect_uri = crate::oauth_callback_server::active_auth_callback_url();
+    let auth_url = validate_authorize_url(&auth_url, &provider, &redirect_uri)?;
     let open_url = resolve_provider_redirect(&auth_url)
         .await?
         .unwrap_or_else(|| auth_url.to_string());
@@ -26,7 +25,11 @@ pub async fn start_social_login(
         .map_err(|e| format!("Failed to open browser: {}", e))
 }
 
-fn validate_authorize_url(auth_url: &str, provider: &str) -> Result<Url, String> {
+fn validate_authorize_url(
+    auth_url: &str,
+    provider: &str,
+    expected_redirect_uri: &str,
+) -> Result<Url, String> {
     if !matches!(provider, "github" | "google" | "microsoft") {
         return Err("Unsupported social login provider".to_string());
     }
@@ -44,23 +47,22 @@ fn validate_authorize_url(auth_url: &str, provider: &str) -> Result<Url, String>
         return Err("Unexpected social login authorize path".to_string());
     }
 
-    let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
-    if query.get("client_id").map(String::as_str) != Some(CLIENT_ID) {
+    if query_param(&url, "client_id").as_deref() != Some(CLIENT_ID) {
         return Err("Unexpected social login client_id".to_string());
     }
-    if query.get("response_type").map(String::as_str) != Some("code") {
+    if query_param(&url, "response_type").as_deref() != Some("code") {
         return Err("Unexpected social login response_type".to_string());
     }
-    if query.get("redirect_uri").map(String::as_str) != Some(REDIRECT_URI) {
+    if query_param(&url, "redirect_uri").as_deref() != Some(expected_redirect_uri) {
         return Err("Unexpected social login redirect_uri".to_string());
     }
-    if query.get("provider").map(String::as_str) != Some(provider) {
+    if query_param(&url, "provider").as_deref() != Some(provider) {
         return Err("Social login provider mismatch".to_string());
     }
-    if query.get("code_challenge_method").map(String::as_str) != Some("S256") {
+    if query_param(&url, "code_challenge_method").as_deref() != Some("S256") {
         return Err("Social login must use S256 PKCE".to_string());
     }
-    if !query.contains_key("code_challenge") || !query.contains_key("state") {
+    if query_param(&url, "code_challenge").is_none() || query_param(&url, "state").is_none() {
         return Err("Social login URL missing PKCE state".to_string());
     }
 
@@ -156,8 +158,24 @@ mod tests {
         validate_authorize_url(
             "https://api.serendb.com/oauth2/authorize?client_id=seren-desktop&response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%3A8787%2Fauth%2Fcallback&state=audit-state&code_challenge=audit-challenge&code_challenge_method=S256&provider=google",
             "google",
+            "http://127.0.0.1:8787/auth/callback",
         )
         .expect("valid authorize URL")
+    }
+
+    #[test]
+    fn accepts_authorize_url_with_dynamic_loopback_redirect() {
+        let url = validate_authorize_url(
+            "https://api.serendb.com/oauth2/authorize?client_id=seren-desktop&response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Fauth%2Fcallback&state=audit-state&code_challenge=audit-challenge&code_challenge_method=S256&provider=github",
+            "github",
+            "http://127.0.0.1:49152/auth/callback",
+        )
+        .expect("dynamic authorize URL");
+
+        assert_eq!(
+            query_param(&url, "redirect_uri").as_deref(),
+            Some("http://127.0.0.1:49152/auth/callback")
+        );
     }
 
     #[test]

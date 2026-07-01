@@ -15,6 +15,10 @@ import {
   humanizeOAuthProviderSlug,
 } from "@/lib/oauth-provider-resolution";
 import { getToken } from "@/lib/tauri-bridge";
+import {
+  getDesktopOAuthCallbackUrl,
+  getValidationRuntimeInfo,
+} from "@/services/oauth-callback";
 
 export interface PublisherOAuthProviderResolution {
   publisherSlug: string;
@@ -147,12 +151,15 @@ export async function connectPublisher(
   }
 
   // Use deep links on macOS/Linux where seren:// URL scheme is registered.
-  // Fall back to localhost callback server on Windows where deep links are
-  // unavailable due to WiX bundler issues (tauri-apps/tauri#10453).
+  // Fall back to the app-wide loopback server on Windows and validation
+  // builds, where sharing the production deep-link scheme would route the
+  // callback to the wrong app instance.
   const isWindows = navigator.userAgent.includes("Windows");
-  const redirectUri = isWindows
-    ? "http://localhost:8787/oauth/callback"
-    : "seren://oauth/callback";
+  const runtime = await getValidationRuntimeInfo();
+  const redirectUri =
+    isWindows || runtime.isValidation
+      ? await getDesktopOAuthCallbackUrl("/oauth/callback")
+      : "seren://oauth/callback";
 
   const authUrl = `${apiBase}/oauth/${providerSlug}/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
 

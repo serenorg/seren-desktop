@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SerenDesktop (Validation)",
+  "identifier": "com.serendb.desktop.validation",
+  "build": {
+    "beforeDevCommand": "pnpm prepare:mcp-servers && pnpm build:provider-runtime && pnpm dev --host 127.0.0.1 --port 1422",
+    "devUrl": "http://127.0.0.1:1422"
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["seren-validation"]
+      }
+    }
+  }
+}

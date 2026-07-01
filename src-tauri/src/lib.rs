@@ -63,6 +63,7 @@ mod support;
 mod sync;
 mod terminal;
 mod tray;
+mod validation;
 mod wallet;
 
 const AUTH_STORE: &str = "auth.json";
@@ -443,6 +444,28 @@ fn get_oauth_callback_port() -> Result<u16, String> {
     oauth::get_available_port()
 }
 
+#[tauri::command]
+fn get_desktop_oauth_callback_port() -> Result<u16, String> {
+    Ok(oauth_callback_server::active_callback_port())
+}
+
+#[tauri::command]
+fn get_desktop_oauth_callback_url(path: String) -> Result<String, String> {
+    let normalized_path = if path.starts_with('/') {
+        path
+    } else {
+        format!("/{path}")
+    };
+    if normalized_path != "/auth/callback" && normalized_path != "/oauth/callback" {
+        return Err("unsupported OAuth callback path".to_string());
+    }
+    Ok(format!(
+        "http://127.0.0.1:{}{}",
+        oauth_callback_server::active_callback_port(),
+        normalized_path
+    ))
+}
+
 #[derive(serde::Serialize)]
 struct BuildInfo {
     app_version: String,
@@ -513,6 +536,8 @@ fn os_version() -> String {
 pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
+
+    builder = builder.manage(validation::ValidationControlState::default());
 
     // Single-instance plugin MUST be registered BEFORE every other plugin so
     // its callback fires as early as possible when a second launch is
@@ -608,6 +633,22 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            let app_identifier = app.config().identifier.clone();
+            let validation_instance = validation::is_validation_identifier(&app_identifier);
+
+            #[cfg(feature = "validation")]
+            {
+                validation::assert_feature_identity(&app_identifier)?;
+                validation::configure_isolated_environment(app)?;
+            }
+
+            #[cfg(not(feature = "validation"))]
+            if validation_instance {
+                return Err(
+                    "validation bundle identity requires a build with --features validation".into(),
+                );
+            }
+
             // Inject the Seren Desktop host marker into the process environment.
             // Every child process (provider runtime, Claude/Codex/Gemini CLI,
             // skills spawned by those agents) inherits these vars and can
@@ -743,9 +784,16 @@ pub fn run() {
 
             // Start OAuth callback server in dev mode
             // Provides localhost:8787 redirect for OAuth without deep links
-            if let Some(handle) =
-                oauth_callback_server::start_oauth_callback_server(app.handle().clone())
-            {
+            if let Some(handle) = oauth_callback_server::start_oauth_callback_server(
+                app.handle().clone(),
+                validation_instance,
+            ) {
+                app.manage(handle);
+            }
+
+            #[cfg(feature = "validation")]
+            if validation_instance {
+                let handle = validation::start_control_server(app.handle().clone())?;
                 app.manage(handle);
             }
 
@@ -1054,6 +1102,11 @@ pub fn run() {
             commands::auth::start_social_login,
             start_oauth_browser_flow,
             get_oauth_callback_port,
+            get_desktop_oauth_callback_port,
+            get_desktop_oauth_callback_url,
+            validation::get_validation_runtime_info,
+            validation::validation_control_frontend_ready,
+            validation::validation_control_reply,
             // Build info
             get_build_info,
             // Desktop support reporting

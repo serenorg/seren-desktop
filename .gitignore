@@ -29,6 +29,7 @@ npm-debug.log*
 # Test coverage
 coverage/
 test-results/
+artifacts/
 
 # Installed skills (runtime data, not committed)
 /skills/
