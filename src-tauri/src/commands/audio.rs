@@ -1247,16 +1247,36 @@ pub fn meeting_autodetect() -> MeetingAutodetectResult {
     meeting_detection(activity)
 }
 
-/// Timestamp of the most recently persisted transcript segment for a meeting —
-/// the silence-backstop anchor. `None` when nothing has landed yet.
-fn select_last_segment_ms(conn: &Connection, meeting_id: &str) -> Result<Option<i64>> {
+#[derive(Debug, Clone, Copy, Default)]
+struct LifecycleSegmentTimes {
+    last_segment_ms: Option<i64>,
+    last_remote_segment_ms: Option<i64>,
+}
+
+/// Timestamps for lifecycle silence guards. `last_segment_ms` covers fully
+/// silent recordings; `last_remote_segment_ms` catches call-end runaways where
+/// local mic noise keeps producing "Me" transcript segments after the remote
+/// system channel has stopped.
+fn select_lifecycle_segment_times(
+    conn: &Connection,
+    meeting_id: &str,
+) -> Result<LifecycleSegmentTimes> {
     conn.query_row(
-        "SELECT MAX(created_at) FROM transcript_segments WHERE meeting_id = ?1",
-        params![meeting_id],
-        |row| row.get::<_, Option<i64>>(0),
+        "SELECT
+            MAX(created_at) AS last_segment_ms,
+            MAX(CASE WHEN speaker = ?2 THEN created_at END) AS last_remote_segment_ms
+         FROM transcript_segments
+         WHERE meeting_id = ?1",
+        params![meeting_id, Speaker::Them.as_str()],
+        |row| {
+            Ok(LifecycleSegmentTimes {
+                last_segment_ms: row.get::<_, Option<i64>>(0)?,
+                last_remote_segment_ms: row.get::<_, Option<i64>>(1)?,
+            })
+        },
     )
     .optional()
-    .map(Option::flatten)
+    .map(|times| times.unwrap_or_default())
 }
 
 /// Advance the auto-record lifecycle by one tick and return the action to
@@ -1278,16 +1298,17 @@ pub async fn meeting_lifecycle_tick(
     // only when both hold, so its presence is the gate.
     let gate_open = source_app.is_some();
 
-    let last_segment_ms = match active_meeting_id {
-        Some(id) => run_db(app, move |conn| select_last_segment_ms(conn, &id)).await?,
-        None => None,
+    let segment_times = match active_meeting_id {
+        Some(id) => run_db(app, move |conn| select_lifecycle_segment_times(conn, &id)).await?,
+        None => LifecycleSegmentTimes::default(),
     };
 
     let signal = LifecycleSignal {
         now_ms: now_ms(),
         gate_open,
         source_app,
-        last_segment_ms,
+        last_segment_ms: segment_times.last_segment_ms,
+        last_remote_segment_ms: segment_times.last_remote_segment_ms,
         calendar_end_ms,
     };
 
@@ -2374,6 +2395,42 @@ mod tests {
         assert_eq!(segments[0].speaker_label, None);
         assert_eq!(segments[0].speaker_source, SpeakerSource::Channel);
         assert_eq!(segments[2].status, SegmentStatus::Gap);
+    }
+
+    #[test]
+    fn lifecycle_segment_times_keep_remote_anchor_separate() {
+        let conn = setup();
+        insert_meeting(&conn, meeting("meeting-1")).unwrap();
+
+        for (seq, speaker, created_at) in [
+            (0, Speaker::Them, 10),
+            (1, Speaker::Me, 20),
+            (2, Speaker::Them, 30),
+            (3, Speaker::Me, 40),
+        ] {
+            insert_transcript_segment(
+                &conn,
+                NewTranscriptSegment {
+                    id: format!("segment-{seq}"),
+                    meeting_id: "meeting-1".to_string(),
+                    seq,
+                    speaker,
+                    text: format!("text {seq}"),
+                    start_ms: seq * 100,
+                    end_ms: seq * 100 + 50,
+                    status: SegmentStatus::Ok,
+                    speaker_label: None,
+                    speaker_source: SpeakerSource::Channel,
+                    created_at,
+                },
+            )
+            .unwrap();
+        }
+
+        let times = select_lifecycle_segment_times(&conn, "meeting-1").unwrap();
+
+        assert_eq!(times.last_segment_ms, Some(40));
+        assert_eq!(times.last_remote_segment_ms, Some(30));
     }
 
     #[test]
