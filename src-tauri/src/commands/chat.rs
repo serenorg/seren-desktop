@@ -2,6 +2,7 @@
 // ABOUTME: Handles CRUD operations for conversations and messages in SQLite.
 
 use crate::commands::provider_runtime::DERIVED_KIND_CASE_SQL;
+use crate::services::conversation_index::{self, IndexableMessage, open_index_db};
 use crate::services::database::{
     DbPool, PersistedMessage, enqueue_sync_tombstone, init_db, mark_sync_upsert,
     save_message_record,
@@ -10,6 +11,92 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
+
+fn load_indexable_message_meta(
+    conn: &Connection,
+    conversation_id: &str,
+) -> rusqlite::Result<Option<(String, Option<String>, Option<String>, Option<String>, bool)>> {
+    let sql = format!(
+        "SELECT {case} AS derived_kind,
+                c.title,
+                CASE WHEN ({case}) = 'agent'
+                     THEN COALESCE(c.agent_type, psr.provider)
+                     ELSE c.agent_type END AS agent_type,
+                COALESCE(c.project_root, c.agent_cwd, c.project_id) AS project_root,
+                c.is_archived
+         FROM conversations c
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         WHERE c.id = ?1",
+        case = DERIVED_KIND_CASE_SQL,
+    );
+    conn.query_row(&sql, params![conversation_id], |row| {
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get::<_, i32>(4)? != 0,
+        ))
+    })
+    .optional()
+}
+
+fn index_message_best_effort(app: &AppHandle, message: &IndexableMessage) {
+    match open_index_db(app).and_then(|conn| conversation_index::reindex_message(&conn, message)) {
+        Ok(_) => {}
+        Err(err) => log::warn!(
+            "[ConversationIndex] Failed to index message {}: {}",
+            message.message_id,
+            err
+        ),
+    }
+}
+
+fn delete_conversation_index_best_effort(app: &AppHandle, conversation_id: &str) {
+    match open_index_db(app)
+        .and_then(|conn| conversation_index::delete_conversation_chunks(&conn, conversation_id))
+    {
+        Ok(_) => {}
+        Err(err) => log::warn!(
+            "[ConversationIndex] Failed to delete index for conversation {}: {}",
+            conversation_id,
+            err
+        ),
+    }
+}
+
+fn clear_conversation_index_best_effort(app: &AppHandle) {
+    match open_index_db(app).and_then(|conn| conversation_index::clear_all_chunks(&conn)) {
+        Ok(_) => {}
+        Err(err) => log::warn!(
+            "[ConversationIndex] Failed to clear conversation index: {}",
+            err
+        ),
+    }
+}
+
+async fn refresh_conversation_index_meta_best_effort(
+    app: AppHandle,
+    conversation_id: String,
+    title: Option<String>,
+    is_archived: Option<bool>,
+) {
+    match open_index_db(&app).and_then(|conn| {
+        conversation_index::update_conversation_meta(
+            &conn,
+            &conversation_id,
+            title.as_deref(),
+            is_archived,
+        )
+    }) {
+        Ok(_) => {}
+        Err(err) => log::warn!(
+            "[ConversationIndex] Failed to refresh index metadata for conversation {}: {}",
+            conversation_id,
+            err
+        ),
+    }
+}
 
 pub(crate) fn delete_conversation_records(
     conn: &Connection,
@@ -378,7 +465,9 @@ pub async fn update_conversation(
     selected_model: Option<String>,
     selected_provider: Option<String>,
 ) -> Result<(), String> {
-    run_db(app, move |conn| {
+    let index_id = id.clone();
+    let index_title = title.clone();
+    run_db(app.clone(), move |conn| {
         if let Some(t) = title {
             conn.execute(
                 "UPDATE conversations SET title = ?1 WHERE id = ?2",
@@ -402,12 +491,15 @@ pub async fn update_conversation(
         }
         Ok(())
     })
-    .await
+    .await?;
+    refresh_conversation_index_meta_best_effort(app, index_id, index_title, None).await;
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn archive_conversation(app: AppHandle, id: String) -> Result<(), String> {
-    run_db(app, move |conn| {
+    let index_id = id.clone();
+    run_db(app.clone(), move |conn| {
         conn.execute(
             "UPDATE conversations SET is_archived = 1 WHERE id = ?1",
             params![id],
@@ -415,16 +507,21 @@ pub async fn archive_conversation(app: AppHandle, id: String) -> Result<(), Stri
         mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
-    .await
+    .await?;
+    refresh_conversation_index_meta_best_effort(app, index_id, None, Some(true)).await;
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn delete_conversation(app: AppHandle, id: String) -> Result<(), String> {
-    run_db(app, move |conn| {
+    let index_id = id.clone();
+    run_db(app.clone(), move |conn| {
         delete_conversation_records(conn, &[id])?;
         Ok(())
     })
-    .await
+    .await?;
+    delete_conversation_index_best_effort(&app, &index_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -432,16 +529,20 @@ pub async fn delete_conversations_by_employee(
     app: AppHandle,
     employee_id: String,
 ) -> Result<i64, String> {
-    run_db(app, move |conn| {
+    let (deleted, conversation_ids) = run_db(app.clone(), move |conn| {
         let mut stmt = conn.prepare("SELECT id FROM conversations WHERE employee_id = ?1")?;
         let conversation_ids = stmt
             .query_map(params![employee_id], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         drop(stmt);
         let deleted = delete_conversation_records(conn, &conversation_ids)?;
-        Ok(deleted as i64)
+        Ok((deleted as i64, conversation_ids))
     })
-    .await
+    .await?;
+    for conversation_id in &conversation_ids {
+        delete_conversation_index_best_effort(&app, conversation_id);
+    }
+    Ok(deleted)
 }
 
 // ============================================================================
@@ -600,7 +701,9 @@ pub async fn set_agent_conversation_title(
     id: String,
     title: String,
 ) -> Result<(), String> {
-    run_db(app, move |conn| {
+    let index_id = id.clone();
+    let index_title = title.clone();
+    run_db(app.clone(), move |conn| {
         conn.execute(
             "UPDATE conversations SET title = ?1 WHERE id = ?2 AND kind = 'agent'",
             params![title, id],
@@ -608,7 +711,9 @@ pub async fn set_agent_conversation_title(
         mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
-    .await
+    .await?;
+    refresh_conversation_index_meta_best_effort(app, index_id, Some(index_title), None).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -758,7 +863,8 @@ pub async fn set_agent_conversation_metadata(
 
 #[tauri::command]
 pub async fn archive_agent_conversation(app: AppHandle, id: String) -> Result<(), String> {
-    run_db(app, move |conn| {
+    let index_id = id.clone();
+    run_db(app.clone(), move |conn| {
         conn.execute(
             "UPDATE conversations SET is_archived = 1 WHERE id = ?1 AND kind = 'agent'",
             params![id],
@@ -766,7 +872,9 @@ pub async fn archive_agent_conversation(app: AppHandle, id: String) -> Result<()
         mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
     })
-    .await
+    .await?;
+    refresh_conversation_index_meta_best_effort(app, index_id, None, Some(true)).await;
+    Ok(())
 }
 
 // ============================================================================
@@ -785,22 +893,39 @@ pub async fn save_message(
     metadata: Option<String>,
     provider: Option<String>,
 ) -> Result<(), String> {
-    run_db(app, move |conn| {
-        save_message_record(
-            conn,
-            &PersistedMessage {
-                id,
-                conversation_id,
-                role,
-                content,
-                model,
-                timestamp,
-                metadata,
-                provider,
+    let indexable = run_db(app.clone(), move |conn| {
+        let message = PersistedMessage {
+            id,
+            conversation_id,
+            role,
+            content,
+            model,
+            timestamp,
+            metadata,
+            provider,
+        };
+        save_message_record(conn, &message)?;
+        let meta = load_indexable_message_meta(conn, &message.conversation_id)?;
+        Ok(meta.map(
+            |(kind, title, agent_type, project_root, is_archived)| IndexableMessage {
+                message_id: message.id,
+                conversation_id: message.conversation_id,
+                kind,
+                role: message.role,
+                title,
+                agent_type,
+                project_root,
+                is_archived,
+                timestamp: message.timestamp,
+                content: message.content,
             },
-        )
+        ))
     })
-    .await
+    .await?;
+    if let Some(message) = indexable {
+        index_message_best_effort(&app, &message);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -846,7 +971,8 @@ pub async fn clear_conversation_history(
     app: AppHandle,
     conversation_id: String,
 ) -> Result<(), String> {
-    run_db(app, move |conn| {
+    let index_id = conversation_id.clone();
+    run_db(app.clone(), move |conn| {
         let mut event_stmt =
             conn.prepare("SELECT id FROM message_events WHERE conversation_id = ?1")?;
         let event_ids = event_stmt
@@ -875,12 +1001,14 @@ pub async fn clear_conversation_history(
         )?;
         Ok(())
     })
-    .await
+    .await?;
+    delete_conversation_index_best_effort(&app, &index_id);
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn clear_all_history(app: AppHandle) -> Result<(), String> {
-    run_db(app, move |conn| {
+    run_db(app.clone(), move |conn| {
         let conversation_ids = conn
             .prepare("SELECT id FROM conversations")?
             .query_map([], |row| row.get::<_, String>(0))?
@@ -908,14 +1036,16 @@ pub async fn clear_all_history(app: AppHandle) -> Result<(), String> {
         conn.execute("DELETE FROM conversations", [])?;
         Ok(())
     })
-    .await
+    .await?;
+    clear_conversation_index_best_effort(&app);
+    Ok(())
 }
 
 // ============================================================================
 // Helper
 // ============================================================================
 
-async fn run_db<T>(
+pub(crate) async fn run_db<T>(
     app: AppHandle,
     task: impl FnOnce(&Connection) -> rusqlite::Result<T> + Send + 'static,
 ) -> Result<T, String>

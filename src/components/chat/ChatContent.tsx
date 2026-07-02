@@ -48,6 +48,7 @@ import {
   toToolCallEvent,
 } from "@/lib/group-tool-calls";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
+import { scrollMessageIntoView } from "@/lib/message-scroll";
 import { isPaymentError } from "@/lib/payment-errors";
 import {
   computeProviderBoundaries,
@@ -103,6 +104,7 @@ import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
+import { threadStore } from "@/stores/thread.store";
 import { workspaceStore } from "@/stores/workspace.store";
 import {
   isRetryableWorker,
@@ -712,6 +714,20 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     void streamingThinking();
     void Object.keys(htmlCache).length;
     requestAnimationFrame(scrollToBottom);
+  });
+
+  createEffect(() => {
+    if (!isPaneActive()) return;
+    const target = threadStore.pendingMessageScroll;
+    const id = conversationId();
+    if (!target || target.conversationId !== id) return;
+
+    void conversationMessages().length;
+    requestAnimationFrame(() => {
+      if (scrollMessageIntoView(messagesRef, target.messageId)) {
+        threadStore.clearMessageScroll();
+      }
+    });
   });
 
   onCleanup(() => {
@@ -1516,11 +1532,22 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 // Render grouped tool calls
                 if (item.type === "tool_group") {
                   return (
-                    <ToolCallGroup
-                      groupId={item.id}
-                      toolCalls={item.toolCalls}
-                      isComplete={true}
-                    />
+                    <>
+                      <For each={item.messages}>
+                        {(groupMessage) => (
+                          <span
+                            aria-hidden="true"
+                            class="block h-0 overflow-hidden"
+                            data-message-id={groupMessage.id}
+                          />
+                        )}
+                      </For>
+                      <ToolCallGroup
+                        groupId={item.id}
+                        toolCalls={item.toolCalls}
+                        isComplete={true}
+                      />
+                    </>
                   );
                 }
 
@@ -1533,7 +1560,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 // Render individual tool call card (for 1-2 tool calls)
                 if (message.type === "tool_call" && message.toolCall) {
                   return (
-                    <div class="chat-tool-row px-5 py-2">
+                    <div
+                      class="chat-tool-row px-5 py-2"
+                      data-message-id={message.id}
+                    >
                       <ToolCallCard
                         toolCall={toToolCallEvent(message.toolCall)}
                       />
@@ -1589,6 +1619,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                     </Show>
                     <article
                       class={`chat-message-row group/msg px-5 py-4 border-b border-surface-2 last:border-b-0 [contain:layout] ${message.role === "user" ? "bg-surface-1" : "bg-transparent"}`}
+                      data-message-id={message.id}
                     >
                       <Show when={message.images && message.images.length > 0}>
                         <MessageImages images={message.images ?? []} />

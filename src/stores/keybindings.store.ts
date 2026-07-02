@@ -28,6 +28,7 @@ export type KeybindingActionId =
   | "global.newChat"
   | "global.newTerminal"
   | "global.searchMeetings"
+  | "global.searchHistory"
   | "workspace.next"
   | "workspace.previous"
   | "workspace.switch1"
@@ -169,6 +170,13 @@ const keybindingDefinitions = [
     label: "Search transcripts",
     description: "Open the meetings panel and focus transcript search.",
     defaults: [{ sequence: [{ mod: true, shift: true, key: "f" }] }],
+  },
+  {
+    id: "global.searchHistory",
+    group: "Global",
+    label: "Search history",
+    description: "Open the conversation history search overlay.",
+    defaults: [{ sequence: [{ mod: true, shift: true, key: "h" }] }],
   },
   {
     id: "workspace.next",

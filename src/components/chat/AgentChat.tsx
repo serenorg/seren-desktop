@@ -50,6 +50,7 @@ import {
   isDocreaderMime,
   pickAndReadAttachments,
 } from "@/lib/images/attachments";
+import { scrollMessageIntoView } from "@/lib/message-scroll";
 import type { Attachment } from "@/lib/providers/types";
 import {
   getModelDisplayName,
@@ -658,6 +659,20 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     agentStore.pendingPermissions;
     agentStore.pendingDiffProposals;
     requestAnimationFrame(scrollToBottom);
+  });
+
+  createEffect(() => {
+    if (!isPaneActive()) return;
+    const target = threadStore.pendingMessageScroll;
+    const thread = activeAgentThread();
+    if (!target || target.conversationId !== thread?.id) return;
+
+    void threadMessages().length;
+    requestAnimationFrame(() => {
+      if (scrollMessageIntoView(messagesRef, target.messageId)) {
+        threadStore.clearMessageScroll();
+      }
+    });
   });
 
   // Clear "awaiting login" banner once a session starts
@@ -1356,6 +1371,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           <article
             class="chat-message-row group/msg relative px-5 py-4 bg-surface-1 border-b border-surface-2 [contain:layout]"
             classList={{ "border-l-2 border-l-destructive": showTurnError() }}
+            data-message-id={message.id}
           >
             <Show when={message.docNames?.length}>
               <div class="flex flex-wrap gap-1.5 mb-2">
@@ -1444,7 +1460,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           }
         };
         return (
-          <article class="chat-message-row group/msg relative px-5 py-4 border-b border-surface-2 [contain:layout]">
+          <article
+            class="chat-message-row group/msg relative px-5 py-4 border-b border-surface-2 [contain:layout]"
+            data-message-id={message.id}
+          >
             <Show when={pairedAttribution()}>
               <div
                 class="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground"
@@ -1540,21 +1559,24 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       case "thought":
         return (
-          <article class="chat-message-row px-5 py-3 border-b border-surface-2">
+          <article
+            class="chat-message-row px-5 py-3 border-b border-surface-2"
+            data-message-id={message.id}
+          >
             <ThinkingBlock thinking={message.content} />
           </article>
         );
 
       case "tool":
         return message.toolCall ? (
-          <div class="chat-tool-row px-5 py-2">
+          <div class="chat-tool-row px-5 py-2" data-message-id={message.id}>
             <ToolCallCard toolCall={message.toolCall} />
           </div>
         ) : null;
 
       case "diff":
         return message.diff ? (
-          <div class="chat-tool-row px-5 py-2">
+          <div class="chat-tool-row px-5 py-2" data-message-id={message.id}>
             <DiffCard diff={message.diff} onViewInEditor={props.onViewDiff} />
           </div>
         ) : null;
@@ -1566,6 +1588,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           <div
             class="chat-message-row px-5 py-2 border-b border-surface-2 flex items-center gap-2"
             data-testid="paired-handoff"
+            data-message-id={message.id}
           >
             <span class="text-[12px]" aria-hidden="true">
               {"\u{1F91D}"}
@@ -1578,7 +1601,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       case "error":
         return (
-          <article class="chat-message-row px-5 py-3 border-b border-surface-2">
+          <article
+            class="chat-message-row px-5 py-3 border-b border-surface-2"
+            data-message-id={message.id}
+          >
             <div
               class={`px-3 py-2 border rounded-md text-sm ${
                 isAuthError(message.content)
@@ -1818,11 +1844,22 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 index() === groupConsecutiveToolCalls().length - 1;
               if (item.type === "tool_group") {
                 return (
-                  <ToolCallGroup
-                    groupId={item.id}
-                    toolCalls={item.toolCalls}
-                    isComplete={true}
-                  />
+                  <>
+                    <For each={item.messages}>
+                      {(groupMessage) => (
+                        <span
+                          aria-hidden="true"
+                          class="block h-0 overflow-hidden"
+                          data-message-id={groupMessage.id}
+                        />
+                      )}
+                    </For>
+                    <ToolCallGroup
+                      groupId={item.id}
+                      toolCalls={item.toolCalls}
+                      isComplete={true}
+                    />
+                  </>
                 );
               }
               return renderMessage(item.message, isLast());

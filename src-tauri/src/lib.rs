@@ -13,6 +13,7 @@ pub mod commands {
     pub mod claude_memory;
     pub mod cli_installer;
     pub mod context_intelligence;
+    pub mod conversation_search;
     pub mod employees_archive;
     pub mod gateway_http;
     pub mod history_sync;
@@ -31,6 +32,7 @@ pub mod commands {
 pub mod services {
     pub mod chunker;
     pub mod context_intelligence;
+    pub mod conversation_index;
     pub mod database;
     pub mod history_sync;
     pub mod indexer;
@@ -606,25 +608,28 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_deep_link::init());
     }
 
-    builder = builder
-        .manage(mcp::McpState::new())
-        .manage(mcp::HttpMcpState::new())
-        .manage(orchestrator::service::OrchestratorState::new())
-        .manage(audio::pipeline::CaptureRegistry::default())
-        .manage(std::sync::Mutex::new(
-            audio::lifecycle::LifecycleController::new(audio::lifecycle::LifecycleConfig::default()),
-        ))
-        .manage(orchestrator::eval::EvalState::new())
-        .manage(orchestrator::tool_bridge::ToolResultBridge::new())
-        .manage(provider_runtime::ProviderRuntimeState::new())
-        .manage(std::sync::Arc::new(
-            commands::updater::ShutdownGuard::default(),
-        ))
-        .manage(services::database::WalCheckpointTask::default())
-        .manage(services::history_sync::HistorySyncLock::default())
-        .manage(messaging::MessagingState::new())
-        .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
-            as polymarket::commands::PolymarketWsState);
+    builder =
+        builder
+            .manage(mcp::McpState::new())
+            .manage(mcp::HttpMcpState::new())
+            .manage(orchestrator::service::OrchestratorState::new())
+            .manage(audio::pipeline::CaptureRegistry::default())
+            .manage(std::sync::Mutex::new(
+                audio::lifecycle::LifecycleController::new(
+                    audio::lifecycle::LifecycleConfig::default(),
+                ),
+            ))
+            .manage(orchestrator::eval::EvalState::new())
+            .manage(orchestrator::tool_bridge::ToolResultBridge::new())
+            .manage(provider_runtime::ProviderRuntimeState::new())
+            .manage(std::sync::Arc::new(
+                commands::updater::ShutdownGuard::default(),
+            ))
+            .manage(services::database::WalCheckpointTask::default())
+            .manage(services::history_sync::HistorySyncLock::default())
+            .manage(messaging::MessagingState::new())
+            .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
+                as polymarket::commands::PolymarketWsState);
 
     builder
         .on_menu_event(|app, event| {
@@ -1128,6 +1133,13 @@ pub fn run() {
             commands::transcript_search::search_transcripts_like,
             commands::transcript_search::indexed_transcript_meeting_ids,
             commands::transcript_search::delete_meeting_transcript_index,
+            commands::conversation_search::search_conversations_fts,
+            commands::conversation_search::search_conversations,
+            commands::conversation_search::index_conversation_embeddings,
+            commands::conversation_search::unembedded_conversation_chunks,
+            commands::conversation_search::delete_conversation_index,
+            commands::conversation_search::update_conversation_index_meta,
+            commands::conversation_search::backfill_conversation_fts,
             commands::indexing::discover_project_files,
             commands::indexing::chunk_file,
             commands::indexing::estimate_indexing,

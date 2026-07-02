@@ -15,7 +15,7 @@
       "!**/.worktrees/**/*",
       "!**/src/api/generated/**/*",
       "!**/src-tauri/target/**/*",
-      "!**/mcp-servers/**"
+      "!**/mcp-servers"
     ]
   },
   "formatter": {

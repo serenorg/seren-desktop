@@ -16,7 +16,8 @@ export type ShortcutAction =
   | "global.openFiles"
   | "global.newChat"
   | "global.newTerminal"
-  | "global.searchMeetings";
+  | "global.searchMeetings"
+  | "global.searchHistory";
 
 /**
  * A shortcut handler may return `false` to signal it did not consume the key,
@@ -40,6 +41,7 @@ const GLOBAL_SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
   "global.newChat",
   "global.newTerminal",
   "global.searchMeetings",
+  "global.searchHistory",
 ];
 
 /**
@@ -150,7 +152,11 @@ class ShortcutManager {
       return;
     }
 
-    if (isInputField && result.action !== "global.closePanel") {
+    if (
+      isInputField &&
+      result.action !== "global.closePanel" &&
+      result.action !== "global.searchHistory"
+    ) {
       return;
     }
 
