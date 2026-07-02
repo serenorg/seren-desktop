@@ -6,6 +6,7 @@ import {
   createEffect,
   createSignal,
   ErrorBoundary,
+  type JSX,
   Match,
   on,
   onCleanup,
@@ -140,6 +141,90 @@ const PERSISTABLE_VIEWS: ReadonlySet<NonNullable<SlidePanelView>> = new Set([
   "meetings",
   "skills",
 ]);
+
+interface ShellRecoveryFallbackProps {
+  title: string;
+  message: string;
+  compact?: boolean;
+  className?: string;
+  onRetry?: () => void;
+}
+
+const ShellRecoveryFallback: Component<ShellRecoveryFallbackProps> = (
+  props,
+) => (
+  <div
+    role="alert"
+    class={[
+      "flex flex-col items-center justify-center gap-3 p-4 text-center",
+      props.compact
+        ? "min-h-[var(--titlebar-height,40px)]"
+        : "h-full min-h-[220px]",
+      props.className ?? "",
+    ].join(" ")}
+  >
+    <div class="text-sm font-semibold text-foreground">{props.title}</div>
+    <div class="max-w-md text-[13px] text-muted-foreground">
+      {props.message}
+    </div>
+    <Show when={props.onRetry}>
+      <button
+        type="button"
+        class="rounded border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-surface-2"
+        onClick={() => props.onRetry?.()}
+      >
+        Retry
+      </button>
+    </Show>
+  </div>
+);
+
+function reportShellBoundaryError(surface: string, error: unknown): void {
+  telemetry.reportError(
+    error instanceof Error ? error : new Error(String(error)),
+    { surface: `app_shell_${surface}` },
+  );
+}
+
+interface ShellSurfaceBoundaryProps {
+  surface: string;
+  title: string;
+  message: string;
+  compact?: boolean;
+  children: JSX.Element;
+}
+
+const ShellSurfaceBoundary: Component<ShellSurfaceBoundaryProps> = (props) => (
+  <ErrorBoundary
+    fallback={(error, reset) => {
+      reportShellBoundaryError(props.surface, error);
+      return (
+        <ShellRecoveryFallback
+          title={props.title}
+          message={props.message}
+          compact={props.compact}
+          onRetry={reset}
+        />
+      );
+    }}
+  >
+    {props.children}
+  </ErrorBoundary>
+);
+
+const ShellSilentBoundary: Component<{
+  surface: string;
+  children: JSX.Element;
+}> = (props) => (
+  <ErrorBoundary
+    fallback={(error) => {
+      reportShellBoundaryError(props.surface, error);
+      return null;
+    }}
+  >
+    {props.children}
+  </ErrorBoundary>
+);
 
 function loadInitialSlidePanel(): SlidePanelView {
   try {
@@ -919,143 +1004,180 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
   return (
     <div class="flex flex-col h-screen bg-background text-foreground">
-      <Titlebar
-        onSignInClick={handleSignInClick}
-        onToggleMeetings={handleToggleMeetings}
-        onToggleSkills={handleToggleSkills}
-        onToggleSettings={handleToggleSettings}
-        meetingRecording={meetingRecording()}
-        meetingProcessing={meetingProcessing()}
-        meetingReady={meetingReady()}
-        recordPromptVisible={recordPromptVisible()}
-        recordPromptSourceApp={meetingStore.state.autoDetectSourceApp}
-        onRecordConversation={() => void meetingStore.acceptAutoDetect()}
-        onDismissRecordPrompt={() => meetingStore.dismissAutoDetect()}
-      />
+      <ShellSurfaceBoundary
+        surface="titlebar"
+        title="Titlebar is recovering."
+        message="Workspace controls hit an error, but chats remain available."
+        compact
+      >
+        <Titlebar
+          onSignInClick={handleSignInClick}
+          onToggleMeetings={handleToggleMeetings}
+          onToggleSkills={handleToggleSkills}
+          onToggleSettings={handleToggleSettings}
+          meetingRecording={meetingRecording()}
+          meetingProcessing={meetingProcessing()}
+          meetingReady={meetingReady()}
+          recordPromptVisible={recordPromptVisible()}
+          recordPromptSourceApp={meetingStore.state.autoDetectSourceApp}
+          onRecordConversation={() => void meetingStore.acceptAutoDetect()}
+          onDismissRecordPrompt={() => meetingStore.dismissAutoDetect()}
+        />
+      </ShellSurfaceBoundary>
 
       <div class="flex flex-1 overflow-hidden relative">
-        <ThreadSidebar
-          collapsed={sidebarCollapsed()}
-          onToggle={() => setSidebarCollapsed((v) => !v)}
-          onOpenCatalog={handleOpenCatalog}
-          onOpenInbox={handleOpenInbox}
-        />
+        <ErrorBoundary
+          fallback={(error, reset) => {
+            reportShellBoundaryError("thread_sidebar", error);
+            return (
+              <aside
+                data-testid="thread-sidebar-recovery"
+                class="thread-list-surface flex flex-col bg-card border-r border-border overflow-hidden"
+                classList={{
+                  "w-[var(--sidebar-width)] min-w-[var(--sidebar-width)]":
+                    !sidebarCollapsed(),
+                  "w-9 min-w-9": sidebarCollapsed(),
+                }}
+              >
+                <ShellRecoveryFallback
+                  title="Threads are recovering."
+                  message="Thread navigation hit an error. The workspace is still running."
+                  onRetry={reset}
+                />
+              </aside>
+            );
+          }}
+        >
+          <ThreadSidebar
+            collapsed={sidebarCollapsed()}
+            onToggle={() => setSidebarCollapsed((v) => !v)}
+            onOpenCatalog={handleOpenCatalog}
+            onOpenInbox={handleOpenInbox}
+          />
+        </ErrorBoundary>
 
         <main class="flex-1 overflow-auto flex flex-col min-w-0">
-          <Show
-            when={conversationSearchStore.state.mode === "full"}
-            fallback={
-              <Show
-                when={interviewLandingOpen()}
-                fallback={
-                  <Show
-                    when={inboxOpen()}
-                    fallback={
-                      <Show
-                        when={catalogOpen()}
-                        fallback={
-                          <Show
-                            when={activeEmployeeId()}
-                            fallback={
-                              <Show
-                                when={activeBountyId()}
-                                fallback={
-                                  <ThreadContent
-                                    onSignInClick={handleSignInClick}
-                                  />
-                                }
-                              >
-                                {(id) => (
-                                  <BountyDetail
-                                    bountyId={id()}
-                                    inheritFrom={activeBountyInheritFrom()}
-                                  />
-                                )}
-                              </Show>
-                            }
-                          >
-                            {(id) => (
-                              <Show
-                                when={
-                                  employeeStore.byId(id()) === undefined &&
-                                  employeeStore.archivedById(id()) !== undefined
-                                }
-                                fallback={
-                                  <EmployeeDetail
+          <ShellSurfaceBoundary
+            surface="main"
+            title="Workspace is recovering."
+            message="This view hit an error. Threads and navigation remain available."
+          >
+            <Show
+              when={conversationSearchStore.state.mode === "full"}
+              fallback={
+                <Show
+                  when={interviewLandingOpen()}
+                  fallback={
+                    <Show
+                      when={inboxOpen()}
+                      fallback={
+                        <Show
+                          when={catalogOpen()}
+                          fallback={
+                            <Show
+                              when={activeEmployeeId()}
+                              fallback={
+                                <Show
+                                  when={activeBountyId()}
+                                  fallback={
+                                    <ThreadContent
+                                      onSignInClick={handleSignInClick}
+                                    />
+                                  }
+                                >
+                                  {(id) => (
+                                    <BountyDetail
+                                      bountyId={id()}
+                                      inheritFrom={activeBountyInheritFrom()}
+                                    />
+                                  )}
+                                </Show>
+                              }
+                            >
+                              {(id) => (
+                                <Show
+                                  when={
+                                    employeeStore.byId(id()) === undefined &&
+                                    employeeStore.archivedById(id()) !==
+                                      undefined
+                                  }
+                                  fallback={
+                                    <EmployeeDetail
+                                      employeeId={id()}
+                                      onClose={closeEmployeeDetailPane}
+                                    />
+                                  }
+                                >
+                                  <ArchivedEmployeeDetail
                                     employeeId={id()}
                                     onClose={closeEmployeeDetailPane}
                                   />
-                                }
-                              >
-                                <ArchivedEmployeeDetail
-                                  employeeId={id()}
-                                  onClose={closeEmployeeDetailPane}
-                                />
-                              </Show>
-                            )}
-                          </Show>
-                        }
-                      >
-                        <ErrorBoundary
-                          fallback={(error) => {
-                            telemetry.reportError(
-                              error instanceof Error
-                                ? error
-                                : new Error(String(error)),
-                              { surface: "agent_catalog" },
-                            );
-                            return (
-                              <div class="flex h-full min-h-[320px] flex-col items-center justify-center gap-3 p-6 text-center">
-                                <div class="text-sm font-semibold text-foreground">
-                                  Agent catalog is recovering.
-                                </div>
-                                <div class="max-w-md text-[13px] text-muted-foreground">
-                                  The catalog view hit an unexpected entry, but
-                                  the rest of Seren is still available.
-                                </div>
-                                <button
-                                  type="button"
-                                  class="rounded border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-surface-2"
-                                  onClick={handleCloseCatalog}
-                                >
-                                  Back to workspace
-                                </button>
-                              </div>
-                            );
-                          }}
+                                </Show>
+                              )}
+                            </Show>
+                          }
                         >
-                          <CatalogList />
-                        </ErrorBoundary>
-                      </Show>
-                    }
-                  >
-                    <InboxList />
-                  </Show>
-                }
-              >
-                <InterviewLanding
-                  initialEmployeeSlug={interviewEmployeeSlug()}
-                  onClose={closeInterviewLanding}
-                  onSelectEmployee={(employeeSlug) => {
-                    reportInterviewInterest(
-                      employeeSlug,
-                      "desktop-role-selection",
-                      "role-selected",
-                    );
-                  }}
-                  onStartInterview={(employeeSlug) => {
-                    reportInterviewInterest(
-                      employeeSlug,
-                      "desktop-interview-start",
-                      "interview-started",
-                    );
-                  }}
-                />
-              </Show>
-            }
-          >
-            <ConversationSearchResults />
-          </Show>
+                          <ErrorBoundary
+                            fallback={(error) => {
+                              telemetry.reportError(
+                                error instanceof Error
+                                  ? error
+                                  : new Error(String(error)),
+                                { surface: "agent_catalog" },
+                              );
+                              return (
+                                <div class="flex h-full min-h-[320px] flex-col items-center justify-center gap-3 p-6 text-center">
+                                  <div class="text-sm font-semibold text-foreground">
+                                    Agent catalog is recovering.
+                                  </div>
+                                  <div class="max-w-md text-[13px] text-muted-foreground">
+                                    The catalog view hit an unexpected entry,
+                                    but the rest of Seren is still available.
+                                  </div>
+                                  <button
+                                    type="button"
+                                    class="rounded border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-surface-2"
+                                    onClick={handleCloseCatalog}
+                                  >
+                                    Back to workspace
+                                  </button>
+                                </div>
+                              );
+                            }}
+                          >
+                            <CatalogList />
+                          </ErrorBoundary>
+                        </Show>
+                      }
+                    >
+                      <InboxList />
+                    </Show>
+                  }
+                >
+                  <InterviewLanding
+                    initialEmployeeSlug={interviewEmployeeSlug()}
+                    onClose={closeInterviewLanding}
+                    onSelectEmployee={(employeeSlug) => {
+                      reportInterviewInterest(
+                        employeeSlug,
+                        "desktop-role-selection",
+                        "role-selected",
+                      );
+                    }}
+                    onStartInterview={(employeeSlug) => {
+                      reportInterviewInterest(
+                        employeeSlug,
+                        "desktop-interview-start",
+                        "interview-started",
+                      );
+                    }}
+                  />
+                </Show>
+              }
+            >
+              <ConversationSearchResults />
+            </Show>
+          </ShellSurfaceBoundary>
         </main>
 
         <SlidePanel
@@ -1065,94 +1187,104 @@ export const AppShell: Component<AppShellProps> = (props) => {
           reader={slidePanel() === "meetings"}
           wide={slidePanel() === "settings"}
         >
-          <Switch>
-            <Match when={slidePanel() === "settings"}>
-              <SettingsPanel
-                onSignInClick={handleSignInClick}
-                onLogout={props.onLogout}
-              />
-            </Match>
-            <Match when={slidePanel() === "database"}>
-              <DatabasePanel />
-            </Match>
-            <Match when={slidePanel() === "tasks"}>
-              <AgentTasksPanel />
-            </Match>
-            <Match when={slidePanel() === "sessions"}>
-              <SessionPanel />
-            </Match>
-            <Match when={slidePanel() === "meetings"}>
-              <MeetingPanel />
-            </Match>
-            <Match when={slidePanel() === "skills"}>
-              <SkillsExplorer panelMode />
-            </Match>
-            <Match when={slidePanel() === "account"}>
-              <SignIn onSuccess={handleLoginSuccess} />
-            </Match>
-          </Switch>
+          <ShellSurfaceBoundary
+            surface="slide_panel"
+            title="Panel is recovering."
+            message="This side panel hit an error. Your workspace remains available."
+          >
+            <Switch>
+              <Match when={slidePanel() === "settings"}>
+                <SettingsPanel
+                  onSignInClick={handleSignInClick}
+                  onLogout={props.onLogout}
+                />
+              </Match>
+              <Match when={slidePanel() === "database"}>
+                <DatabasePanel />
+              </Match>
+              <Match when={slidePanel() === "tasks"}>
+                <AgentTasksPanel />
+              </Match>
+              <Match when={slidePanel() === "sessions"}>
+                <SessionPanel />
+              </Match>
+              <Match when={slidePanel() === "meetings"}>
+                <MeetingPanel />
+              </Match>
+              <Match when={slidePanel() === "skills"}>
+                <SkillsExplorer panelMode />
+              </Match>
+              <Match when={slidePanel() === "account"}>
+                <SignIn onSuccess={handleLoginSuccess} />
+              </Match>
+            </Switch>
+          </ShellSurfaceBoundary>
         </SlidePanel>
       </div>
 
-      <Show when={skillPublishStore.firstPublishPath}>
-        {(path) => {
-          const target = () => publishTargetForPath(path());
-          return (
-            <Show when={target()}>
-              {(skill) => (
-                <PublishSkillModal
-                  skill={skill()}
-                  onClose={() => skillPublishStore.clearFirstPublish()}
-                  onPublished={() => void handleSkillPublishComplete()}
-                />
-              )}
-            </Show>
-          );
-        }}
-      </Show>
-      <Show when={skillPublishStore.versionPublishPath}>
-        {(path) => {
-          const target = () => publishTargetForPath(path());
-          const catalogVersion = (slug: string) =>
-            skillsStore.available.find((s) => s.slug === slug)?.version;
-          return (
-            <Show when={target()}>
-              {(skill) => (
-                <PublishVersionModal
-                  skill={skill()}
-                  currentVersion={
-                    catalogVersion(skill().slug) ?? skill().version
-                  }
-                  onClose={() => skillPublishStore.clearVersionPublish()}
-                  onPublished={() => void handleSkillPublishComplete()}
-                />
-              )}
-            </Show>
-          );
-        }}
-      </Show>
+      <ShellSilentBoundary surface="publish_modals">
+        <Show when={skillPublishStore.firstPublishPath}>
+          {(path) => {
+            const target = () => publishTargetForPath(path());
+            return (
+              <Show when={target()}>
+                {(skill) => (
+                  <PublishSkillModal
+                    skill={skill()}
+                    onClose={() => skillPublishStore.clearFirstPublish()}
+                    onPublished={() => void handleSkillPublishComplete()}
+                  />
+                )}
+              </Show>
+            );
+          }}
+        </Show>
+        <Show when={skillPublishStore.versionPublishPath}>
+          {(path) => {
+            const target = () => publishTargetForPath(path());
+            const catalogVersion = (slug: string) =>
+              skillsStore.available.find((s) => s.slug === slug)?.version;
+            return (
+              <Show when={target()}>
+                {(skill) => (
+                  <PublishVersionModal
+                    skill={skill()}
+                    currentVersion={
+                      catalogVersion(skill().slug) ?? skill().version
+                    }
+                    onClose={() => skillPublishStore.clearVersionPublish()}
+                    onPublished={() => void handleSkillPublishComplete()}
+                  />
+                )}
+              </Show>
+            );
+          }}
+        </Show>
+      </ShellSilentBoundary>
 
       {/* First-run audio-permission explainer, surfaced app-wide so non-panel
           start paths (tray, auto-detect) gate on it too. Driven by the meeting
           store's pending priming request. */}
-      <Show when={meetingStore.state.primingRequest}>
-        <AudioPrimingDialog
-          onContinue={() => void meetingStore.confirmPriming()}
-          onCancel={() => void meetingStore.cancelPriming()}
-        />
-      </Show>
+      <ShellSilentBoundary surface="global_overlays">
+        <Show when={meetingStore.state.primingRequest}>
+          <AudioPrimingDialog
+            onContinue={() => void meetingStore.confirmPriming()}
+            onCancel={() => void meetingStore.cancelPriming()}
+          />
+        </Show>
 
-      {/* Always-visible recording indicator while a capture is live (auto- or
-          manually-started): elapsed time + Stop / Pause / Resume / Delete. */}
-      <RecordingIndicator />
+        {/* Always-visible recording indicator while a capture is live (auto- or
+            manually-started): elapsed time + Stop / Pause / Resume / Delete. */}
+        <RecordingIndicator />
 
-      <ConversationSearchOverlay />
+        <ConversationSearchOverlay />
 
-      {/* Layout-level blocking sign-in modal — fires on mid-session expiry,
-          refresh-token failure, and the /login slash command. Distinct from
-          the passive titlebar Sign In button (always-on when unauthenticated)
-          and from ChatContent's local pre-send gate. See #1661. */}
-      <SessionExpiredModal />
+        {/* Layout-level blocking sign-in modal — fires on mid-session expiry,
+            refresh-token failure, and the /login slash command. Distinct from
+            the passive titlebar Sign In button (always-on when unauthenticated)
+            and from ChatContent's local pre-send gate. See #1661. */}
+        <SessionExpiredModal />
+      </ShellSilentBoundary>
     </div>
   );
 };
