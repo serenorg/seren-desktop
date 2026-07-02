@@ -6,7 +6,7 @@ import {
   listConnections,
   listProviders,
   listStorePublishers,
-  revokeConnection,
+  revokeConnectionById,
   type UserOAuthConnectionResponse,
 } from "@/api";
 import { apiBase } from "@/lib/config";
@@ -215,8 +215,14 @@ async function revokePublisherConnection(
   providerSlug: string,
   options: { ignoreNotFound?: boolean } = {},
 ): Promise<void> {
-  const { error, response } = await revokeConnection({
-    path: { provider: providerSlug },
+  const connectionId = await resolveConnectionIdForDisconnect(
+    providerSlug,
+    options,
+  );
+  if (!connectionId) return;
+
+  const { error, response } = await revokeConnectionById({
+    path: { connection_id: connectionId },
     throwOnError: false,
   });
 
@@ -233,6 +239,45 @@ async function revokePublisherConnection(
     );
     throw new Error(`Failed to revoke connection: ${formatOAuthError(error)}`);
   }
+}
+
+async function resolveConnectionIdForDisconnect(
+  providerSlug: string,
+  options: { ignoreNotFound?: boolean },
+): Promise<string | null> {
+  const { data, error } = await listConnections({ throwOnError: false });
+  if (error) {
+    throw new Error(`Failed to list connections: ${formatOAuthError(error)}`);
+  }
+
+  const matches = (data?.connections ?? []).filter(
+    (connection) => connection.provider_slug === providerSlug,
+  );
+
+  if (matches.length === 0) {
+    if (options.ignoreNotFound) {
+      console.log(
+        `[PublisherOAuth] No existing ${providerSlug} connection to revoke`,
+      );
+      return null;
+    }
+    throw new Error(`No connection found for provider ${providerSlug}`);
+  }
+
+  if (matches.length > 1) {
+    const details = matches
+      .map((connection) => {
+        const account =
+          connection.provider_email ?? connection.provider_user_id ?? "unknown";
+        return `${connection.id} (${account})`;
+      })
+      .join(", ");
+    throw new Error(
+      `Multiple connections found for provider ${providerSlug}. Disconnect by connection ID: ${details}`,
+    );
+  }
+
+  return matches[0].id;
 }
 
 function formatOAuthError(error: unknown): string {

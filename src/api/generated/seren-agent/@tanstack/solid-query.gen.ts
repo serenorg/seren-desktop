@@ -114,7 +114,7 @@ export const serenAgentGetDeploymentActivityQueryKey = (options: Options<SerenAg
 /**
  * Get recent activity for a managed seren-agent deployment.
  *
- * Returns redacted managed-agent activity with run status, timing, cost, token, and artifact-count summaries. This endpoint omits prompt, output, and tool payload details; use seren-cloud run-history APIs for full runtime history.
+ * Returns recent managed-agent activity with run status, timing, cost, token, and artifact-count summaries. This endpoint omits prompt, output, and tool payload details; use seren-cloud run-history APIs for full runtime history.
  */
 export const serenAgentGetDeploymentActivityOptions = (options: Options<SerenAgentGetDeploymentActivityData>) => queryOptions<SerenAgentGetDeploymentActivityResponse, DefaultError, SerenAgentGetDeploymentActivityResponse, ReturnType<typeof serenAgentGetDeploymentActivityQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
@@ -163,7 +163,7 @@ export const serenAgentGetDeploymentActivityInfiniteQueryKey = (options: Options
 /**
  * Get recent activity for a managed seren-agent deployment.
  *
- * Returns redacted managed-agent activity with run status, timing, cost, token, and artifact-count summaries. This endpoint omits prompt, output, and tool payload details; use seren-cloud run-history APIs for full runtime history.
+ * Returns recent managed-agent activity with run status, timing, cost, token, and artifact-count summaries. This endpoint omits prompt, output, and tool payload details; use seren-cloud run-history APIs for full runtime history.
  */
 export const serenAgentGetDeploymentActivityInfiniteOptions = (options: Options<SerenAgentGetDeploymentActivityData>) => {
     const opts = infiniteQueryOptions<SerenAgentGetDeploymentActivityResponse, DefaultError, InfiniteData<SerenAgentGetDeploymentActivityResponse>, QueryKey<Options<SerenAgentGetDeploymentActivityData>>, number | Pick<QueryKey<Options<SerenAgentGetDeploymentActivityData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
@@ -338,7 +338,7 @@ export const serenAgentGetDeploymentResourcesQueryKey = (options: Options<SerenA
 /**
  * Get platform resources available to a managed seren-agent deployment.
  *
- * Returns a redacted managed-agent resource inventory. This endpoint is a managed-agent projection; use seren-cloud deployment APIs for full runtime operations.
+ * Returns a managed-agent resource summary. This endpoint is a managed-agent projection; use seren-cloud deployment APIs for full runtime operations.
  */
 export const serenAgentGetDeploymentResourcesOptions = (options: Options<SerenAgentGetDeploymentResourcesData>) => queryOptions<SerenAgentGetDeploymentResourcesResponse, DefaultError, SerenAgentGetDeploymentResourcesResponse, ReturnType<typeof serenAgentGetDeploymentResourcesQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {

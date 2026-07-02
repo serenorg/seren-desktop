@@ -534,6 +534,12 @@ export type ComputeUsageEventDebugRecord = {
     event_type: string;
 };
 
+export type ConfirmObjectStorageUploadRequest = {
+    byte_length?: number | null;
+    etag?: string | null;
+    sha256?: string | null;
+};
+
 export type ConnectionsResponse = {
     connections: Array<UserOAuthConnectionResponse>;
 };
@@ -649,6 +655,20 @@ export type CreateOAuthProviderRequest = {
     token_endpoint_auth_method?: TokenEndpointAuthMethod;
     token_url: string;
     userinfo_url?: string | null;
+};
+
+export type CreateObjectStorageBucketRequest = {
+    display_name?: string | null;
+    metadata?: unknown;
+    slug: string;
+};
+
+export type CreateObjectStorageUploadRequest = {
+    byte_length: number;
+    content_type?: string;
+    metadata?: unknown;
+    object_key: string;
+    sha256: string;
 };
 
 export type CreateOrganizationCustomSkillRequest = {
@@ -3898,6 +3918,347 @@ export type DataResponseOAuthProviderResponse = {
         token_url: string;
         updated_at: string;
         userinfo_url?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseObjectStorageBucket = {
+    data: {
+        created_at: string;
+        created_by_user_id?: string | null;
+        display_name?: string | null;
+        id: string;
+        metadata: unknown;
+        organization_id: string;
+        slug: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseObjectStorageDownload = {
+    data: {
+        download_expires_at: string;
+        download_headers: {
+            [key: string]: string;
+        };
+        download_url: string;
+        object: ObjectStorageObject;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseObjectStorageObject = {
+    data: {
+        bucket_id: string;
+        bucket_slug: string;
+        byte_length: number;
+        content_type: string;
+        created_at: string;
+        created_by_user_id?: string | null;
+        etag?: string | null;
+        id: string;
+        metadata: unknown;
+        object_key: string;
+        organization_id: string;
+        sha256: string;
+        status: string;
+        updated_at: string;
+        uploaded_at?: string | null;
+        uploaded_by_user_id?: string | null;
+        uri: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseObjectStorageUpload = {
+    data: {
+        object: ObjectStorageObject;
+        upload_expires_at: string;
+        upload_headers: {
+            [key: string]: string;
+        };
+        upload_url: string;
     };
     pagination?: null | PaginationMeta;
 };
@@ -8186,6 +8547,183 @@ export type DataResponseVecOAuthProviderResponse = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseVecObjectStorageBucket = {
+    data: Array<{
+        created_at: string;
+        created_by_user_id?: string | null;
+        display_name?: string | null;
+        id: string;
+        metadata: unknown;
+        organization_id: string;
+        slug: string;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecObjectStorageObject = {
+    data: Array<{
+        bucket_id: string;
+        bucket_slug: string;
+        byte_length: number;
+        content_type: string;
+        created_at: string;
+        created_by_user_id?: string | null;
+        etag?: string | null;
+        id: string;
+        metadata: unknown;
+        object_key: string;
+        organization_id: string;
+        sha256: string;
+        status: string;
+        updated_at: string;
+        uploaded_at?: string | null;
+        uploaded_by_user_id?: string | null;
+        uri: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseVecOrganization = {
     data: Array<{
         created_at: string;
@@ -11797,6 +12335,14 @@ export type McpToolInfo = {
     name: string;
 };
 
+export type MultipleOAuthConnectionsAmbiguousResponse = {
+    connections: Array<UserOAuthConnectionResponse>;
+    error: string;
+    message: string;
+    provider_id: string;
+    provider_slug: string;
+};
+
 export type NotificationReadResponse = {
     notification_id: string;
     read_at: string;
@@ -11823,6 +12369,55 @@ export type OAuthProviderResponse = {
     token_url: string;
     updated_at: string;
     userinfo_url?: string | null;
+};
+
+export type ObjectStorageBucket = {
+    created_at: string;
+    created_by_user_id?: string | null;
+    display_name?: string | null;
+    id: string;
+    metadata: unknown;
+    organization_id: string;
+    slug: string;
+    updated_at: string;
+};
+
+export type ObjectStorageDownload = {
+    download_expires_at: string;
+    download_headers: {
+        [key: string]: string;
+    };
+    download_url: string;
+    object: ObjectStorageObject;
+};
+
+export type ObjectStorageObject = {
+    bucket_id: string;
+    bucket_slug: string;
+    byte_length: number;
+    content_type: string;
+    created_at: string;
+    created_by_user_id?: string | null;
+    etag?: string | null;
+    id: string;
+    metadata: unknown;
+    object_key: string;
+    organization_id: string;
+    sha256: string;
+    status: string;
+    updated_at: string;
+    uploaded_at?: string | null;
+    uploaded_by_user_id?: string | null;
+    uri: string;
+};
+
+export type ObjectStorageUpload = {
+    object: ObjectStorageObject;
+    upload_expires_at: string;
+    upload_headers: {
+        [key: string]: string;
+    };
+    upload_url: string;
 };
 
 /**
@@ -12076,7 +12671,7 @@ export type OrganizationOtpResetResponse = {
     user_id: string;
 };
 
-export type OrganizationOtpScope = 'org_sign_in' | 'organization_security_manage' | 'private_models.access';
+export type OrganizationOtpScope = 'org_sign_in' | 'organization_security_manage' | 'private_models.access' | 'object_storage.read' | 'object_storage.write' | 'object_storage.delete' | 'object_storage.manage';
 
 export type OrganizationOtpScopePolicy = {
     scope: OrganizationOtpScope;
@@ -13278,6 +13873,10 @@ export type SessionsRevoked = {
     revoked_count: number;
 };
 
+export type SetDefaultConnectionResponse = {
+    connection: UserOAuthConnectionResponse;
+};
+
 /**
  * Request to set up account recovery
  */
@@ -14134,6 +14733,7 @@ export type UserOAuthConnectionResponse = {
     created_at: string;
     expires_at?: string | null;
     id: string;
+    is_default: boolean;
     is_valid: boolean;
     last_used_at?: string | null;
     provider_email?: string | null;
@@ -15819,12 +16419,12 @@ export type RevokeConnectionByIdData = {
     body?: never;
     path: {
         /**
-         * OAuth provider UUID to disconnect
+         * OAuth connection UUID to disconnect
          */
-        provider_id: string;
+        connection_id: string;
     };
     query?: never;
-    url: '/oauth/connections/providers/{provider_id}';
+    url: '/oauth/connections/{connection_id}';
 };
 
 export type RevokeConnectionByIdErrors = {
@@ -15843,33 +16443,33 @@ export type RevokeConnectionByIdResponses = {
 
 export type RevokeConnectionByIdResponse = RevokeConnectionByIdResponses[keyof RevokeConnectionByIdResponses];
 
-export type RevokeConnectionData = {
+export type SetDefaultConnectionData = {
     body?: never;
     path: {
         /**
-         * OAuth provider slug to disconnect
+         * OAuth connection UUID
          */
-        provider: string;
+        connection_id: string;
     };
     query?: never;
-    url: '/oauth/connections/{provider}';
+    url: '/oauth/connections/{connection_id}/default';
 };
 
-export type RevokeConnectionErrors = {
+export type SetDefaultConnectionErrors = {
     /**
      * Connection not found
      */
     404: unknown;
 };
 
-export type RevokeConnectionResponses = {
+export type SetDefaultConnectionResponses = {
     /**
-     * Connection revoked successfully
+     * Default connection updated
      */
-    200: RevokeResponse;
+    200: SetDefaultConnectionResponse;
 };
 
-export type RevokeConnectionResponse = RevokeConnectionResponses[keyof RevokeConnectionResponses];
+export type SetDefaultConnectionResponse2 = SetDefaultConnectionResponses[keyof SetDefaultConnectionResponses];
 
 export type ListProvidersData = {
     body?: never;
@@ -17621,6 +18221,240 @@ export type UpdateOrgOauthProviderResponses = {
 };
 
 export type UpdateOrgOauthProviderResponse = UpdateOrgOauthProviderResponses[keyof UpdateOrgOauthProviderResponses];
+
+export type ListObjectStorageBucketsData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID or 'default'
+         */
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/object-storage/buckets';
+};
+
+export type ListObjectStorageBucketsErrors = {
+    /**
+     * Object storage is not configured or access is forbidden
+     */
+    403: unknown;
+};
+
+export type ListObjectStorageBucketsResponses = {
+    /**
+     * Object storage buckets retrieved
+     */
+    200: DataResponseVecObjectStorageBucket;
+};
+
+export type ListObjectStorageBucketsResponse = ListObjectStorageBucketsResponses[keyof ListObjectStorageBucketsResponses];
+
+export type CreateObjectStorageBucketData = {
+    body: CreateObjectStorageBucketRequest;
+    path: {
+        /**
+         * Organization ID or 'default'
+         */
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/object-storage/buckets';
+};
+
+export type CreateObjectStorageBucketErrors = {
+    /**
+     * Bucket slug already exists
+     */
+    409: unknown;
+};
+
+export type CreateObjectStorageBucketResponses = {
+    /**
+     * Object storage bucket created
+     */
+    201: DataResponseObjectStorageBucket;
+};
+
+export type CreateObjectStorageBucketResponse = CreateObjectStorageBucketResponses[keyof CreateObjectStorageBucketResponses];
+
+export type DeleteObjectStorageBucketData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID or 'default'
+         */
+        organization_id: string;
+        /**
+         * Object storage bucket slug
+         */
+        bucket_slug: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/object-storage/buckets/{bucket_slug}';
+};
+
+export type DeleteObjectStorageBucketErrors = {
+    /**
+     * Bucket is not empty
+     */
+    409: unknown;
+};
+
+export type DeleteObjectStorageBucketResponses = {
+    /**
+     * Object storage bucket deleted
+     */
+    200: DataResponseObjectStorageBucket;
+};
+
+export type DeleteObjectStorageBucketResponse = DeleteObjectStorageBucketResponses[keyof DeleteObjectStorageBucketResponses];
+
+export type ListObjectStorageObjectsData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID or 'default'
+         */
+        organization_id: string;
+        /**
+         * Object storage bucket slug
+         */
+        bucket_slug: string;
+    };
+    query?: {
+        prefix?: string | null;
+        limit?: number;
+        offset?: number;
+    };
+    url: '/organizations/{organization_id}/object-storage/buckets/{bucket_slug}/objects';
+};
+
+export type ListObjectStorageObjectsResponses = {
+    /**
+     * Object storage objects retrieved
+     */
+    200: DataResponseVecObjectStorageObject;
+};
+
+export type ListObjectStorageObjectsResponse = ListObjectStorageObjectsResponses[keyof ListObjectStorageObjectsResponses];
+
+export type DownloadObjectStorageObjectData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID or 'default'
+         */
+        organization_id: string;
+        /**
+         * Object storage bucket slug
+         */
+        bucket_slug: string;
+    };
+    query: {
+        object_key: string;
+    };
+    url: '/organizations/{organization_id}/object-storage/buckets/{bucket_slug}/objects/by-key/download';
+};
+
+export type DownloadObjectStorageObjectResponses = {
+    /**
+     * Object storage download URL created
+     */
+    200: DataResponseObjectStorageDownload;
+};
+
+export type DownloadObjectStorageObjectResponse = DownloadObjectStorageObjectResponses[keyof DownloadObjectStorageObjectResponses];
+
+export type CreateObjectStorageUploadData = {
+    body: CreateObjectStorageUploadRequest;
+    path: {
+        /**
+         * Organization ID or 'default'
+         */
+        organization_id: string;
+        /**
+         * Object storage bucket slug
+         */
+        bucket_slug: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/object-storage/buckets/{bucket_slug}/objects/uploads';
+};
+
+export type CreateObjectStorageUploadErrors = {
+    /**
+     * Object key already exists
+     */
+    409: unknown;
+};
+
+export type CreateObjectStorageUploadResponses = {
+    /**
+     * Object storage upload intent created
+     */
+    201: DataResponseObjectStorageUpload;
+};
+
+export type CreateObjectStorageUploadResponse = CreateObjectStorageUploadResponses[keyof CreateObjectStorageUploadResponses];
+
+export type DeleteObjectStorageObjectData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID or 'default'
+         */
+        organization_id: string;
+        /**
+         * Object storage bucket slug
+         */
+        bucket_slug: string;
+        /**
+         * Object ID
+         */
+        object_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/object-storage/buckets/{bucket_slug}/objects/{object_id}';
+};
+
+export type DeleteObjectStorageObjectResponses = {
+    /**
+     * Object storage object deleted
+     */
+    200: DataResponseObjectStorageObject;
+};
+
+export type DeleteObjectStorageObjectResponse = DeleteObjectStorageObjectResponses[keyof DeleteObjectStorageObjectResponses];
+
+export type ConfirmObjectStorageUploadData = {
+    body: ConfirmObjectStorageUploadRequest;
+    path: {
+        /**
+         * Organization ID or 'default'
+         */
+        organization_id: string;
+        /**
+         * Object storage bucket slug
+         */
+        bucket_slug: string;
+        /**
+         * Object ID
+         */
+        object_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/object-storage/buckets/{bucket_slug}/objects/{object_id}/confirm-upload';
+};
+
+export type ConfirmObjectStorageUploadResponses = {
+    /**
+     * Object storage upload confirmed
+     */
+    200: DataResponseObjectStorageObject;
+};
+
+export type ConfirmObjectStorageUploadResponse = ConfirmObjectStorageUploadResponses[keyof ConfirmObjectStorageUploadResponses];
 
 export type GetOrganizationOtpPolicyData = {
     body?: never;
@@ -19756,6 +20590,12 @@ export type GetStorePublisherLogoResponses = {
 
 export type ProxyToPublisherGetData = {
     body: unknown;
+    headers?: {
+        /**
+         * Optional OAuth connection UUID for BYOC publishers
+         */
+        'x-seren-oauth-connection-id'?: string | null;
+    };
     path: {
         /**
          * Publisher slug identifier
@@ -19766,7 +20606,12 @@ export type ProxyToPublisherGetData = {
          */
         path: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Optional OAuth connection UUID for MCP publisher routes
+         */
+        connection_id?: string;
+    };
     url: '/publishers/{slug}/{path}';
 };
 
@@ -19784,6 +20629,10 @@ export type ProxyToPublisherGetErrors = {
      */
     404: unknown;
     /**
+     * Multiple OAuth connections are available and no selector/default was provided
+     */
+    409: MultipleOAuthConnectionsAmbiguousResponse;
+    /**
      * Internal server error
      */
     500: unknown;
@@ -19800,6 +20649,12 @@ export type ProxyToPublisherGetResponses = {
 
 export type ProxyToPublisherPostData = {
     body: unknown;
+    headers?: {
+        /**
+         * Optional OAuth connection UUID for BYOC publishers
+         */
+        'x-seren-oauth-connection-id'?: string | null;
+    };
     path: {
         /**
          * Publisher slug identifier
@@ -19810,7 +20665,12 @@ export type ProxyToPublisherPostData = {
          */
         path: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Optional OAuth connection UUID for MCP publisher routes
+         */
+        connection_id?: string;
+    };
     url: '/publishers/{slug}/{path}';
 };
 
@@ -19827,6 +20687,10 @@ export type ProxyToPublisherPostErrors = {
      * Publisher or endpoint not found
      */
     404: unknown;
+    /**
+     * Multiple OAuth connections are available and no selector/default was provided
+     */
+    409: MultipleOAuthConnectionsAmbiguousResponse;
     /**
      * Internal server error
      */

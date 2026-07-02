@@ -61,7 +61,7 @@ export const serenAgentDeleteManagedDeployment = <ThrowOnError extends boolean =
 /**
  * Get recent activity for a managed seren-agent deployment.
  *
- * Returns redacted managed-agent activity with run status, timing, cost, token, and artifact-count summaries. This endpoint omits prompt, output, and tool payload details; use seren-cloud run-history APIs for full runtime history.
+ * Returns recent managed-agent activity with run status, timing, cost, token, and artifact-count summaries. This endpoint omits prompt, output, and tool payload details; use seren-cloud run-history APIs for full runtime history.
  */
 export const serenAgentGetDeploymentActivity = <ThrowOnError extends boolean = false>(options: Options<SerenAgentGetDeploymentActivityData, ThrowOnError>): RequestResult<SerenAgentGetDeploymentActivityResponses, SerenAgentGetDeploymentActivityErrors, ThrowOnError> => (options.client ?? client).get<SerenAgentGetDeploymentActivityResponses, SerenAgentGetDeploymentActivityErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -168,7 +168,7 @@ export const serenAgentPreviewManagedDeploymentRollback = <ThrowOnError extends 
 /**
  * Get platform resources available to a managed seren-agent deployment.
  *
- * Returns a redacted managed-agent resource inventory. This endpoint is a managed-agent projection; use seren-cloud deployment APIs for full runtime operations.
+ * Returns a managed-agent resource summary. This endpoint is a managed-agent projection; use seren-cloud deployment APIs for full runtime operations.
  */
 export const serenAgentGetDeploymentResources = <ThrowOnError extends boolean = false>(options: Options<SerenAgentGetDeploymentResourcesData, ThrowOnError>): RequestResult<SerenAgentGetDeploymentResourcesResponses, SerenAgentGetDeploymentResourcesErrors, ThrowOnError> => (options.client ?? client).get<SerenAgentGetDeploymentResourcesResponses, SerenAgentGetDeploymentResourcesErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],

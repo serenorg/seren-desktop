@@ -166,7 +166,7 @@
           "seren-agent"
         ],
         "summary": "Get recent activity for a managed seren-agent deployment.",
-        "description": "Returns redacted managed-agent activity with run status, timing, cost, token, and artifact-count summaries. This endpoint omits prompt, output, and tool payload details; use seren-cloud run-history APIs for full runtime history.",
+        "description": "Returns recent managed-agent activity with run status, timing, cost, token, and artifact-count summaries. This endpoint omits prompt, output, and tool payload details; use seren-cloud run-history APIs for full runtime history.",
         "operationId": "seren_agent_get_deployment_activity",
         "parameters": [
           {
@@ -660,7 +660,7 @@
           "seren-agent"
         ],
         "summary": "Get platform resources available to a managed seren-agent deployment.",
-        "description": "Returns a redacted managed-agent resource inventory. This endpoint is a managed-agent projection; use seren-cloud deployment APIs for full runtime operations.",
+        "description": "Returns a managed-agent resource summary. This endpoint is a managed-agent projection; use seren-cloud deployment APIs for full runtime operations.",
         "operationId": "seren_agent_get_deployment_resources",
         "parameters": [
           {

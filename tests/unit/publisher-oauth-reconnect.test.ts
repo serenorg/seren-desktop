@@ -6,15 +6,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getToken: vi.fn<() => Promise<string | null>>(),
   invoke: vi.fn<(command: string, args?: unknown) => Promise<unknown>>(),
+  listConnections: vi.fn(),
   openUrl: vi.fn<() => Promise<void>>(),
-  revokeConnection: vi.fn(),
+  revokeConnectionById: vi.fn(),
 }));
 
 vi.mock("@/api", () => ({
-  listConnections: vi.fn(),
+  listConnections: mocks.listConnections,
   listProviders: vi.fn(),
   listStorePublishers: vi.fn(),
-  revokeConnection: mocks.revokeConnection,
+  revokeConnectionById: mocks.revokeConnectionById,
 }));
 
 vi.mock("@/lib/config", () => ({
@@ -58,7 +59,18 @@ describe("publisher OAuth reconnect", () => {
       return "https://accounts.example.test/oauth";
     });
     mocks.openUrl.mockResolvedValue(undefined);
-    mocks.revokeConnection.mockResolvedValue({
+    mocks.listConnections.mockResolvedValue({
+      data: {
+        connections: [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            provider_slug: "google",
+            provider_email: "user@example.com",
+          },
+        ],
+      },
+    });
+    mocks.revokeConnectionById.mockResolvedValue({
       data: {},
       response: new Response(null, { status: 200 }),
     });
@@ -69,8 +81,8 @@ describe("publisher OAuth reconnect", () => {
 
     await connectPublisher("google", { revokeBeforeConnect: true });
 
-    expect(mocks.revokeConnection).toHaveBeenCalledWith({
-      path: { provider: "google" },
+    expect(mocks.revokeConnectionById).toHaveBeenCalledWith({
+      path: { connection_id: "11111111-1111-4111-8111-111111111111" },
       throwOnError: false,
     });
     expect(mocks.invoke).toHaveBeenCalledWith("get_oauth_redirect_url", {
@@ -86,9 +98,9 @@ describe("publisher OAuth reconnect", () => {
         mocks.invoke.mock.calls[index]?.[0] === "get_oauth_redirect_url",
     );
     expect(redirectInvokeOrder).toBeDefined();
-    expect(mocks.revokeConnection.mock.invocationCallOrder[0]).toBeLessThan(
-      redirectInvokeOrder ?? 0,
-    );
+    expect(
+      mocks.revokeConnectionById.mock.invocationCallOrder[0],
+    ).toBeLessThan(redirectInvokeOrder ?? 0);
     expect(redirectInvokeOrder ?? 0).toBeLessThan(
       mocks.openUrl.mock.invocationCallOrder[0],
     );
@@ -99,7 +111,8 @@ describe("publisher OAuth reconnect", () => {
 
     await connectPublisher("google");
 
-    expect(mocks.revokeConnection).not.toHaveBeenCalled();
+    expect(mocks.listConnections).not.toHaveBeenCalled();
+    expect(mocks.revokeConnectionById).not.toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenCalledWith(
       "get_oauth_redirect_url",
       expect.any(Object),
@@ -108,14 +121,16 @@ describe("publisher OAuth reconnect", () => {
   });
 
   it("continues reconnect when the stale connection was already gone", async () => {
-    mocks.revokeConnection.mockResolvedValue({
-      error: { message: "Connection not found" },
-      response: new Response(null, { status: 404 }),
+    mocks.listConnections.mockResolvedValue({
+      data: {
+        connections: [],
+      },
     });
     const { connectPublisher } = await import("@/services/publisher-oauth");
 
     await connectPublisher("google", { revokeBeforeConnect: true });
 
+    expect(mocks.revokeConnectionById).not.toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenCalledWith(
       "get_oauth_redirect_url",
       expect.any(Object),
@@ -123,6 +138,37 @@ describe("publisher OAuth reconnect", () => {
     expect(mocks.openUrl).toHaveBeenCalledWith(
       "https://accounts.example.test/oauth",
     );
+  });
+
+  it("does not guess which stale connection to revoke when a provider has multiple connections", async () => {
+    mocks.listConnections.mockResolvedValue({
+      data: {
+        connections: [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            provider_slug: "google",
+            provider_email: "first@example.com",
+          },
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            provider_slug: "google",
+            provider_email: "second@example.com",
+          },
+        ],
+      },
+    });
+    const { connectPublisher } = await import("@/services/publisher-oauth");
+
+    await expect(
+      connectPublisher("google", { revokeBeforeConnect: true }),
+    ).rejects.toThrow(/Multiple connections found for provider google/);
+
+    expect(mocks.revokeConnectionById).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      "get_oauth_redirect_url",
+      expect.any(Object),
+    );
+    expect(mocks.openUrl).not.toHaveBeenCalled();
   });
 
   it("uses loopback callback URL for validation runtime publisher OAuth", async () => {
