@@ -7,6 +7,7 @@ import {
   listProviders,
   listStorePublishers,
   revokeConnectionById,
+  setDefaultConnection,
   type UserOAuthConnectionResponse,
 } from "@/api";
 import { apiBase } from "@/lib/config";
@@ -19,6 +20,10 @@ import {
   getDesktopOAuthCallbackUrl,
   getValidationRuntimeInfo,
 } from "@/services/oauth-callback";
+import {
+  markOAuthConnectionsChanged,
+  type OAuthConnection,
+} from "@/stores/oauth-account.store";
 
 export interface PublisherOAuthProviderResolution {
   publisherSlug: string;
@@ -184,9 +189,7 @@ export async function connectPublisher(
 /**
  * List user's connected OAuth providers.
  */
-export async function listConnectedPublishers(): Promise<
-  UserOAuthConnectionResponse[]
-> {
+export async function listConnectedPublishers(): Promise<OAuthConnection[]> {
   console.log("[PublisherOAuth] Fetching connected OAuth providers");
   const { data, error } = await listConnections({ throwOnError: false });
 
@@ -195,7 +198,7 @@ export async function listConnectedPublishers(): Promise<
     throw new Error(`Failed to list connections: ${error}`);
   }
 
-  const connections = data?.connections || [];
+  const connections = (data?.connections || []) as OAuthConnection[];
   console.log(
     `[PublisherOAuth] Found ${connections.length} connected providers`,
   );
@@ -208,7 +211,63 @@ export async function listConnectedPublishers(): Promise<
 export async function disconnectPublisher(providerSlug: string): Promise<void> {
   console.log(`[PublisherOAuth] Disconnecting ${providerSlug}`);
   await revokePublisherConnection(providerSlug);
+  markOAuthConnectionsChanged();
   console.log(`[PublisherOAuth] Successfully disconnected ${providerSlug}`);
+}
+
+/**
+ * Disconnect one OAuth account row.
+ */
+export async function disconnectOAuthConnection(
+  connectionId: string,
+): Promise<void> {
+  console.log(
+    `[PublisherOAuth] Disconnecting OAuth connection ${connectionId}`,
+  );
+
+  const { error } = await revokeConnectionById({
+    path: { connection_id: connectionId },
+    throwOnError: false,
+  });
+
+  if (error) {
+    console.error(
+      `[PublisherOAuth] Error disconnecting OAuth connection ${connectionId}:`,
+      error,
+    );
+    throw new Error(`Failed to revoke connection: ${formatOAuthError(error)}`);
+  }
+
+  markOAuthConnectionsChanged();
+}
+
+/**
+ * Make one OAuth account the provider default.
+ */
+export async function setDefaultOAuthConnection(
+  connectionId: string,
+): Promise<OAuthConnection> {
+  console.log(
+    `[PublisherOAuth] Setting default OAuth connection ${connectionId}`,
+  );
+
+  const { data, error } = await setDefaultConnection({
+    path: { connection_id: connectionId },
+    throwOnError: false,
+  });
+
+  if (error) {
+    console.error(
+      `[PublisherOAuth] Error setting default OAuth connection ${connectionId}:`,
+      error,
+    );
+    throw new Error(
+      `Failed to set default connection: ${formatOAuthError(error)}`,
+    );
+  }
+
+  markOAuthConnectionsChanged();
+  return data.connection as OAuthConnection;
 }
 
 async function revokePublisherConnection(

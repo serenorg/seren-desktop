@@ -16,7 +16,6 @@ import {
   listProviders,
   listStorePublishers,
   type PublisherOAuthProviderResponse,
-  type UserOAuthConnectionResponse,
 } from "@/api";
 import attioLogo from "@/assets/oauth-logos/attio.svg";
 import githubLogo from "@/assets/oauth-logos/github.svg";
@@ -30,9 +29,16 @@ import {
 import { listenForOAuthCallback } from "@/lib/tauri-bridge";
 import {
   connectPublisher,
-  disconnectPublisher,
+  disconnectOAuthConnection,
+  setDefaultOAuthConnection,
 } from "@/services/publisher-oauth";
 import { authStore } from "@/stores/auth.store";
+import {
+  formatOAuthConnectionLabel,
+  getOAuthConnectionsForProvider,
+  markOAuthConnectionsChanged,
+  type OAuthConnection,
+} from "@/stores/oauth-account.store";
 
 /** Local fallback logos for OAuth providers */
 const LOCAL_PROVIDER_LOGOS: Record<string, string> = {
@@ -71,7 +77,10 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
   const [connectingProvider, setConnectingProvider] = createSignal<
     string | null
   >(null);
-  const [disconnectingProvider, setDisconnectingProvider] = createSignal<
+  const [disconnectingConnection, setDisconnectingConnection] = createSignal<
+    string | null
+  >(null);
+  const [settingDefaultConnection, setSettingDefaultConnection] = createSignal<
     string | null
   >(null);
   const [error, setError] = createSignal<string | null>(null);
@@ -144,7 +153,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
         console.error("[OAuthLogins] Error fetching connections:", error);
         return [];
       }
-      return data?.connections || [];
+      return (data?.connections || []) as OAuthConnection[];
     },
   );
 
@@ -214,6 +223,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
           "[OAuthLogins] Refreshing connections after successful OAuth",
         );
         await refetchConnections();
+        markOAuthConnectionsChanged();
         console.log("[OAuthLogins] Connections refreshed successfully");
         // Clear expired status for this provider since they just reconnected
         const currentProvider = connectingProvider();
@@ -237,12 +247,8 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
     });
   });
 
-  const isConnected = (
-    providerSlug: string,
-  ): UserOAuthConnectionResponse | undefined => {
-    return connections()?.find(
-      (c) => c.provider_slug === providerSlug && c.is_valid,
-    );
+  const providerConnections = (providerSlug: string): OAuthConnection[] => {
+    return getOAuthConnectionsForProvider(connections() ?? [], providerSlug);
   };
 
   const isExpired = (providerSlug: string, providerId: string): boolean => {
@@ -306,22 +312,40 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
     }
   };
 
-  const handleDisconnect = async (providerSlug: string) => {
+  const handleDisconnectConnection = async (
+    connection: OAuthConnection,
+  ): Promise<void> => {
     const confirmDisconnect = window.confirm(
-      `Disconnect from ${providerSlug}? You'll need to reconnect to use publishers that require this authentication.`,
+      `Disconnect ${formatOAuthConnectionLabel(connection)} from ${connection.provider_slug}? You'll need to reconnect to use publishers that require this authentication.`,
     );
     if (!confirmDisconnect) return;
 
     setError(null);
-    setDisconnectingProvider(providerSlug);
+    setDisconnectingConnection(connection.id);
 
     try {
-      await disconnectPublisher(providerSlug);
+      await disconnectOAuthConnection(connection.id);
       await refetchConnections();
-      setDisconnectingProvider(null);
+      setDisconnectingConnection(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to disconnect");
-      setDisconnectingProvider(null);
+      setDisconnectingConnection(null);
+    }
+  };
+
+  const handleSetDefaultConnection = async (
+    connection: OAuthConnection,
+  ): Promise<void> => {
+    setError(null);
+    setSettingDefaultConnection(connection.id);
+
+    try {
+      await setDefaultOAuthConnection(connection.id);
+      await refetchConnections();
+      setSettingDefaultConnection(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to set default");
+      setSettingDefaultConnection(null);
     }
   };
 
@@ -397,18 +421,17 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
         <div class="flex flex-col gap-2">
           <For each={providers()}>
             {(provider) => {
-              const connection = () => isConnected(provider.slug);
+              const providerAccounts = () => providerConnections(provider.slug);
+              const hasConnection = () => providerAccounts().length > 0;
               const expired = () => isExpired(provider.slug, provider.id);
               const isConnecting = () => connectingProvider() === provider.slug;
-              const isDisconnecting = () =>
-                disconnectingProvider() === provider.slug;
 
               // Determine card border/background based on state
               const cardClasses = () => {
                 if (expired()) {
                   return "border-warning/50 bg-warning/[0.08]";
                 }
-                if (connection()) {
+                if (hasConnection()) {
                   return "border-success/30 bg-success/5";
                 }
                 return "border-border-hover";
@@ -469,7 +492,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                               Expired
                             </span>
                           </Show>
-                          <Show when={connection() && !expired()}>
+                          <Show when={hasConnection() && !expired()}>
                             <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-success/20 text-success">
                               Connected
                             </span>
@@ -486,14 +509,12 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                             this service
                           </span>
                         </Show>
-                        <Show when={!expired() && connection()}>
-                          {(conn) => (
-                            <span class="text-[0.75rem] text-muted-foreground">
-                              {conn().provider_email
-                                ? `Connected as ${conn().provider_email}`
-                                : `Last used: ${formatDate(conn().last_used_at)}`}
-                            </span>
-                          )}
+                        <Show when={!expired() && hasConnection()}>
+                          <span class="text-[0.75rem] text-muted-foreground">
+                            {providerAccounts().length === 1
+                              ? `1 account connected`
+                              : `${providerAccounts().length} accounts connected`}
+                          </span>
                         </Show>
                       </div>
                     </div>
@@ -509,19 +530,17 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                           {isConnecting() ? "Reconnecting..." : "Reconnect"}
                         </button>
                       </Show>
-                      <Show when={connection() && !expired()}>
+                      <Show when={hasConnection() && !expired()}>
                         <button
                           type="button"
-                          class="px-4 py-2 bg-transparent border border-destructive/50 rounded-md text-destructive text-[0.9rem] cursor-pointer transition-all duration-150 hover:not-disabled:bg-destructive/10 hover:not-disabled:border-destructive disabled:opacity-50 disabled:cursor-not-allowed"
-                          onClick={() => handleDisconnect(provider.slug)}
-                          disabled={isDisconnecting()}
+                          class="px-4 py-2 bg-transparent border border-border rounded-md text-foreground text-[0.9rem] cursor-pointer transition-all duration-150 hover:not-disabled:bg-surface-2 hover:not-disabled:border-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={() => handleConnect(provider)}
+                          disabled={isConnecting()}
                         >
-                          {isDisconnecting()
-                            ? "Disconnecting..."
-                            : "Disconnect"}
+                          {isConnecting() ? "Adding..." : "Add account"}
                         </button>
                       </Show>
-                      <Show when={!connection() && !expired()}>
+                      <Show when={!hasConnection() && !expired()}>
                         <button
                           type="button"
                           class="px-4 py-2 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-primary/85 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -534,11 +553,92 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                     </div>
                   </div>
 
+                  {/* Connected account rows */}
+                  <Show when={hasConnection() && !expired()}>
+                    <div class="px-4 pb-3 pt-0 border-t border-border/50">
+                      <span class="block text-[0.7rem] text-muted-foreground/70 uppercase tracking-wider pt-3 pb-1.5">
+                        Accounts
+                      </span>
+                      <div class="flex flex-col divide-y divide-border/50">
+                        <For each={providerAccounts()}>
+                          {(connection) => {
+                            const label = () =>
+                              formatOAuthConnectionLabel(connection);
+                            const isDefault = () =>
+                              Boolean(connection.is_default);
+                            const isDisconnecting = () =>
+                              disconnectingConnection() === connection.id;
+                            const isSettingDefault = () =>
+                              settingDefaultConnection() === connection.id;
+
+                            return (
+                              <div
+                                class="flex items-center justify-between gap-3 py-2.5"
+                                data-testid="oauth-account-row"
+                              >
+                                <div class="flex items-center gap-3 min-w-0">
+                                  <div class="w-8 h-8 rounded-full bg-surface-2 border border-border flex items-center justify-center text-xs font-semibold text-foreground shrink-0">
+                                    {label().charAt(0).toUpperCase()}
+                                  </div>
+                                  <div class="min-w-0">
+                                    <div class="flex items-center gap-2 min-w-0">
+                                      <span class="text-[0.9rem] text-foreground truncate">
+                                        {label()}
+                                      </span>
+                                      <Show when={isDefault()}>
+                                        <span class="text-[11px] text-success font-medium shrink-0">
+                                          Default
+                                        </span>
+                                      </Show>
+                                    </div>
+                                    <span class="block text-[0.75rem] text-muted-foreground truncate">
+                                      Last used:{" "}
+                                      {formatDate(connection.last_used_at)}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div class="flex items-center gap-2 shrink-0">
+                                  <Show when={!isDefault()}>
+                                    <button
+                                      type="button"
+                                      class="px-3 py-1.5 bg-transparent border border-border rounded-md text-[0.8rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:not-disabled:bg-surface-2 hover:not-disabled:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                                      onClick={() =>
+                                        handleSetDefaultConnection(connection)
+                                      }
+                                      disabled={isSettingDefault()}
+                                    >
+                                      {isSettingDefault()
+                                        ? "Setting..."
+                                        : "Set default"}
+                                    </button>
+                                  </Show>
+                                  <button
+                                    type="button"
+                                    class="px-3 py-1.5 bg-transparent border border-destructive/50 rounded-md text-[0.8rem] text-destructive cursor-pointer transition-all duration-150 hover:not-disabled:bg-destructive/10 hover:not-disabled:border-destructive disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onClick={() =>
+                                      handleDisconnectConnection(connection)
+                                    }
+                                    disabled={isDisconnecting()}
+                                  >
+                                    {isDisconnecting()
+                                      ? "Disconnecting..."
+                                      : "Disconnect"}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          }}
+                        </For>
+                      </div>
+                    </div>
+                  </Show>
+
                   {/* Linked publishers sub-list */}
-                  <Show when={linked().length > 1}>
+                  <Show when={hasConnection() && linked().length > 0}>
                     <div class="px-4 pb-3 pt-0 border-t border-border/50 mt-0">
                       <span class="block text-[0.7rem] text-muted-foreground/70 uppercase tracking-wider pt-2.5 pb-1.5">
-                        Services using this connection
+                        Services using the default account
                       </span>
                       <div class="flex flex-col gap-1.5">
                         <For each={linked()}>

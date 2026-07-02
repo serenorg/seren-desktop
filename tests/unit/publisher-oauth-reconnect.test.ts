@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listConnections: vi.fn(),
   openUrl: vi.fn<() => Promise<void>>(),
   revokeConnectionById: vi.fn(),
+  setDefaultConnection: vi.fn(),
 }));
 
 vi.mock("@/api", () => ({
@@ -16,6 +17,7 @@ vi.mock("@/api", () => ({
   listProviders: vi.fn(),
   listStorePublishers: vi.fn(),
   revokeConnectionById: mocks.revokeConnectionById,
+  setDefaultConnection: mocks.setDefaultConnection,
 }));
 
 vi.mock("@/lib/config", () => ({
@@ -72,6 +74,21 @@ describe("publisher OAuth reconnect", () => {
     });
     mocks.revokeConnectionById.mockResolvedValue({
       data: {},
+      response: new Response(null, { status: 200 }),
+    });
+    mocks.setDefaultConnection.mockResolvedValue({
+      data: {
+        connection: {
+          id: "conn_google_1",
+          provider_slug: "google",
+          provider_email: "user@example.com",
+          provider_user_id: "user-1",
+          is_valid: true,
+          is_default: true,
+          connected_at: "2026-01-01T00:00:00Z",
+          last_used_at: null,
+        },
+      },
       response: new Response(null, { status: 200 }),
     });
   });
@@ -194,5 +211,32 @@ describe("publisher OAuth reconnect", () => {
       bearerToken: "access-token",
       url: "https://api.serendb.com/oauth/google/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Foauth%2Fcallback",
     });
+  });
+
+  it("disconnects a single OAuth account row by connection id", async () => {
+    const { disconnectOAuthConnection } = await import(
+      "@/services/publisher-oauth"
+    );
+
+    await disconnectOAuthConnection("conn_google_1");
+
+    expect(mocks.revokeConnectionById).toHaveBeenCalledWith({
+      path: { connection_id: "conn_google_1" },
+      throwOnError: false,
+    });
+  });
+
+  it("sets a single OAuth account row as provider default", async () => {
+    const { setDefaultOAuthConnection } = await import(
+      "@/services/publisher-oauth"
+    );
+
+    const connection = await setDefaultOAuthConnection("conn_google_1");
+
+    expect(mocks.setDefaultConnection).toHaveBeenCalledWith({
+      path: { connection_id: "conn_google_1" },
+      throwOnError: false,
+    });
+    expect(connection.is_default).toBe(true);
   });
 });

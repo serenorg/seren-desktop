@@ -332,6 +332,81 @@ describe("MCP Gateway Native Tool Routing (#1329)", () => {
     expect(result.is_error).toBe(false);
   });
 
+  it("should pass connection_id as call_publisher metadata for REST publisher tools", async () => {
+    const { mcpClient } = await import("@/lib/mcp/client");
+    const callToolMock = vi.mocked(mcpClient.callToolHttp);
+
+    callToolMock.mockImplementation(async (_server, request) => {
+      if (request.name === "list_agent_publishers") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                publishers: [{ slug: "gmail", name: "Gmail" }],
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+      if (
+        request.name === "list_mcp_tools" &&
+        request.arguments?.publisher === "gmail"
+      ) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                tools: [
+                  {
+                    name: "post_messages_send",
+                    description: "Send email",
+                    inputSchema: { type: "object", properties: {} },
+                  },
+                ],
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+      return { content: [], isError: true };
+    });
+
+    const { initializeGateway, callGatewayTool } = await import(
+      "@/services/mcp-gateway"
+    );
+
+    await initializeGateway();
+    callToolMock.mockClear();
+    callToolMock.mockResolvedValue({
+      content: [{ type: "text", text: "sent" }],
+      isError: false,
+    });
+
+    const result = await callGatewayTool("gmail", "post_messages_send", {
+      connection_id: "conn_google_1",
+      to: "user@example.com",
+      subject: "Hello",
+    });
+
+    expect(callToolMock).toHaveBeenCalledWith("seren-gateway", {
+      name: "call_publisher",
+      arguments: {
+        publisher: "gmail",
+        tool: "post_messages_send",
+        connection_id: "conn_google_1",
+        tool_args: {
+          to: "user@example.com",
+          subject: "Hello",
+        },
+      },
+    });
+    expect(result.is_error).toBe(false);
+  });
+
   it("should track native tools and clear them on reset", async () => {
     const { initializeGateway, isNativeMcpTool, resetGateway } = await import(
       "@/services/mcp-gateway"

@@ -108,6 +108,7 @@ import {
 } from "./composerToolbarClasses";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
+import { OAuthAccountSwitcher } from "./OAuthAccountSwitcher";
 import { PairedEffortSelector } from "./PairedEffortSelector";
 import { PairedModelSelector } from "./PairedModelSelector";
 import { PlanHeader } from "./PlanHeader";
@@ -1728,6 +1729,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           >
             Clear
           </button>
+          <OAuthAccountSwitcher threadId={props.threadId} />
         </div>
       </Show>
 
