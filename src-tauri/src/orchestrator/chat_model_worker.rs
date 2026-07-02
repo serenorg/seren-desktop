@@ -1483,6 +1483,7 @@ created if missing.",
     /// call `submit_tool_result` with the result.
     async fn execute_frontend_tool(
         app: &tauri::AppHandle,
+        conversation_id: &str,
         tool_call_id: &str,
         name: &str,
         arguments: &str,
@@ -1501,8 +1502,12 @@ created if missing.",
             tool_call_id
         );
 
-        // Emit a tool execution request to the frontend
+        // Emit a tool execution request to the frontend. The owning conversation
+        // id lets the frontend resolve per-thread state (e.g. the selected OAuth
+        // account) against the run that issued the call, not whichever chat the
+        // user happens to be viewing when a background run reaches a tool.
         let payload = serde_json::json!({
+            "conversation_id": conversation_id,
             "tool_call_id": tool_call_id,
             "name": name,
             "arguments": arguments,
@@ -1550,7 +1555,7 @@ impl Worker for ChatModelWorker {
 
     async fn execute(
         &self,
-        _conversation_id: &str,
+        conversation_id: &str,
         prompt: &str,
         conversation_context: &[serde_json::Value],
         routing: &RoutingDecision,
@@ -1874,7 +1879,14 @@ impl Worker for ChatModelWorker {
                         } else {
                             // Route non-local tools (gateway__, mcp__)
                             // to the frontend for execution via the tool bridge.
-                            Self::execute_frontend_tool(app, &tc.id, &tc.name, &tc.arguments).await
+                            Self::execute_frontend_tool(
+                                app,
+                                conversation_id,
+                                &tc.id,
+                                &tc.name,
+                                &tc.arguments,
+                            )
+                            .await
                         };
 
                         // Emit ToolResult event to frontend
