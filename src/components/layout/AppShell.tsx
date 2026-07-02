@@ -30,6 +30,8 @@ import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { AudioPrimingDialog } from "@/components/meeting/AudioPrimingDialog";
 import { MeetingPanel } from "@/components/meeting/MeetingPanel";
 import { RecordingIndicator } from "@/components/meeting/RecordingIndicator";
+import { ConversationSearchOverlay } from "@/components/search/ConversationSearchOverlay";
+import { ConversationSearchResults } from "@/components/search/ConversationSearchResults";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import {
@@ -57,12 +59,18 @@ import { isMeetingProcessingStatus } from "@/lib/meeting-format";
 import { isNativeTextEditingKey, shortcuts } from "@/lib/shortcuts";
 import type { InstalledSkill } from "@/lib/skills";
 import { listenForInterviewLaunch } from "@/lib/tauri-bridge";
+import {
+  backfillConversationFts,
+  backfillConversationIndex,
+} from "@/services/conversation-search";
 import { telemetry } from "@/services/telemetry";
 import {
   appearanceState,
   applyAppearanceToDocument,
   loadAppearance,
 } from "@/stores/appearance.store";
+import { authStore } from "@/stores/auth.store";
+import { conversationSearchStore } from "@/stores/conversation-search.store";
 import {
   initEditorSessionPersistence,
   pickEditorSessionForContext,
@@ -216,8 +224,22 @@ export const AppShell: Component<AppShellProps> = (props) => {
   const [interviewEmployeeSlug, setInterviewEmployeeSlug] = createSignal<
     string | null
   >(null);
+  const [conversationFtsReady, setConversationFtsReady] = createSignal(false);
+  let conversationEmbeddingBackfillStarted = false;
+
+  const startConversationEmbeddingBackfill = () => {
+    if (conversationEmbeddingBackfillStarted) return;
+    conversationEmbeddingBackfillStarted = true;
+    void backfillConversationIndex();
+  };
+
   createEffect(() => {
     persistSlidePanel(slidePanel());
+  });
+
+  createEffect(() => {
+    if (!conversationFtsReady() || !authStore.isAuthenticated) return;
+    startConversationEmbeddingBackfill();
   });
 
   const reportInterviewInterest = (
@@ -799,6 +821,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     // every future capture (#2160).
     void meetingStore.reconcileStaleCaptures();
     meetingStore.startAutoDetect();
+    void backfillConversationFts().finally(() => setConversationFtsReady(true));
 
     window.addEventListener("seren:open-panel", handleOpenPanel);
     window.addEventListener(
@@ -838,6 +861,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
       setSlidePanel("meetings");
       meetingStore.requestSearchFocus();
     });
+    shortcuts.register("global.searchHistory", () => {
+      setSlidePanel(null);
+      conversationSearchStore.openOverlay();
+    });
   });
 
   onCleanup(() => {
@@ -867,6 +894,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     shortcuts.unregister("global.newChat");
     shortcuts.unregister("global.newTerminal");
     shortcuts.unregister("global.searchMeetings");
+    shortcuts.unregister("global.searchHistory");
   });
 
   const recordPromptVisible = () =>
@@ -915,111 +943,118 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
         <main class="flex-1 overflow-auto flex flex-col min-w-0">
           <Show
-            when={interviewLandingOpen()}
+            when={conversationSearchStore.state.mode === "full"}
             fallback={
               <Show
-                when={inboxOpen()}
+                when={interviewLandingOpen()}
                 fallback={
                   <Show
-                    when={catalogOpen()}
+                    when={inboxOpen()}
                     fallback={
                       <Show
-                        when={activeEmployeeId()}
+                        when={catalogOpen()}
                         fallback={
                           <Show
-                            when={activeBountyId()}
+                            when={activeEmployeeId()}
                             fallback={
-                              <ThreadContent
-                                onSignInClick={handleSignInClick}
-                              />
+                              <Show
+                                when={activeBountyId()}
+                                fallback={
+                                  <ThreadContent
+                                    onSignInClick={handleSignInClick}
+                                  />
+                                }
+                              >
+                                {(id) => (
+                                  <BountyDetail
+                                    bountyId={id()}
+                                    inheritFrom={activeBountyInheritFrom()}
+                                  />
+                                )}
+                              </Show>
                             }
                           >
                             {(id) => (
-                              <BountyDetail
-                                bountyId={id()}
-                                inheritFrom={activeBountyInheritFrom()}
-                              />
+                              <Show
+                                when={
+                                  employeeStore.byId(id()) === undefined &&
+                                  employeeStore.archivedById(id()) !== undefined
+                                }
+                                fallback={
+                                  <EmployeeDetail
+                                    employeeId={id()}
+                                    onClose={closeEmployeeDetailPane}
+                                  />
+                                }
+                              >
+                                <ArchivedEmployeeDetail
+                                  employeeId={id()}
+                                  onClose={closeEmployeeDetailPane}
+                                />
+                              </Show>
                             )}
                           </Show>
                         }
                       >
-                        {(id) => (
-                          <Show
-                            when={
-                              employeeStore.byId(id()) === undefined &&
-                              employeeStore.archivedById(id()) !== undefined
-                            }
-                            fallback={
-                              <EmployeeDetail
-                                employeeId={id()}
-                                onClose={closeEmployeeDetailPane}
-                              />
-                            }
-                          >
-                            <ArchivedEmployeeDetail
-                              employeeId={id()}
-                              onClose={closeEmployeeDetailPane}
-                            />
-                          </Show>
-                        )}
+                        <ErrorBoundary
+                          fallback={(error) => {
+                            telemetry.reportError(
+                              error instanceof Error
+                                ? error
+                                : new Error(String(error)),
+                              { surface: "agent_catalog" },
+                            );
+                            return (
+                              <div class="flex h-full min-h-[320px] flex-col items-center justify-center gap-3 p-6 text-center">
+                                <div class="text-sm font-semibold text-foreground">
+                                  Agent catalog is recovering.
+                                </div>
+                                <div class="max-w-md text-[13px] text-muted-foreground">
+                                  The catalog view hit an unexpected entry, but
+                                  the rest of Seren is still available.
+                                </div>
+                                <button
+                                  type="button"
+                                  class="rounded border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-surface-2"
+                                  onClick={handleCloseCatalog}
+                                >
+                                  Back to workspace
+                                </button>
+                              </div>
+                            );
+                          }}
+                        >
+                          <CatalogList />
+                        </ErrorBoundary>
                       </Show>
                     }
                   >
-                    <ErrorBoundary
-                      fallback={(error) => {
-                        telemetry.reportError(
-                          error instanceof Error
-                            ? error
-                            : new Error(String(error)),
-                          { surface: "agent_catalog" },
-                        );
-                        return (
-                          <div class="flex h-full min-h-[320px] flex-col items-center justify-center gap-3 p-6 text-center">
-                            <div class="text-sm font-semibold text-foreground">
-                              Agent catalog is recovering.
-                            </div>
-                            <div class="max-w-md text-[13px] text-muted-foreground">
-                              The catalog view hit an unexpected entry, but the
-                              rest of Seren is still available.
-                            </div>
-                            <button
-                              type="button"
-                              class="rounded border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-surface-2"
-                              onClick={handleCloseCatalog}
-                            >
-                              Back to workspace
-                            </button>
-                          </div>
-                        );
-                      }}
-                    >
-                      <CatalogList />
-                    </ErrorBoundary>
+                    <InboxList />
                   </Show>
                 }
               >
-                <InboxList />
+                <InterviewLanding
+                  initialEmployeeSlug={interviewEmployeeSlug()}
+                  onClose={closeInterviewLanding}
+                  onSelectEmployee={(employeeSlug) => {
+                    reportInterviewInterest(
+                      employeeSlug,
+                      "desktop-role-selection",
+                      "role-selected",
+                    );
+                  }}
+                  onStartInterview={(employeeSlug) => {
+                    reportInterviewInterest(
+                      employeeSlug,
+                      "desktop-interview-start",
+                      "interview-started",
+                    );
+                  }}
+                />
               </Show>
             }
           >
-            <InterviewLanding
-              initialEmployeeSlug={interviewEmployeeSlug()}
-              onClose={closeInterviewLanding}
-              onSelectEmployee={(employeeSlug) => {
-                reportInterviewInterest(
-                  employeeSlug,
-                  "desktop-role-selection",
-                  "role-selected",
-                );
-              }}
-              onStartInterview={(employeeSlug) => {
-                reportInterviewInterest(
-                  employeeSlug,
-                  "desktop-interview-start",
-                  "interview-started",
-                );
-              }}
-            />
+            <ConversationSearchResults />
           </Show>
         </main>
 
@@ -1110,6 +1145,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
       {/* Always-visible recording indicator while a capture is live (auto- or
           manually-started): elapsed time + Stop / Pause / Resume / Delete. */}
       <RecordingIndicator />
+
+      <ConversationSearchOverlay />
 
       {/* Layout-level blocking sign-in modal — fires on mid-session expiry,
           refresh-token failure, and the /login slash command. Distinct from

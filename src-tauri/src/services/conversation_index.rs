@@ -126,7 +126,10 @@ fn create_tables(conn: &Connection) -> Result<()> {
     // Exact path. A plain (non-external-content) FTS5 table whose rowid mirrors
     // conv_chunks.id — supports INSERT with an explicit rowid and DELETE by rowid,
     // avoiding the external-content sync footguns.
-    conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS conv_fts USING fts5(text)", [])?;
+    conn.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS conv_fts USING fts5(text)",
+        [],
+    )?;
     // Semantic path (dim reuses EMBEDDING_DIM = 1536, same as transcript/code index).
     conn.execute(
         &format!(
@@ -157,7 +160,10 @@ pub fn open_index_db(app: &AppHandle) -> Result<Connection> {
 }
 
 fn embedding_to_blob(embedding: &[f32]) -> Vec<u8> {
-    embedding.iter().flat_map(|value| value.to_le_bytes()).collect()
+    embedding
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect()
 }
 
 fn fts_document(title: Option<&str>, text: &str) -> String {
@@ -200,7 +206,11 @@ pub fn chunk_message(content: &str) -> Vec<ChunkInput> {
                 }
             }
         }
-        let text: String = chars[start..end].iter().collect::<String>().trim().to_string();
+        let text: String = chars[start..end]
+            .iter()
+            .collect::<String>()
+            .trim()
+            .to_string();
         if !text.is_empty() {
             chunks.push(ChunkInput { seq, text });
             seq += 1;
@@ -219,9 +229,15 @@ fn delete_message_chunks_tx(tx: &Connection, message_id: &str) -> Result<()> {
     };
     for id in &ids {
         tx.execute("DELETE FROM conv_fts WHERE rowid = ?1", params![id])?;
-        tx.execute("DELETE FROM conv_embeddings WHERE chunk_id = ?1", params![id])?;
+        tx.execute(
+            "DELETE FROM conv_embeddings WHERE chunk_id = ?1",
+            params![id],
+        )?;
     }
-    tx.execute("DELETE FROM conv_chunks WHERE message_id = ?1", params![message_id])?;
+    tx.execute(
+        "DELETE FROM conv_chunks WHERE message_id = ?1",
+        params![message_id],
+    )?;
     Ok(())
 }
 
@@ -282,7 +298,10 @@ pub fn delete_conversation_chunks(conn: &Connection, conversation_id: &str) -> R
     };
     for id in &ids {
         tx.execute("DELETE FROM conv_fts WHERE rowid = ?1", params![id])?;
-        tx.execute("DELETE FROM conv_embeddings WHERE chunk_id = ?1", params![id])?;
+        tx.execute(
+            "DELETE FROM conv_embeddings WHERE chunk_id = ?1",
+            params![id],
+        )?;
     }
     tx.execute(
         "DELETE FROM conv_chunks WHERE conversation_id = ?1",
@@ -317,9 +336,11 @@ pub fn update_conversation_meta(
         let rows: Vec<(i64, String)> = {
             let mut stmt =
                 conn.prepare("SELECT id, text FROM conv_chunks WHERE conversation_id = ?1")?;
-            stmt.query_map(params![conversation_id], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .filter_map(|row| row.ok())
-                .collect()
+            stmt.query_map(params![conversation_id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .filter_map(|row| row.ok())
+            .collect()
         };
         for (chunk_id, text) in rows {
             conn.execute(
@@ -384,7 +405,12 @@ fn build_filter_clause(filters: &SearchFilters) -> (String, Vec<Value>) {
     let mut clause = String::new();
     let mut vals: Vec<Value> = Vec::new();
     if !filters.kinds.is_empty() {
-        let placeholders = filters.kinds.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = filters
+            .kinds
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
         clause.push_str(&format!(" AND c.kind IN ({placeholders})"));
         for kind in &filters.kinds {
             vals.push(Value::Text(kind.clone()));
@@ -527,7 +553,11 @@ mod tests {
             kind: kind.to_string(),
             role: role.to_string(),
             title: Some(format!("title-{conv}")),
-            agent_type: if kind == "agent" { Some("claude-code".into()) } else { None },
+            agent_type: if kind == "agent" {
+                Some("claude-code".into())
+            } else {
+                None
+            },
             project_root: Some("/repo".into()),
             is_archived: false,
             timestamp: 1000,
@@ -562,8 +592,16 @@ mod tests {
     #[test]
     fn fts_ranks_and_matches_words() {
         let conn = test_conn();
-        reindex_message(&conn, &msg("m1", "c1", "chat", "user", "the updater signing failed")).unwrap();
-        reindex_message(&conn, &msg("m2", "c2", "chat", "user", "weather chatter today")).unwrap();
+        reindex_message(
+            &conn,
+            &msg("m1", "c1", "chat", "user", "the updater signing failed"),
+        )
+        .unwrap();
+        reindex_message(
+            &conn,
+            &msg("m2", "c2", "chat", "user", "weather chatter today"),
+        )
+        .unwrap();
 
         let hits = search_fts(&conn, "signing", &SearchFilters::default(), 10).unwrap();
         assert_eq!(hits.len(), 1);
@@ -588,7 +626,13 @@ mod tests {
         let conn = test_conn();
         reindex_message(
             &conn,
-            &msg("m1", "c1", "chat", "assistant", r#"set createUpdaterArtifacts: true AND ship"#),
+            &msg(
+                "m1",
+                "c1",
+                "chat",
+                "assistant",
+                r#"set createUpdaterArtifacts: true AND ship"#,
+            ),
         )
         .unwrap();
 
@@ -606,11 +650,20 @@ mod tests {
         }
         // A term that is present matches; one that is absent does not.
         assert_eq!(
-            search_fts(&conn, "createUpdaterArtifacts", &SearchFilters::default(), 10).unwrap().len(),
+            search_fts(
+                &conn,
+                "createUpdaterArtifacts",
+                &SearchFilters::default(),
+                10
+            )
+            .unwrap()
+            .len(),
             1
         );
         assert_eq!(
-            search_fts(&conn, "nonexistentterm", &SearchFilters::default(), 10).unwrap().len(),
+            search_fts(&conn, "nonexistentterm", &SearchFilters::default(), 10)
+                .unwrap()
+                .len(),
             0
         );
     }
@@ -656,10 +709,16 @@ mod tests {
         let query = unit_vec(0);
 
         let run = |f: &SearchFilters| {
-            let mut fts: Vec<String> =
-                search_fts(&conn, "alpha", f, 50).unwrap().into_iter().map(|h| h.message_id).collect();
-            let mut sem: Vec<String> =
-                search_semantic(&conn, &query, f, 50).unwrap().into_iter().map(|h| h.message_id).collect();
+            let mut fts: Vec<String> = search_fts(&conn, "alpha", f, 50)
+                .unwrap()
+                .into_iter()
+                .map(|h| h.message_id)
+                .collect();
+            let mut sem: Vec<String> = search_semantic(&conn, &query, f, 50)
+                .unwrap()
+                .into_iter()
+                .map(|h| h.message_id)
+                .collect();
             fts.sort();
             sem.sort();
             (fts, sem)
@@ -671,17 +730,26 @@ mod tests {
         assert_eq!(sem, vec!["m1", "m2"]);
 
         // kind = chat only → m1 (m3 archived).
-        let (fts, sem) = run(&SearchFilters { kinds: vec!["chat".into()], ..Default::default() });
+        let (fts, sem) = run(&SearchFilters {
+            kinds: vec!["chat".into()],
+            ..Default::default()
+        });
         assert_eq!(fts, vec!["m1"]);
         assert_eq!(sem, vec!["m1"]);
 
         // project = /repoB → m2.
-        let (fts, sem) = run(&SearchFilters { project_root: Some("/repoB".into()), ..Default::default() });
+        let (fts, sem) = run(&SearchFilters {
+            project_root: Some("/repoB".into()),
+            ..Default::default()
+        });
         assert_eq!(fts, vec!["m2"]);
         assert_eq!(sem, vec!["m2"]);
 
         // include archived → m1, m2, m3.
-        let (fts, sem) = run(&SearchFilters { include_archived: true, ..Default::default() });
+        let (fts, sem) = run(&SearchFilters {
+            include_archived: true,
+            ..Default::default()
+        });
         assert_eq!(fts, vec!["m1", "m2", "m3"]);
         assert_eq!(sem, vec!["m1", "m2", "m3"]);
     }
@@ -689,22 +757,52 @@ mod tests {
     #[test]
     fn delete_and_reindex_cascade() {
         let conn = test_conn();
-        reindex_message(&conn, &msg("m1", "c1", "chat", "user", "original signing text")).unwrap();
+        reindex_message(
+            &conn,
+            &msg("m1", "c1", "chat", "user", "original signing text"),
+        )
+        .unwrap();
         insert_embedding(&conn, chunk_id_for(&conn, "m1"), &unit_vec(0)).unwrap();
 
         // Edit (upsert): reindex replaces text; the old text is gone.
-        reindex_message(&conn, &msg("m1", "c1", "chat", "user", "revised deployment text")).unwrap();
-        assert_eq!(search_fts(&conn, "signing", &SearchFilters::default(), 10).unwrap().len(), 0);
-        assert_eq!(search_fts(&conn, "deployment", &SearchFilters::default(), 10).unwrap().len(), 1);
+        reindex_message(
+            &conn,
+            &msg("m1", "c1", "chat", "user", "revised deployment text"),
+        )
+        .unwrap();
+        assert_eq!(
+            search_fts(&conn, "signing", &SearchFilters::default(), 10)
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(
+            search_fts(&conn, "deployment", &SearchFilters::default(), 10)
+                .unwrap()
+                .len(),
+            1
+        );
         // Reindex dropped the stale embedding too (chunk is unembedded again).
-        assert!(unembedded_chunk_batch(&conn, 10).unwrap().iter().any(|(_, t)| t.contains("deployment")));
+        assert!(
+            unembedded_chunk_batch(&conn, 10)
+                .unwrap()
+                .iter()
+                .any(|(_, t)| t.contains("deployment"))
+        );
 
         // Delete by message: chunks + fts + embeddings all gone.
         insert_embedding(&conn, chunk_id_for(&conn, "m1"), &unit_vec(0)).unwrap();
         delete_message_chunks(&conn, "m1").unwrap();
-        assert_eq!(search_fts(&conn, "deployment", &SearchFilters::default(), 10).unwrap().len(), 0);
+        assert_eq!(
+            search_fts(&conn, "deployment", &SearchFilters::default(), 10)
+                .unwrap()
+                .len(),
+            0
+        );
         assert!(indexed_message_ids(&conn).unwrap().is_empty());
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM conv_embeddings", [], |r| r.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM conv_embeddings", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(count, 0);
     }
 
@@ -712,7 +810,11 @@ mod tests {
     fn delete_conversation_and_clear_all() {
         let conn = test_conn();
         reindex_message(&conn, &msg("m1", "c1", "chat", "user", "one signing")).unwrap();
-        reindex_message(&conn, &msg("m2", "c1", "assistant", "assistant", "two signing")).unwrap();
+        reindex_message(
+            &conn,
+            &msg("m2", "c1", "assistant", "assistant", "two signing"),
+        )
+        .unwrap();
         reindex_message(&conn, &msg("m3", "c2", "chat", "user", "three signing")).unwrap();
 
         delete_conversation_chunks(&conn, "c1").unwrap();
@@ -733,14 +835,22 @@ mod tests {
         let hits = search_fts(
             &conn,
             "signing",
-            &SearchFilters { include_archived: true, ..Default::default() },
+            &SearchFilters {
+                include_archived: true,
+                ..Default::default()
+            },
             10,
         )
         .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].title.as_deref(), Some("Renamed"));
         // Now archived → excluded by the default filter.
-        assert_eq!(search_fts(&conn, "signing", &SearchFilters::default(), 10).unwrap().len(), 0);
+        assert_eq!(
+            search_fts(&conn, "signing", &SearchFilters::default(), 10)
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     #[test]
@@ -754,6 +864,9 @@ mod tests {
         let giant = "word ".repeat(CHUNK_CHAR_BUDGET * MAX_CHUNKS_PER_MESSAGE);
         let chunks = chunk_message(&giant);
         assert_eq!(chunks.len(), MAX_CHUNKS_PER_MESSAGE);
-        assert_eq!(chunks.last().unwrap().seq, (MAX_CHUNKS_PER_MESSAGE - 1) as i64);
+        assert_eq!(
+            chunks.last().unwrap().seq,
+            (MAX_CHUNKS_PER_MESSAGE - 1) as i64
+        );
     }
 }

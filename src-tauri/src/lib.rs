@@ -12,8 +12,8 @@ pub mod commands {
     pub mod chat;
     pub mod claude_memory;
     pub mod cli_installer;
-    pub mod conversation_search;
     pub mod context_intelligence;
+    pub mod conversation_search;
     pub mod employees_archive;
     pub mod gateway_http;
     pub mod history_sync;
@@ -608,25 +608,28 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_deep_link::init());
     }
 
-    builder = builder
-        .manage(mcp::McpState::new())
-        .manage(mcp::HttpMcpState::new())
-        .manage(orchestrator::service::OrchestratorState::new())
-        .manage(audio::pipeline::CaptureRegistry::default())
-        .manage(std::sync::Mutex::new(
-            audio::lifecycle::LifecycleController::new(audio::lifecycle::LifecycleConfig::default()),
-        ))
-        .manage(orchestrator::eval::EvalState::new())
-        .manage(orchestrator::tool_bridge::ToolResultBridge::new())
-        .manage(provider_runtime::ProviderRuntimeState::new())
-        .manage(std::sync::Arc::new(
-            commands::updater::ShutdownGuard::default(),
-        ))
-        .manage(services::database::WalCheckpointTask::default())
-        .manage(services::history_sync::HistorySyncLock::default())
-        .manage(messaging::MessagingState::new())
-        .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
-            as polymarket::commands::PolymarketWsState);
+    builder =
+        builder
+            .manage(mcp::McpState::new())
+            .manage(mcp::HttpMcpState::new())
+            .manage(orchestrator::service::OrchestratorState::new())
+            .manage(audio::pipeline::CaptureRegistry::default())
+            .manage(std::sync::Mutex::new(
+                audio::lifecycle::LifecycleController::new(
+                    audio::lifecycle::LifecycleConfig::default(),
+                ),
+            ))
+            .manage(orchestrator::eval::EvalState::new())
+            .manage(orchestrator::tool_bridge::ToolResultBridge::new())
+            .manage(provider_runtime::ProviderRuntimeState::new())
+            .manage(std::sync::Arc::new(
+                commands::updater::ShutdownGuard::default(),
+            ))
+            .manage(services::database::WalCheckpointTask::default())
+            .manage(services::history_sync::HistorySyncLock::default())
+            .manage(messaging::MessagingState::new())
+            .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
+                as polymarket::commands::PolymarketWsState);
 
     builder
         .on_menu_event(|app, event| {

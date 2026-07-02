@@ -12,7 +12,10 @@ export const TransitionAnnouncement: Component<TransitionAnnouncementProps> = (
   props,
 ) => {
   return (
-    <div class="flex items-center gap-2 px-3 py-1.5 border-l-2 border-primary text-muted-foreground text-xs leading-normal animate-[fadeInUp_300ms_ease-in]">
+    <div
+      class="flex items-center gap-2 px-3 py-1.5 border-l-2 border-primary text-muted-foreground text-xs leading-normal animate-[fadeInUp_300ms_ease-in]"
+      data-message-id={props.message.id}
+    >
       {props.message.content}
     </div>
   );

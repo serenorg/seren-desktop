@@ -71,8 +71,7 @@ pub fn index_conversation_embeddings(
     embedding: Vec<f32>,
 ) -> Result<(), String> {
     let conn = open_index_db(&app).map_err(|err| err.to_string())?;
-    conversation_index::insert_embedding(&conn, chunk_id, &embedding)
-        .map_err(|err| err.to_string())
+    conversation_index::insert_embedding(&conn, chunk_id, &embedding).map_err(|err| err.to_string())
 }
 
 #[tauri::command]

@@ -215,10 +215,18 @@ export async function backfillConversationIndex(): Promise<void> {
     }
 
     for (const [index, chunk] of eligible.entries()) {
+      const embedding = embeddings.data[index]?.embedding;
+      if (!embedding) {
+        backfillAttempts.set(
+          chunk.chunkId,
+          (backfillAttempts.get(chunk.chunkId) ?? 0) + 1,
+        );
+        continue;
+      }
       try {
         await invoke("index_conversation_embeddings", {
           chunkId: chunk.chunkId,
-          embedding: embeddings.data[index].embedding,
+          embedding,
         });
         backfillAttempts.delete(chunk.chunkId);
       } catch {

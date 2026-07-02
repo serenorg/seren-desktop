@@ -21,6 +21,7 @@ import {
   OPEN_EMPLOYEE_DETAIL_EVENT,
 } from "@/components/sidebar/EmployeesSection";
 import { openFolder } from "@/lib/files/service";
+import { getShortcutLabel } from "@/lib/shortcuts";
 import {
   encodeThreadDragPayload,
   encodeThreadDragText,
@@ -38,6 +39,7 @@ import {
 import type { AgentType } from "@/services/providers";
 import { agentStore } from "@/stores/agent.store";
 import { authStore, refreshPrivateChatPolicy } from "@/stores/auth.store";
+import { conversationSearchStore } from "@/stores/conversation-search.store";
 import { editorSessionStore } from "@/stores/editor.sessions";
 import { fileTreeState } from "@/stores/fileTree";
 import type {
@@ -116,6 +118,25 @@ const EditorIcon: Component<{ size?: number; strokeWidth?: number }> = (
   >
     <path d="M9.5 2.5H4a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 4 13.5h8A1.5 1.5 0 0 0 13.5 12V6" />
     <path d="M11 2.5l2.5 2.5-5.5 5.5H5.5V8L11 2.5z" />
+  </svg>
+);
+
+const SearchIcon: Component<{ size?: number; strokeWidth?: number }> = (
+  iconProps,
+) => (
+  <svg
+    width={iconProps.size ?? 14}
+    height={iconProps.size ?? 14}
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width={iconProps.strokeWidth ?? 1.4}
+    stroke-linecap="round"
+    role="img"
+    aria-label="Search"
+  >
+    <circle cx="7" cy="7" r="4.25" />
+    <path d="m10.25 10.25 3 3" />
   </svg>
 );
 
@@ -231,6 +252,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     } finally {
       setSpawning(false);
     }
+  };
+
+  const handleSearchHistory = () => {
+    setShowLauncher(false);
+    conversationSearchStore.openOverlay();
   };
 
   const toggleLauncher = () => {
@@ -822,6 +848,21 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               </button>
             </div>
           </Show>
+        </div>
+
+        <div class="px-3 pb-2 shrink-0">
+          <button
+            type="button"
+            data-testid="search-history-button"
+            class="flex h-8 w-full items-center gap-2 rounded-md border border-transparent bg-transparent px-2.5 text-left text-[12px] text-muted-foreground transition-colors hover:border-border hover:bg-surface-2 hover:text-foreground"
+            onClick={handleSearchHistory}
+          >
+            <SearchIcon size={13} />
+            <span class="min-w-0 flex-1 truncate">Search history</span>
+            <kbd class="shrink-0 rounded border border-border bg-surface-3 px-1.5 py-px font-mono text-[10px] text-muted-foreground">
+              {getShortcutLabel("global.searchHistory")}
+            </kbd>
+          </button>
         </div>
 
         {/* Thread list grouped by project */}

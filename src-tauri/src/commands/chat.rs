@@ -2,11 +2,11 @@
 // ABOUTME: Handles CRUD operations for conversations and messages in SQLite.
 
 use crate::commands::provider_runtime::DERIVED_KIND_CASE_SQL;
+use crate::services::conversation_index::{self, IndexableMessage, open_index_db};
 use crate::services::database::{
     DbPool, PersistedMessage, enqueue_sync_tombstone, init_db, mark_sync_upsert,
     save_message_record,
 };
-use crate::services::conversation_index::{self, IndexableMessage, open_index_db};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -906,8 +906,8 @@ pub async fn save_message(
         };
         save_message_record(conn, &message)?;
         let meta = load_indexable_message_meta(conn, &message.conversation_id)?;
-        Ok(meta.map(|(kind, title, agent_type, project_root, is_archived)| {
-            IndexableMessage {
+        Ok(meta.map(
+            |(kind, title, agent_type, project_root, is_archived)| IndexableMessage {
                 message_id: message.id,
                 conversation_id: message.conversation_id,
                 kind,
@@ -918,8 +918,8 @@ pub async fn save_message(
                 is_archived,
                 timestamp: message.timestamp,
                 content: message.content,
-            }
-        }))
+            },
+        ))
     })
     .await?;
     if let Some(message) = indexable {
