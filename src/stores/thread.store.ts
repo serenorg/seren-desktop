@@ -155,6 +155,7 @@ export interface ThreadGroup {
 interface ThreadState {
   activeThreadId: string | null;
   activeThreadKind: ThreadKind | null;
+  pendingMessageScroll: { conversationId: string; messageId: string } | null;
   /** When true, new threads prefer Seren Chat over any available agent. */
   preferChat: boolean;
   /**
@@ -187,6 +188,7 @@ export interface SkillLaunchOptions {
 const [state, setState] = createStore<ThreadState>({
   activeThreadId: null,
   activeThreadKind: null,
+  pendingMessageScroll: null,
   preferChat: false,
   projectOrder: loadProjectOrder(),
   folderLastActivity: loadFolderLastActivity(),
@@ -397,6 +399,21 @@ export const threadStore = {
 
   get activeThreadKind(): ThreadKind | null {
     return state.activeThreadKind;
+  },
+
+  get pendingMessageScroll(): {
+    conversationId: string;
+    messageId: string;
+  } | null {
+    return state.pendingMessageScroll;
+  },
+
+  requestMessageScroll(conversationId: string, messageId: string): void {
+    setState("pendingMessageScroll", { conversationId, messageId });
+  },
+
+  clearMessageScroll(): void {
+    setState("pendingMessageScroll", null);
   },
 
   get preferChat(): boolean {
