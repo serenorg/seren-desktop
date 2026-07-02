@@ -74,7 +74,8 @@ export function installValidationControlBridge(): void {
             reply.result = await handleCommand(command);
           } catch (error) {
             reply.ok = false;
-            reply.error = error instanceof Error ? error.message : String(error);
+            reply.error =
+              error instanceof Error ? error.message : String(error);
           }
 
           try {
@@ -274,7 +275,9 @@ async function nativeScreenshot(): Promise<unknown> {
   try {
     const runtime = await getValidationRuntimeInfo();
     if (!runtime.isValidation || runtime.processId <= 0) {
-      throw new Error("Native validation capture requires validation runtime info.");
+      throw new Error(
+        "Native validation capture requires validation runtime info.",
+      );
     }
 
     const windows = await invoke<NativeCaptureWindow[]>(
