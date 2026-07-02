@@ -116,58 +116,6 @@ pub(crate) struct ModelStats {
     cost_count: u32,
 }
 
-/// Compute Thompson sampling rankings for available models given a task type.
-///
-/// For each model:
-/// 1. Query time-decayed positive/negative counts from eval_signals
-/// 2. Sample from Beta(positive + 1, negative + 1)
-/// 3. Apply cost penalty: score = sample - (cost_weight * normalized_cost)
-///
-/// Models with no data get Beta(1,1) = uniform random [0,1] (exploration).
-/// Returns rankings sorted by score descending.
-pub fn get_model_rankings<R: Rng>(
-    conn: &Connection,
-    rng: &mut R,
-    task_type: &str,
-    available_models: &[String],
-    cost_weight: f64,
-) -> Vec<ModelRanking> {
-    if available_models.is_empty() {
-        return vec![];
-    }
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
-
-    let stats = load_model_stats_at(conn, task_type, available_models, now);
-    sample_model_rankings(rng, available_models, &stats, None, cost_weight)
-}
-
-/// Compute Thompson sampling rankings with best-effort community priors.
-pub fn get_model_rankings_with_community_priors<R: Rng>(
-    conn: &Connection,
-    rng: &mut R,
-    task_type: &str,
-    available_models: &[String],
-    community_priors: &HashMap<String, CommunityPrior>,
-    cost_weight: f64,
-) -> Vec<ModelRanking> {
-    if available_models.is_empty() {
-        return vec![];
-    }
-
-    let stats = load_model_stats(conn, task_type, available_models);
-    sample_model_rankings(
-        rng,
-        available_models,
-        &stats,
-        Some(community_priors),
-        cost_weight,
-    )
-}
-
 /// Load time-decayed local stats from SQLite for the ranking sampler.
 pub(crate) fn load_model_stats(
     conn: &Connection,
@@ -575,7 +523,8 @@ mod tests {
     }
 
     // =========================================================================
-    // Thompson Sampling — get_model_rankings
+    // Thompson Sampling — load_model_stats + sample_model_rankings
+    // (the live production composition used in orchestrator::service)
     // =========================================================================
 
     #[test]
@@ -584,7 +533,8 @@ mod tests {
         let mut rng = seeded_rng();
         let models = vec!["model-a".to_string(), "model-b".to_string()];
 
-        let rankings = get_model_rankings(&conn, &mut rng, "general_chat", &models, 0.1);
+        let stats = load_model_stats(&conn, "general_chat", &models);
+        let rankings = sample_model_rankings(&mut rng, &models, &stats, None, 0.1);
         assert_eq!(rankings.len(), 2);
         // Both should have scores (from Beta(1,1) uniform sampling)
         for r in &rankings {
@@ -596,7 +546,9 @@ mod tests {
     fn ranking_empty_models_returns_empty() {
         let conn = setup_test_db();
         let mut rng = seeded_rng();
-        let rankings = get_model_rankings(&conn, &mut rng, "general_chat", &[], 0.1);
+        let models: Vec<String> = vec![];
+        let stats = load_model_stats(&conn, "general_chat", &models);
+        let rankings = sample_model_rankings(&mut rng, &models, &stats, None, 0.1);
         assert!(rankings.is_empty());
     }
 
@@ -637,7 +589,8 @@ mod tests {
         let mut good_first_count = 0;
         for seed in 0..20 {
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-            let rankings = get_model_rankings(&conn, &mut rng, "code_generation", &models, 0.0);
+            let stats = load_model_stats(&conn, "code_generation", &models);
+            let rankings = sample_model_rankings(&mut rng, &models, &stats, None, 0.0);
             if rankings[0].model_id == "model-good" {
                 good_first_count += 1;
             }
@@ -688,7 +641,8 @@ mod tests {
         let mut recent_first = 0;
         for seed in 0..30 {
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-            let rankings = get_model_rankings(&conn, &mut rng, "general_chat", &models, 0.0);
+            let stats = load_model_stats(&conn, "general_chat", &models);
+            let rankings = sample_model_rankings(&mut rng, &models, &stats, None, 0.0);
             if rankings[0].model_id == "model-recent" {
                 recent_first += 1;
             }
@@ -736,7 +690,8 @@ mod tests {
         let mut cheap_first = 0;
         for seed in 0..30 {
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-            let rankings = get_model_rankings(&conn, &mut rng, "general_chat", &models, 0.1);
+            let stats = load_model_stats(&conn, "general_chat", &models);
+            let rankings = sample_model_rankings(&mut rng, &models, &stats, None, 0.1);
             if rankings[0].model_id == "model-cheap" {
                 cheap_first += 1;
             }
@@ -800,24 +755,24 @@ mod tests {
             prior(1000.0, 1.0, 50),
         );
 
+        let stats = load_model_stats(&conn, "general_chat", &models);
         let mut local_first_without_prior = 0;
         let mut community_first_with_prior = 0;
 
         for seed in 0..20 {
             let mut local_rng = rand::rngs::StdRng::seed_from_u64(seed);
             let local_rankings =
-                get_model_rankings(&conn, &mut local_rng, "general_chat", &models, 0.0);
+                sample_model_rankings(&mut local_rng, &models, &stats, None, 0.0);
             if local_rankings[0].model_id == "model-local-favorite" {
                 local_first_without_prior += 1;
             }
 
             let mut blended_rng = rand::rngs::StdRng::seed_from_u64(seed);
-            let blended_rankings = get_model_rankings_with_community_priors(
-                &conn,
+            let blended_rankings = sample_model_rankings(
                 &mut blended_rng,
-                "general_chat",
                 &models,
-                &community_priors,
+                &stats,
+                Some(&community_priors),
                 0.0,
             );
             if blended_rankings[0].model_id == "model-community-favorite" {
@@ -843,16 +798,16 @@ mod tests {
         // the same rankings as the local-only path given the same local stats
         // and the same RNG state.
         //
-        // The earlier shape of this test compared two top-level wrappers —
-        // `get_model_rankings` and `get_model_rankings_with_community_priors`
-        // — which each capture their own `SystemTime::now()` inside
-        // `load_model_stats[_at]`. The two `now` values drift by microseconds
-        // between calls; the resulting decay-weighted alpha/beta drift too,
-        // producing different Beta-distribution samples from otherwise
-        // identical seeded RNGs. That made the test flaky in CI (#2033).
+        // The earlier shape of this test compared two top-level ranking
+        // wrappers (since removed) that each captured their own
+        // `SystemTime::now()` inside `load_model_stats[_at]`. The two `now`
+        // values drift by microseconds between calls; the resulting
+        // decay-weighted alpha/beta drift too, producing different
+        // Beta-distribution samples from otherwise identical seeded RNGs. That
+        // made the test flaky in CI (#2033).
         //
-        // The fallback contract lives at the sampler, not at the wrappers, so
-        // assert it there with identical stats and identical seeded RNG state.
+        // The fallback contract lives at the sampler, so assert it there with
+        // identical stats and identical seeded RNG state.
         let mut stats: HashMap<String, ModelStats> = HashMap::new();
         stats.insert(
             "model-good".to_string(),

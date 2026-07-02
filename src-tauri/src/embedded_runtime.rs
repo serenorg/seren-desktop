@@ -1,6 +1,7 @@
 // ABOUTME: Configures embedded Node.js and Git runtime paths at application startup.
 // ABOUTME: Stores bundled runtime directories for injection into child process environments.
 
+#[cfg(any(target_os = "windows", test))]
 use serde::Serialize;
 use std::env;
 use std::path::PathBuf;
@@ -24,6 +25,7 @@ pub struct EmbeddedRuntimePaths {
     pub python_dir: Option<PathBuf>,
 }
 
+#[cfg(any(target_os = "windows", test))]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct RuntimeHealthIssue {
     pub component: String,
@@ -31,6 +33,7 @@ pub struct RuntimeHealthIssue {
     pub remediation: String,
 }
 
+#[cfg(any(target_os = "windows", test))]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct RuntimeHealthReport {
     pub ok: bool,
@@ -38,6 +41,7 @@ pub struct RuntimeHealthReport {
     pub issues: Vec<RuntimeHealthIssue>,
 }
 
+#[cfg(any(target_os = "windows", test))]
 impl RuntimeHealthReport {
     pub fn to_error_message(&self) -> String {
         if self.ok {
@@ -67,6 +71,7 @@ impl RuntimeHealthReport {
 /// debugging from inside the user's paid turn. Windows is intentionally
 /// fail-closed because it does not have reliable system Python/Node fallback
 /// semantics for skill execution.
+#[cfg(any(target_os = "windows", test))]
 pub fn runtime_health_report_for_os(
     platform: &str,
     paths: &EmbeddedRuntimePaths,
