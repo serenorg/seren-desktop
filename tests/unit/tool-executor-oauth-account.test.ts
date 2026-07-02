@@ -77,6 +77,7 @@ describe("tool executor OAuth account routing", () => {
       "@/stores/oauth-account.store"
     );
     setThreadOAuthConnectionId("thread-1", "google", null);
+    setThreadOAuthConnectionId("thread-2", "google", null);
     mocks.resolveOAuthProviderForPublisher.mockResolvedValue({
       publisherSlug: "gmail",
       providerSlug: "google",
@@ -109,6 +110,36 @@ describe("tool executor OAuth account routing", () => {
         arguments: JSON.stringify({ q: "from:example" }),
       },
     });
+
+    expect(result.is_error).toBe(false);
+    expect(mocks.callGatewayTool).toHaveBeenCalledWith("gmail", "messages", {
+      q: "from:example",
+      connection_id: "conn-google-personal",
+    });
+  });
+
+  it("resolves the owning run's OAuth account, not the chat the user is viewing", async () => {
+    const [{ executeTool }, { setThreadOAuthConnectionId }] =
+      await Promise.all([
+        import("@/lib/tools/executor"),
+        import("@/stores/oauth-account.store"),
+      ]);
+    // The user is viewing thread-1 (active) with the work account selected,
+    // while a background run in thread-2 selected the personal account.
+    setThreadOAuthConnectionId("thread-1", "google", "conn-google-work");
+    setThreadOAuthConnectionId("thread-2", "google", "conn-google-personal");
+
+    const result = await executeTool(
+      {
+        id: "tool-call-owning",
+        type: "function",
+        function: {
+          name: "gateway__gmail__messages",
+          arguments: JSON.stringify({ q: "from:example" }),
+        },
+      },
+      "thread-2",
+    );
 
     expect(result.is_error).toBe(false);
     expect(mocks.callGatewayTool).toHaveBeenCalledWith("gmail", "messages", {

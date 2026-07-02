@@ -141,6 +141,7 @@ async function requestGatewayApproval(
   publisherSlug: string,
   toolName: string,
   args: Record<string, unknown>,
+  conversationId: string | null,
 ): Promise<GatewayApprovalResult> {
   const approvalId = `gateway-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const requirement = getApprovalRequirement(publisherSlug, toolName);
@@ -156,7 +157,7 @@ async function requestGatewayApproval(
       publisherSlug,
       toolName,
       args,
-      threadId: conversationStore.activeConversationId,
+      threadId: conversationId ?? conversationStore.activeConversationId,
       description: requirement?.description || "Execute operation",
       isDestructive: requirement?.isDestructive || false,
     });
@@ -204,6 +205,7 @@ async function resolveGatewayOAuthConnectionArgs(
   publisherSlug: string,
   toolName: string,
   args: Record<string, unknown>,
+  conversationId: string | null,
 ): Promise<GatewayConnectionArgsResult> {
   if (typeof args.connection_id === "string" && args.connection_id.length > 0) {
     return { args };
@@ -220,7 +222,7 @@ async function resolveGatewayOAuthConnectionArgs(
     );
     if (providerConnections.length === 0) return { args };
 
-    const threadId = conversationStore.activeConversationId;
+    const threadId = conversationId ?? conversationStore.activeConversationId;
     const selected = resolveThreadOAuthConnection(
       threadId,
       provider.providerSlug,
@@ -316,7 +318,10 @@ async function requestShellApproval(
  * Execute a single tool call and return the result.
  * Routes to MCP servers or file tools based on prefix.
  */
-export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
+export async function executeTool(
+  toolCall: ToolCall,
+  conversationId: string | null = null,
+): Promise<ToolResult> {
   const { name, arguments: argsJson } = toolCall.function;
 
   try {
@@ -348,6 +353,7 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
         gatewayInfo.publisherSlug,
         gatewayInfo.toolName,
         args,
+        conversationId,
       );
     }
 
@@ -659,6 +665,7 @@ async function executeGatewayTool(
   publisherSlug: string,
   toolName: string,
   args: Record<string, unknown>,
+  conversationId: string | null,
 ): Promise<ToolResult> {
   try {
     let callArgs = args;
@@ -672,6 +679,7 @@ async function executeGatewayTool(
         publisherSlug,
         toolName,
         args,
+        conversationId,
       );
 
       if (!approval.approved) {
@@ -694,6 +702,7 @@ async function executeGatewayTool(
       publisherSlug,
       toolName,
       callArgs,
+      conversationId,
     );
     if (resolvedArgs.error) {
       return {

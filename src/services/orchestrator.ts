@@ -139,6 +139,7 @@ interface SkillRef {
 
 /** Tool execution request emitted by the Rust ChatModelWorker for non-local tools. */
 interface ToolExecutionRequest {
+  conversation_id: string;
   tool_call_id: string;
   name: string;
   arguments: string;
@@ -1131,14 +1132,17 @@ async function handleToolRequest(request: ToolExecutionRequest): Promise<void> {
   );
 
   try {
-    const result = await executeTool({
-      id: request.tool_call_id,
-      type: "function",
-      function: {
-        name: request.name,
-        arguments: request.arguments,
+    const result = await executeTool(
+      {
+        id: request.tool_call_id,
+        type: "function",
+        function: {
+          name: request.name,
+          arguments: request.arguments,
+        },
       },
-    });
+      request.conversation_id,
+    );
 
     await invoke("submit_tool_result", {
       toolCallId: result.tool_call_id,
