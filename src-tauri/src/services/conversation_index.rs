@@ -160,6 +160,13 @@ fn embedding_to_blob(embedding: &[f32]) -> Vec<u8> {
     embedding.iter().flat_map(|value| value.to_le_bytes()).collect()
 }
 
+fn fts_document(title: Option<&str>, text: &str) -> String {
+    match title.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(title) => format!("{title}\n{text}"),
+        None => text.to_string(),
+    }
+}
+
 /// Split a message into embeddable chunks on a character budget, breaking on
 /// whitespace where possible. Capped at `MAX_CHUNKS_PER_MESSAGE`; only the head
 /// of a giant message is indexed. Empty/whitespace-only content yields no chunks.
@@ -250,7 +257,7 @@ pub fn reindex_message(conn: &Connection, msg: &IndexableMessage) -> Result<()> 
         let chunk_id = tx.last_insert_rowid();
         tx.execute(
             "INSERT INTO conv_fts (rowid, text) VALUES (?1, ?2)",
-            params![chunk_id, chunk.text],
+            params![chunk_id, fts_document(msg.title.as_deref(), &chunk.text)],
         )?;
     }
     tx.commit()?;
@@ -307,6 +314,19 @@ pub fn update_conversation_meta(
             "UPDATE conv_chunks SET title = ?1 WHERE conversation_id = ?2",
             params![title, conversation_id],
         )?;
+        let rows: Vec<(i64, String)> = {
+            let mut stmt =
+                conn.prepare("SELECT id, text FROM conv_chunks WHERE conversation_id = ?1")?;
+            stmt.query_map(params![conversation_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .filter_map(|row| row.ok())
+                .collect()
+        };
+        for (chunk_id, text) in rows {
+            conn.execute(
+                "UPDATE conv_fts SET text = ?1 WHERE rowid = ?2",
+                params![fts_document(Some(title), &text), chunk_id],
+            )?;
+        }
     }
     if let Some(is_archived) = is_archived {
         conn.execute(
@@ -320,6 +340,12 @@ pub fn update_conversation_meta(
 /// Attach an embedding to an existing chunk (upsert by chunk id). The caller must
 /// validate `embedding.len() == EMBEDDING_DIM`.
 pub fn insert_embedding(conn: &Connection, chunk_id: i64, embedding: &[f32]) -> Result<()> {
+    if embedding.len() != EMBEDDING_DIM {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "expected embedding dim {EMBEDDING_DIM}, got {}",
+            embedding.len()
+        )));
+    }
     conn.execute(
         "INSERT OR REPLACE INTO conv_embeddings (chunk_id, embedding) VALUES (?1, ?2)",
         params![chunk_id, embedding_to_blob(embedding)],
@@ -543,6 +569,18 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].message_id, "m1");
         assert_eq!(hits[0].distance, 0.0);
+    }
+
+    #[test]
+    fn fts_matches_conversation_titles() {
+        let conn = test_conn();
+        let mut message = msg("m1", "c1", "chat", "user", "body does not contain the term");
+        message.title = Some("Release signing notes".to_string());
+        reindex_message(&conn, &message).unwrap();
+
+        let hits = search_fts(&conn, "release", &SearchFilters::default(), 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].message_id, "m1");
     }
 
     #[test]

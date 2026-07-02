@@ -12,6 +12,7 @@ pub mod commands {
     pub mod chat;
     pub mod claude_memory;
     pub mod cli_installer;
+    pub mod conversation_search;
     pub mod context_intelligence;
     pub mod employees_archive;
     pub mod gateway_http;
@@ -1129,6 +1130,13 @@ pub fn run() {
             commands::transcript_search::search_transcripts_like,
             commands::transcript_search::indexed_transcript_meeting_ids,
             commands::transcript_search::delete_meeting_transcript_index,
+            commands::conversation_search::search_conversations_fts,
+            commands::conversation_search::search_conversations,
+            commands::conversation_search::index_conversation_embeddings,
+            commands::conversation_search::unembedded_conversation_chunks,
+            commands::conversation_search::delete_conversation_index,
+            commands::conversation_search::update_conversation_index_meta,
+            commands::conversation_search::backfill_conversation_fts,
             commands::indexing::discover_project_files,
             commands::indexing::chunk_file,
             commands::indexing::estimate_indexing,
