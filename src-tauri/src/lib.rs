@@ -31,6 +31,7 @@ pub mod commands {
 pub mod services {
     pub mod chunker;
     pub mod context_intelligence;
+    pub mod conversation_index;
     pub mod database;
     pub mod history_sync;
     pub mod indexer;
