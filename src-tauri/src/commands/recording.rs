@@ -2935,6 +2935,7 @@ fn clean_native_context_text(value: &str, max_chars: usize) -> Option<String> {
     (!cleaned.is_empty()).then(|| cleaned.to_string())
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn app_name_from_process_path(path: &str) -> Option<String> {
     let file_name = path
         .rsplit(['\\', '/'])
