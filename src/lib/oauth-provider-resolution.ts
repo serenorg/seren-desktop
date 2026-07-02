@@ -25,6 +25,11 @@ const KNOWN_OAUTH_PROVIDER_BY_PUBLISHER: Record<string, KnownOAuthProvider> = {
   "google-meet": { providerSlug: "google", providerName: "Google" },
   googlecalendar: { providerSlug: "google", providerName: "Google" },
   googlemeet: { providerSlug: "google", providerName: "Google" },
+  "microsoft-outlook": {
+    providerSlug: "microsoft",
+    providerName: "Microsoft",
+  },
+  outlook: { providerSlug: "microsoft", providerName: "Microsoft" },
 };
 
 const DISPLAY_NAME_OVERRIDES: Record<string, string> = {
@@ -32,7 +37,9 @@ const DISPLAY_NAME_OVERRIDES: Record<string, string> = {
   github: "GitHub",
   gmail: "Gmail",
   google: "Google",
+  microsoft: "Microsoft",
   oauth: "OAuth",
+  outlook: "Outlook",
 };
 
 function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {

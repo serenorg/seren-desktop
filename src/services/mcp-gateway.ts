@@ -646,8 +646,8 @@ export async function callGatewayTool(
   const startTime = Date.now();
 
   try {
-    // Separate x402 payment from tool args (call_publisher accepts it at top level)
-    const { _x402_payment, ...toolArgs } = args;
+    // Separate gateway metadata from publisher tool args.
+    const { _x402_payment, connection_id, ...toolArgs } = args;
 
     // Check if this is a first-class MCP tool on the gateway.
     // Native tools (from the gateway's list_tools response) are called directly
@@ -670,6 +670,9 @@ export async function callGatewayTool(
       };
       if (_x402_payment !== undefined) {
         dispatchArgs._x402_payment = _x402_payment;
+      }
+      if (typeof connection_id === "string" && connection_id.length > 0) {
+        dispatchArgs.connection_id = connection_id;
       }
 
       result = await mcpClient.callToolHttp(SEREN_MCP_SERVER_NAME, {

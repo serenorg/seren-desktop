@@ -4,12 +4,29 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import {
   type Component,
+  createEffect,
+  createMemo,
+  createResource,
   createSignal,
+  For,
   onCleanup,
   onMount,
   Show,
 } from "solid-js";
+import {
+  listConnectedPublishers,
+  resolveOAuthProviderForPublisher,
+} from "@/services/publisher-oauth";
 import { conversationStore } from "@/stores/conversation.store";
+import {
+  formatOAuthConnectionLabel,
+  getDefaultOAuthConnection,
+  getOAuthConnectionsForProvider,
+  type OAuthConnection,
+  oauthConnectionsRevision,
+  resolveThreadOAuthConnection,
+  setThreadOAuthConnectionId,
+} from "@/stores/oauth-account.store";
 import type { UnifiedMessage } from "@/types/conversation";
 
 interface ApprovalRequest {
@@ -17,6 +34,7 @@ interface ApprovalRequest {
   publisherSlug: string;
   toolName: string;
   args: Record<string, unknown>;
+  threadId?: string | null;
   description: string;
   isDestructive: boolean;
 }
@@ -70,6 +88,20 @@ export const GatewayToolApproval: Component = () => {
   const [request, setRequest] = createSignal<ApprovalRequest | null>(null);
   const [isProcessing, setIsProcessing] = createSignal(false);
   const [provenance, setProvenance] = createSignal<Provenance | null>(null);
+  const [selectedConnectionId, setSelectedConnectionId] = createSignal<
+    string | null
+  >(null);
+
+  const [providerResolution] = createResource(
+    () => request()?.publisherSlug ?? null,
+    async (publisherSlug) =>
+      publisherSlug ? resolveOAuthProviderForPublisher(publisherSlug) : null,
+  );
+
+  const [connections] = createResource(
+    () => [request()?.approvalId ?? null, oauthConnectionsRevision()] as const,
+    async ([approvalId]) => (approvalId ? listConnectedPublishers() : []),
+  );
 
   onMount(async () => {
     const unlisten = await listen<ApprovalRequest>(
@@ -81,6 +113,7 @@ export const GatewayToolApproval: Component = () => {
         );
         // Snapshot provenance at the moment the request arrives
         setProvenance(deriveProvenance(conversationStore.messages));
+        setSelectedConnectionId(null);
         setRequest(event.payload);
         setIsProcessing(false);
       },
@@ -91,9 +124,89 @@ export const GatewayToolApproval: Component = () => {
     });
   });
 
+  const approvalThreadId = () =>
+    request()?.threadId ?? conversationStore.activeConversationId;
+
+  const providerSlug = createMemo(
+    () => providerResolution()?.providerSlug ?? null,
+  );
+
+  const validConnections = createMemo(() => {
+    const slug = providerSlug();
+    if (!slug) return [];
+    return getOAuthConnectionsForProvider(connections() ?? [], slug);
+  });
+
+  createEffect(() => {
+    const req = request();
+    const slug = providerSlug();
+    if (!req || !slug) return;
+
+    const current = selectedConnectionId();
+    if (
+      current &&
+      validConnections().some((connection) => connection.id === current)
+    ) {
+      return;
+    }
+
+    const resolved = resolveThreadOAuthConnection(
+      approvalThreadId(),
+      slug,
+      connections() ?? [],
+    );
+    setSelectedConnectionId(resolved?.id ?? null);
+  });
+
+  const selectedConnection = createMemo(() => {
+    const id = selectedConnectionId();
+    if (!id) return null;
+    return (
+      validConnections().find((connection) => connection.id === id) ?? null
+    );
+  });
+
+  const hasDefaultConnection = createMemo(() =>
+    Boolean(getDefaultOAuthConnection(validConnections())),
+  );
+
+  const shouldRenderAccountChoices = createMemo(
+    () => validConnections().length > 1 && !hasDefaultConnection(),
+  );
+
+  const needsConnectionChoice = createMemo(() => {
+    if (!providerSlug() || selectedConnection()) return false;
+    return shouldRenderAccountChoices();
+  });
+
+  const handleConnectionChange = (connectionId: string) => {
+    const slug = providerSlug();
+    if (!slug) return;
+    const connection = validConnections().find(
+      (item) => item.id === connectionId,
+    );
+    if (!connection) return;
+    setThreadOAuthConnectionId(approvalThreadId(), slug, connection.id);
+    setSelectedConnectionId(connection.id);
+  };
+
+  const connectionInitial = (connection: OAuthConnection) =>
+    formatOAuthConnectionLabel(connection).charAt(0).toUpperCase();
+
+  const approveLabel = createMemo(() => {
+    if (needsConnectionChoice()) return "Choose account";
+    if (isProcessing()) return "Processing...";
+    const connection = selectedConnection();
+    if (shouldRenderAccountChoices() && connection) {
+      return `Approve & send from ${formatOAuthConnectionLabel(connection)}`;
+    }
+    return "Approve";
+  });
+
   const handleApprove = async () => {
     const req = request();
     if (!req || isProcessing()) return;
+    if (needsConnectionChoice()) return;
 
     setIsProcessing(true);
     console.log("[GatewayToolApproval] Approving operation:", req.approvalId);
@@ -102,9 +215,11 @@ export const GatewayToolApproval: Component = () => {
       await emit("gateway-tool-approval-response", {
         id: req.approvalId,
         approved: true,
+        connectionId: selectedConnection()?.id ?? null,
       });
       setRequest(null);
       setProvenance(null);
+      setSelectedConnectionId(null);
     } catch (err) {
       console.error("[GatewayToolApproval] Failed to emit approval:", err);
       setIsProcessing(false);
@@ -125,6 +240,7 @@ export const GatewayToolApproval: Component = () => {
       });
       setRequest(null);
       setProvenance(null);
+      setSelectedConnectionId(null);
     } catch (err) {
       console.error("[GatewayToolApproval] Failed to emit denial:", err);
       setIsProcessing(false);
@@ -180,6 +296,140 @@ export const GatewayToolApproval: Component = () => {
                   {req().description}
                 </span>
               </div>
+
+              <Show when={validConnections().length > 0}>
+                <div class="flex flex-col gap-1.5 mb-4">
+                  <span class="text-sm font-medium text-muted-foreground uppercase tracking-[0.5px]">
+                    {shouldRenderAccountChoices()
+                      ? "From - choose an account to send from:"
+                      : "From:"}
+                  </span>
+                  <Show
+                    when={shouldRenderAccountChoices()}
+                    fallback={
+                      <Show
+                        when={
+                          validConnections().length === 1
+                            ? validConnections()[0]
+                            : null
+                        }
+                        keyed
+                        fallback={
+                          <div class="relative">
+                            <div class="flex items-center gap-3 text-base text-foreground bg-surface-1 px-3 py-2 rounded-md border border-border min-h-[46px]">
+                              <Show when={selectedConnection()}>
+                                {(connection) => (
+                                  <span class="w-7 h-7 rounded-full bg-accent text-primary-foreground flex items-center justify-center text-xs font-semibold shrink-0">
+                                    {connectionInitial(connection())}
+                                  </span>
+                                )}
+                              </Show>
+                              <span class="truncate">
+                                {selectedConnection()
+                                  ? formatOAuthConnectionLabel(
+                                      selectedConnection() as OAuthConnection,
+                                    )
+                                  : "Choose account"}
+                              </span>
+                              <span class="ml-auto text-muted-foreground">
+                                ⌄
+                              </span>
+                            </div>
+                            <select
+                              class="absolute inset-0 h-full w-full opacity-0 cursor-pointer"
+                              value={selectedConnectionId() ?? ""}
+                              onChange={(event) =>
+                                handleConnectionChange(
+                                  event.currentTarget.value,
+                                )
+                              }
+                              disabled={isProcessing()}
+                              aria-label="Choose OAuth account"
+                            >
+                              <option value="" disabled>
+                                Choose account
+                              </option>
+                              <For each={validConnections()}>
+                                {(connection) => (
+                                  <option value={connection.id}>
+                                    {formatOAuthConnectionLabel(connection)}
+                                    {connection.is_default ? " (default)" : ""}
+                                  </option>
+                                )}
+                              </For>
+                            </select>
+                          </div>
+                        }
+                      >
+                        {(connection) => (
+                          <span class="flex items-center gap-3 text-base text-foreground bg-surface-1 px-3 py-2 rounded-md border border-border min-h-[46px]">
+                            <span class="w-7 h-7 rounded-full bg-accent text-primary-foreground flex items-center justify-center text-xs font-semibold shrink-0">
+                              {connectionInitial(connection())}
+                            </span>
+                            <span class="truncate">
+                              {formatOAuthConnectionLabel(connection())}
+                            </span>
+                          </span>
+                        )}
+                      </Show>
+                    }
+                  >
+                    <div class="flex flex-col gap-2">
+                      <span class="text-[0.8rem] text-warning/90">
+                        {validConnections().length}{" "}
+                        {providerResolution()?.providerName ?? "OAuth"} accounts
+                        are connected and no default is set.
+                      </span>
+                      <For each={validConnections()}>
+                        {(connection) => {
+                          const selected = () =>
+                            selectedConnectionId() === connection.id;
+                          return (
+                            <button
+                              type="button"
+                              class={`w-full text-left flex items-center gap-3 px-3 py-3 rounded-lg border transition-colors ${
+                                selected()
+                                  ? "border-accent bg-accent/10 text-foreground"
+                                  : "border-border bg-surface-1 text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+                              }`}
+                              onClick={() =>
+                                handleConnectionChange(connection.id)
+                              }
+                              disabled={isProcessing()}
+                            >
+                              <span
+                                class={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                                  selected()
+                                    ? "border-accent"
+                                    : "border-muted-foreground/40"
+                                }`}
+                                aria-hidden="true"
+                              >
+                                <Show when={selected()}>
+                                  <span class="w-2 h-2 rounded-full bg-accent" />
+                                </Show>
+                              </span>
+                              <span class="w-7 h-7 rounded-full bg-accent text-primary-foreground flex items-center justify-center text-xs font-semibold shrink-0">
+                                {connectionInitial(connection)}
+                              </span>
+                              <span class="min-w-0">
+                                <span class="block text-[0.95rem] truncate">
+                                  {formatOAuthConnectionLabel(connection)}
+                                </span>
+                                <span class="block text-[0.8rem] text-muted-foreground truncate">
+                                  {providerResolution()?.providerName ??
+                                    "OAuth"}{" "}
+                                  account
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        }}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
+              </Show>
 
               <div class="flex flex-col gap-1.5 mb-4">
                 <span class="text-sm font-medium text-muted-foreground uppercase tracking-[0.5px]">
@@ -251,9 +501,9 @@ export const GatewayToolApproval: Component = () => {
                 type="button"
                 class="px-6 py-2.5 text-[0.95rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-accent text-primary-foreground hover:bg-primary/85 hover:shadow-[var(--glow-primary)]"
                 onClick={handleApprove}
-                disabled={isProcessing()}
+                disabled={isProcessing() || needsConnectionChoice()}
               >
-                {isProcessing() ? "Processing..." : "Approve"}
+                {approveLabel()}
               </button>
             </div>
           </div>

@@ -12,8 +12,18 @@ import {
   callSerenTool,
   type PaymentProxyInfo,
 } from "@/services/mcp-gateway";
+import {
+  listConnectedPublishers,
+  resolveOAuthProviderForPublisher,
+} from "@/services/publisher-oauth";
 import { startShellProgressListener } from "@/services/shell-progress";
 import { x402Service } from "@/services/x402";
+import { conversationStore } from "@/stores/conversation.store";
+import {
+  getOAuthConnectionsForProvider,
+  hasAmbiguousOAuthConnections,
+  resolveThreadOAuthConnection,
+} from "@/stores/oauth-account.store";
 import { getApprovalRequirement, requiresApproval } from "./approval-config";
 import { parseGatewayToolName, parseMcpToolName } from "./definitions";
 
@@ -30,6 +40,16 @@ const GATEWAY_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const SHELL_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_RESULT_SIZE = 50_000; // 50KB cap
 const MAX_ARRAY_ITEMS = 25;
+
+interface GatewayApprovalResult {
+  approved: boolean;
+  connectionId?: string | null;
+}
+
+interface GatewayConnectionArgsResult {
+  args: Record<string, unknown>;
+  error?: string;
+}
 
 /**
  * Emit an event to notify the UI that an OAuth connection has expired.
@@ -121,7 +141,7 @@ async function requestGatewayApproval(
   publisherSlug: string,
   toolName: string,
   args: Record<string, unknown>,
-): Promise<boolean> {
+): Promise<GatewayApprovalResult> {
   const approvalId = `gateway-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const requirement = getApprovalRequirement(publisherSlug, toolName);
 
@@ -136,12 +156,13 @@ async function requestGatewayApproval(
       publisherSlug,
       toolName,
       args,
+      threadId: conversationStore.activeConversationId,
       description: requirement?.description || "Execute operation",
       isDestructive: requirement?.isDestructive || false,
     });
   } catch (err) {
     console.error("[Tool Executor] Failed to emit approval request:", err);
-    return false;
+    return { approved: false };
   }
 
   // Wait for approval response
@@ -150,10 +171,10 @@ async function requestGatewayApproval(
     const timeout = setTimeout(() => {
       console.log(`[Tool Executor] Approval timeout for ${approvalId}`);
       unlisten?.();
-      resolve(false);
+      resolve({ approved: false });
     }, GATEWAY_APPROVAL_TIMEOUT_MS);
 
-    listen<{ id: string; approved: boolean }>(
+    listen<{ id: string; approved: boolean; connectionId?: string | null }>(
       "gateway-tool-approval-response",
       (event) => {
         if (event.payload.id !== approvalId) return;
@@ -162,7 +183,10 @@ async function requestGatewayApproval(
         );
         clearTimeout(timeout);
         unlisten?.();
-        resolve(event.payload.approved);
+        resolve({
+          approved: event.payload.approved,
+          connectionId: event.payload.connectionId ?? null,
+        });
       },
     )
       .then((fn) => {
@@ -171,9 +195,59 @@ async function requestGatewayApproval(
       .catch((err) => {
         console.error("[Tool Executor] Failed to listen for approval:", err);
         clearTimeout(timeout);
-        resolve(false);
+        resolve({ approved: false });
       });
   });
+}
+
+async function resolveGatewayOAuthConnectionArgs(
+  publisherSlug: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<GatewayConnectionArgsResult> {
+  if (typeof args.connection_id === "string" && args.connection_id.length > 0) {
+    return { args };
+  }
+
+  try {
+    const [provider, connections] = await Promise.all([
+      resolveOAuthProviderForPublisher(publisherSlug),
+      listConnectedPublishers(),
+    ]);
+    const providerConnections = getOAuthConnectionsForProvider(
+      connections,
+      provider.providerSlug,
+    );
+    if (providerConnections.length === 0) return { args };
+
+    const threadId = conversationStore.activeConversationId;
+    const selected = resolveThreadOAuthConnection(
+      threadId,
+      provider.providerSlug,
+      connections,
+    );
+
+    if (selected) {
+      return { args: { ...args, connection_id: selected.id } };
+    }
+
+    if (
+      hasAmbiguousOAuthConnections(threadId, provider.providerSlug, connections)
+    ) {
+      return {
+        args,
+        error: `Multiple ${provider.providerName} accounts are connected. Choose an active account for this chat before running ${publisherSlug}/${toolName}.`,
+      };
+    }
+
+    return { args };
+  } catch (err) {
+    console.warn(
+      `[Tool Executor] Failed to resolve OAuth connection for ${publisherSlug}:`,
+      err,
+    );
+    return { args };
+  }
 }
 
 /**
@@ -587,18 +661,20 @@ async function executeGatewayTool(
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
   try {
+    let callArgs = args;
+
     // Check if this operation requires user approval
     if (requiresApproval(publisherSlug, toolName)) {
       console.log(
         `[Tool Executor] Operation requires approval: ${publisherSlug}/${toolName}`,
       );
-      const approved = await requestGatewayApproval(
+      const approval = await requestGatewayApproval(
         publisherSlug,
         toolName,
         args,
       );
 
-      if (!approved) {
+      if (!approval.approved) {
         console.log("[Tool Executor] Operation denied by user");
         return {
           tool_call_id: toolCallId,
@@ -608,9 +684,27 @@ async function executeGatewayTool(
       }
 
       console.log("[Tool Executor] Operation approved by user");
+
+      if (approval.connectionId) {
+        callArgs = { ...args, connection_id: approval.connectionId };
+      }
     }
 
-    const response = await callGatewayTool(publisherSlug, toolName, args);
+    const resolvedArgs = await resolveGatewayOAuthConnectionArgs(
+      publisherSlug,
+      toolName,
+      callArgs,
+    );
+    if (resolvedArgs.error) {
+      return {
+        tool_call_id: toolCallId,
+        content: resolvedArgs.error,
+        is_error: true,
+      };
+    }
+    callArgs = resolvedArgs.args;
+
+    const response = await callGatewayTool(publisherSlug, toolName, callArgs);
 
     // Check if this is a payment proxy response (requires client-side signing)
     if (response.is_error && response.payment_proxy) {
@@ -648,7 +742,7 @@ async function executeGatewayTool(
         console.log("[Tool Executor] Retrying with signed payment...");
 
         const retryArgs = {
-          ...args,
+          ...callArgs,
           _x402_payment: paymentResult.paymentHeader,
         };
 
@@ -684,7 +778,7 @@ async function executeGatewayTool(
         const retryResponse = await callGatewayTool(
           publisherSlug,
           toolName,
-          args,
+          callArgs,
         );
 
         const retryContent =
