@@ -196,6 +196,16 @@ let quitConfirmed = false;
 // so a double-trigger can't launch two mic streams for the same session.
 let isStarting = false;
 
+// Single-flight guard for the auto-detect poll. `setInterval` fires the poll
+// every AUTO_DETECT_POLL_MS regardless of whether the prior tick has finished,
+// and a tick that auto-starts a capture parks on `requestCaptureStart` while
+// native mic init runs (seconds to minutes). Without this guard, overlapping
+// ticks fire `meetingLifecycleNoteManualStop` against the in-flight start (the
+// new pending_capture row isn't in the store yet, so `isCapturing()` reads
+// false) and spawn orphaned pending_capture meetings that wedge the panel in
+// "Starting". The auto-detect loop is single-flight by design.
+let pollInFlight = false;
+
 // Stops in flight, keyed by meeting id. Two stop sources (tray + panel) can
 // fire near-simultaneously and both pass the status check, double-running notes
 // + the agent handoff. This guard makes the second a no-op (#2162).
@@ -1365,7 +1375,20 @@ async function refreshUpcomingEventsIfStale(): Promise<void> {
   setMeetingState("upcomingStatus", result.status);
 }
 
+// Serialize the poll: skip a tick while a prior one is still running (including
+// its awaited capture start/stop), so overlapping ticks can't desync the
+// lifecycle or orphan a pending_capture meeting mid-start.
 async function pollAutoDetect(): Promise<void> {
+  if (pollInFlight) return;
+  pollInFlight = true;
+  try {
+    await runAutoDetectPollOnce();
+  } finally {
+    pollInFlight = false;
+  }
+}
+
+async function runAutoDetectPollOnce(): Promise<void> {
   if (!isTauriRuntime()) return;
   if (!settingsStore.get("meetingAutoDetectEnabled")) {
     setMeetingState("autoDetectSuggested", false);
