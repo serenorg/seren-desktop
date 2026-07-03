@@ -22,6 +22,7 @@ import githubLogo from "@/assets/oauth-logos/github.svg";
 import googleLogo from "@/assets/oauth-logos/google.svg";
 import linearLogo from "@/assets/oauth-logos/linear.svg";
 import { apiBase } from "@/lib/config";
+import { describeOAuthCallbackError } from "@/lib/oauth-callback";
 import {
   getExpiredOAuthProviderSlugs,
   isOAuthProviderExpired,
@@ -193,35 +194,28 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
   onMount(async () => {
     console.log("[OAuthLogins] Setting up OAuth callback listener");
     const unlisten = await listenForOAuthCallback(async (url) => {
-      // Only process if we initiated a publisher OAuth flow
+      console.log("[OAuthLogins] Received OAuth callback URL:", url);
+
+      // Surface Gateway/provider errors even if the webview reloaded mid-flow
+      // (which resets connectingProvider) or the connect timeout already fired.
+      // Otherwise a failed "Add account" looks like a silent no-op.
+      const callbackError = describeOAuthCallbackError(url);
+      if (callbackError) {
+        console.log("[OAuthLogins] OAuth error received:", callbackError);
+        if (connectTimeout) clearTimeout(connectTimeout);
+        setError(callbackError);
+        setConnectingProvider(null);
+        return;
+      }
+
+      // Success: only refresh if this panel initiated the flow.
       if (!connectingProvider()) return;
 
-      console.log("[OAuthLogins] Received OAuth callback URL:", url);
+      // The Gateway handles token exchange, we just need to refresh.
+      console.log(
+        "[OAuthLogins] Refreshing connections after successful OAuth",
+      );
       try {
-        const urlObj = new URL(url);
-        console.log(
-          "[OAuthLogins] Parsed URL - origin:",
-          urlObj.origin,
-          "pathname:",
-          urlObj.pathname,
-          "search:",
-          urlObj.search,
-        );
-        const errorParam = urlObj.searchParams.get("error");
-
-        if (errorParam) {
-          console.log("[OAuthLogins] OAuth error received:", errorParam);
-          if (connectTimeout) clearTimeout(connectTimeout);
-          setError(`OAuth error: ${errorParam}`);
-          setConnectingProvider(null);
-          return;
-        }
-
-        // Refresh connections after successful OAuth callback
-        // The Gateway handles token exchange, we just need to refresh
-        console.log(
-          "[OAuthLogins] Refreshing connections after successful OAuth",
-        );
         await refetchConnections();
         markOAuthConnectionsChanged();
         console.log("[OAuthLogins] Connections refreshed successfully");
@@ -230,13 +224,12 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
         if (currentProvider) {
           clearExpiredStatus(currentProvider);
         }
-        if (connectTimeout) clearTimeout(connectTimeout);
-        setConnectingProvider(null);
         setError(null);
       } catch (err) {
         console.error("[OAuthLogins] Error processing OAuth callback:", err);
-        if (connectTimeout) clearTimeout(connectTimeout);
         setError(err instanceof Error ? err.message : "OAuth callback failed");
+      } finally {
+        if (connectTimeout) clearTimeout(connectTimeout);
         setConnectingProvider(null);
       }
     });
