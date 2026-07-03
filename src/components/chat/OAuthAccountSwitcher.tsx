@@ -11,7 +11,9 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { describeOAuthCallbackError } from "@/lib/oauth-callback";
 import { humanizeOAuthProviderSlug } from "@/lib/oauth-provider-resolution";
+import { listenForOAuthCallback } from "@/lib/tauri-bridge";
 import {
   connectPublisher,
   listConnectedPublishers,
@@ -19,6 +21,7 @@ import {
 import {
   formatOAuthConnectionLabel,
   getOAuthConnectionsForProvider,
+  markOAuthConnectionsChanged,
   type OAuthConnection,
   oauthConnectionsRevision,
   resolveThreadOAuthConnection,
@@ -50,6 +53,7 @@ export const OAuthAccountSwitcher: Component<OAuthAccountSwitcherProps> = (
   >(null);
   const [connectError, setConnectError] = createSignal<string | null>(null);
   let rootRef: HTMLDivElement | undefined;
+  let connectTimeout: ReturnType<typeof setTimeout> | null = null;
   const [connections] = createResource(oauthConnectionsRevision, async () =>
     listConnectedPublishers(),
   );
@@ -67,6 +71,30 @@ export const OAuthAccountSwitcher: Component<OAuthAccountSwitcherProps> = (
     };
     document.addEventListener("click", close);
     onCleanup(() => document.removeEventListener("click", close));
+  });
+
+  // Resolve a switcher-initiated add-account flow when its OAuth callback lands.
+  // Without this, add-account errors are never shown here and a successful add
+  // never refreshes the list.
+  onMount(async () => {
+    const unlisten = await listenForOAuthCallback((url) => {
+      if (!connectingProvider()) return;
+      if (connectTimeout) clearTimeout(connectTimeout);
+      const callbackError = describeOAuthCallbackError(url);
+      if (callbackError) {
+        setConnectError(callbackError);
+        setConnectingProvider(null);
+        return;
+      }
+      // Success — refresh every account list bound to the revision signal.
+      markOAuthConnectionsChanged();
+      setConnectError(null);
+      setConnectingProvider(null);
+    });
+    onCleanup(() => {
+      unlisten();
+      if (connectTimeout) clearTimeout(connectTimeout);
+    });
   });
 
   const groups = createMemo<ProviderAccountGroup[]>(() => {
@@ -122,13 +150,25 @@ export const OAuthAccountSwitcher: Component<OAuthAccountSwitcherProps> = (
     if (connectingProvider()) return;
     setConnectingProvider(providerSlug);
     setConnectError(null);
+
+    // Reset if the OAuth callback never arrives (e.g. the user cancels in the
+    // browser). The listener above clears this on a real callback.
+    if (connectTimeout) clearTimeout(connectTimeout);
+    connectTimeout = setTimeout(() => {
+      if (connectingProvider()) {
+        setConnectingProvider(null);
+        setConnectError("Connection timed out. Please try again.");
+      }
+    }, 120_000);
+
     try {
       await connectPublisher(providerSlug);
+      // Flow continues via the OAuth callback listener.
     } catch (err) {
+      if (connectTimeout) clearTimeout(connectTimeout);
       setConnectError(
         err instanceof Error ? err.message : "Failed to start OAuth flow",
       );
-    } finally {
       setConnectingProvider(null);
     }
   };
