@@ -356,6 +356,18 @@ export interface LoginRequiredEvent {
   reason: string;
 }
 
+/**
+ * Emitted by an agent runtime when the Seren MCP gateway was configured for a
+ * session but failed to register any tools after bounded in-place reconnect
+ * attempts (the gateway connected — its instructions loaded — but its
+ * `tools/list` kept failing). Lets the desktop surface a degraded state instead
+ * of letting the session run instruction-only and silently. (#2802)
+ */
+export interface McpDegradedEvent {
+  sessionId: string;
+  serverName: string;
+}
+
 // Union type for all provider runtime events
 export type AgentEvent =
   | { type: "pairedEvent"; data: PairedTranscriptEvent }
@@ -371,7 +383,8 @@ export type AgentEvent =
   | { type: "sessionStatus"; data: SessionStatusEvent }
   | { type: "userMessage"; data: UserMessageEvent }
   | { type: "error"; data: ErrorEvent }
-  | { type: "loginRequired"; data: LoginRequiredEvent };
+  | { type: "loginRequired"; data: LoginRequiredEvent }
+  | { type: "mcpDegraded"; data: McpDegradedEvent };
 
 async function invokeProvider<T>(
   command: string,
@@ -757,6 +770,7 @@ const EVENT_SUFFIXES = {
   userMessage: "user-message",
   error: "error",
   loginRequired: "login-required",
+  mcpDegraded: "mcp-degraded",
 } as const;
 
 type EventType = keyof typeof EVENT_SUFFIXES;
@@ -907,6 +921,12 @@ export async function subscribeToSession(
       "error",
       createHandler<{ type: "error"; data: ErrorEvent }>("error"),
     ),
+    subscribeToEvent<McpDegradedEvent>(
+      "mcpDegraded",
+      createHandler<{ type: "mcpDegraded"; data: McpDegradedEvent }>(
+        "mcpDegraded",
+      ),
+    ),
   ]);
 }
 
@@ -959,6 +979,9 @@ export async function subscribeToAllEvents(
     ),
     subscribeToEvent<LoginRequiredEvent>("loginRequired", (data) =>
       callback({ type: "loginRequired", data }),
+    ),
+    subscribeToEvent<McpDegradedEvent>("mcpDegraded", (data) =>
+      callback({ type: "mcpDegraded", data }),
     ),
   ]);
 }

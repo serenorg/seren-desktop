@@ -6738,6 +6738,59 @@ export const agentStore = {
         this.handleStatusChange(sessionId, event.data.status, event.data);
         break;
 
+      case "mcpDegraded": {
+        // The Seren gateway connected for this session (its instructions
+        // loaded) but never registered its tools, and the runtime exhausted
+        // its in-place reconnect attempts. Surface a calm, non-fatal notice —
+        // the thread still works for non-publisher tasks, so this must NOT set
+        // the persistent session error banner or freeze the composer — and
+        // route it to the support pipeline so a persistent gateway
+        // `tools/list` failure becomes ticketable rather than silent. #2802
+        const degradedSession = state.sessions[sessionId];
+        if (!degradedSession) {
+          break;
+        }
+        const degradedNotice =
+          "Seren publisher tools could not be loaded for this thread — the " +
+          "Seren gateway was reachable but its tool list stayed unavailable " +
+          "after several retries. Publisher actions may fail here; start a " +
+          "new thread to try again.";
+        const lastDegradedMessage = degradedSession.messages.at(-1);
+        if (
+          lastDegradedMessage?.type !== "error" ||
+          lastDegradedMessage.content !== degradedNotice
+        ) {
+          const noticeMessage: AgentMessage = {
+            id: crypto.randomUUID(),
+            type: "error",
+            content: degradedNotice,
+            timestamp: Date.now(),
+          };
+          setState("sessions", sessionId, "messages", (msgs) => [
+            ...msgs,
+            noticeMessage,
+          ]);
+          const degradedConvoId = degradedSession.conversationId;
+          if (degradedConvoId) {
+            persistAgentMessage(
+              degradedConvoId,
+              noticeMessage,
+              degradedSession.info.agentType ?? null,
+            );
+          }
+        }
+        void captureSupportError({
+          kind: "agent.seren_mcp_tools_unavailable",
+          message: `seren-mcp registered 0 tools after reconnect recovery (server: ${event.data.serverName})`,
+          agentContext: {
+            model: degradedSession.currentModelId,
+            provider: degradedSession.info.agentType,
+            tool_calls: [],
+          },
+        });
+        break;
+      }
+
       case "error": {
         // Graceful "Task cancelled" is a system/user-initiated cancel
         // (predictive-compaction promotion teardown, Stop button, etc.) and
