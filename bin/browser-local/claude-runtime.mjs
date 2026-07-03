@@ -594,9 +594,35 @@ const ONE_M_TIER_RECORDS = [
 ];
 
 // Default model for fresh sessions. Chosen so users land on the 1M-tier
-// experience without needing picker discovery; the cli-updater baseline at
-// 2.1.120 (#1761) guarantees every running CLI knows this id. #1763.
-const DEFAULT_PREFERRED_MODEL = "claude-opus-4-7[1m]";
+// experience without needing picker discovery; the cli-updater baseline
+// (see CLI_MIN_VERSION_BASELINE) guarantees every running CLI knows this id.
+// Opus 4.8 was prewired in #2060; #2810 promotes it to the out-of-box default.
+// #1763.
+const DEFAULT_PREFERRED_MODEL = "claude-opus-4-8[1m]";
+
+// Out-of-box permission mode for fresh Claude threads. Users land on
+// bypassPermissions so they are not re-selecting it every session — the
+// composer Permission Mode selector is the source of truth, and per-thread
+// changes persist per-conversation (#1597). See claudeModeFromApprovalPolicy
+// for how an explicitly stricter approval policy still downgrades the seed.
+// #2810.
+const DEFAULT_PREFERRED_MODE = "bypassPermissions";
+
+// Maps the persisted agent approval policy to the permission mode a fresh
+// Claude thread spawns in. The default and on-request policies land on the
+// out-of-box DEFAULT_PREFERRED_MODE; only an explicitly stricter policy
+// (untrusted / on-failure) downgrades to acceptEdits. Runs against the stored
+// setting at every spawn, so it governs the composer default without mutating
+// the saved value. #2810.
+function claudeModeFromApprovalPolicy(approvalPolicy) {
+  switch (approvalPolicy) {
+    case "untrusted":
+    case "on-failure":
+      return "acceptEdits";
+    default:
+      return DEFAULT_PREFERRED_MODE;
+  }
+}
 
 // Picker order (top → bottom): the active default first, then by family
 // (opus → sonnet → haiku → other), then by version descending (4-7 → 4-6 →
@@ -2265,19 +2291,6 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     };
   }
 
-  function claudeModeFromApprovalPolicy(approvalPolicy) {
-    switch (approvalPolicy) {
-      case "on-request":
-      case "untrusted":
-      case "on-failure":
-        return "acceptEdits";
-      case "never":
-        return "bypassPermissions";
-      default:
-        return "acceptEdits";
-    }
-  }
-
   async function spawnSession(params) {
     const {
       cwd,
@@ -2998,6 +3011,8 @@ export {
   augmentWithLegacyOpus as _augmentWithLegacyOpus,
   ONE_M_TIER_RECORDS as _ONE_M_TIER_RECORDS,
   DEFAULT_PREFERRED_MODEL as _DEFAULT_PREFERRED_MODEL,
+  DEFAULT_PREFERRED_MODE as _DEFAULT_PREFERRED_MODE,
+  claudeModeFromApprovalPolicy as _claudeModeFromApprovalPolicy,
   comparePickerEntries as _comparePickerEntries,
   resolveSpawnShell as _resolveSpawnShell,
   buildClaudeArgs as _buildClaudeArgs,

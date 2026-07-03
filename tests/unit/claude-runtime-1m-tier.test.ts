@@ -233,9 +233,9 @@ describe("comparePickerEntries — default first, newest descending (#1763)", ()
   });
 });
 
-describe("DEFAULT_PREFERRED_MODEL — fresh-session out-of-box default (#1763)", () => {
-  it("is the Opus 4.7 1M-tier id so new users get the wider window without picker discovery", () => {
-    expect(DEFAULT_PREFERRED_MODEL).toBe("claude-opus-4-7[1m]");
+describe("DEFAULT_PREFERRED_MODEL — fresh-session out-of-box default (#1763, #2810)", () => {
+  it("is the Opus 4.8 1M-tier id so new users get the newest model + wider window without picker discovery", () => {
+    expect(DEFAULT_PREFERRED_MODEL).toBe("claude-opus-4-8[1m]");
   });
 });
 

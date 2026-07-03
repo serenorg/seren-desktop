@@ -50,13 +50,13 @@ describe("#1776 — post-init currentModelId resolution preserves [1m]", () => {
     expect(fnBody).not.toContain("chooseUpdatedModelId(");
   });
 
-  it("DEFAULT_PREFERRED_MODEL is the [1m]-tier Opus 4.7 id", () => {
+  it("DEFAULT_PREFERRED_MODEL is the [1m]-tier Opus 4.8 id (#2810)", () => {
     // The fresh-thread fallback must default to the 1M-tier variant so the
     // picker shows it as the default selection out of the box. Combined with
     // the chooseUpdatedModelId reuse above, this gives fresh threads a 1M
     // window without requiring picker discovery.
     expect(claudeRuntimeSource).toContain(
-      'const DEFAULT_PREFERRED_MODEL = "claude-opus-4-7[1m]";',
+      'const DEFAULT_PREFERRED_MODEL = "claude-opus-4-8[1m]";',
     );
   });
 });

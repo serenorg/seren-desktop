@@ -35,10 +35,13 @@ const SEMVER_EXTRACT_RE = /\d+\.\d+\.\d+[^\s]*/;
  * the baseline we ignore the 24h TTL and force an update on the next launch.
  * This unsticks installs that were poisoned by an old `cli-tools/package.json`
  * caret pin (e.g. `^2.1.30`) or by a transient registry failure that the TTL
- * then masked for months. Bumped together with #1761 so users gain access to
- * the JS→native migration boundary at 2.1.120 and the Opus 4.7 catalog. */
+ * then masked for months. #1761 set this to 2.1.120 for the JS→native
+ * migration boundary and the Opus 4.7 catalog; #2810 raises it so a stuck
+ * install cannot spawn on the new Opus 4.8 default (the CLI rejects unknown
+ * model ids), since the gate force-updates to `@latest`. 2.1.197 is verified
+ * to ship the claude-opus-4-8 catalog. */
 export const CLI_MIN_VERSION_BASELINE = {
-  "@anthropic-ai/claude-code": "2.1.120",
+  "@anthropic-ai/claude-code": "2.1.197",
 };
 
 /** Returns true when `installed` is a clean semver below `baseline`. */

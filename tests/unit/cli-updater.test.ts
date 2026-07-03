@@ -173,7 +173,7 @@ describe("backgroundUpdateCli TTL gate", () => {
       state,
       now: Date.now(),
       _versionOverrides: {
-        runInstalledVersion: async () => "2.1.123",
+        runInstalledVersion: async () => "2.1.199",
         runNpmView: async () => null,
       },
     });
@@ -200,12 +200,14 @@ describe("isBelowBaseline (#1761)", () => {
     expect(isBelowBaseline("2.1.30", "")).toBe(false);
   });
 
-  it("Claude Code baseline is at the JS→native migration boundary", () => {
-    // 2.1.120 is the first native-binary release. Below this, users miss
-    // the Opus 4.7 catalog and the binary structure the install detection
-    // expects. The baseline must not regress without explicit reasoning.
+  it("Claude Code baseline ships the Opus 4.8 catalog (#2810)", () => {
+    // #1761 set this to 2.1.120 (JS→native boundary + Opus 4.7 catalog).
+    // #2810 raised it to 2.1.197 so a stuck install can't spawn on the new
+    // Opus 4.8 default — the CLI rejects unknown model ids, and the baseline
+    // gate force-updates to @latest. 2.1.197 is verified to ship
+    // claude-opus-4-8. The baseline must not regress without explicit reasoning.
     expect(CLI_MIN_VERSION_BASELINE["@anthropic-ai/claude-code"]).toBe(
-      "2.1.120",
+      "2.1.197",
     );
   });
 });
