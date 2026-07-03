@@ -12,6 +12,8 @@ const modulePath = new URL(
 const {
   _inferClaudeContextWindow: inferClaudeContextWindow,
   _augmentWithLegacyOpus: augmentWithLegacyOpus,
+  _ensurePreferredModelRecord: ensurePreferredModelRecord,
+  _resolvePostInitCurrentModelId: resolvePostInitCurrentModelId,
   _ONE_M_TIER_RECORDS: ONE_M_TIER_RECORDS,
   _DEFAULT_PREFERRED_MODEL: DEFAULT_PREFERRED_MODEL,
   _comparePickerEntries: comparePickerEntries,
@@ -206,6 +208,98 @@ describe("augmentWithLegacyOpus — picker exposes 1M-tier variants", () => {
     expect(augmented[0].isDefault).toBe(true);
     const bareOpus = augmented.find((r) => r.modelId === "claude-opus-4-7");
     expect(bareOpus?.isDefault).toBe(false);
+  });
+});
+
+describe("ensurePreferredModelRecord — spawned model stays advertised (#2812)", () => {
+  it("injects Opus 4.8 1M when the CLI initialize catalog omits it", () => {
+    const cliCatalog = [
+      {
+        modelId: "claude-opus-4-7",
+        name: "Opus 4.7",
+        description: "",
+        supportsEffort: false,
+        supportedEffortLevels: [],
+        isDefault: true,
+      },
+      {
+        modelId: "claude-sonnet-4-6",
+        name: "Sonnet 4.6",
+        description: "",
+        supportsEffort: false,
+        supportedEffortLevels: [],
+        isDefault: false,
+      },
+    ];
+
+    const augmented = augmentWithLegacyOpus(cliCatalog);
+    expect(augmented.map((r: { modelId: string }) => r.modelId)).not.toContain(
+      "claude-opus-4-8[1m]",
+    );
+
+    const withPreferred = ensurePreferredModelRecord(
+      augmented,
+      "claude-opus-4-8[1m]",
+    ) as Array<{ modelId: string; name: string; isDefault: boolean }>;
+
+    expect(withPreferred[0]).toMatchObject({
+      modelId: "claude-opus-4-8[1m]",
+      name: "Opus 4.8 (1M context)",
+      isDefault: true,
+    });
+    expect(
+      withPreferred.find((r) => r.modelId === "claude-opus-4-7[1m]")?.isDefault,
+    ).toBe(false);
+  });
+});
+
+describe("resolvePostInitCurrentModelId — null initialize model keeps spawn seed (#2812)", () => {
+  it("does not fall back to records[0] when initResult.model is null", () => {
+    const records = ensurePreferredModelRecord(
+      augmentWithLegacyOpus([
+        {
+          modelId: "claude-opus-4-7",
+          name: "Opus 4.7",
+          description: "",
+          supportsEffort: false,
+          supportedEffortLevels: [],
+          isDefault: true,
+        },
+      ]),
+      "claude-opus-4-8[1m]",
+    );
+
+    expect(
+      resolvePostInitCurrentModelId(
+        "claude-opus-4-8[1m]",
+        null,
+        records,
+      ),
+    ).toBe("claude-opus-4-8[1m]");
+  });
+
+  it("still preserves the 1M suffix when initialize echoes the bare model", () => {
+    const records = ensurePreferredModelRecord(
+      augmentWithLegacyOpus([
+        {
+          modelId: "claude-opus-4-7",
+          name: "Opus 4.7",
+          description: "",
+          supportsEffort: false,
+          supportedEffortLevels: [],
+          isDefault: true,
+        },
+      ]),
+      "claude-opus-4-8[1m]",
+    );
+
+    expect(
+      resolvePostInitCurrentModelId(
+        "claude-opus-4-8[1m]",
+        "claude-opus-4-8",
+        records,
+      ),
+    ).toBe("claude-opus-4-8[1m]");
   });
 });
 
