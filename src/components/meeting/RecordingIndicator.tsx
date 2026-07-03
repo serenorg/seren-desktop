@@ -3,6 +3,13 @@
 
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { meetingStore } from "@/stores/meeting.store";
+import {
+  DEFAULT_COMPOSER_GAP,
+  DEFAULT_EDGE_INSET,
+  DEFAULT_TITLEBAR_HEIGHT,
+  defaultRecordingIndicatorPosition,
+  type Position,
+} from "./recordingIndicatorPlacement";
 
 function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -22,11 +29,6 @@ const DISCLOSURE =
 // Persisted drag position so a user who moved the indicator off their controls
 // keeps it there across reopens. UI-only; not sensitive.
 const POSITION_KEY = "seren.recordingIndicator.position";
-
-interface Position {
-  x: number;
-  y: number;
-}
 
 function loadPosition(): Position | null {
   try {
@@ -48,8 +50,12 @@ export function RecordingIndicator() {
   const [deleting, setDeleting] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
   const [position, setPosition] = createSignal<Position | null>(loadPosition());
+  const [defaultPosition, setDefaultPosition] = createSignal<Position | null>(
+    null,
+  );
   let containerRef: HTMLDivElement | undefined;
   let drag: { px: number; py: number; ox: number; oy: number } | null = null;
+  let defaultPositionFrame: number | null = null;
 
   let timer: number | undefined;
   onMount(() => {
@@ -64,6 +70,7 @@ export function RecordingIndicator() {
       (meeting) => meeting.status === "capturing",
     ) ?? null;
   const paused = () => meetingStore.state.capturePaused;
+  const displayedPosition = () => position() ?? defaultPosition();
 
   // Drop a stale delete confirmation if the recording ends.
   createEffect(() => {
@@ -105,6 +112,55 @@ export function RecordingIndicator() {
     };
   };
 
+  const titlebarHeight = (): number => {
+    const raw = getComputedStyle(document.documentElement)
+      .getPropertyValue("--titlebar-height")
+      .trim();
+    const parsed = Number.parseFloat(raw);
+    return Number.isFinite(parsed) ? parsed : DEFAULT_TITLEBAR_HEIGHT;
+  };
+
+  const visibleComposerTop = (): number | null => {
+    const composers = Array.from(
+      document.querySelectorAll<HTMLElement>(".chat-composer-form"),
+    );
+    const visibleComposers = composers
+      .map((composer) => composer.getBoundingClientRect())
+      .filter(
+        (rect) =>
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.bottom > 0 &&
+          rect.top < window.innerHeight,
+      )
+      .sort((a, b) => b.bottom - a.bottom);
+
+    return visibleComposers[0]?.top ?? null;
+  };
+
+  const updateDefaultPosition = () => {
+    if (!active() || position() || !containerRef) return;
+    const next = defaultRecordingIndicatorPosition({
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      indicatorWidth: containerRef.offsetWidth,
+      indicatorHeight: containerRef.offsetHeight,
+      composerTop: visibleComposerTop(),
+      titlebarHeight: titlebarHeight(),
+    });
+    setDefaultPosition((current) =>
+      current?.x === next.x && current.y === next.y ? current : next,
+    );
+  };
+
+  const scheduleDefaultPositionUpdate = () => {
+    if (defaultPositionFrame !== null) return;
+    defaultPositionFrame = window.requestAnimationFrame(() => {
+      defaultPositionFrame = null;
+      updateDefaultPosition();
+    });
+  };
+
   // Clamping otherwise only runs mid-drag, so a position restored at a smaller
   // window size — or a window shrunk after dragging — could strand the pill
   // off-screen (and the drag handle out of reach). Re-clamp on window resize and
@@ -112,15 +168,39 @@ export function RecordingIndicator() {
   const onResize = () => {
     const current = position();
     if (current) setPosition(clampToViewport(current.x, current.y));
+    else scheduleDefaultPositionUpdate();
   };
   onMount(() => {
     window.addEventListener("resize", onResize);
-    onCleanup(() => window.removeEventListener("resize", onResize));
+    const layoutObserver = new MutationObserver(() => {
+      if (active() && !position()) scheduleDefaultPositionUpdate();
+    });
+    layoutObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["aria-hidden", "class", "hidden", "style"],
+    });
+    onCleanup(() => {
+      window.removeEventListener("resize", onResize);
+      layoutObserver.disconnect();
+      if (defaultPositionFrame !== null) {
+        window.cancelAnimationFrame(defaultPositionFrame);
+      }
+    });
   });
   createEffect(() => {
-    if (!active()) return;
+    if (!active()) {
+      setDefaultPosition(null);
+      return;
+    }
     const current = position();
-    if (!current || !containerRef) return;
+    if (!current) {
+      scheduleDefaultPositionUpdate();
+      return;
+    }
+    if (!containerRef) return;
+    setDefaultPosition(null);
     const clamped = clampToViewport(current.x, current.y);
     if (clamped.x !== current.x || clamped.y !== current.y) {
       setPosition(clamped);
@@ -204,16 +284,20 @@ export function RecordingIndicator() {
     <Show when={active()}>
       <div
         ref={containerRef}
-        class="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-full border border-destructive/40 bg-popover/95 px-3 py-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.32)] backdrop-blur-sm animate-[fadeIn_200ms_ease]"
+        class="fixed z-50 flex items-center gap-2 rounded-full border border-destructive/40 bg-popover/95 px-3 py-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.32)] backdrop-blur-sm animate-[fadeIn_200ms_ease]"
         style={
-          position()
+          displayedPosition()
             ? {
-                left: `${position()?.x}px`,
-                top: `${position()?.y}px`,
+                left: `${displayedPosition()?.x}px`,
+                top: `${displayedPosition()?.y}px`,
                 right: "auto",
                 bottom: "auto",
               }
-            : undefined
+            : {
+                right: `${DEFAULT_EDGE_INSET}px`,
+                top: `calc(var(--titlebar-height, ${DEFAULT_TITLEBAR_HEIGHT}px) + ${DEFAULT_COMPOSER_GAP}px)`,
+                bottom: "auto",
+              }
         }
         aria-label={statusText()}
       >
