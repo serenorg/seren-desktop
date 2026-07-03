@@ -701,6 +701,42 @@ function augmentWithLegacyOpus(records) {
   return merged.slice().sort(comparePickerEntries);
 }
 
+function makeFallbackModelRecord(modelId) {
+  return {
+    modelId,
+    name: modelId,
+    description: undefined,
+    supportsEffort: false,
+    supportsFastMode: false,
+    supportsAutoMode: false,
+    supportsAdaptiveThinking: false,
+    supportedEffortLevels: [],
+    isDefault: false,
+  };
+}
+
+function ensurePreferredModelRecord(records, preferredModel) {
+  if (typeof preferredModel !== "string" || preferredModel.length === 0) {
+    return records;
+  }
+
+  const existing = records.find((record) => record.modelId === preferredModel);
+  const preferredRecord =
+    existing ??
+    ONE_M_TIER_RECORDS.find((record) => record.modelId === preferredModel) ??
+    makeFallbackModelRecord(preferredModel);
+
+  const withoutPreferred = records.filter(
+    (record) => record.modelId !== preferredModel,
+  );
+  return [
+    { ...preferredRecord, isDefault: true },
+    ...withoutPreferred.map((record) =>
+      record.isDefault ? { ...record, isDefault: false } : record,
+    ),
+  ].sort(comparePickerEntries);
+}
+
 function combinePrompt(prompt, context) {
   const contextText = Array.isArray(context)
     ? context
@@ -2231,6 +2267,26 @@ function attachProcessListeners(emit, sessions, session, exitPromises) {
   });
 }
 
+function resolvePostInitCurrentModelId(
+  previousModelId,
+  initModel,
+  availableModelRecords,
+) {
+  const inferredFromInit =
+    typeof initModel === "string" && initModel.length > 0
+      ? inferCurrentModelId(initModel, availableModelRecords)
+      : null;
+  return (
+    chooseUpdatedModelId(
+      previousModelId,
+      inferredFromInit,
+      availableModelRecords,
+    ) ??
+    inferredFromInit ??
+    previousModelId
+  );
+}
+
 export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) {
   const sessions = new Map();
   const claudeLogPrefix = providerLogPrefix("claude", runtimeMode);
@@ -2327,10 +2383,10 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       normalizeEffort(reasoningEffort) ?? DEFAULT_CLAUDE_EFFORT;
     // Prefer the user's persisted choice (agent_model_id from the conversation
     // row) so a resumed thread spawns on the model the user actually picked.
-    // Falls back to Opus 4.7 with the 1M-tier suffix for fresh threads — that
+    // Falls back to Opus 4.8 with the 1M-tier suffix for fresh threads — that
     // is the out-of-box default users should land on so the wider window is
     // active without requiring picker discovery (#1763). The cli-updater
-    // baseline at 2.1.120 (#1761) ensures every running CLI knows this model.
+    // baseline at 2.1.197 (#2810) ensures every running CLI knows this model.
     // When the CLI adds/changes models, the picker stays authoritative; the
     // assistant message handler below then corrects session.currentModelId
     // from Anthropic's message.model ground truth on the first response,
@@ -2510,8 +2566,11 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         }
       }
 
-      session.availableModelRecords = augmentWithLegacyOpus(
-        normalizeModelRecords(initResult),
+      session.availableModelRecords = ensurePreferredModelRecord(
+        augmentWithLegacyOpus(
+          normalizeModelRecords(initResult),
+        ),
+        preferredModel,
       );
       // Route the inferred id through chooseUpdatedModelId so the `[1m]`
       // suffix from the spawn-time `--model` arg is preserved when the CLI
@@ -2519,18 +2578,15 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       // post-init clobber strips `[1m]` from every fresh `[1m]` thread,
       // poisoning the picker and the next setModel arg with the 200K-tier
       // bare id even though the session is actually running on 1M. #1776.
-      const inferredFromInit = inferCurrentModelId(
+      // A null initResult.model means the CLI has not reported a current
+      // model yet. Keep the spawn seed in that case instead of falling back
+      // to records[0], which may be the newest catalog model rather than the
+      // `--model` argument this session is actually running. #2812.
+      session.currentModelId = resolvePostInitCurrentModelId(
+        session.currentModelId,
         initResult?.model ?? null,
         session.availableModelRecords,
       );
-      session.currentModelId =
-        chooseUpdatedModelId(
-          session.currentModelId,
-          inferredFromInit,
-          session.availableModelRecords,
-        ) ??
-        inferredFromInit ??
-        session.currentModelId;
 
       // The launched session stays in its default permission flow until we
       // explicitly switch modes over the control channel.
@@ -3009,6 +3065,8 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
 export {
   inferClaudeContextWindow as _inferClaudeContextWindow,
   augmentWithLegacyOpus as _augmentWithLegacyOpus,
+  ensurePreferredModelRecord as _ensurePreferredModelRecord,
+  resolvePostInitCurrentModelId as _resolvePostInitCurrentModelId,
   ONE_M_TIER_RECORDS as _ONE_M_TIER_RECORDS,
   DEFAULT_PREFERRED_MODEL as _DEFAULT_PREFERRED_MODEL,
   DEFAULT_PREFERRED_MODE as _DEFAULT_PREFERRED_MODE,

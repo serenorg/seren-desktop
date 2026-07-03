@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 const claudeRuntimeSource = readSource("bin/browser-local/claude-runtime.mjs");
 
 describe("#1776 — post-init currentModelId resolution preserves [1m]", () => {
-  it("spawnSession routes the inferred init.model through chooseUpdatedModelId", () => {
+  it("spawnSession advertises the spawned model and resolves init.model through the post-init helper", () => {
     // Anthropic echoes the bare resolved id (e.g. claude-opus-4-7) in
     // initResult.model even when the session was spawned with --model
     // claude-opus-4-7[1m]. Resolving the bare echo via inferCurrentModelId
@@ -16,14 +16,16 @@ describe("#1776 — post-init currentModelId resolution preserves [1m]", () => {
     // running on 1M. chooseUpdatedModelId carries the existing #1763
     // [1m]-preservation guard — reuse it here so spawn-time and per-message
     // resolution agree on the tier marker.
-    const spawnAnchor = "augmentWithLegacyOpus(\n        normalizeModelRecords(initResult),\n      );";
+    const spawnAnchor = "ensurePreferredModelRecord(\n        augmentWithLegacyOpus(";
     const idx = claudeRuntimeSource.indexOf(spawnAnchor);
     expect(idx, "spawnSession post-init block must exist").toBeGreaterThan(0);
 
     const block = claudeRuntimeSource.slice(idx, idx + 1200);
-    expect(block).toContain("chooseUpdatedModelId(");
+    expect(block).toContain("normalizeModelRecords(initResult)");
+    expect(block).toContain("preferredModel");
+    expect(block).toContain("resolvePostInitCurrentModelId(");
     expect(block).toContain("session.currentModelId,");
-    expect(block).toContain("inferredFromInit");
+    expect(block).toContain("initResult?.model ?? null");
   });
 
   it("forkSession delegates [1m] preservation to the next spawnSession boot — no temp init block", () => {
