@@ -918,6 +918,30 @@ const INITIALIZE_TIMEOUT_MS = 60_000;
 // abandoned. Each attempt runs against a fresh process. #2452
 const INITIALIZE_MAX_ATTEMPTS = 2;
 
+// The Seren MCP gateway can complete its MCP `initialize` handshake — so its
+// instruction block loads into the prompt — while its `tools/list` call fails,
+// leaving the session "connected" with ZERO seren-mcp tools for its whole
+// lifetime. Claude Code does NOT downgrade the client to "failed" on a
+// tools/list miss, so the connection status reads healthy while every publisher
+// action fails against tools that were never registered. The only reliable
+// signal is the tool COUNT, and the first streamed `system init` message is the
+// earliest point that count is fully resolved. We audit it there and recover in
+// place with the `mcp_reconnect` control request (single-server reconnect +
+// tools re-fetch, no process restart) before surfacing a degraded state. #2802
+const SEREN_MCP_SERVER_NAME = "seren-mcp";
+const SEREN_MCP_TOOL_PREFIX = `mcp__${SEREN_MCP_SERVER_NAME}__`;
+// The remote HTTP gateway's connect + tools/list races in the background and is
+// often still `pending` when the first `system init` fires, so a bare "0 tools
+// at init" is NOT yet a failure. Give the connection this long to register its
+// tools naturally (cheap local `mcp_status` polls, no gateway round-trips)
+// before treating it as degraded — otherwise a healthy-but-slow gateway would
+// be needlessly reconnected on every spawn.
+const SEREN_MCP_SETTLE_TIMEOUT_MS = 10_000;
+const SEREN_MCP_SETTLE_POLL_INTERVAL_MS = 500;
+const SEREN_MCP_RECONNECT_MAX_ATTEMPTS = 3;
+const SEREN_MCP_RECONNECT_BASE_DELAY_MS = 500;
+const SEREN_MCP_CONTROL_TIMEOUT_MS = 15_000;
+
 function sendInitialize(session) {
   return sendControlRequest(
     session,
@@ -1667,6 +1691,10 @@ function handleSystemMessage(emit, session, payload) {
         session.currentModelId ??
         inferCurrentModelId(payload.model, session.availableModelRecords);
       emit("provider://session-status", buildSessionStatus(session));
+      // The `system init` message is the first point Claude Code's tool
+      // registry is fully resolved, so it is where we can tell whether the
+      // Seren gateway actually registered its tools. #2802
+      maybeAuditSerenMcpTools(emit, session, payload);
       return;
     }
 
@@ -1688,6 +1716,173 @@ function handleSystemMessage(emit, session, payload) {
     default:
       return;
   }
+}
+
+/** Count the seren-mcp tools in a streamed `system init` `tools` array. */
+function countSerenMcpTools(tools) {
+  if (!Array.isArray(tools)) {
+    return 0;
+  }
+  return tools.filter(
+    (name) => typeof name === "string" && name.startsWith(SEREN_MCP_TOOL_PREFIX),
+  ).length;
+}
+
+/**
+ * Audit the first `system init` for missing Seren gateway tools and kick off
+ * settle-then-recover when the gateway did not register any tools. Runs at most
+ * once per session, and only when the session was spawned with the gateway
+ * configured (an API key was present). #2802
+ */
+function maybeAuditSerenMcpTools(emit, session, payload) {
+  if (!session.serenMcpConfigured || session.serenMcpToolsChecked) {
+    return;
+  }
+  session.serenMcpToolsChecked = true;
+
+  // Fast path: the gateway already registered its tools by the time the first
+  // `system init` fired, so there is nothing to do and no control traffic.
+  if (countSerenMcpTools(payload.tools) > 0) {
+    return;
+  }
+
+  // Zero tools at init can just mean the remote gateway is still connecting, so
+  // don't judge it yet — let it settle, then recover only if it stays toolless.
+  void settleAndRecoverSerenMcpTools(emit, session);
+}
+
+/**
+ * Read the live seren-mcp status + tool count via the `mcp_status` control
+ * request. Returns `{ status, toolCount }`, or `null` when `mcp_status` is
+ * unsupported (older CLI) or the session is gone.
+ */
+async function serenMcpStatus(session) {
+  let response;
+  try {
+    response = await sendControlRequest(
+      session,
+      { subtype: "mcp_status" },
+      SEREN_MCP_CONTROL_TIMEOUT_MS,
+    );
+  } catch {
+    return null;
+  }
+  const servers = Array.isArray(response?.mcpServers) ? response.mcpServers : [];
+  const seren = servers.find((server) => server?.name === SEREN_MCP_SERVER_NAME);
+  return {
+    status: seren?.status ?? "absent",
+    toolCount: Array.isArray(seren?.tools) ? seren.tools.length : 0,
+  };
+}
+
+/**
+ * Wait for the remote gateway to finish connecting before judging it. The
+ * connect + tools/list race in the background, so poll the cheap in-process
+ * `mcp_status` until the gateway either registers tools (healthy — was just
+ * slow) or the settle window elapses with it still toolless. Only then hand off
+ * to reconnect recovery. Never reconnects a merely-still-connecting gateway. #2802
+ */
+async function settleAndRecoverSerenMcpTools(emit, session) {
+  const settleDeadline = Date.now() + SEREN_MCP_SETTLE_TIMEOUT_MS;
+  let lastStatus = "pending";
+  for (;;) {
+    if (session.process?.exitCode != null || session.process?.killed) {
+      return;
+    }
+    const status = await serenMcpStatus(session);
+    if (status === null) {
+      // `mcp_status` unsupported — we cannot distinguish "still connecting" from
+      // "genuinely toolless", so do nothing rather than risk a false alarm.
+      return;
+    }
+    lastStatus = status.status;
+    if (status.toolCount > 0) {
+      return; // healthy — the gateway registered its tools on its own
+    }
+    if (Date.now() >= settleDeadline) {
+      break; // still toolless after the settle window — treat as degraded
+    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, SEREN_MCP_SETTLE_POLL_INTERVAL_MS),
+    );
+  }
+
+  console.warn(
+    `${session.logPrefix ?? providerLogPrefix("claude")} seren-mcp registered ` +
+      `0 tools after ${Math.round(SEREN_MCP_SETTLE_TIMEOUT_MS / 1000)}s ` +
+      `(server status: ${lastStatus}); attempting in-place reconnect recovery.`,
+  );
+  await recoverSerenMcpTools(emit, session);
+}
+
+/**
+ * Reconnect the seren-mcp server in place (no process restart) with bounded
+ * retries and backoff, re-checking the tool count after each attempt. When the
+ * underlying failure is a server-side `tools/list` transient, a reconnect
+ * re-fetches the tool list and repopulates the live registry for the rest of
+ * the session. Surfaces a degraded state only after every attempt is
+ * exhausted. #2802
+ */
+async function recoverSerenMcpTools(emit, session) {
+  for (
+    let attempt = 1;
+    attempt <= SEREN_MCP_RECONNECT_MAX_ATTEMPTS;
+    attempt += 1
+  ) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, SEREN_MCP_RECONNECT_BASE_DELAY_MS * attempt),
+    );
+
+    // Stop if the CLI process has since exited or been killed — reconnecting a
+    // dead session is pointless and would spuriously surface a degraded state.
+    if (session.process?.exitCode != null || session.process?.killed) {
+      return;
+    }
+
+    try {
+      await sendControlRequest(
+        session,
+        { subtype: "mcp_reconnect", serverName: SEREN_MCP_SERVER_NAME },
+        SEREN_MCP_CONTROL_TIMEOUT_MS,
+      );
+    } catch (error) {
+      console.warn(
+        `${session.logPrefix ?? providerLogPrefix("claude")} seren-mcp ` +
+          `reconnect attempt ${attempt}/${SEREN_MCP_RECONNECT_MAX_ATTEMPTS} ` +
+          `failed: ${error.message}`,
+      );
+      continue;
+    }
+
+    const status = await serenMcpStatus(session);
+    if (status === null) {
+      // Reconnect was acknowledged but the count cannot be verified (older CLI
+      // without `mcp_status`, or the session ended). Best effort — stop here.
+      console.warn(
+        `${session.logPrefix ?? providerLogPrefix("claude")} seren-mcp ` +
+          `reconnected (tool count unverifiable); stopping recovery.`,
+      );
+      return;
+    }
+    if (status.toolCount > 0) {
+      console.warn(
+        `${session.logPrefix ?? providerLogPrefix("claude")} seren-mcp tools ` +
+          `recovered: ${status.toolCount} tools after reconnect attempt ` +
+          `${attempt}.`,
+      );
+      return;
+    }
+  }
+
+  console.error(
+    `${session.logPrefix ?? providerLogPrefix("claude")} seren-mcp tools ` +
+      `failed to register after ${SEREN_MCP_RECONNECT_MAX_ATTEMPTS} reconnect ` +
+      `attempts; surfacing degraded state.`,
+  );
+  emit("provider://mcp-degraded", {
+    sessionId: session.id,
+    serverName: SEREN_MCP_SERVER_NAME,
+  });
 }
 
 function handleAssistantMessage(emit, session, payload) {
@@ -2029,6 +2224,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     mcpConfigJson = null,
     spawnEnv = {},
     reasoningEffort = DEFAULT_CLAUDE_EFFORT,
+    serenMcpConfigured = false,
   }) {
     return {
       id: sessionId,
@@ -2061,6 +2257,11 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       // Peak per-turn input tokens across the current prompt's tool-call
       // iterations. Reset at handleResult. See #1611.
       peakInputTokens: 0,
+      // Whether this session was spawned with the Seren MCP gateway configured
+      // (an API key was present), and whether its post-spawn tool-registration
+      // audit has already run. See maybeAuditSerenMcpTools / #2802.
+      serenMcpConfigured,
+      serenMcpToolsChecked: false,
     };
   }
 
@@ -2102,6 +2303,11 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
 
     const remoteSessionId = resumeAgentSessionId ?? randomUUID();
     const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
+    // The Seren gateway is only in the MCP config when an API key is present
+    // (see createRemoteSerenServer). Mirror that check so the post-spawn tool
+    // audit only runs for sessions that actually expect gateway tools. #2802
+    const serenMcpConfigured =
+      typeof apiKey === "string" && apiKey.trim().length > 0;
     const claudeBin = resolveClaudeBinary();
     const extendedPath = buildExtendedPath();
     const effectiveEffort =
@@ -2247,6 +2453,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         mcpConfigJson: mcpConfig.claudeMcpConfigJson,
         spawnEnv: mcpConfig.childEnv,
         reasoningEffort: effectiveEffort,
+        serenMcpConfigured,
       });
 
       sessions.set(sessionId, launchedSession);
@@ -2799,4 +3006,6 @@ export {
   buildFastModeFlagSettings as _buildFastModeFlagSettings,
   handleAssistantMessage as _handleAssistantMessage,
   handleStreamEvent as _handleStreamEvent,
+  countSerenMcpTools as _countSerenMcpTools,
+  SEREN_MCP_TOOL_PREFIX as _SEREN_MCP_TOOL_PREFIX,
 };
