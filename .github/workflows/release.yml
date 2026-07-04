@@ -33,6 +33,9 @@ env:
   HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' }}
   # SSL.com eSigner cloud signing for Windows EV code signing
   HAS_WINDOWS_SIGNING: ${{ secrets.ES_USERNAME != '' }}
+  # Maximum billable SSL.com cloud hash-signing operations for one Windows
+  # release job. Bump only after auditing sign-targets.txt / signer telemetry.
+  MAX_SIGNATURES: ${{ vars.MAX_SIGNATURES || '850' }}
 
 jobs:
   create-release:
@@ -307,6 +310,21 @@ jobs:
           echo "::error::Either configure SSL.com eSigner secrets or push a non-v* tag for unsigned dev builds."
           exit 1
 
+      - name: Initialize Windows signing budget telemetry
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          [int]$max = 0
+          if (-not [int]::TryParse($env:MAX_SIGNATURES, [ref]$max) -or $max -lt 0) {
+            Write-Host "::error::MAX_SIGNATURES must be a non-negative integer, got '$env:MAX_SIGNATURES'."
+            exit 1
+          }
+          $telemetry = Join-Path $env:RUNNER_TEMP "windows-signing-telemetry.jsonl"
+          Remove-Item -LiteralPath $telemetry -Force -ErrorAction SilentlyContinue
+          "WINDOWS_SIGN_TELEMETRY_FILE=$telemetry" >> $env:GITHUB_ENV
+          Write-Host "Windows signing telemetry: $telemetry"
+          Write-Host "Windows signing MAX_SIGNATURES=$max"
+
       # macOS: Import certificates and setup keychain (skip if no certificate)
       - name: Import macOS certificates
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
@@ -495,6 +513,55 @@ jobs:
       - name: Build Tauri app (unsigned, macOS without signing)
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING != 'true'
         run: pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Summarize Windows signing budget
+        if: always() && matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $summary = $env:GITHUB_STEP_SUMMARY
+          $telemetry = $env:WINDOWS_SIGN_TELEMETRY_FILE
+          Add-Content -LiteralPath $summary -Value "## Windows signing budget"
+          Add-Content -LiteralPath $summary -Value ""
+          Add-Content -LiteralPath $summary -Value "- MAX_SIGNATURES: $env:MAX_SIGNATURES"
+          Add-Content -LiteralPath $summary -Value "- Telemetry: ``$telemetry``"
+          if (-not $telemetry -or -not (Test-Path -LiteralPath $telemetry)) {
+            Add-Content -LiteralPath $summary -Value "- Status: no signing telemetry was produced before the job stopped."
+            Write-Host "No Windows signing telemetry found at: $telemetry"
+            exit 0
+          }
+
+          $records = @()
+          foreach ($line in (Get-Content -LiteralPath $telemetry)) {
+            $trimmed = $line.Trim()
+            if (-not $trimmed) { continue }
+            $records += ($trimmed | ConvertFrom-Json)
+          }
+
+          [int]$discovered = 0
+          [int]$skipped = 0
+          [int]$wouldSign = 0
+          [int]$signed = 0
+          $blocked = $false
+          foreach ($record in $records) {
+            if ($null -ne $record.discovered) { $discovered += [int]$record.discovered }
+            if ($null -ne $record.skipped) { $skipped += [int]$record.skipped }
+            if ($null -ne $record.would_sign) { $wouldSign += [int]$record.would_sign }
+            if ($null -ne $record.signed) { $signed += [int]$record.signed }
+            if ($record.status -eq "blocked") { $blocked = $true }
+          }
+          $status = if ($blocked) { "blocked by budget gate" } else { "within budget" }
+          Add-Content -LiteralPath $summary -Value "- Status: $status"
+          Add-Content -LiteralPath $summary -Value "- Discovered: $discovered"
+          Add-Content -LiteralPath $summary -Value "- Skipped already valid: $skipped"
+          Add-Content -LiteralPath $summary -Value "- Cloud signatures spent: $signed"
+          Add-Content -LiteralPath $summary -Value ""
+          Add-Content -LiteralPath $summary -Value "| Status | Source | Discovered | Skipped | Would sign | Signed | Previous signed |"
+          Add-Content -LiteralPath $summary -Value "|---|---|---:|---:|---:|---:|---:|"
+          foreach ($record in $records) {
+            $source = ([string]$record.source).Replace("|", "\|")
+            Add-Content -LiteralPath $summary -Value "| $($record.status) | ``$source`` | $($record.discovered) | $($record.skipped) | $($record.would_sign) | $($record.signed) | $($record.previous_signed) |"
+          }
+          Write-Host "Windows signing budget summary: status=$status discovered=$discovered skipped=$skipped signed=$signed max=$env:MAX_SIGNATURES"
 
       # Verify dist/ contains current frontend code.
       # Catches stale dist/ bundles that bypass beforeBuildCommand.

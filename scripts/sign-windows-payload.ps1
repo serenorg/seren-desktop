@@ -1,5 +1,6 @@
 # ABOUTME: Signs Windows PE binaries in place with signtool using the eSigner CKA-loaded EV cert (#2276).
 # ABOUTME: Takes signables from -Root/-File/-ListFile, skips already-signed, signs in throttled batches (#2282), fails loud if any file is left unsigned.
+# ABOUTME: Enforces the Windows release signature budget and writes per-invocation telemetry (#2818).
 
 [CmdletBinding()]
 param(
@@ -21,10 +22,84 @@ param(
   # file, so bursting the whole payload trips SSL.com's per-minute rate limit
   # (#2282). Pausing between batches holds the request rate under that ceiling.
   [int]$DelaySeconds = 0,
+  # Maximum cumulative cloud hash-signing operations allowed for this release job.
+  # Defaults from MAX_SIGNATURES; unset/-1 disables the gate for local ad-hoc use.
+  [int]$MaxSignatures = -1,
+  # JSONL telemetry file shared across signer invocations in one release job.
+  # Defaults from WINDOWS_SIGN_TELEMETRY_FILE.
+  [string]$TelemetryFile = "",
   [int]$MaxRetries = 3
 )
 
 $ErrorActionPreference = "Stop"
+
+function Resolve-MaxSignatureBudget {
+  param([int]$Explicit)
+  if ($Explicit -ge 0) { return $Explicit }
+  $raw = $env:MAX_SIGNATURES
+  if (-not $raw) { return -1 }
+  [int]$parsed = 0
+  if (-not [int]::TryParse($raw, [ref]$parsed) -or $parsed -lt 0) {
+    Write-Host "::error::MAX_SIGNATURES must be a non-negative integer, got '$raw'."
+    exit 1
+  }
+  return $parsed
+}
+
+function Get-SigningSource {
+  if ($ListFile) { return "list:$ListFile" }
+  if ($File.Count -gt 0 -and $Root.Count -eq 0) { return "file" }
+  if ($Root.Count -gt 0 -and $File.Count -eq 0) { return "root" }
+  return "mixed"
+}
+
+function Read-PreviousSignedCount {
+  param([string]$Path)
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return 0 }
+  [int]$total = 0
+  foreach ($line in (Get-Content -LiteralPath $Path)) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed) { continue }
+    try {
+      $record = $trimmed | ConvertFrom-Json
+      if ($null -ne $record.signed) { $total += [int]$record.signed }
+    } catch {
+      Write-Host "::warning::Ignoring malformed Windows signing telemetry line in ${Path}: $trimmed"
+    }
+  }
+  return $total
+}
+
+function Write-SigningTelemetry {
+  param(
+    [string]$Path,
+    [string]$Status,
+    [string]$Source,
+    [int]$Discovered,
+    [int]$Skipped,
+    [int]$WouldSign,
+    [int]$Signed,
+    [int]$PreviousSigned,
+    [int]$Max
+  )
+  if (-not $Path) { return }
+  $dir = Split-Path -Parent $Path
+  if ($dir -and -not (Test-Path -LiteralPath $dir)) {
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  }
+  $record = [PSCustomObject]@{
+    timestamp = (Get-Date).ToUniversalTime().ToString("o")
+    status = $Status
+    source = $Source
+    discovered = $Discovered
+    skipped = $Skipped
+    would_sign = $WouldSign
+    signed = $Signed
+    previous_signed = $PreviousSigned
+    max_signatures = if ($Max -ge 0) { $Max } else { $null }
+  }
+  ($record | ConvertTo-Json -Compress) | Add-Content -LiteralPath $Path
+}
 
 # Resolve the thumbprint before anything else so a missing credential fails
 # fast with an actionable error instead of a confusing signtool failure.
@@ -33,23 +108,14 @@ if (-not $Thumbprint) {
   Write-Host "::error::No certificate thumbprint: pass -Thumbprint or set WINDOWS_SIGN_THUMBPRINT (exported by the eSigner CKA setup step)."
   exit 1
 }
+$maxSignatureBudget = Resolve-MaxSignatureBudget -Explicit $MaxSignatures
+if (-not $TelemetryFile) { $TelemetryFile = $env:WINDOWS_SIGN_TELEMETRY_FILE }
+$signingSource = Get-SigningSource
 
 # Authenticode-signable PE extensions. .pyd/.node are ordinary DLLs; signtool
 # signs them in place by content, so (unlike CodeSignTool) no extension rewrite
 # is needed.
 $signableExt = @(".exe", ".dll", ".node", ".pyd")
-
-# Discover the newest x64 signtool.exe from the installed Windows 10 SDK rather
-# than hardcoding an SDK version that drifts on the hosted runner.
-$signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue |
-  Where-Object { $_.FullName -match "\\x64\\" } |
-  Sort-Object FullName -Descending |
-  Select-Object -First 1
-if (-not $signtool) {
-  Write-Host "::error::Could not locate an x64 signtool.exe under the Windows 10 SDK."
-  exit 1
-}
-Write-Host "Using signtool: $($signtool.FullName)"
 
 # Build the target set: explicit files + every signable under each root.
 $targets = [System.Collections.Generic.List[string]]::new()
@@ -106,9 +172,34 @@ if ($skipped -gt 0) {
 }
 if ($targets.Count -eq 0) {
   Write-Host "All $discovered discovered file(s) already validly signed; nothing to do."
+  $previousSigned = Read-PreviousSignedCount -Path $TelemetryFile
+  Write-SigningTelemetry -Path $TelemetryFile -Status "success" -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign 0 -Signed 0 -PreviousSigned $previousSigned -Max $maxSignatureBudget
   exit 0
 }
+$previousSigned = Read-PreviousSignedCount -Path $TelemetryFile
+$projectedSigned = $previousSigned + $targets.Count
+if ($maxSignatureBudget -ge 0) {
+  Write-Host "Windows signing budget: $previousSigned already signed, this invocation would sign $($targets.Count), max $maxSignatureBudget."
+  if ($projectedSigned -gt $maxSignatureBudget) {
+    Write-Host "::error::Windows signing budget exceeded: signing $($targets.Count) more file(s) would bring this release to $projectedSigned cloud signature(s), above MAX_SIGNATURES=$maxSignatureBudget."
+    Write-Host "::error::Audit sign-targets.txt / Windows signing telemetry and raise MAX_SIGNATURES through review only if this release intentionally needs the extra signatures."
+    Write-SigningTelemetry -Path $TelemetryFile -Status "blocked" -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign $targets.Count -Signed 0 -PreviousSigned $previousSigned -Max $maxSignatureBudget
+    exit 1
+  }
+}
 Write-Host "Signing $($targets.Count) file(s) in batches of $BatchSize (delay ${DelaySeconds}s between batches)..."
+
+# Discover the newest x64 signtool.exe from the installed Windows 10 SDK rather
+# than hardcoding an SDK version that drifts on the hosted runner.
+$signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue |
+  Where-Object { $_.FullName -match "\\x64\\" } |
+  Sort-Object FullName -Descending |
+  Select-Object -First 1
+if (-not $signtool) {
+  Write-Host "::error::Could not locate an x64 signtool.exe under the Windows 10 SDK."
+  exit 1
+}
+Write-Host "Using signtool: $($signtool.FullName)"
 
 # signtool signs each file by sending only its hash to the SSL.com cloud (one op
 # per file). Retry each batch for transient cloud/timestamp failures.
@@ -147,4 +238,5 @@ if ($unsigned.Count -gt 0) {
   $unsigned | ForEach-Object { Write-Host "    $_" }
   exit 1
 }
+Write-SigningTelemetry -Path $TelemetryFile -Status "success" -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign $targets.Count -Signed $targets.Count -PreviousSigned $previousSigned -Max $maxSignatureBudget
 Write-Host "All $($targets.Count) file(s) carry a Valid Authenticode signature."
