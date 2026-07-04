@@ -43,7 +43,13 @@ describe("#2113 compaction acts on the over-budget tail flag", () => {
     expect(chatStore).toContain("relieveOverBudgetTail(");
   });
 
-  it("agent surfaces an over-budget tail with no compactable prefix", () => {
+  it("agent prunes and respawns an over-budget tail with no compactable prefix", () => {
     expect(agentStore).toContain("tailWindow.overBudget");
+    expect(agentStore).toContain("relieveOverBudgetTail(");
+    expect(agentStore).toContain("over-budget tail relief respawned");
+    expect(agentStore).toContain(
+      'return { outcome: "succeeded", newSessionId: reliefSessionId }',
+    );
+    expect(agentStore).not.toContain("serving transcript left intact");
   });
 });
