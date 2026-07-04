@@ -73,12 +73,11 @@ describe("#1858 Defect 2 — passive prepend preserves tool-result content", () 
   // resource-id slot, so opaque handles got summarized away and the user had
   // to re-supply them post-compaction.
 
-  // Anchor on the unique "Build the structured prepend up-front" comment that
-  // introduces the prepend-builder block in compactAgentConversation. This
-  // keeps assertions inside the prepend region only — not the toCompact
-  // serialization above it nor the post-prepend spawn flows below.
+  // Anchor on the shared prepend helper. This keeps assertions inside the
+  // prepend formatting region only — not the toCompact serialization nor the
+  // post-prepend spawn flows below.
   const prependRegion = () =>
-    regionAfter("Build the structured prepend up-front", 2500);
+    regionAfter("function buildAgentCompactionPrepend", 2500);
 
   it("prepend builder includes m.type === \"tool\" alongside user/assistant", () => {
     // The filter must allow tool messages through. Pre-fix shape was a literal

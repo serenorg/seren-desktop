@@ -20,6 +20,7 @@ import { isGeneratedPromptPrimer } from "@/lib/chat-history-export";
 import {
   type PrunableMessage,
   pruneCompactedHistory,
+  relieveOverBudgetTail,
 } from "@/lib/compaction/prune";
 import {
   buildDeterministicFallbackSummary,
@@ -334,6 +335,88 @@ function consumeCompactionPrepend(sessionId: string, prompt: string): string {
   if (!prepend) return prompt;
   setState("sessions", sessionId, "pendingCompactionPrepend", undefined);
   return `[Auto-compaction restored prior context]\n${prepend}\n\n---\n\n${prompt}`;
+}
+
+function prunableAgentMessage(m: AgentMessage): PrunableMessage {
+  return {
+    id: m.id,
+    role:
+      m.type === "user" || m.type === "assistant" || m.type === "tool"
+        ? m.type
+        : "other",
+    content: m.content,
+    toolResult: m.toolCall?.result,
+    toolName: m.toolCall?.title,
+    toolArgs: m.toolCall?.parameters
+      ? JSON.stringify(m.toolCall.parameters)
+      : undefined,
+  };
+}
+
+function applyPrunedAgentMessages(
+  messages: AgentMessage[],
+  pruned: PrunableMessage[],
+): AgentMessage[] {
+  return messages.map((m, i) => {
+    const p = pruned[i];
+    if (!p) return m;
+    const next: AgentMessage = { ...m, content: p.content };
+    if (m.toolCall) {
+      let parameters = m.toolCall.parameters;
+      if (p.toolArgs !== undefined) {
+        try {
+          parameters = JSON.parse(p.toolArgs) as Record<string, unknown>;
+        } catch {
+          parameters = m.toolCall.parameters;
+        }
+      }
+      next.toolCall = {
+        ...m.toolCall,
+        parameters,
+        ...(p.toolResult !== undefined ? { result: p.toolResult } : {}),
+      };
+    }
+    return next;
+  });
+}
+
+function buildAgentCompactionPrepend(
+  summary: string,
+  toPreserve: AgentMessage[],
+): string {
+  // Tool messages can be enormous file contents / JSON dumps; user and
+  // assistant text keep the original ceiling used by the long-standing
+  // post-compaction prepend path.
+  const MAX_MSG_CHARS = 2000;
+  const MAX_TOOL_CHARS = 500;
+  const preservedContext = toPreserve
+    .map((m) => {
+      if (m.type === "user" || m.type === "assistant") {
+        const content =
+          m.content.length > MAX_MSG_CHARS
+            ? `${m.content.slice(0, MAX_MSG_CHARS)}... [truncated]`
+            : m.content;
+        if (m.type === "user") {
+          return `<prior_user>${content}</prior_user>`;
+        }
+        return `<prior_assistant>${content}</prior_assistant>`;
+      }
+      if (m.type === "tool" && m.toolCall?.result) {
+        const title = (m.toolCall.title || "tool").replace(/"/g, "'");
+        const result = m.toolCall.result;
+        const trimmed =
+          result.length > MAX_TOOL_CHARS
+            ? `${result.slice(0, MAX_TOOL_CHARS)}... [truncated]`
+            : result;
+        return `<prior_tool name="${title}">${trimmed}</prior_tool>`;
+      }
+      return null;
+    })
+    .filter((s): s is string => s !== null)
+    .join("\n\n");
+  return preservedContext
+    ? `Prior work summary:\n${summary}\n\n<prior_messages>\n${preservedContext}\n</prior_messages>`
+    : `Prior work summary:\n${summary}`;
 }
 
 /**
@@ -4485,18 +4568,123 @@ export const agentStore = {
       targetTailRatio: opts?.tailRatio,
     });
     const toCompact = messages.slice(0, tailWindow.cutIndex);
-    const toPreserve = messages.slice(tailWindow.cutIndex);
+    let toPreserve = messages.slice(tailWindow.cutIndex);
     if (toCompact.length === 0) {
       if (tailWindow.overBudget) {
-        // Soft-ceiling (#2113): the anchored tail alone exceeds the budget and
-        // there is no older prefix to summarize. The serving transcript is left
-        // intact — the agent runtime manages its own context window, and the
-        // post-compaction prepend is already per-message bounded on the normal
-        // path — but surface the condition so a stuck context gauge is visible
-        // instead of being reported as plain "nothing to compact".
-        console.warn(
-          `[AgentStore] over-budget tail with no compactable prefix (tail ${tailWindow.tailTokens} > budget ${tailWindow.tailBudget}); serving transcript left intact`,
+        const relief = relieveOverBudgetTail(
+          toPreserve.map(prunableAgentMessage),
+          tailWindow.tailBudget,
         );
+        toPreserve = applyPrunedAgentMessages(toPreserve, relief.messages);
+        console.warn(
+          `[AgentStore] over-budget tail with no compactable prefix pruned ${relief.tailTokensBefore}->${relief.tailTokensAfter} tokens`,
+        );
+        if (
+          mode === "reactive" &&
+          relief.tailTokensAfter < relief.tailTokensBefore
+        ) {
+          // The agent runtime owns its own transcript, so mutating Solid state is
+          // not enough to relieve Codex/Claude context pressure. Respawn a clean
+          // session and queue the pruned, bounded tail as the one-shot prepend;
+          // compactAndRetry will resend the failed user prompt on that session.
+          const fullTranscript = toPreserve;
+          const cwd = session.cwd;
+          const agentType = session.info.agentType;
+          const conversationId = session.conversationId;
+          const priorModelId = session.currentModelId;
+          const queuedPrompts = session.pendingPrompts ?? [];
+          const tailReliefSummary = relief.stillOverBudget
+            ? "No older transcript prefix was available to summarize. Reducible tool payloads in the preserved tail were pruned, but the retained context may still be close to the model limit."
+            : "No older transcript prefix was available to summarize. Reducible tool payloads in the preserved tail were pruned before retrying the failed request.";
+          const prependText = buildAgentCompactionPrepend(
+            `${tailReliefSummary}\n\nVERIFY-BEFORE-ACTING: Files, projects, and databases mentioned above may not exist on disk. Re-read the workspace, list .worktrees/, and resolve SerenDB projects/tables before acting on any claim.`,
+            toPreserve,
+          );
+
+          try {
+            setState("sessions", sessionId, "isCompacting", true);
+            await this.terminateSession(sessionId);
+            const reliefSessionId = await this.spawnSession(cwd, agentType, {
+              localSessionId: conversationId,
+              initialModelId: priorModelId,
+            });
+            if (!reliefSessionId) {
+              throw new Error(
+                "CompactionFailure: tail-relief respawn returned null",
+              );
+            }
+            if (!state.sessions[reliefSessionId]) {
+              throw new Error(
+                "CompactionFailure: tail-relief respawn was removed before settings could be restored",
+              );
+            }
+            setState("sessions", reliefSessionId, "messages", fullTranscript);
+            setState(
+              "sessions",
+              reliefSessionId,
+              "restoredMessageCount",
+              fullTranscript.length,
+            );
+            if (queuedPrompts.length > 0) {
+              setState(
+                "sessions",
+                reliefSessionId,
+                "pendingPrompts",
+                queuedPrompts,
+              );
+            }
+            await waitForSessionReady(reliefSessionId);
+            await this.restoreSessionSettings(session, reliefSessionId);
+            setState(
+              "sessions",
+              reliefSessionId,
+              "pendingCompactionPrepend",
+              prependText,
+            );
+            console.info(
+              `[AgentStore] over-budget tail relief respawned ${reliefSessionId} after pruning ${relief.tailTokensBefore}->${relief.tailTokensAfter} tokens`,
+            );
+            return { outcome: "succeeded", newSessionId: reliefSessionId };
+          } catch (error) {
+            console.error(
+              "[AgentStore] Tail-relief respawn failed (catastrophic):",
+              error,
+            );
+            if (state.sessions[sessionId]) {
+              setState("sessions", sessionId, "isCompacting", false);
+            } else if (fullTranscript.length > 0) {
+              console.warn(
+                `[AgentStore] Tail-relief recovery — restoring ${fullTranscript.length} pruned messages to a new session`,
+              );
+              try {
+                const recoveryId = await this.spawnSession(cwd, agentType, {
+                  localSessionId: conversationId,
+                  initialModelId: priorModelId,
+                });
+                if (recoveryId) {
+                  setState("sessions", recoveryId, "messages", fullTranscript);
+                  setState(
+                    "sessions",
+                    recoveryId,
+                    "restoredMessageCount",
+                    fullTranscript.length,
+                  );
+                }
+              } catch (recoveryErr) {
+                console.error(
+                  "[AgentStore] Tail-relief recovery spawn also failed:",
+                  recoveryErr,
+                );
+              }
+            }
+            return { outcome: "failed_catastrophic" };
+          }
+        }
+        if (relief.stillOverBudget) {
+          console.warn(
+            "[AgentStore] over-budget tail still exceeds budget after pruning (irreducible content)",
+          );
+        }
       } else {
         console.info(
           "[AgentStore] Token budget preserves the whole tail — nothing to compact",
@@ -4547,19 +4735,7 @@ export const agentStore = {
       // bound oversized tool-call arguments. This both shrinks the summarizer
       // input and lets the summary capture tool outcomes (previously dropped,
       // since only message content was fed in). #2105.
-      const prunable: PrunableMessage[] = toCompact.map((m) => ({
-        id: m.id,
-        role:
-          m.type === "user" || m.type === "assistant" || m.type === "tool"
-            ? m.type
-            : "other",
-        content: m.content,
-        toolResult: m.toolCall?.result,
-        toolName: m.toolCall?.title,
-        toolArgs: m.toolCall?.parameters
-          ? JSON.stringify(m.toolCall.parameters)
-          : undefined,
-      }));
+      const prunable: PrunableMessage[] = toCompact.map(prunableAgentMessage);
       const pruned = pruneCompactedHistory(prunable, {
         protectedFromIndex: prunable.length,
       });
@@ -4685,36 +4861,7 @@ export const agentStore = {
       // the transcript inside its assistant content instead of treating
       // the block as quoted context, bleeding the prepend into the chat
       // and starving the Thinking budget. #1941.
-      const MAX_MSG_CHARS = 2000;
-      const MAX_TOOL_CHARS = 500;
-      const preservedContext = toPreserve
-        .map((m) => {
-          if (m.type === "user" || m.type === "assistant") {
-            const content =
-              m.content.length > MAX_MSG_CHARS
-                ? `${m.content.slice(0, MAX_MSG_CHARS)}... [truncated]`
-                : m.content;
-            if (m.type === "user") {
-              return `<prior_user>${content}</prior_user>`;
-            }
-            return `<prior_assistant>${content}</prior_assistant>`;
-          }
-          if (m.type === "tool" && m.toolCall?.result) {
-            const title = (m.toolCall.title || "tool").replace(/"/g, "'");
-            const result = m.toolCall.result;
-            const trimmed =
-              result.length > MAX_TOOL_CHARS
-                ? `${result.slice(0, MAX_TOOL_CHARS)}... [truncated]`
-                : result;
-            return `<prior_tool name="${title}">${trimmed}</prior_tool>`;
-          }
-          return null;
-        })
-        .filter((s): s is string => s !== null)
-        .join("\n\n");
-      const prependText = preservedContext
-        ? `Prior work summary:\n${summary}\n\n<prior_messages>\n${preservedContext}\n</prior_messages>`
-        : `Prior work summary:\n${summary}`;
+      const prependText = buildAgentCompactionPrepend(summary, toPreserve);
 
       // The synthetic-transcript builder interprets this as a count of REAL
       // user turns to keep from the parent JSONL (findCutIndex in

@@ -22,28 +22,27 @@ describe("#1673 — predictive compaction does not block drain", () => {
     );
     const fnBody = agentStoreSource.slice(fnStart, fnEnd);
 
-    // Exactly one true-flip on isCompacting in this function.
-    const flips = fnBody.match(
+    // Every true-flip on isCompacting in this function must be reactive-gated.
+    // Tail-relief compaction has a second reactive-only respawn path; predictive
+    // mode still must not signal teardown on the serving session.
+    const flips = [...fnBody.matchAll(
       /setState\("sessions",\s*sessionId,\s*"isCompacting",\s*true\)/g,
+    )];
+    expect(flips.length, "at least one isCompacting=true flip").toBeGreaterThan(
+      0,
     );
-    expect(flips, "exactly one isCompacting=true flip").toHaveLength(1);
-
-    // That flip must be reactive-gated. We assert by string adjacency: the
-    // `if (mode === "reactive") {` opener must precede the flip with no
-    // intervening close-brace at the same scope.
-    const reactiveGateIdx = fnBody.indexOf('if (mode === "reactive")');
-    const flipIdx = fnBody.indexOf(
-      'setState("sessions", sessionId, "isCompacting", true)',
-    );
-    expect(reactiveGateIdx, "reactive gate must exist").toBeGreaterThan(0);
-    expect(flipIdx).toBeGreaterThan(reactiveGateIdx);
-
-    // The slice between gate and flip must contain only whitespace + "{".
-    const between = fnBody.slice(
-      reactiveGateIdx + 'if (mode === "reactive")'.length,
-      flipIdx,
-    );
-    expect(between.trim()).toBe("{");
+    for (const flip of flips) {
+      const flipIdx = flip.index ?? 0;
+      const reactiveGateIdx = fnBody.lastIndexOf(
+        'mode === "reactive"',
+        flipIdx,
+      );
+      const predictiveBranchIdx = fnBody.lastIndexOf(
+        'if (mode === "predictive")',
+        flipIdx,
+      );
+      expect(reactiveGateIdx).toBeGreaterThan(predictiveBranchIdx);
+    }
   });
 
   it("predictive branch does not write isCompacting on the serving session", () => {
