@@ -36,8 +36,15 @@ Add these secrets to the repository settings (Settings → Secrets → Actions):
 
 | Secret | Description |
 |--------|-------------|
-| `WINDOWS_CERTIFICATE` | Code signing certificate (.pfx, base64 encoded) |
-| `WINDOWS_CERTIFICATE_PASSWORD` | Password for the .pfx file |
+| `ES_USERNAME` | SSL.com eSigner account username |
+| `ES_PASSWORD` | SSL.com eSigner account password |
+| `ES_TOTP_SECRET` | SSL.com eSigner TOTP seed used by the CKA login step |
+
+### Release Variables
+
+| Variable | Description |
+|----------|-------------|
+| `MAX_SIGNATURES` | Maximum SSL.com cloud hash-signing operations allowed in one Windows release job. Defaults to `850` in `release.yml`; raise only after reviewing `sign-targets.txt` and the Windows signing job summary. |
 
 ## Certificate Setup
 
@@ -98,20 +105,11 @@ Update `src-tauri/tauri.conf.json` with the public key:
 
 ### Step 3: Windows Code Signing Certificate
 
-**Option A: DigiCert (Recommended)**
-1. https://www.digicert.com/signing/code-signing-certificates
-2. Choose Standard or EV Code Signing
-3. Complete verification (1-3 days for EV)
-4. Download .pfx file
-
-**Option B: Other Providers**
-- Sectigo: https://sectigo.com/code-signing-certificates
-- GlobalSign: https://www.globalsign.com/code-signing
-
-Convert to base64:
-```bash
-base64 -i certificate.pfx
-```
+Production Windows signing uses SSL.com eSigner CKA (Cloud Key Adapter), not a
+checked-in or CI-imported `.pfx`. The release workflow installs the CKA client,
+logs in with the `ES_*` secrets, loads the EV code-signing certificate into
+`Cert:\CurrentUser\My`, and exports `WINDOWS_SIGN_THUMBPRINT` for the signer
+wrapper and Tauri `signCommand` overlay.
 
 ## Windows Signing Coverage (What Smart App Control Evaluates)
 
@@ -128,7 +126,8 @@ the artifact that embeds it is produced:
    `.nsis.zip` updater bundle. The signable set is discovered by
    `scripts/print-windows-signables.ts` and signed in place by
    `scripts/sign-windows-payload.ps1` (signtool + eSigner CKA, throttled
-   batches under SSL.com's rate limit, `#2282`).
+   batches under SSL.com's rate limit, `#2282`, with the `MAX_SIGNATURES`
+   budget gate from `#2818`).
 
 2. **NSIS stock plugin DLLs** (`#2237`, `#2299`) — `System.dll`, `nsExec.dll`,
    `StartMenu.dll`, and `nsDialogs.dll` ship inside the `tauri-bundler` NSIS
@@ -157,11 +156,22 @@ the artifact that embeds it is produced:
 
 ### Verification gates (release CI, hard-fail)
 
+- The cumulative signer telemetry cannot exceed `MAX_SIGNATURES` (`#2818`).
+  Recent Windows signing audits found roughly 715-729 embedded-runtime
+  signables, plus the NSIS/tooling and Tauri wrapper signings. The default
+  ceiling is `850`, leaving limited headroom for normal drift while stopping a
+  runaway release before it spends hundreds or thousands of unexpected SSL.com
+  cloud signatures.
 - Loose `.exe`/`.dll` under `bundle/` are all `Valid` (`#2235`).
 - Every `.exe`/`.dll` extracted from `.nsis.zip` is `Valid` (`#2236`).
 - The setup `.exe` is unpacked with 7-Zip and **every** embedded
   `.exe`/`.dll`/`.node` — including the `$PLUGINSDIR` helper DLLs — is `Valid`
   (`#2237`). This is the closest CI proxy for what Smart App Control sees.
+
+Each Windows release writes a **Windows signing budget** section to the GitHub
+job summary. Review the discovered, skipped, and cloud-signatures-spent counts
+before changing `MAX_SIGNATURES`; a ceiling bump should be paired with an audit
+of the added files and why they must be signed.
 
 ### SEREN_TAURI_SKIP_PREP
 

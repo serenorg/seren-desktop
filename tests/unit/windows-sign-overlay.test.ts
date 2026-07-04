@@ -17,6 +17,10 @@ function runCli(args: string[]): { stdout: string; stderr: string; status: numbe
   return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", status: r.status ?? 1 };
 }
 
+function psSingleQuoted(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 describe("print-windows-sign-overlay CLI", () => {
   it("emits a minimal signCommand overlay wired to the payload signer", () => {
     const { stdout, status } = runCli([repoRoot]);
@@ -124,6 +128,31 @@ describe("release workflow contract", () => {
     expect(workflow).toContain("Verify embedded installer payload signatures (Windows)");
     expect(workflow).toContain("Audit Windows payload signature coverage");
   });
+
+  it("caps Windows signing volume and reports budget telemetry (#2818)", () => {
+    const signer = readFileSync(signerScript, "utf8");
+
+    expect(workflow).toContain("MAX_SIGNATURES");
+    expect(workflow).toContain("vars.MAX_SIGNATURES");
+    expect(workflow).toContain("Initialize Windows signing budget telemetry");
+    expect(workflow).toContain("WINDOWS_SIGN_TELEMETRY_FILE");
+    expect(workflow).toContain("Summarize Windows signing budget");
+    expect(workflow).toContain("Cloud signatures spent");
+
+    const initAt = workflow.indexOf("Initialize Windows signing budget telemetry");
+    const signAt = workflow.indexOf("Sign embedded runtime (Windows)");
+    const buildAt = workflow.indexOf("Build Tauri app (signed, Windows)");
+    const summaryAt = workflow.indexOf("Summarize Windows signing budget");
+    expect(initAt).toBeGreaterThanOrEqual(0);
+    expect(signAt).toBeGreaterThan(initAt);
+    expect(summaryAt).toBeGreaterThan(buildAt);
+
+    expect(signer).toContain("Resolve-MaxSignatureBudget");
+    expect(signer).toContain("Read-PreviousSignedCount");
+    expect(signer).toContain("Write-SigningTelemetry");
+    expect(signer).toContain("Windows signing budget exceeded");
+    expect(signer).toContain("MAX_SIGNATURES");
+  });
 });
 
 describe("sign-windows-payload.ps1 thumbprint resolution", () => {
@@ -175,11 +204,64 @@ describe("sign-windows-payload.ps1 thumbprint resolution", () => {
     "accepts the thumbprint from WINDOWS_SIGN_THUMBPRINT (signCommand passes no -Thumbprint)",
     () => {
       const { out, status } = runSigner({ WINDOWS_SIGN_THUMBPRINT: "933C679D86D0ACAF531B37A4D12C0B360EB4815C" });
-      // Proceeds past validation; on non-Windows it then fails at signtool
-      // discovery — proving the env thumbprint was accepted.
+      // Proceeds past validation into Windows-only signing work — proving the
+      // env thumbprint was accepted.
       expect(status).toBe(1);
-      expect(out).toContain("signtool");
+      expect(out).toMatch(/Get-AuthenticodeSignature|signtool/);
       expect(out).not.toContain("WINDOWS_SIGN_THUMBPRINT");
+    },
+    pwshTimeout,
+  );
+
+  it.runIf(hasPwsh)(
+    "blocks over-budget signing before signtool and records telemetry (#2818)",
+    () => {
+      const telemetry = path.join(dummy, "telemetry.jsonl");
+      writeFileSync(
+        telemetry,
+        `${JSON.stringify({
+          status: "success",
+          source: "previous",
+          discovered: 2,
+          skipped: 0,
+          would_sign: 2,
+          signed: 2,
+          previous_signed: 0,
+          max_signatures: 2,
+        })}\n`,
+      );
+
+      const script = `
+function Get-AuthenticodeSignature {
+  param([string]$LiteralPath)
+  [PSCustomObject]@{ Status = "NotSigned" }
+}
+& ${psSingleQuoted(signerScript)} -Thumbprint "933C679D86D0ACAF531B37A4D12C0B360EB4815C" -File ${psSingleQuoted(path.join(dummy, "a.exe"))} -MaxSignatures 2 -TelemetryFile ${psSingleQuoted(telemetry)}
+exit $LASTEXITCODE
+`;
+      const r = spawnSync("pwsh", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], {
+        encoding: "utf8",
+      });
+      const out = `${r.stdout}\n${r.stderr}`;
+
+      expect(r.status).toBe(1);
+      expect(out).toContain("Windows signing budget exceeded");
+      expect(out).not.toContain("signtool");
+
+      const records = readFileSync(telemetry, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(records).toHaveLength(2);
+      expect(records[1]).toMatchObject({
+        status: "blocked",
+        discovered: 1,
+        skipped: 0,
+        would_sign: 1,
+        signed: 0,
+        previous_signed: 2,
+        max_signatures: 2,
+      });
     },
     pwshTimeout,
   );
