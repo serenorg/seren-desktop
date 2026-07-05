@@ -2,7 +2,7 @@
 // ABOUTME: Guards the regression class where Windows installers shipped unsigned Seren.exe / nsis_tauri_utils.dll (v3.52.4-6).
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -129,7 +129,7 @@ describe("release workflow contract", () => {
     expect(workflow).toContain("Audit Windows payload signature coverage");
   });
 
-  it("caps Windows signing volume and reports budget telemetry (#2818)", () => {
+  it("reports Windows signing budget telemetry as warning-only (#2818/#2821)", () => {
     const signer = readFileSync(signerScript, "utf8");
 
     expect(workflow).toContain("MAX_SIGNATURES");
@@ -151,6 +151,7 @@ describe("release workflow contract", () => {
     expect(signer).toContain("Read-PreviousSignedCount");
     expect(signer).toContain("Write-SigningTelemetry");
     expect(signer).toContain("Windows signing budget exceeded");
+    expect(signer).toContain("over_budget");
     expect(signer).toContain("MAX_SIGNATURES");
   });
 });
@@ -213,10 +214,13 @@ describe("sign-windows-payload.ps1 thumbprint resolution", () => {
     pwshTimeout,
   );
 
-  it.runIf(hasPwsh)(
-    "blocks over-budget signing before signtool and records telemetry (#2818)",
+  it.runIf(runnable)(
+    "warns over-budget signing, continues to signtool, and records telemetry (#2821)",
     () => {
       const telemetry = path.join(dummy, "telemetry.jsonl");
+      const fakeSigntool = path.join(dummy, "kit\\x64\\signtool.exe");
+      writeFileSync(fakeSigntool, "#!/bin/sh\nexit 0\n");
+      chmodSync(fakeSigntool, 0o755);
       writeFileSync(
         telemetry,
         `${JSON.stringify({
@@ -232,9 +236,28 @@ describe("sign-windows-payload.ps1 thumbprint resolution", () => {
       );
 
       const script = `
-function Get-AuthenticodeSignature {
+$global:sigChecks = 0
+function global:Get-AuthenticodeSignature {
   param([string]$LiteralPath)
-  [PSCustomObject]@{ Status = "NotSigned" }
+  $global:sigChecks++
+  if ($global:sigChecks -eq 1) {
+    [PSCustomObject]@{ Status = "NotSigned" }
+  } else {
+    [PSCustomObject]@{ Status = "Valid" }
+  }
+}
+function global:Get-ChildItem {
+  param(
+    [string]$Path,
+    [switch]$Recurse,
+    [string]$Filter,
+    [object]$ErrorAction
+  )
+  if ($Filter -eq "signtool.exe") {
+    [PSCustomObject]@{ FullName = ${psSingleQuoted(fakeSigntool)} }
+    return
+  }
+  Microsoft.PowerShell.Management\\Get-ChildItem @PSBoundParameters
 }
 & ${psSingleQuoted(signerScript)} -Thumbprint "933C679D86D0ACAF531B37A4D12C0B360EB4815C" -File ${psSingleQuoted(path.join(dummy, "a.exe"))} -MaxSignatures 2 -TelemetryFile ${psSingleQuoted(telemetry)}
 exit $LASTEXITCODE
@@ -244,9 +267,9 @@ exit $LASTEXITCODE
       });
       const out = `${r.stdout}\n${r.stderr}`;
 
-      expect(r.status).toBe(1);
+      expect(r.status).toBe(0);
       expect(out).toContain("Windows signing budget exceeded");
-      expect(out).not.toContain("signtool");
+      expect(out).toContain(`Using signtool: ${fakeSigntool}`);
 
       const records = readFileSync(telemetry, "utf8")
         .trim()
@@ -254,11 +277,11 @@ exit $LASTEXITCODE
         .map((line) => JSON.parse(line));
       expect(records).toHaveLength(2);
       expect(records[1]).toMatchObject({
-        status: "blocked",
+        status: "over_budget",
         discovered: 1,
         skipped: 0,
         would_sign: 1,
-        signed: 0,
+        signed: 1,
         previous_signed: 2,
         max_signatures: 2,
       });

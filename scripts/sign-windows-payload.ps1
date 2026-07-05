@@ -1,6 +1,6 @@
 # ABOUTME: Signs Windows PE binaries in place with signtool using the eSigner CKA-loaded EV cert (#2276).
 # ABOUTME: Takes signables from -Root/-File/-ListFile, skips already-signed, signs in throttled batches (#2282), fails loud if any file is left unsigned.
-# ABOUTME: Enforces the Windows release signature budget and writes per-invocation telemetry (#2818).
+# ABOUTME: Reports the Windows release signature budget and writes per-invocation telemetry (#2818/#2821).
 
 [CmdletBinding()]
 param(
@@ -22,8 +22,8 @@ param(
   # file, so bursting the whole payload trips SSL.com's per-minute rate limit
   # (#2282). Pausing between batches holds the request rate under that ceiling.
   [int]$DelaySeconds = 0,
-  # Maximum cumulative cloud hash-signing operations allowed for this release job.
-  # Defaults from MAX_SIGNATURES; unset/-1 disables the gate for local ad-hoc use.
+  # Maximum cumulative cloud hash-signing operations expected for this release job.
+  # Defaults from MAX_SIGNATURES; unset/-1 disables the warning for local ad-hoc use.
   [int]$MaxSignatures = -1,
   # JSONL telemetry file shared across signer invocations in one release job.
   # Defaults from WINDOWS_SIGN_TELEMETRY_FILE.
@@ -178,13 +178,13 @@ if ($targets.Count -eq 0) {
 }
 $previousSigned = Read-PreviousSignedCount -Path $TelemetryFile
 $projectedSigned = $previousSigned + $targets.Count
+$telemetryStatus = "success"
 if ($maxSignatureBudget -ge 0) {
   Write-Host "Windows signing budget: $previousSigned already signed, this invocation would sign $($targets.Count), max $maxSignatureBudget."
   if ($projectedSigned -gt $maxSignatureBudget) {
-    Write-Host "::error::Windows signing budget exceeded: signing $($targets.Count) more file(s) would bring this release to $projectedSigned cloud signature(s), above MAX_SIGNATURES=$maxSignatureBudget."
-    Write-Host "::error::Audit sign-targets.txt / Windows signing telemetry and raise MAX_SIGNATURES through review only if this release intentionally needs the extra signatures."
-    Write-SigningTelemetry -Path $TelemetryFile -Status "blocked" -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign $targets.Count -Signed 0 -PreviousSigned $previousSigned -Max $maxSignatureBudget
-    exit 1
+    Write-Host "::warning::Windows signing budget exceeded: signing $($targets.Count) more file(s) would bring this release to $projectedSigned cloud signature(s), above MAX_SIGNATURES=$maxSignatureBudget."
+    Write-Host "::warning::Release signing will continue. Audit sign-targets.txt / Windows signing telemetry and raise MAX_SIGNATURES if this release intentionally needs the extra signatures."
+    $telemetryStatus = "over_budget"
   }
 }
 Write-Host "Signing $($targets.Count) file(s) in batches of $BatchSize (delay ${DelaySeconds}s between batches)..."
@@ -238,5 +238,5 @@ if ($unsigned.Count -gt 0) {
   $unsigned | ForEach-Object { Write-Host "    $_" }
   exit 1
 }
-Write-SigningTelemetry -Path $TelemetryFile -Status "success" -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign $targets.Count -Signed $targets.Count -PreviousSigned $previousSigned -Max $maxSignatureBudget
+Write-SigningTelemetry -Path $TelemetryFile -Status $telemetryStatus -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign $targets.Count -Signed $targets.Count -PreviousSigned $previousSigned -Max $maxSignatureBudget
 Write-Host "All $($targets.Count) file(s) carry a Valid Authenticode signature."

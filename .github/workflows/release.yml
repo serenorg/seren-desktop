@@ -33,8 +33,8 @@ env:
   HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' }}
   # SSL.com eSigner cloud signing for Windows EV code signing
   HAS_WINDOWS_SIGNING: ${{ secrets.ES_USERNAME != '' }}
-  # Maximum billable SSL.com cloud hash-signing operations for one Windows
-  # release job. Bump only after auditing sign-targets.txt / signer telemetry.
+  # Warning threshold for billable SSL.com cloud hash-signing operations in one
+  # Windows release job. Bump only after auditing sign-targets.txt / signer telemetry.
   MAX_SIGNATURES: ${{ vars.MAX_SIGNATURES || '850' }}
 
 jobs:
@@ -541,15 +541,15 @@ jobs:
           [int]$skipped = 0
           [int]$wouldSign = 0
           [int]$signed = 0
-          $blocked = $false
+          $overBudget = $false
           foreach ($record in $records) {
             if ($null -ne $record.discovered) { $discovered += [int]$record.discovered }
             if ($null -ne $record.skipped) { $skipped += [int]$record.skipped }
             if ($null -ne $record.would_sign) { $wouldSign += [int]$record.would_sign }
             if ($null -ne $record.signed) { $signed += [int]$record.signed }
-            if ($record.status -eq "blocked") { $blocked = $true }
+            if ($record.status -eq "over_budget") { $overBudget = $true }
           }
-          $status = if ($blocked) { "blocked by budget gate" } else { "within budget" }
+          $status = if ($overBudget) { "over budget warning" } else { "within budget" }
           Add-Content -LiteralPath $summary -Value "- Status: $status"
           Add-Content -LiteralPath $summary -Value "- Discovered: $discovered"
           Add-Content -LiteralPath $summary -Value "- Skipped already valid: $skipped"
