@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponses, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentErrors, SerenAgentDeleteManagedDeploymentResponses, SerenAgentDeployData, SerenAgentDeployErrors, SerenAgentDeployResponses, SerenAgentGetDeploymentActivityData, SerenAgentGetDeploymentActivityErrors, SerenAgentGetDeploymentActivityResponses, SerenAgentGetDeploymentHealthData, SerenAgentGetDeploymentHealthErrors, SerenAgentGetDeploymentHealthResponses, SerenAgentGetDeploymentResourcesData, SerenAgentGetDeploymentResourcesErrors, SerenAgentGetDeploymentResourcesResponses, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentErrors, SerenAgentGetManagedDeploymentResponses, SerenAgentHealthData, SerenAgentHealthErrors, SerenAgentHealthResponses, SerenAgentListDeploymentsData, SerenAgentListDeploymentsErrors, SerenAgentListDeploymentsResponses, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsErrors, SerenAgentListManagedDeploymentRevisionsResponses, SerenAgentPatchManagedDeploymentFilesData, SerenAgentPatchManagedDeploymentFilesErrors, SerenAgentPatchManagedDeploymentFilesResponses, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackErrors, SerenAgentPreviewManagedDeploymentRollbackResponses, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateErrors, SerenAgentPreviewManagedDeploymentUpdateResponses, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponses, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentErrors, SerenAgentRollbackManagedDeploymentResponses, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentErrors, SerenAgentStartManagedDeploymentResponses, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentErrors, SerenAgentStopManagedDeploymentResponses, SerenAgentTestRunData, SerenAgentTestRunErrors, SerenAgentTestRunResponses, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentErrors, SerenAgentUpdateManagedDeploymentResponses } from './types.gen';
+import type { SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponses, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentErrors, SerenAgentDeleteManagedDeploymentResponses, SerenAgentDeployData, SerenAgentDeployErrors, SerenAgentDeployResponses, SerenAgentDescribeDeploymentToolData, SerenAgentDescribeDeploymentToolErrors, SerenAgentDescribeDeploymentToolResponses, SerenAgentGetDeploymentActivityData, SerenAgentGetDeploymentActivityErrors, SerenAgentGetDeploymentActivityResponses, SerenAgentGetDeploymentHealthData, SerenAgentGetDeploymentHealthErrors, SerenAgentGetDeploymentHealthResponses, SerenAgentGetDeploymentResourcesData, SerenAgentGetDeploymentResourcesErrors, SerenAgentGetDeploymentResourcesResponses, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentErrors, SerenAgentGetManagedDeploymentResponses, SerenAgentHealthData, SerenAgentHealthErrors, SerenAgentHealthResponses, SerenAgentListDeploymentsData, SerenAgentListDeploymentsErrors, SerenAgentListDeploymentsResponses, SerenAgentListDeploymentToolGroupsData, SerenAgentListDeploymentToolGroupsErrors, SerenAgentListDeploymentToolGroupsResponses, SerenAgentListDeploymentToolsData, SerenAgentListDeploymentToolsErrors, SerenAgentListDeploymentToolsResponses, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsErrors, SerenAgentListManagedDeploymentRevisionsResponses, SerenAgentPatchManagedDeploymentFilesData, SerenAgentPatchManagedDeploymentFilesErrors, SerenAgentPatchManagedDeploymentFilesResponses, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackErrors, SerenAgentPreviewManagedDeploymentRollbackResponses, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateErrors, SerenAgentPreviewManagedDeploymentUpdateResponses, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponses, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentErrors, SerenAgentRollbackManagedDeploymentResponses, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentErrors, SerenAgentStartManagedDeploymentResponses, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentErrors, SerenAgentStopManagedDeploymentResponses, SerenAgentTestRunData, SerenAgentTestRunErrors, SerenAgentTestRunResponses, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentErrors, SerenAgentUpdateManagedDeploymentResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -191,6 +191,39 @@ export const serenAgentStartManagedDeployment = <ThrowOnError extends boolean = 
 export const serenAgentStopManagedDeployment = <ThrowOnError extends boolean = false>(options: Options<SerenAgentStopManagedDeploymentData, ThrowOnError>): RequestResult<SerenAgentStopManagedDeploymentResponses, SerenAgentStopManagedDeploymentErrors, ThrowOnError> => (options.client ?? client).post<SerenAgentStopManagedDeploymentResponses, SerenAgentStopManagedDeploymentErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/deployments/{id}/stop',
+    ...options
+});
+
+/**
+ * List tool groups currently assigned to a managed seren-agent deployment.
+ *
+ * Returns the resolved tool-group read model for a managed seren-agent deployment. Today these groups are derived from the deployment's tool_presets config inputs; future explicit tool-group assignments will use the same response shape.
+ */
+export const serenAgentListDeploymentToolGroups = <ThrowOnError extends boolean = false>(options: Options<SerenAgentListDeploymentToolGroupsData, ThrowOnError>): RequestResult<SerenAgentListDeploymentToolGroupsResponses, SerenAgentListDeploymentToolGroupsErrors, ThrowOnError> => (options.client ?? client).get<SerenAgentListDeploymentToolGroupsResponses, SerenAgentListDeploymentToolGroupsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/tool-groups',
+    ...options
+});
+
+/**
+ * List tools currently visible to a managed seren-agent deployment.
+ *
+ * Returns the declared tool catalog for a managed seren-agent deployment, including source, approval, and side-effect metadata. This endpoint is a managed-agent projection; use seren-cloud run APIs for runtime execution.
+ */
+export const serenAgentListDeploymentTools = <ThrowOnError extends boolean = false>(options: Options<SerenAgentListDeploymentToolsData, ThrowOnError>): RequestResult<SerenAgentListDeploymentToolsResponses, SerenAgentListDeploymentToolsErrors, ThrowOnError> => (options.client ?? client).get<SerenAgentListDeploymentToolsResponses, SerenAgentListDeploymentToolsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/tools',
+    ...options
+});
+
+/**
+ * Describe one tool currently visible to a managed seren-agent deployment.
+ *
+ * Returns one declared tool descriptor for a managed seren-agent deployment, including source, approval, and side-effect metadata. This endpoint is a managed-agent projection; use seren-cloud run APIs for runtime execution.
+ */
+export const serenAgentDescribeDeploymentTool = <ThrowOnError extends boolean = false>(options: Options<SerenAgentDescribeDeploymentToolData, ThrowOnError>): RequestResult<SerenAgentDescribeDeploymentToolResponses, SerenAgentDescribeDeploymentToolErrors, ThrowOnError> => (options.client ?? client).get<SerenAgentDescribeDeploymentToolResponses, SerenAgentDescribeDeploymentToolErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/deployments/{id}/tools/{tool_name}',
     ...options
 });
 

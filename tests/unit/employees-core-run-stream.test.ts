@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createEmployeeRunManager,
   employeeErrorTextFromCode,
+  employeeCapabilityGuidanceForError,
+  employeeErrorCodeFromConversationMessage,
+  employeeToolGroupSummaries,
   employeeTextFromConversationMessage,
   errorTextFromOutputEvents,
   type EmployeeOutputEventEnvelope,
@@ -158,6 +161,104 @@ describe("employees-core sequenced run stream", () => {
     ).toBe(
       "This employee needs a connected account or credential before it can use the required tool. Update employee settings.",
     );
+  });
+
+  it("extracts structured run error codes for capability guidance", () => {
+    const message = {
+      role: "assistant",
+      events: [
+        {
+          type: "error",
+          code: "tool_not_configured",
+          message: "raw message",
+        },
+      ],
+      run_summary: {
+        status: "failed",
+      },
+    } as const;
+
+    expect(employeeErrorCodeFromConversationMessage(message)).toBe(
+      "tool_not_configured",
+    );
+    expect(
+      employeeCapabilityGuidanceForError("tool_not_configured", {
+        toolPresets: [],
+        resolvedTools: [],
+      }),
+    ).toBe(
+      "No tool groups are enabled for this employee. Enable Live data for web research, Publisher actions for connected tools, or SerenDB queries for database access.",
+    );
+  });
+
+  it("summarizes employee tool groups for compact capability panels", () => {
+    expect(
+      employeeToolGroupSummaries([
+        {
+          id: "live_data",
+          label: "Live data",
+          description: "Read external data.",
+          tool_count: 4,
+          tool_names: [
+            "seren_publishers_suggest",
+            "seren_publishers_get",
+            "seren_mcp_read_resource",
+            "seren_mcp_list_tools",
+          ],
+          side_effecting: false,
+          approval_type: "none",
+        },
+        {
+          id: "publisher_actions",
+          label: "Publisher actions",
+          description: "Call connected tools.",
+          tool_count: 1,
+          tool_names: ["seren_publisher_request"],
+          side_effecting: true,
+          approval_type: "required",
+        },
+      ]),
+    ).toEqual([
+      {
+        id: "live_data",
+        label: "Live data",
+        description: "Read external data.",
+        toolCount: 4,
+        toolPreview:
+          "publishers suggest, publishers get, mcp read resource + 1 more",
+        modeLabel: "Read-only",
+        approvalLabel: "No approval",
+        tone: "success",
+      },
+      {
+        id: "publisher_actions",
+        label: "Publisher actions",
+        description: "Call connected tools.",
+        toolCount: 1,
+        toolPreview: "publisher request",
+        modeLabel: "Action-capable",
+        approvalLabel: "Approval required",
+        tone: "warning",
+      },
+    ]);
+  });
+
+  it("renders a count when a tool group reports a count without names", () => {
+    const [summary] = employeeToolGroupSummaries([
+      {
+        id: "custom",
+        preset: null,
+        label: "Custom group",
+        description: "A curated set.",
+        tool_count: 5,
+        tool_names: null,
+        side_effecting: false,
+        approval_type: null,
+      },
+    ]);
+    expect(summary?.toolCount).toBe(5);
+    expect(summary?.toolPreview).toBe("5 tools");
+    expect(summary?.approvalLabel).toBe("No approval");
   });
 
   it("sanitizes unknown provider details and redacts fallback identifiers", () => {

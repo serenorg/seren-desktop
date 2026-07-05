@@ -11,11 +11,13 @@ import {
   type CloudDeploymentSummary,
   type ManagedAgentDeploymentDetail,
   type ManagedAgentDeploymentRevisionSummary,
+  type ManagedAgentToolGroupEntry,
   type PrivateModelCatalogEntry,
   serenAgentDeleteManagedDeployment,
   serenAgentDeploy,
   serenAgentGetManagedDeployment,
   serenAgentListDeployments,
+  serenAgentListDeploymentToolGroups,
   serenAgentListManagedDeploymentRevisions,
   serenAgentPatchManagedDeploymentFiles,
   serenAgentPrivateModels,
@@ -560,6 +562,19 @@ export const employees = {
       );
     }
     return data?.data?.models ?? [];
+  },
+
+  async listToolGroups(id: string): Promise<ManagedAgentToolGroupEntry[]> {
+    const { data, error, response } = await serenAgentListDeploymentToolGroups({
+      path: { id },
+      throwOnError: false,
+    });
+    if (error) {
+      throw new Error(
+        `Failed to list employee tool groups: ${formatApiError(error, response, "")}`,
+      );
+    }
+    return data?.data?.tool_groups ?? [];
   },
 
   async listRevisions(id: string): Promise<EmployeeRevision[]> {

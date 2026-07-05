@@ -585,12 +585,13 @@ export type AgentSpec = {
     session_database?: null | ManagedAgentSessionDatabase;
     template?: null | ManagedAgentTemplate;
     /**
-     * Managed tool presets. Defaults to `live_data`.
+     * Managed tool preset configuration. Defaults to `live_data`. Presets are
+     * compact config inputs, not resolved display groups.
      */
     tool_presets?: Array<ManagedAgentToolPreset> | null;
     /**
      * Optional typed tool references. Coexists with `tool_presets` so the
-     * runtime can resolve from typed refs and preset groups together.
+     * runtime can resolve from typed refs and preset configuration together.
      */
     tool_refs?: Array<AgentToolRef> | null;
     /**
@@ -709,7 +710,8 @@ export type AgentSpecUpdate = {
     session_database?: null | ManagedAgentSessionDatabase;
     template?: null | ManagedAgentTemplate;
     /**
-     * Updated managed tool presets.
+     * Updated managed tool preset configuration. Presets are compact config
+     * inputs, not resolved display groups.
      */
     tool_presets?: Array<ManagedAgentToolPreset> | null;
     /**
@@ -1421,6 +1423,11 @@ export type DataResponseManagedAgentDeploymentDetail = {
         side_effect_policy?: null | SideEffectPolicy;
         status: CloudDeploymentStatus;
         template: ManagedAgentTemplate;
+        /**
+         * Preset configuration enabled on the deployment. Presets are compact
+         * config inputs; use the tool-groups endpoint for the resolved display
+         * model with labels, descriptions, and tool membership.
+         */
         tool_presets: Array<ManagedAgentToolPreset>;
         /**
          * Typed tool refs declared on the deployment, when any.
@@ -1843,6 +1850,272 @@ export type DataResponseManagedAgentHealthReport = {
         status: ManagedAgentHealthStatus;
         storage: ManagedAgentStorageHealth;
         summary: ManagedAgentHealthSummary;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseManagedAgentToolCatalogEntry = {
+    data: {
+        approval_reason?: string | null;
+        approval_rule_count: number;
+        approval_type: ToolApprovalType;
+        /**
+         * Whether this tool is included in the durable tool-call checkpoint used
+         * for conservative resume. Today this mirrors `side_effecting`; it is
+         * separate so future deployment policy can narrow checkpointing without
+         * changing the response shape.
+         */
+        checkpoint_required: boolean;
+        data_labels?: Array<string>;
+        description: string;
+        input_schema?: unknown;
+        name: string;
+        preset?: null | ManagedAgentToolPreset;
+        side_effecting: boolean;
+        source: ManagedAgentToolSource;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseManagedAgentToolCatalogResponse = {
+    data: {
+        allowed_publisher_operations: Array<string>;
+        approval_policy: ManagedAgentApprovalPolicy;
+        deployment_id: string;
+        /**
+         * Preset configuration enabled on the deployment. The catalog expands
+         * these presets into concrete tool descriptors.
+         */
+        tool_presets: Array<ManagedAgentToolPreset>;
+        tools: Array<ManagedAgentToolCatalogEntry>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseManagedAgentToolGroupResponse = {
+    data: {
+        deployment_id: string;
+        /**
+         * True when the response is derived from preset configuration instead of
+         * explicit persisted tool-group assignments.
+         */
+        implicit: boolean;
+        /**
+         * Resolved display/read model for the deployment's named tool groups.
+         * Today these are derived from `tool_presets`; future custom groups use
+         * the same shape with `preset` omitted.
+         */
+        tool_groups: Array<ManagedAgentToolGroupEntry>;
     };
     pagination?: null | PaginationMeta;
 };
@@ -2429,6 +2702,11 @@ export type ManagedAgentDeploymentDetail = {
     side_effect_policy?: null | SideEffectPolicy;
     status: CloudDeploymentStatus;
     template: ManagedAgentTemplate;
+    /**
+     * Preset configuration enabled on the deployment. Presets are compact
+     * config inputs; use the tool-groups endpoint for the resolved display
+     * model with labels, descriptions, and tool membership.
+     */
     tool_presets: Array<ManagedAgentToolPreset>;
     /**
      * Typed tool refs declared on the deployment, when any.
@@ -2719,6 +2997,70 @@ export type ManagedAgentSummary = {
 
 export type ManagedAgentTemplate = 'research_monitor' | 'workflow_agent';
 
+export type ManagedAgentToolCatalogEntry = {
+    approval_reason?: string | null;
+    approval_rule_count: number;
+    approval_type: ToolApprovalType;
+    /**
+     * Whether this tool is included in the durable tool-call checkpoint used
+     * for conservative resume. Today this mirrors `side_effecting`; it is
+     * separate so future deployment policy can narrow checkpointing without
+     * changing the response shape.
+     */
+    checkpoint_required: boolean;
+    data_labels?: Array<string>;
+    description: string;
+    input_schema?: unknown;
+    name: string;
+    preset?: null | ManagedAgentToolPreset;
+    side_effecting: boolean;
+    source: ManagedAgentToolSource;
+};
+
+export type ManagedAgentToolCatalogResponse = {
+    allowed_publisher_operations: Array<string>;
+    approval_policy: ManagedAgentApprovalPolicy;
+    deployment_id: string;
+    /**
+     * Preset configuration enabled on the deployment. The catalog expands
+     * these presets into concrete tool descriptors.
+     */
+    tool_presets: Array<ManagedAgentToolPreset>;
+    tools: Array<ManagedAgentToolCatalogEntry>;
+};
+
+export type ManagedAgentToolGroupEntry = {
+    approval_type: ToolApprovalType;
+    /**
+     * Whether any tool in this group is included in the durable tool-call
+     * checkpoint used for conservative resume.
+     */
+    checkpoint_required: boolean;
+    data_labels?: Array<string>;
+    description: string;
+    id: string;
+    label: string;
+    preset?: null | ManagedAgentToolPreset;
+    side_effecting: boolean;
+    tool_count: number;
+    tool_names: Array<string>;
+};
+
+export type ManagedAgentToolGroupResponse = {
+    deployment_id: string;
+    /**
+     * True when the response is derived from preset configuration instead of
+     * explicit persisted tool-group assignments.
+     */
+    implicit: boolean;
+    /**
+     * Resolved display/read model for the deployment's named tool groups.
+     * Today these are derived from `tool_presets`; future custom groups use
+     * the same shape with `preset` omitted.
+     */
+    tool_groups: Array<ManagedAgentToolGroupEntry>;
+};
+
 export type ManagedAgentToolPreset = 'live_data' | 'publisher_actions' | 'database';
 
 export type ManagedAgentToolResources = {
@@ -2727,9 +3069,16 @@ export type ManagedAgentToolResources = {
     credential_count: number;
     guardrail_count: number;
     resolved_tools: Array<string>;
+    /**
+     * Preset configuration enabled on the deployment. Presets are compact
+     * config inputs; use the tool-groups endpoint for the resolved display
+     * model.
+     */
     tool_presets: Array<ManagedAgentToolPreset>;
     tool_ref_count: number;
 };
+
+export type ManagedAgentToolSource = 'publisher' | 'mcp' | 'database' | 'custom';
 
 /**
  * Structured condition reported on a managed deployment's status. Mirrors the
@@ -3580,6 +3929,135 @@ export type SerenAgentStopManagedDeploymentResponses = {
 };
 
 export type SerenAgentStopManagedDeploymentResponse = SerenAgentStopManagedDeploymentResponses[keyof SerenAgentStopManagedDeploymentResponses];
+
+export type SerenAgentListDeploymentToolGroupsData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/tool-groups';
+};
+
+export type SerenAgentListDeploymentToolGroupsErrors = {
+    /**
+     * Deployment is not managed by seren-agent
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenAgentListDeploymentToolGroupsResponses = {
+    /**
+     * Managed deployment tool groups retrieved
+     */
+    200: DataResponseManagedAgentToolGroupResponse;
+};
+
+export type SerenAgentListDeploymentToolGroupsResponse = SerenAgentListDeploymentToolGroupsResponses[keyof SerenAgentListDeploymentToolGroupsResponses];
+
+export type SerenAgentListDeploymentToolsData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: {
+        /**
+         * Optional case-insensitive search over tool names, descriptions, and sources
+         */
+        q?: string;
+    };
+    url: '/deployments/{id}/tools';
+};
+
+export type SerenAgentListDeploymentToolsErrors = {
+    /**
+     * Deployment is not managed by seren-agent
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenAgentListDeploymentToolsResponses = {
+    /**
+     * Managed deployment tool catalog retrieved
+     */
+    200: DataResponseManagedAgentToolCatalogResponse;
+};
+
+export type SerenAgentListDeploymentToolsResponse = SerenAgentListDeploymentToolsResponses[keyof SerenAgentListDeploymentToolsResponses];
+
+export type SerenAgentDescribeDeploymentToolData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+        /**
+         * Tool name
+         */
+        tool_name: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/tools/{tool_name}';
+};
+
+export type SerenAgentDescribeDeploymentToolErrors = {
+    /**
+     * Deployment is not managed by seren-agent
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment or tool not found
+     */
+    404: unknown;
+};
+
+export type SerenAgentDescribeDeploymentToolResponses = {
+    /**
+     * Managed deployment tool descriptor retrieved
+     */
+    200: DataResponseManagedAgentToolCatalogEntry;
+};
+
+export type SerenAgentDescribeDeploymentToolResponse = SerenAgentDescribeDeploymentToolResponses[keyof SerenAgentDescribeDeploymentToolResponses];
 
 export type SerenAgentHealthData = {
     body?: never;

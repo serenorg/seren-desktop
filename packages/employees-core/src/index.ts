@@ -122,6 +122,30 @@ export interface EmployeeCapabilityBadge {
   title: string;
 }
 
+export interface EmployeeToolGroupInput {
+  id: string;
+  preset?: string | null;
+  label: string;
+  description: string;
+  tool_count?: number | null;
+  tool_names?: readonly string[] | null;
+  side_effecting?: boolean | null;
+  checkpoint_required?: boolean | null;
+  approval_type?: string | null;
+  data_labels?: readonly string[] | null;
+}
+
+export interface EmployeeToolGroupSummary {
+  id: string;
+  label: string;
+  description: string;
+  toolCount: number;
+  toolPreview: string;
+  modeLabel: string;
+  approvalLabel: string;
+  tone: "neutral" | "success" | "warning";
+}
+
 export type EmployeeRunErrorCode =
   | "tool_unavailable"
   | "tool_not_configured"
@@ -1007,6 +1031,27 @@ export function errorTextFromOutputEvents(value: unknown): string {
     .trim();
 }
 
+export function errorCodeFromOutputEvents(
+  value: unknown,
+): EmployeeRunErrorCode | undefined {
+  let fallback: EmployeeRunErrorCode | undefined;
+  for (const event of outputEventEnvelopes(value)) {
+    if (event.type !== "error" || !event.code) continue;
+    if (event.code !== "unknown") return event.code;
+    fallback = "unknown";
+  }
+  return fallback;
+}
+
+export function employeeErrorCodeFromConversationMessage(
+  message: EmployeeMessageTextInput,
+): EmployeeRunErrorCode | undefined {
+  return (
+    errorCodeFromOutputEvents(message.events) ??
+    errorCodeFromOutputEvents(message.run?.output_events)
+  );
+}
+
 const TOOL_RESPONSE_ERROR_TEXT =
   "The configured model route could not process the tool response. Change this employee to a tool-capable model route in employee settings.";
 
@@ -1403,6 +1448,96 @@ export function employeeCapabilityBadges(
   }
 
   return badges;
+}
+
+export function employeeToolGroupSummaries(
+  groups: readonly EmployeeToolGroupInput[] | null | undefined,
+): EmployeeToolGroupSummary[] {
+  return [...(groups ?? [])].map((group) => {
+    const toolNames = group.tool_names ?? [];
+    const toolCount = group.tool_count ?? toolNames.length;
+    const actionCapable = Boolean(group.side_effecting);
+    return {
+      id: group.id,
+      label: group.label,
+      description: group.description,
+      toolCount,
+      toolPreview: employeeToolPreview(toolNames, toolCount),
+      modeLabel: actionCapable ? "Action-capable" : "Read-only",
+      approvalLabel: employeeApprovalTypeLabel(group.approval_type),
+      tone:
+        group.approval_type === "required" || actionCapable
+          ? "warning"
+          : "success",
+    };
+  });
+}
+
+export function employeeCapabilityGuidanceForError(
+  code: EmployeeRunErrorCode | string | null | undefined,
+  input: EmployeeCapabilityInput,
+): string | undefined {
+  const toolPresets = input.toolPresets ?? [];
+  const hasLiveData = toolPresets.includes("live_data");
+  const hasPublisherActions = toolPresets.includes("publisher_actions");
+  const hasAnyTool =
+    toolPresets.length > 0 || (input.resolvedTools?.length ?? 0) > 0;
+
+  switch (code) {
+    case "tool_unavailable":
+    case "tool_not_configured":
+      if (!hasAnyTool) {
+        return "No tool groups are enabled for this employee. Enable Live data for web research, Publisher actions for connected tools, or SerenDB queries for database access.";
+      }
+      if (!hasLiveData && !hasPublisherActions) {
+        return "This employee only has limited tool access. Enable Live data for web research or Publisher actions for connected tools.";
+      }
+      if (!hasLiveData) {
+        return "Live data is not enabled. Enable it when this employee needs web research, publisher discovery, or read-only external data.";
+      }
+      if (!hasPublisherActions) {
+        return "Publisher actions are not enabled. Enable them when this employee needs to call connected tools or write to external systems.";
+      }
+      return "Review this employee's enabled tool groups and connected accounts.";
+    case "tool_missing_credential":
+      return "Connect the required account or credential in employee settings before using that tool.";
+    case "tool_permission_denied":
+      return input.approvalPolicy === "allow_mutations"
+        ? "Review the allowed publisher operations and connected account grants for this employee."
+        : "Tool permissions are read-only. Switch permissions to Allow actions if this employee should write to external systems.";
+    case "model_tool_calls_unsupported":
+    case "model_tool_response_rejected":
+      return "This employee's model route is not completing tool calls. Use a tool-capable model route before relying on web or connector tools.";
+    default:
+      return undefined;
+  }
+}
+
+function employeeToolPreview(
+  toolNames: readonly string[],
+  toolCount: number,
+): string {
+  if (toolCount <= 0) return "No tools";
+  const visible = toolNames.slice(0, 3).map(formatEmployeeToolName);
+  // A group can report a count without names (e.g. future count-only custom
+  // groups); render the count rather than a nameless "+ N more".
+  if (visible.length === 0) {
+    return `${toolCount} ${toolCount === 1 ? "tool" : "tools"}`;
+  }
+  const remaining = Math.max(0, toolCount - visible.length);
+  return remaining > 0
+    ? `${visible.join(", ")} + ${remaining} more`
+    : visible.join(", ");
+}
+
+function employeeApprovalTypeLabel(value: string | null | undefined): string {
+  if (value === "required") return "Approval required";
+  if (value === "audit") return "Audited";
+  return "No approval";
+}
+
+function formatEmployeeToolName(name: string): string {
+  return name.replace(/^seren_/, "").replace(/_/g, " ");
 }
 
 export function runStatusLabel(

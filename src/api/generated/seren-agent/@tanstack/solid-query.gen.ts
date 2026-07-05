@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { type Options, serenAgentCapabilities, serenAgentDeleteManagedDeployment, serenAgentDeploy, serenAgentGetDeploymentActivity, serenAgentGetDeploymentHealth, serenAgentGetDeploymentResources, serenAgentGetManagedDeployment, serenAgentHealth, serenAgentListDeployments, serenAgentListManagedDeploymentRevisions, serenAgentPatchManagedDeploymentFiles, serenAgentPreviewManagedDeploymentRollback, serenAgentPreviewManagedDeploymentUpdate, serenAgentPrivateModels, serenAgentRollbackManagedDeployment, serenAgentStartManagedDeployment, serenAgentStopManagedDeployment, serenAgentTestRun, serenAgentUpdateManagedDeployment } from '../sdk.gen';
-import type { SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponse, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentResponse, SerenAgentDeployData, SerenAgentDeployResponse, SerenAgentGetDeploymentActivityData, SerenAgentGetDeploymentActivityResponse, SerenAgentGetDeploymentHealthData, SerenAgentGetDeploymentHealthResponse, SerenAgentGetDeploymentResourcesData, SerenAgentGetDeploymentResourcesResponse, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentResponse, SerenAgentHealthData, SerenAgentHealthResponse, SerenAgentListDeploymentsData, SerenAgentListDeploymentsResponse, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsResponse, SerenAgentPatchManagedDeploymentFilesData, SerenAgentPatchManagedDeploymentFilesResponse, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackResponse, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateResponse, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponse, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentResponse, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentResponse, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentResponse, SerenAgentTestRunData, SerenAgentTestRunResponse, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentResponse } from '../types.gen';
+import { type Options, serenAgentCapabilities, serenAgentDeleteManagedDeployment, serenAgentDeploy, serenAgentDescribeDeploymentTool, serenAgentGetDeploymentActivity, serenAgentGetDeploymentHealth, serenAgentGetDeploymentResources, serenAgentGetManagedDeployment, serenAgentHealth, serenAgentListDeployments, serenAgentListDeploymentToolGroups, serenAgentListDeploymentTools, serenAgentListManagedDeploymentRevisions, serenAgentPatchManagedDeploymentFiles, serenAgentPreviewManagedDeploymentRollback, serenAgentPreviewManagedDeploymentUpdate, serenAgentPrivateModels, serenAgentRollbackManagedDeployment, serenAgentStartManagedDeployment, serenAgentStopManagedDeployment, serenAgentTestRun, serenAgentUpdateManagedDeployment } from '../sdk.gen';
+import type { SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponse, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentResponse, SerenAgentDeployData, SerenAgentDeployResponse, SerenAgentDescribeDeploymentToolData, SerenAgentDescribeDeploymentToolResponse, SerenAgentGetDeploymentActivityData, SerenAgentGetDeploymentActivityResponse, SerenAgentGetDeploymentHealthData, SerenAgentGetDeploymentHealthResponse, SerenAgentGetDeploymentResourcesData, SerenAgentGetDeploymentResourcesResponse, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentResponse, SerenAgentHealthData, SerenAgentHealthResponse, SerenAgentListDeploymentsData, SerenAgentListDeploymentsResponse, SerenAgentListDeploymentToolGroupsData, SerenAgentListDeploymentToolGroupsResponse, SerenAgentListDeploymentToolsData, SerenAgentListDeploymentToolsResponse, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsResponse, SerenAgentPatchManagedDeploymentFilesData, SerenAgentPatchManagedDeploymentFilesResponse, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackResponse, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateResponse, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponse, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentResponse, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentResponse, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentResponse, SerenAgentTestRunData, SerenAgentTestRunResponse, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -386,6 +386,66 @@ export const serenAgentStopManagedDeploymentMutation = (options?: Partial<Option
     };
     return mutationOptions;
 };
+
+export const serenAgentListDeploymentToolGroupsQueryKey = (options: Options<SerenAgentListDeploymentToolGroupsData>) => createQueryKey('serenAgentListDeploymentToolGroups', options);
+
+/**
+ * List tool groups currently assigned to a managed seren-agent deployment.
+ *
+ * Returns the resolved tool-group read model for a managed seren-agent deployment. Today these groups are derived from the deployment's tool_presets config inputs; future explicit tool-group assignments will use the same response shape.
+ */
+export const serenAgentListDeploymentToolGroupsOptions = (options: Options<SerenAgentListDeploymentToolGroupsData>) => queryOptions<SerenAgentListDeploymentToolGroupsResponse, DefaultError, SerenAgentListDeploymentToolGroupsResponse, ReturnType<typeof serenAgentListDeploymentToolGroupsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await serenAgentListDeploymentToolGroups({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: serenAgentListDeploymentToolGroupsQueryKey(options)
+});
+
+export const serenAgentListDeploymentToolsQueryKey = (options: Options<SerenAgentListDeploymentToolsData>) => createQueryKey('serenAgentListDeploymentTools', options);
+
+/**
+ * List tools currently visible to a managed seren-agent deployment.
+ *
+ * Returns the declared tool catalog for a managed seren-agent deployment, including source, approval, and side-effect metadata. This endpoint is a managed-agent projection; use seren-cloud run APIs for runtime execution.
+ */
+export const serenAgentListDeploymentToolsOptions = (options: Options<SerenAgentListDeploymentToolsData>) => queryOptions<SerenAgentListDeploymentToolsResponse, DefaultError, SerenAgentListDeploymentToolsResponse, ReturnType<typeof serenAgentListDeploymentToolsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await serenAgentListDeploymentTools({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: serenAgentListDeploymentToolsQueryKey(options)
+});
+
+export const serenAgentDescribeDeploymentToolQueryKey = (options: Options<SerenAgentDescribeDeploymentToolData>) => createQueryKey('serenAgentDescribeDeploymentTool', options);
+
+/**
+ * Describe one tool currently visible to a managed seren-agent deployment.
+ *
+ * Returns one declared tool descriptor for a managed seren-agent deployment, including source, approval, and side-effect metadata. This endpoint is a managed-agent projection; use seren-cloud run APIs for runtime execution.
+ */
+export const serenAgentDescribeDeploymentToolOptions = (options: Options<SerenAgentDescribeDeploymentToolData>) => queryOptions<SerenAgentDescribeDeploymentToolResponse, DefaultError, SerenAgentDescribeDeploymentToolResponse, ReturnType<typeof serenAgentDescribeDeploymentToolQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await serenAgentDescribeDeploymentTool({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: serenAgentDescribeDeploymentToolQueryKey(options)
+});
 
 export const serenAgentHealthQueryKey = (options?: Options<SerenAgentHealthData>) => createQueryKey('serenAgentHealth', options);
 

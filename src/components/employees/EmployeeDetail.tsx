@@ -1,7 +1,10 @@
 // ABOUTME: Detail view for a single virtual employee - status, suspend/wake, manage actions.
 // ABOUTME: Replaces the main content area when an employee row is selected in the sidebar.
 
-import { employeeCapabilityBadges } from "@seren/employees-core";
+import {
+  employeeCapabilityBadges,
+  employeeToolGroupSummaries,
+} from "@seren/employees-core";
 import {
   type Component,
   createMemo,
@@ -92,6 +95,16 @@ function capabilityBadgeClass(tone: "neutral" | "success" | "warning") {
     return "border-amber-500/30 bg-amber-500/10 text-amber-200";
   }
   return "border-border bg-surface-2 text-muted-foreground";
+}
+
+function capabilityGroupClass(tone: "neutral" | "success" | "warning") {
+  if (tone === "success") {
+    return "border-emerald-500/25 bg-emerald-500/[0.08]";
+  }
+  if (tone === "warning") {
+    return "border-amber-500/25 bg-amber-500/[0.08]";
+  }
+  return "border-border bg-surface-2";
 }
 
 function primaryCtaLabel(mode: EmployeeMode): string {
@@ -212,6 +225,14 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     () => props.employeeId,
     async (id) => employeeStore.loadDetail(id),
   );
+  const [toolGroups] = createResource(
+    () => {
+      const employee = detail();
+      if (!employee || employee.visibility === "opaque") return undefined;
+      return employee.id;
+    },
+    async (id) => svc.listToolGroups(id),
+  );
   const capabilityBadges = createMemo(() => {
     const employee = detail();
     if (!employee) return [];
@@ -223,6 +244,9 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
       approvalPolicy: employee.approvalPolicy,
     });
   });
+  const capabilityGroups = createMemo(() =>
+    employeeToolGroupSummaries(toolGroups() ?? []),
+  );
 
   // Surface only conditions that warrant operator attention.
   // `Accepted`/`Ready` are positive conditions whose healthy steady state is
@@ -692,6 +716,40 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                         >
                           {badge.label}
                         </span>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+                <Show when={capabilityGroups().length > 0}>
+                  <div class="mt-3 grid gap-2 md:grid-cols-3">
+                    <For each={capabilityGroups()}>
+                      {(group) => (
+                        <div
+                          class={`min-w-0 rounded-md border px-3 py-2 ${capabilityGroupClass(
+                            group.tone,
+                          )}`}
+                        >
+                          <div class="flex items-center justify-between gap-2">
+                            <span class="truncate text-[12px] font-semibold text-foreground">
+                              {group.label}
+                            </span>
+                            <span class="shrink-0 text-[10px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
+                              {group.toolCount}{" "}
+                              {group.toolCount === 1 ? "tool" : "tools"}
+                            </span>
+                          </div>
+                          <p class="mt-1 truncate text-[11px] text-muted-foreground">
+                            {group.toolPreview}
+                          </p>
+                          <div class="mt-2 flex flex-wrap gap-1">
+                            <span class="rounded-full border border-border bg-background/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              {group.modeLabel}
+                            </span>
+                            <span class="rounded-full border border-border bg-background/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              {group.approvalLabel}
+                            </span>
+                          </div>
+                        </div>
                       )}
                     </For>
                   </div>
