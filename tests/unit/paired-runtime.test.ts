@@ -3,7 +3,11 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error — plain-JS runtime module without type declarations.
-import { createPairedRuntime, PAIRED_AGENT_TYPE } from "../../bin/browser-local/paired-runtime.mjs";
+import {
+  createPairedRuntime,
+  PAIRED_AGENT_TYPE,
+  resolvePlannerModel,
+} from "../../bin/browser-local/paired-runtime.mjs";
 
 interface Emitted {
   channel: string;
@@ -113,6 +117,13 @@ function createHarness() {
       innerSessions.delete(sessionId);
     }),
     setSessionModel: vi.fn(async () => {}),
+    listSessionModels: vi.fn((sessionId: string) => {
+      const session = innerSessions.get(sessionId);
+      if (!session) return [];
+      return session.agentType === "claude-code"
+        ? claudeModels.availableModels
+        : codexModels.availableModels;
+    }),
     updateSessionConfigOption: vi.fn(async () => null),
     setPermissionMode: vi.fn(async () => {}),
     respondToPermission: vi.fn(async () => {}),
@@ -303,6 +314,73 @@ describe("paired runtime — spawn", () => {
     >;
     expect(String(last.paired.planner.notice)).toContain("claude-fable-5");
     expect(String(last.paired.planner.notice)).toMatch(/Claude default/i);
+  });
+
+  it("falls back to the newest Opus and pins Opus, not Fable, when Fable 5 is unavailable (#2827)", async () => {
+    // Account without Fable access: the switchable catalog carries only Opus.
+    h.inner.listSessionModels.mockImplementation((sessionId: string) => {
+      const session = h.innerSessions.get(sessionId);
+      if (!session || session.agentType !== "claude-code") return [];
+      return [
+        { modelId: "claude-opus-4-8[1m]", name: "Opus 4.8 (1M context)" },
+        { modelId: "claude-opus-4-8", name: "Opus 4.8" },
+        { modelId: "claude-opus-4-7[1m]", name: "Opus 4.7 (1M context)" },
+      ];
+    });
+    await spawnPaired(h);
+    const plannerInnerId = String(
+      h.inner.spawnSession.mock.calls.find(
+        (c) => c[0].agentType === "claude-code",
+      )?.[0].localSessionId,
+    );
+    const plannerSets = h.inner.setSessionModel.mock.calls.filter(
+      (c) => c[0].sessionId === plannerInnerId,
+    );
+    // Newest Opus, 1M tier — never claude-fable-5.
+    expect(plannerSets.map((c) => c[0].modelId)).toEqual(["claude-opus-4-8[1m]"]);
+
+    const statuses = eventsFor(h.emitted, "provider://session-status").filter(
+      (e) => e.payload.sessionId === "paired-1",
+    );
+    const last = statuses[statuses.length - 1].payload as Record<
+      string,
+      // biome-ignore lint/suspicious/noExplicitAny: test introspection
+      any
+    >;
+    expect(last.paired.planner.pinnedModelId).toBe("claude-opus-4-8[1m]");
+    expect(String(last.paired.planner.notice)).toMatch(/Fable 5 is unavailable/i);
+    expect(String(last.paired.planner.notice)).toContain("Opus");
+  });
+
+  it("keeps the Claude default with a notice when neither Fable nor Opus is available (#2827)", async () => {
+    h.inner.listSessionModels.mockImplementation((sessionId: string) => {
+      const session = h.innerSessions.get(sessionId);
+      if (!session || session.agentType !== "claude-code") return [];
+      return [{ modelId: "claude-sonnet-4-5", name: "Sonnet 4.5" }];
+    });
+    await spawnPaired(h);
+    const plannerInnerId = String(
+      h.inner.spawnSession.mock.calls.find(
+        (c) => c[0].agentType === "claude-code",
+      )?.[0].localSessionId,
+    );
+    const plannerSets = h.inner.setSessionModel.mock.calls.filter(
+      (c) => c[0].sessionId === plannerInnerId,
+    );
+    expect(plannerSets).toHaveLength(0);
+
+    const statuses = eventsFor(h.emitted, "provider://session-status").filter(
+      (e) => e.payload.sessionId === "paired-1",
+    );
+    const last = statuses[statuses.length - 1].payload as Record<
+      string,
+      // biome-ignore lint/suspicious/noExplicitAny: test introspection
+      any
+    >;
+    expect(last.paired.planner.pinnedModelId).toBeNull();
+    expect(String(last.paired.planner.notice)).toMatch(
+      /Neither Fable 5 nor an Opus/i,
+    );
   });
 
   it("never forwards raw inner session ids to the frontend", async () => {
@@ -711,5 +789,51 @@ describe("paired runtime — terminate", () => {
       (e) => e.payload.status === "terminated",
     );
     expect(terminated.length).toBe(1);
+  });
+});
+
+describe("resolvePlannerModel (#2827)", () => {
+  it("respects an explicit user model over Fable", () => {
+    expect(
+      resolvePlannerModel("claude-opus-4-6", [{ modelId: "claude-fable-5" }]),
+    ).toMatchObject({ modelId: "claude-opus-4-6", reason: "explicit" });
+  });
+
+  it("prefers Fable 5 when the account can switch to it", () => {
+    expect(
+      resolvePlannerModel(null, [
+        { modelId: "claude-opus-4-8[1m]", name: "Opus 4.8 (1M context)" },
+        { modelId: "claude-fable-5", name: "Fable 5" },
+      ]),
+    ).toMatchObject({ modelId: "claude-fable-5", reason: "fable" });
+  });
+
+  it("falls back to the newest Opus 1M tier when Fable is absent", () => {
+    expect(
+      resolvePlannerModel(null, [
+        { modelId: "claude-opus-4-8", name: "Opus 4.8" },
+        { modelId: "claude-opus-4-8[1m]", name: "Opus 4.8 (1M context)" },
+        { modelId: "claude-opus-4-7[1m]", name: "Opus 4.7 (1M context)" },
+      ]),
+    ).toMatchObject({ modelId: "claude-opus-4-8[1m]", reason: "opus-fallback" });
+  });
+
+  it("uses the bare Opus tier when no 1M variant is listed", () => {
+    expect(
+      resolvePlannerModel(null, [{ modelId: "claude-opus-4-8", name: "Opus 4.8" }]),
+    ).toMatchObject({ modelId: "claude-opus-4-8", reason: "opus-fallback" });
+  });
+
+  it("returns a null pin when neither Fable nor Opus is available", () => {
+    expect(
+      resolvePlannerModel(null, [{ modelId: "claude-sonnet-4-5" }]),
+    ).toMatchObject({ modelId: null, reason: "default" });
+  });
+
+  it("tolerates an empty or missing catalog", () => {
+    expect(resolvePlannerModel(null, [])).toMatchObject({ reason: "default" });
+    expect(resolvePlannerModel(null, undefined)).toMatchObject({
+      reason: "default",
+    });
   });
 });

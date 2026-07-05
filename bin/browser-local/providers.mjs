@@ -1755,6 +1755,18 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     });
   }
 
+  // Read the switchable model catalog for a session. The paired coordinator uses
+  // it to resolve the planner pin (Fable 5, else newest Opus) against what the
+  // account can actually switch to. Codex sessions live in the local `sessions`
+  // map; a Claude planner session is owned by claudeRuntime.
+  function listSessionModels(sessionId) {
+    const session = sessions.get(sessionId);
+    if (session) {
+      return buildAvailableModels(session);
+    }
+    return claudeRuntime.listSessionModels(sessionId);
+  }
+
   async function setSessionMode({ sessionId, mode }) {
     return setPermissionMode({ sessionId, mode });
   }
@@ -1819,6 +1831,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         cancelPrompt,
         terminateSession,
         setSessionModel,
+        listSessionModels,
         updateSessionConfigOption,
         setPermissionMode,
         respondToPermission,

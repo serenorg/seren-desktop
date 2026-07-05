@@ -2863,6 +2863,11 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     });
   }
 
+  function listSessionModels(sessionId) {
+    const session = sessions.get(sessionId);
+    return session ? buildAvailableModels(session) : [];
+  }
+
   async function setModel({ sessionId, modelId }) {
     const session = sessions.get(sessionId);
     if (!session) {
@@ -3053,6 +3058,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     setPermissionMode,
     respondToPermission,
     setModel,
+    listSessionModels,
     setConfigOption,
     forkSession,
     buildSyntheticTranscript,
