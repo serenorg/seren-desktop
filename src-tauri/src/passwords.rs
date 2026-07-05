@@ -248,7 +248,8 @@ struct AccountSecretsRecord {
 #[derive(Debug, Deserialize)]
 struct IdentityRecord {
     identity_id: Uuid,
-    owner_user_id: Uuid,
+    #[serde(default)]
+    owner_user_id: Option<Uuid>,
     kem_public_key: String,
     signing_public_key: String,
 }
@@ -1539,7 +1540,10 @@ async fn grant_desktop_mcp_agent_vault_access(
     result
 }
 
-fn owned_vault_ids(vaults: &[VaultRecord], owner_user_id: Uuid) -> BTreeSet<Uuid> {
+fn owned_vault_ids(vaults: &[VaultRecord], owner_user_id: Option<Uuid>) -> BTreeSet<Uuid> {
+    let Some(owner_user_id) = owner_user_id else {
+        return BTreeSet::new();
+    };
     vaults
         .iter()
         .filter(|vault| vault.owner_user_id == Some(owner_user_id))
@@ -2257,6 +2261,38 @@ mod tests {
     }
 
     #[test]
+    fn identity_record_parses_without_owner_user_id() {
+        // The gateway may omit owner_user_id on /identities/me during a rollout
+        // skew; parsing must not fail. A missing owner degrades to None (no
+        // owned vaults) rather than breaking unlock and credential creation.
+        let json = serde_json::json!({
+            "identity_id": "22222222-2222-4222-8222-222222222222",
+            "kem_public_key": "AA==",
+            "signing_public_key": "AA=="
+        });
+
+        let record: IdentityRecord = serde_json::from_value(json).unwrap();
+
+        assert_eq!(record.owner_user_id, None);
+        assert!(owned_vault_ids(&[], record.owner_user_id).is_empty());
+    }
+
+    #[test]
+    fn identity_record_parses_with_owner_user_id() {
+        let owner = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+        let json = serde_json::json!({
+            "identity_id": "22222222-2222-4222-8222-222222222222",
+            "owner_user_id": owner,
+            "kem_public_key": "AA==",
+            "signing_public_key": "AA=="
+        });
+
+        let record: IdentityRecord = serde_json::from_value(json).unwrap();
+
+        assert_eq!(record.owner_user_id, Some(owner));
+    }
+
+    #[test]
     fn parses_account_secrets_from_account_secrets_envelope() {
         let data = serde_json::json!({
             "account_secrets": serde_json::from_str::<serde_json::Value>(account_secrets_record_json()).unwrap()
@@ -2734,7 +2770,7 @@ mod tests {
                     vault_key_version: 1,
                 },
             ],
-            owner,
+            Some(owner),
         );
 
         assert!(ids.contains(&owned));
