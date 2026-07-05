@@ -776,7 +776,15 @@ async fn create_passwords_vault_inner(
 
     let mut stored = passwords_session().lock().await;
     let Some(session) = stored.as_mut() else {
-        return Err(anyhow::anyhow!("Unlock Seren Passwords first"));
+        // The vault was created and the MCP agent granted server-side above; the
+        // session was locked during the network round-trip, so there is no
+        // in-memory state to update. Report success — the vault persists and
+        // reappears on the next unlock — instead of a misleading "unlock first"
+        // error for an operation that actually completed. #2831
+        return Ok(UnlockPasswordsVaultResponse {
+            vaults: Vec::new(),
+            mcp_agent_identity_id: mcp_agent.as_ref().map(|agent| agent.identity_id),
+        });
     };
     if session.mcp_agent.is_none() {
         session.mcp_agent = mcp_agent;
