@@ -44,7 +44,7 @@ Add these secrets to the repository settings (Settings → Secrets → Actions):
 
 | Variable | Description |
 |----------|-------------|
-| `MAX_SIGNATURES` | Maximum SSL.com cloud hash-signing operations allowed in one Windows release job. Defaults to `850` in `release.yml`; raise only after reviewing `sign-targets.txt` and the Windows signing job summary. |
+| `MAX_SIGNATURES` | Warning threshold for SSL.com cloud hash-signing operations in one Windows release job. Defaults to `850` in `release.yml`; raise only after reviewing `sign-targets.txt` and the Windows signing job summary. |
 
 ## Certificate Setup
 
@@ -126,8 +126,8 @@ the artifact that embeds it is produced:
    `.nsis.zip` updater bundle. The signable set is discovered by
    `scripts/print-windows-signables.ts` and signed in place by
    `scripts/sign-windows-payload.ps1` (signtool + eSigner CKA, throttled
-   batches under SSL.com's rate limit, `#2282`, with the `MAX_SIGNATURES`
-   budget gate from `#2818`).
+   batches under SSL.com's rate limit, `#2282`, with `MAX_SIGNATURES`
+   budget telemetry from `#2818`/`#2821`).
 
 2. **NSIS stock plugin DLLs** (`#2237`, `#2299`) — `System.dll`, `nsExec.dll`,
    `StartMenu.dll`, and `nsDialogs.dll` ship inside the `tauri-bundler` NSIS
@@ -154,24 +154,24 @@ the artifact that embeds it is produced:
    is re-packed from the signed `.exe` and its `.nsis.zip.sig` re-signed with
    the Tauri updater key (`#2236`).
 
+### Budget telemetry (release CI, warning-only)
+
+Each Windows release writes a **Windows signing budget** section to the GitHub
+job summary. Recent audits found roughly 715-729 embedded-runtime signables,
+plus the NSIS/tooling and Tauri wrapper signings. The default warning threshold
+is `850`, leaving limited headroom for normal drift while making unexpected
+growth visible without blocking a production release. Review the discovered,
+skipped, and cloud-signatures-spent counts before changing `MAX_SIGNATURES`; a
+threshold bump should be paired with an audit of the added files and why they
+must be signed.
+
 ### Verification gates (release CI, hard-fail)
 
-- The cumulative signer telemetry cannot exceed `MAX_SIGNATURES` (`#2818`).
-  Recent Windows signing audits found roughly 715-729 embedded-runtime
-  signables, plus the NSIS/tooling and Tauri wrapper signings. The default
-  ceiling is `850`, leaving limited headroom for normal drift while stopping a
-  runaway release before it spends hundreds or thousands of unexpected SSL.com
-  cloud signatures.
 - Loose `.exe`/`.dll` under `bundle/` are all `Valid` (`#2235`).
 - Every `.exe`/`.dll` extracted from `.nsis.zip` is `Valid` (`#2236`).
 - The setup `.exe` is unpacked with 7-Zip and **every** embedded
   `.exe`/`.dll`/`.node` — including the `$PLUGINSDIR` helper DLLs — is `Valid`
   (`#2237`). This is the closest CI proxy for what Smart App Control sees.
-
-Each Windows release writes a **Windows signing budget** section to the GitHub
-job summary. Review the discovered, skipped, and cloud-signatures-spent counts
-before changing `MAX_SIGNATURES`; a ceiling bump should be paired with an audit
-of the added files and why they must be signed.
 
 ### SEREN_TAURI_SKIP_PREP
 
