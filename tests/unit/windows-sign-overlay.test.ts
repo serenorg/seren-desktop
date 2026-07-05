@@ -129,6 +129,27 @@ describe("release workflow contract", () => {
     expect(workflow).toContain("Audit Windows payload signature coverage");
   });
 
+  it("wraps the embedded-runtime signer with the Windows signature cache (#2823)", () => {
+    expect(workflow).toContain("Restore Windows signature cache");
+    expect(workflow).toContain("uses: actions/cache@v4");
+    expect(workflow).toContain(".sig-cache/windows-authenticode");
+    expect(workflow).toContain("key: win-sigcache-${{ github.run_id }}");
+    expect(workflow).toContain("win-sigcache-");
+    expect(workflow).toContain("windows-signature-cache.ps1");
+
+    const cacheActionAt = workflow.indexOf("Restore Windows signature cache");
+    const signStepAt = workflow.indexOf("Sign embedded runtime (Windows)");
+    const cacheRestoreAt = workflow.indexOf("-Mode restore", signStepAt);
+    const signerAt = workflow.indexOf("sign-windows-payload.ps1", cacheRestoreAt);
+    const cacheSaveAt = workflow.indexOf("-Mode save", signerAt);
+
+    expect(cacheActionAt).toBeGreaterThanOrEqual(0);
+    expect(signStepAt).toBeGreaterThan(cacheActionAt);
+    expect(cacheRestoreAt).toBeGreaterThan(signStepAt);
+    expect(signerAt).toBeGreaterThan(cacheRestoreAt);
+    expect(cacheSaveAt).toBeGreaterThan(signerAt);
+  });
+
   it("reports Windows signing budget telemetry as warning-only (#2818/#2821)", () => {
     const signer = readFileSync(signerScript, "utf8");
 
