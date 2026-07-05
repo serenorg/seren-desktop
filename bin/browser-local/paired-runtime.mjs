@@ -5,6 +5,20 @@ import { randomUUID } from "node:crypto";
 
 export const PAIRED_AGENT_TYPE = "claude-codex";
 
+// Default Claude model for the paired agent's planner/reviewer role. The paired
+// agent pins the Claude role to Fable 5 unless the user has explicitly chosen a
+// planner model. Applied as a post-spawn model switch (see spawnRole) so an
+// unavailable id degrades to the Claude Code default with a notice instead of
+// failing the session. Fable's context is 1M-native, so the bare id is used
+// (no `[1m]` tier suffix). #2825.
+const PAIRED_PLANNER_MODEL_ID = "claude-fable-5";
+
+// Friendly labels for pinned model ids the Claude Code catalog may not report by
+// name, so the setup declaration reads "Fable 5" rather than a raw model id.
+const MODEL_DISPLAY_LABELS = {
+  "claude-fable-5": "Fable 5",
+};
+
 const ROLE_DEFS = {
   planner: {
     role: "planner",
@@ -38,7 +52,9 @@ function effortDisplayValue(roleState) {
 
 function describeRoleModel(roleState) {
   const base = roleState.pinnedModelId
-    ? (modelDisplayName(roleState) ?? roleState.pinnedModelId)
+    ? (modelDisplayName(roleState) ??
+        MODEL_DISPLAY_LABELS[roleState.pinnedModelId] ??
+        roleState.pinnedModelId)
     : ROLE_DEFS[roleState.role].defaultModelLabel;
   const current = modelDisplayName(roleState);
   return current && current !== base ? `${base} · currently ${current}` : base;
@@ -62,11 +78,16 @@ export function buildPairedDeclaration(paired) {
 
 function buildPlannerPrompt(userPrompt) {
   return [
-    "You are the PLANNER and REVIEWER in a paired workflow. A separate",
-    "executor agent (Codex) will make all code edits, run commands, and run",
-    "tests. Do NOT edit files or run state-changing commands yourself.",
-    "Read whatever you need, then reply with a short, concrete implementation",
-    "plan the executor can follow. Plain language; numbered steps.",
+    "You are the PLANNER in a paired workflow. A separate executor agent",
+    "(Codex) will make all code edits, run commands, and run tests — you do",
+    "not. Read only the files you need to write an accurate plan.",
+    "",
+    "Reply with the implementation plan and nothing else: numbered steps the",
+    "executor can follow, each naming the concrete file paths and functions to",
+    "change. Skip preamble, restating the request, rationale, alternatives you",
+    "weighed, and risk commentary — the executor needs the steps, not the",
+    "reasoning. If the request is already unambiguous, write the plan directly",
+    "rather than surveying options.",
     "",
     "User request:",
     userPrompt,
@@ -350,6 +371,25 @@ export function createPairedRuntime({ emit, inner }) {
         initialModelId: config.modelId ?? undefined,
       });
       roleState.agentSessionId = info?.agentSessionId ?? roleState.agentSessionId;
+
+      // Pin the planner/reviewer model — Fable 5 by default (#2825) unless the
+      // user has explicitly chosen a planner model. Switch after spawn: the
+      // spawn stays on the Claude Code default, so a model id the local CLI does
+      // not recognize degrades to a notice here instead of killing the planner
+      // process (an unknown spawn-time `--model` would). Mirrors the executor.
+      const plannerModelId = config.modelId ?? PAIRED_PLANNER_MODEL_ID;
+      if (plannerModelId) {
+        try {
+          await inner.setSessionModel({
+            sessionId: innerSessionId,
+            modelId: plannerModelId,
+          });
+          roleState.pinnedModelId = plannerModelId;
+        } catch {
+          roleState.pinnedModelId = null;
+          roleState.notice = `Pinned model ${plannerModelId} is unavailable in this Claude Code install. Using the Claude default instead.`;
+        }
+      }
       return info;
     }
 

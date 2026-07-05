@@ -229,8 +229,14 @@ describe("paired runtime — spawn", () => {
   });
 
   it("applies pinned executor model from spawn params, with fallback notice when unavailable", async () => {
-    h.inner.setSessionModel.mockRejectedValueOnce(
-      new Error("Unknown Codex model: gpt-retired"),
+    // The planner is pinned to Fable 5 first (#2825), so reject only the
+    // executor's model rather than the next call in order.
+    h.inner.setSessionModel.mockImplementation(
+      async ({ modelId }: { modelId: string }) => {
+        if (modelId === "gpt-retired") {
+          throw new Error("Unknown Codex model: gpt-retired");
+        }
+      },
     );
     await spawnPaired(h, {
       paired: { executor: { modelId: "gpt-retired" } },
@@ -245,6 +251,58 @@ describe("paired runtime — spawn", () => {
     >;
     expect(String(last.paired.executor.notice)).toContain("gpt-retired");
     expect(String(last.paired.executor.notice)).toMatch(/no longer available/i);
+  });
+
+  it("pins Fable 5 for the planner on spawn when no planner model is configured (#2825)", async () => {
+    await spawnPaired(h);
+    const plannerInnerId = String(
+      h.inner.spawnSession.mock.calls.find(
+        (c) => c[0].agentType === "claude-code",
+      )?.[0].localSessionId,
+    );
+    expect(h.inner.setSessionModel).toHaveBeenCalledWith({
+      sessionId: plannerInnerId,
+      modelId: "claude-fable-5",
+    });
+  });
+
+  it("respects an explicit planner model instead of the Fable default", async () => {
+    await spawnPaired(h, {
+      paired: { planner: { modelId: "claude-opus-4-6" } },
+    });
+    const plannerInnerId = String(
+      h.inner.spawnSession.mock.calls.find(
+        (c) => c[0].agentType === "claude-code",
+      )?.[0].localSessionId,
+    );
+    const plannerSets = h.inner.setSessionModel.mock.calls.filter(
+      (c) => c[0].sessionId === plannerInnerId,
+    );
+    expect(plannerSets.map((c) => c[0].modelId)).toEqual(["claude-opus-4-6"]);
+  });
+
+  it("keeps the paired session alive when the pinned planner model is unavailable", async () => {
+    // A planner model the local Claude Code install rejects must degrade to a
+    // notice, never fail the spawn — the whole point of the post-spawn switch.
+    h.inner.setSessionModel.mockImplementation(
+      async ({ modelId }: { modelId: string }) => {
+        if (modelId === "claude-fable-5") {
+          throw new Error("Unknown model: claude-fable-5");
+        }
+      },
+    );
+    const info = await spawnPaired(h);
+    expect(info.id).toBe("paired-1");
+    const statuses = eventsFor(h.emitted, "provider://session-status").filter(
+      (e) => e.payload.sessionId === "paired-1",
+    );
+    const last = statuses[statuses.length - 1].payload as Record<
+      string,
+      // biome-ignore lint/suspicious/noExplicitAny: test introspection
+      any
+    >;
+    expect(String(last.paired.planner.notice)).toContain("claude-fable-5");
+    expect(String(last.paired.planner.notice)).toMatch(/Claude default/i);
   });
 
   it("never forwards raw inner session ids to the frontend", async () => {
@@ -314,6 +372,20 @@ describe("paired runtime — prompt pipeline", () => {
     });
     const reviewCall = h.inner.sendPrompt.mock.calls[2][0];
     expect(String(reviewCall.prompt)).toContain("EXEC: renamed the button");
+  });
+
+  it("sends a plan-only planner prompt that omits reviewer framing (#2825)", async () => {
+    await h.paired.sendPrompt({
+      sessionId: "paired-1",
+      prompt: "rename the login button",
+    });
+    const plannerPrompt = String(h.inner.sendPrompt.mock.calls[0][0].prompt);
+    expect(plannerPrompt).toContain("You are the PLANNER");
+    expect(plannerPrompt).toContain("the implementation plan and nothing else");
+    // The review phase is a separate turn; the planner prompt must not carry
+    // reviewer framing that invites Fable to spend output tokens on it.
+    expect(plannerPrompt).not.toContain("REVIEWER");
+    expect(plannerPrompt).toContain("rename the login button");
   });
 
   it("emits inline handoff events between phases with source and destination", async () => {
@@ -494,6 +566,9 @@ describe("paired runtime — role-scoped model and effort", () => {
         (c) => c[0].agentType === "codex",
       )?.[0].localSessionId,
     );
+    // Drop the spawn-time planner Fable pin (#2825) so these tests count only
+    // their own explicit setSessionModel calls.
+    h.inner.setSessionModel.mockClear();
     h.emitted.length = 0;
   });
 
