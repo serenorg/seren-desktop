@@ -122,6 +122,22 @@ export interface EmployeeCapabilityBadge {
   title: string;
 }
 
+export type EmployeeRunErrorCode =
+  | "tool_unavailable"
+  | "tool_not_configured"
+  | "tool_missing_credential"
+  | "tool_permission_denied"
+  | "tool_rate_limited"
+  | "tool_provider_failed"
+  | "model_tool_response_rejected"
+  | "model_tool_calls_unsupported"
+  | "model_provider_rejected"
+  | "approval_required"
+  | "guardrail_blocked"
+  | "runtime_error"
+  | "timeout"
+  | "unknown";
+
 export type EmployeeOutputEventEnvelope =
   | {
       type: "text";
@@ -234,6 +250,8 @@ export type EmployeeOutputEventEnvelope =
   | {
       type: "error";
       message: string;
+      code?: EmployeeRunErrorCode | null;
+      retryable?: boolean | null;
       sequence_number?: number | null;
       event_type?: string | null;
       kind?: string | null;
@@ -978,7 +996,10 @@ export function textFromOutputEvents(value: unknown): string {
 export function errorTextFromOutputEvents(value: unknown): string {
   return outputEventEnvelopes(value)
     .map((event) =>
-      event.type === "error" ? sanitizeEmployeeErrorText(event.message) : "",
+      event.type === "error"
+        ? (employeeErrorTextFromCode(event.code) ??
+          sanitizeEmployeeErrorText(event.message))
+        : "",
     )
     .filter(Boolean)
     .filter((message, index, messages) => messages.indexOf(message) === index)
@@ -1003,6 +1024,44 @@ const TOOL_PERMISSION_ERROR_TEXT =
 
 const GENERIC_EMPLOYEE_ERROR_TEXT =
   "The employee could not complete this request.";
+
+export function employeeErrorTextFromCode(
+  code: string | null | undefined,
+): string | undefined {
+  switch (code) {
+    case "tool_unavailable":
+    case "tool_not_configured":
+      return TOOL_CONFIGURATION_ERROR_TEXT;
+    case "tool_missing_credential":
+      return "This employee needs a connected account or credential before it can use the required tool. Update employee settings.";
+    case "tool_permission_denied":
+      return TOOL_PERMISSION_ERROR_TEXT;
+    case "tool_rate_limited":
+      return "The required tool is currently rate-limited. Review the connected provider limits or choose another tool route.";
+    case "tool_provider_failed":
+      return "The required tool failed while contacting its provider. Check the connected provider configuration.";
+    case "model_tool_response_rejected":
+      return TOOL_RESPONSE_ERROR_TEXT;
+    case "model_tool_calls_unsupported":
+      return MODEL_TOOL_SUPPORT_ERROR_TEXT;
+    case "model_provider_rejected":
+      return MODEL_PROVIDER_ERROR_TEXT;
+    case "approval_required":
+      return "This request is waiting for an approval before the employee can continue.";
+    case "guardrail_blocked":
+      return "This request was blocked by an employee policy or guardrail.";
+    case "timeout":
+      return "The employee timed out before it could complete this request.";
+    case "runtime_error":
+      return GENERIC_EMPLOYEE_ERROR_TEXT;
+    case "unknown":
+    case undefined:
+    case null:
+      return undefined;
+    default:
+      return undefined;
+  }
+}
 
 export function sanitizeEmployeeErrorText(value: string): string {
   const trimmed = value.trim();
@@ -1030,12 +1089,13 @@ export function sanitizeEmployeeErrorText(value: string): string {
   }
 
   if (
-    normalized.includes("llm publisher returned") ||
-    normalized.includes("provider returned error") ||
-    normalized.includes("previous_errors") ||
-    normalized.includes("provider_name") ||
-    normalized.includes('"is_byok"')
+    normalized.includes("guardrail") ||
+    normalized.includes("policy blocked")
   ) {
+    return "This request was blocked by an employee policy or guardrail.";
+  }
+
+  if (looksLikeModelProviderDetail(normalized)) {
     return MODEL_PROVIDER_ERROR_TEXT;
   }
 
@@ -1043,7 +1103,7 @@ export function sanitizeEmployeeErrorText(value: string): string {
     return GENERIC_EMPLOYEE_ERROR_TEXT;
   }
 
-  return trimmed;
+  return redactEmployeeErrorText(trimmed);
 }
 
 function looksLikeToolConfigurationError(value: string): boolean {
@@ -1073,6 +1133,36 @@ function looksLikeModelToolSupportError(value: string): boolean {
       value.includes("does not support") ||
       value.includes("unsupported"))
   );
+}
+
+function looksLikeModelProviderDetail(value: string): boolean {
+  return (
+    value.includes("llm publisher returned") ||
+    value.includes("seren models publisher returned") ||
+    value.includes("provider returned error") ||
+    value.includes("previous_errors") ||
+    value.includes("provider_name") ||
+    value.includes('"is_byok"') ||
+    value.includes("azure openai") ||
+    value.includes("openai:") ||
+    value.includes("bedrock") ||
+    value.includes("anthropic") ||
+    value.includes("deploymentnotfound") ||
+    value.includes("invalid_request_error")
+  );
+}
+
+function redactEmployeeErrorText(value: string): string {
+  const redacted = value
+    .replace(/https?:\/\/\S+/gi, "[url]")
+    .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g, "[email]")
+    .replace(
+      /\b(?:sk-[A-Za-z0-9_-]{10,}|seren_[A-Za-z0-9_-]{10,})\b/g,
+      "[secret]",
+    )
+    .replace(/\b(?:token|key|secret)=\S+/gi, "[secret]")
+    .replace(/\b[A-Za-z0-9_-]{32,}\b/g, "[identifier]");
+  return redacted.length > 240 ? GENERIC_EMPLOYEE_ERROR_TEXT : redacted;
 }
 
 export function employeeTextFromConversationMessage(

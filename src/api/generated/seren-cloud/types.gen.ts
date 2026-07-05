@@ -992,6 +992,12 @@ export type CloudRunDoneStatus = 'ok' | 'error' | 'cancelled';
 export type CloudRunErrorCause = 'agent' | 'model' | 'tool' | 'session' | 'artifact' | 'memory' | 'config' | 'io' | 'serialization' | 'timeout' | 'task' | 'guardrail' | 'approval' | 'unknown';
 
 /**
+ * Stable error code for expected run failures. This lets clients render
+ * configuration and tool failures without parsing provider messages.
+ */
+export type CloudRunErrorCode = 'tool_unavailable' | 'tool_not_configured' | 'tool_missing_credential' | 'tool_permission_denied' | 'tool_rate_limited' | 'tool_provider_failed' | 'model_tool_response_rejected' | 'model_tool_calls_unsupported' | 'model_provider_rejected' | 'approval_required' | 'guardrail_blocked' | 'runtime_error' | 'timeout' | 'unknown';
+
+/**
  * Eval records linked to a run, either as the promoted source or as an actual replay target.
  */
 export type CloudRunEvalsResponse = {
@@ -1123,7 +1129,9 @@ export type CloudRunOutputEvent = {
     type: 'compaction_finished';
 } | {
     cause?: null | CloudRunErrorCause;
+    code?: CloudRunErrorCode;
     message: string;
+    retryable?: boolean;
     type: 'error';
 };
 

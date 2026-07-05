@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createEmployeeRunManager,
+  employeeErrorTextFromCode,
   employeeTextFromConversationMessage,
   errorTextFromOutputEvents,
   type EmployeeOutputEventEnvelope,
@@ -132,6 +133,59 @@ describe("employees-core sequenced run stream", () => {
     ).toBe(
       "The configured model route could not process the tool response. Change this employee to a tool-capable model route in employee settings.",
     );
+  });
+
+  it("prefers structured run error codes over raw messages", () => {
+    expect(employeeErrorTextFromCode("model_tool_response_rejected")).toBe(
+      "The configured model route could not process the tool response. Change this employee to a tool-capable model route in employee settings.",
+    );
+
+    expect(
+      employeeTextFromConversationMessage({
+        role: "assistant",
+        events: [
+          {
+            type: "error",
+            code: "tool_missing_credential",
+            message:
+              "Raw provider payload should not be needed when a code exists.",
+          },
+        ],
+        run_summary: {
+          status: "failed",
+        },
+      }),
+    ).toBe(
+      "This employee needs a connected account or credential before it can use the required tool. Update employee settings.",
+    );
+  });
+
+  it("sanitizes unknown provider details and redacts fallback identifiers", () => {
+    expect(
+      sanitizeEmployeeErrorText(
+        "Azure OpenAI: DeploymentNotFound for resource my-resource-eastus",
+      ),
+    ).toBe(
+      "The employee could not complete this request because the model provider rejected it.",
+    );
+
+    expect(
+      sanitizeEmployeeErrorText(
+        "Provider rejected key=seren_EZbR5XkovK_15PIo10ZioJo0omYawxGcSFlRls1bvhSdas4jpSA",
+      ),
+    ).toBe("Provider rejected [secret]");
+  });
+
+  it("falls back to sanitized text for unknown error codes", () => {
+    expect(
+      errorTextFromOutputEvents([
+        {
+          type: "error",
+          code: "unknown",
+          message: "Approval was denied.",
+        },
+      ]),
+    ).toBe("Approval was denied.");
   });
 
   it("keeps ordinary human-readable failure messages", () => {
