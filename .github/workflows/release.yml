@@ -436,21 +436,47 @@ jobs:
           CARGO_BUILD_TARGET: ${{ matrix.target }}
         run: pnpm prepare:tauri-build
 
+      - name: Restore Windows signature cache
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        uses: actions/cache@v4
+        with:
+          path: .sig-cache/windows-authenticode
+          # Unique primary key + broad restore key: restore the newest prior
+          # content-addressed store, then save this run's newly signed misses.
+          key: win-sigcache-${{ github.run_id }}
+          restore-keys: |
+            win-sigcache-
+
       # Discover the signable set with the tested cross-platform selector, then
       # sign it throttled to stay under SSL.com's per-minute rate limit (#2282).
       # The embedded runtime is the only large payload, so it carries the throttle;
       # the per-file installer/helper signings below stay unthrottled (tiny sets).
+      # A content-addressed signature cache restores unchanged binaries before
+      # signing, so steady-state releases only spend signatures on changed files
+      # while the signer keeps its existing Valid-signature skip and telemetry.
       - name: Sign embedded runtime (Windows)
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         shell: pwsh
         run: |
           pnpm tsx scripts/print-windows-signables.ts `
             src-tauri/embedded-runtime src-tauri/mcp-servers > sign-targets.txt
+          ./scripts/windows-signature-cache.ps1 `
+            -Mode restore `
+            -ListFile sign-targets.txt `
+            -CacheDir .sig-cache/windows-authenticode `
+            -Manifest windows-signature-cache-manifest.tsv `
+            -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT
           ./scripts/sign-windows-payload.ps1 `
             -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT `
             -ListFile sign-targets.txt `
             -BatchSize 10 `
             -DelaySeconds 30
+          ./scripts/windows-signature-cache.ps1 `
+            -Mode save `
+            -ListFile sign-targets.txt `
+            -CacheDir .sig-cache/windows-authenticode `
+            -Manifest windows-signature-cache-manifest.tsv `
+            -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT
 
       # makensis embeds the stock NSIS plugins ($PLUGINSDIR: System.dll,
       # nsExec.dll, StartMenu.dll, nsDialogs.dll) from the bundler's NSIS

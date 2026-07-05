@@ -128,6 +128,12 @@ the artifact that embeds it is produced:
    `scripts/sign-windows-payload.ps1` (signtool + eSigner CKA, throttled
    batches under SSL.com's rate limit, `#2282`, with `MAX_SIGNATURES`
    budget telemetry from `#2818`/`#2821`).
+   `scripts/windows-signature-cache.ps1` wraps this large payload signing with
+   a content-addressed Authenticode cache (`#2823`): before signing, unchanged
+   files are restored from cache only when the cached blob has a `Valid`
+   signature from the expected certificate thumbprint; after signing, newly
+   signed cache misses are saved by their pre-sign SHA-256. The signer still
+   owns the actual skip/sign/budget telemetry behavior.
 
 2. **NSIS stock plugin DLLs** (`#2237`, `#2299`) — `System.dll`, `nsExec.dll`,
    `StartMenu.dll`, and `nsDialogs.dll` ship inside the `tauri-bundler` NSIS
@@ -164,6 +170,12 @@ growth visible without blocking a production release. Review the discovered,
 skipped, and cloud-signatures-spent counts before changing `MAX_SIGNATURES`; a
 threshold bump should be paired with an audit of the added files and why they
 must be signed.
+
+The embedded-runtime signature cache should make the second release with an
+unchanged runtime report most of that large payload as skipped already valid,
+because cached signed binaries are restored before `sign-windows-payload.ps1`
+runs. A cold cache should behave the same as the pre-cache path, then populate
+the cache for later releases.
 
 ### Verification gates (release CI, hard-fail)
 
