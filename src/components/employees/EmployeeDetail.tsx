@@ -231,7 +231,18 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
       if (!employee || employee.visibility === "opaque") return undefined;
       return employee.id;
     },
-    async (id) => svc.listToolGroups(id),
+    async (id) => {
+      try {
+        return await svc.listToolGroups(id);
+      } catch (error) {
+        // Tool groups are a secondary panel. A transient fetch failure must
+        // not re-throw through the render graph and collapse the whole
+        // EmployeeDetail pane via ShellSurfaceBoundary. Degrade to an empty
+        // list, matching the fail-soft contract of the primary detail resource.
+        console.warn(`Failed to load tool groups for employee ${id}:`, error);
+        return [];
+      }
+    },
   );
   const capabilityBadges = createMemo(() => {
     const employee = detail();
