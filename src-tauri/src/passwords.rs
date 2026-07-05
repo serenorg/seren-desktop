@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::orchestrator::gateway_envelope::{publisher_status, unwrap_publisher_body};
 use base64::Engine;
@@ -10,7 +11,8 @@ use base64::engine::general_purpose::STANDARD as B64;
 use serde::{Deserialize, Serialize};
 use seren_secrets_crypto::CryptoError;
 use seren_secrets_crypto::keys::{
-    IdentityKemPublicKey, IdentitySigningPublicKey, ItemContentKey, VaultKey,
+    IdentityKemPublicKey, IdentitySigningPrivateKey, IdentitySigningPublicKey, ItemContentKey,
+    VaultKey,
 };
 use seren_secrets_crypto::protocol::account::{AccountSecrets, account_setup, unlock_account};
 use seren_secrets_crypto::protocol::item::{
@@ -24,12 +26,16 @@ use seren_secrets_crypto::protocol::vault::{
     decrypt_vault_name, encrypt_vault_description, encrypt_vault_name, generate_vault_key,
     unwrap_vault_key, wrap_vault_key_for_identity,
 };
+use seren_secrets_crypto::{protocol::membership_grant, signing};
 use tauri::AppHandle;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
 const PASSWORDS_BASE_URL: &str = "https://api.serendb.com/publishers/seren-passwords";
+const DESKTOP_MCP_AGENT_CONTEXT: &str = "seren-desktop";
+const DESKTOP_MCP_AGENT_DISPLAY_NAME: &str = "Seren Desktop";
+const DESKTOP_MCP_AGENT_ACCESS_LEVEL: &str = "write";
 const MAX_SECRET_FIELDS: usize = 16;
 const MAX_FIELD_NAME_LEN: usize = 128;
 const MAX_FIELD_VALUE_LEN: usize = 32 * 1024;
@@ -79,6 +85,8 @@ pub struct UnlockPasswordsVaultRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UnlockPasswordsVaultResponse {
     vaults: Vec<PasswordsVaultSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mcp_agent_identity_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -95,6 +103,8 @@ pub struct SetupPasswordsVaultResponse {
     recovery_key_display: String,
     personal_vault_id: String,
     vaults: Vec<PasswordsVaultSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mcp_agent_identity_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -149,13 +159,22 @@ pub struct SavePasswordsApiCredentialRequest {
     fields: Vec<PasswordsSecretFieldInput>,
 }
 
-#[derive(Clone)]
 struct PasswordsSession {
     // KEM public key proven to match the unwrapped private key at unlock;
     // later wrap operations must use this copy rather than re-fetching the
     // server-supplied value, which is unauthenticated.
     kem_public: IdentityKemPublicKey,
+    // Kept only while the Passwords session is unlocked so new owned vaults
+    // can be granted to the hosted MCP identity without another password prompt.
+    signing_private: IdentitySigningPrivateKey,
+    mcp_agent: Option<DesktopMcpAgentGrantSession>,
     vaults: BTreeMap<Uuid, UnlockedVault>,
+}
+
+#[derive(Clone)]
+struct DesktopMcpAgentGrantSession {
+    identity_id: Uuid,
+    kem_public: IdentityKemPublicKey,
 }
 
 #[derive(Clone)]
@@ -229,6 +248,7 @@ struct AccountSecretsRecord {
 #[derive(Debug, Deserialize)]
 struct IdentityRecord {
     identity_id: Uuid,
+    owner_user_id: Uuid,
     kem_public_key: String,
     signing_public_key: String,
 }
@@ -243,16 +263,34 @@ struct SyncResponse {
 #[derive(Debug, Deserialize)]
 struct VaultRecord {
     vault_id: Uuid,
+    owner_user_id: Option<Uuid>,
     name_ciphertext: Option<String>,
     wrapped_vault_key: Option<String>,
     vault_key_version: i32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct MembershipRecord {
     vault_id: Uuid,
     identity_id: Uuid,
     access_level: String,
+}
+
+#[derive(Debug, Serialize)]
+struct EnsureHostedAgentIdentityRequest {
+    display_name: String,
+    key_provenance: serde_json::Value,
+    issued_at: i64,
+    nonce: String,
+    signature: String,
+}
+
+#[derive(Debug, Serialize)]
+struct MembershipGrantRequest {
+    identity_id: Uuid,
+    wrapped_vault_key: String,
+    access_level: &'static str,
+    granted_signature: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -537,25 +575,49 @@ async fn unlock_passwords_vault_inner(
     let account_record = get_account_secrets(app, &client).await?;
     let identity: IdentityRecord = get_data(app, &client, "/identities/me").await?;
     let identity_id = identity.identity_id;
+    let owner_user_id = identity.owner_user_id;
     let account_secrets = build_account_secrets(account_record, identity)?;
     let unlocked = unlock_account_for_passwords(master_password, &account_secrets)?;
     let sync: SyncResponse = get_data(app, &client, "/sync").await?;
     let writable_vault_ids = writable_vault_ids(sync.memberships.as_deref(), identity_id);
+    let owned_vault_ids = owned_vault_ids(&sync.vaults, owner_user_id);
+    let memberships = sync.memberships.clone();
 
     let (unlocked_vaults, failed_vaults) = unlock_vaults(
         sync.vaults,
         &unlocked.kem_private,
         writable_vault_ids.as_ref(),
     );
-    drop(unlocked);
     if unlocked_vaults.is_empty() && failed_vaults > 0 {
         return Err(anyhow::anyhow!(
             "No Seren Passwords vault could be unlocked; {failed_vaults} vault key(s) failed to decrypt"
         ));
     }
 
+    let mcp_agent = match ensure_desktop_mcp_agent_identity(
+        app,
+        &client,
+        memberships.as_deref(),
+        &owned_vault_ids,
+        &unlocked_vaults,
+        &unlocked.signing_private,
+    )
+    .await
+    {
+        Ok(agent_identity_id) => agent_identity_id,
+        Err(error) => {
+            log::warn!("Failed to provision Seren Passwords Desktop MCP agent: {error}");
+            None
+        }
+    };
+    let mcp_agent_identity_id = mcp_agent.as_ref().map(|agent| agent.identity_id);
+    let signing_private = unlocked.signing_private.clone();
+    drop(unlocked);
+
     let mut session = PasswordsSession {
         kem_public: account_secrets.kem_public_key,
+        signing_private,
+        mcp_agent,
         vaults: unlocked_vaults,
     };
     let vault_ids: Vec<Uuid> = session.vaults.keys().copied().collect();
@@ -569,6 +631,7 @@ async fn unlock_passwords_vault_inner(
 
     let response = UnlockPasswordsVaultResponse {
         vaults: session_vault_summaries(&session),
+        mcp_agent_identity_id,
     };
     let mut stored = passwords_session().lock().await;
     *stored = Some(session);
@@ -619,6 +682,7 @@ async fn setup_passwords_vault_inner(
         recovery_key_display,
         personal_vault_id: setup_response.personal_vault_id.to_string(),
         vaults: unlocked.vaults,
+        mcp_agent_identity_id: unlocked.mcp_agent_identity_id,
     })
 }
 
@@ -632,12 +696,16 @@ async fn create_passwords_vault_inner(
     // vault key is sealed to the session's KEM public key, which unlock
     // verified against the unwrapped private key; a freshly fetched,
     // server-supplied public key would be unauthenticated here.
-    let kem_public = {
+    let (kem_public, signing_private, stored_mcp_agent) = {
         let session = passwords_session().lock().await;
-        session
+        let session = session
             .as_ref()
-            .map(|session| session.kem_public)
-            .ok_or_else(|| anyhow::anyhow!("Unlock Seren Passwords first"))?
+            .ok_or_else(|| anyhow::anyhow!("Unlock Seren Passwords first"))?;
+        (
+            session.kem_public,
+            session.signing_private.clone(),
+            session.mcp_agent.clone(),
+        )
     };
 
     let client = reqwest::Client::new();
@@ -668,24 +736,54 @@ async fn create_passwords_vault_inner(
         ciphertext.zeroize();
     }
     let created_version = result?.vault_key_version;
+    let unlocked_vault = UnlockedVault {
+        vault_id,
+        name: name.to_string(),
+        vault_key,
+        vault_key_version: created_version,
+        writable: true,
+        item_count: 0,
+    };
+
+    let mut mcp_agent = stored_mcp_agent;
+    if mcp_agent.is_none() {
+        match ensure_desktop_mcp_agent(app, &client, &signing_private).await {
+            Ok(agent) => mcp_agent = Some(agent),
+            Err(error) => {
+                log::warn!("Failed to provision Seren Passwords Desktop MCP agent: {error}");
+            }
+        }
+    }
+    if let Some(agent) = mcp_agent.as_ref()
+        && let Err(error) = grant_desktop_mcp_agent_vault_access(
+            app,
+            &client,
+            &signing_private,
+            agent.identity_id,
+            &agent.kem_public,
+            &unlocked_vault,
+        )
+        .await
+    {
+        log::warn!(
+            "Failed to grant Seren Passwords Desktop MCP agent {} access to new vault {}: {}",
+            agent.identity_id,
+            vault_id,
+            error
+        );
+    }
 
     let mut stored = passwords_session().lock().await;
     let Some(session) = stored.as_mut() else {
         return Err(anyhow::anyhow!("Unlock Seren Passwords first"));
     };
-    session.vaults.insert(
-        vault_id,
-        UnlockedVault {
-            vault_id,
-            name: name.to_string(),
-            vault_key,
-            vault_key_version: created_version,
-            writable: true,
-            item_count: 0,
-        },
-    );
+    if session.mcp_agent.is_none() {
+        session.mcp_agent = mcp_agent;
+    }
+    session.vaults.insert(vault_id, unlocked_vault);
     Ok(UnlockPasswordsVaultResponse {
         vaults: session_vault_summaries(session),
+        mcp_agent_identity_id: session.mcp_agent.as_ref().map(|agent| agent.identity_id),
     })
 }
 
@@ -1073,6 +1171,37 @@ async fn post_vault(
     parse_data_response(response).await
 }
 
+async fn post_ensure_hosted_agent(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    body: &EnsureHostedAgentIdentityRequest,
+) -> anyhow::Result<IdentityRecord> {
+    let url = format!("{PASSWORDS_BASE_URL}/identities/agents/hosted/ensure");
+    let payload = serde_json::to_value(body)?;
+    let response = crate::auth::authenticated_request(app, client, |client, token| {
+        client.post(&url).bearer_auth(token).json(&payload)
+    })
+    .await
+    .map_err(anyhow::Error::msg)?;
+    parse_data_response(response).await
+}
+
+async fn post_membership_grant(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    vault_id: Uuid,
+    body: &MembershipGrantRequest,
+) -> anyhow::Result<()> {
+    let url = format!("{PASSWORDS_BASE_URL}/vaults/{vault_id}/memberships");
+    let payload = serde_json::to_value(body)?;
+    let response = crate::auth::authenticated_request(app, client, |client, token| {
+        client.post(&url).bearer_auth(token).json(&payload)
+    })
+    .await
+    .map_err(anyhow::Error::msg)?;
+    parse_membership_grant_response(response).await
+}
+
 async fn post_item(
     app: &AppHandle,
     client: &reqwest::Client,
@@ -1087,6 +1216,38 @@ async fn post_item(
     .await
     .map_err(anyhow::Error::msg)?;
     parse_data_response(response).await
+}
+
+async fn parse_membership_grant_response(response: reqwest::Response) -> anyhow::Result<()> {
+    let status = response.status();
+    let body = response.text().await?;
+    if status == reqwest::StatusCode::CONFLICT {
+        return Ok(());
+    }
+    if !status.is_success() {
+        return Err(anyhow::anyhow!(
+            "Seren Passwords request failed with HTTP {}: {}",
+            status,
+            truncate_error_body(&body)
+        ));
+    }
+    let value: serde_json::Value = serde_json::from_str(&body)?;
+    if let Some(status) = publisher_status(&value) {
+        if status == 409 {
+            return Ok(());
+        }
+        if status >= 400 {
+            let payload = unwrap_publisher_body(&value);
+            return Err(anyhow::anyhow!(
+                "Seren Passwords request failed with upstream HTTP {}: {}",
+                status,
+                truncate_error_body(&payload.to_string())
+            ));
+        }
+    }
+    let payload = parse_publisher_payload(unwrap_publisher_body(&value))?;
+    let _wrapped: DataResponse<serde_json::Value> = serde_json::from_value(payload)?;
+    Ok(())
 }
 
 async fn patch_item(
@@ -1238,6 +1399,169 @@ fn session_vault_summaries(session: &PasswordsSession) -> Vec<PasswordsVaultSumm
             item_count: vault.item_count,
         })
         .collect()
+}
+
+async fn ensure_desktop_mcp_agent_identity(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    memberships: Option<&[MembershipRecord]>,
+    owned_vault_ids: &BTreeSet<Uuid>,
+    unlocked_vaults: &BTreeMap<Uuid, UnlockedVault>,
+    signing_private: &IdentitySigningPrivateKey,
+) -> anyhow::Result<Option<DesktopMcpAgentGrantSession>> {
+    if !unlocked_vaults
+        .keys()
+        .any(|vault_id| owned_vault_ids.contains(vault_id))
+    {
+        return Ok(None);
+    }
+
+    let agent = ensure_desktop_mcp_agent(app, client, signing_private).await?;
+
+    for (vault_id, vault) in unlocked_vaults {
+        if !owned_vault_ids.contains(vault_id)
+            || membership_allows_write(memberships, agent.identity_id, *vault_id)
+        {
+            continue;
+        }
+        if let Err(error) = grant_desktop_mcp_agent_vault_access(
+            app,
+            client,
+            signing_private,
+            agent.identity_id,
+            &agent.kem_public,
+            vault,
+        )
+        .await
+        {
+            log::warn!(
+                "Failed to grant Seren Passwords Desktop MCP agent {} access to vault {}: {}",
+                agent.identity_id,
+                vault_id,
+                error
+            );
+        }
+    }
+
+    Ok(Some(agent))
+}
+
+async fn ensure_desktop_mcp_agent(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    signing_private: &IdentitySigningPrivateKey,
+) -> anyhow::Result<DesktopMcpAgentGrantSession> {
+    let request = signed_desktop_mcp_agent_request(signing_private)?;
+    let agent = post_ensure_hosted_agent(app, client, &request).await?;
+    let kem_public = IdentityKemPublicKey::from_slice(&decode_b64(
+        &agent.kem_public_key,
+        "agent kem_public_key",
+    )?)?;
+    Ok(DesktopMcpAgentGrantSession {
+        identity_id: agent.identity_id,
+        kem_public,
+    })
+}
+
+fn signed_desktop_mcp_agent_request(
+    signing_private: &IdentitySigningPrivateKey,
+) -> anyhow::Result<EnsureHostedAgentIdentityRequest> {
+    let key_provenance = serde_json::json!({
+        "kind": "hosted_mcp",
+        "context": DESKTOP_MCP_AGENT_CONTEXT,
+        "client": "seren-desktop",
+    });
+    let issued_at = current_unix_timestamp()?;
+    let nonce = Uuid::new_v4().to_string();
+    let canonical = canonical_hosted_agent_request_bytes(
+        DESKTOP_MCP_AGENT_DISPLAY_NAME,
+        &key_provenance,
+        issued_at,
+        &nonce,
+    )?;
+    let signature = signing::sign(signing_private, &canonical);
+    Ok(EnsureHostedAgentIdentityRequest {
+        display_name: DESKTOP_MCP_AGENT_DISPLAY_NAME.to_string(),
+        key_provenance,
+        issued_at,
+        nonce,
+        signature: B64.encode(signature),
+    })
+}
+
+fn canonical_hosted_agent_request_bytes(
+    display_name: &str,
+    key_provenance: &serde_json::Value,
+    issued_at: i64,
+    nonce: &str,
+) -> anyhow::Result<Vec<u8>> {
+    let canonical = serde_json::json!({
+        "display_name": display_name,
+        "key_provenance": key_provenance,
+        "issued_at": issued_at,
+        "nonce": nonce,
+    });
+    serde_json::to_vec(&canonical).map_err(anyhow::Error::new)
+}
+
+fn current_unix_timestamp() -> anyhow::Result<i64> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| anyhow::anyhow!("system clock is before unix epoch: {err}"))?;
+    i64::try_from(duration.as_secs()).map_err(|err| anyhow::anyhow!("timestamp overflow: {err}"))
+}
+
+async fn grant_desktop_mcp_agent_vault_access(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    signing_private: &IdentitySigningPrivateKey,
+    agent_identity_id: Uuid,
+    agent_kem_public: &IdentityKemPublicKey,
+    vault: &UnlockedVault,
+) -> anyhow::Result<()> {
+    let mut wrapped_vault_key = wrap_vault_key_for_identity(&vault.vault_key, agent_kem_public);
+    let mut signature = membership_grant::sign_membership_grant(
+        signing_private,
+        vault.vault_id.as_bytes(),
+        agent_identity_id.as_bytes(),
+        membership_grant::ACCESS_LEVEL_WRITE,
+        &wrapped_vault_key,
+    );
+    let request = MembershipGrantRequest {
+        identity_id: agent_identity_id,
+        wrapped_vault_key: B64.encode(&wrapped_vault_key),
+        access_level: DESKTOP_MCP_AGENT_ACCESS_LEVEL,
+        granted_signature: B64.encode(&signature),
+    };
+    let result = post_membership_grant(app, client, vault.vault_id, &request).await;
+    wrapped_vault_key.zeroize();
+    signature.zeroize();
+    result
+}
+
+fn owned_vault_ids(vaults: &[VaultRecord], owner_user_id: Uuid) -> BTreeSet<Uuid> {
+    vaults
+        .iter()
+        .filter(|vault| vault.owner_user_id == Some(owner_user_id))
+        .map(|vault| vault.vault_id)
+        .collect()
+}
+
+fn membership_allows_write(
+    memberships: Option<&[MembershipRecord]>,
+    identity_id: Uuid,
+    vault_id: Uuid,
+) -> bool {
+    memberships.is_some_and(|memberships| {
+        memberships.iter().any(|membership| {
+            membership.identity_id == identity_id
+                && membership.vault_id == vault_id
+                && matches!(
+                    membership.access_level.to_ascii_lowercase().as_str(),
+                    "write" | "admin"
+                )
+        })
+    })
 }
 
 fn writable_vault_ids(
@@ -2230,12 +2554,14 @@ mod tests {
             vec![
                 VaultRecord {
                     vault_id: bad_vault_id,
+                    owner_user_id: None,
                     name_ciphertext: None,
                     wrapped_vault_key: Some(B64.encode([0u8; 48])),
                     vault_key_version: 1,
                 },
                 VaultRecord {
                     vault_id: good_vault_id,
+                    owner_user_id: None,
                     name_ciphertext: None,
                     wrapped_vault_key: Some(B64.encode(&wrapped)),
                     vault_key_version: 3,
@@ -2263,12 +2589,14 @@ mod tests {
                 vaults: vec![
                     VaultRecord {
                         vault_id: read_only_vault_id,
+                        owner_user_id: None,
                         name_ciphertext: None,
                         wrapped_vault_key: Some("read-only-wrap".into()),
                         vault_key_version: 1,
                     },
                     VaultRecord {
                         vault_id: writable_vault_id,
+                        owner_user_id: None,
                         name_ciphertext: None,
                         wrapped_vault_key: Some("write-wrap".into()),
                         vault_key_version: 2,
@@ -2304,6 +2632,7 @@ mod tests {
             SyncResponse {
                 vaults: vec![VaultRecord {
                     vault_id,
+                    owner_user_id: None,
                     name_ciphertext: None,
                     wrapped_vault_key: Some("read-only-wrap".into()),
                     vault_key_version: 1,
@@ -2333,6 +2662,7 @@ mod tests {
             SyncResponse {
                 vaults: vec![VaultRecord {
                     vault_id,
+                    owner_user_id: None,
                     name_ciphertext: None,
                     wrapped_vault_key: Some("wrapped-key".into()),
                     vault_key_version: 1,
@@ -2358,6 +2688,7 @@ mod tests {
             SyncResponse {
                 vaults: vec![VaultRecord {
                     vault_id,
+                    owner_user_id: None,
                     name_ciphertext: None,
                     wrapped_vault_key: Some("wrapped-key".into()),
                     vault_key_version: 1,
@@ -2369,6 +2700,94 @@ mod tests {
         .unwrap();
 
         assert_eq!(selected.vault_id, vault_id);
+    }
+
+    #[test]
+    fn owned_vault_ids_filters_to_current_user() {
+        let owner = Uuid::new_v4();
+        let other_owner = Uuid::new_v4();
+        let owned = Uuid::new_v4();
+        let shared = Uuid::new_v4();
+        let org = Uuid::new_v4();
+
+        let ids = owned_vault_ids(
+            &[
+                VaultRecord {
+                    vault_id: owned,
+                    owner_user_id: Some(owner),
+                    name_ciphertext: None,
+                    wrapped_vault_key: Some("owned-wrap".into()),
+                    vault_key_version: 1,
+                },
+                VaultRecord {
+                    vault_id: shared,
+                    owner_user_id: Some(other_owner),
+                    name_ciphertext: None,
+                    wrapped_vault_key: Some("shared-wrap".into()),
+                    vault_key_version: 1,
+                },
+                VaultRecord {
+                    vault_id: org,
+                    owner_user_id: None,
+                    name_ciphertext: None,
+                    wrapped_vault_key: Some("org-wrap".into()),
+                    vault_key_version: 1,
+                },
+            ],
+            owner,
+        );
+
+        assert!(ids.contains(&owned));
+        assert!(!ids.contains(&shared));
+        assert!(!ids.contains(&org));
+    }
+
+    #[test]
+    fn membership_allows_write_accepts_write_or_better() {
+        let agent = Uuid::new_v4();
+        let read_vault = Uuid::new_v4();
+        let write_vault = Uuid::new_v4();
+        let admin_vault = Uuid::new_v4();
+        let none_vault = Uuid::new_v4();
+        let memberships = vec![
+            MembershipRecord {
+                vault_id: read_vault,
+                identity_id: agent,
+                access_level: "read".into(),
+            },
+            MembershipRecord {
+                vault_id: write_vault,
+                identity_id: agent,
+                access_level: "write".into(),
+            },
+            MembershipRecord {
+                vault_id: admin_vault,
+                identity_id: agent,
+                access_level: "admin".into(),
+            },
+        ];
+
+        assert!(!membership_allows_write(
+            Some(&memberships),
+            agent,
+            read_vault
+        ));
+        assert!(membership_allows_write(
+            Some(&memberships),
+            agent,
+            write_vault
+        ));
+        assert!(membership_allows_write(
+            Some(&memberships),
+            agent,
+            admin_vault
+        ));
+        assert!(!membership_allows_write(
+            Some(&memberships),
+            agent,
+            none_vault
+        ));
+        assert!(!membership_allows_write(None, agent, read_vault));
     }
 
     #[test]

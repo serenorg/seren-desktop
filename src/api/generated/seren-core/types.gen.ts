@@ -619,7 +619,7 @@ export type CreateApiKeyRequest = {
     key_type?: null | ApiKeyType;
     name: string;
     /**
-     * Granular permission scopes for the key. Meaningful for agent keys.
+     * Granular permission scopes for publisher and operation access.
      */
     scopes?: Array<string> | null;
 };
@@ -7654,6 +7654,15 @@ export type DataResponseUserMe = {
      * Response for GET /auth/me - current user info with default organization
      */
     data: UserInfo & {
+        /**
+         * Present when the API key is bound to an agent identity.
+         */
+        agent_identity_id?: string | null;
+        /**
+         * Present when /auth/me is authenticated by an API key.
+         */
+        api_key_id?: string | null;
+        api_key_type?: null | ApiKeyType;
         /**
          * The user's default organization ID for API calls requiring an organization context.
          * This is typically the first organization the user joined (their personal org).
@@ -14720,6 +14729,15 @@ export type UserInfo = {
  */
 export type UserMe = UserInfo & {
     /**
+     * Present when the API key is bound to an agent identity.
+     */
+    agent_identity_id?: string | null;
+    /**
+     * Present when /auth/me is authenticated by an API key.
+     */
+    api_key_id?: string | null;
+    api_key_type?: null | ApiKeyType;
+    /**
      * The user's default organization ID for API calls requiring an organization context.
      * This is typically the first organization the user joined (their personal org).
      */
@@ -16513,6 +16531,10 @@ export type InitiateOauthByIdErrors = {
      * Provider not found
      */
     404: unknown;
+    /**
+     * OAuth account access is unavailable
+     */
+    503: unknown;
 };
 
 export type OauthCallbackByIdData = {
@@ -16573,6 +16595,10 @@ export type InitiateOauthErrors = {
      * Provider not found
      */
     404: unknown;
+    /**
+     * OAuth account access is unavailable
+     */
+    503: unknown;
 };
 
 export type OauthCallbackData = {

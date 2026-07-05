@@ -57,6 +57,15 @@ describe("createApiKey HTTP status (#2497 Defect 1)", () => {
       response: { status: 201 },
     });
     await expect(createApiKey()).resolves.toBe("seren_live_abc");
+    expect(createDefaultOrgApiKeyMock).toHaveBeenCalledWith({
+      body: {
+        name: "Seren Desktop",
+        key_type: undefined,
+        agent_identity_id: undefined,
+        scopes: ["publisher:*"],
+      },
+      throwOnError: false,
+    });
   });
 
   for (const status of [401, 403, 500]) {

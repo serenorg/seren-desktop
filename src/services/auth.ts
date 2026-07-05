@@ -2,6 +2,7 @@
 // ABOUTME: Wraps the generated seren-core SDK with token storage and rate-limit policy.
 
 import {
+  type ApiKeyType,
   createDefaultOrgApiKey,
   getCurrentUser,
   type LoginResult,
@@ -274,6 +275,14 @@ export async function isLoggedIn(): Promise<boolean> {
 export { getToken };
 
 const DESKTOP_API_KEY_NAME = "Seren Desktop";
+const DESKTOP_API_KEY_SCOPES = ["publisher:*"] as const;
+
+export interface CreateApiKeyOptions {
+  name?: string;
+  keyType?: ApiKeyType;
+  agentIdentityId?: string;
+  scopes?: readonly string[];
+}
 
 /**
  * Thrown when provisioning the SerenDB desktop API key fails. Carries the HTTP
@@ -297,9 +306,18 @@ export class ApiKeyProvisioningError extends Error {
  * @returns API key (seren_xxx_yyy format)
  * @throws ApiKeyProvisioningError if not authenticated or the request fails
  */
-export async function createApiKey(): Promise<string> {
+export async function createApiKey(
+  options: CreateApiKeyOptions = {},
+): Promise<string> {
   const { data, error, response } = await createDefaultOrgApiKey({
-    body: { name: DESKTOP_API_KEY_NAME },
+    body: {
+      name: options.name ?? DESKTOP_API_KEY_NAME,
+      key_type: options.keyType,
+      agent_identity_id: options.agentIdentityId,
+      scopes: options.scopes
+        ? [...options.scopes]
+        : [...DESKTOP_API_KEY_SCOPES],
+    },
     throwOnError: false,
   });
 

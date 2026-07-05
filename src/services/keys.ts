@@ -53,12 +53,14 @@ export interface PasswordsVaultSummary {
 
 export interface UnlockPasswordsVaultResponse {
   vaults: PasswordsVaultSummary[];
+  mcpAgentIdentityId?: string | null;
 }
 
 export interface SetupPasswordsVaultResponse {
   recoveryKeyDisplay: string;
   personalVaultId: string;
   vaults: PasswordsVaultSummary[];
+  mcpAgentIdentityId?: string | null;
 }
 
 export interface PasswordsItemSummary {
