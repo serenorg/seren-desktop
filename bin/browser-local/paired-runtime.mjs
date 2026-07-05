@@ -7,10 +7,11 @@ export const PAIRED_AGENT_TYPE = "claude-codex";
 
 // Default Claude model for the paired agent's planner/reviewer role. The paired
 // agent pins the Claude role to Fable 5 unless the user has explicitly chosen a
-// planner model. Applied as a post-spawn model switch (see spawnRole) so an
-// unavailable id degrades to the Claude Code default with a notice instead of
-// failing the session. Fable's context is 1M-native, so the bare id is used
-// (no `[1m]` tier suffix). #2825.
+// planner model. When the account cannot switch to Fable, the planner falls back
+// to the newest Opus (#2827) rather than silently running the Claude default.
+// Applied as a post-spawn model switch (see spawnRole), resolved against the
+// session's real switchable catalog. Fable's context is 1M-native, so the bare
+// id is used (no `[1m]` tier suffix). #2825.
 const PAIRED_PLANNER_MODEL_ID = "claude-fable-5";
 
 // Friendly labels for pinned model ids the Claude Code catalog may not report by
@@ -18,6 +19,41 @@ const PAIRED_PLANNER_MODEL_ID = "claude-fable-5";
 const MODEL_DISPLAY_LABELS = {
   "claude-fable-5": "Fable 5",
 };
+
+// When Fable 5 isn't available on the account, the planner falls back to Opus.
+// The Claude catalog is sorted opus-first, newest version first, so the first
+// Opus entry is the latest; prefer its 1M-context tier (the app default, #2810).
+function findFallbackOpus(availableModels) {
+  const opus = availableModels.filter(
+    (m) => typeof m.modelId === "string" && m.modelId.startsWith("claude-opus-"),
+  );
+  if (opus.length === 0) return null;
+  const newestBaseId = opus[0].modelId.replace(/\[1m\]$/, "");
+  return (
+    opus.find((m) => m.modelId === `${newestBaseId}[1m]`) ??
+    opus.find((m) => m.modelId === newestBaseId) ??
+    opus[0]
+  );
+}
+
+// Resolve which model to pin for the planner given the account's switchable
+// catalog. Prefer an explicit user choice, then Fable 5, then the newest Opus.
+// Returns a null modelId when none apply so the caller keeps the Claude default.
+// The `reason` drives the notice/label so a fallback never claims to be Fable.
+export function resolvePlannerModel(explicitModelId, availableModels) {
+  if (explicitModelId) {
+    return { modelId: explicitModelId, reason: "explicit", name: null };
+  }
+  const models = Array.isArray(availableModels) ? availableModels : [];
+  if (models.some((m) => m.modelId === PAIRED_PLANNER_MODEL_ID)) {
+    return { modelId: PAIRED_PLANNER_MODEL_ID, reason: "fable", name: null };
+  }
+  const opus = findFallbackOpus(models);
+  if (opus) {
+    return { modelId: opus.modelId, reason: "opus-fallback", name: opus.name };
+  }
+  return { modelId: null, reason: "default", name: null };
+}
 
 const ROLE_DEFS = {
   planner: {
@@ -372,23 +408,38 @@ export function createPairedRuntime({ emit, inner }) {
       });
       roleState.agentSessionId = info?.agentSessionId ?? roleState.agentSessionId;
 
-      // Pin the planner/reviewer model — Fable 5 by default (#2825) unless the
-      // user has explicitly chosen a planner model. Switch after spawn: the
-      // spawn stays on the Claude Code default, so a model id the local CLI does
-      // not recognize degrades to a notice here instead of killing the planner
-      // process (an unknown spawn-time `--model` would). Mirrors the executor.
-      const plannerModelId = config.modelId ?? PAIRED_PLANNER_MODEL_ID;
-      if (plannerModelId) {
+      // Pin the planner/reviewer model. Prefer the user's explicit choice, then
+      // Fable 5 (#2825), then the newest Opus when the account has no Fable
+      // access (#2827). Resolve against the session's real switchable catalog
+      // instead of assuming setSessionModel throws on a miss — the Claude path
+      // does not throw for an unavailable id, so a blind pin would silently run
+      // the wrong model while claiming Fable. Switch after spawn so the process
+      // stays on the Claude default first; pinnedModelId/notice always reflect
+      // the model actually pinned, never a Fable claim while running Opus.
+      const availableModels =
+        typeof inner.listSessionModels === "function"
+          ? (inner.listSessionModels(innerSessionId) ?? [])
+          : [];
+      const target = resolvePlannerModel(config.modelId, availableModels);
+      if (target.modelId) {
         try {
           await inner.setSessionModel({
             sessionId: innerSessionId,
-            modelId: plannerModelId,
+            modelId: target.modelId,
           });
-          roleState.pinnedModelId = plannerModelId;
+          roleState.pinnedModelId = target.modelId;
+          roleState.notice =
+            target.reason === "opus-fallback"
+              ? `Fable 5 is unavailable on this account; planning with ${target.name ?? "Opus"} instead.`
+              : null;
         } catch {
           roleState.pinnedModelId = null;
-          roleState.notice = `Pinned model ${plannerModelId} is unavailable in this Claude Code install. Using the Claude default instead.`;
+          roleState.notice = `Pinned model ${target.modelId} is unavailable in this Claude Code install. Using the Claude default instead.`;
         }
+      } else {
+        roleState.pinnedModelId = null;
+        roleState.notice =
+          "Neither Fable 5 nor an Opus model is available on this account. Using the Claude default instead.";
       }
       return info;
     }
