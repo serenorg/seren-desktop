@@ -438,7 +438,7 @@ jobs:
 
       - name: Restore Windows signature cache
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .sig-cache/windows-authenticode
           # Unique primary key + broad restore key: restore the newest prior
