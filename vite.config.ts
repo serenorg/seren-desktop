@@ -80,6 +80,13 @@ export default defineConfig(async () => ({
 
   // Path aliases
   resolve: {
+    // Force a single solid-js instance across the app and every workspace
+    // package (e.g. @seren/chat-ui, which pins it as a peer dependency).
+    // Without this, a version skew — such as the app on 1.9.14 while a
+    // workspace peer resolves to 1.9.13 — ships two reactive runtimes, and a
+    // component's onMount can run in an ownerless second runtime synchronously
+    // during render, tripping temporal-dead-zone crashes.
+    dedupe: ["solid-js"],
     alias: [
       { find: "@", replacement: resolve(__dirname, "src") },
       {
