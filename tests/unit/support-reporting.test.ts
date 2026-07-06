@@ -9,6 +9,7 @@ import {
   benignConsoleError,
   captureSupportError,
   installSupportReporting,
+  isBenignReloadCallbackWarning,
   reportError,
 } from "@/lib/support/hook";
 import {
@@ -398,5 +399,25 @@ describe("#1630 agent-store support reporting", () => {
     expect(source).toContain("captureSupportError({");
     expect(source).toContain("tool_calls: toolCalls");
     expect(source).not.toContain("TODO(#1630)");
+  });
+});
+
+describe("benign Tauri reload callback-id warning (#2873)", () => {
+  const NOISE =
+    "[TAURI] Couldn't find callback id 838612930. This might happen when the app is reloaded while Rust is running an asynchronous operation.";
+
+  it("flags the reload callback-id warning for suppression", () => {
+    expect(isBenignReloadCallbackWarning([NOISE])).toBe(true);
+  });
+
+  it("leaves unrelated warnings (including other [TAURI] warnings) untouched", () => {
+    expect(isBenignReloadCallbackWarning(["some unrelated warning"])).toBe(
+      false,
+    );
+    expect(
+      isBenignReloadCallbackWarning(["[TAURI] plugin failed to initialize"]),
+    ).toBe(false);
+    expect(isBenignReloadCallbackWarning([new Error(NOISE)])).toBe(false);
+    expect(isBenignReloadCallbackWarning([])).toBe(false);
   });
 });

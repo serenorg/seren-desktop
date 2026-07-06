@@ -465,6 +465,23 @@ export async function safeInvoke<T>(
   }
 }
 
+/**
+ * Tauri's injected IPC core logs `[TAURI] Couldn't find callback id <n>. This
+ * might happen when the app is reloaded while Rust is running an asynchronous
+ * operation.` whenever a callback id is missing because the webview reloaded
+ * mid async op. It is expected and non-actionable, and repeats many times per
+ * reload — so the console.warn wrapper drops it instead of printing/logging it.
+ * Matched apostrophe-agnostically; unrelated `[TAURI]` warnings pass through.
+ */
+export function isBenignReloadCallbackWarning(args: unknown[]): boolean {
+  const first = args[0];
+  return (
+    typeof first === "string" &&
+    first.includes("[TAURI]") &&
+    first.includes("find callback id")
+  );
+}
+
 export function installSupportReporting(): void {
   if (installed || typeof window === "undefined") return;
   const supportGlobal = supportReportingGlobal();
@@ -512,6 +529,9 @@ export function installSupportReporting(): void {
   };
 
   console.warn = (...args: unknown[]) => {
+    // Drop the benign Tauri reload callback-id warning entirely — it is
+    // non-actionable and floods both the console and the support log. #2873.
+    if (isBenignReloadCallbackWarning(args)) return;
     originalWarn(...args);
     appendSupportLog("WARN", "console", args.map(String).join(" "));
   };
