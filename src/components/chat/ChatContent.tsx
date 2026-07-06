@@ -514,7 +514,8 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     setHtmlCache(e.data.id, e.data.html);
   };
   markdownWorker.onerror = (err) => {
-    console.error("[ChatContent] Markdown worker error:", err.message);
+    // Non-fatal: the caller falls back to inline rendering. Not reportable.
+    console.warn("[ChatContent] Markdown worker error:", err.message);
   };
   onCleanup(() => markdownWorker.terminate());
 

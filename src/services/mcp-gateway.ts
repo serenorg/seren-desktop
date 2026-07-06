@@ -370,7 +370,9 @@ export async function initializeGateway(): Promise<void> {
     // Get Seren API key (auto-created after OAuth login)
     const apiKey = await getSerenApiKey();
     if (!apiKey) {
-      console.error(
+      // Expected pre-login state, not a defect; the throw below carries the
+      // reportable signal if a caller treats it as fatal.
+      console.warn(
         "[MCP Gateway] No Seren API key - user needs to complete login",
       );
       throw new McpGatewayError(
@@ -705,7 +707,8 @@ export async function callGatewayTool(
     };
   } catch (error) {
     const executionTime = Date.now() - startTime;
-    console.error(
+    // Expected agent outcome (returned to the model as is_error). Not reportable.
+    console.warn(
       `[MCP Gateway] Tool call failed: ${error instanceof Error ? error.message : String(error)}`,
     );
 

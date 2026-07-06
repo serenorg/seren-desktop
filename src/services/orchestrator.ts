@@ -1151,7 +1151,8 @@ async function handleToolRequest(request: ToolExecutionRequest): Promise<void> {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("[orchestrator] Tool execution failed:", message);
+    // Expected agent outcome (submitted back as an is_error result). Not reportable.
+    console.warn("[orchestrator] Tool execution failed:", message);
 
     await invoke("submit_tool_result", {
       toolCallId: request.tool_call_id,

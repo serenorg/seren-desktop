@@ -11,6 +11,8 @@ import { supportSignature } from "./signature";
 import type {
   SupportBuildInfo,
   SupportCaptureInput,
+  SupportReportAgentContext,
+  SupportReportHttpInfo,
   SupportReportIds,
   SupportReportLogEntry,
   SupportReportPayload,
@@ -381,6 +383,76 @@ export function captureUnknownError(kind: string, error: unknown): void {
   });
 }
 
+/**
+ * Report a reportable failure to the support pipeline while ALSO surfacing it
+ * in the console. Use this for failures whose payload is a bare string, an
+ * `err.message`, or a plain object — cases the `console.error` capture gate
+ * intentionally drops because they are not `Error` instances.
+ *
+ * The gate stays conservative on purpose: a bare `console.error("...")` must
+ * NOT auto-open a public GitHub issue (most such logs are non-fatal). So
+ * reportability is opt-in through this helper rather than inferred from the
+ * shape of console.error arguments. Its counterpart is `benignConsoleError`
+ * for failures that are visible but must not report. See #2864.
+ */
+export function reportError(
+  kind: string,
+  message: string,
+  opts?: {
+    cause?: unknown;
+    http?: SupportReportHttpInfo;
+    agentContext?: SupportReportAgentContext;
+  },
+): void {
+  // Visible in the console for local debugging. String-only so the wrapped
+  // console.error's Error-like gate does not ALSO enqueue a duplicate capture.
+  try {
+    console.error(`[report:${kind}] ${message}`);
+  } catch {
+    // Never let a logging failure escape the reporting path.
+  }
+  const normalized =
+    opts?.cause !== undefined ? normalizeError(opts.cause) : undefined;
+  void captureSupportError({
+    kind,
+    message:
+      normalized?.message && normalized.message !== message
+        ? `${message}: ${normalized.message}`
+        : message,
+    stack: normalized?.stack ?? [],
+    http: opts?.http,
+    agentContext: opts?.agentContext,
+  });
+}
+
+/**
+ * Log a KNOWN-BENIGN failure that should be visible as a console error but must
+ * NOT open a support report / GitHub issue: transient runtime races, graceful
+ * user-initiated cancels, expected precondition failures. This is the explicit,
+ * testable counterpart to the old habit of "pass strings so the gate skips it".
+ * See #2864.
+ */
+export function benignConsoleError(reason: string, ...args: unknown[]): void {
+  // Route through the ORIGINAL (unwrapped) console.error so the capture gate
+  // never inspects these args — otherwise an Error passed here would still be
+  // reported, defeating the suppression.
+  const original =
+    supportReportingGlobal().__serenSupportOriginalError ??
+    console.error.bind(console);
+  try {
+    original(`[benign:${reason}]`, ...args);
+  } catch {
+    // ignore
+  }
+  // Keep a breadcrumb in the support log slice (WARN, non-reporting) so the
+  // context still rides along with any UNRELATED report captured later.
+  appendSupportLog(
+    "WARN",
+    "console",
+    [`[benign:${reason}]`, ...args].map(String).join(" "),
+  );
+}
+
 export async function safeInvoke<T>(
   command: string,
   args?: Record<string, unknown>,
@@ -421,7 +493,10 @@ export function installSupportReporting(): void {
     // exception (Error instance or something with a stack). Lots of code
     // uses `console.error` for non-fatal warnings (e.g. "failed to connect
     // to local provider") and we don't want every such log to become a
-    // public GitHub issue.
+    // public GitHub issue. Reportability for non-Error payloads is opt-in via
+    // `reportError(...)`; visible-but-benign failures use `benignConsoleError`
+    // or `console.warn`. The `console-error-reportable` test enforces that no
+    // reportable-looking `console.error` slips through this gate. See #2864.
     const candidate = args.find(
       (arg) =>
         arg instanceof Error ||

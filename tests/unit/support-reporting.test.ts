@@ -6,8 +6,10 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __supportReportingTestHooks,
+  benignConsoleError,
   captureSupportError,
   installSupportReporting,
+  reportError,
 } from "@/lib/support/hook";
 import {
   capSupportPayload,
@@ -278,6 +280,55 @@ describe("support report hook behavior", () => {
     expect(console.warn).not.toHaveBeenCalledWith(
       expect.stringContaining("secret-token"),
     );
+  });
+});
+
+describe("#2864 explicit console reporting helpers", () => {
+  beforeEach(() => {
+    installBrowserGlobals();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(null, { status: 201 }))),
+    );
+  });
+
+  afterEach(() => {
+    supportHooks.reset();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("reportError forwards a non-Error failure to the support pipeline", async () => {
+    installSupportReporting();
+    reportError("test.reportable", "reportable failure with no Error object");
+
+    await flushSupportPipeline();
+
+    expect(supportHooks.seenSignatures()).toHaveLength(1);
+  });
+
+  it("reportError captures exactly once even with an Error cause", async () => {
+    installSupportReporting();
+    reportError("test.reportable_cause", "wrapper message", {
+      cause: new Error("underlying failure"),
+    });
+
+    await flushSupportPipeline();
+
+    // One capture only — the visible console.error line is string-only, so the
+    // gate does not ALSO enqueue a duplicate.
+    expect(supportHooks.seenSignatures()).toHaveLength(1);
+  });
+
+  it("benignConsoleError never reports, even when handed an Error", async () => {
+    installSupportReporting();
+    benignConsoleError("test.benign", "known-benign race", new Error("boom"));
+
+    await flushSupportPipeline();
+
+    expect(supportHooks.seenSignatures()).toEqual([]);
   });
 });
 

@@ -591,6 +591,14 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
                         "[ProviderRuntime] Crashed {} times, giving up",
                         restart_attempts - 1
                     );
+                    crate::support::report_runtime_error(
+                        &app,
+                        "provider_runtime.crash_loop",
+                        &format!(
+                            "provider runtime crashed {} times; giving up",
+                            restart_attempts - 1
+                        ),
+                    );
                     let _ = app.emit(
                         "provider-runtime://failed",
                         serde_json::json!({ "attempts": restart_attempts - 1 }),
@@ -620,6 +628,11 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
                         // process slot — otherwise the frontend never learns
                         // the agent runtime died.
                         log::error!("[ProviderRuntime] Restart failed: {}", err);
+                        crate::support::report_runtime_error(
+                            &app,
+                            "provider_runtime.restart_failed",
+                            &format!("provider runtime restart failed: {err}"),
+                        );
                         let _ = app.emit(
                             "provider-runtime://failed",
                             serde_json::json!({ "attempts": restart_attempts, "error": err }),

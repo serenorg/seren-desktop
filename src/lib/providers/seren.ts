@@ -386,7 +386,9 @@ export const serenProvider: ProviderAdapter = {
 
     if (!response.ok || !response.body) {
       const errorText = await response.text().catch(() => "");
-      console.error("[Seren Stream Error]", {
+      // The api.serendb.com 4xx/5xx is already captured centrally by appFetch's
+      // captureHttpFailure; this is a local diagnostic before the throw below.
+      console.warn("[Seren Stream Error]", {
         status: response.status,
         body: errorText,
         model,

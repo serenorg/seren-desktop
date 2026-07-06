@@ -25,7 +25,7 @@ import {
 } from "@/lib/browser-local-runtime";
 import { getRuntimeConfig } from "@/lib/runtime";
 import { shortcuts } from "@/lib/shortcuts";
-import { captureUnknownError } from "@/lib/support/hook";
+import { captureUnknownError, reportError } from "@/lib/support/hook";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
 import { syncMemories } from "@/services/memory";
@@ -394,7 +394,14 @@ function App() {
           await notifyUser(notice.message);
         }
       } catch (error) {
-        console.error(`[ClaudeMemory] reactive start crashed: ${error}`);
+        // The inner catch already reports known ClaudeMemory start failures; a
+        // throw that reaches here is an UNEXPECTED reactive-effect crash worth a
+        // ticket, not a benign log.
+        reportError(
+          "claude_memory.reactive_crash",
+          "[ClaudeMemory] reactive start crashed",
+          { cause: error },
+        );
       }
     });
   });

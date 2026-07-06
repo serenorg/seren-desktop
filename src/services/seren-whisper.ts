@@ -86,7 +86,9 @@ export async function transcribeAudio(
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("[Whisper] HTTP error:", response.status, errorText);
+    // The api.serendb.com 4xx/5xx is captured centrally by appFetch's
+    // captureHttpFailure; this is a local diagnostic before the throw.
+    console.warn("[Whisper] HTTP error:", response.status, errorText);
     throw new Error(`Whisper API error: ${response.status} - ${errorText}`);
   }
 
@@ -102,7 +104,8 @@ export async function transcribeAudio(
       typeof error?.message === "string"
         ? error.message
         : `Upstream error: ${status}`;
-    console.error("[Whisper] Gateway upstream error:", msg);
+    // Local diagnostic before the throw; the caller reports if fatal.
+    console.warn("[Whisper] Gateway upstream error:", msg);
     throw new Error(msg);
   }
 
@@ -112,7 +115,8 @@ export async function transcribeAudio(
   >;
   const text = responsePayload.text;
   if (!text) {
-    console.error("[Whisper] No text in response:", JSON.stringify(result));
+    // Local diagnostic before the throw; the caller reports if fatal.
+    console.warn("[Whisper] No text in response:", JSON.stringify(result));
     throw new Error("No transcription returned from Whisper API");
   }
 

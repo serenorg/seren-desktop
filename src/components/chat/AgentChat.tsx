@@ -231,7 +231,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     setHtmlCache(e.data.id, e.data.html);
   };
   markdownWorker.onerror = (err) => {
-    console.error("[AgentChat] Markdown worker error:", err.message);
+    // Non-fatal: the caller falls back to inline rendering. Not reportable.
+    console.warn("[AgentChat] Markdown worker error:", err.message);
   };
   onCleanup(() => markdownWorker.terminate());
 

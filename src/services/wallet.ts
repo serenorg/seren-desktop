@@ -149,7 +149,9 @@ export async function initiateTopUp(amount: number) {
 
   if (error) {
     const status = response?.status;
-    console.error("[Wallet] Error initiating top-up:", { status, error });
+    // The api.serendb.com 4xx/5xx is captured centrally by the hey-api client's
+    // captureHttpFailure; this is a local diagnostic before the throw.
+    console.warn("[Wallet] Error initiating top-up:", { status, error });
     throw new Error(
       `Failed to initiate top-up: ${apiErrorDetail(error, status)}`,
     );

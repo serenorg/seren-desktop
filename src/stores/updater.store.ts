@@ -133,7 +133,9 @@ async function checkForUpdates(_manual = false): Promise<void> {
     }
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
-    console.error("[Updater] Check failed:", err.message);
+    // Observability goes through telemetry.captureError below; this is a local
+    // console diagnostic. Update-check failures are transient/network-bound.
+    console.warn("[Updater] Check failed:", err.message);
     telemetry.captureError(err, { type: "updater", phase: "check" });
     setState({ status: "error", error: err.message });
   }
@@ -211,7 +213,9 @@ async function installPreflight(): Promise<boolean> {
     const reason =
       report.reason ??
       "SerenDesktop cannot install updates from this app location.";
-    console.error("[Updater] Install blocked by preflight:", reason);
+    // Expected, user-actionable condition (e.g. app in a read-only location);
+    // observability flows through telemetry.captureError below.
+    console.warn("[Updater] Install blocked by preflight:", reason);
     telemetry.captureError(new Error(reason), {
       type: "updater",
       phase: "install_preflight",
@@ -365,7 +369,8 @@ async function installAvailableUpdate(
     await relaunch();
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
-    console.error("[Updater] Install failed:", err.message);
+    // Observability goes through telemetry.captureError below; local diagnostic.
+    console.warn("[Updater] Install failed:", err.message);
     telemetry.captureError(err, { type: "updater", phase: "install" });
     setState({ status: "error", error: err.message });
     // Release the native shutdown guard so the user can keep using the app
