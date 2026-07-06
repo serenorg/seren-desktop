@@ -23,8 +23,13 @@ export const PairedEffortSelector: Component<Props> = (props) => {
 
   const roleStatus = () => props.session?.paired?.[props.pairedRole] ?? null;
 
+  const configOptions = () => {
+    const options = roleStatus()?.configOptions;
+    return Array.isArray(options) ? options : [];
+  };
+
   const option = () =>
-    roleStatus()?.configOptions?.find(
+    configOptions().find(
       (o) => o.id === "reasoning_effort" && o.type === "select",
     ) ?? null;
 

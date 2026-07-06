@@ -42,3 +42,39 @@ describe("agent selector partial-status guards (#2862)", () => {
     );
   });
 });
+
+describe("configOptions non-array guards (#2869)", () => {
+  const agentEffort = source("src/components/chat/AgentEffortSelector.tsx");
+  const agentFastMode = source("src/components/chat/AgentFastModeSelector.tsx");
+  const pairedEffort = source("src/components/chat/PairedEffortSelector.tsx");
+  const agentStore = source("src/stores/agent.store.ts");
+
+  it("normalizes configOptions before .find in every effort/fast-mode selector", () => {
+    // `configOptions?.find(...)` only guards null/undefined; a truthy
+    // non-array partial frame reaches `.find` and throws, tripping the
+    // workspace-recovery boundary. Each reader must normalize to [] first.
+    for (const selector of [agentEffort, agentFastMode, pairedEffort]) {
+      expect(selector).toContain("Array.isArray(options) ? options : []");
+      expect(selector).toContain("configOptions().find");
+      expect(selector).not.toContain("configOptions?.find");
+    }
+  });
+
+  it("only writes array-shaped status list fields into session state", () => {
+    // Root cause: handleStatusChange stored whatever the frame carried. The
+    // write must be gated on Array.isArray so no reader ever sees a non-array.
+    expect(agentStore).toContain("Array.isArray(data?.configOptions)");
+    expect(agentStore).toContain("Array.isArray(models.availableModels)");
+    expect(agentStore).toContain("Array.isArray(modes.availableModes)");
+    // The bare unguarded write-gate must be gone.
+    expect(agentStore).not.toContain("if (data?.configOptions) {");
+  });
+
+  it("ignores a configOptionsUpdate frame whose configOptions is not an array", () => {
+    // incoming.map(...) throws on a non-array before it can even be stored.
+    const idx = agentStore.indexOf('case "configOptionsUpdate":');
+    expect(idx).toBeGreaterThan(0);
+    const body = agentStore.slice(idx, idx + 700);
+    expect(body).toContain("if (!Array.isArray(incoming)) break;");
+  });
+});
