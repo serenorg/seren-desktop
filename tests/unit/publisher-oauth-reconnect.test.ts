@@ -137,6 +137,17 @@ describe("publisher OAuth reconnect", () => {
     expect(mocks.openUrl).toHaveBeenCalledTimes(1);
   });
 
+  it("treats signed-out OAuth connection listing as empty without hitting the API (#2865)", async () => {
+    mocks.getToken.mockResolvedValue(null);
+    const { listConnectedPublishers } = await import(
+      "@/services/publisher-oauth"
+    );
+
+    await expect(listConnectedPublishers()).resolves.toEqual([]);
+
+    expect(mocks.listConnections).not.toHaveBeenCalled();
+  });
+
   it("continues reconnect when the stale connection was already gone", async () => {
     mocks.listConnections.mockResolvedValue({
       data: {

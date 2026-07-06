@@ -28,10 +28,15 @@ export const PairedEffortSelector: Component<Props> = (props) => {
       (o) => o.id === "reasoning_effort" && o.type === "select",
     ) ?? null;
 
+  const optionValues = () => {
+    const values = option()?.options;
+    return Array.isArray(values) ? values : [];
+  };
+
   const currentLabel = () => {
     const opt = option();
     if (!opt) return null;
-    const current = opt.options.find((v) => v.value === opt.currentValue);
+    const current = optionValues().find((v) => v.value === opt.currentValue);
     return current?.name ?? opt.currentValue;
   };
 
@@ -88,7 +93,7 @@ export const PairedEffortSelector: Component<Props> = (props) => {
               Applies from the next planning session Claude spawns.
             </div>
           </Show>
-          <For each={option()?.options ?? []}>
+          <For each={optionValues()}>
             {(opt) => (
               <button
                 type="button"

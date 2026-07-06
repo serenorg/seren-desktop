@@ -5,12 +5,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import { getValidationRuntimeInfo } from "@/services/oauth-callback";
+import { setRootPath } from "@/stores/fileTree";
 
 interface ValidationCommand {
   id: string;
   command: string;
   selector?: string;
   value?: string;
+  path?: string;
   route?: string;
   key?: string;
   timeoutMs?: number;
@@ -114,9 +116,17 @@ async function handleCommand(command: ValidationCommand): Promise<unknown> {
       return dumpText(command.selector);
     case "screenshot":
       return screenshot(command.selector, command.native === true);
+    case "setRootPath":
+      return setValidationRootPath(command.path ?? command.value);
     default:
       throw new Error(`Unsupported validation command: ${command.command}`);
   }
+}
+
+function setValidationRootPath(path: string | undefined): { rootPath: string } {
+  if (!path) throw new Error("setRootPath requires path");
+  setRootPath(path);
+  return { rootPath: path };
 }
 
 function navigate(route: string | undefined): { route: string } {

@@ -191,6 +191,14 @@ export async function connectPublisher(
  */
 export async function listConnectedPublishers(): Promise<OAuthConnection[]> {
   console.log("[PublisherOAuth] Fetching connected OAuth providers");
+  const token = await getToken();
+  if (!token) {
+    console.log(
+      "[PublisherOAuth] No auth token available; treating connections as empty",
+    );
+    return [];
+  }
+
   const { data, error } = await listConnections({ throwOnError: false });
 
   if (error) {

@@ -51,4 +51,10 @@ describe("AppShell scoped error recovery (#2797)", () => {
       expect(appShell).toContain(marker);
     }
   });
+
+  it("logs the caught error detail locally before reporting telemetry (#2862)", () => {
+    expect(appShell).toContain("surface recovered after error");
+    expect(appShell).toContain("error.stack ?? error.message");
+    expect(appShell).toContain("telemetry.reportError");
+  });
 });

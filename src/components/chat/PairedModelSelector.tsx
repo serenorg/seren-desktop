@@ -22,7 +22,10 @@ export const PairedModelSelector: Component<Props> = (props) => {
   let dropdownRef: HTMLDivElement | undefined;
 
   const roleStatus = () => props.session?.paired?.[props.pairedRole] ?? null;
-  const availableModels = () => roleStatus()?.models?.availableModels ?? [];
+  const availableModels = () => {
+    const models = roleStatus()?.models?.availableModels;
+    return Array.isArray(models) ? models : [];
+  };
   const currentModelId = () => roleStatus()?.models?.currentModelId;
 
   const currentModelName = () => {

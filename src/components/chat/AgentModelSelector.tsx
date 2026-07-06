@@ -18,7 +18,10 @@ export const AgentModelSelector: Component<Props> = (props) => {
   const [isOpen, setIsOpen] = createSignal(false);
   let dropdownRef: HTMLDivElement | undefined;
 
-  const availableModels = () => props.session?.availableModels ?? [];
+  const availableModels = () => {
+    const models = props.session?.availableModels;
+    return Array.isArray(models) ? models : [];
+  };
   const currentModelId = () => props.session?.currentModelId;
   const userSelectedModelId = () => props.session?.userSelectedModelId;
 
