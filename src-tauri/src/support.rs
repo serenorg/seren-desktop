@@ -1,10 +1,11 @@
 // ABOUTME: Native support-reporting helpers for desktop bug reports.
 // ABOUTME: Generates anonymous IDs, submits reports, and persists panic sidecars.
 
+use std::collections::HashSet;
 use std::fs;
 use std::panic::PanicHookInfo;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use hmac::{Hmac, Mac};
@@ -29,6 +30,29 @@ const MAX_BUNDLE_BYTES: usize = 5 * 1024 * 1024;
 const MAX_SWEEP_PER_LAUNCH: usize = 5;
 // Retry-After ceiling so a misconfigured server cannot hang us indefinitely.
 const MAX_RETRY_AFTER_SECONDS: u64 = 60;
+// Bound the native runtime-error dedup set so a long-running session with many
+// distinct native failures cannot grow it unbounded. Native reports are rare
+// (catastrophic events), so clearing on overflow is acceptable.
+const MAX_SEEN_RUNTIME_SIGNATURES: usize = 256;
+
+// Signatures of native runtime-error reports already submitted this process, so
+// a crash-loop that fires the same failure repeatedly reports it only once.
+static SEEN_RUNTIME_SIGNATURES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn remember_runtime_signature(signature: &str) -> bool {
+    let set = SEEN_RUNTIME_SIGNATURES.get_or_init(|| Mutex::new(HashSet::new()));
+    // Never panic on a poisoned lock — support reporting must not take down a
+    // caller. Recover the inner set instead.
+    let mut guard = set.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.contains(signature) {
+        return false;
+    }
+    if guard.len() >= MAX_SEEN_RUNTIME_SIGNATURES {
+        guard.clear();
+    }
+    guard.insert(signature.to_string());
+    true
+}
 
 #[derive(Serialize)]
 pub struct SupportReportIds {
@@ -78,7 +102,61 @@ pub fn get_support_report_ids(
 
 #[tauri::command]
 pub async fn submit_support_report(app: AppHandle, bundle: Value) -> Result<(), String> {
-    post_support_report(&app, bundle, true).await.map(|_| ())
+    let client = build_http_client();
+    match post_with_client(&app, &client, bundle.clone()).await {
+        PostOutcome::Success => Ok(()),
+        // 4xx (schema drift, expired key, too large): the server will never
+        // accept it, so drop rather than persist a bundle that can't succeed.
+        PostOutcome::PermanentFailure(err) => Err(err),
+        // Transient (offline, 5xx, 429, pre-auth): persist for the next-launch
+        // sweep so the report is not lost, then report the failure to the caller.
+        PostOutcome::TransientFailure(err) => {
+            if let Err(persist_err) = persist_pending_report(&app, &bundle) {
+                log::warn!("[support-report] failed to persist pending report: {persist_err}");
+            }
+            Err(err)
+        }
+    }
+}
+
+/// Report a genuine native/runtime defect (e.g. the provider runtime dying and
+/// failing to restart) to the support pipeline. Fire-and-forget and safe to
+/// call from any sync context; deduped per-process. On a transient submit
+/// failure the bundle is persisted for the next-launch sweep so it is durable.
+pub fn report_runtime_error(app: &AppHandle, kind: &str, message: &str) {
+    let payload = match build_runtime_payload(app, kind, message) {
+        Some(payload) => payload,
+        None => return,
+    };
+    if !remember_runtime_signature(&payload.signature) {
+        return;
+    }
+    let kind = kind.to_string();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let bundle = match serde_json::to_value(&payload) {
+            Ok(bundle) => bundle,
+            Err(err) => {
+                log::warn!("[support-report] runtime report serialize failed: {err}");
+                return;
+            }
+        };
+        let client = build_http_client();
+        match post_with_client(&app, &client, bundle.clone()).await {
+            PostOutcome::Success => {}
+            PostOutcome::PermanentFailure(err) => {
+                log::warn!("[support-report] runtime report '{kind}' dropped (permanent): {err}");
+            }
+            PostOutcome::TransientFailure(err) => {
+                log::warn!("[support-report] runtime report '{kind}' deferred for retry: {err}");
+                if let Err(persist_err) = persist_pending_report(&app, &bundle) {
+                    log::warn!(
+                        "[support-report] failed to persist pending runtime report: {persist_err}"
+                    );
+                }
+            }
+        }
+    });
 }
 
 #[tauri::command]
@@ -103,18 +181,27 @@ pub async fn sweep_support_crash_reports(app: AppHandle) -> Result<(), String> {
             continue;
         }
 
+        let is_pending = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(is_pending_report_filename);
+
         let body = fs::read_to_string(&path)
             .map_err(|err| format!("failed to read crash report {}: {err}", path.display()))?;
         let bundle: Value = serde_json::from_str(&body)
             .map_err(|err| format!("failed to parse crash report {}: {err}", path.display()))?;
-        if !is_crash_recovery_sidecar(&bundle) {
+
+        // Replay both crash-recovery sidecars (from a panic) and pending-report
+        // sidecars (a live report deferred after a transient submit failure).
+        // Anything else is a stray file we delete rather than replay.
+        if !is_pending && !is_crash_recovery_sidecar(&bundle) {
             log::warn!(
-                "[support-report] deleting non-crash sidecar {}",
+                "[support-report] deleting stray sidecar {}",
                 path.display()
             );
             if let Err(err) = fs::remove_file(&path) {
                 log::warn!(
-                    "[support-report] failed to delete non-crash sidecar {}: {err}",
+                    "[support-report] failed to delete stray sidecar {}: {err}",
                     path.display()
                 );
             }
@@ -128,7 +215,7 @@ pub async fn sweep_support_crash_reports(app: AppHandle) -> Result<(), String> {
             PostOutcome::Success | PostOutcome::PermanentFailure(_) => {
                 if let Err(err) = fs::remove_file(&path) {
                     log::warn!(
-                        "[support-report] failed to delete crash sidecar {}: {err}",
+                        "[support-report] failed to delete sidecar {}: {err}",
                         path.display()
                     );
                 }
@@ -136,7 +223,7 @@ pub async fn sweep_support_crash_reports(app: AppHandle) -> Result<(), String> {
             // Transient (network/5xx): leave on disk for the next launch.
             PostOutcome::TransientFailure(err) => {
                 log::warn!(
-                    "[support-report] crash sidecar {} kept for retry: {err}",
+                    "[support-report] sidecar {} kept for retry: {err}",
                     path.display()
                 );
             }
@@ -203,20 +290,6 @@ enum PostOutcome {
     /// Transient failure (network error, 5xx). Caller may keep the bundle for
     /// a future attempt.
     TransientFailure(String),
-}
-
-async fn post_support_report(app: &AppHandle, bundle: Value, retry: bool) -> Result<bool, String> {
-    let client = build_http_client();
-    if !retry {
-        return match post_attempt(app, &client, &bundle).await {
-            PostOutcome::Success => Ok(true),
-            PostOutcome::PermanentFailure(err) | PostOutcome::TransientFailure(err) => Err(err),
-        };
-    }
-    match post_with_client(app, &client, bundle).await {
-        PostOutcome::Success => Ok(true),
-        PostOutcome::PermanentFailure(err) | PostOutcome::TransientFailure(err) => Err(err),
-    }
 }
 
 async fn post_with_client(app: &AppHandle, client: &reqwest::Client, bundle: Value) -> PostOutcome {
@@ -377,6 +450,43 @@ fn panic_message(info: &PanicHookInfo<'_>) -> String {
     }
 }
 
+// Build a non-crash support payload for a native runtime error. Unlike panics,
+// these are not crash recoveries — they are live defects surfaced by the Rust
+// core (e.g. the provider runtime dying), so `crash_recovery` is false.
+fn runtime_signature(kind: &str, redacted_message: &str) -> String {
+    sha256_hex(&format!("{kind}\n{redacted_message}"))
+}
+
+fn build_runtime_payload(app: &AppHandle, kind: &str, message: &str) -> Option<SupportPayload> {
+    let salt = support_salt(app).ok()?;
+    let message = redact_string(message);
+    let signature = runtime_signature(kind, &message);
+
+    Some(SupportPayload {
+        schema_version: 1,
+        signature,
+        install_id: hmac_hex_prefix(&salt, b"install", 16).ok()?,
+        session_id_hash: hmac_hex_prefix(&salt, b"runtime-session", 16).ok()?,
+        app_version: app
+            .config()
+            .version
+            .clone()
+            .unwrap_or_else(|| "unknown".into()),
+        tauri_version: tauri::VERSION.to_string(),
+        os: target_os().to_string(),
+        arch: target_arch().to_string(),
+        timestamp: jiff::Timestamp::now().to_string(),
+        crash_recovery: false,
+        truncated: false,
+        error: SupportError {
+            kind: kind.to_string(),
+            message,
+            stack: Vec::new(),
+        },
+        log_slice: Vec::new(),
+    })
+}
+
 fn write_crash_payload(app: &AppHandle, payload: &SupportPayload) -> Result<PathBuf, String> {
     let crash_dir = crash_dir(app)?;
     fs::create_dir_all(&crash_dir).map_err(|err| err.to_string())?;
@@ -391,11 +501,41 @@ fn write_crash_payload(app: &AppHandle, payload: &SupportPayload) -> Result<Path
     Ok(path)
 }
 
+/// Persist a report bundle that could not be submitted this run to a `pending-`
+/// sidecar so the next-launch sweep can retry it. The raw bundle is stored
+/// verbatim (preserving http/agent_context the typed struct drops) so the
+/// retried report is identical to the original.
+fn persist_pending_report(app: &AppHandle, bundle: &Value) -> Result<PathBuf, String> {
+    let crash_dir = crash_dir(app)?;
+    fs::create_dir_all(&crash_dir).map_err(|err| err.to_string())?;
+    let bytes = serde_json::to_vec(bundle).map_err(|err| err.to_string())?;
+    if bytes.len() > MAX_BUNDLE_BYTES {
+        return Err(format!("pending report too large ({} bytes)", bytes.len()));
+    }
+    let signature = bundle
+        .get("signature")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let sig_prefix: String = signature.chars().take(12).collect();
+    let filename = format!(
+        "pending-{}-{}.json",
+        jiff::Timestamp::now().as_second(),
+        sig_prefix
+    );
+    let path = crash_dir.join(filename);
+    fs::write(&path, &bytes).map_err(|err| err.to_string())?;
+    Ok(path)
+}
+
 fn is_crash_recovery_sidecar(bundle: &Value) -> bool {
     bundle
         .get("crash_recovery")
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+fn is_pending_report_filename(name: &str) -> bool {
+    name.starts_with("pending-")
 }
 
 fn capped_crash_payload_bytes(payload: &SupportPayload) -> Result<Vec<u8>, String> {
@@ -577,6 +717,69 @@ mod tests {
             "crash_recovery": false,
         })));
         assert!(!is_crash_recovery_sidecar(&json!({})));
+    }
+
+    #[test]
+    fn sweep_replays_pending_and_crash_but_not_stray_sidecars() {
+        // The sweep replays a sidecar when it is a pending-report file OR a
+        // crash-recovery bundle; everything else is a stray file it deletes.
+        let non_crash = json!({ "crash_recovery": false });
+        assert!(is_pending_report_filename("pending-123-abc.json"));
+        assert!(!is_pending_report_filename("crash-123-abc.json"));
+        // A pending sidecar replays even though its bundle is not crash_recovery.
+        assert!(
+            is_pending_report_filename("pending-1-a.json") || is_crash_recovery_sidecar(&non_crash)
+        );
+        // A stray non-crash file that is not a pending sidecar is not replayed.
+        assert!(
+            !is_pending_report_filename("stray.json") && !is_crash_recovery_sidecar(&non_crash)
+        );
+    }
+
+    #[test]
+    fn runtime_signature_is_stable_and_kind_scoped() {
+        let a = runtime_signature("provider_runtime.restart_failed", "boom");
+        let b = runtime_signature("provider_runtime.restart_failed", "boom");
+        let c = runtime_signature("provider_runtime.crash_loop", "boom");
+        assert_eq!(a, b, "same kind+message must dedupe to one signature");
+        assert_ne!(a, c, "different kind must produce a different signature");
+        assert_eq!(a.len(), 64);
+    }
+
+    #[test]
+    fn runtime_signature_folds_over_redacted_paths() {
+        // Two users hitting the same failure with different $HOME paths must
+        // dedupe to one signature after redaction.
+        let left = runtime_signature(
+            "provider_runtime.restart_failed",
+            &redact_string("spawn failed at /Users/alice/app"),
+        );
+        let right = runtime_signature(
+            "provider_runtime.restart_failed",
+            &redact_string("spawn failed at /Users/bob/app"),
+        );
+        assert_eq!(left, right);
+    }
+
+    #[test]
+    fn runtime_dedup_reports_each_signature_once_and_stays_bounded() {
+        let sig = "a".repeat(64);
+        assert!(remember_runtime_signature(&sig), "first sighting reports");
+        assert!(
+            !remember_runtime_signature(&sig),
+            "repeat sighting is suppressed"
+        );
+        // Fill past the cap with distinct signatures; the set must stay bounded
+        // and never panic.
+        for i in 0..(MAX_SEEN_RUNTIME_SIGNATURES + 10) {
+            let _ = remember_runtime_signature(&format!("{i:064x}"));
+        }
+        let set = SEEN_RUNTIME_SIGNATURES
+            .get()
+            .expect("initialized")
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(set.len() <= MAX_SEEN_RUNTIME_SIGNATURES);
     }
 
     #[test]

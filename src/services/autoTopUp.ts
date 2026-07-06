@@ -65,9 +65,11 @@ function logEvent(
     eventHistory.shift();
   }
 
-  // Log to console for debugging
+  // Log to console for debugging. The underlying API failure (if any) is
+  // already captured centrally by the hey-api client's captureHttpFailure; a
+  // declined card is operational, not a defect. Not reportable here.
   if (type === "failed") {
-    console.error("[AutoTopUp]", type, event);
+    console.warn("[AutoTopUp]", type, event);
   }
 }
 

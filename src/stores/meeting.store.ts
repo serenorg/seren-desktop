@@ -971,15 +971,13 @@ async function stopAndProcess(meeting: Meeting): Promise<void> {
     await loadMeetings();
     if (!isTauriRuntime()) return;
     if (stopOutcome?.failureReason) {
-      console.error("[meeting] capture stopped without transcript output", {
+      // Local diagnostic only. The reportable case (a real transcription
+      // backend outage) is captured explicitly below via captureSupportError;
+      // an empty capture with no transcriptionError is benign. #2606.
+      console.warn("[meeting] capture stopped without transcript output", {
         meetingId: meeting.id,
         outcome: stopOutcome,
       });
-      // A transport-level transcription failure (quota/auth/5xx) is a
-      // service-side outage, not a benign empty capture — route it through the
-      // support pipeline so a serenorg/seren-desktop ticket opens. console.error
-      // is local-only (per `feedback_support_pipeline.md`); only a real backend
-      // error reaches here, never plain silence. #2606.
       if (stopOutcome.transcriptionError) {
         void captureSupportError({
           kind: "meeting_transcription_failed",

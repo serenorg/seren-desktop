@@ -22,40 +22,37 @@ const errorCaseEnd = agentStoreSource.indexOf(
 const errorCaseBody = agentStoreSource.slice(errorCaseStart, errorCaseEnd);
 
 describe("#1708 — graceful 'Task cancelled' is logged without firing capture", () => {
-  it("the case 'error' branch detects 'Task cancelled' before the diagnostic console.error fires", () => {
-    // The cancel-detection check must precede the diagnostic console.error
-    // so the call site can pick the string-only signature for graceful
-    // cancels. Otherwise the support hook captures the Error instance
-    // before our existing graceful-cancel handler runs.
+  it("the case 'error' branch detects 'Task cancelled' before the benign suppression fires", () => {
+    // The cancel-detection check must precede the diagnostic log so the call
+    // site can route graceful cancels through benignConsoleError. Otherwise a
+    // real reporting path could fire before our graceful-cancel handler runs.
     const detectIdx = errorCaseBody.indexOf('"Task cancelled"');
-    const consoleIdx = errorCaseBody.indexOf("console.error(");
+    const suppressIdx = errorCaseBody.indexOf("benignConsoleError(");
     expect(detectIdx, "Task cancelled string must exist").toBeGreaterThan(0);
-    expect(consoleIdx, "console.error must exist").toBeGreaterThan(0);
-    expect(detectIdx).toBeLessThan(consoleIdx);
+    expect(suppressIdx, "benignConsoleError must exist").toBeGreaterThan(0);
+    expect(detectIdx).toBeLessThan(suppressIdx);
   });
 
-  it("the graceful-cancel branch calls console.error WITHOUT forwarding event.data.error", () => {
-    // Mirror #1699: log strings only so the support hook's capture filter
-    // (Error instance / stack-bearing object) does not forward this to
-    // the Gateway. Real errors continue to forward the Error instance.
-    const cancelBranchIdx = errorCaseBody.indexOf("isGracefulCancel");
+  it("the graceful-cancel branch suppresses via benignConsoleError without forwarding event.data.error", () => {
+    // Post-#2864: route graceful cancels through the explicit benign helper so
+    // they never report, and never forward event.data.error. Real errors
+    // continue to forward the Error instance in the else branch below.
+    const cancelBranchIdx = errorCaseBody.indexOf("if (isGracefulCancel) {");
     expect(
       cancelBranchIdx,
-      "isGracefulCancel guard must exist in case 'error'",
+      "isGracefulCancel branch must exist in case 'error'",
     ).toBeGreaterThan(0);
-    // First console.error after the guard must NOT pass event.data.error
-    // as a forwarded Error candidate. Bound the search so we don't bleed
-    // into the non-cancel branch.
-    const region = errorCaseBody.slice(
-      cancelBranchIdx,
-      cancelBranchIdx + 600,
+    // Bound the slice to just the cancel branch (up to the else-if).
+    const region = errorCaseBody.slice(cancelBranchIdx, cancelBranchIdx + 400);
+    const branchEnd = region.indexOf("} else");
+    expect(branchEnd).toBeGreaterThan(0);
+    const cancelBranchOnly = region.slice(0, branchEnd);
+    expect(cancelBranchOnly).toMatch(
+      /benignConsoleError\(\s*"agent\.graceful_cancel"/,
     );
-    const firstConsoleErr = region.indexOf("console.error(");
-    expect(firstConsoleErr).toBeGreaterThan(0);
-    const elseIdx = region.indexOf("} else {");
-    expect(elseIdx).toBeGreaterThan(firstConsoleErr);
-    const cancelBranchOnly = region.slice(firstConsoleErr, elseIdx);
     expect(cancelBranchOnly).not.toMatch(/event\.data\.error/);
+    expect(cancelBranchOnly).not.toMatch(/console\.error\(/);
+    expect(cancelBranchOnly).not.toMatch(/reportError\(/);
   });
 
   it("the non-cancel branch still forwards event.data.error so real defects are captured", () => {

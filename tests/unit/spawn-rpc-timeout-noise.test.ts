@@ -16,11 +16,11 @@ const supportHookSource = readFileSync(
 );
 
 describe("#151 — RPC timeout in spawn catch is logged without firing capture", () => {
-  it("the spawn catch branches on 'Runtime RPC timed out' and logs strings only", () => {
-    // The support hook captures console.error only when an Error instance (or
-    // an object with a stack) is in the args. Passing the message as a
-    // string skips the capture path. Verify the branch exists and uses a
-    // string-only call.
+  it("the spawn catch branches on 'Runtime RPC timed out' and routes through benignConsoleError", () => {
+    // Post-#2864 the transient runtime-unresponsive case is suppressed via the
+    // explicit `benignConsoleError` helper (not a fragile string-only
+    // console.error), so it can never open a support report. Verify the branch
+    // exists and uses that helper.
     const catchIdx = agentStoreSource.indexOf("Spawn error (");
     expect(catchIdx, "spawn catch must exist").toBeGreaterThan(0);
     // The branch should pivot on the timeout substring.
@@ -31,17 +31,17 @@ describe("#151 — RPC timeout in spawn catch is logged without firing capture",
       branchIdx,
       "RPC-timeout branch must exist in spawn catch",
     ).toBeGreaterThan(0);
-    // The timeout branch must call console.error WITHOUT passing the Error
-    // object (string-only signature).
     const region = agentStoreSource.slice(branchIdx, branchIdx + 600);
-    expect(region).toMatch(
-      /console\.error\(\s*`\[AgentStore\] Spawn error[^`]*runtime unresponsive: \$\{message\}`,?\s*\)/,
-    );
-    // No Error instance forwarded in the timeout branch.
     const timeoutBranchEnd = region.indexOf("} else {");
     expect(timeoutBranchEnd).toBeGreaterThan(0);
     const timeoutBranchOnly = region.slice(0, timeoutBranchEnd);
-    expect(timeoutBranchOnly).not.toMatch(/console\.error\([^)]*,\s*error\b/);
+    // The timeout branch suppresses via the named helper...
+    expect(timeoutBranchOnly).toMatch(
+      /benignConsoleError\(\s*"agent\.spawn_runtime_unresponsive"/,
+    );
+    // ...and forwards nothing to any reporting path.
+    expect(timeoutBranchOnly).not.toMatch(/console\.error\(/);
+    expect(timeoutBranchOnly).not.toMatch(/reportError\(/);
   });
 
   it("the non-timeout branch still forwards the Error so support capture fires", () => {

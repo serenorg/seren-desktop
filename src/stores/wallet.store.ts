@@ -332,7 +332,10 @@ async function refreshBalance(): Promise<void> {
     consecutiveFailures++;
     const message =
       err instanceof Error ? err.message : "Failed to fetch balance";
-    console.error("[Wallet Store] Error refreshing balance:", message);
+    // Background poll: expired sessions and transient network blips are the
+    // dominant cases, and the underlying HTTP failure is already captured
+    // centrally by the wallet service's fetch. Local diagnostic only.
+    console.warn("[Wallet Store] Error refreshing balance:", message);
 
     const isAuthError =
       message.includes("expired") ||

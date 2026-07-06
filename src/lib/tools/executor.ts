@@ -570,7 +570,9 @@ export async function executeTool(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[Tool Executor] Tool "${name}" failed:`, message);
+    // Tool failures are an expected agent outcome, surfaced to the model as an
+    // is_error result — not an app defect. Not reportable.
+    console.warn(`[Tool Executor] Tool "${name}" failed:`, message);
     return {
       tool_call_id: toolCall.id,
       content: `Error: ${message}`,
@@ -613,7 +615,8 @@ async function executeMcpTool(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(
+    // Expected agent outcome (surfaced as an is_error result). Not reportable.
+    console.warn(
       `[Tool Executor] MCP tool "${serverName}/${toolName}" failed:`,
       message,
     );
@@ -823,7 +826,8 @@ async function executeGatewayTool(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(
+    // Expected agent outcome (surfaced as an is_error result). Not reportable.
+    console.warn(
       `[Tool Executor] Gateway tool "${publisherSlug}/${toolName}" failed:`,
       message,
     );

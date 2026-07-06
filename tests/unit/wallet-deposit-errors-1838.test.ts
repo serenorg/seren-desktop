@@ -133,7 +133,7 @@ describe("#1838 captureSupportError leaves a trail when dedupe drops a capture",
 
 describe("#1838 initiateTopUp surfaces server status and message", () => {
   beforeEach(() => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -149,10 +149,12 @@ describe("#1838 initiateTopUp surfaces server status and message", () => {
     } as unknown as Awaited<ReturnType<typeof createDeposit>>);
 
     // Pre-fix this threw a hardcoded "Failed to initiate top-up" with no
-    // status, no body, no console.error — operators had nothing to grep.
+    // status, no body, no local log — operators had nothing to grep. The
+    // reportable HTTP failure is captured centrally by the hey-api client, so
+    // the site logs a local console.warn breadcrumb (not console.error). #2864.
     await expect(initiateTopUp(500)).rejects.toThrow(
       /400.*Amount exceeds per-purchase limit of \$300/,
     );
-    expect(console.error).toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalled();
   });
 });

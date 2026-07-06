@@ -511,7 +511,11 @@ import {
   performAgentFallback,
 } from "@/lib/rate-limit-fallback";
 import { scrubAgentMarkup } from "@/lib/scrub-agent-markup";
-import { captureSupportError } from "@/lib/support/hook";
+import {
+  benignConsoleError,
+  captureSupportError,
+  reportError,
+} from "@/lib/support/hook";
 import {
   clearConversationHistory,
   createAgentConversation,
@@ -2568,7 +2572,9 @@ export const agentStore = {
         targetSessionId = await this.resumeAgentConversation(threadId);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error("[AgentStore] retryLastPrompt: respawn failed:", message);
+        // setTurnError below routes this through _submitTurnErrorReport ->
+        // captureSupportError, so the report is already covered. Local diagnostic.
+        console.warn("[AgentStore] retryLastPrompt: respawn failed:", message);
         this.setTurnError(threadId, "crash_ceiling", message);
         return;
       }
@@ -2607,7 +2613,8 @@ export const agentStore = {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error("[AgentStore] retryLastPrompt: dispatch failed:", message);
+      // Covered by setTurnError -> _submitTurnErrorReport below. Local diagnostic.
+      console.warn("[AgentStore] retryLastPrompt: dispatch failed:", message);
       this.setTurnError(threadId, "crash_ceiling", message);
     }
   },
@@ -2833,7 +2840,10 @@ export const agentStore = {
       setState("remoteSessionsNextCursor", page.nextCursor ?? null);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error("Failed to list remote sessions:", msg);
+      // Provider RPC failure (Tauri invoke) — not an HTTP call, so nothing
+      // captures it centrally. This surfaces a user-facing error state, so it
+      // is a reportable Gateway-feature failure.
+      reportError("agent.remote_sessions_list_failed", msg, { cause: error });
       setState("remoteSessionsError", msg);
     } finally {
       setState("remoteSessionsLoading", false);
@@ -2870,7 +2880,10 @@ export const agentStore = {
       setState("remoteSessionsNextCursor", page.nextCursor ?? null);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error("Failed to list more remote sessions:", msg);
+      // Provider RPC failure (Tauri invoke) with no central capture; reportable.
+      reportError("agent.remote_sessions_load_more_failed", msg, {
+        cause: error,
+      });
       setState("remoteSessionsError", msg);
     } finally {
       setState("remoteSessionsLoading", false);
@@ -3548,11 +3561,11 @@ export const agentStore = {
         // unresponsive — the Rust runtime monitor will restart it and the
         // `provider-runtime://restarted` listener re-dispatches the in-flight
         // turn. This is a transient runtime-layer failure, not a code defect
-        // the user can act on; pass strings (no Error) to console.error so
-        // the support pipeline doesn't capture it as a public bug report.
-        // #151.
+        // the user can act on, so it is explicitly suppressed from the support
+        // pipeline. #151.
         if (message.includes("Runtime RPC timed out")) {
-          console.error(
+          benignConsoleError(
+            "agent.spawn_runtime_unresponsive",
             `[AgentStore] Spawn error (${agentDisplayName(resolvedAgentType)}) — runtime unresponsive: ${message}`,
           );
         } else {
@@ -3871,8 +3884,12 @@ export const agentStore = {
     // Prevent infinite spawn-crash-respawn cascades: if this conversation
     // has failed too many times in a short window, stop retrying.
     if (isSpawnCascading(conversationId)) {
-      console.error(
-        `[AgentStore] Spawn cascade detected for ${conversationId} — ${SPAWN_CASCADE_MAX_FAILURES} failures in ${SPAWN_CASCADE_WINDOW_MS / 1000}s. Stopping auto-resume.`,
+      // A cascade ceiling means the agent cannot start after repeated attempts
+      // — a real degradation worth a ticket, and there is no Error object or
+      // central capture on this computed path.
+      reportError(
+        "agent.spawn_cascade",
+        `[AgentStore] Spawn cascade detected — ${SPAWN_CASCADE_MAX_FAILURES} failures in ${SPAWN_CASCADE_WINDOW_MS / 1000}s. Stopping auto-resume.`,
       );
       setState(
         "error",
@@ -5088,7 +5105,9 @@ export const agentStore = {
       });
 
       if (!newSessionId) {
-        console.error(
+        // Local diagnostic; the throw below is the reportable signal caught by
+        // the compaction recovery path.
+        console.warn(
           "[AgentStore] Failed to spawn new session after compaction — catastrophic",
         );
         throw new Error(
@@ -6941,17 +6960,18 @@ export const agentStore = {
       case "error": {
         // Graceful "Task cancelled" is a system/user-initiated cancel
         // (predictive-compaction promotion teardown, Stop button, etc.) and
-        // not a defect. Detect it before the diagnostic console.error so
-        // the cancel branch can log strings only — the support hook's
-        // capture filter requires an Error instance / stack-bearing object,
-        // and a plain string skips the public-bug-report path. Mirrors the
-        // RPC-timeout filter from #1699. #1708.
+        // not a defect, so it is explicitly suppressed from the support
+        // pipeline. Mirrors the RPC-timeout filter from #1699. #1708.
         const errorMessage = String(event.data.error);
         const isGracefulCancel = errorMessage.includes("Task cancelled");
         const isRecoverableSessionDeath = isSessionDeathMessage(errorMessage);
         const errorPrefix = `[AgentStore] Error event for session ${sessionId} (${agentDisplayName(state.sessions[sessionId]?.info.agentType)}):`;
         if (isGracefulCancel) {
-          console.error(errorPrefix, errorMessage);
+          benignConsoleError(
+            "agent.graceful_cancel",
+            errorPrefix,
+            errorMessage,
+          );
         } else if (isRecoverableSessionDeath) {
           console.info(errorPrefix, errorMessage);
         } else {
@@ -7086,7 +7106,9 @@ export const agentStore = {
           const compactPromise = this.compactAndRetry(sessionId).then(
             (outcome) => {
               if (outcome === "failed_catastrophic") {
-                console.error(
+                // failTurnForSession below routes this through setTurnError ->
+                // _submitTurnErrorReport -> captureSupportError. Local diagnostic.
+                console.warn(
                   "[AgentStore] Compaction failed catastrophically — falling back to Chat",
                 );
                 setState("sessions", sessionId, "promptTooLong", true);
