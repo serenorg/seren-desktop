@@ -10,15 +10,44 @@ export const PAIRED_AGENT_TYPE = "claude-codex";
 // planner model. When the account cannot switch to Fable, the planner falls back
 // to the newest Opus (#2827) rather than silently running the Claude default.
 // Applied as a post-spawn model switch (see spawnRole), resolved against the
-// session's real switchable catalog. Fable's context is 1M-native, so the bare
-// id is used (no `[1m]` tier suffix). #2825.
-const PAIRED_PLANNER_MODEL_ID = "claude-fable-5";
+// session's real switchable catalog.
+//
+// Match on the base id, NOT an exact literal: the Claude Code CLI reports Fable
+// in its switchable catalog as `claude-fable-5[1m]` (1M-tier suffix, the same
+// shape as its Opus/Sonnet 1M entries), and future builds may date-stamp it. An
+// exact bare-id compare silently missed the real `[1m]` entry and demoted every
+// Fable-capable account to the Opus fallback with a false "unavailable" notice
+// (#2859). Resolve against the normalized base and pin whichever concrete id the
+// catalog actually exposes. #2825.
+const PAIRED_PLANNER_BASE_MODEL_ID = "claude-fable-5";
 
 // Friendly labels for pinned model ids the Claude Code catalog may not report by
 // name, so the setup declaration reads "Fable 5" rather than a raw model id.
 const MODEL_DISPLAY_LABELS = {
   "claude-fable-5": "Fable 5",
+  "claude-fable-5[1m]": "Fable 5",
 };
+
+// Normalize a catalog model id to its base for family matching: drop the 1M-tier
+// `[1m]` suffix and any trailing `-YYYYMMDD` date stamp. Mirrors the stripping in
+// claude-runtime.mjs's inferClaudeContextWindow so `claude-fable-5[1m]` and a
+// dated `claude-fable-5-20260601` both resolve to `claude-fable-5`.
+function normalizeBaseModelId(modelId) {
+  return typeof modelId === "string"
+    ? modelId.replace(/\[1m\]$/i, "").replace(/-\d{8}$/, "")
+    : "";
+}
+
+// Find the account's switchable Fable entry regardless of tier/date suffix.
+// Prefer the 1M-tier variant when the catalog lists more than one, so the pin
+// lands on Fable's native 1M context.
+function findFableModel(availableModels) {
+  const fable = availableModels.filter(
+    (m) => normalizeBaseModelId(m.modelId) === PAIRED_PLANNER_BASE_MODEL_ID,
+  );
+  if (fable.length === 0) return null;
+  return fable.find((m) => /\[1m\]$/i.test(m.modelId)) ?? fable[0];
+}
 
 // When Fable 5 isn't available on the account, the planner falls back to Opus.
 // The Claude catalog is sorted opus-first, newest version first, so the first
@@ -45,8 +74,9 @@ export function resolvePlannerModel(explicitModelId, availableModels) {
     return { modelId: explicitModelId, reason: "explicit", name: null };
   }
   const models = Array.isArray(availableModels) ? availableModels : [];
-  if (models.some((m) => m.modelId === PAIRED_PLANNER_MODEL_ID)) {
-    return { modelId: PAIRED_PLANNER_MODEL_ID, reason: "fable", name: null };
+  const fable = findFableModel(models);
+  if (fable) {
+    return { modelId: fable.modelId, reason: "fable", name: fable.name ?? null };
   }
   const opus = findFallbackOpus(models);
   if (opus) {
