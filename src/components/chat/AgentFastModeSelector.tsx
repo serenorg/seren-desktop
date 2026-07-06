@@ -10,7 +10,10 @@ interface Props {
 }
 
 export const AgentFastModeSelector: Component<Props> = (props) => {
-  const availableModels = () => props.session?.availableModels ?? [];
+  const availableModels = () => {
+    const models = props.session?.availableModels;
+    return Array.isArray(models) ? models : [];
+  };
   const displayModelId = () =>
     props.session?.userSelectedModelId ?? props.session?.currentModelId;
 

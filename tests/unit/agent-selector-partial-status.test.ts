@@ -14,6 +14,7 @@ describe("agent selector partial-status guards (#2862)", () => {
   const pairedEffort = source("src/components/chat/PairedEffortSelector.tsx");
   const agentModel = source("src/components/chat/AgentModelSelector.tsx");
   const pairedModel = source("src/components/chat/PairedModelSelector.tsx");
+  const agentFastMode = source("src/components/chat/AgentFastModeSelector.tsx");
 
   it("does not dereference config option arrays directly in effort selectors", () => {
     for (const selector of [agentEffort, pairedEffort]) {
@@ -29,5 +30,15 @@ describe("agent selector partial-status guards (#2862)", () => {
     for (const selector of [agentModel, pairedModel]) {
       expect(selector).toContain("Array.isArray(models) ? models : []");
     }
+  });
+
+  it("normalizes availableModels before .find in the fast-mode selector (#2866)", () => {
+    // option() runs ungated inside <Show when={option()}> and calls
+    // availableModels().find(...), so a non-array availableModels must be
+    // normalized to [] rather than dereferenced.
+    expect(agentFastMode).toContain("Array.isArray(models) ? models : []");
+    expect(agentFastMode).not.toContain(
+      "props.session?.availableModels ?? []",
+    );
   });
 });
