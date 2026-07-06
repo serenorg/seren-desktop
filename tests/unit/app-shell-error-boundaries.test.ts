@@ -54,7 +54,11 @@ describe("AppShell scoped error recovery (#2797)", () => {
 
   it("logs the caught error detail locally before reporting telemetry (#2862)", () => {
     expect(appShell).toContain("surface recovered after error");
-    expect(appShell).toContain("error.stack ?? error.message");
+    // formatErrorForLog leads with name+message so WebKit/JSC's frames-only
+    // stack no longer hides what threw (#2877). It replaced the old
+    // `error.stack ?? error.message`, which dropped the message entirely.
+    expect(appShell).toContain("formatErrorForLog(error)");
+    expect(appShell).not.toContain("error.stack ?? error.message");
     expect(appShell).toContain("telemetry.reportError");
   });
 
@@ -63,8 +67,8 @@ describe("AppShell scoped error recovery (#2797)", () => {
     // neither reaches /support/report. The boundary reporter must ALSO route
     // through captureUnknownError so a user-visible workspace-recovery crash
     // auto-files a ticket.
-    expect(appShell).toContain(
-      'import { captureUnknownError } from "@/lib/support/hook";',
+    expect(appShell).toMatch(
+      /import \{[^}]*\bcaptureUnknownError\b[^}]*\} from "@\/lib\/support\/hook";/,
     );
     const idx = appShell.indexOf("function reportShellBoundaryError");
     expect(idx).toBeGreaterThan(0);

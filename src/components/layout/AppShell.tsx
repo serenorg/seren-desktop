@@ -59,7 +59,7 @@ import { openFolder } from "@/lib/files/service";
 import { isMeetingProcessingStatus } from "@/lib/meeting-format";
 import { isNativeTextEditingKey, shortcuts } from "@/lib/shortcuts";
 import type { InstalledSkill } from "@/lib/skills";
-import { captureUnknownError } from "@/lib/support/hook";
+import { captureUnknownError, formatErrorForLog } from "@/lib/support/hook";
 import { listenForInterviewLaunch } from "@/lib/tauri-bridge";
 import {
   backfillConversationFts,
@@ -181,8 +181,10 @@ const ShellRecoveryFallback: Component<ShellRecoveryFallbackProps> = (
 );
 
 function reportShellBoundaryError(surface: string, error: unknown): void {
-  const detail =
-    error instanceof Error ? (error.stack ?? error.message) : String(error);
+  // Lead with name + message (formatErrorForLog), then frames. A bare
+  // `error.stack` is frames-only on WebKit/JSC, which is why these crashes
+  // logged an anonymous stack with no error text.
+  const detail = formatErrorForLog(error);
   console.warn(
     `[AppShell] ${surface} surface recovered after error: ${detail}`,
   );
