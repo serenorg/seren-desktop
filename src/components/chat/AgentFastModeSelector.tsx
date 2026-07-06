@@ -26,9 +26,14 @@ export const AgentFastModeSelector: Component<Props> = (props) => {
     );
   };
 
+  const configOptions = () => {
+    const options = props.session?.configOptions;
+    return Array.isArray(options) ? options : [];
+  };
+
   const option = () => {
     const fastModeOption =
-      props.session?.configOptions?.find(
+      configOptions().find(
         (config) => config.id === "fast_mode" && config.type === "select",
       ) ?? null;
     return fastModeOption && currentModelSupportsFastMode()

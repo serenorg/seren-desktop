@@ -14,8 +14,13 @@ export const AgentEffortSelector: Component<Props> = (props) => {
   const [isOpen, setIsOpen] = createSignal(false);
   let dropdownRef: HTMLDivElement | undefined;
 
+  const configOptions = () => {
+    const options = props.session?.configOptions;
+    return Array.isArray(options) ? options : [];
+  };
+
   const option = () =>
-    props.session?.configOptions?.find(
+    configOptions().find(
       (o) => o.id === "reasoning_effort" && o.type === "select",
     ) ?? null;
 

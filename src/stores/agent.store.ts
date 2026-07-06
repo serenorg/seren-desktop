@@ -6884,6 +6884,10 @@ export const agentStore = {
       case "configOptionsUpdate": {
         const restore = state.sessions[sessionId]?.pendingConfigRestore;
         const incoming = event.data.configOptions;
+        // Ignore a malformed frame whose configOptions is not an array — both
+        // the `.map` below and the selector `.find` readers would throw on it,
+        // tripping the workspace-recovery boundary. #2869.
+        if (!Array.isArray(incoming)) break;
         const merged = restore
           ? incoming.map((opt) =>
               opt.type === "select" && restore[opt.id]
@@ -7871,12 +7875,19 @@ export const agentStore = {
           setState("sessions", sessionId, "pendingModelId", undefined);
         }
       }
-      setState(
-        "sessions",
-        sessionId,
-        "availableModels",
-        models.availableModels,
-      );
+      // A partial/malformed status frame can carry these list fields as a
+      // non-array shape (#2862). Only accept arrays so no downstream render
+      // ever dereferences a non-array with `.find`/`.map`; a later clean frame
+      // restores the real list. Ignoring (vs. coercing to []) keeps a prior
+      // good list intact through a transient bad frame. #2869.
+      if (Array.isArray(models.availableModels)) {
+        setState(
+          "sessions",
+          sessionId,
+          "availableModels",
+          models.availableModels,
+        );
+      }
     }
 
     // Extract mode state from session status events (e.g. ready with modes,
@@ -7887,12 +7898,12 @@ export const agentStore = {
         availableModes?: AgentModeInfo[];
       };
       setState("sessions", sessionId, "currentModeId", modes.currentModeId);
-      if (modes.availableModes) {
+      if (Array.isArray(modes.availableModes)) {
         setState("sessions", sessionId, "availableModes", modes.availableModes);
       }
     }
 
-    if (data?.configOptions) {
+    if (Array.isArray(data?.configOptions)) {
       setState("sessions", sessionId, "configOptions", data.configOptions);
     }
 
