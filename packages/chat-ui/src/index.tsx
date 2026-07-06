@@ -242,6 +242,12 @@ export function ChatThinkingStatus(props: ChatThinkingStatusProps) {
   let wordTimer: ReturnType<typeof setInterval> | undefined;
   let tickTimer: ReturnType<typeof setInterval> | undefined;
 
+  // Declared before onMount because onMount reads it. When a mismatched
+  // solid-js instance runs onMount synchronously during render (instead of
+  // deferring), a declaration placed after onMount lands in the temporal dead
+  // zone and throws a ReferenceError that takes down the whole surface.
+  const showElapsedAfterMs = () => props.showElapsedAfterMs ?? 5000;
+
   onMount(() => {
     setIndex(Math.floor(Math.random() * words().length));
     wordTimer = setInterval(() => {
@@ -260,8 +266,6 @@ export function ChatThinkingStatus(props: ChatThinkingStatusProps) {
     if (wordTimer) clearInterval(wordTimer);
     if (tickTimer) clearInterval(tickTimer);
   });
-
-  const showElapsedAfterMs = () => props.showElapsedAfterMs ?? 5000;
 
   return (
     <span class={cx(props.class, props.classNames?.root)}>
