@@ -460,6 +460,28 @@ describe("paired runtime — prompt pipeline", () => {
     expect(String(codexCall.prompt)).toContain("rename the login button");
   });
 
+  it("passes original context through to the Codex executor turn (#2858)", async () => {
+    const context = [
+      { type: "text", text: "Selected file: src/components/LoginButton.tsx" },
+      { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+    ];
+    await h.paired.sendPrompt({
+      sessionId: "paired-1",
+      prompt: "rename the login button",
+      context,
+    });
+    const plannerCall = h.inner.sendPrompt.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    const executorCall = h.inner.sendPrompt.mock.calls[1][0] as Record<
+      string,
+      unknown
+    >;
+    expect(plannerCall.context).toBe(context);
+    expect(executorCall.context).toBe(context);
+  });
+
   it("hands the executor's output to the review prompt", async () => {
     await h.paired.sendPrompt({
       sessionId: "paired-1",
@@ -481,6 +503,19 @@ describe("paired runtime — prompt pipeline", () => {
     // reviewer framing that invites Fable to spend output tokens on it.
     expect(plannerPrompt).not.toContain("REVIEWER");
     expect(plannerPrompt).toContain("rename the login button");
+  });
+
+  it("sends an execution-focused executor prompt with verification guidance (#2858)", async () => {
+    await h.paired.sendPrompt({
+      sessionId: "paired-1",
+      prompt: "rename the login button",
+    });
+    const executorPrompt = String(h.inner.sendPrompt.mock.calls[1][0].prompt);
+    expect(executorPrompt).toContain("repository is the source of truth");
+    expect(executorPrompt).toContain("Preserve unrelated user work");
+    expect(executorPrompt).toContain("Run focused verification first");
+    expect(executorPrompt).toContain("live MCP/publisher discovery");
+    expect(executorPrompt).toContain("Report only: changed files");
   });
 
   it("emits inline handoff events between phases with source and destination", async () => {

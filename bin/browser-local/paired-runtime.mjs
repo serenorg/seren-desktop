@@ -162,10 +162,23 @@ function buildPlannerPrompt(userPrompt) {
 
 function buildExecutorPrompt(userPrompt, planText) {
   return [
-    "You are the EXECUTOR in a paired workflow. Claude (the planner) reviewed",
-    "the user's request and produced the plan below. Implement it: make the",
-    "code edits, run the commands, and run the tests the plan calls for.",
-    "Report what you changed and any test results.",
+    "You are the EXECUTOR in a paired workflow. Claude's plan is approved",
+    "guidance, but the repository is the source of truth. Inspect the",
+    "relevant files, callers, tests, and config before editing. If the plan",
+    "conflicts with the code, adapt and report the deviation.",
+    "",
+    "Make the code changes needed to satisfy the user's request end-to-end.",
+    "Preserve unrelated user work and do not revert unrelated changes.",
+    "Run focused verification first, then broader impacted lint, typecheck,",
+    "build, and test checks when available. Diagnose and fix failures unless",
+    "blocked by missing secrets, unavailable external state, or evidence of a",
+    "pre-existing failure.",
+    "",
+    "If third-party services are relevant, use live MCP/publisher discovery",
+    "before assuming integrations are unavailable.",
+    "",
+    "Report only: changed files, verification commands/results, plan",
+    "deviations, and remaining risks/blockers.",
     "",
     "Original user request:",
     userPrompt,
@@ -664,6 +677,7 @@ export function createPairedRuntime({ emit, inner }) {
         paired,
         "executor",
         buildExecutorPrompt(prompt, planText),
+        context,
       );
       collectMeta("executor");
 
