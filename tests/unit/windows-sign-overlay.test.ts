@@ -131,7 +131,7 @@ describe("release workflow contract", () => {
 
   it("wraps the embedded-runtime signer with the Windows signature cache (#2823)", () => {
     expect(workflow).toContain("Restore Windows signature cache");
-    expect(workflow).toContain("uses: actions/cache@v4");
+    expect(workflow).toContain("uses: actions/cache@v6");
     expect(workflow).toContain(".sig-cache/windows-authenticode");
     expect(workflow).toContain("key: win-sigcache-${{ github.run_id }}");
     expect(workflow).toContain("win-sigcache-");
