@@ -77,7 +77,7 @@
     "monaco-editor": "^0.55.1",
     "pdfjs-dist": "^6.1.200",
     "qrcode": "^1.5.4",
-    "solid-js": "^1.9.13",
+    "solid-js": "^1.9.14",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "4",
     "thirdweb": "^5.120.1",
