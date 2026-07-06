@@ -40,11 +40,13 @@ function createHarness() {
 
   const innerSessions = new Map<string, FakeInnerSession>();
 
+  // Mirrors the live Claude Code catalog: the CLI reports Fable with the 1M-tier
+  // suffix (`claude-fable-5[1m]`), never the bare id (#2859).
   const claudeModels = {
     currentModelId: "claude-opus-4-7[1m]",
     availableModels: [
       { modelId: "claude-opus-4-7[1m]", name: "Opus 4.7 (1M)" },
-      { modelId: "claude-fable-5", name: "Fable 5" },
+      { modelId: "claude-fable-5[1m]", name: "Fable" },
     ],
   };
   const codexModels = {
@@ -264,17 +266,32 @@ describe("paired runtime — spawn", () => {
     expect(String(last.paired.executor.notice)).toMatch(/no longer available/i);
   });
 
-  it("pins Fable 5 for the planner on spawn when no planner model is configured (#2825)", async () => {
+  it("pins Fable 5 for the planner on spawn when no planner model is configured (#2825, #2859)", async () => {
     await spawnPaired(h);
     const plannerInnerId = String(
       h.inner.spawnSession.mock.calls.find(
         (c) => c[0].agentType === "claude-code",
       )?.[0].localSessionId,
     );
+    // Pins the concrete catalog id the CLI actually exposes for Fable — the
+    // 1M-tier `[1m]` variant, not the bare id (#2859).
     expect(h.inner.setSessionModel).toHaveBeenCalledWith({
       sessionId: plannerInnerId,
-      modelId: "claude-fable-5",
+      modelId: "claude-fable-5[1m]",
     });
+
+    // No fallback fired, so the planner carries no "unavailable" notice and is
+    // pinned to Fable — the exact regression from #2859.
+    const statuses = eventsFor(h.emitted, "provider://session-status").filter(
+      (e) => e.payload.sessionId === "paired-1",
+    );
+    const last = statuses[statuses.length - 1].payload as Record<
+      string,
+      // biome-ignore lint/suspicious/noExplicitAny: test introspection
+      any
+    >;
+    expect(last.paired.planner.pinnedModelId).toBe("claude-fable-5[1m]");
+    expect(last.paired.planner.notice).toBeNull();
   });
 
   it("respects an explicit planner model instead of the Fable default", async () => {
@@ -297,8 +314,8 @@ describe("paired runtime — spawn", () => {
     // notice, never fail the spawn — the whole point of the post-spawn switch.
     h.inner.setSessionModel.mockImplementation(
       async ({ modelId }: { modelId: string }) => {
-        if (modelId === "claude-fable-5") {
-          throw new Error("Unknown model: claude-fable-5");
+        if (modelId === "claude-fable-5[1m]") {
+          throw new Error("Unknown model: claude-fable-5[1m]");
         }
       },
     );
@@ -312,7 +329,7 @@ describe("paired runtime — spawn", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test introspection
       any
     >;
-    expect(String(last.paired.planner.notice)).toContain("claude-fable-5");
+    expect(String(last.paired.planner.notice)).toContain("claude-fable-5[1m]");
     expect(String(last.paired.planner.notice)).toMatch(/Claude default/i);
   });
 
@@ -806,6 +823,26 @@ describe("resolvePlannerModel (#2827)", () => {
         { modelId: "claude-fable-5", name: "Fable 5" },
       ]),
     ).toMatchObject({ modelId: "claude-fable-5", reason: "fable" });
+  });
+
+  it("matches the live catalog's 1M-tier Fable id, not just the bare id (#2859)", () => {
+    // The real CLI reports `claude-fable-5[1m]`; an exact bare-id compare missed
+    // it and demoted every Fable account to the Opus fallback.
+    expect(
+      resolvePlannerModel(null, [
+        { modelId: "claude-opus-4-8[1m]", name: "Opus 4.8 (1M context)" },
+        { modelId: "claude-fable-5[1m]", name: "Fable" },
+      ]),
+    ).toMatchObject({ modelId: "claude-fable-5[1m]", reason: "fable" });
+  });
+
+  it("prefers the 1M-tier Fable variant when the catalog lists both", () => {
+    expect(
+      resolvePlannerModel(null, [
+        { modelId: "claude-fable-5", name: "Fable 5" },
+        { modelId: "claude-fable-5[1m]", name: "Fable" },
+      ]),
+    ).toMatchObject({ modelId: "claude-fable-5[1m]", reason: "fable" });
   });
 
   it("falls back to the newest Opus 1M tier when Fable is absent", () => {
