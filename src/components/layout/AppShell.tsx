@@ -59,6 +59,7 @@ import { openFolder } from "@/lib/files/service";
 import { isMeetingProcessingStatus } from "@/lib/meeting-format";
 import { isNativeTextEditingKey, shortcuts } from "@/lib/shortcuts";
 import type { InstalledSkill } from "@/lib/skills";
+import { captureUnknownError } from "@/lib/support/hook";
 import { listenForInterviewLaunch } from "@/lib/tauri-bridge";
 import {
   backfillConversationFts,
@@ -189,6 +190,11 @@ function reportShellBoundaryError(surface: string, error: unknown): void {
     error instanceof Error ? error : new Error(String(error)),
     { surface: `app_shell_${surface}` },
   );
+  // A caught render-boundary error is a user-visible crash — route it to the
+  // support pipeline so it becomes a ticket, not just a local warn + telemetry
+  // event. captureUnknownError dedupes by signature, so a boundary that
+  // re-throws on Retry cannot spam /support/report. #2870.
+  captureUnknownError(`app_shell_${surface}`, error);
 }
 
 interface ShellSurfaceBoundaryProps {

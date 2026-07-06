@@ -57,4 +57,18 @@ describe("AppShell scoped error recovery (#2797)", () => {
     expect(appShell).toContain("error.stack ?? error.message");
     expect(appShell).toContain("telemetry.reportError");
   });
+
+  it("routes the caught boundary error to the /support/report pipeline (#2870)", () => {
+    // console.warn is local-only and telemetry.reportError goes to analytics —
+    // neither reaches /support/report. The boundary reporter must ALSO route
+    // through captureUnknownError so a user-visible workspace-recovery crash
+    // auto-files a ticket.
+    expect(appShell).toContain(
+      'import { captureUnknownError } from "@/lib/support/hook";',
+    );
+    const idx = appShell.indexOf("function reportShellBoundaryError");
+    expect(idx).toBeGreaterThan(0);
+    const body = appShell.slice(idx, idx + 900);
+    expect(body).toContain("captureUnknownError(`app_shell_${surface}`, error)");
+  });
 });
