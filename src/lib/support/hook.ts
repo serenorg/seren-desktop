@@ -81,6 +81,18 @@ function normalizeError(error: unknown): {
   }
 }
 
+/**
+ * Build a log-safe one-string detail from an error, name and message first.
+ * WebKit/JSC `Error.stack` is frames-only — it omits the name and message — so
+ * logging a bare `error.stack` hides what actually threw. Always lead with
+ * `kind: message`, then the frames.
+ */
+export function formatErrorForLog(error: unknown): string {
+  const { kind, message, stack } = normalizeError(error);
+  const head = `${kind}: ${message}`;
+  return stack.length > 0 ? `${head}\n${stack.join("\n")}` : head;
+}
+
 function inferOs(raw: string): SupportReportPayload["os"] {
   const value = raw.toLowerCase();
   if (value.includes("windows") || value.includes("win32")) return "windows";

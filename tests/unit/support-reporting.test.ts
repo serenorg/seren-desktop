@@ -8,6 +8,7 @@ import {
   __supportReportingTestHooks,
   benignConsoleError,
   captureSupportError,
+  formatErrorForLog,
   installSupportReporting,
   isBenignReloadCallbackWarning,
   reportError,
@@ -419,5 +420,39 @@ describe("benign Tauri reload callback-id warning (#2873)", () => {
     ).toBe(false);
     expect(isBenignReloadCallbackWarning([new Error(NOISE)])).toBe(false);
     expect(isBenignReloadCallbackWarning([])).toBe(false);
+  });
+});
+
+describe("formatErrorForLog (#2877)", () => {
+  it("leads with name and message even when the stack omits them (WebKit/JSC)", () => {
+    const error = new Error("configOptions.find is not a function");
+    error.name = "TypeError";
+    // JSC's Error.stack is frames-only: no name, no message.
+    Object.defineProperty(error, "stack", {
+      value: "renderMessage@app.js:1:2\nsendPrompt@stores.js:3:4",
+      configurable: true,
+    });
+
+    const detail = formatErrorForLog(error);
+
+    expect(detail).toContain("TypeError: configOptions.find is not a function");
+    expect(detail).toContain("renderMessage@app.js:1:2");
+    // The message must precede the frames, not be lost behind them.
+    expect(detail.indexOf("TypeError:")).toBeLessThan(
+      detail.indexOf("renderMessage@app.js"),
+    );
+  });
+
+  it("falls back to a message when there is no stack", () => {
+    const error = new Error("boom");
+    error.name = "ReferenceError";
+    Object.defineProperty(error, "stack", { value: "", configurable: true });
+    expect(formatErrorForLog(error)).toBe("ReferenceError: boom");
+  });
+
+  it("stringifies non-Error throws", () => {
+    expect(formatErrorForLog("plain string throw")).toContain(
+      "plain string throw",
+    );
   });
 });
