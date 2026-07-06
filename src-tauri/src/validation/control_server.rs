@@ -92,6 +92,8 @@ struct ControlCommand {
     #[serde(default)]
     value: Option<String>,
     #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
     route: Option<String>,
     #[serde(default)]
     key: Option<String>,
@@ -109,6 +111,8 @@ struct IncomingCommand {
     selector: Option<String>,
     #[serde(default)]
     value: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
     #[serde(default)]
     route: Option<String>,
     #[serde(default)]
@@ -246,6 +250,7 @@ fn handle_request(
         command: incoming.command,
         selector: incoming.selector,
         value: incoming.value,
+        path: incoming.path,
         route: incoming.route,
         key: incoming.key,
         timeout_ms: incoming.timeout_ms,
@@ -290,7 +295,14 @@ fn handle_request(
 fn is_allowed_command(command: &str) -> bool {
     matches!(
         command,
-        "navigate" | "click" | "fill" | "press" | "waitFor" | "dumpText" | "screenshot"
+        "navigate"
+            | "click"
+            | "fill"
+            | "press"
+            | "waitFor"
+            | "dumpText"
+            | "screenshot"
+            | "setRootPath"
     )
 }
 

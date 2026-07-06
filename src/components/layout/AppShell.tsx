@@ -180,6 +180,11 @@ const ShellRecoveryFallback: Component<ShellRecoveryFallbackProps> = (
 );
 
 function reportShellBoundaryError(surface: string, error: unknown): void {
+  const detail =
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
+  console.warn(
+    `[AppShell] ${surface} surface recovered after error: ${detail}`,
+  );
   telemetry.reportError(
     error instanceof Error ? error : new Error(String(error)),
     { surface: `app_shell_${surface}` },

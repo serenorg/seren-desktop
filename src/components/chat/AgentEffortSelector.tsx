@@ -19,10 +19,15 @@ export const AgentEffortSelector: Component<Props> = (props) => {
       (o) => o.id === "reasoning_effort" && o.type === "select",
     ) ?? null;
 
+  const optionValues = () => {
+    const values = option()?.options;
+    return Array.isArray(values) ? values : [];
+  };
+
   const currentLabel = () => {
     const opt = option();
     if (!opt) return null;
-    const current = opt.options.find((v) => v.value === opt.currentValue);
+    const current = optionValues().find((v) => v.value === opt.currentValue);
     return current?.name ?? opt.currentValue;
   };
 
@@ -88,7 +93,7 @@ export const AgentEffortSelector: Component<Props> = (props) => {
           <div class="px-3 py-2 border-b border-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
             Reasoning Effort
           </div>
-          <For each={option()?.options ?? []}>
+          <For each={optionValues()}>
             {(opt) => (
               <button
                 type="button"
