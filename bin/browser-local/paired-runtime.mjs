@@ -566,7 +566,9 @@ export function createPairedRuntime({ emit, inner }) {
     const info = await inner.spawnSession({
       ...base,
       agentType: ROLE_DEFS.executor.agentType,
-      approvalPolicy: params.approvalPolicy,
+      // Match direct Codex sessions: paired executor work should start in
+      // Permission Mode: Auto, not inherit Claude's default on-request policy.
+      approvalPolicy: "on-failure",
       sandboxMode: params.sandboxMode,
       networkEnabled: params.networkEnabled,
     });

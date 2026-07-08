@@ -171,6 +171,24 @@ describe("paired runtime — spawn", () => {
     expect(spawnTypes).toContain("codex");
   });
 
+  it("starts the Codex executor in Auto while leaving Claude planner on its own policy (#2886)", async () => {
+    await spawnPaired(h, {
+      approvalPolicy: "on-request",
+      sandboxMode: "workspace-write",
+    });
+
+    const claudeSpawn = h.inner.spawnSession.mock.calls.find(
+      (c) => c[0].agentType === "claude-code",
+    )?.[0];
+    const codexSpawn = h.inner.spawnSession.mock.calls.find(
+      (c) => c[0].agentType === "codex",
+    )?.[0];
+
+    expect(claudeSpawn?.approvalPolicy).toBe("on-request");
+    expect(codexSpawn?.approvalPolicy).toBe("on-failure");
+    expect(codexSpawn?.sandboxMode).toBe("workspace-write");
+  });
+
   it("returns a composite agentSessionId carrying both inner remote ids", async () => {
     const info = await spawnPaired(h);
     const composite = JSON.parse(String(info.agentSessionId));
