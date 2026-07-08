@@ -150,6 +150,33 @@ describe("release workflow contract", () => {
     expect(cacheSaveAt).toBeGreaterThan(signerAt);
   });
 
+  it("hard-gates unchanged embedded-runtime signature cache misses before Windows artifacts upload (#2882)", () => {
+    expect(workflow).toContain("WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED");
+    expect(workflow).toContain("Fetch previous Windows signing cache state");
+    expect(workflow).toContain("windows-signing-cache-previous-state.json");
+    expect(workflow).toContain("Assert Windows signature cache hit budget");
+    expect(workflow).toContain("assert-windows-signature-cache.ps1");
+    expect(workflow).toContain("windows-signing-cache-state.json");
+    expect(workflow).toContain("Upload Windows signing cache state");
+
+    const stageAt = workflow.indexOf("Stage embedded runtime for signing (Windows)");
+    const fetchStateAt = workflow.indexOf("Fetch previous Windows signing cache state");
+    const cacheRestoreAt = workflow.indexOf("Restore Windows signature cache");
+    const signAt = workflow.indexOf("Sign embedded runtime (Windows)");
+    const assertAt = workflow.indexOf("Assert Windows signature cache hit budget");
+    const buildAt = workflow.indexOf("Build Tauri app (signed, Windows)");
+    const uploadWindowsAt = workflow.indexOf("Upload Windows NSIS");
+    const uploadStateAt = workflow.indexOf("Upload Windows signing cache state");
+
+    expect(stageAt).toBeGreaterThanOrEqual(0);
+    expect(fetchStateAt).toBeGreaterThan(stageAt);
+    expect(cacheRestoreAt).toBeGreaterThan(fetchStateAt);
+    expect(signAt).toBeGreaterThan(cacheRestoreAt);
+    expect(assertAt).toBeGreaterThan(signAt);
+    expect(assertAt).toBeLessThan(buildAt);
+    expect(uploadStateAt).toBeGreaterThan(uploadWindowsAt);
+  });
+
   it("reports Windows signing budget telemetry as warning-only (#2818/#2821)", () => {
     const signer = readFileSync(signerScript, "utf8");
 

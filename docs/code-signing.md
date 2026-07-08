@@ -45,6 +45,7 @@ Add these secrets to the repository settings (Settings → Secrets → Actions):
 | Variable | Description |
 |----------|-------------|
 | `MAX_SIGNATURES` | Warning threshold for SSL.com cloud hash-signing operations in one Windows release job. Defaults to `850` in `release.yml`; raise only after reviewing `sign-targets.txt` and the Windows signing job summary. |
+| `WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED` | Hard-fail threshold for fresh embedded-runtime signatures when the signable manifest matches the previous release. Defaults to `25`; keep this low so a broken signature cache fails before release artifacts publish. |
 
 ## Certificate Setup
 
@@ -177,8 +178,28 @@ because cached signed binaries are restored before `sign-windows-payload.ps1`
 runs. A cold cache should behave the same as the pre-cache path, then populate
 the cache for later releases.
 
+### Signature cache hit gate (release CI, hard-fail)
+
+The release job persists `windows-signing-cache-state.json` as a GitHub release
+asset. On the next Windows release, the workflow downloads that state from the
+previous published release, computes a stable hash of the current
+embedded-runtime signable manifest (`windows-signature-cache-manifest.tsv`),
+and runs `scripts/assert-windows-signature-cache.ps1` against the real signer
+telemetry.
+
+If the manifest hash matches the previous release, the embedded-runtime set is
+unchanged. In that case, the cache must restore almost all previously signed
+binaries before the signer runs. Fresh embedded-runtime signatures above
+`WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED` fail the Windows build with an
+explicit cache-regression error. If no previous state exists yet, or the
+manifest hash changed because the runtime genuinely changed, the gate writes
+the current state and skips the assertion for that release.
+
 ### Verification gates (release CI, hard-fail)
 
+- Unchanged embedded-runtime releases cannot freshly sign more than
+  `WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED` files; this catches broken
+  cross-release signature-cache restores before artifacts are uploaded.
 - Loose `.exe`/`.dll` under `bundle/` are all `Valid` (`#2235`).
 - Every `.exe`/`.dll` extracted from `.nsis.zip` is `Valid` (`#2236`).
 - The setup `.exe` is unpacked with 7-Zip and **every** embedded
