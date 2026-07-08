@@ -164,7 +164,11 @@ function modeFromApprovalPolicy(approvalPolicy) {
 }
 
 function sandboxFromMode(sandboxMode, networkEnabled) {
-  if (networkEnabled || sandboxMode === "danger-full-access") {
+  if (
+    networkEnabled ||
+    sandboxMode === "danger-full-access" ||
+    sandboxMode === "full-access"
+  ) {
     return "danger-full-access";
   }
   if (sandboxMode === "read-only") {
@@ -1864,3 +1868,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     stopLmStudioServer: lmStudioRuntime.stopServer,
   };
 }
+
+export {
+  codexApprovalPolicy as _codexApprovalPolicy,
+  modeFromApprovalPolicy as _modeFromApprovalPolicy,
+  sandboxFromMode as _sandboxFromMode,
+};
