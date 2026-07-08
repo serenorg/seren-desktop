@@ -36,6 +36,9 @@ env:
   # Warning threshold for billable SSL.com cloud hash-signing operations in one
   # Windows release job. Bump only after auditing sign-targets.txt / signer telemetry.
   MAX_SIGNATURES: ${{ vars.MAX_SIGNATURES || '850' }}
+  # Hard gate for unchanged embedded-runtime releases: if the manifest matches
+  # the previous release, a working signature cache should make this near zero.
+  WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED: ${{ vars.WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED || '25' }}
 
 jobs:
   create-release:
@@ -436,6 +439,61 @@ jobs:
           CARGO_BUILD_TARGET: ${{ matrix.target }}
         run: pnpm prepare:tauri-build
 
+      - name: Fetch previous Windows signing cache state
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tagName = '${{ github.ref_name }}';
+            const stateAssetName = 'windows-signing-cache-state.json';
+            const outputPath = 'windows-signing-cache-previous-state.json';
+
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner,
+              repo,
+              per_page: 50,
+            });
+            const previous = releases.find((release) => !release.draft && release.tag_name !== tagName);
+            if (!previous) {
+              core.notice('No previous published release found for Windows signing cache comparison.');
+              return;
+            }
+
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner,
+              repo,
+              release_id: previous.id,
+              per_page: 100,
+            });
+            const stateAsset = assets.find((asset) => asset.name === stateAssetName);
+            if (!stateAsset) {
+              core.notice(`Previous release ${previous.tag_name} has no ${stateAssetName}; first gated release will write it.`);
+              return;
+            }
+
+            const response = await github.request('GET /repos/{owner}/{repo}/releases/assets/{asset_id}', {
+              owner,
+              repo,
+              asset_id: stateAsset.id,
+              headers: {
+                accept: 'application/octet-stream',
+              },
+            });
+            const raw = typeof response.data === 'string'
+              ? response.data
+              : Buffer.isBuffer(response.data)
+                ? response.data.toString('utf8')
+                : response.data instanceof ArrayBuffer
+                  ? Buffer.from(response.data).toString('utf8')
+                  : JSON.stringify(response.data);
+            JSON.parse(raw);
+            fs.writeFileSync(outputPath, raw);
+            core.notice(`Downloaded Windows signing cache state from ${previous.tag_name} to ${outputPath}.`);
+
       - name: Restore Windows signature cache
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         uses: actions/cache@v6
@@ -477,6 +535,17 @@ jobs:
             -CacheDir .sig-cache/windows-authenticode `
             -Manifest windows-signature-cache-manifest.tsv `
             -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT
+
+      - name: Assert Windows signature cache hit budget
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          ./scripts/assert-windows-signature-cache.ps1 `
+            -ListFile sign-targets.txt `
+            -Manifest windows-signature-cache-manifest.tsv `
+            -PreviousState windows-signing-cache-previous-state.json `
+            -OutputState windows-signing-cache-state.json `
+            -MaxSignedWhenUnchanged $env:WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED
 
       # makensis embeds the stock NSIS plugins ($PLUGINSDIR: System.dll,
       # nsExec.dll, StartMenu.dll, nsDialogs.dll) from the bundler's NSIS
@@ -1169,6 +1238,14 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.nsis.zip
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.nsis.zip.sig
           if-no-files-found: warn
+
+      - name: Upload Windows signing cache state
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-signing-cache-state
+          path: windows-signing-cache-state.json
+          if-no-files-found: error
 
       - name: Upload Linux updater bundle
         if: startsWith(matrix.os, 'ubuntu')
