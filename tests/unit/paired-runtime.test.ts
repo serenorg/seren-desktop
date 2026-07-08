@@ -619,6 +619,121 @@ describe("paired runtime — prompt pipeline", () => {
   });
 });
 
+describe("paired runtime — planner hold (#2880)", () => {
+  let h: ReturnType<typeof createHarness>;
+  beforeEach(async () => {
+    h = createHarness();
+    await spawnPaired(h);
+    h.emitted.length = 0;
+  });
+
+  it("holds the turn for the user instead of handing off when the planner emits the sentinel", async () => {
+    for (const s of h.innerSessions.values()) {
+      if (s.agentType === "claude-code") {
+        s.scriptedTurnText = ["What should the skill be named?\n[[PAIRED:AWAIT_USER]]"];
+      }
+    }
+
+    await h.paired.sendPrompt({
+      sessionId: "paired-1",
+      prompt: "help me design a private grant skill, ask me questions first",
+    });
+
+    // Only the planner ran — Codex was never prompted, and there is no review.
+    const order = h.inner.sendPrompt.mock.calls.map((c) => {
+      const sid = String(c[0].sessionId);
+      return h.innerSessions.get(sid)?.agentType ?? sid;
+    });
+    expect(order).toEqual(["claude-code"]);
+
+    // No handoff events fired.
+    const handoffs = eventsFor(h.emitted, "provider://paired-event").filter(
+      (e) => e.payload.kind === "handoff",
+    );
+    expect(handoffs.length).toBe(0);
+
+    // Exactly one paired prompt-complete closes the turn.
+    const completes = eventsFor(h.emitted, "provider://prompt-complete").filter(
+      (e) => e.payload.sessionId === "paired-1",
+    );
+    expect(completes.length).toBe(1);
+
+    // The control token never reaches the frontend; the question does.
+    const visible = eventsFor(h.emitted, "provider://message-chunk")
+      .map((e) => String(e.payload.text))
+      .join("");
+    expect(visible).toContain("What should the skill be named?");
+    expect(visible).not.toContain("AWAIT_USER");
+    expect(visible).not.toContain("[[PAIRED");
+
+    // The turn ends idle, ownership released back to the user.
+    const states = eventsFor(h.emitted, "provider://session-status")
+      .map(
+        (e) =>
+          (e.payload as { paired?: { state?: string } }).paired?.state ?? null,
+      )
+      .filter(Boolean);
+    expect(states[states.length - 1]).toBe("idle");
+  });
+
+  it("strips the sentinel even when it splits across streamed chunks", async () => {
+    h.inner.sendPrompt.mockImplementation(
+      async ({ sessionId }: { sessionId: string }) => {
+        const session = h.innerSessions.get(sessionId);
+        if (session?.agentType === "claude-code") {
+          h.wrappedEmit("provider://message-chunk", {
+            sessionId,
+            text: "Question part [[PAIRED:AW",
+          });
+          h.wrappedEmit("provider://message-chunk", {
+            sessionId,
+            text: "AIT_USER]]",
+          });
+        }
+        h.wrappedEmit("provider://prompt-complete", {
+          sessionId,
+          stopReason: "end_turn",
+          meta: { usage: { input_tokens: 10, output_tokens: 5 } },
+        });
+      },
+    );
+
+    await h.paired.sendPrompt({ sessionId: "paired-1", prompt: "discuss first" });
+
+    // Held even though the token was split — Codex never ran.
+    const order = h.inner.sendPrompt.mock.calls.map((c) => {
+      const sid = String(c[0].sessionId);
+      return h.innerSessions.get(sid)?.agentType ?? sid;
+    });
+    expect(order).toEqual(["claude-code"]);
+
+    // No fragment of the token leaks through the chunk boundary.
+    const visible = eventsFor(h.emitted, "provider://message-chunk")
+      .map((e) => String(e.payload.text))
+      .join("");
+    expect(visible).toBe("Question part ");
+    expect(visible).not.toContain("[[PAIRED");
+    expect(visible).not.toContain("AW");
+  });
+
+  it("runs the full plan → execute → review pipeline when no sentinel is present", async () => {
+    for (const s of h.innerSessions.values()) {
+      s.scriptedTurnText =
+        s.agentType === "claude-code"
+          ? ["PLAN: do the thing", "REVIEW: looks good"]
+          : ["EXEC: did the thing"];
+    }
+
+    await h.paired.sendPrompt({ sessionId: "paired-1", prompt: "build it now" });
+
+    const order = h.inner.sendPrompt.mock.calls.map((c) => {
+      const sid = String(c[0].sessionId);
+      return h.innerSessions.get(sid)?.agentType ?? sid;
+    });
+    expect(order).toEqual(["claude-code", "codex", "claude-code"]);
+  });
+});
+
 describe("paired runtime — approvals", () => {
   let h: ReturnType<typeof createHarness>;
   let executorInnerId: string;

@@ -142,18 +142,75 @@ export function buildPairedDeclaration(paired) {
   ].join("\n");
 }
 
+// A planner turn ends with this control token when the plan is NOT ready to
+// hand to the executor — the user asked to keep discussing or designing first,
+// asked to withhold execution, or the request needs a clarifying question. When
+// present, the coordinator returns control to the user instead of handing off
+// to Codex (#2880). The token is stripped from the streamed planner text so it
+// never renders to the user.
+const PLANNER_HOLD_SENTINEL = "[[PAIRED:AWAIT_USER]]";
+
+// Streaming-safe removal of a fixed control token from a text stream. The token
+// can arrive split across chunks, so each push() emits everything that cannot
+// be part of the token and holds back a trailing prefix until later text
+// decides it. `found` flips true once a complete token has been seen.
+function createSentinelFilter(sentinel) {
+  let pending = "";
+  let found = false;
+  const heldPrefixLen = () => {
+    const max = Math.min(pending.length, sentinel.length - 1);
+    for (let n = max; n > 0; n--) {
+      if (sentinel.startsWith(pending.slice(pending.length - n))) return n;
+    }
+    return 0;
+  };
+  return {
+    push(text) {
+      pending += text ?? "";
+      let idx = pending.indexOf(sentinel);
+      while (idx !== -1) {
+        found = true;
+        pending = pending.slice(0, idx) + pending.slice(idx + sentinel.length);
+        idx = pending.indexOf(sentinel);
+      }
+      const keep = pending.length - heldPrefixLen();
+      const out = pending.slice(0, keep);
+      pending = pending.slice(keep);
+      return out;
+    },
+    flush() {
+      const out = pending;
+      pending = "";
+      return out;
+    },
+    get found() {
+      return found;
+    },
+  };
+}
+
 function buildPlannerPrompt(userPrompt) {
   return [
     "You are the PLANNER in a paired workflow. A separate executor agent",
     "(Codex) will make all code edits, run commands, and run tests — you do",
     "not. Read only the files you need to write an accurate plan.",
     "",
-    "Reply with the implementation plan and nothing else: numbered steps the",
-    "executor can follow, each naming the concrete file paths and functions to",
-    "change. Skip preamble, restating the request, rationale, alternatives you",
-    "weighed, and risk commentary — the executor needs the steps, not the",
-    "reasoning. If the request is already unambiguous, write the plan directly",
-    "rather than surveying options.",
+    "If the user is not ready for execution — they asked you to discuss,",
+    "design, or scope the work before any code changes, asked you to hold off",
+    "handing to the executor, or the request needs a clarifying question — then",
+    "do NOT write an implementation plan. Respond to the user directly (ask",
+    "your question or share the discussion, one point at a time when they ask",
+    "for that), and end your entire message with this exact control line on its",
+    `own line: ${PLANNER_HOLD_SENTINEL}`,
+    "The control line keeps ownership with you so the executor never starts;",
+    "the user does not see it. Use it every turn you need to keep talking.",
+    "",
+    "Otherwise the request is ready to build. Reply with the implementation plan and nothing else:",
+    "numbered steps the executor can follow, each naming the concrete file",
+    "paths and functions to change. Skip preamble, restating the request,",
+    "rationale, alternatives you weighed, and risk commentary — the executor",
+    "needs the steps, not the reasoning. Do not include the control line when",
+    "you hand off a plan.",
     "",
     "User request:",
     userPrompt,
@@ -227,6 +284,8 @@ export function createPairedRuntime({ emit, inner }) {
       notice: null,
       turnText: "",
       lastTurnMeta: null,
+      holdRequested: false,
+      sentinelFilter: null,
     };
   }
 
@@ -366,6 +425,23 @@ export function createPairedRuntime({ emit, inner }) {
 
       case "provider://message-chunk": {
         if (payload.replay === true) return true;
+        const filter = roleState.sentinelFilter;
+        if (filter && !payload.isThought) {
+          // Planner visible text: strip the hold control token before it
+          // streams so the user never sees it (#2880). Thoughts bypass the
+          // filter — the token only appears in the final answer.
+          const visible = filter.push(payload.text ?? "");
+          roleState.turnText += visible;
+          if (visible) {
+            emit(channel, {
+              ...payload,
+              text: visible,
+              sessionId: paired.id,
+              agentProvider: roleState.agentType,
+            });
+          }
+          return true;
+        }
         if (!payload.isThought) {
           roleState.turnText += payload.text ?? "";
         }
@@ -619,11 +695,35 @@ export function createPairedRuntime({ emit, inner }) {
     const roleState = paired.roles[role];
     roleState.turnText = "";
     roleState.lastTurnMeta = null;
-    await inner.sendPrompt({
-      sessionId: roleState.innerSessionId,
-      prompt,
-      context,
-    });
+    roleState.holdRequested = false;
+    // Only the planner can hold the turn for the user; its control token is
+    // stripped from the streamed text as chunks arrive (#2880).
+    roleState.sentinelFilter =
+      role === "planner" ? createSentinelFilter(PLANNER_HOLD_SENTINEL) : null;
+    try {
+      await inner.sendPrompt({
+        sessionId: roleState.innerSessionId,
+        prompt,
+        context,
+      });
+    } finally {
+      const filter = roleState.sentinelFilter;
+      roleState.sentinelFilter = null;
+      if (filter) {
+        // Emit any held-back tail (a partial token that never completed) so the
+        // last visible characters still reach the UI.
+        const tail = filter.flush();
+        if (tail && !paired.cancelRequested) {
+          roleState.turnText += tail;
+          emit("provider://message-chunk", {
+            sessionId: paired.id,
+            text: tail,
+            agentProvider: roleState.agentType,
+          });
+        }
+        roleState.holdRequested = filter.found;
+      }
+    }
     throwIfCancelled(paired);
     return roleState.turnText;
   }
@@ -665,6 +765,25 @@ export function createPairedRuntime({ emit, inner }) {
         context,
       );
       collectMeta("planner");
+
+      // The planner can hold the turn for the user — a design/discussion phase
+      // or a clarifying question — instead of handing off. Skip execution and
+      // review and return control so the user can reply (#2880).
+      if (paired.roles.planner.holdRequested) {
+        paired.currentPrompt = null;
+        paired.status = "ready";
+        setPhase(paired, "idle", null);
+        emit("provider://prompt-complete", {
+          sessionId: paired.id,
+          stopReason: "end_turn",
+          meta: {
+            usage,
+            ...(contextWindow ? { contextWindow } : {}),
+          },
+        });
+        emitPairedStatus(paired, "ready");
+        return;
+      }
 
       emitHandoff(
         paired,
