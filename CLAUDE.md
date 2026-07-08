@@ -194,6 +194,14 @@ All features and bug fixes MUST be developed in worktrees, not directly on main.
 - NEVER test mocked behavior.
 - Test output MUST BE PRISTINE TO PASS.
 
+### NO MOCKS IN FUNCTIONAL TESTING (non-negotiable)
+
+- Functional tests and walkthroughs MUST exercise the REAL system end-to-end against the REAL layer that can fail — never mocks, stubs, or simulated state.
+- A "functional walkthrough" that mocks the failing layer is NOT a functional test. It proves script internals, not production behavior. A green mocked walkthrough while production silently fails is a FAILURE, not a pass.
+- Verify the actual production outcome, not the code path in isolation. Ask: "what real-world result proves this works?" then observe THAT result — e.g. for a CI/release fix, read the NEXT real release's logs/metrics and confirm the intended effect actually happened.
+- If the layer that fails (GitHub Actions cache scoping, a vendor's cloud API, cross-run/cross-tag state) cannot be reached in a unit test, the fix is UNVALIDATED until it runs for real. Say so; do not sign off on a mocked substitute.
+- WHY: three signing "fixes" (#2818, #2821, #2824) shipped with green mocked walkthroughs while the real objective failed silently across seven releases. The mocked `actions/cache` "warm restore" never tested cross-tag restore — the exact layer that was broken — and it cost us thousands of dollars in SSL.com overage before anyone read a real release log.
+
 ## Debugging
 
 YOU MUST ALWAYS find the root cause. NEVER fix symptoms or add workarounds.
