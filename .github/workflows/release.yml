@@ -39,6 +39,8 @@ env:
   # Hard gate for unchanged embedded-runtime releases: if the manifest matches
   # the previous release, a working signature cache should make this near zero.
   WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED: ${{ vars.WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED || '25' }}
+  # R2 prefix for the content-addressed signed Windows embedded-runtime blobs.
+  WINDOWS_SIGNATURE_CACHE_R2_PREFIX: windows-signature-cache/authenticode
 
 jobs:
   create-release:
@@ -494,16 +496,53 @@ jobs:
             fs.writeFileSync(outputPath, raw);
             core.notice(`Downloaded Windows signing cache state from ${previous.tag_name} to ${outputPath}.`);
 
-      - name: Restore Windows signature cache
+      - name: Setup AWS CLI for Windows signature cache
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        uses: actions/cache@v6
-        with:
-          path: .sig-cache/windows-authenticode
-          # Unique primary key + broad restore key: restore the newest prior
-          # content-addressed store, then save this run's newly signed misses.
-          key: win-sigcache-${{ github.run_id }}
-          restore-keys: |
-            win-sigcache-
+        shell: pwsh
+        run: |
+          $aws = Get-Command aws -ErrorAction SilentlyContinue
+          if (-not $aws) {
+            python -m pip install --user awscli
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error::Failed to install awscli for Windows signature cache restore/save."
+              exit $LASTEXITCODE
+            }
+            $scriptsDir = python -c "import os, site; print(os.path.join(site.USER_BASE, 'Scripts'))"
+            $env:PATH = "$scriptsDir;$env:PATH"
+            Add-Content -LiteralPath $env:GITHUB_PATH -Value $scriptsDir
+          }
+          aws --version
+
+      - name: Restore Windows signature cache from R2
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          if (-not $env:AWS_ACCESS_KEY_ID -or -not $env:AWS_SECRET_ACCESS_KEY -or -not $env:AWS_ENDPOINT_URL -or -not $env:R2_BUCKET) {
+            Write-Host "::error::R2 credentials are required for the Windows signature cache."
+            exit 1
+          }
+          $cacheDir = ".sig-cache/windows-authenticode"
+          New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+          $source = "s3://$env:R2_BUCKET/$env:WINDOWS_SIGNATURE_CACHE_R2_PREFIX"
+          Write-Host "Restoring Windows signature cache from $source"
+          aws s3 sync $source $cacheDir `
+            --endpoint-url="$env:AWS_ENDPOINT_URL" `
+            --exclude "*" `
+            --include "*.signed" `
+            --no-progress `
+            --only-show-errors
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Failed to restore Windows signature cache from R2."
+            exit $LASTEXITCODE
+          }
+          $count = @(Get-ChildItem -LiteralPath $cacheDir -Filter "*.signed" -File -ErrorAction SilentlyContinue).Count
+          Write-Host "Windows signature cache: restored $count signed blob(s) from R2."
 
       # Discover the signable set with the tested cross-platform selector, then
       # sign it throttled to stay under SSL.com's per-minute rate limit (#2282).
@@ -535,6 +574,41 @@ jobs:
             -CacheDir .sig-cache/windows-authenticode `
             -Manifest windows-signature-cache-manifest.tsv `
             -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT
+
+      - name: Save Windows signature cache to R2
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          if (-not $env:AWS_ACCESS_KEY_ID -or -not $env:AWS_SECRET_ACCESS_KEY -or -not $env:AWS_ENDPOINT_URL -or -not $env:R2_BUCKET) {
+            Write-Host "::error::R2 credentials are required for the Windows signature cache."
+            exit 1
+          }
+          $cacheDir = ".sig-cache/windows-authenticode"
+          $count = @(Get-ChildItem -LiteralPath $cacheDir -Filter "*.signed" -File -ErrorAction SilentlyContinue).Count
+          if ($count -eq 0) {
+            Write-Host "::warning::No Windows signature cache blobs exist to upload to R2."
+            exit 0
+          }
+          $target = "s3://$env:R2_BUCKET/$env:WINDOWS_SIGNATURE_CACHE_R2_PREFIX"
+          Write-Host "Saving $count Windows signature cache blob(s) to $target"
+          aws s3 sync $cacheDir $target `
+            --endpoint-url="$env:AWS_ENDPOINT_URL" `
+            --exclude "*" `
+            --include "*.signed" `
+            --size-only `
+            --no-progress `
+            --only-show-errors
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Failed to save Windows signature cache to R2."
+            exit $LASTEXITCODE
+          }
+          Write-Host "Windows signature cache: R2 save completed."
 
       - name: Assert Windows signature cache hit budget
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'

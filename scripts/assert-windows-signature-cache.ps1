@@ -226,7 +226,7 @@ Write-CurrentState -Path $OutputState -State $state
 
 if ($status -eq "failed_unchanged_manifest_over_floor") {
   Write-Host "::error::Windows signature cache regression: embedded-runtime manifest hash $currentHash matches the previous release, but $($telemetrySummary.embedded_signed) embedded-runtime file(s) were freshly signed; expected <= $MaxSignedWhenUnchanged."
-  Write-Host "::error::Inspect telemetry '$TelemetryFile', cache manifest '$Manifest', previous state '$PreviousState', and current state '$OutputState'. The actions/cache restore may be broken or returning an empty cache."
+  Write-Host "::error::Inspect telemetry '$TelemetryFile', cache manifest '$Manifest', previous state '$PreviousState', and current state '$OutputState'. The R2 signature-cache restore may be broken or returning an empty cache."
   exit 1
 }
 

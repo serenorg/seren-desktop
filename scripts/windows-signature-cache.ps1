@@ -6,7 +6,7 @@ param(
   [Parameter(Mandatory = $true)][ValidateSet("restore", "save")][string]$Mode,
   # Newline-delimited signable set produced by scripts/print-windows-signables.ts.
   [Parameter(Mandatory = $true)][string]$ListFile,
-  # Persistent cache directory restored/saved by actions/cache.
+  # Persistent cache directory restored/saved by the release workflow's R2 sync.
   [Parameter(Mandatory = $true)][string]$CacheDir,
   # Pre-sign hash manifest written by restore and consumed by save.
   [Parameter(Mandatory = $true)][string]$Manifest,
