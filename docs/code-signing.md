@@ -39,6 +39,10 @@ Add these secrets to the repository settings (Settings → Secrets → Actions):
 | `ES_USERNAME` | SSL.com eSigner account username |
 | `ES_PASSWORD` | SSL.com eSigner account password |
 | `ES_TOTP_SECRET` | SSL.com eSigner TOTP seed used by the CKA login step |
+| `R2_ACCESS_KEY_ID` | Cloudflare R2 access key used by the release workflow to restore/save the Windows signature cache and publish release artifacts |
+| `R2_SECRET_ACCESS_KEY` | Cloudflare R2 secret key used with `R2_ACCESS_KEY_ID` |
+| `R2_ENDPOINT` | Cloudflare R2 S3-compatible endpoint used by AWS CLI |
+| `R2_BUCKET_NAME` | Cloudflare R2 bucket used for release artifacts and the Windows signature cache |
 
 ### Release Variables
 
@@ -133,8 +137,12 @@ the artifact that embeds it is produced:
    a content-addressed Authenticode cache (`#2823`): before signing, unchanged
    files are restored from cache only when the cached blob has a `Valid`
    signature from the expected certificate thumbprint; after signing, newly
-   signed cache misses are saved by their pre-sign SHA-256. The signer still
-   owns the actual skip/sign/budget telemetry behavior.
+   signed cache misses are saved by their pre-sign SHA-256. The signed blob
+   store lives in Cloudflare R2 under
+   `windows-signature-cache/authenticode/`, not `actions/cache`, because
+   GitHub Actions caches created on one release tag cannot be restored by the
+   next release tag. The signer still owns the actual skip/sign/budget
+   telemetry behavior.
 
 2. **NSIS stock plugin DLLs** (`#2237`, `#2299`) — `System.dll`, `nsExec.dll`,
    `StartMenu.dll`, and `nsDialogs.dll` ship inside the `tauri-bundler` NSIS
@@ -176,7 +184,15 @@ The embedded-runtime signature cache should make the second release with an
 unchanged runtime report most of that large payload as skipped already valid,
 because cached signed binaries are restored before `sign-windows-payload.ps1`
 runs. A cold cache should behave the same as the pre-cache path, then populate
-the cache for later releases.
+the R2 cache for later releases.
+
+The workflow installs AWS CLI on the Windows runner only when needed, syncs
+`*.signed` blobs from `s3://$R2_BUCKET_NAME/windows-signature-cache/authenticode`
+before the PowerShell cache restore, and syncs the content-addressed cache back
+to the same R2 prefix after signing using `AWS_DEFAULT_REGION=auto`.
+`scripts/windows-signature-cache.ps1` still verifies every restored blob with
+`Get-AuthenticodeSignature` and the loaded eSigner certificate thumbprint
+before overwriting staged runtime files.
 
 ### Signature cache hit gate (release CI, hard-fail)
 

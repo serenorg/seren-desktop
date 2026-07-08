@@ -129,25 +129,34 @@ describe("release workflow contract", () => {
     expect(workflow).toContain("Audit Windows payload signature coverage");
   });
 
-  it("wraps the embedded-runtime signer with the Windows signature cache (#2823)", () => {
-    expect(workflow).toContain("Restore Windows signature cache");
-    expect(workflow).toContain("uses: actions/cache@v6");
+  it("wraps the embedded-runtime signer with the R2-backed Windows signature cache (#2823/#2883)", () => {
+    expect(workflow).toContain("WINDOWS_SIGNATURE_CACHE_R2_PREFIX");
+    expect(workflow).toContain("windows-signature-cache/authenticode");
+    expect(workflow).toContain("Setup AWS CLI for Windows signature cache");
+    expect(workflow).toContain("Restore Windows signature cache from R2");
+    expect(workflow).toContain("Save Windows signature cache to R2");
     expect(workflow).toContain(".sig-cache/windows-authenticode");
-    expect(workflow).toContain("key: win-sigcache-${{ github.run_id }}");
-    expect(workflow).toContain("win-sigcache-");
+    expect(workflow).toContain("aws s3 sync");
+    expect(workflow).toContain("--size-only");
     expect(workflow).toContain("windows-signature-cache.ps1");
+    expect(workflow).not.toContain("key: win-sigcache-${{ github.run_id }}");
+    expect(workflow).not.toContain("win-sigcache-");
 
-    const cacheActionAt = workflow.indexOf("Restore Windows signature cache");
+    const awsCliAt = workflow.indexOf("Setup AWS CLI for Windows signature cache");
+    const r2RestoreAt = workflow.indexOf("Restore Windows signature cache from R2");
     const signStepAt = workflow.indexOf("Sign embedded runtime (Windows)");
     const cacheRestoreAt = workflow.indexOf("-Mode restore", signStepAt);
     const signerAt = workflow.indexOf("sign-windows-payload.ps1", cacheRestoreAt);
     const cacheSaveAt = workflow.indexOf("-Mode save", signerAt);
+    const r2SaveAt = workflow.indexOf("Save Windows signature cache to R2");
 
-    expect(cacheActionAt).toBeGreaterThanOrEqual(0);
-    expect(signStepAt).toBeGreaterThan(cacheActionAt);
+    expect(awsCliAt).toBeGreaterThanOrEqual(0);
+    expect(r2RestoreAt).toBeGreaterThan(awsCliAt);
+    expect(signStepAt).toBeGreaterThan(r2RestoreAt);
     expect(cacheRestoreAt).toBeGreaterThan(signStepAt);
     expect(signerAt).toBeGreaterThan(cacheRestoreAt);
     expect(cacheSaveAt).toBeGreaterThan(signerAt);
+    expect(r2SaveAt).toBeGreaterThan(cacheSaveAt);
   });
 
   it("hard-gates unchanged embedded-runtime signature cache misses before Windows artifacts upload (#2882)", () => {
@@ -161,8 +170,9 @@ describe("release workflow contract", () => {
 
     const stageAt = workflow.indexOf("Stage embedded runtime for signing (Windows)");
     const fetchStateAt = workflow.indexOf("Fetch previous Windows signing cache state");
-    const cacheRestoreAt = workflow.indexOf("Restore Windows signature cache");
+    const cacheRestoreAt = workflow.indexOf("Restore Windows signature cache from R2");
     const signAt = workflow.indexOf("Sign embedded runtime (Windows)");
+    const cacheSaveAt = workflow.indexOf("Save Windows signature cache to R2");
     const assertAt = workflow.indexOf("Assert Windows signature cache hit budget");
     const buildAt = workflow.indexOf("Build Tauri app (signed, Windows)");
     const uploadWindowsAt = workflow.indexOf("Upload Windows NSIS");
@@ -172,7 +182,8 @@ describe("release workflow contract", () => {
     expect(fetchStateAt).toBeGreaterThan(stageAt);
     expect(cacheRestoreAt).toBeGreaterThan(fetchStateAt);
     expect(signAt).toBeGreaterThan(cacheRestoreAt);
-    expect(assertAt).toBeGreaterThan(signAt);
+    expect(cacheSaveAt).toBeGreaterThan(signAt);
+    expect(assertAt).toBeGreaterThan(cacheSaveAt);
     expect(assertAt).toBeLessThan(buildAt);
     expect(uploadStateAt).toBeGreaterThan(uploadWindowsAt);
   });
