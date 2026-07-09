@@ -6190,10 +6190,15 @@ export const agentStore = {
 
     const roleConfig = (
       role: PairedStatus["planner"],
-    ): { modelId?: string; effort?: string } | undefined => {
+    ):
+      | { modelId?: string; effort?: string; serviceTier?: string }
+      | undefined => {
       const config = {
         ...(role.pinnedModelId ? { modelId: role.pinnedModelId } : {}),
         ...(role.pinnedEffort ? { effort: role.pinnedEffort } : {}),
+        ...(role.pinnedServiceTier
+          ? { serviceTier: role.pinnedServiceTier }
+          : {}),
       };
       return Object.keys(config).length > 0 ? config : undefined;
     };

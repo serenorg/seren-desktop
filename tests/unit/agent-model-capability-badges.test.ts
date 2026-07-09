@@ -13,6 +13,10 @@ const fastSelectorSource = readFileSync(
   resolve("src/components/chat/AgentFastModeSelector.tsx"),
   "utf-8",
 );
+const pairedFastSelectorSource = readFileSync(
+  resolve("src/components/chat/PairedFastModeSelector.tsx"),
+  "utf-8",
+);
 const chatSource = readFileSync(
   resolve("src/components/chat/AgentChat.tsx"),
   "utf-8",
@@ -34,5 +38,11 @@ describe("#2058 agent model capability UI", () => {
     expect(fastSelectorSource).toContain('id === "fast_mode"');
     expect(fastSelectorSource).toContain("supportsFastMode");
     expect(fastSelectorSource).toMatch(/setConfigOption\(\s*"fast_mode"/);
+    expect(chatSource).toContain("PairedFastModeSelector");
+    expect(pairedFastSelectorSource).toContain('id === "fast_mode"');
+    expect(pairedFastSelectorSource).toContain("supportsFastMode");
+    expect(pairedFastSelectorSource).toMatch(
+      /setPairedConfigOption\(\s*props\.pairedRole,\s*"fast_mode"/,
+    );
   });
 });

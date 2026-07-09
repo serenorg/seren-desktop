@@ -15,6 +15,9 @@ describe("agent selector partial-status guards (#2862)", () => {
   const agentModel = source("src/components/chat/AgentModelSelector.tsx");
   const pairedModel = source("src/components/chat/PairedModelSelector.tsx");
   const agentFastMode = source("src/components/chat/AgentFastModeSelector.tsx");
+  const pairedFastMode = source(
+    "src/components/chat/PairedFastModeSelector.tsx",
+  );
 
   it("does not dereference config option arrays directly in effort selectors", () => {
     for (const selector of [agentEffort, pairedEffort]) {
@@ -40,6 +43,7 @@ describe("agent selector partial-status guards (#2862)", () => {
     expect(agentFastMode).not.toContain(
       "props.session?.availableModels ?? []",
     );
+    expect(pairedFastMode).toContain("Array.isArray(models) ? models : []");
   });
 });
 
@@ -47,13 +51,21 @@ describe("configOptions non-array guards (#2869)", () => {
   const agentEffort = source("src/components/chat/AgentEffortSelector.tsx");
   const agentFastMode = source("src/components/chat/AgentFastModeSelector.tsx");
   const pairedEffort = source("src/components/chat/PairedEffortSelector.tsx");
+  const pairedFastMode = source(
+    "src/components/chat/PairedFastModeSelector.tsx",
+  );
   const agentStore = source("src/stores/agent.store.ts");
 
   it("normalizes configOptions before .find in every effort/fast-mode selector", () => {
     // `configOptions?.find(...)` only guards null/undefined; a truthy
     // non-array partial frame reaches `.find` and throws, tripping the
     // workspace-recovery boundary. Each reader must normalize to [] first.
-    for (const selector of [agentEffort, agentFastMode, pairedEffort]) {
+    for (const selector of [
+      agentEffort,
+      agentFastMode,
+      pairedEffort,
+      pairedFastMode,
+    ]) {
       expect(selector).toContain("Array.isArray(options) ? options : []");
       expect(selector).toContain("configOptions().find");
       expect(selector).not.toContain("configOptions?.find");

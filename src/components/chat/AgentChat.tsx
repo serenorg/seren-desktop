@@ -111,6 +111,7 @@ import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { OAuthAccountSwitcher } from "./OAuthAccountSwitcher";
 import { PairedEffortSelector } from "./PairedEffortSelector";
+import { PairedFastModeSelector } from "./PairedFastModeSelector";
 import { PairedModelSelector } from "./PairedModelSelector";
 import { PlanHeader } from "./PlanHeader";
 import { SkillsButton } from "./SkillsButton";
@@ -2249,6 +2250,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     pairedRole="planner"
                   />
                   <PairedEffortSelector
+                    session={threadSession()}
+                    pairedRole="executor"
+                  />
+                  <PairedFastModeSelector
                     session={threadSession()}
                     pairedRole="executor"
                   />

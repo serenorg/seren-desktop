@@ -323,33 +323,87 @@ function createCodexSessionRecord({
     currentModelId: null,
     currentModeId,
     reasoningEffort: "medium",
+    serviceTier: null,
     latestTurnUsage: undefined,
   };
+}
+
+function normalizeServiceTier(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function normalizeServiceTiers(record) {
+  const tiers = [];
+  const seen = new Set();
+  const addTier = (id, name, description) => {
+    if (typeof id !== "string" || id.length === 0 || seen.has(id)) {
+      return;
+    }
+    seen.add(id);
+    tiers.push({
+      id,
+      name: typeof name === "string" && name.length > 0 ? name : id,
+      description:
+        typeof description === "string" && description.length > 0
+          ? description
+          : null,
+    });
+  };
+
+  if (Array.isArray(record?.serviceTiers)) {
+    for (const tier of record.serviceTiers) {
+      addTier(tier?.id, tier?.name, tier?.description);
+    }
+  }
+
+  if (Array.isArray(record?.additionalSpeedTiers)) {
+    for (const tier of record.additionalSpeedTiers) {
+      addTier(tier, tier, null);
+    }
+  }
+
+  return tiers;
+}
+
+function getFastServiceTier(modelRecord) {
+  return (
+    modelRecord?.serviceTiers?.find((tier) => tier.id === "fast") ?? null
+  );
 }
 
 function normalizeModelRecords(result) {
   const data = Array.isArray(result?.data) ? result.data : [];
   return data
     .filter((record) => record && record.hidden !== true)
-    .map((record) => ({
-      modelId: record.id ?? record.model,
-      name: record.displayName ?? record.id ?? record.model ?? "Unknown model",
-      description: record.description ?? undefined,
-      defaultReasoningEffort:
-        record.defaultReasoningEffort ??
-        record.default_reasoning_effort ??
-        "medium",
-      supportedReasoningEfforts: Array.isArray(record.supportedReasoningEfforts)
-        ? record.supportedReasoningEfforts
-            .map((effort) => ({
-              value: effort.reasoningEffort,
-              name: effort.reasoningEffort,
-              description: effort.description ?? undefined,
-            }))
-            .filter((effort) => typeof effort.value === "string")
-        : [],
-      isDefault: record.isDefault === true,
-    }))
+    .map((record) => {
+      const serviceTiers = normalizeServiceTiers(record);
+      return {
+        modelId: record.id ?? record.model,
+        name:
+          record.displayName ?? record.id ?? record.model ?? "Unknown model",
+        description: record.description ?? undefined,
+        defaultReasoningEffort:
+          record.defaultReasoningEffort ??
+          record.default_reasoning_effort ??
+          "medium",
+        supportedReasoningEfforts: Array.isArray(
+          record.supportedReasoningEfforts,
+        )
+          ? record.supportedReasoningEfforts
+              .map((effort) => ({
+                value: effort.reasoningEffort,
+                name: effort.reasoningEffort,
+                description: effort.description ?? undefined,
+              }))
+              .filter((effort) => typeof effort.value === "string")
+          : [],
+        defaultServiceTier: normalizeServiceTier(
+          record.defaultServiceTier ?? record.default_service_tier,
+        ),
+        serviceTiers,
+        isDefault: record.isDefault === true,
+      };
+    })
     .filter((record) => typeof record.modelId === "string");
 }
 
@@ -369,10 +423,11 @@ function buildAvailableModels(session) {
     modelId: record.modelId,
     name: record.name,
     description: record.description,
+    supportsFastMode: getFastServiceTier(record) !== null,
   }));
 }
 
-function buildConfigOptions(session) {
+function buildReasoningEffortConfigOption(session) {
   const modelRecord = getSelectedModelRecord(session);
   const efforts =
     modelRecord?.supportedReasoningEfforts?.length > 0
@@ -385,7 +440,7 @@ function buildConfigOptions(session) {
         ];
 
   if (efforts.length === 0) {
-    return [];
+    return null;
   }
 
   const currentValue = efforts.some(
@@ -396,20 +451,84 @@ function buildConfigOptions(session) {
 
   session.reasoningEffort = currentValue;
 
-  return [
-    {
-      id: "reasoning_effort",
-      name: "Reasoning Effort",
-      description: "Controls how much reasoning Codex uses on future turns.",
-      type: "select",
-      currentValue,
-      options: efforts.map((option) => ({
-        value: option.value,
-        name: option.name,
-        description: option.description ?? null,
-      })),
-    },
-  ];
+  return {
+    id: "reasoning_effort",
+    name: "Reasoning Effort",
+    description: "Controls how much reasoning Codex uses on future turns.",
+    type: "select",
+    currentValue,
+    options: efforts.map((option) => ({
+      value: option.value,
+      name: option.name,
+      description: option.description ?? null,
+    })),
+  };
+}
+
+function buildFastModeConfigOption(session) {
+  const fastTier = getFastServiceTier(getSelectedModelRecord(session));
+  if (!fastTier) {
+    return null;
+  }
+
+  return {
+    id: "fast_mode",
+    name: "Fast Mode",
+    description: "Uses the Codex Fast service tier for future turns.",
+    type: "select",
+    currentValue: session.serviceTier === fastTier.id ? "on" : "off",
+    options: [
+      {
+        value: "on",
+        name: "On",
+        description: fastTier.description,
+      },
+      {
+        value: "off",
+        name: "Off",
+        description: "Use the model's standard service tier.",
+      },
+    ],
+  };
+}
+
+function buildConfigOptions(session) {
+  const options = [];
+  const reasoningEffortOption = buildReasoningEffortConfigOption(session);
+  if (reasoningEffortOption) {
+    options.push(reasoningEffortOption);
+  }
+  const fastModeOption = buildFastModeConfigOption(session);
+  if (fastModeOption) {
+    options.push(fastModeOption);
+  }
+  return options;
+}
+
+function codexServiceTierFromFastModeValue(valueId, session) {
+  switch (valueId) {
+    case "on": {
+      const fastTier = getFastServiceTier(getSelectedModelRecord(session));
+      if (!fastTier) {
+        throw new Error("Fast mode is not supported by the selected Codex model.");
+      }
+      return fastTier.id;
+    }
+    case "off":
+      return null;
+    default:
+      throw new Error(`Unsupported fast mode value: ${valueId}`);
+  }
+}
+
+function buildCodexTurnStartParams(session, prompt, context) {
+  return {
+    threadId: session.agentSessionId,
+    input: buildCodexTurnInput(prompt, context),
+    ...(session.currentModelId ? { model: session.currentModelId } : {}),
+    ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
+    ...(session.serviceTier ? { serviceTier: session.serviceTier } : {}),
+  };
 }
 
 function buildSessionStatus(session, status = session.status) {
@@ -1256,6 +1375,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         approvalPolicy: codexApprovalPolicy(resolvedMode),
         sandbox: resolvedSandbox,
         experimentalRawEvents: false,
+        ...(session.serviceTier ? { serviceTier: session.serviceTier } : {}),
       };
 
       let threadResult;
@@ -1321,6 +1441,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         threadResult?.reasoningEffort ??
         getSelectedModelRecord(session)?.defaultReasoningEffort ??
         "medium";
+      session.serviceTier = normalizeServiceTier(threadResult?.serviceTier);
 
       if (resumedExistingThread && session.agentSessionId) {
         let replayThread = threadResult?.thread;
@@ -1409,14 +1530,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       const response = await sendRequest(
         session,
         "turn/start",
-        {
-          threadId: session.agentSessionId,
-          input: buildCodexTurnInput(prompt, context),
-          ...(session.currentModelId ? { model: session.currentModelId } : {}),
-          ...(session.reasoningEffort
-            ? { effort: session.reasoningEffort }
-            : {}),
-        },
+        buildCodexTurnStartParams(session, prompt, context),
         20_000,
       );
 
@@ -1745,6 +1859,23 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     }
 
     session.currentModelId = targetModel.modelId;
+    if (
+      session.serviceTier &&
+      !targetModel.serviceTiers.some((tier) => tier.id === session.serviceTier)
+    ) {
+      if (session.agentSessionId) {
+        await sendRequest(
+          session,
+          "thread/settings/update",
+          {
+            threadId: session.agentSessionId,
+            serviceTier: null,
+          },
+          10_000,
+        );
+      }
+      session.serviceTier = null;
+    }
     const supportsCurrentEffort = targetModel.supportedReasoningEfforts.some(
       (option) => option.value === session.reasoningEffort,
     );
@@ -1800,11 +1931,35 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       }
       return claudeRuntime.setConfigOption({ sessionId, configId, valueId });
     }
+
+    if (configId === "fast_mode") {
+      const serviceTier = codexServiceTierFromFastModeValue(valueId, session);
+      if (session.agentSessionId) {
+        await sendRequest(
+          session,
+          "thread/settings/update",
+          {
+            threadId: session.agentSessionId,
+            serviceTier,
+          },
+          10_000,
+        );
+      }
+      session.serviceTier = serviceTier;
+      emit("provider://config-options-update", {
+        sessionId,
+        configOptions: buildConfigOptions(session),
+      });
+      return null;
+    }
+
     if (configId !== "reasoning_effort") {
       return null;
     }
 
-    const configOption = buildConfigOptions(session)[0];
+    const configOption = buildConfigOptions(session).find(
+      (option) => option.id === "reasoning_effort",
+    );
     if (
       !configOption ||
       !configOption.options.some((option) => option.value === valueId)
@@ -1870,7 +2025,11 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
 }
 
 export {
+  buildCodexTurnStartParams as _buildCodexTurnStartParams,
+  buildSessionStatus as _buildCodexSessionStatus,
+  codexServiceTierFromFastModeValue as _codexServiceTierFromFastModeValue,
   codexApprovalPolicy as _codexApprovalPolicy,
   modeFromApprovalPolicy as _modeFromApprovalPolicy,
+  normalizeModelRecords as _normalizeCodexModelRecords,
   sandboxFromMode as _sandboxFromMode,
 };

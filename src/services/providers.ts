@@ -245,12 +245,16 @@ export interface PairedRoleStatus {
       modelId: string;
       name: string;
       description?: string;
+      supportsFastMode?: boolean;
+      supportsAutoMode?: boolean;
+      supportsAdaptiveThinking?: boolean;
     }>;
   };
   configOptions?: SessionConfigOption[];
   /** Explicit user pick; null while floating on the provider default. */
   pinnedModelId?: string | null;
   pinnedEffort?: string | null;
+  pinnedServiceTier?: string | null;
   /** Inline status, e.g. pinned-model fallback or next-session effort timing. */
   notice?: string | null;
 }
@@ -276,8 +280,8 @@ export interface PairedTranscriptEvent {
 
 /** Per-role spawn configuration restored from the conversation row. */
 export interface PairedSpawnConfig {
-  planner?: { modelId?: string; effort?: string };
-  executor?: { modelId?: string; effort?: string };
+  planner?: { modelId?: string; effort?: string; serviceTier?: string };
+  executor?: { modelId?: string; effort?: string; serviceTier?: string };
 }
 
 export interface SessionStatusEvent {
