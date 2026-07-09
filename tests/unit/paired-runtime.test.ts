@@ -52,8 +52,16 @@ function createHarness() {
   const codexModels = {
     currentModelId: "gpt-5.5-codex",
     availableModels: [
-      { modelId: "gpt-5.5-codex", name: "GPT-5.5 Codex" },
-      { modelId: "gpt-5.1-codex-mini", name: "GPT-5.1 Codex Mini" },
+      {
+        modelId: "gpt-5.5-codex",
+        name: "GPT-5.5 Codex",
+        supportsFastMode: true,
+      },
+      {
+        modelId: "gpt-5.1-codex-mini",
+        name: "GPT-5.1 Codex Mini",
+        supportsFastMode: false,
+      },
     ],
   };
   const claudeEffort = {
@@ -77,6 +85,16 @@ function createHarness() {
       { value: "high", name: "high" },
     ],
   };
+  const codexFastMode = {
+    id: "fast_mode",
+    name: "Fast Mode",
+    type: "select",
+    currentValue: "off",
+    options: [
+      { value: "on", name: "On" },
+      { value: "off", name: "Off" },
+    ],
+  };
 
   const inner = {
     spawnSession: vi.fn(async (params: Record<string, unknown>) => {
@@ -89,7 +107,9 @@ function createHarness() {
         status: "ready",
         agentSessionId: `${agentType}-remote-${id}`,
         models: isClaude ? claudeModels : codexModels,
-        configOptions: [isClaude ? { ...claudeEffort } : { ...codexEffort }],
+        configOptions: isClaude
+          ? [{ ...claudeEffort }]
+          : [{ ...codexEffort }, { ...codexFastMode }],
       });
       return {
         id,
@@ -914,6 +934,31 @@ describe("paired runtime — role-scoped model and effort", () => {
       configId: "reasoning_effort",
       valueId: "high",
     });
+  });
+
+  it("executor fast mode change routes to Codex and updates paired status", async () => {
+    await h.paired.updateSessionConfigOption({
+      sessionId: "paired-1",
+      configId: "fast_mode",
+      valueId: "on",
+      role: "executor",
+    });
+    expect(h.inner.updateSessionConfigOption).toHaveBeenCalledWith({
+      sessionId: executorInnerId,
+      configId: "fast_mode",
+      valueId: "on",
+    });
+    const statuses = eventsFor(h.emitted, "provider://session-status");
+    const last = statuses[statuses.length - 1].payload as {
+      // biome-ignore lint/suspicious/noExplicitAny: test introspection
+      paired?: Record<string, any>;
+    };
+    expect(last.paired?.executor.pinnedServiceTier).toBe("fast");
+    expect(
+      last.paired?.executor.configOptions.find(
+        (option: { id: string }) => option.id === "fast_mode",
+      )?.currentValue,
+    ).toBe("on");
   });
 
   it("surfaces unsupported effort values instead of silently applying them", async () => {

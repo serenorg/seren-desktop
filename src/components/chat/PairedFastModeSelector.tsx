@@ -1,24 +1,31 @@
-// ABOUTME: Toggle for agent fast mode when the active model supports it.
-// ABOUTME: Uses the generic provider config-option bridge.
+// ABOUTME: Role-scoped fast-mode toggle for paired Claude + Codex threads.
+// ABOUTME: Renders only when that role reports a fast_mode option and model support.
 
 import type { Component } from "solid-js";
 import { Show } from "solid-js";
+import type { PairedRole } from "@/services/providers";
 import { type ActiveSession, agentStore } from "@/stores/agent.store";
 
 interface Props {
   session: ActiveSession | null;
+  pairedRole: PairedRole;
 }
 
-export const AgentFastModeSelector: Component<Props> = (props) => {
+const ROLE_LABELS: Record<PairedRole, string> = {
+  planner: "Planner fast",
+  executor: "Executor fast",
+};
+
+export const PairedFastModeSelector: Component<Props> = (props) => {
+  const roleStatus = () => props.session?.paired?.[props.pairedRole] ?? null;
+
   const availableModels = () => {
-    const models = props.session?.availableModels;
+    const models = roleStatus()?.models?.availableModels;
     return Array.isArray(models) ? models : [];
   };
-  const displayModelId = () =>
-    props.session?.userSelectedModelId ?? props.session?.currentModelId;
 
   const currentModelSupportsFastMode = () => {
-    const id = displayModelId();
+    const id = roleStatus()?.models?.currentModelId;
     if (!id) return false;
     return (
       availableModels().find((model) => model.modelId === id)
@@ -27,7 +34,7 @@ export const AgentFastModeSelector: Component<Props> = (props) => {
   };
 
   const configOptions = () => {
-    const options = props.session?.configOptions;
+    const options = roleStatus()?.configOptions;
     return Array.isArray(options) ? options : [];
   };
 
@@ -45,7 +52,8 @@ export const AgentFastModeSelector: Component<Props> = (props) => {
 
   const toggleFastMode = () => {
     if (!option()) return;
-    agentStore.setConfigOption(
+    void agentStore.setPairedConfigOption(
+      props.pairedRole,
       "fast_mode",
       isOn() ? "off" : "on",
       props.session?.info.id,
@@ -80,7 +88,7 @@ export const AgentFastModeSelector: Component<Props> = (props) => {
             d="M13 3L4 14h7l-1 7 9-11h-7l1-7z"
           />
         </svg>
-        <span class="font-medium">Fast</span>
+        <span class="font-medium">{ROLE_LABELS[props.pairedRole]}</span>
       </button>
     </Show>
   );

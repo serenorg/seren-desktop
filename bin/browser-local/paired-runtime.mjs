@@ -281,6 +281,7 @@ export function createPairedRuntime({ emit, inner }) {
       configOptions: undefined,
       pinnedModelId: null,
       pinnedEffort: null,
+      pinnedServiceTier: null,
       notice: null,
       turnText: "",
       lastTurnMeta: null,
@@ -306,6 +307,7 @@ export function createPairedRuntime({ emit, inner }) {
       configOptions: roleState.configOptions,
       pinnedModelId: roleState.pinnedModelId,
       pinnedEffort: roleState.pinnedEffort,
+      pinnedServiceTier: roleState.pinnedServiceTier,
       notice: roleState.notice,
     };
   }
@@ -595,6 +597,19 @@ export function createPairedRuntime({ emit, inner }) {
       } catch {
         roleState.pinnedEffort = null;
         roleState.notice = `Pinned effort ${config.effort} is not supported by the selected Codex model. Using its default effort instead.`;
+      }
+    }
+    if (config.serviceTier) {
+      try {
+        await inner.updateSessionConfigOption({
+          sessionId: innerSessionId,
+          configId: "fast_mode",
+          valueId: "on",
+        });
+        roleState.pinnedServiceTier = config.serviceTier;
+      } catch {
+        roleState.pinnedServiceTier = null;
+        roleState.notice = `Pinned Codex service tier ${config.serviceTier} is not supported by the selected model. Using its default speed instead.`;
       }
     }
     return info;
@@ -955,6 +970,13 @@ export function createPairedRuntime({ emit, inner }) {
       // selector responsive until the runtime echo lands.
       const option = (roleState.configOptions ?? []).find(
         (o) => o.id === "reasoning_effort",
+      );
+      if (option) option.currentValue = valueId;
+    }
+    if (configId === "fast_mode") {
+      roleState.pinnedServiceTier = valueId === "on" ? "fast" : null;
+      const option = (roleState.configOptions ?? []).find(
+        (o) => o.id === "fast_mode",
       );
       if (option) option.currentValue = valueId;
     }
