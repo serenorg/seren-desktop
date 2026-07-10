@@ -1652,8 +1652,20 @@ jobs:
             `$work = Join-Path $env:TEMP '${workName}'`,
             `$logsS3Uri = ${psString(logsS3Uri)}`,
             `$logsUploadUrl = ${psString(env.LOGS_UPLOAD_URL)}`,
-            "if (Test-Path $work) { Remove-Item -LiteralPath $work -Recurse -Force }",
+            // Prune leaked scratch dirs from prior runs (#2901). A crash before
+            // the finally-cleanup below leaves one 'seren-release-windows-e2e-*'
+            // dir per run; 99 of them filled the box C: drive to 96.9% free=6.26GB
+            // and slowed the NSIS install to 7+ min. Delete ALL of them (not just
+            // this run-id) so the drive self-heals even after a prior crash.
+            "$stale = @(Get-ChildItem -LiteralPath $env:TEMP -Directory -Filter 'seren-release-windows-e2e-*' -ErrorAction SilentlyContinue)",
+            "if ($stale.Count -gt 0) { Write-Host \"[windows-e2e:ssm] Pruning $($stale.Count) leaked scratch dir(s) from prior runs\"; $stale | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue } }",
+            "$sysDrive = if ([string]::IsNullOrWhiteSpace($env:SystemDrive)) { 'C:' } else { $env:SystemDrive }",
+            "$freeGb = [math]::Round((Get-PSDrive -Name $sysDrive.TrimEnd(':')).Free / 1GB, 2)",
+            "if ($freeGb -lt 15) { Write-Host \"::warning::[windows-e2e:ssm] Low disk: $sysDrive has $freeGb GB free (<15 GB); WebView2 CDP startup may stall (see #2901/#2902)\" } else { Write-Host \"[windows-e2e:ssm] $sysDrive free space: $freeGb GB\" }",
             "New-Item -ItemType Directory -Force -Path $work | Out-Null",
+            // The download -> run -> upload sequence removes $work in the finally
+            // below on BOTH success and failure, so the scratch never leaks (#2901).
+            "try {",
             "Write-Host '[windows-e2e:ssm] Downloading staged installer and payload'",
             `Invoke-WebRequest -Uri ${psString(env.INSTALLER_URL)} -OutFile (Join-Path $work 'SerenDesktop-setup.exe')`,
             `Invoke-WebRequest -Uri ${psString(env.PAYLOAD_URL)} -OutFile (Join-Path $work 'windows-e2e-payload.zip')`,
@@ -1672,6 +1684,11 @@ jobs:
             "try { Invoke-WebRequest -Uri $logsUploadUrl -Method Put -InFile $logBundle -UseBasicParsing | Out-Null } catch { throw \"Failed to upload Windows app harness logs to $logsS3Uri via presigned URL: $($_.Exception.Message)\" }",
             "Write-Host \"[windows-e2e:ssm] Uploaded Windows app harness logs to $logsS3Uri\"",
             "if ($harnessExitCode -ne 0) { throw \"Windows app scheduled-task harness failed with exit code $harnessExitCode\" }",
+            // Remove this run's scratch dir on BOTH success and failure, AFTER the
+            // logs are uploaded above, so the box drive can't trend downward across
+            // runs (#2901). Runs even when the try body throws. Set-Location out of
+            // $work first: Windows cannot delete a process's current directory.
+            "} finally { Set-Location -LiteralPath $env:TEMP; Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue; Write-Host '[windows-e2e:ssm] Removed scratch work dir' }",
             ];
           // executionTimeout bounds the whole on-box command. It must exceed the
           // harness's own budget: the scheduled-task wait (TaskTimeoutSeconds + 60

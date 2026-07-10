@@ -269,30 +269,98 @@ function Copy-E2EAppLogs([string]$DestinationDir) {
   }
 }
 
-function Wait-ForCdp([int]$Port, [int]$TimeoutSeconds, [System.Diagnostics.Process]$AppProcess) {
+function Get-WebView2UserDataDirs() {
+  # WebView2 stores its profile (including DevToolsActivePort) under the app's
+  # bundle-identifier folder. Mirror the roots Copy-E2EAppLogs already trusts.
+  $dirs = @()
+  foreach ($base in @($env:LOCALAPPDATA, $env:APPDATA)) {
+    if ([string]::IsNullOrWhiteSpace($base)) {
+      continue
+    }
+    $dirs += (Join-Path $base "com.serendb.desktop\EBWebView")
+  }
+  return @($dirs | Select-Object -Unique)
+}
+
+function Get-DevToolsActivePort([string[]]$UserDataDirs) {
+  # WebView2/Chromium writes the actually-bound remote-debugging port into
+  # <user-data-dir>\DevToolsActivePort (first line). Returns 0 when no readable
+  # port file exists yet.
+  foreach ($dir in $UserDataDirs) {
+    $portFile = Join-Path $dir "DevToolsActivePort"
+    if (-not (Test-Path -LiteralPath $portFile)) {
+      continue
+    }
+    try {
+      $firstLine = Get-Content -LiteralPath $portFile -TotalCount 1 -ErrorAction Stop | Select-Object -First 1
+      $parsed = 0
+      if (-not [string]::IsNullOrWhiteSpace($firstLine) -and [int]::TryParse($firstLine.Trim(), [ref]$parsed) -and $parsed -gt 0) {
+        return $parsed
+      }
+    } catch {
+      Write-Host "::warning::Unable to read DevToolsActivePort at ${portFile}: $($_.Exception.Message)"
+    }
+  }
+  return 0
+}
+
+function Write-DevToolsActivePortDiagnostics([string[]]$UserDataDirs) {
+  Write-Host "DevToolsActivePort probe:"
+  foreach ($dir in $UserDataDirs) {
+    $portFile = Join-Path $dir "DevToolsActivePort"
+    if (Test-Path -LiteralPath $portFile) {
+      $contents = (Get-Content -LiteralPath $portFile -ErrorAction SilentlyContinue) -join " | "
+      Write-Host "  present: $portFile -> [$contents]"
+    } else {
+      Write-Host "  missing: $portFile"
+    }
+  }
+}
+
+function Wait-ForCdp([int]$Port, [int]$TimeoutSeconds, [System.Diagnostics.Process]$AppProcess, [string[]]$UserDataDirs) {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-  $url = "http://127.0.0.1:$Port/json/version"
+  $portsTried = [System.Collections.Generic.List[int]]::new()
+  $portsTried.Add($Port)
   do {
     if ($null -ne $AppProcess) {
       $AppProcess.Refresh()
       if ($AppProcess.HasExited) {
         Write-WindowsLaunchDiagnostics $AppProcess
+        Write-DevToolsActivePortDiagnostics $UserDataDirs
         Fail "Seren.exe exited before WebView2 CDP became available. ExitCode=$($AppProcess.ExitCode)"
       }
     }
-    try {
-      $response = Invoke-RestMethod -Uri $url -Method Get -TimeoutSec 2
-      if ($response.webSocketDebuggerUrl) {
-        return
-      }
-    } catch {
-      Start-Sleep -Milliseconds 500
+
+    # Prefer the port WebView2 actually bound. If it declined the requested port
+    # (busy, ephemeral fallback, or a version-specific behavior change like the
+    # Evergreen 149->150 bump in #2902), DevToolsActivePort names the real one;
+    # poll it too instead of the fixed 9222 forever.
+    $filePort = Get-DevToolsActivePort $UserDataDirs
+    if ($filePort -gt 0 -and -not $portsTried.Contains($filePort)) {
+      Write-Stage "DevToolsActivePort reports WebView2 bound port $filePort (requested $Port); adding it to the CDP probe set"
+      $portsTried.Add($filePort)
     }
+
+    foreach ($candidate in $portsTried) {
+      try {
+        $response = Invoke-RestMethod -Uri "http://127.0.0.1:$candidate/json/version" -Method Get -TimeoutSec 2
+        if ($response.webSocketDebuggerUrl) {
+          if ($candidate -ne $Port) {
+            Write-Stage "WebView2 CDP came up on port $candidate (requested $Port)"
+          }
+          return $candidate
+        }
+      } catch {
+        # endpoint not ready yet; retry every candidate until the deadline
+      }
+    }
+    Start-Sleep -Milliseconds 500
   } while ((Get-Date) -lt $deadline)
 
   $webViewCount = @(Get-Process -Name "msedgewebview2" -ErrorAction SilentlyContinue).Count
   Write-WindowsLaunchDiagnostics $AppProcess
-  Fail "Timed out waiting for WebView2 remote debugging endpoint at $url. msedgewebview2 process count=$webViewCount"
+  Write-DevToolsActivePortDiagnostics $UserDataDirs
+  Fail "Timed out waiting for WebView2 remote debugging endpoint on port(s) $($portsTried -join ', '). msedgewebview2 process count=$webViewCount"
 }
 
 function Find-RequiredFile([string]$Root, [string]$Filter, [string]$Label) {
@@ -382,14 +450,23 @@ if ([string]::IsNullOrWhiteSpace($webView2Runtime)) {
 }
 Write-Stage "WebView2 runtime detected: $webView2Runtime"
 
+# --remote-allow-origins stays a wildcard: it only gates the WebSocket upgrade,
+# not the /json/version HTTP discovery that timed out in #2902, and an explicit
+# fixed-port origin would reject the very non-9222 fallback the DevToolsActivePort
+# resolution below is designed to attach to.
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$RemoteDebugPort --remote-allow-origins=*"
 $env:SEREN_E2E_CAPTURE_INJECTION = "1"
+$webViewUserDataDirs = Get-WebView2UserDataDirs
 Write-Stage "Launching Seren.exe with WebView2 remote debugging on port $RemoteDebugPort"
 $app = Start-Process -FilePath $appExe -PassThru
 
 try {
   Write-Stage "Waiting for WebView2 CDP endpoint"
-  Wait-ForCdp -Port $RemoteDebugPort -TimeoutSeconds $StartupTimeoutSeconds -AppProcess $app
+  $cdpPort = Wait-ForCdp -Port $RemoteDebugPort -TimeoutSeconds $StartupTimeoutSeconds -AppProcess $app -UserDataDirs $webViewUserDataDirs
+  # Thread the port WebView2 actually bound through to the probe (#2902); it may
+  # differ from $RemoteDebugPort when DevToolsActivePort resolved a fallback.
+  $env:SEREN_E2E_CDP_ENDPOINT = "http://127.0.0.1:$cdpPort"
+  Write-Stage "Using CDP endpoint $env:SEREN_E2E_CDP_ENDPOINT for the Windows app e2e probe"
   Write-Stage "Running Node app e2e probe"
   $probeExitCode = Invoke-ProcessWithTimeout "node" @("$PSScriptRoot/windows-e2e-app.mjs") $ProbeTimeoutSeconds "Windows app e2e probe" -NoNewWindow -StdoutPath $probeStdoutPath -StderrPath $probeStderrPath -OnTimeout {
     Write-ProbeTimeoutDiagnostics $app
