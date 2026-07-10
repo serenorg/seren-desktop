@@ -13,7 +13,12 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-import { backgroundUpdateCli } from "./cli-updater.mjs";
+import {
+  backgroundUpdateCli,
+  CLI_MIN_VERSION_BASELINE,
+  isBelowBaseline,
+  runInstalledVersion,
+} from "./cli-updater.mjs";
 
 // LM Studio support is loaded lazily so a missing LM Studio dependency (e.g.
 // @lmstudio/sdk) never crashes the registry, which every agent relies on for
@@ -400,6 +405,77 @@ async function ensureGlobalNpmPackage({ emit, command, packageName, label }) {
   });
 
   return command;
+}
+
+function runCodexSelfUpdate(resolvedPath) {
+  const command =
+    typeof resolvedPath === "string" && resolvedPath.length > 0
+      ? resolvedPath
+      : "codex";
+  const shell =
+    process.platform === "win32" && command.toLowerCase().endsWith(".cmd");
+  return new Promise((resolvePromise, rejectPromise) => {
+    execFile(
+      command,
+      ["update"],
+      { timeout: 180_000, shell },
+      (error, stdout, stderr) => {
+        if (error) {
+          rejectPromise(new Error(stderr || error.message));
+          return;
+        }
+        resolvePromise(stdout.trim());
+      },
+    );
+  });
+}
+
+async function ensureCodexCliViaUpdater(emit) {
+  await ensureGlobalNpmPackage({
+    emit,
+    command: "codex",
+    packageName: "@openai/codex",
+    label: "Codex",
+  });
+
+  const baseline = CLI_MIN_VERSION_BASELINE["@openai/codex"];
+  let resolved = resolveInstalledCodexBinary();
+  const installed = await runInstalledVersion(resolved, "codex");
+  if (!isBelowBaseline(installed, baseline)) {
+    return resolved;
+  }
+
+  emit("provider://cli-install-progress", {
+    stage: "installing",
+    message: `Updating Codex CLI to ${baseline} or newer...`,
+  });
+
+  try {
+    await runCodexSelfUpdate(resolved !== "codex" ? resolved : "codex");
+  } catch (error) {
+    throw new Error(
+      `Codex CLI ${installed ?? "unknown"} is too old for Seren's GPT-5.6 ` +
+        `defaults and auto-update failed. Run "codex update" manually and ` +
+        `restart Seren. ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  resolved = resolveInstalledCodexBinary();
+  const updated = await runInstalledVersion(resolved, "codex");
+  if (isBelowBaseline(updated, baseline)) {
+    throw new Error(
+      `Codex CLI is still ${updated ?? "unknown"} after update; Seren requires ` +
+        `${baseline} or newer for GPT-5.6 defaults. Run "codex update" manually ` +
+        "and restart Seren.",
+    );
+  }
+
+  emit("provider://cli-install-progress", {
+    stage: "complete",
+    message: "Codex CLI updated successfully",
+  });
+
+  return resolved;
 }
 
 async function ensureClaudeCodeViaNativeInstaller(emit) {
@@ -798,12 +874,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         return true;
       },
       async ensureCli() {
-        return ensureGlobalNpmPackage({
-          emit,
-          command: "codex",
-          packageName: "@openai/codex",
-          label: "Codex",
-        });
+        return ensureCodexCliViaUpdater(emit);
       },
       launchLogin() {
         // Login MUST target the same binary that providers.spawnCodex

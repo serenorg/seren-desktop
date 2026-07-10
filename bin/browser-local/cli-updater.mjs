@@ -41,6 +41,10 @@ const SEMVER_EXTRACT_RE = /\d+\.\d+\.\d+[^\s]*/;
  * model ids), since the gate force-updates to `@latest`. 2.1.197 is verified
  * to ship the claude-opus-4-8 catalog. */
 export const CLI_MIN_VERSION_BASELINE = {
+  // 0.144.1 is verified to advertise the GPT-5.6 Codex catalog. 0.143.0
+  // accepts those ids at thread/start but fails at turn/start with "requires
+  // a newer version of Codex", breaking Seren's GPT-5.6 defaults. #2904.
+  "@openai/codex": "0.144.1",
   "@anthropic-ai/claude-code": "2.1.197",
 };
 
@@ -418,6 +422,7 @@ export async function backgroundUpdateCli({
   const installedVersionFn =
     _versionOverrides?.runInstalledVersion ?? runInstalledVersion;
   const npmViewFn = _versionOverrides?.runNpmView ?? runNpmView;
+  const selfUpdateFn = _versionOverrides?.tryCliSelfUpdate ?? tryCliSelfUpdate;
 
   // Compatibility: production runs may not pass `state` (callers were
   // written before the test seam). When state is omitted we manage
@@ -482,12 +487,27 @@ export async function backgroundUpdateCli({
     }
 
     if (installed && latest && isNewer(installed, latest)) {
+      if (packageName === "@openai/codex") {
+        const selfOk = await selfUpdateFn(resolvedPath);
+        if (selfOk) {
+          saveState(persisted);
+          onUpdated?.({
+            label,
+            bareCommand,
+            from: installed,
+            to: latest,
+            channel: "self",
+          });
+          return report("success", { from: installed, to: latest, channel: "self" });
+        }
+      }
+
       // Native installs are gated by the upstream's signed installer + their
       // own self-update mechanism; we don't have a tarball to scan. Keep
       // existing flow. npm channel updates are scanned per #1647.
       if (channel === "native") {
         try {
-          const selfOk = await tryCliSelfUpdate(resolvedPath);
+          const selfOk = await selfUpdateFn(resolvedPath);
           if (!selfOk) {
             await runClaudeNativeInstaller();
           }
