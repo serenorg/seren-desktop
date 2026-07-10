@@ -14,6 +14,8 @@
     "macOSPrivateApi": true,
     "windows": [
       {
+        "label": "main",
+        "create": false,
         "title": "Seren",
         "width": 1200,
         "height": 800,

@@ -555,4 +555,30 @@ describe("Windows production e2e release gate", () => {
     // and a fixed-port origin would reject the non-9222 fallback we attach to.
     expect(runner).toContain("--remote-allow-origins=*");
   });
+
+  it("enables WebView2 remote debugging via the app's own AdditionalBrowserArguments (#2902)", () => {
+    // WebView2 150 drops the WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS env var once
+    // the host app sets browser args, so --remote-debugging-port never reaches
+    // the browser process. The port must be injected through the app's own
+    // programmatic additional_browser_args, gated on an e2e-only env flag.
+    expect(runner).toContain("SEREN_E2E_REMOTE_DEBUG_PORT");
+
+    const libRs = readFileSync(join(root, "src-tauri/src/lib.rs"), "utf8");
+    expect(libRs).toContain("SEREN_E2E_REMOTE_DEBUG_PORT");
+    expect(libRs).toContain("additional_browser_args");
+    expect(libRs).toContain("WebviewWindowBuilder::from_config");
+    // additional_browser_args REPLACES wry's default, so the e2e string must
+    // reproduce it or the e2e webview would diverge from production.
+    expect(libRs).toContain(
+      "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
+    );
+    expect(libRs).toContain("--autoplay-policy=no-user-gesture-required");
+
+    // The window is created in the setup hook, so auto-creation must be off.
+    const tauriConf = readFileSync(
+      join(root, "src-tauri/tauri.conf.json"),
+      "utf8",
+    );
+    expect(tauriConf).toContain('"create": false');
+  });
 });
