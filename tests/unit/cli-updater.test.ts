@@ -210,6 +210,74 @@ describe("isBelowBaseline (#1761)", () => {
       "2.1.197",
     );
   });
+
+  it("Codex baseline ships the GPT-5.6 app-server catalog (#2904)", async () => {
+    expect(CLI_MIN_VERSION_BASELINE["@openai/codex"]).toBe("0.144.1");
+
+    const state = {
+      "lastUpdateCheck:codex": Date.now() - 1000,
+    };
+    const result = await backgroundUpdateCli({
+      label: "Codex",
+      bareCommand: "codex",
+      resolvedPath: "/opt/homebrew/bin/codex",
+      packageName: "@openai/codex",
+      state,
+      now: Date.now(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "0.143.0",
+        runNpmView: async () => null,
+      },
+    });
+
+    expect(result.skipped).not.toBe("ttl");
+    expect(result).toMatchObject({
+      outcome: "skipped:network",
+      installed: "0.143.0",
+    });
+  });
+
+  it("uses Codex self-update before npm tarball scanning (#2904)", async () => {
+    let selfUpdateCalls = 0;
+    let scanCalled = false;
+    const result = await backgroundUpdateCli({
+      label: "Codex",
+      bareCommand: "codex",
+      resolvedPath: "/opt/homebrew/bin/codex",
+      packageName: "@openai/codex",
+      state: {},
+      now: Date.now(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "0.143.0",
+        runNpmView: async () => "0.144.1",
+        tryCliSelfUpdate: async () => {
+          selfUpdateCalls++;
+          return true;
+        },
+      },
+      _scannerOverrides: {
+        npmPackToDirectory: async () => {
+          throw new Error("must not pack when Codex self-update succeeds");
+        },
+        scanTarball: async () => {
+          scanCalled = true;
+          throw new Error("must not scan when Codex self-update succeeds");
+        },
+        runNpmInstallFromTarball: async () => {
+          throw new Error("must not install when Codex self-update succeeds");
+        },
+      },
+    });
+
+    expect(selfUpdateCalls).toBe(1);
+    expect(scanCalled).toBe(false);
+    expect(result).toMatchObject({
+      outcome: "success",
+      from: "0.143.0",
+      to: "0.144.1",
+      channel: "self",
+    });
+  });
 });
 
 describe("outcome logging (#1646)", () => {
