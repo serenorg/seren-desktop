@@ -90,3 +90,10 @@ if ($Mode -eq "restore") {
 
   Write-Host "Windows signature cache: saved $saved newly signed blob(s)."
 }
+
+# Exit 0 explicitly on success. This script runs only cmdlets (no native command
+# sets $LASTEXITCODE), so without this a caller invoking it with `&` inherits a
+# stale/`$null` $LASTEXITCODE. `$null -ne 0` is $true in PowerShell, so a caller
+# guard `if ($LASTEXITCODE -ne 0) { exit }` would fire on a clean run. Real
+# failures throw (ErrorActionPreference=Stop) and never reach this line.
+exit 0
