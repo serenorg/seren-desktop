@@ -573,6 +573,9 @@ export function createPairedRuntime({ emit, inner }) {
       approvalPolicy: "on-failure",
       sandboxMode: params.sandboxMode,
       networkEnabled: params.networkEnabled,
+      initialModelId: config.modelId ?? undefined,
+      reasoningEffort: config.effort ?? undefined,
+      codexDefaultIntent: "paired-executor",
     });
     roleState.agentSessionId = info?.agentSessionId ?? roleState.agentSessionId;
 

@@ -49,21 +49,28 @@ function createHarness() {
       { modelId: "claude-fable-5[1m]", name: "Fable" },
     ],
   };
-  const codexModels = {
-    currentModelId: "gpt-5.5-codex",
-    availableModels: [
-      {
-        modelId: "gpt-5.5-codex",
-        name: "GPT-5.5 Codex",
-        supportsFastMode: true,
-      },
-      {
-        modelId: "gpt-5.1-codex-mini",
-        name: "GPT-5.1 Codex Mini",
-        supportsFastMode: false,
-      },
-    ],
-  };
+  const codexAvailableModels = [
+    {
+      modelId: "gpt-5.6-sol",
+      name: "GPT-5.6 Sol",
+      supportsFastMode: true,
+    },
+    {
+      modelId: "gpt-5.6-luna",
+      name: "GPT-5.6 Luna",
+      supportsFastMode: true,
+    },
+    {
+      modelId: "gpt-5.6-terra",
+      name: "GPT-5.6 Terra",
+      supportsFastMode: true,
+    },
+    {
+      modelId: "gpt-5.5-codex",
+      name: "GPT-5.5 Codex",
+      supportsFastMode: true,
+    },
+  ];
   const claudeEffort = {
     id: "reasoning_effort",
     name: "Reasoning Effort",
@@ -79,8 +86,9 @@ function createHarness() {
     id: "reasoning_effort",
     name: "Reasoning Effort",
     type: "select",
-    currentValue: "medium",
+    currentValue: "low",
     options: [
+      { value: "low", name: "low" },
       { value: "medium", name: "medium" },
       { value: "high", name: "high" },
     ],
@@ -102,6 +110,25 @@ function createHarness() {
       const agentType = String(params.agentType);
       innerSessions.set(id, { id, agentType, scriptedTurnText: [] });
       const isClaude = agentType === "claude-code";
+      const codexInitialModelId =
+        typeof params.initialModelId === "string" &&
+        codexAvailableModels.some(
+          (model) => model.modelId === params.initialModelId,
+        )
+          ? params.initialModelId
+          : params.codexDefaultIntent === "paired-executor"
+            ? "gpt-5.6-luna"
+            : "gpt-5.6-sol";
+      const codexModels = {
+        currentModelId: codexInitialModelId,
+        availableModels: codexAvailableModels,
+      };
+      const codexReasoningEffort =
+        typeof params.reasoningEffort === "string"
+          ? params.reasoningEffort
+          : params.codexDefaultIntent === "paired-executor"
+            ? "low"
+            : "medium";
       wrappedEmit("provider://session-status", {
         sessionId: id,
         status: "ready",
@@ -109,7 +136,10 @@ function createHarness() {
         models: isClaude ? claudeModels : codexModels,
         configOptions: isClaude
           ? [{ ...claudeEffort }]
-          : [{ ...codexEffort }, { ...codexFastMode }],
+          : [
+              { ...codexEffort, currentValue: codexReasoningEffort },
+              { ...codexFastMode },
+            ],
       });
       return {
         id,
@@ -144,7 +174,7 @@ function createHarness() {
       if (!session) return [];
       return session.agentType === "claude-code"
         ? claudeModels.availableModels
-        : codexModels.availableModels;
+        : codexAvailableModels;
     }),
     updateSessionConfigOption: vi.fn(async () => null),
     setPermissionMode: vi.fn(async () => {}),
@@ -207,6 +237,7 @@ describe("paired runtime — spawn", () => {
     expect(claudeSpawn?.approvalPolicy).toBe("on-request");
     expect(codexSpawn?.approvalPolicy).toBe("on-failure");
     expect(codexSpawn?.sandboxMode).toBe("workspace-write");
+    expect(codexSpawn?.codexDefaultIntent).toBe("paired-executor");
   });
 
   it("returns a composite agentSessionId carrying both inner remote ids", async () => {
@@ -228,7 +259,8 @@ describe("paired runtime — spawn", () => {
     expect(text).toContain("Handoffs appear inline");
     // Declares resolved models and efforts in plain language.
     expect(text).toContain("Opus 4.7 (1M)");
-    expect(text).toContain("GPT-5.5 Codex");
+    expect(text).toContain("GPT-5.6 Luna");
+    expect(text).toContain("low");
     expect(text).toContain("medium");
     expect(declarations[0].payload.sessionId).toBe("paired-1");
   });
@@ -273,9 +305,10 @@ describe("paired runtime — spawn", () => {
     expect(last.paired.planner.models.currentModelId).toBe(
       "claude-opus-4-7[1m]",
     );
-    expect(last.paired.executor.models.currentModelId).toBe("gpt-5.5-codex");
+    expect(last.paired.executor.models.currentModelId).toBe("gpt-5.6-luna");
     expect(last.paired.planner.configOptions[0].id).toBe("reasoning_effort");
     expect(last.paired.executor.configOptions[0].id).toBe("reasoning_effort");
+    expect(last.paired.executor.configOptions[0].currentValue).toBe("low");
     expect(last.paired.state).toBe("idle");
   });
 
@@ -292,6 +325,9 @@ describe("paired runtime — spawn", () => {
     await spawnPaired(h, {
       paired: { executor: { modelId: "gpt-retired" } },
     });
+    const codexSpawn = h.inner.spawnSession.mock.calls.find(
+      (c) => c[0].agentType === "codex",
+    )?.[0];
     const statuses = eventsFor(h.emitted, "provider://session-status").filter(
       (e) => e.payload.sessionId === "paired-1",
     );
@@ -300,6 +336,8 @@ describe("paired runtime — spawn", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test introspection
       any
     >;
+    expect(codexSpawn?.initialModelId).toBe("gpt-retired");
+    expect(codexSpawn?.codexDefaultIntent).toBe("paired-executor");
     expect(String(last.paired.executor.notice)).toContain("gpt-retired");
     expect(String(last.paired.executor.notice)).toMatch(/no longer available/i);
   });
