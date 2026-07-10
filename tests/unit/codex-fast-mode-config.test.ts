@@ -9,9 +9,12 @@ const modulePath = new URL(
 ).href;
 const {
   _buildCodexSessionStatus: buildCodexSessionStatus,
+  _buildCodexThreadStartParams: buildCodexThreadStartParams,
   _buildCodexTurnStartParams: buildCodexTurnStartParams,
   _codexServiceTierFromFastModeValue: codexServiceTierFromFastModeValue,
   _normalizeCodexModelRecords: normalizeCodexModelRecords,
+  _resolveCodexInitialReasoningEffort: resolveCodexInitialReasoningEffort,
+  _resolveCodexPreferredModelRecord: resolveCodexPreferredModelRecord,
 } = await import(/* @vite-ignore */ modulePath);
 
 function modelListResult() {
@@ -66,6 +69,62 @@ function session(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe("#2890 Codex GPT-5.6 defaults", () => {
+  it("prefers GPT-5.6 Sol for direct Codex even when model/list is stale", () => {
+    const records = normalizeCodexModelRecords(modelListResult());
+    const preferred = resolveCodexPreferredModelRecord(records, {
+      intent: "direct",
+    });
+
+    expect(preferred?.modelId).toBe("gpt-5.6-sol");
+    expect(preferred?.name).toBe("GPT-5.6 Sol");
+    expect(
+      resolveCodexInitialReasoningEffort(preferred, { intent: "direct" }),
+    ).toBe("medium");
+  });
+
+  it("prefers GPT-5.6 Luna with low effort for the paired Claude + Codex executor even when model/list is stale", () => {
+    const records = normalizeCodexModelRecords(modelListResult());
+    const preferred = resolveCodexPreferredModelRecord(records, {
+      intent: "paired-executor",
+    });
+
+    expect(preferred?.modelId).toBe("gpt-5.6-luna");
+    expect(preferred?.name).toBe("GPT-5.6 Luna");
+    expect(
+      resolveCodexInitialReasoningEffort(preferred, {
+        intent: "paired-executor",
+      }),
+    ).toBe("low");
+  });
+
+  it("preserves an explicit Codex model over preferred defaults", () => {
+    const records = normalizeCodexModelRecords(modelListResult());
+    const preferred = resolveCodexPreferredModelRecord(records, {
+      intent: "direct",
+      explicitModelId: "gpt-5.6-luna",
+    });
+
+    expect(preferred?.modelId).toBe("gpt-5.6-luna");
+  });
+
+  it("passes the resolved model to Codex thread/start", () => {
+    const params = buildCodexThreadStartParams(
+      session({ currentModelId: "gpt-5.6-sol" }),
+      "/repo",
+      "auto",
+      "danger-full-access",
+    );
+
+    expect(params).toMatchObject({
+      cwd: "/repo",
+      approvalPolicy: "never",
+      sandbox: "danger-full-access",
+      model: "gpt-5.6-sol",
+    });
+  });
+});
 
 describe("#2888 Codex fast mode config", () => {
   it("exposes Fast support from Codex service-tier metadata and emits a fast_mode option", () => {

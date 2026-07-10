@@ -51,6 +51,58 @@ const pairedRuntimeModule = await loadAgentRuntimeModule(
 const PAIRED_AGENT_TYPE =
   pairedRuntimeModule.module?.PAIRED_AGENT_TYPE ?? "claude-codex";
 
+const CODEX_DEFAULT_INTENTS = new Set(["direct", "paired-executor"]);
+const CODEX_DIRECT_PREFERRED_MODELS = ["gpt-5.6-sol", "gpt-5.6"];
+const CODEX_PAIRED_EXECUTOR_PREFERRED_MODELS = [
+  "gpt-5.6-luna",
+  "gpt-5.6-terra",
+];
+const CODEX_KNOWN_GPT56_MODELS = new Map([
+  [
+    "gpt-5.6-sol",
+    {
+      name: "GPT-5.6 Sol",
+      description: "Flagship GPT-5.6 model for Codex.",
+      defaultReasoningEffort: "medium",
+    },
+  ],
+  [
+    "gpt-5.6",
+    {
+      name: "GPT-5.6",
+      description: "GPT-5.6 alias that routes to Sol.",
+      defaultReasoningEffort: "medium",
+    },
+  ],
+  [
+    "gpt-5.6-luna",
+    {
+      name: "GPT-5.6 Luna",
+      description: "Fast, lower-cost GPT-5.6 model for Codex.",
+      defaultReasoningEffort: "low",
+    },
+  ],
+  [
+    "gpt-5.6-terra",
+    {
+      name: "GPT-5.6 Terra",
+      description: "Balanced GPT-5.6 model for Codex.",
+      defaultReasoningEffort: "medium",
+    },
+  ],
+]);
+const CODEX_KNOWN_MODEL_PICKER_ORDER = [
+  "gpt-5.6-sol",
+  "gpt-5.6-luna",
+  "gpt-5.6-terra",
+];
+const CODEX_GPT56_REASONING_EFFORTS = [
+  { value: "low", name: "low" },
+  { value: "medium", name: "medium" },
+  { value: "high", name: "high" },
+  { value: "xhigh", name: "xhigh" },
+];
+
 export function createUnavailableRuntime(label, reason) {
   const detail = reason ? `: ${reason}` : "";
   const unavailable = async () => {
@@ -407,14 +459,100 @@ function normalizeModelRecords(result) {
     .filter((record) => typeof record.modelId === "string");
 }
 
+function codexKnownModelRecord(modelId) {
+  const known = CODEX_KNOWN_GPT56_MODELS.get(modelId);
+  if (!known) return null;
+  return {
+    modelId,
+    name: known.name,
+    description: known.description,
+    defaultReasoningEffort: known.defaultReasoningEffort,
+    supportedReasoningEfforts: CODEX_GPT56_REASONING_EFFORTS,
+    defaultServiceTier: null,
+    serviceTiers: [],
+    isDefault: false,
+  };
+}
+
+function withKnownCodexModelRecords(records) {
+  const catalog = Array.isArray(records) ? records : [];
+  const seen = new Set(catalog.map((record) => record.modelId));
+  const known = CODEX_KNOWN_MODEL_PICKER_ORDER
+    .filter((modelId) => !seen.has(modelId))
+    .map(codexKnownModelRecord)
+    .filter(Boolean);
+  return [...catalog, ...known];
+}
+
+function normalizeCodexDefaultIntent(value) {
+  return CODEX_DEFAULT_INTENTS.has(value) ? value : "direct";
+}
+
+function findModelRecord(records, modelId) {
+  return (
+    records.find((record) => record.modelId === modelId) ??
+    null
+  );
+}
+
+function getCatalogDefaultModelRecord(records) {
+  return records.find((record) => record.isDefault) ?? records[0] ?? null;
+}
+
+function resolveCodexPreferredModelRecord(
+  records,
+  { intent = "direct", explicitModelId = null } = {},
+) {
+  const catalog = Array.isArray(records) ? records : [];
+  if (typeof explicitModelId === "string" && explicitModelId.length > 0) {
+    const explicit =
+      findModelRecord(catalog, explicitModelId) ??
+      codexKnownModelRecord(explicitModelId);
+    if (explicit) return explicit;
+  }
+
+  const preferred =
+    normalizeCodexDefaultIntent(intent) === "paired-executor"
+      ? CODEX_PAIRED_EXECUTOR_PREFERRED_MODELS
+      : CODEX_DIRECT_PREFERRED_MODELS;
+  for (const modelId of preferred) {
+    const record =
+      findModelRecord(catalog, modelId) ?? codexKnownModelRecord(modelId);
+    if (record) return record;
+  }
+
+  return getCatalogDefaultModelRecord(catalog);
+}
+
+function resolveCodexInitialReasoningEffort(
+  modelRecord,
+  { intent = "direct", explicitEffort = null } = {},
+) {
+  const supported = Array.isArray(modelRecord?.supportedReasoningEfforts)
+    ? modelRecord.supportedReasoningEfforts
+        .map((option) => option?.value)
+        .filter((value) => typeof value === "string" && value.length > 0)
+    : [];
+  const supports = (value) => supported.length === 0 || supported.includes(value);
+  const preferred =
+    typeof explicitEffort === "string" && explicitEffort.length > 0
+      ? explicitEffort
+      : normalizeCodexDefaultIntent(intent) === "paired-executor"
+        ? "low"
+        : (modelRecord?.defaultReasoningEffort ?? "medium");
+
+  if (supports(preferred)) return preferred;
+  const modelDefault = modelRecord?.defaultReasoningEffort ?? null;
+  if (modelDefault && supports(modelDefault)) return modelDefault;
+  return supported[0] ?? "medium";
+}
+
 function getSelectedModelRecord(session) {
   return (
     session.availableModelRecords.find(
       (record) => record.modelId === session.currentModelId,
     ) ??
-    session.availableModelRecords.find((record) => record.isDefault) ??
-    session.availableModelRecords[0] ??
-    null
+    getCatalogDefaultModelRecord(session.availableModelRecords)
   );
 }
 
@@ -519,6 +657,22 @@ function codexServiceTierFromFastModeValue(valueId, session) {
     default:
       throw new Error(`Unsupported fast mode value: ${valueId}`);
   }
+}
+
+function buildCodexThreadStartParams(
+  session,
+  cwd,
+  resolvedMode,
+  resolvedSandbox,
+) {
+  return {
+    cwd,
+    approvalPolicy: codexApprovalPolicy(resolvedMode),
+    sandbox: resolvedSandbox,
+    experimentalRawEvents: false,
+    ...(session.currentModelId ? { model: session.currentModelId } : {}),
+    ...(session.serviceTier ? { serviceTier: session.serviceTier } : {}),
+  };
 }
 
 function buildCodexTurnStartParams(session, prompt, context) {
@@ -1305,6 +1459,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       sandboxMode,
       networkEnabled,
       timeoutSecs,
+      initialModelId,
+      reasoningEffort,
+      codexDefaultIntent,
     } = params;
 
     if (agentType === PAIRED_AGENT_TYPE) {
@@ -1368,7 +1525,25 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         throw new Error("Codex session was terminated during initialization.");
       }
 
-      session.availableModelRecords = normalizeModelRecords(modelListResult);
+      session.availableModelRecords = withKnownCodexModelRecords(
+        normalizeModelRecords(modelListResult),
+      );
+      const defaultIntent = normalizeCodexDefaultIntent(codexDefaultIntent);
+      const preferredModelRecord = resolveCodexPreferredModelRecord(
+        session.availableModelRecords,
+        {
+          intent: defaultIntent,
+          explicitModelId: initialModelId,
+        },
+      );
+      session.currentModelId = preferredModelRecord?.modelId ?? null;
+      session.reasoningEffort = resolveCodexInitialReasoningEffort(
+        preferredModelRecord,
+        {
+          intent: defaultIntent,
+          explicitEffort: reasoningEffort,
+        },
+      );
 
       const threadParams = {
         cwd,
@@ -1377,6 +1552,12 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         experimentalRawEvents: false,
         ...(session.serviceTier ? { serviceTier: session.serviceTier } : {}),
       };
+      const threadStartParams = buildCodexThreadStartParams(
+        session,
+        cwd,
+        resolvedMode,
+        resolvedSandbox,
+      );
 
       let threadResult;
       let resumedExistingThread = false;
@@ -1399,7 +1580,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
           threadResult = await sendRequest(
             session,
             "thread/start",
-            threadParams,
+            threadStartParams,
             20_000,
           );
         }
@@ -1407,7 +1588,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         threadResult = await sendRequest(
           session,
           "thread/start",
-          threadParams,
+          threadStartParams,
           20_000,
         );
       }
@@ -1435,12 +1616,24 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
           `${codexLogPrefix} threadResult.model: requested=${requestedModelId}, served=${servedModelId}`,
         );
       }
-      session.currentModelId =
-        servedModelId ?? requestedModelId ?? null;
-      session.reasoningEffort =
-        threadResult?.reasoningEffort ??
-        getSelectedModelRecord(session)?.defaultReasoningEffort ??
-        "medium";
+      session.currentModelId = resumedExistingThread
+        ? (servedModelId ?? requestedModelId ?? null)
+        : (requestedModelId ?? servedModelId ?? null);
+      if (resumedExistingThread) {
+        session.reasoningEffort =
+          threadResult?.reasoningEffort ??
+          getSelectedModelRecord(session)?.defaultReasoningEffort ??
+          session.reasoningEffort ??
+          "medium";
+      } else {
+        session.reasoningEffort = resolveCodexInitialReasoningEffort(
+          getSelectedModelRecord(session),
+          {
+            intent: defaultIntent,
+            explicitEffort: reasoningEffort,
+          },
+        );
+      }
       session.serviceTier = normalizeServiceTier(threadResult?.serviceTier);
 
       if (resumedExistingThread && session.agentSessionId) {
@@ -2025,11 +2218,14 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
 }
 
 export {
+  buildCodexThreadStartParams as _buildCodexThreadStartParams,
   buildCodexTurnStartParams as _buildCodexTurnStartParams,
   buildSessionStatus as _buildCodexSessionStatus,
   codexServiceTierFromFastModeValue as _codexServiceTierFromFastModeValue,
   codexApprovalPolicy as _codexApprovalPolicy,
   modeFromApprovalPolicy as _modeFromApprovalPolicy,
   normalizeModelRecords as _normalizeCodexModelRecords,
+  resolveCodexInitialReasoningEffort as _resolveCodexInitialReasoningEffort,
+  resolveCodexPreferredModelRecord as _resolveCodexPreferredModelRecord,
   sandboxFromMode as _sandboxFromMode,
 };
