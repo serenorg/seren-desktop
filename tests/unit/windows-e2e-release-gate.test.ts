@@ -581,4 +581,25 @@ describe("Windows production e2e release gate", () => {
     );
     expect(tauriConf).toContain('"create": false');
   });
+
+  it("signs stock NSIS plugins on a cold cache instead of exiting 0 on a null $LASTEXITCODE (#2900)", () => {
+    // windows-signature-cache.ps1 runs only cmdlets, so it must exit with a
+    // deterministic code — otherwise a `&`-invoking caller inherits a $null
+    // $LASTEXITCODE, and `$null -ne 0` ($true in PowerShell) trips its failure
+    // guard, exiting 0 before signing and shipping an unsigned nsExec.dll.
+    const cacheScript = readFileSync(
+      join(root, "scripts/windows-signature-cache.ps1"),
+      "utf8",
+    );
+    expect(cacheScript.trimEnd().endsWith("exit 0")).toBe(true);
+
+    // The stage script's cache guards must be null-safe (`if ($LASTEXITCODE)`),
+    // never the `-ne 0` form that fires on a clean run.
+    const stage = readFileSync(
+      join(root, "scripts/stage-signed-nsis-toolset.ps1"),
+      "utf8",
+    );
+    expect(stage).toContain("if ($LASTEXITCODE) { exit $LASTEXITCODE }");
+    expect(stage).not.toContain("if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }");
+  });
 });

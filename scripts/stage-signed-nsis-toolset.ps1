@@ -92,7 +92,10 @@ if ($CacheDir) {
   $listFile = Join-Path ([IO.Path]::GetTempPath()) "nsis-signables.txt"
   Set-Content -LiteralPath $listFile -Value $pluginPaths
   & $cacheScript -Mode restore -ListFile $listFile -CacheDir $CacheDir -Manifest $Manifest -Thumbprint $Thumbprint
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  # Null-safe: only a non-zero code is a failure. `-ne 0` alone would fire on a
+  # $null $LASTEXITCODE ($null -ne 0 is $true in PowerShell) and silently skip
+  # signing with exit 0, shipping unsigned stock plugins (#2900).
+  if ($LASTEXITCODE) { exit $LASTEXITCODE }
 }
 
 Write-Host "Signing $($stock.Count) stock NSIS plugin DLL(s) in the toolset cache..."
@@ -103,6 +106,6 @@ if ($signExit -ne 0) { exit $signExit }
 # Persist newly signed plugins into the cache for the next release to restore.
 if ($CacheDir) {
   & $cacheScript -Mode save -ListFile $listFile -CacheDir $CacheDir -Manifest $Manifest -Thumbprint $Thumbprint
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  if ($LASTEXITCODE) { exit $LASTEXITCODE }
 }
 exit 0
