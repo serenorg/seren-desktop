@@ -450,10 +450,15 @@ if ([string]::IsNullOrWhiteSpace($webView2Runtime)) {
 }
 Write-Stage "WebView2 runtime detected: $webView2Runtime"
 
-# --remote-allow-origins stays a wildcard: it only gates the WebSocket upgrade,
-# not the /json/version HTTP discovery that timed out in #2902, and an explicit
-# fixed-port origin would reject the very non-9222 fallback the DevToolsActivePort
-# resolution below is designed to attach to.
+# SEREN_E2E_REMOTE_DEBUG_PORT is the primary switch: the app reads it at startup
+# and enables WebView2 remote debugging through its own AdditionalBrowserArguments.
+# WebView2 150 ignores the WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS env var once the
+# host app sets browser args, so that env var no longer reaches the browser
+# process (#2902). We keep setting it too as a fallback for WebView2 149-era
+# runtimes that still honor it. --remote-allow-origins stays a wildcard: it only
+# gates the WebSocket upgrade, not the /json/version HTTP discovery, and an
+# explicit fixed-port origin would reject the non-9222 DevToolsActivePort fallback.
+$env:SEREN_E2E_REMOTE_DEBUG_PORT = "$RemoteDebugPort"
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$RemoteDebugPort --remote-allow-origins=*"
 $env:SEREN_E2E_CAPTURE_INJECTION = "1"
 $webViewUserDataDirs = Get-WebView2UserDataDirs

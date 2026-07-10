@@ -638,6 +638,43 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // Create the configured windows here rather than letting Tauri
+            // auto-create them (the window is marked "create": false in
+            // tauri.conf.json) so the Windows e2e release gate can enable
+            // WebView2 remote debugging through the app's OWN
+            // AdditionalBrowserArguments. WebView2 150 stopped honoring the
+            // WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS environment variable once
+            // the host app sets browser args, so the harness env var never
+            // reaches the browser process (serenorg/seren-desktop#2902).
+            // Passing the flags programmatically is the channel WebView2 still
+            // honors.
+            //
+            // Gated on SEREN_E2E_REMOTE_DEBUG_PORT so a normal build never opens
+            // a debug port. The string mirrors wry's own default args
+            // (disable-features + autoplay-policy) because additional_browser_args
+            // REPLACES that default instead of extending it.
+            let e2e_remote_debug_args = std::env::var("SEREN_E2E_REMOTE_DEBUG_PORT")
+                .ok()
+                .and_then(|value| value.trim().parse::<u16>().ok())
+                .map(|port| {
+                    format!(
+                        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --remote-debugging-port={port} --remote-allow-origins=*"
+                    )
+                });
+            let window_configs = app.config().app.windows.clone();
+            for window_config in &window_configs {
+                let mut window_builder =
+                    tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?;
+                if let Some(args) = &e2e_remote_debug_args {
+                    window_builder = window_builder.additional_browser_args(args);
+                    log::info!(
+                        "[e2e] WebView2 remote debugging enabled on window '{}'",
+                        window_config.label
+                    );
+                }
+                window_builder.build()?;
+            }
+
             let app_identifier = app.config().identifier.clone();
             let validation_instance = validation::is_validation_identifier(&app_identifier);
 
