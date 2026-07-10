@@ -512,4 +512,47 @@ describe("Windows production e2e release gate", () => {
     expect(manualPublishWorkflow).toContain("latest.json");
     expect(manualPublishWorkflow).not.toContain("windows-app-e2e");
   });
+
+  it("self-prunes leaked on-box scratch dirs and removes this run's on both paths (#2901)", () => {
+    const job = workflowJob("windows-app-e2e");
+    // Prune ALL prior scratch dirs (not just this run-id), so a crash before the
+    // finally-cleanup can't silently fill the box drive across runs.
+    expect(job).toContain(
+      "Get-ChildItem -LiteralPath $env:TEMP -Directory -Filter 'seren-release-windows-e2e-*'",
+    );
+    expect(job).toContain(
+      "$stale | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }",
+    );
+    // The leaky start-only, same-run-id-only cleanup must not come back.
+    expect(job).not.toContain(
+      "if (Test-Path $work) { Remove-Item -LiteralPath $work -Recurse -Force }",
+    );
+    // Scratch is removed on success AND failure, after logs upload; Set-Location
+    // out of $work first because Windows can't delete a process's CWD.
+    expect(job).toContain(
+      "} finally { Set-Location -LiteralPath $env:TEMP; Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue;",
+    );
+    // Disk pressure surfaces explicitly instead of as a mystery CDP timeout.
+    expect(job).toContain("Low disk:");
+  });
+
+  it("resolves the real WebView2 CDP port via DevToolsActivePort (#2902)", () => {
+    // The gate must not hard-code 9222 forever: when WebView2 binds a different
+    // port (busy/ephemeral/Evergreen bump), DevToolsActivePort names the real one.
+    expect(runner).toContain("function Get-DevToolsActivePort");
+    expect(runner).toContain("function Get-WebView2UserDataDirs");
+    expect(runner).toContain("com.serendb.desktop\\EBWebView");
+    expect(runner).toContain("DevToolsActivePort");
+    expect(runner).toContain("-UserDataDirs $webViewUserDataDirs");
+    // The resolved port is threaded through to the Node probe.
+    expect(runner).toContain(
+      '$env:SEREN_E2E_CDP_ENDPOINT = "http://127.0.0.1:$cdpPort"',
+    );
+    // Timeout must state whether DevToolsActivePort existed and what it named.
+    expect(runner).toContain("function Write-DevToolsActivePortDiagnostics");
+    expect(runner).toContain("Write-DevToolsActivePortDiagnostics $UserDataDirs");
+    // Origin stays a wildcard: it only gates the WS upgrade, not /json/version,
+    // and a fixed-port origin would reject the non-9222 fallback we attach to.
+    expect(runner).toContain("--remote-allow-origins=*");
+  });
 });
