@@ -630,10 +630,53 @@ jobs:
       # uses). Seed the cache exactly as the bundler would and EV-sign the
       # stock plugin DLLs in place; they are not hash-pinned, so the
       # signatures survive the build (#2299).
+      # The stock plugins are byte-identical across releases (pinned NsisSha1),
+      # so cache their signatures in the same R2 store the embedded runtime uses.
+      # The cache dir was already restored from R2 above; the save step below
+      # pushes any freshly signed plugins back for the next release to reuse.
       - name: Stage signed NSIS toolset (Windows)
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         shell: pwsh
-        run: ./scripts/stage-signed-nsis-toolset.ps1
+        run: |
+          ./scripts/stage-signed-nsis-toolset.ps1 `
+            -CacheDir .sig-cache/windows-authenticode `
+            -Manifest windows-nsis-cache-manifest.tsv `
+            -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT
+
+      - name: Save NSIS signature cache to R2
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          if (-not $env:AWS_ACCESS_KEY_ID -or -not $env:AWS_SECRET_ACCESS_KEY -or -not $env:AWS_ENDPOINT_URL -or -not $env:R2_BUCKET) {
+            Write-Host "::error::R2 credentials are required for the Windows signature cache."
+            exit 1
+          }
+          $cacheDir = ".sig-cache/windows-authenticode"
+          $count = @(Get-ChildItem -LiteralPath $cacheDir -Filter "*.signed" -File -ErrorAction SilentlyContinue).Count
+          if ($count -eq 0) {
+            Write-Host "::warning::No Windows signature cache blobs exist to upload to R2."
+            exit 0
+          }
+          $target = "s3://$env:R2_BUCKET/$env:WINDOWS_SIGNATURE_CACHE_R2_PREFIX"
+          Write-Host "Saving $count Windows signature cache blob(s) to $target"
+          aws s3 sync $cacheDir $target `
+            --endpoint-url="$env:AWS_ENDPOINT_URL" `
+            --exclude "*" `
+            --include "*.signed" `
+            --size-only `
+            --no-progress `
+            --only-show-errors
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Failed to save NSIS signature cache to R2."
+            exit $LASTEXITCODE
+          }
+          Write-Host "NSIS signature cache: R2 save completed."
 
       # Build the app (with signing for macOS when certificates available)
       # Note: APPLE_ID/PASSWORD/TEAM_ID removed to prevent Tauri's internal notarization

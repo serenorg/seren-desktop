@@ -16,7 +16,16 @@ param(
   # signed on the bundler's build-local copy, which IS on the plugin search
   # path for additional/).
   [string]$UtilsUrl = "https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll",
-  [string]$UtilsSha1 = "75197FEE3C6A814FE035788D1C34EAD39349B860"
+  [string]$UtilsSha1 = "75197FEE3C6A814FE035788D1C34EAD39349B860",
+  # Content-addressed signature cache directory (restored from R2 by the release
+  # workflow). When set, the stock plugins reuse a prior release's signatures
+  # instead of spending an SSL.com cloud signature each time — they are
+  # byte-identical across releases (pinned NsisSha1), so the cache hits ~always.
+  [string]$CacheDir = "",
+  # Pre-sign hash manifest for the cache restore/save round-trip.
+  [string]$Manifest = "windows-nsis-cache-manifest.tsv",
+  # EV cert thumbprint; only signatures from this cert are trusted on restore.
+  [string]$Thumbprint = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -73,7 +82,27 @@ if ($missing.Count -gt 0) {
   Write-Host "::error::Stock plugin set is missing: $($missing -join ', ')."
   exit 1
 }
+$pluginPaths = @($stock | ForEach-Object { $_.FullName })
+
+# Restore cached signatures before signing so unchanged plugins skip the cloud
+# signer. Uses the same content-addressed engine as the embedded runtime; the
+# signer's own valid-signature skip then avoids re-signing anything restored.
+$cacheScript = Join-Path $PSScriptRoot "windows-signature-cache.ps1"
+if ($CacheDir) {
+  $listFile = Join-Path ([IO.Path]::GetTempPath()) "nsis-signables.txt"
+  Set-Content -LiteralPath $listFile -Value $pluginPaths
+  & $cacheScript -Mode restore -ListFile $listFile -CacheDir $CacheDir -Manifest $Manifest -Thumbprint $Thumbprint
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 Write-Host "Signing $($stock.Count) stock NSIS plugin DLL(s) in the toolset cache..."
-& (Join-Path $PSScriptRoot "sign-windows-payload.ps1") -File @($stock | ForEach-Object { $_.FullName })
-# The signer's `exit` only ends its own script scope — propagate it.
-exit $LASTEXITCODE
+& (Join-Path $PSScriptRoot "sign-windows-payload.ps1") -File $pluginPaths
+$signExit = $LASTEXITCODE
+if ($signExit -ne 0) { exit $signExit }
+
+# Persist newly signed plugins into the cache for the next release to restore.
+if ($CacheDir) {
+  & $cacheScript -Mode save -ListFile $listFile -CacheDir $CacheDir -Manifest $Manifest -Thumbprint $Thumbprint
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+exit 0
