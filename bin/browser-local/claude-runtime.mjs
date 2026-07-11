@@ -1154,6 +1154,9 @@ function buildPromptMeta(result, peakInputTokens, fallbackModelId) {
         : {}),
       ...(contextWindow != null ? { contextWindow } : {}),
       ...(typeof result?.num_turns === "number" ? { numTurns: result.num_turns } : {}),
+      ...(typeof result?.total_cost_usd === "number"
+        ? { cost_usd: result.total_cost_usd }
+        : {}),
     },
   };
 }

@@ -5,6 +5,12 @@ import { randomUUID } from "node:crypto";
 
 export const PAIRED_AGENT_TYPE = "claude-codex";
 
+const PAIRED_LEDGER_VERSION = 1;
+const DEFAULT_EXECUTOR_MAX_ATTEMPTS = 3;
+const DEFAULT_EXECUTOR_TOKEN_BUDGET = 120_000;
+const MAX_PERSISTED_PHASES = 8;
+const MAX_PERSISTED_TEXT = 32_000;
+
 // Default Claude model for the paired agent's planner/reviewer role. The paired
 // agent pins the Claude role to Fable 5 unless the user has explicitly chosen a
 // planner model. When the account cannot switch to Fable, the planner falls back
@@ -212,12 +218,22 @@ function buildPlannerPrompt(userPrompt) {
     "needs the steps, not the reasoning. Do not include the control line when",
     "you hand off a plan.",
     "",
+    "Finish the plan with machine-checkable acceptance assertions, one per line:",
+    "ASSERT A1: <observable condition and exact verification evidence required>",
+    "ASSERT A2: <observable condition and exact verification evidence required>",
+    "Then declare the bounded executor budget on one line:",
+    `BUDGET executor_tokens=${DEFAULT_EXECUTOR_TOKEN_BUDGET} max_attempts=${DEFAULT_EXECUTOR_MAX_ATTEMPTS}`,
+    "Assertions are the checkpoint contract. Do not replace them with prose.",
+    "",
     "User request:",
     userPrompt,
   ].join("\n");
 }
 
-function buildExecutorPrompt(userPrompt, planText) {
+function buildExecutorPrompt(userPrompt, planText, phase) {
+  const assertionLines = phase.assertions
+    .map((assertion) => `${assertion.id}: ${assertion.description}`)
+    .join("\n");
   return [
     "You are the EXECUTOR in a paired workflow. Claude's plan is approved",
     "guidance, but the repository is the source of truth. Inspect the",
@@ -252,8 +268,23 @@ function buildExecutorPrompt(userPrompt, planText) {
     "claim and fail category/quantity mismatches. State every coverage bound",
     "(page, top-N, sample, date range); silent truncation is a failed checkpoint.",
     "",
+    `This is ledger phase ${phase.id}. You have at most ${phase.budget.maxAttempts}`,
+    `attempts and ${phase.budget.executorTokens} executor tokens across the phase.`,
+    "Never repeat an approval-gated, destructive, live-send, or non-idempotent",
+    "action within this turn. If one needs another attempt, report a BLOCKER",
+    "and wait for a fresh operator instruction.",
+    "",
     "Report only: changed files, verification commands/results, plan",
-    "deviations, and remaining risks/blockers.",
+    "deviations, and remaining risks/blockers. Finish with exactly one evidence",
+    "line for every assertion using `PASS <id> — <evidence>` or",
+    "`FAIL <id> — <diagnostics>`. Evidence must name the command, artifact,",
+    "or live result checked. Add `ARTIFACT <path-or-url> — <verification>` for",
+    "each produced artifact and `BLOCKER <operator action> — <diagnostics>`",
+    "for each unresolved blocker. Do not claim the checkpoint complete when",
+    "any assertion is missing or failed.",
+    "",
+    "Ledger assertions:",
+    assertionLines || "A1: Satisfy and verify the original user request.",
     "",
     "Original user request:",
     userPrompt,
@@ -263,13 +294,33 @@ function buildExecutorPrompt(userPrompt, planText) {
   ].join("\n");
 }
 
-function buildReviewPrompt(userPrompt, executorReport) {
+function buildRepairPrompt(userPrompt, planText, phase, diagnostics) {
+  return [
+    buildExecutorPrompt(userPrompt, planText, phase),
+    "",
+    `This is bounded repair attempt ${phase.attempts.length + 1}.`,
+    "Repair only the failed or missing assertions below, then re-run their",
+    "checks. Preserve already verified work. Do not invoke the planner and do",
+    "not repeat any approval-gated, destructive, live-send, or non-idempotent",
+    "action from an earlier attempt.",
+    "",
+    "Accumulated diagnostics:",
+    diagnostics,
+  ].join("\n");
+}
+
+function buildReviewPrompt(userPrompt, executorReport, checkpointSummary) {
   return [
     "You are the REVIEWER in a paired workflow. Codex (the executor) just",
     "implemented your plan. Review the work below against the user's request.",
     "Do NOT edit files. Verify the changes look correct, call out any gaps or",
     "risks, and finish with a short summary for the user: who planned, what",
-    "changed, who reviewed, and test status.",
+    "changed, who reviewed, and test status. This is a declared checkpoint",
+    "invocation. Reference the ledger phase/assertion ids; do not restate the",
+    "canonical plan. The runtime appends the final post-review spend line; use",
+    "the current spend snapshot below only as review context.",
+    "",
+    checkpointSummary,
     "",
     "Original user request:",
     userPrompt,
@@ -284,6 +335,277 @@ function mergeUsage(target, meta) {
   if (!usage) return;
   target.input_tokens += usage.input_tokens ?? 0;
   target.output_tokens += usage.output_tokens ?? 0;
+}
+
+function emptySpend() {
+  return {
+    input_tokens: 0,
+    output_tokens: 0,
+    turns: 0,
+    cost_usd: 0,
+    costed_turns: 0,
+  };
+}
+
+function usageFromMeta(meta) {
+  const cost = Number(meta?.cost_usd);
+  return {
+    input_tokens: Number(meta?.usage?.input_tokens) || 0,
+    output_tokens: Number(meta?.usage?.output_tokens) || 0,
+    turns: 1,
+    cost_usd: Number.isFinite(cost) && cost >= 0 ? cost : 0,
+    costed_turns: Number.isFinite(cost) && cost >= 0 ? 1 : 0,
+  };
+}
+
+function addSpend(target, delta) {
+  target.input_tokens += delta.input_tokens;
+  target.output_tokens += delta.output_tokens;
+  target.turns += delta.turns;
+  target.cost_usd += delta.cost_usd;
+  target.costed_turns += delta.costed_turns;
+}
+
+function totalTokens(spend) {
+  return spend.input_tokens + spend.output_tokens;
+}
+
+function createLedger() {
+  return {
+    version: PAIRED_LEDGER_VERSION,
+    sequence: 0,
+    canonicalPlan: null,
+    phases: [],
+    totalSpend: {
+      planner: emptySpend(),
+      executor: emptySpend(),
+    },
+    plannerInvocations: [],
+  };
+}
+
+function normalizeSpend(raw) {
+  return {
+    input_tokens: Number(raw?.input_tokens) || 0,
+    output_tokens: Number(raw?.output_tokens) || 0,
+    turns: Number(raw?.turns) || 0,
+    cost_usd: Number(raw?.cost_usd) || 0,
+    costed_turns: Number(raw?.costed_turns) || 0,
+  };
+}
+
+function normalizeLedger(raw) {
+  if (!raw || raw.version !== PAIRED_LEDGER_VERSION) return createLedger();
+  return {
+    ...createLedger(),
+    ...raw,
+    phases: Array.isArray(raw.phases)
+      ? raw.phases.map((phase) => ({
+          ...phase,
+          assertions: Array.isArray(phase.assertions) ? phase.assertions : [],
+          attempts: Array.isArray(phase.attempts) ? phase.attempts : [],
+          artifacts: Array.isArray(phase.artifacts) ? phase.artifacts : [],
+          blockers: Array.isArray(phase.blockers) ? phase.blockers : [],
+          spend: {
+            planner: normalizeSpend(phase.spend?.planner),
+            executor: normalizeSpend(phase.spend?.executor),
+          },
+        }))
+      : [],
+    totalSpend: {
+      planner: normalizeSpend(raw.totalSpend?.planner),
+      executor: normalizeSpend(raw.totalSpend?.executor),
+    },
+    plannerInvocations: Array.isArray(raw.plannerInvocations)
+      ? raw.plannerInvocations.slice(-40)
+      : [],
+  };
+}
+
+function persistedLedger(ledger) {
+  const copy = JSON.parse(JSON.stringify(ledger));
+  copy.canonicalPlan = String(copy.canonicalPlan ?? "").slice(
+    0,
+    MAX_PERSISTED_TEXT,
+  );
+  const phases = (copy.phases ?? []).slice(-MAX_PERSISTED_PHASES);
+  copy.phases = phases.map((phase, index) => ({
+    ...phase,
+    userPrompt: String(phase.userPrompt ?? "").slice(0, 2_000),
+    lastExecutorReport:
+      index === phases.length - 1
+        ? String(phase.lastExecutorReport ?? "").slice(0, MAX_PERSISTED_TEXT)
+        : "",
+    attempts: (phase.attempts ?? []).map((attempt) => ({
+      ...attempt,
+      diagnostics: String(attempt.diagnostics ?? "").slice(0, 1_500),
+    })),
+  }));
+  copy.plannerInvocations = (copy.plannerInvocations ?? []).slice(-40);
+  return copy;
+}
+
+function parseResumeState(raw) {
+  if (!raw) return { resumeIds: null, ledger: createLedger() };
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      resumeIds: parsed && typeof parsed === "object" ? parsed : null,
+      ledger: normalizeLedger(parsed?.ledger),
+    };
+  } catch {
+    return { resumeIds: null, ledger: createLedger() };
+  }
+}
+
+function parsePlanContract(planText) {
+  const assertions = [];
+  const seen = new Set();
+  const assertionPattern = /^\s*ASSERT\s+([A-Za-z0-9._-]+)\s*:\s*(.+)$/gim;
+  let match;
+  while ((match = assertionPattern.exec(planText)) !== null) {
+    const id = match[1].toUpperCase();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    assertions.push({ id, description: match[2].trim() });
+  }
+  if (assertions.length === 0) {
+    assertions.push({
+      id: "A1",
+      description: "Satisfy and verify the original user request.",
+    });
+  }
+
+  const budgetMatch =
+    /^\s*BUDGET\s+executor_tokens=(\d+)\s+max_attempts=(\d+)\s*$/im.exec(
+      planText,
+    );
+  const executorTokens = Math.min(
+    500_000,
+    Math.max(1, Number(budgetMatch?.[1]) || DEFAULT_EXECUTOR_TOKEN_BUDGET),
+  );
+  const maxAttempts = Math.min(
+    5,
+    Math.max(1, Number(budgetMatch?.[2]) || DEFAULT_EXECUTOR_MAX_ATTEMPTS),
+  );
+  return { assertions, budget: { executorTokens, maxAttempts } };
+}
+
+function parseExecutorReport(report, assertions) {
+  const resultById = new Map();
+  const resultPattern =
+    /^\s*(PASS|FAIL)\s+([A-Za-z0-9._-]+)\s*(?:—|-|:)\s*(.+)$/gim;
+  let match;
+  while ((match = resultPattern.exec(report)) !== null) {
+    resultById.set(match[2].toUpperCase(), {
+      id: match[2].toUpperCase(),
+      passed: match[1].toUpperCase() === "PASS",
+      evidence: match[3].trim(),
+    });
+  }
+  const results = assertions.map((assertion) => {
+    const result = resultById.get(assertion.id);
+    return (
+      result ?? {
+        id: assertion.id,
+        passed: false,
+        evidence: "Missing PASS/FAIL evidence line.",
+      }
+    );
+  });
+
+  const artifacts = [];
+  const artifactPattern = /^\s*ARTIFACT\s+(.+?)(?:\s+(?:—|-|:)\s+(.+))?$/gim;
+  while ((match = artifactPattern.exec(report)) !== null) {
+    artifacts.push({ path: match[1].trim(), verification: match[2]?.trim() ?? "" });
+  }
+  const blockers = [];
+  const blockerPattern = /^\s*BLOCKER\s+(.+?)(?:\s+(?:—|-|:)\s+(.+))?$/gim;
+  while ((match = blockerPattern.exec(report)) !== null) {
+    blockers.push({ action: match[1].trim(), diagnostics: match[2]?.trim() ?? "" });
+  }
+  const failed = results.filter((result) => !result.passed);
+  const diagnostics = [
+    ...failed.map((result) => `${result.id}: ${result.evidence}`),
+    ...blockers.map(
+      (blocker) => `BLOCKER ${blocker.action}: ${blocker.diagnostics}`,
+    ),
+  ].join("\n");
+  return {
+    complete: failed.length === 0 && blockers.length === 0,
+    results,
+    artifacts,
+    blockers,
+    diagnostics: diagnostics || "No failed assertion diagnostics were reported.",
+  };
+}
+
+function substantiallyReemits(previous, next) {
+  const words = (value) =>
+    new Set(String(value ?? "").toLowerCase().match(/[a-z0-9_./-]{4,}/g) ?? []);
+  const before = words(previous);
+  const after = words(next);
+  if (before.size < 20 || after.size < 20) return false;
+  let overlap = 0;
+  for (const word of before) {
+    if (after.has(word)) overlap += 1;
+  }
+  return overlap / Math.min(before.size, after.size) >= 0.85;
+}
+
+function isNonRetryableToolCall(payload) {
+  const text = `${payload?.title ?? ""} ${JSON.stringify(
+    payload?.parameters ?? {},
+  )}`.toLowerCase();
+  return (
+    /\b(send|deploy|publish|transfer|withdraw|trade|order|payment|delete|remove)\b/.test(
+      text,
+    ) || /"method"\s*:\s*"(post|put|patch|delete)"/i.test(text)
+  );
+}
+
+function spendSummary(ledger, phase) {
+  const describe = (spend) => {
+    const cost =
+      spend.costed_turns === spend.turns && spend.turns > 0
+        ? `, $${spend.cost_usd.toFixed(6)}`
+        : ", cost unavailable from local CLI";
+    return `${totalTokens(spend)} tokens (${spend.turns} turns${cost})`;
+  };
+  return `Ledger ${phase.id} spend: planner ${describe(phase.spend.planner)}, executor ${describe(phase.spend.executor)}; session totals: planner ${describe(ledger.totalSpend.planner)}, executor ${describe(ledger.totalSpend.executor)}.`;
+}
+
+function attemptSummary(phase) {
+  const outcomes = phase.attempts
+    .map((attempt) => `${attempt.number} ${attempt.status}`)
+    .join(", ");
+  return `Ledger ${phase.id} attempts: ${phase.attempts.length}${
+    outcomes ? ` (${outcomes})` : ""
+  }.`;
+}
+
+function checkpointContext(ledger, phase) {
+  const diagnostics = phase.attempts
+    .filter((attempt) => attempt.status !== "passed")
+    .map((attempt) => `Attempt ${attempt.number}: ${attempt.diagnostics}`)
+    .join("\n");
+  const blockers = phase.blockers
+    .map((blocker) => `${blocker.action}: ${blocker.diagnostics}`)
+    .join("\n");
+  return [
+    attemptSummary(phase),
+    spendSummary(ledger, phase),
+    diagnostics ? `Accumulated diagnostics:\n${diagnostics}` : "",
+    blockers ? `Open blockers:\n${blockers}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function mergeArtifacts(existing, incoming) {
+  const byPath = new Map(existing.map((artifact) => [artifact.path, artifact]));
+  for (const artifact of incoming) byPath.set(artifact.path, artifact);
+  return [...byPath.values()];
 }
 
 export function createPairedRuntime({ emit, inner }) {
@@ -305,6 +627,8 @@ export function createPairedRuntime({ emit, inner }) {
       lastTurnMeta: null,
       holdRequested: false,
       sentinelFilter: null,
+      permissionRequestsDuringTurn: 0,
+      nonRetryableActionsDuringTurn: 0,
     };
   }
 
@@ -312,7 +636,74 @@ export function createPairedRuntime({ emit, inner }) {
     const planner = paired.roles.planner.agentSessionId;
     const executor = paired.roles.executor.agentSessionId;
     if (!planner && !executor) return undefined;
-    return JSON.stringify({ planner, executor });
+    return JSON.stringify({
+      planner,
+      executor,
+      ledger: persistedLedger(paired.ledger),
+    });
+  }
+
+  function activeLedgerPhase(paired) {
+    for (let index = paired.ledger.phases.length - 1; index >= 0; index -= 1) {
+      const phase = paired.ledger.phases[index];
+      if (!["completed", "blocked"].includes(phase.status)) return phase;
+    }
+    return null;
+  }
+
+  function createLedgerPhase(paired, userPrompt) {
+    paired.ledger.sequence += 1;
+    const phase = {
+      id: `phase-${paired.ledger.sequence}`,
+      status: "planning",
+      userPrompt,
+      planVersion: paired.ledger.sequence,
+      assertions: [],
+      budget: {
+        executorTokens: DEFAULT_EXECUTOR_TOKEN_BUDGET,
+        maxAttempts: DEFAULT_EXECUTOR_MAX_ATTEMPTS,
+      },
+      attempts: [],
+      spend: {
+        planner: emptySpend(),
+        executor: emptySpend(),
+      },
+      artifacts: [],
+      blockers: [],
+      lastExecutorReport: "",
+      checkpoint: null,
+    };
+    paired.ledger.phases.push(phase);
+    return phase;
+  }
+
+  function recordRoleSpend(paired, phase, role) {
+    const delta = usageFromMeta(paired.roles[role].lastTurnMeta);
+    addSpend(phase.spend[role], delta);
+    addSpend(paired.ledger.totalSpend[role], delta);
+    return delta;
+  }
+
+  function recordPlannerInvocation(paired, phase, kind, outcome, extra = {}) {
+    paired.ledger.plannerInvocations.push({
+      phaseId: phase.id,
+      kind,
+      outcome,
+      at: new Date().toISOString(),
+      ...extra,
+    });
+    paired.ledger.plannerInvocations = paired.ledger.plannerInvocations.slice(-40);
+  }
+
+  function ledgerStatusView(paired) {
+    const phase = activeLedgerPhase(paired) ?? paired.ledger.phases.at(-1) ?? null;
+    return {
+      version: paired.ledger.version,
+      phaseId: phase?.id ?? null,
+      phaseStatus: phase?.status ?? null,
+      attemptCount: phase?.attempts?.length ?? 0,
+      spend: phase ? spendSummary(paired.ledger, phase) : null,
+    };
   }
 
   function roleStatusView(roleState) {
@@ -341,6 +732,7 @@ export function createPairedRuntime({ emit, inner }) {
         activeRole: paired.activeRole,
         planner: roleStatusView(paired.roles.planner),
         executor: roleStatusView(paired.roles.executor),
+        ledger: ledgerStatusView(paired),
       },
     });
   }
@@ -479,6 +871,7 @@ export function createPairedRuntime({ emit, inner }) {
         return true;
 
       case "provider://permission-request": {
+        roleState.permissionRequestsDuringTurn += 1;
         paired.permissionRoutes.set(payload.requestId, payload.sessionId);
         if (paired.state !== "waiting-approval") {
           paired.stateBeforeApproval = {
@@ -489,6 +882,18 @@ export function createPairedRuntime({ emit, inner }) {
           emitPairedStatus(paired);
         }
         emit(channel, { ...payload, sessionId: paired.id });
+        return true;
+      }
+
+      case "provider://tool-call": {
+        if (isNonRetryableToolCall(payload)) {
+          roleState.nonRetryableActionsDuringTurn += 1;
+        }
+        emit(channel, {
+          ...payload,
+          sessionId: paired.id,
+          agentProvider: roleState.agentType,
+        });
         return true;
       }
 
@@ -638,14 +1043,8 @@ export function createPairedRuntime({ emit, inner }) {
 
   async function spawnSession(params) {
     const pairedId = params.localSessionId ?? randomUUID();
-    let resumeIds = null;
-    if (params.resumeAgentSessionId) {
-      try {
-        resumeIds = JSON.parse(params.resumeAgentSessionId);
-      } catch {
-        resumeIds = null;
-      }
-    }
+    const resumeState = parseResumeState(params.resumeAgentSessionId);
+    const resumeIds = resumeState.resumeIds;
 
     const paired = {
       id: pairedId,
@@ -659,6 +1058,7 @@ export function createPairedRuntime({ emit, inner }) {
         planner: createRoleState("planner"),
         executor: createRoleState("executor"),
       },
+      ledger: resumeState.ledger,
       resumeIds,
       currentPrompt: null,
       cancelRequested: false,
@@ -734,6 +1134,8 @@ export function createPairedRuntime({ emit, inner }) {
     roleState.turnText = "";
     roleState.lastTurnMeta = null;
     roleState.holdRequested = false;
+    roleState.permissionRequestsDuringTurn = 0;
+    roleState.nonRetryableActionsDuringTurn = 0;
     // Only the planner can hold the turn for the user; its control token is
     // stripped from the streamed text as chunks arrive (#2880).
     roleState.sentinelFilter =
@@ -782,12 +1184,14 @@ export function createPairedRuntime({ emit, inner }) {
     const usage = { input_tokens: 0, output_tokens: 0 };
     let contextWindow;
 
-    const collectMeta = (role) => {
+    const collectMeta = (role, phase) => {
       const meta = paired.roles[role].lastTurnMeta;
       mergeUsage(usage, meta);
+      const delta = recordRoleSpend(paired, phase, role);
       if (typeof meta?.contextWindow === "number") {
         contextWindow = meta.contextWindow;
       }
+      return delta;
     };
 
     try {
@@ -795,58 +1199,186 @@ export function createPairedRuntime({ emit, inner }) {
         emitDeclaration(paired);
       }
 
-      setPhase(paired, "planning", "planner");
-      const planText = await runRoleTurn(
-        paired,
-        "planner",
-        buildPlannerPrompt(prompt),
-        context,
-      );
-      collectMeta("planner");
+      let phase = activeLedgerPhase(paired);
+      if (!phase) phase = createLedgerPhase(paired, prompt);
+      const resumable =
+        Boolean(paired.ledger.canonicalPlan) &&
+        ["executing", "reviewing"].includes(phase.status);
+      let planText = paired.ledger.canonicalPlan ?? "";
 
-      // The planner can hold the turn for the user — a design/discussion phase
-      // or a clarifying question — instead of handing off. Skip execution and
-      // review and return control so the user can reply (#2880).
-      if (paired.roles.planner.holdRequested) {
-        paired.currentPrompt = null;
-        paired.status = "ready";
-        setPhase(paired, "idle", null);
-        emit("provider://prompt-complete", {
-          sessionId: paired.id,
-          stopReason: "end_turn",
-          meta: {
-            usage,
-            ...(contextWindow ? { contextWindow } : {}),
-          },
+      if (resumable) {
+        recordPlannerInvocation(
+          paired,
+          phase,
+          "plan",
+          "blocked-resume-routed-to-executor",
+        );
+        phase.userPrompt = phase.userPrompt || prompt;
+        emitPairedStatus(paired);
+      } else {
+        phase.status = "planning";
+        setPhase(paired, "planning", "planner");
+        const previousPlan = paired.ledger.canonicalPlan;
+        planText = await runRoleTurn(
+          paired,
+          "planner",
+          buildPlannerPrompt(prompt),
+          context,
+        );
+        collectMeta("planner", phase);
+        recordPlannerInvocation(paired, phase, "plan", "allowed", {
+          duplicatePlan: substantiallyReemits(previousPlan, planText),
         });
-        emitPairedStatus(paired, "ready");
-        return;
+
+        // The planner can hold the turn for the user — a design/discussion phase
+        // or a clarifying question — instead of handing off. Keep the phase so
+        // its role spend survives, but do not create a canonical plan yet.
+        if (paired.roles.planner.holdRequested) {
+          phase.status = "awaiting-user";
+          paired.currentPrompt = null;
+          paired.status = "ready";
+          setPhase(paired, "idle", null);
+          emit("provider://prompt-complete", {
+            sessionId: paired.id,
+            stopReason: "end_turn",
+            meta: {
+              usage,
+              ...(contextWindow ? { contextWindow } : {}),
+            },
+          });
+          emitPairedStatus(paired, "ready");
+          return;
+        }
+
+        const contract = parsePlanContract(planText);
+        phase.assertions = contract.assertions;
+        phase.budget = contract.budget;
+        phase.status = "executing";
+        phase.userPrompt = prompt;
+        paired.ledger.canonicalPlan = planText;
+      }
+
+      let executorReport = phase.lastExecutorReport;
+      let checkpoint = phase.checkpoint;
+      if (phase.status !== "reviewing" || !executorReport || !checkpoint) {
+        emitHandoff(
+          paired,
+          resumable ? "Ledger" : "Claude",
+          "Codex",
+          resumable
+            ? `${phase.id} resumed directly with Codex; planner re-entry was blocked.`
+            : "Claude handed off to Codex to make the approved code changes.",
+        );
+        phase.status = "executing";
+        setPhase(paired, "executing", "executor");
+
+        let executorPrompt =
+          phase.attempts.length > 0
+            ? buildRepairPrompt(
+                phase.userPrompt,
+                planText,
+                phase,
+                phase.attempts
+                  .map(
+                    (attempt) =>
+                      `Attempt ${attempt.number}: ${attempt.diagnostics}`,
+                  )
+                  .join("\n"),
+              )
+            : buildExecutorPrompt(phase.userPrompt, planText, phase);
+        while (phase.attempts.length < phase.budget.maxAttempts) {
+          executorReport = await runRoleTurn(
+            paired,
+            "executor",
+            executorPrompt,
+            context,
+          );
+          const attemptUsage = collectMeta("executor", phase);
+          checkpoint = parseExecutorReport(executorReport, phase.assertions);
+          phase.lastExecutorReport = executorReport;
+          phase.artifacts = mergeArtifacts(phase.artifacts, checkpoint.artifacts);
+          phase.blockers = checkpoint.blockers;
+          phase.checkpoint = checkpoint;
+          phase.attempts.push({
+            number: phase.attempts.length + 1,
+            status: checkpoint.complete ? "passed" : "failed",
+            assertionResults: checkpoint.results,
+            diagnostics: checkpoint.diagnostics,
+            usage: attemptUsage,
+            approvalRequests:
+              paired.roles.executor.permissionRequestsDuringTurn,
+            nonRetryableActions:
+              paired.roles.executor.nonRetryableActionsDuringTurn,
+            at: new Date().toISOString(),
+          });
+          emitPairedStatus(paired);
+
+          if (checkpoint.complete) break;
+          if (paired.roles.executor.permissionRequestsDuringTurn > 0) {
+            phase.blockers.push({
+              action: "Fresh operator approval required before retry",
+              diagnostics:
+                "Autonomous repair stopped because this attempt crossed an approval gate.",
+            });
+            break;
+          }
+          if (paired.roles.executor.nonRetryableActionsDuringTurn > 0) {
+            phase.blockers.push({
+              action: "Fresh operator instruction required before retry",
+              diagnostics:
+                "Autonomous repair stopped because this attempt performed a live-write, destructive, or non-idempotent action.",
+            });
+            break;
+          }
+          if (totalTokens(phase.spend.executor) >= phase.budget.executorTokens) {
+            phase.blockers.push({
+              action: "Executor token budget exhausted",
+              diagnostics: `${totalTokens(phase.spend.executor)} / ${phase.budget.executorTokens} tokens used.`,
+            });
+            break;
+          }
+          if (phase.attempts.length >= phase.budget.maxAttempts) break;
+          executorPrompt = buildRepairPrompt(
+            phase.userPrompt,
+            planText,
+            phase,
+            phase.attempts
+              .map(
+                (attempt) =>
+                  `Attempt ${attempt.number}: ${attempt.diagnostics}`,
+              )
+              .join("\n"),
+          );
+        }
       }
 
       emitHandoff(
         paired,
-        "Claude",
-        "Codex",
-        "Claude handed off to Codex to make the approved code changes.",
-      );
-      setPhase(paired, "executing", "executor");
-      const executorReport = await runRoleTurn(
-        paired,
-        "executor",
-        buildExecutorPrompt(prompt, planText),
-        context,
-      );
-      collectMeta("executor");
-
-      emitHandoff(
-        paired,
         "Codex",
         "Claude",
-        "Codex handed back to Claude to review the changes.",
+        "Codex handed back to Claude at the declared ledger checkpoint.",
       );
+      phase.status = "reviewing";
       setPhase(paired, "reviewing", "planner");
-      await runRoleTurn(paired, "planner", buildReviewPrompt(prompt, executorReport));
-      collectMeta("planner");
+      recordPlannerInvocation(paired, phase, "checkpoint", "allowed");
+      await runRoleTurn(
+        paired,
+        "planner",
+        buildReviewPrompt(
+          phase.userPrompt,
+          executorReport,
+          checkpointContext(paired.ledger, phase),
+        ),
+      );
+      collectMeta("planner", phase);
+      phase.status = checkpoint?.complete ? "completed" : "blocked";
+      const finalSpendSummary = spendSummary(paired.ledger, phase);
+      emit("provider://message-chunk", {
+        sessionId: paired.id,
+        text: `\n\n${attemptSummary(phase)}\n${finalSpendSummary}`,
+        agentProvider: paired.roles.planner.agentType,
+      });
+      emitPairedStatus(paired);
 
       paired.currentPrompt = null;
       paired.status = "ready";
