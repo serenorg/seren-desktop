@@ -187,7 +187,7 @@ describe("#1987 Verified Agent Output", () => {
       "I could not verify that the service is unavailable.",
     );
 
-    const unavailableWithFailedCheck = validateFinalOutput({
+    const unavailableWithMalformedCheck = validateFinalOutput({
       finalText: "GitHub is unavailable in this session.",
       evidence: extractEvidenceFromUnifiedMessages([
         unifiedTool({
@@ -199,15 +199,37 @@ describe("#1987 Verified Agent Output", () => {
             name: "mcp__seren_mcp__list_agent_publishers",
             status: "error",
             isError: true,
-            result: "Publisher github-api not found",
+            result: "Invalid arguments: unknown field slug",
           },
         }),
       ]),
     });
-    expect(unavailableWithFailedCheck.claims[0]).toMatchObject({
+    expect(unavailableWithMalformedCheck.claims[0]).toMatchObject({
+      kind: "publisher_unavailable",
+      status: "unverified",
+      evidenceToolCallIds: [],
+    });
+
+    const unavailableWithFreshAbsence = validateFinalOutput({
+      finalText: "GitHub is unavailable in this session.",
+      evidence: extractEvidenceFromUnifiedMessages([
+        unifiedTool({
+          toolCallId: "verify-2",
+          toolCall: {
+            toolCallId: "verify-2",
+            title: "list_agent_publishers",
+            kind: "seren-mcp",
+            name: "mcp__seren_mcp__list_agent_publishers",
+            status: "completed",
+            result: "Fresh publisher list: no matching publisher found",
+          },
+        }),
+      ]),
+    });
+    expect(unavailableWithFreshAbsence.claims[0]).toMatchObject({
       kind: "publisher_unavailable",
       status: "verified",
-      evidenceToolCallIds: ["verify-1"],
+      evidenceToolCallIds: ["verify-2"],
     });
   });
 

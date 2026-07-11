@@ -106,7 +106,7 @@ function verifiedEvidenceIds(
       );
     case "publisher_unavailable":
       return evidence.tools
-        .filter(isFailedPublisherVerificationTool)
+        .filter(isSuccessfulPublisherAbsenceVerification)
         .map((tool) => tool.id);
   }
 }
@@ -227,12 +227,12 @@ function matchesTool(tool: ToolEvidence, pattern: RegExp): boolean {
   );
 }
 
-function isFailedPublisherVerificationTool(tool: ToolEvidence): boolean {
+function isSuccessfulPublisherAbsenceVerification(tool: ToolEvidence): boolean {
   return (
-    isFailedTool(tool) &&
-    matchesTool(
-      tool,
-      /publisher|gateway|list_agent_publishers|call_publisher|mcp/i,
+    !isFailedTool(tool) &&
+    matchesTool(tool, /list_agent_publishers/i) &&
+    /publisher[^\n]*(not found|absent)|no matching publisher/i.test(
+      tool.result ?? "",
     )
   );
 }
