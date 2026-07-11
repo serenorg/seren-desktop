@@ -913,6 +913,63 @@ describe("paired runtime — prompt pipeline", () => {
     expect(cancelErrors.length).toBe(1);
     expect(eventsFor(h.emitted, "provider://prompt-complete").length).toBe(0);
   });
+
+  it("retires an abandoned executing phase so the next prompt is honored, not swallowed as a resume (#2917)", async () => {
+    const originalSendPrompt = h.inner.sendPrompt.getMockImplementation();
+    // First turn: the planner plans, then the executor turn throws in-process.
+    h.inner.sendPrompt.mockImplementation(
+      async (args: { sessionId: string; prompt: string }) => {
+        const session = h.innerSessions.get(String(args.sessionId));
+        if (session?.agentType === "codex") {
+          throw new Error("executor blew up mid-turn");
+        }
+        return originalSendPrompt?.(args);
+      },
+    );
+    await h.paired
+      .sendPrompt({ sessionId: "paired-1", prompt: "implement feature X" })
+      .catch(() => {});
+
+    // Second turn: executor healthy again; the user sends a DIFFERENT request.
+    h.inner.sendPrompt.mockImplementation(originalSendPrompt);
+    for (const session of h.innerSessions.values()) {
+      session.scriptedTurnText =
+        session.agentType === "codex"
+          ? ["PASS A1 — did Y"]
+          : ["PLAN: do Y\nASSERT A1: Y is done", "REVIEW: Y looks correct"];
+    }
+    h.inner.sendPrompt.mockClear();
+    h.emitted.length = 0;
+
+    await h.paired.sendPrompt({
+      sessionId: "paired-1",
+      prompt: "STOP — do Y instead",
+    });
+
+    // A fresh plan → execute → review must run — NOT a resume that routes the
+    // stale task straight to the executor and drops the new prompt.
+    const order = h.inner.sendPrompt.mock.calls.map(
+      (call) => h.innerSessions.get(String(call[0].sessionId))?.agentType,
+    );
+    expect(order).toEqual(["claude-code", "codex", "claude-code"]);
+    const plannerPrompt = String(h.inner.sendPrompt.mock.calls[0][0].prompt);
+    const executorPrompt = String(h.inner.sendPrompt.mock.calls[1][0].prompt);
+    expect(plannerPrompt).toContain("STOP — do Y instead");
+    expect(executorPrompt).toContain("STOP — do Y instead");
+    expect(plannerPrompt).not.toContain("implement feature X");
+    expect(executorPrompt).not.toContain("implement feature X");
+
+    // The ledger retires the abandoned phase and starts a fresh, completed one.
+    const persisted = JSON.parse(
+      String(
+        eventsFor(h.emitted, "provider://session-status").at(-1)?.payload
+          .agentSessionId,
+      ),
+    );
+    expect(persisted.ledger.phases).toHaveLength(2);
+    expect(persisted.ledger.phases[0].status).toBe("interrupted");
+    expect(persisted.ledger.phases[1].status).toBe("completed");
+  });
 });
 
 describe("paired runtime — planner hold (#2880)", () => {

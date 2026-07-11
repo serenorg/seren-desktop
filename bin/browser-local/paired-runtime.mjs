@@ -394,6 +394,19 @@ function normalizeSpend(raw) {
   };
 }
 
+function normalizeBudget(raw) {
+  return {
+    executorTokens: Math.min(
+      500_000,
+      Math.max(1, Number(raw?.executorTokens) || DEFAULT_EXECUTOR_TOKEN_BUDGET),
+    ),
+    maxAttempts: Math.min(
+      5,
+      Math.max(1, Number(raw?.maxAttempts) || DEFAULT_EXECUTOR_MAX_ATTEMPTS),
+    ),
+  };
+}
+
 function normalizeLedger(raw) {
   if (!raw || raw.version !== PAIRED_LEDGER_VERSION) return createLedger();
   return {
@@ -406,6 +419,7 @@ function normalizeLedger(raw) {
           attempts: Array.isArray(phase.attempts) ? phase.attempts : [],
           artifacts: Array.isArray(phase.artifacts) ? phase.artifacts : [],
           blockers: Array.isArray(phase.blockers) ? phase.blockers : [],
+          budget: normalizeBudget(phase.budget),
           spend: {
             planner: normalizeSpend(phase.spend?.planner),
             executor: normalizeSpend(phase.spend?.executor),
@@ -646,9 +660,24 @@ export function createPairedRuntime({ emit, inner }) {
   function activeLedgerPhase(paired) {
     for (let index = paired.ledger.phases.length - 1; index >= 0; index -= 1) {
       const phase = paired.ledger.phases[index];
-      if (!["completed", "blocked"].includes(phase.status)) return phase;
+      if (!["completed", "blocked", "interrupted"].includes(phase.status)) {
+        return phase;
+      }
     }
     return null;
+  }
+
+  // A resumable phase (executing/reviewing) that is abandoned by cancel or an
+  // in-process error must be retired, or the user's next prompt satisfies the
+  // resume gate and is silently swallowed as a re-run of the old task (#2917).
+  // Cross-process resume is unaffected: a hard crash never runs this path, so a
+  // persisted executing phase still resumes on the next spawn. Planning and
+  // awaiting-user phases are left intact so planner-hold continuation survives.
+  function markActivePhaseInterrupted(paired) {
+    const phase = activeLedgerPhase(paired);
+    if (phase && (phase.status === "executing" || phase.status === "reviewing")) {
+      phase.status = "interrupted";
+    }
   }
 
   function createLedgerPhase(paired, userPrompt) {
@@ -1400,6 +1429,7 @@ export function createPairedRuntime({ emit, inner }) {
       paired.status = "ready";
       paired.state = "idle";
       paired.activeRole = null;
+      markActivePhaseInterrupted(paired);
       if (wasCancelled) {
         // cancelPrompt already emitted the cancel error + ready status.
         // Reject like the single-session runtimes so the frontend's prompt
@@ -1429,6 +1459,7 @@ export function createPairedRuntime({ emit, inner }) {
     paired.status = "ready";
     paired.state = "idle";
     paired.activeRole = null;
+    markActivePhaseInterrupted(paired);
     emit("provider://error", {
       sessionId: paired.id,
       error: "Task cancelled",
