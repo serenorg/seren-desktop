@@ -703,6 +703,16 @@ export function createPairedRuntime({ emit, inner }) {
       checkpoint: null,
     };
     paired.ledger.phases.push(phase);
+    // Bound in-memory ledger growth the same way persistence does — keep only
+    // the most recent phases. The active phase is always last, and older
+    // terminal phases are history whose spend already lives in totalSpend
+    // (#2919).
+    if (paired.ledger.phases.length > MAX_PERSISTED_PHASES) {
+      paired.ledger.phases.splice(
+        0,
+        paired.ledger.phases.length - MAX_PERSISTED_PHASES,
+      );
+    }
     return phase;
   }
 
