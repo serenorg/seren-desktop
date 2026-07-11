@@ -495,8 +495,11 @@ describe("paired runtime — prompt pipeline", () => {
     for (const s of h.innerSessions.values()) {
       s.scriptedTurnText =
         s.agentType === "claude-code"
-          ? ["PLAN: rename the button", "REVIEW: looks good"]
-          : ["EXEC: renamed the button"];
+          ? [
+              "PLAN: rename the button\nASSERT A1: button is renamed and verified\nBUDGET executor_tokens=120000 max_attempts=3",
+              "REVIEW: looks good",
+            ]
+          : ["EXEC: renamed the button\nPASS A1 — focused test passed"];
     }
     h.emitted.length = 0;
   });
@@ -619,7 +622,15 @@ describe("paired runtime — prompt pipeline", () => {
     const chunks = eventsFor(h.emitted, "provider://message-chunk");
     expect(chunks.every((c) => c.payload.sessionId === "paired-1")).toBe(true);
     const providers = chunks.map((c) => c.payload.agentProvider);
-    expect(providers).toEqual(["claude-code", "codex", "claude-code"]);
+    expect(providers).toEqual([
+      "claude-code",
+      "codex",
+      "claude-code",
+      "claude-code",
+    ]);
+    expect(String(chunks.at(-1)?.payload.text)).toContain(
+      "Ledger phase-1 spend:",
+    );
   });
 
   it("walks paired state planning → executing → reviewing → idle", async () => {
@@ -658,6 +669,208 @@ describe("paired runtime — prompt pipeline", () => {
     }
     // The turn must end on a ready frame.
     expect(frames[frames.length - 1].status).toBe("ready");
+  });
+
+  it("repairs failed assertions inside the executor budget without another planner turn (#2912, #2913)", async () => {
+    const executor = [...h.innerSessions.values()].find(
+      (session) => session.agentType === "codex",
+    );
+    if (!executor) throw new Error("missing executor session");
+    executor.scriptedTurnText = [
+      "FAIL A1 — focused test failed with exit 1",
+      "PASS A1 — focused test passed after the local repair",
+    ];
+
+    await h.paired.sendPrompt({ sessionId: "paired-1", prompt: "do it" });
+
+    const order = h.inner.sendPrompt.mock.calls.map((call) =>
+      h.innerSessions.get(String(call[0].sessionId))?.agentType,
+    );
+    expect(order).toEqual(["claude-code", "codex", "codex", "claude-code"]);
+    expect(String(h.inner.sendPrompt.mock.calls[2][0].prompt)).toContain(
+      "bounded repair attempt 2",
+    );
+
+    const lastStatus = eventsFor(h.emitted, "provider://session-status").at(-1)
+      ?.payload as {
+      paired?: {
+        ledger?: { attemptCount?: number; phaseStatus?: string; spend?: string };
+      };
+    };
+    expect(lastStatus.paired?.ledger).toMatchObject({
+      attemptCount: 2,
+      phaseStatus: "completed",
+    });
+    expect(lastStatus.paired?.ledger?.spend).toContain("executor 30 tokens");
+    expect(
+      String(eventsFor(h.emitted, "provider://message-chunk").at(-1)?.payload.text),
+    ).toContain("Ledger phase-1 attempts: 2 (1 failed, 2 passed).");
+  });
+
+  it("halts the repair loop when the phase executor-token budget is exhausted (#2913)", async () => {
+    const planner = [...h.innerSessions.values()].find(
+      (session) => session.agentType === "claude-code",
+    );
+    const executor = [...h.innerSessions.values()].find(
+      (session) => session.agentType === "codex",
+    );
+    if (!planner || !executor) throw new Error("missing paired inner session");
+    planner.scriptedTurnText = [
+      "PLAN: repair\nASSERT A1: repair is verified\nBUDGET executor_tokens=20 max_attempts=5",
+      "REVIEW: executor budget exhausted",
+    ];
+    executor.scriptedTurnText = [
+      "FAIL A1 — first check failed",
+      "FAIL A1 — second check failed",
+      "PASS A1 — this attempt must never run",
+    ];
+
+    await h.paired.sendPrompt({ sessionId: "paired-1", prompt: "do it" });
+
+    const executorCalls = h.inner.sendPrompt.mock.calls.filter(
+      (call) =>
+        h.innerSessions.get(String(call[0].sessionId))?.agentType === "codex",
+    );
+    expect(executorCalls).toHaveLength(2);
+    const persisted = JSON.parse(
+      String(
+        eventsFor(h.emitted, "provider://session-status").at(-1)?.payload
+          .agentSessionId,
+      ),
+    );
+    expect(persisted.ledger.phases[0].blockers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "Executor token budget exhausted" }),
+      ]),
+    );
+  });
+
+  it("never retries an executor attempt that crossed an approval gate (#2912)", async () => {
+    const executor = [...h.innerSessions.values()].find(
+      (session) => session.agentType === "codex",
+    );
+    if (!executor) throw new Error("missing executor session");
+    executor.scriptedTurnText = ["FAIL A1 — live write still needs approval"];
+    const originalSendPrompt = h.inner.sendPrompt.getMockImplementation();
+    h.inner.sendPrompt.mockImplementation(async (args) => {
+      const session = h.innerSessions.get(String(args.sessionId));
+      if (session?.agentType === "codex") {
+        h.wrappedEmit("provider://permission-request", {
+          sessionId: args.sessionId,
+          requestId: "approval-1",
+          toolCall: { name: "commandExecution" },
+          options: [],
+        });
+      }
+      return originalSendPrompt?.(args);
+    });
+
+    await h.paired.sendPrompt({ sessionId: "paired-1", prompt: "do it" });
+
+    const executorCalls = h.inner.sendPrompt.mock.calls.filter(
+      (call) =>
+        h.innerSessions.get(String(call[0].sessionId))?.agentType === "codex",
+    );
+    expect(executorCalls).toHaveLength(1);
+    const persisted = JSON.parse(
+      String(
+        eventsFor(h.emitted, "provider://session-status").at(-1)?.payload
+          .agentSessionId,
+      ),
+    );
+    expect(persisted.ledger.phases[0].attempts[0].approvalRequests).toBe(1);
+    expect(persisted.ledger.phases[0].blockers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "Fresh operator approval required before retry",
+        }),
+      ]),
+    );
+  });
+
+  it("resumes an incomplete durable ledger at the executor without retransmitting the plan (#2913, #2914)", async () => {
+    const resumed = createHarness();
+    const resumeAgentSessionId = JSON.stringify({
+      planner: "claude-code-remote-old",
+      executor: "codex-remote-old",
+      ledger: {
+        version: 1,
+        sequence: 1,
+        canonicalPlan:
+          "PLAN: repair\nASSERT A1: repair is verified\nBUDGET executor_tokens=120000 max_attempts=3",
+        phases: [
+          {
+            id: "phase-1",
+            status: "executing",
+            userPrompt: "repair it",
+            planVersion: 1,
+            assertions: [{ id: "A1", description: "repair is verified" }],
+            budget: { executorTokens: 120000, maxAttempts: 3 },
+            attempts: [
+              {
+                number: 1,
+                status: "failed",
+                diagnostics: "A1: first check failed",
+                assertionResults: [],
+                usage: { input_tokens: 10, output_tokens: 5, turns: 1 },
+                approvalRequests: 0,
+              },
+            ],
+            spend: {
+              planner: { input_tokens: 10, output_tokens: 5, turns: 1 },
+              executor: { input_tokens: 10, output_tokens: 5, turns: 1 },
+            },
+            artifacts: [],
+            blockers: [],
+            lastExecutorReport: "FAIL A1 — first check failed",
+            checkpoint: null,
+          },
+        ],
+        totalSpend: {
+          planner: { input_tokens: 10, output_tokens: 5, turns: 1 },
+          executor: { input_tokens: 10, output_tokens: 5, turns: 1 },
+        },
+        plannerInvocations: [],
+      },
+    });
+    await spawnPaired(resumed, { resumeAgentSessionId });
+    for (const session of resumed.innerSessions.values()) {
+      session.scriptedTurnText =
+        session.agentType === "codex"
+          ? ["PASS A1 — resumed focused check passed"]
+          : ["REVIEW: resumed checkpoint looks good"];
+    }
+    resumed.emitted.length = 0;
+
+    await resumed.paired.sendPrompt({
+      sessionId: "paired-1",
+      prompt: "continue",
+    });
+
+    const order = resumed.inner.sendPrompt.mock.calls.map((call) =>
+      resumed.innerSessions.get(String(call[0].sessionId))?.agentType,
+    );
+    expect(order).toEqual(["codex", "claude-code"]);
+    expect(String(resumed.inner.sendPrompt.mock.calls[0][0].prompt)).toContain(
+      "bounded repair attempt 2",
+    );
+    const persisted = JSON.parse(
+      String(
+        eventsFor(resumed.emitted, "provider://session-status").at(-1)?.payload
+          .agentSessionId,
+      ),
+    );
+    expect(persisted.ledger.phases[0]).toMatchObject({
+      status: "completed",
+      attempts: [{ number: 1 }, { number: 2, status: "passed" }],
+    });
+    expect(persisted.ledger.plannerInvocations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          outcome: "blocked-resume-routed-to-executor",
+        }),
+      ]),
+    );
   });
 
   it("suppresses replayed inner history chunks (DB transcript is authoritative)", async () => {
@@ -803,8 +1016,11 @@ describe("paired runtime — planner hold (#2880)", () => {
     for (const s of h.innerSessions.values()) {
       s.scriptedTurnText =
         s.agentType === "claude-code"
-          ? ["PLAN: do the thing", "REVIEW: looks good"]
-          : ["EXEC: did the thing"];
+          ? [
+              "PLAN: do the thing\nASSERT A1: thing is verified\nBUDGET executor_tokens=120000 max_attempts=3",
+              "REVIEW: looks good",
+            ]
+          : ["EXEC: did the thing\nPASS A1 — focused test passed"];
     }
 
     await h.paired.sendPrompt({ sessionId: "paired-1", prompt: "build it now" });
