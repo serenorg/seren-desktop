@@ -228,13 +228,14 @@ function matchesTool(tool: ToolEvidence, pattern: RegExp): boolean {
 }
 
 function isSuccessfulPublisherAbsenceVerification(tool: ToolEvidence): boolean {
-  return (
-    !isFailedTool(tool) &&
-    matchesTool(tool, /list_agent_publishers/i) &&
-    /publisher[^\n]*(not found|absent)|no matching publisher/i.test(
-      tool.result ?? "",
-    )
-  );
+  // A successful no-argument list_agent_publishers call is the live catalog
+  // evidence the agent is instructed to gather; the absence determination is
+  // its client-side filter over that list. The real tool returns the catalog
+  // as JSON ({"publishers":[...]}), never prose like "not found", so requiring
+  // absence phrasing in the result made this unsatisfiable (#2918). A failed or
+  // malformed lookup is still excluded so it can never stand in for real
+  // evidence (#2910).
+  return !isFailedTool(tool) && matchesTool(tool, /list_agent_publishers/i);
 }
 
 function isFailedTool(tool: ToolEvidence): boolean {

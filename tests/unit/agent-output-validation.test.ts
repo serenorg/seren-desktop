@@ -210,6 +210,9 @@ describe("#1987 Verified Agent Output", () => {
       evidenceToolCallIds: [],
     });
 
+    // The real list_agent_publishers tool returns the catalog as JSON, never
+    // prose like "not found" — a successful live list that omits GitHub is the
+    // evidence, and the absence is the agent's client-side filter (#2918).
     const unavailableWithFreshAbsence = validateFinalOutput({
       finalText: "GitHub is unavailable in this session.",
       evidence: extractEvidenceFromUnifiedMessages([
@@ -221,7 +224,8 @@ describe("#1987 Verified Agent Output", () => {
             kind: "seren-mcp",
             name: "mcp__seren_mcp__list_agent_publishers",
             status: "completed",
-            result: "Fresh publisher list: no matching publisher found",
+            result:
+              '{"publishers":[{"slug":"seren-notes"},{"slug":"seren-whisper"}]}',
           },
         }),
       ]),
