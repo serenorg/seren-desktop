@@ -38,4 +38,12 @@ describe("#1622 — PUBLISHER_LIVE_QUERY_INSTRUCTION", () => {
   it("mentions call_publisher so the agent can invoke after discovery", () => {
     expect(PUBLISHER_LIVE_QUERY_INSTRUCTION).toContain("call_publisher");
   });
+
+  it("forbids parameterized discovery failures from becoming absence claims (#2910)", () => {
+    const txt = PUBLISHER_LIVE_QUERY_INSTRUCTION;
+    expect(txt).toContain("filter that returned list client-side");
+    expect(txt).toContain("parameterized discovery call is not evidence");
+    expect(txt).toContain("Authorization or allowlist rejection");
+    expect(txt).not.toContain("list_agent_publishers with slug:");
+  });
 });

@@ -590,7 +590,14 @@ describe("paired runtime — prompt pipeline", () => {
     expect(executorPrompt).toContain("repository is the source of truth");
     expect(executorPrompt).toContain("Preserve unrelated user work");
     expect(executorPrompt).toContain("Run focused verification first");
-    expect(executorPrompt).toContain("live MCP/publisher discovery");
+    expect(executorPrompt).toContain("list_agent_publishers with no");
+    expect(executorPrompt).toContain("preflight");
+    expect(executorPrompt).toContain("stored session expiry");
+    expect(executorPrompt).toContain("one operator ask");
+    expect(executorPrompt).toContain("visible error text and a screenshot");
+    expect(executorPrompt).toContain("scan outbound rows/docs for placeholders");
+    expect(executorPrompt).toContain("one PASS/FAIL with an evidence reference");
+    expect(executorPrompt).toContain("State every coverage bound");
     expect(executorPrompt).toContain("Report only: changed files");
   });
 

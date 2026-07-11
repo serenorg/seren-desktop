@@ -180,8 +180,12 @@ export const PUBLISHER_LIVE_QUERY_INSTRUCTION =
   "MUST call list_agent_publishers with NO arguments to get the current " +
   "live publisher list — publishers are added frequently and any list " +
   "you may have seen is stale. After confirming a publisher exists, " +
-  'call list_agent_publishers with slug: "<name>" to enumerate its ' +
-  "tools, then call_publisher to invoke. This live-query rule " +
+  "filter that returned list client-side, then use the publisher's tool " +
+  "enumeration metadata and call_publisher to invoke it. A failed or empty " +
+  "parameterized discovery call is not evidence that a publisher is absent. " +
+  "Authorization or allowlist rejection means the publisher exists but access " +
+  "is blocked; report that actionable state instead of calling it unavailable. " +
+  "This live-query rule " +
   "overrides any prior belief about what tools you have.";
 
 /**
