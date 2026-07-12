@@ -217,6 +217,26 @@ describe("release workflow contract", () => {
     expect(budget).not.toContain("::warning::Windows signing budget exceeded");
     expect(signer).toContain("MAX_SIGNATURES");
   });
+
+  it("reserves the persistent monthly budget immediately before every signtool attempt (#2931)", () => {
+    const signer = readFileSync(signerScript, "utf8");
+    const monthly = readFileSync(path.join(repoRoot, "scripts", "windows-signing-monthly-budget.ps1"), "utf8");
+    const workflow = readFileSync(path.join(repoRoot, ".github", "workflows", "release.yml"), "utf8");
+    const loopAt = signer.indexOf("while ($true)");
+    const attemptAt = signer.indexOf("$attempt++", loopAt);
+    const reserveAt = signer.indexOf("Block-MonthlySigning", attemptAt);
+    const signtoolAt = signer.indexOf("& $signtool.FullName sign", reserveAt);
+
+    expect(attemptAt).toBeGreaterThan(loopAt);
+    expect(reserveAt).toBeGreaterThan(attemptAt);
+    expect(signtoolAt).toBeGreaterThan(reserveAt);
+    expect(monthly).toContain('"--if-match"');
+    expect(monthly).toContain('"--if-none-match"');
+    expect(monthly).toContain("reserved_before_cloud_call");
+    expect(monthly).toContain("BootstrapApprovedBy");
+    expect(workflow).toContain("blocked_monthly_budget");
+    expect(workflow).toContain("SSL_SIGNING_BILLING_TIMEZONE");
+  });
 });
 
 describe("sign-windows-payload.ps1 thumbprint resolution", () => {

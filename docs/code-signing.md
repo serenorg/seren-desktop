@@ -49,6 +49,14 @@ Add these secrets to the repository settings (Settings → Secrets → Actions):
 | Variable | Description |
 |----------|-------------|
 | `MAX_SIGNATURES` | Fail-closed ceiling for SSL.com cloud hash-signing operations in one Windows release job. Defaults to `100` in `release.yml`; an intentional cold/full cache reseed above that ceiling requires an explicit repository-variable override after reviewing the signable inventory. |
+| `SSL_SIGNING_MONTHLY_BUDGET_CENTS` | Monthly controlled SSL.com budget in integer cents; default `10000`. |
+| `SSL_SIGNING_TIER_BASE_CENTS` | Tier 1 base charge in cents; default `2000`. |
+| `SSL_SIGNING_TIER_INCLUDED_OPERATIONS` | Operations included by Tier 1; default `20`. |
+| `SSL_SIGNING_TIER_OVERAGE_CENTS` | Per-operation overage in cents; default `100`. |
+| `SSL_SIGNING_OTHER_FIXED_MONTHLY_CENTS` | Other subscription/credential charges in cents; default `0`, and must be raised if SSL.com keeps another fixed fee active. |
+| `SSL_SIGNING_BILLING_ANCHOR_DAY` | Required invoice-cycle start day (`1`-`28`). No calendar-month assumption is made. |
+| `SSL_SIGNING_BILLING_TIMEZONE` | Required IANA/Windows timezone for the invoice boundary. |
+| `SSL_SIGNING_ACCOUNT` / `SSL_SIGNING_CERTIFICATE` | Required stable ledger identity for the SSL.com account and certificate. |
 | `WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED` | Hard-fail threshold for fresh embedded-runtime signatures when the signable manifest matches the previous release. Defaults to `25`; keep this low so a broken signature cache fails before release artifacts publish. |
 
 ## Certificate Setup
@@ -193,6 +201,55 @@ real AWS-hosted app walkthrough continue, signature-only verification gates are
 skipped, and CI asserts that the resulting setup executable is not EV signed.
 The installer and updater artifacts still publish, while release notes are
 resolved to **NOT EV code signed** from the uploaded budget-state artifact.
+
+The per-release `MAX_SIGNATURES` barrier is independent of the persistent
+monthly barrier. Immediately before every real `signtool` batch—and again
+before every retry—`windows-signing-monthly-budget.ps1` conditionally updates a
+versioned R2 ledger. The compare-and-swap uses the object's ETag (`If-Match`),
+retries conflicts, and treats missing, corrupt, stale, conflicting, or
+unreachable state as a hard signing failure. A reservation remains spent when
+the cloud result is missing or ambiguous.
+
+Tier 1 projection uses integer cents:
+
+`base + other_fixed + max(0, operations - included) * overage`.
+
+The defaults (`2000 + 0 + max(0, operations - 20) * 100`) permit 100 operations
+at a `10000`-cent ceiling. Fourteen seven-operation releases reserve 98; a
+fifteenth is blocked before SSL.com. Additional fixed charges reduce that
+ceiling automatically. Job summaries report the cycle boundary, committed or
+reserved operations, remaining operations, projected dollars, and ledger
+version. Alerts should be configured from the same ledger at 50%, 75%, 90%,
+and 100%; the workflow summary exposes the authoritative values.
+
+#### Bootstrap, rollover, and reconciliation
+
+The first release in an active invoice cycle must never create a zero ledger.
+Run the manual **Windows signing monthly ledger** workflow with
+`bootstrap-active-cycle`, the authoritative operation count from SSL.com's
+dashboard/invoice, its evidence timestamp/source, and the exact approval
+phrase. The object is created with `If-None-Match: *`, records the approving
+GitHub actor, and cannot overwrite an existing cycle. If authoritative usage is
+unknown, leave signing blocked and bootstrap at the next configured boundary
+with a verified zero. A new cycle also requires this explicit bootstrap; prior
+cycle objects remain under `windows-signing-ledgers/v1/` for audit.
+
+Reconcile `committed_or_reserved_operations` and each run/source/invocation
+entry against the SSL.com invoice. Reservations may conservatively exceed the
+invoice after ambiguous failures, but the projected charge must never exceed
+the repository budget. Before changing pricing, fixed charges, account,
+certificate, anchor, or timezone, reconcile the current object and bootstrap
+the new identity/cycle rather than editing a ledger in place.
+
+For a live backend check, dispatch the same workflow with `live-test`. It uses
+real R2 conditional writes, launches two simultaneous near-limit reservations,
+requires exactly one admission, and verifies persistence from a fresh process;
+it uses no storage mock.
+
+An emergency override requires an operator-approved repository-variable change
+and an audited ledger bootstrap under a new certificate/account identity. Never
+edit or delete the current ledger to recover budget. If the budget is exhausted,
+allow the documented unsigned release path or intentionally defer the release.
 
 The embedded-runtime signature cache should make the second release with an
 unchanged runtime report most of that large payload as skipped already valid,
