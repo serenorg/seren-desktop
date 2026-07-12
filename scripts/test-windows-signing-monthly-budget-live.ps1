@@ -43,3 +43,4 @@ if (($codes -join ',') -ne '0,2') { throw "CAS test expected one admission and o
 & $barrier -Mode Reserve -Source "persistence-check" -Invocation 1 -Operations 1
 if ($LASTEXITCODE -ne 2) { throw "A separate process did not observe the persisted reservation." }
 Write-Host "Live R2 monthly signing ledger validation passed without mocks."
+exit 0
