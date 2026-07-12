@@ -21,7 +21,11 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex").toUpperCase();
 }
 
-function writeArtifacts(contentHash: string, signed: number): { list: string; manifest: string; telemetry: string } {
+function writeArtifacts(
+  contentHash: string,
+  signed: number,
+  skipped = 195,
+): { list: string; manifest: string; telemetry: string } {
   const payload = path.join(root, "src-tauri", "embedded-runtime", "bin", "payload.exe");
   const list = path.join(root, "sign-targets.txt");
   const manifest = path.join(root, "windows-signature-cache-manifest.tsv");
@@ -37,7 +41,7 @@ function writeArtifacts(contentHash: string, signed: number): { list: string; ma
       status: "success",
       source: "list:sign-targets.txt",
       discovered: 729,
-      skipped: 195,
+      skipped,
       would_sign: signed,
       signed,
       previous_signed: 0,
@@ -121,31 +125,39 @@ describe("assert-windows-signature-cache.ps1", () => {
     pwshTimeout,
   );
 
+  // Bootstrap a previous-release state whose manifest hash differs from the
+  // follow-up run, so the follow-up exercises the changed-manifest path.
+  function bootstrapPreviousState(previousState: string): void {
+    const first = writeArtifacts(sha256("unsigned payload v1"), 3, 726);
+    expect(
+      runGate([
+        "-ListFile",
+        first.list,
+        "-Manifest",
+        first.manifest,
+        "-TelemetryFile",
+        first.telemetry,
+        "-OutputState",
+        previousState,
+        "-Workspace",
+        root,
+        "-MaxSignedWhenUnchanged",
+        "25",
+        "-MinRestoreRateWhenChanged",
+        "75",
+      ]).status,
+    ).toBe(0);
+  }
+
   it.runIf(hasPwsh)(
-    "skips the hard gate when the embedded-runtime manifest changed",
+    "passes when the manifest changed but the per-file cache still restored",
     () => {
-      const firstArtifacts = writeArtifacts(sha256("unsigned payload v1"), 534);
       const previousState = path.join(root, "previous-state.json");
       const currentState = path.join(root, "current-state.json");
+      bootstrapPreviousState(previousState);
 
-      expect(
-        runGate([
-          "-ListFile",
-          firstArtifacts.list,
-          "-Manifest",
-          firstArtifacts.manifest,
-          "-TelemetryFile",
-          firstArtifacts.telemetry,
-          "-OutputState",
-          previousState,
-          "-Workspace",
-          root,
-          "-MaxSignedWhenUnchanged",
-          "25",
-        ]).status,
-      ).toBe(0);
-
-      const changedArtifacts = writeArtifacts(sha256("unsigned payload v2"), 534);
+      // Healthy steady state: 726/729 restored (99.6%), only 3 freshly signed.
+      const changedArtifacts = writeArtifacts(sha256("unsigned payload v2"), 3, 726);
       const changed = runGate([
         "-ListFile",
         changedArtifacts.list,
@@ -161,13 +173,54 @@ describe("assert-windows-signature-cache.ps1", () => {
         root,
         "-MaxSignedWhenUnchanged",
         "25",
+        "-MinRestoreRateWhenChanged",
+        "75",
       ]);
 
       expect(changed.status).toBe(0);
-      expect(changed.out).toContain("manifest changed");
+      const state = JSON.parse(readFileSync(currentState, "utf8"));
+      expect(state.cache_gate_status).toBe("passed_changed_manifest");
+      expect(state.previous_manifest_hash).not.toBe(state.manifest_hash);
+    },
+    pwshTimeout,
+  );
+
+  it.runIf(hasPwsh)(
+    "fails when the manifest changed and the per-file cache restore collapsed (#2922)",
+    () => {
+      const previousState = path.join(root, "previous-state.json");
+      const currentState = path.join(root, "current-state.json");
+      bootstrapPreviousState(previousState);
+
+      // Broken cache: only 195/729 restored (26.7%), 534 freshly signed — the
+      // silent-overage regression that a changed manifest must no longer hide.
+      const changedArtifacts = writeArtifacts(sha256("unsigned payload v2"), 534, 195);
+      const changed = runGate([
+        "-ListFile",
+        changedArtifacts.list,
+        "-Manifest",
+        changedArtifacts.manifest,
+        "-TelemetryFile",
+        changedArtifacts.telemetry,
+        "-PreviousState",
+        previousState,
+        "-OutputState",
+        currentState,
+        "-Workspace",
+        root,
+        "-MaxSignedWhenUnchanged",
+        "25",
+        "-MinRestoreRateWhenChanged",
+        "75",
+      ]);
+
+      expect(changed.status).toBe(1);
+      expect(changed.out).toContain("Windows signature cache regression");
+      expect(changed.out).toContain("restore");
 
       const state = JSON.parse(readFileSync(currentState, "utf8"));
-      expect(state.cache_gate_status).toBe("skipped_changed_manifest");
+      expect(state.cache_gate_status).toBe("failed_changed_manifest_restore_collapsed");
+      expect(state.embedded_runtime_signed).toBe(534);
       expect(state.previous_manifest_hash).not.toBe(state.manifest_hash);
     },
     pwshTimeout,
