@@ -67,8 +67,17 @@ function Project-Cost([int64]$ProjectedOperations, [int64]$Base, [int64]$Include
 }
 
 function Invoke-Aws([string[]]$Arguments, [switch]$AllowFailure) {
-  $output = & aws @Arguments 2>&1 | Out-String
-  $code = $LASTEXITCODE
+  $output = ""
+  $code = 1
+  foreach ($transportAttempt in 1..5) {
+    $output = & aws @Arguments 2>&1 | Out-String
+    $code = $LASTEXITCODE
+    if ($code -eq 0) { break }
+    $transient = $output -match "Too Many Requests|\(429\)|status code: 429|\(50[0-9]\)|status code: 50[0-9]"
+    if (-not $transient -or $transportAttempt -eq 5) { break }
+    Write-Host "::warning::Transient R2 response on attempt $transportAttempt/5; retrying without permitting a signing call."
+    Start-Sleep -Milliseconds (250 * [Math]::Pow(2, $transportAttempt - 1))
+  }
   if ($code -ne 0 -and -not $AllowFailure) { Fail "R2 ledger request failed (aws $($Arguments[0..1] -join ' ')): $($output.Trim())" }
   return [PSCustomObject]@{ code = $code; output = $output.Trim() }
 }
