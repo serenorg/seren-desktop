@@ -16,6 +16,11 @@ param(
   # Maximum fresh embedded-runtime signatures allowed when the manifest is unchanged.
   # Defaults from WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED, then 25.
   [int]$MaxSignedWhenUnchanged = -1,
+  # Minimum percent of embedded-runtime signables that must restore from the
+  # per-file cache when the manifest changed. Below this, the R2 cache is
+  # treated as collapsed and the release fails (#2922). Defaults from
+  # WINDOWS_EMBEDDED_RUNTIME_CACHE_MIN_RESTORE_RATE, then 75.
+  [int]$MinRestoreRateWhenChanged = -1,
   # Stable base for turning absolute manifest paths into release-invariant paths.
   [string]$Workspace = ""
 )
@@ -180,6 +185,12 @@ if ($MaxSignedWhenUnchanged -lt 0) {
     -Name "WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED" `
     -Default 25
 }
+if ($MinRestoreRateWhenChanged -lt 0) {
+  $MinRestoreRateWhenChanged = Resolve-NonNegativeInt `
+    -Raw $env:WINDOWS_EMBEDDED_RUNTIME_CACHE_MIN_RESTORE_RATE `
+    -Name "WINDOWS_EMBEDDED_RUNTIME_CACHE_MIN_RESTORE_RATE" `
+    -Default 75
+}
 
 if (-not (Test-Path -LiteralPath $ListFile)) { throw "ListFile not found: $ListFile" }
 $manifestSummary = Read-ManifestSummary -Path $Manifest -WorkspaceRoot $Workspace
@@ -194,6 +205,11 @@ $previousHash = if ($previous -and $previous.manifest_hash) {
 
 $status = "skipped_no_previous_state"
 $currentHash = [string]$manifestSummary.hash
+$restoreRate = if ($telemetrySummary.embedded_discovered -gt 0) {
+  [math]::Round(100.0 * $telemetrySummary.embedded_skipped / $telemetrySummary.embedded_discovered, 2)
+} else {
+  100.0
+}
 if ($previousHash) {
   if ($previousHash -eq $currentHash) {
     $status = "passed_unchanged_manifest"
@@ -201,7 +217,15 @@ if ($previousHash) {
       $status = "failed_unchanged_manifest_over_floor"
     }
   } else {
-    $status = "skipped_changed_manifest"
+    # The manifest changed, but a previous release means the per-file R2 cache
+    # should still restore the ~99% of embedded-runtime files that did not
+    # change. A collapsed restore rate is the silent-overage signal (#2922):
+    # the aggregate hash changing every release must not disable the guard.
+    if ($telemetrySummary.embedded_discovered -gt 0 -and $restoreRate -lt $MinRestoreRateWhenChanged) {
+      $status = "failed_changed_manifest_restore_collapsed"
+    } else {
+      $status = "passed_changed_manifest"
+    }
   }
 }
 
@@ -216,10 +240,12 @@ $state = [PSCustomObject]@{
   previous_manifest_hash = if ($previousHash) { $previousHash } else { $null }
   cache_gate_status = $status
   max_signed_when_unchanged = $MaxSignedWhenUnchanged
+  min_restore_rate_when_changed = $MinRestoreRateWhenChanged
   embedded_runtime_discovered = [int]$telemetrySummary.embedded_discovered
   embedded_runtime_skipped = [int]$telemetrySummary.embedded_skipped
   embedded_runtime_would_sign = [int]$telemetrySummary.embedded_would_sign
   embedded_runtime_signed = [int]$telemetrySummary.embedded_signed
+  embedded_runtime_restore_rate = $restoreRate
   total_signed_so_far = [int]$telemetrySummary.total_signed
 }
 Write-CurrentState -Path $OutputState -State $state
@@ -230,10 +256,16 @@ if ($status -eq "failed_unchanged_manifest_over_floor") {
   exit 1
 }
 
+if ($status -eq "failed_changed_manifest_restore_collapsed") {
+  Write-Host "::error::Windows signature cache regression: embedded-runtime manifest changed, but only $($telemetrySummary.embedded_skipped)/$($telemetrySummary.embedded_discovered) ($restoreRate%) signable(s) restored from the per-file cache; below the $MinRestoreRateWhenChanged% floor. This release would freshly sign $($telemetrySummary.embedded_signed) file(s) and silently bill SSL.com (#2922)."
+  Write-Host "::error::Inspect telemetry '$TelemetryFile', cache manifest '$Manifest', and the R2 signature-cache restore. If this release intentionally overhauls the embedded runtime, lower WINDOWS_EMBEDDED_RUNTIME_CACHE_MIN_RESTORE_RATE for this run."
+  exit 1
+}
+
 if ($status -eq "passed_unchanged_manifest") {
   Write-Host "Windows signature cache gate passed: unchanged embedded-runtime manifest $currentHash signed $($telemetrySummary.embedded_signed) file(s), max $MaxSignedWhenUnchanged."
-} elseif ($status -eq "skipped_changed_manifest") {
-  Write-Host "Windows signature cache gate skipped: embedded-runtime manifest changed from $previousHash to $currentHash."
+} elseif ($status -eq "passed_changed_manifest") {
+  Write-Host "Windows signature cache gate passed: embedded-runtime manifest changed from $previousHash to $currentHash, but $restoreRate% of signables restored from cache (min $MinRestoreRateWhenChanged%); signed $($telemetrySummary.embedded_signed) file(s)."
 } else {
   Write-Host "Windows signature cache gate skipped: no previous release state was available."
 }
