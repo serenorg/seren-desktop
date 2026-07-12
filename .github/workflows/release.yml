@@ -33,9 +33,10 @@ env:
   HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' }}
   # SSL.com eSigner cloud signing for Windows EV code signing
   HAS_WINDOWS_SIGNING: ${{ secrets.ES_USERNAME != '' }}
-  # Warning threshold for billable SSL.com cloud hash-signing operations in one
-  # Windows release job. Bump only after auditing sign-targets.txt / signer telemetry.
-  MAX_SIGNATURES: ${{ vars.MAX_SIGNATURES || '850' }}
+  # Fail-closed ceiling for billable SSL.com cloud hash-signing operations in one
+  # Windows release job. Normal releases spend roughly 0-10; 100 leaves ample
+  # drift while a cold/full cache reseed requires an explicit audited repo override.
+  MAX_SIGNATURES: ${{ vars.MAX_SIGNATURES || '100' }}
   # Hard gate for unchanged embedded-runtime releases: if the manifest matches
   # the previous release, a working signature cache should make this near zero.
   WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED: ${{ vars.WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED || '25' }}
@@ -305,12 +306,14 @@ jobs:
             seren-desktop-publishers \
             seren-desktop-mcp
 
-      # Windows: gate v* tag releases on signing being available.
+      # Windows: gate v* tag releases on signing credentials being available.
       # Without this, a misconfigured secret causes us to ship an unsigned
       # Windows binary that Smart App Control immediately blocks (#2230 audit
       # P1 "Release workflow can claim EV signing even when Windows signing
       # is skipped"). For tag pushes that ARE production releases, refuse to
-      # proceed rather than ship unsigned.
+      # proceed rather than silently ship unsigned. A runtime MAX_SIGNATURES
+      # block is distinct: the signer records it and the release intentionally
+      # continues with the transparently unsigned fallback required by #2929.
       - name: Require Windows signing for tag releases
         if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/v') && env.HAS_WINDOWS_SIGNING != 'true'
         shell: bash
@@ -330,9 +333,14 @@ jobs:
             exit 1
           }
           $telemetry = Join-Path $env:RUNNER_TEMP "windows-signing-telemetry.jsonl"
+          $blockFile = Join-Path $env:RUNNER_TEMP "windows-signing-budget-block.json"
           Remove-Item -LiteralPath $telemetry -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $blockFile -Force -ErrorAction SilentlyContinue
           "WINDOWS_SIGN_TELEMETRY_FILE=$telemetry" >> $env:GITHUB_ENV
+          "WINDOWS_SIGNING_BLOCK_FILE=$blockFile" >> $env:GITHUB_ENV
+          "WINDOWS_SIGNING_BLOCKED=false" >> $env:GITHUB_ENV
           Write-Host "Windows signing telemetry: $telemetry"
+          Write-Host "Windows signing block state: $blockFile"
           Write-Host "Windows signing MAX_SIGNATURES=$max"
 
       # macOS: Import certificates and setup keychain (skip if no certificate)
@@ -571,6 +579,7 @@ jobs:
           ./scripts/sign-windows-payload.ps1 `
             -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT `
             -ListFile sign-targets.txt `
+            -SigningSource "embedded-runtime-and-mcp" `
             -BatchSize 10 `
             -DelaySeconds 30
           ./scripts/windows-signature-cache.ps1 `
@@ -581,7 +590,7 @@ jobs:
             -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT
 
       - name: Save Windows signature cache to R2
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         shell: pwsh
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -616,7 +625,7 @@ jobs:
           Write-Host "Windows signature cache: R2 save completed."
 
       - name: Assert Windows signature cache hit budget
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         shell: pwsh
         run: |
           ./scripts/assert-windows-signature-cache.ps1 `
@@ -650,7 +659,7 @@ jobs:
             -Thumbprint $env:WINDOWS_SIGN_THUMBPRINT
 
       - name: Save NSIS signature cache to R2
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         shell: pwsh
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -713,7 +722,7 @@ jobs:
       # The overlay lives outside tauri.conf.json so contributor Windows
       # builds never attempt to sign. The wrapper reads WINDOWS_SIGN_THUMBPRINT
       # from the eSigner CKA step via GITHUB_ENV.
-      - name: Build Tauri app (signed, Windows)
+      - name: Build Tauri app (budget-aware, Windows)
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         env:
           # The embedded runtime was already staged and EV-signed above; skip
@@ -743,9 +752,7 @@ jobs:
           Add-Content -LiteralPath $summary -Value "- MAX_SIGNATURES: $env:MAX_SIGNATURES"
           Add-Content -LiteralPath $summary -Value "- Telemetry: ``$telemetry``"
           if (-not $telemetry -or -not (Test-Path -LiteralPath $telemetry)) {
-            Add-Content -LiteralPath $summary -Value "- Status: no signing telemetry was produced before the job stopped."
-            Write-Host "No Windows signing telemetry found at: $telemetry"
-            exit 0
+            throw "No Windows signing telemetry found at: $telemetry"
           }
 
           $records = @()
@@ -759,19 +766,21 @@ jobs:
           [int]$skipped = 0
           [int]$wouldSign = 0
           [int]$signed = 0
-          $overBudget = $false
+          $blocked = $false
           foreach ($record in $records) {
             if ($null -ne $record.discovered) { $discovered += [int]$record.discovered }
             if ($null -ne $record.skipped) { $skipped += [int]$record.skipped }
             if ($null -ne $record.would_sign) { $wouldSign += [int]$record.would_sign }
             if ($null -ne $record.signed) { $signed += [int]$record.signed }
-            if ($record.status -eq "over_budget") { $overBudget = $true }
+            if ($record.status -eq "blocked_over_budget" -or $record.status -eq "skipped_budget_blocked") { $blocked = $true }
           }
-          $status = if ($overBudget) { "over budget warning" } else { "within budget" }
+          $status = if ($blocked) { "blocked_over_budget" } else { "within_budget" }
           Add-Content -LiteralPath $summary -Value "- Status: $status"
+          Add-Content -LiteralPath $summary -Value "- Projected cloud signatures: $wouldSign"
           Add-Content -LiteralPath $summary -Value "- Discovered: $discovered"
           Add-Content -LiteralPath $summary -Value "- Skipped already valid: $skipped"
-          Add-Content -LiteralPath $summary -Value "- Cloud signatures spent: $signed"
+          Add-Content -LiteralPath $summary -Value "- Actual cloud signatures spent: $signed"
+          Add-Content -LiteralPath $summary -Value "- Signing blocked: $($blocked.ToString().ToLowerInvariant())"
           Add-Content -LiteralPath $summary -Value ""
           Add-Content -LiteralPath $summary -Value "| Status | Source | Discovered | Skipped | Would sign | Signed | Previous signed |"
           Add-Content -LiteralPath $summary -Value "|---|---|---:|---:|---:|---:|---:|"
@@ -779,7 +788,17 @@ jobs:
             $source = ([string]$record.source).Replace("|", "\|")
             Add-Content -LiteralPath $summary -Value "| $($record.status) | ``$source`` | $($record.discovered) | $($record.skipped) | $($record.would_sign) | $($record.signed) | $($record.previous_signed) |"
           }
-          Write-Host "Windows signing budget summary: status=$status discovered=$discovered skipped=$skipped signed=$signed max=$env:MAX_SIGNATURES"
+          $state = [PSCustomObject]@{
+            schema_version = 1
+            status = $status
+            blocked = $blocked
+            max_signatures = [int]$env:MAX_SIGNATURES
+            projected_total = $wouldSign
+            actual_signed = $signed
+            sources = @($records)
+          }
+          ($state | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath "windows-signing-budget-state.json"
+          Write-Host "Windows signing budget summary: status=$status projected=$wouldSign signed=$signed max=$env:MAX_SIGNATURES"
 
       # Verify dist/ contains current frontend code.
       # Catches stale dist/ bundles that bypass beforeBuildCommand.
@@ -1011,7 +1030,7 @@ jobs:
       # users' machines (#2230 audit P0/P1 #1).
       - name: Verify Windows code signing (NSIS setup .exe)
         id: verify_windows_setup
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         shell: pwsh
         run: |
           Write-Host "Verifying NSIS setup .exe signatures..."
@@ -1039,7 +1058,7 @@ jobs:
       # as a guarantee until a green release proves it redundant (#2294). It
       # mirrors the macOS .app.tar.gz re-pack/re-sign pattern above (#2236).
       - name: Re-pack and re-sign .nsis.zip updater bundle (Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         shell: pwsh
         run: |
           $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
@@ -1085,7 +1104,7 @@ jobs:
       # by Tauri repacking artifacts and losing signatures (#2236) and by a
       # Deflate re-pack the updater cannot extract (#2479), so this is a hard gate.
       - name: Verify .nsis.zip updater bundle signatures (Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         shell: pwsh
         run: |
           $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
@@ -1191,7 +1210,7 @@ jobs:
       # (.nsis.zip) and #2237 ($PLUGINSDIR helper DLLs).
       - name: Audit Windows payload signature coverage
         id: audit_windows_payload
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         shell: pwsh
         run: |
           $bundleRoot = "src-tauri/target/${{ matrix.target }}/release/bundle"
@@ -1224,7 +1243,7 @@ jobs:
       # Valid Authenticode signature. This is what a user's Smart App Control
       # actually evaluates, so a failure here means a real publisher prompt.
       - name: Verify embedded installer payload signatures (Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         shell: pwsh
         run: |
           $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
@@ -1271,6 +1290,23 @@ jobs:
           }
           Write-Host "All $($bins.Count) embedded installer binaries (incl. `$PLUGINSDIR helper DLLs) are validly signed."
           Remove-Item -Path $extractDir -Recurse -Force
+
+      - name: Verify budget-blocked Windows fallback is unsigned
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED == 'true'
+        shell: pwsh
+        run: |
+          $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
+          $setup = Get-ChildItem -Path $nsisDir -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $setup) {
+            Write-Host "::error::Budget-blocked build produced no Windows setup artifact."
+            exit 1
+          }
+          $sig = Get-AuthenticodeSignature -LiteralPath $setup.FullName
+          if ($sig.Status -eq "Valid") {
+            Write-Host "::error::Budget-blocked fallback unexpectedly produced a validly Authenticode-signed setup artifact."
+            exit 1
+          }
+          Write-Host "Budget-blocked Windows fallback is present and not EV signed: $($setup.Name) status=$($sig.Status)."
 
       # Scan the Tauri-generated NSI / NSH output for unresolved ${...}
       # placeholders. #2230 showed "${product_name} is running" rendering
@@ -1363,11 +1399,19 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Windows signing cache state
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         uses: actions/upload-artifact@v7
         with:
           name: windows-signing-cache-state
           path: windows-signing-cache-state.json
+          if-no-files-found: error
+
+      - name: Upload Windows signing budget state
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-signing-budget-state
+          path: windows-signing-budget-state.json
           if-no-files-found: error
 
       - name: Upload Linux updater bundle
@@ -1410,6 +1454,12 @@ jobs:
         with:
           name: Seren-Desktop-Windows-x64.exe
           path: windows-artifact
+
+      - name: Download Windows signing budget state
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-signing-budget-state
+          path: windows-signing-budget-state
 
       - name: Validate Windows e2e AWS configuration
         shell: bash
@@ -1573,9 +1623,15 @@ jobs:
           set -euo pipefail
           installer="$(find windows-artifact -type f -name '*.exe' | head -n 1)"
           if [ -z "$installer" ]; then
-            echo "::error::No signed Windows installer artifact found"
+            echo "::error::No Windows installer artifact found"
             exit 1
           fi
+          budget_state="windows-signing-budget-state/windows-signing-budget-state.json"
+          if [ ! -f "$budget_state" ]; then
+            echo "::error::Windows signing budget state artifact is missing"
+            exit 1
+          fi
+          signing_blocked="$(jq -r 'if .blocked == true then "true" else "false" end' "$budget_state")"
           payload="$RUNNER_TEMP/windows-e2e-payload.zip"
           zip -q -r "$payload" \
             package.json \
@@ -1622,6 +1678,7 @@ jobs:
           PY
           )"
           echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "signing_blocked=$signing_blocked" >> "$GITHUB_OUTPUT"
           {
             echo "installer_url<<EOF"
             echo "$installer_url"
@@ -1642,6 +1699,7 @@ jobs:
           INSTALLER_URL: ${{ steps.stage.outputs.installer_url }}
           PAYLOAD_URL: ${{ steps.stage.outputs.payload_url }}
           LOGS_UPLOAD_URL: ${{ steps.stage.outputs.logs_upload_url }}
+          WINDOWS_SIGNING_BLOCKED: ${{ steps.stage.outputs.signing_blocked }}
         run: |
           set -euo pipefail
           node <<'NODE' > "$RUNNER_TEMP/windows-e2e-commands.json"
@@ -1652,6 +1710,9 @@ jobs:
           }
           const workName = `seren-release-windows-e2e-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`;
           const logsS3Uri = `s3://${env.WINDOWS_E2E_S3_BUCKET}/${env.S3_PREFIX}/windows-e2e-logs.zip`;
+          const unsignedBudgetArg = env.WINDOWS_SIGNING_BLOCKED === 'true'
+            ? ' -AllowUnsignedBudgetBlockedArtifact'
+            : '';
           const commands = [
             "$ErrorActionPreference = 'Stop'",
             "$ProgressPreference = 'SilentlyContinue'",
@@ -1679,7 +1740,7 @@ jobs:
             "Expand-Archive -LiteralPath (Join-Path $work 'windows-e2e-payload.zip') -DestinationPath $work -Force",
             "Set-Location $work",
             "Write-Host '[windows-e2e:ssm] Running Windows app harness as scheduled task user'",
-            `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows-e2e-task-user.ps1 -InstallerPath (Join-Path $work 'SerenDesktop-setup.exe') -WorkDir $work -SecretParameterPrefix ${psString(env.WINDOWS_E2E_SECRET_PARAMETER_PREFIX)} -ProbeTimeoutSeconds 1800 -TaskTimeoutSeconds 3600`,
+            `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows-e2e-task-user.ps1 -InstallerPath (Join-Path $work 'SerenDesktop-setup.exe') -WorkDir $work -SecretParameterPrefix ${psString(env.WINDOWS_E2E_SECRET_PARAMETER_PREFIX)} -ProbeTimeoutSeconds 1800 -TaskTimeoutSeconds 3600${unsignedBudgetArg}`,
             "$harnessExitCode = $LASTEXITCODE",
             "Write-Host '[windows-e2e:ssm] Bundling Windows app harness logs'",
             "$logPaths = @((Join-Path $work 'windows-e2e-task.log'), (Join-Path $work 'windows-e2e-logs')) | Where-Object { Test-Path -LiteralPath $_ }",
@@ -1989,13 +2050,16 @@ jobs:
                 if (!fs.statSync(dir).isDirectory()) return false;
                 return fs.readdirSync(dir).some((f) => f.endsWith('-setup.exe'));
               });
-            const windowsSignedClaim = isProductionTag && hasWindowsArtifact
+            const budgetStatePath = path.join(artifactsDir, 'windows-signing-budget-state', 'windows-signing-budget-state.json');
+            const windowsSigningBlocked = fs.existsSync(budgetStatePath)
+              && JSON.parse(fs.readFileSync(budgetStatePath, 'utf8')).blocked === true;
+            const windowsSignedClaim = isProductionTag && hasWindowsArtifact && !windowsSigningBlocked
               ? 'Windows builds are EV code signed. If you still see a SmartScreen warning, click "More info" → "Run anyway"; reputation builds with installs.'
               : 'Windows artifacts in this release are NOT EV code signed.';
             const noteMarker = '<!-- WINDOWS_SIGNING_NOTE -->';
             if (publishTarget.body && publishTarget.body.includes(noteMarker)) {
               const updatedBody = publishTarget.body.replace(noteMarker, windowsSignedClaim);
-              console.log(`Resolving Windows signing note: tag=${tagName} hasWindowsArtifact=${hasWindowsArtifact}`);
+              console.log(`Resolving Windows signing note: tag=${tagName} hasWindowsArtifact=${hasWindowsArtifact} budgetBlocked=${windowsSigningBlocked}`);
               await github.rest.repos.updateRelease({
                 owner,
                 repo,

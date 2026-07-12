@@ -148,13 +148,16 @@ jobs:
                 if (!fs.statSync(dir).isDirectory()) return false;
                 return fs.readdirSync(dir).some((f) => f.endsWith('-setup.exe'));
               });
-            const windowsSignedClaim = isProductionTag && hasWindowsArtifact
+            const budgetStatePath = path.join(artifactsDir, 'windows-signing-budget-state', 'windows-signing-budget-state.json');
+            const windowsSigningBlocked = fs.existsSync(budgetStatePath)
+              && JSON.parse(fs.readFileSync(budgetStatePath, 'utf8')).blocked === true;
+            const windowsSignedClaim = isProductionTag && hasWindowsArtifact && !windowsSigningBlocked
               ? 'Windows builds are EV code signed. If you still see a SmartScreen warning, click "More info" -> "Run anyway"; reputation builds with installs.'
               : 'Windows artifacts in this release are NOT EV code signed.';
             const noteMarker = '<!-- WINDOWS_SIGNING_NOTE -->';
             if (publishTarget.body && publishTarget.body.includes(noteMarker)) {
               const updatedBody = publishTarget.body.replace(noteMarker, windowsSignedClaim);
-              console.log(`Resolving Windows signing note: tag=${tagName} hasWindowsArtifact=${hasWindowsArtifact}`);
+              console.log(`Resolving Windows signing note: tag=${tagName} hasWindowsArtifact=${hasWindowsArtifact} budgetBlocked=${windowsSigningBlocked}`);
               await github.rest.repos.updateRelease({
                 owner,
                 repo,

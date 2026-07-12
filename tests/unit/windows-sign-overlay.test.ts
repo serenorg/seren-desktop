@@ -2,7 +2,7 @@
 // ABOUTME: Guards the regression class where Windows installers shipped unsigned Seren.exe / nsis_tauri_utils.dll (v3.52.4-6).
 
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -15,10 +15,6 @@ const signerScript = path.join(repoRoot, "scripts", "sign-windows-payload.ps1");
 function runCli(args: string[]): { stdout: string; stderr: string; status: number } {
   const r = spawnSync(tsxBin, [cli, ...args], { encoding: "utf8" });
   return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", status: r.status ?? 1 };
-}
-
-function psSingleQuoted(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
 }
 
 describe("print-windows-sign-overlay CLI", () => {
@@ -174,7 +170,7 @@ describe("release workflow contract", () => {
     const signAt = workflow.indexOf("Sign embedded runtime (Windows)");
     const cacheSaveAt = workflow.indexOf("Save Windows signature cache to R2");
     const assertAt = workflow.indexOf("Assert Windows signature cache hit budget");
-    const buildAt = workflow.indexOf("Build Tauri app (signed, Windows)");
+    const buildAt = workflow.indexOf("Build Tauri app (budget-aware, Windows)");
     const uploadWindowsAt = workflow.indexOf("Upload Windows NSIS");
     const uploadStateAt = workflow.indexOf("Upload Windows signing cache state");
 
@@ -188,29 +184,37 @@ describe("release workflow contract", () => {
     expect(uploadStateAt).toBeGreaterThan(uploadWindowsAt);
   });
 
-  it("reports Windows signing budget telemetry as warning-only (#2818/#2821)", () => {
+  it("hard-blocks Windows signing before signtool and preserves the unsigned fallback (#2929)", () => {
     const signer = readFileSync(signerScript, "utf8");
+    const budget = readFileSync(path.join(repoRoot, "scripts", "windows-signing-budget.ps1"), "utf8");
 
     expect(workflow).toContain("MAX_SIGNATURES");
     expect(workflow).toContain("vars.MAX_SIGNATURES");
     expect(workflow).toContain("Initialize Windows signing budget telemetry");
     expect(workflow).toContain("WINDOWS_SIGN_TELEMETRY_FILE");
+    expect(workflow).toContain("WINDOWS_SIGNING_BLOCK_FILE");
     expect(workflow).toContain("Summarize Windows signing budget");
-    expect(workflow).toContain("Cloud signatures spent");
+    expect(workflow).toContain("Projected cloud signatures");
+    expect(workflow).toContain("Actual cloud signatures spent");
+    expect(workflow).toContain("Verify budget-blocked Windows fallback is unsigned");
+    expect(workflow).toContain("windows-signing-budget-state.json");
+    expect(workflow).toContain("Windows artifacts in this release are NOT EV code signed.");
 
     const initAt = workflow.indexOf("Initialize Windows signing budget telemetry");
     const signAt = workflow.indexOf("Sign embedded runtime (Windows)");
-    const buildAt = workflow.indexOf("Build Tauri app (signed, Windows)");
+    const buildAt = workflow.indexOf("Build Tauri app (budget-aware, Windows)");
     const summaryAt = workflow.indexOf("Summarize Windows signing budget");
     expect(initAt).toBeGreaterThanOrEqual(0);
     expect(signAt).toBeGreaterThan(initAt);
     expect(summaryAt).toBeGreaterThan(buildAt);
 
     expect(signer).toContain("Resolve-MaxSignatureBudget");
-    expect(signer).toContain("Read-PreviousSignedCount");
     expect(signer).toContain("Write-SigningTelemetry");
-    expect(signer).toContain("Windows signing budget exceeded");
-    expect(signer).toContain("over_budget");
+    expect(signer).toContain("windows-signing-budget.ps1");
+    expect(signer.indexOf("windows-signing-budget.ps1")).toBeLessThan(signer.indexOf("signtool.exe"));
+    expect(budget).toContain("blocked_over_budget");
+    expect(budget).toContain("exit 2");
+    expect(budget).not.toContain("::warning::Windows signing budget exceeded");
     expect(signer).toContain("MAX_SIGNATURES");
   });
 });
@@ -239,7 +243,17 @@ describe("sign-windows-payload.ps1 thumbprint resolution", () => {
     const r = spawnSync(
       "pwsh",
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", signerScript, "-File", path.join(dummy, "a.exe")],
-      { encoding: "utf8", env: { ...process.env, WINDOWS_SIGN_THUMBPRINT: undefined, ...env } },
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          WINDOWS_SIGN_THUMBPRINT: undefined,
+          MAX_SIGNATURES: "100",
+          WINDOWS_SIGN_TELEMETRY_FILE: path.join(dummy, "telemetry.jsonl"),
+          WINDOWS_SIGNING_BLOCK_FILE: path.join(dummy, "blocked.json"),
+          ...env,
+        },
+      },
     );
     return { out: `${r.stdout}\n${r.stderr}`, status: r.status ?? 1 };
   }
@@ -273,78 +287,4 @@ describe("sign-windows-payload.ps1 thumbprint resolution", () => {
     pwshTimeout,
   );
 
-  it.runIf(runnable)(
-    "warns over-budget signing, continues to signtool, and records telemetry (#2821)",
-    () => {
-      const telemetry = path.join(dummy, "telemetry.jsonl");
-      const fakeSigntool = path.join(dummy, "kit\\x64\\signtool.exe");
-      writeFileSync(fakeSigntool, "#!/bin/sh\nexit 0\n");
-      chmodSync(fakeSigntool, 0o755);
-      writeFileSync(
-        telemetry,
-        `${JSON.stringify({
-          status: "success",
-          source: "previous",
-          discovered: 2,
-          skipped: 0,
-          would_sign: 2,
-          signed: 2,
-          previous_signed: 0,
-          max_signatures: 2,
-        })}\n`,
-      );
-
-      const script = `
-$global:sigChecks = 0
-function global:Get-AuthenticodeSignature {
-  param([string]$LiteralPath)
-  $global:sigChecks++
-  if ($global:sigChecks -eq 1) {
-    [PSCustomObject]@{ Status = "NotSigned" }
-  } else {
-    [PSCustomObject]@{ Status = "Valid" }
-  }
-}
-function global:Get-ChildItem {
-  param(
-    [string]$Path,
-    [switch]$Recurse,
-    [string]$Filter,
-    [object]$ErrorAction
-  )
-  if ($Filter -eq "signtool.exe") {
-    [PSCustomObject]@{ FullName = ${psSingleQuoted(fakeSigntool)} }
-    return
-  }
-  Microsoft.PowerShell.Management\\Get-ChildItem @PSBoundParameters
-}
-& ${psSingleQuoted(signerScript)} -Thumbprint "933C679D86D0ACAF531B37A4D12C0B360EB4815C" -File ${psSingleQuoted(path.join(dummy, "a.exe"))} -MaxSignatures 2 -TelemetryFile ${psSingleQuoted(telemetry)}
-exit $LASTEXITCODE
-`;
-      const r = spawnSync("pwsh", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], {
-        encoding: "utf8",
-      });
-      const out = `${r.stdout}\n${r.stderr}`;
-
-      expect(r.status).toBe(0);
-      expect(out).toContain("Windows signing budget exceeded");
-      expect(out).toContain(`Using signtool: ${fakeSigntool}`);
-
-      const records = readFileSync(telemetry, "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      expect(records).toHaveLength(2);
-      expect(records[1]).toMatchObject({
-        status: "over_budget",
-        discovered: 1,
-        skipped: 0,
-        would_sign: 1,
-        signed: 1,
-        previous_signed: 2,
-        max_signatures: 2,
-      });
-    },
-    pwshTimeout,
-  );
 });

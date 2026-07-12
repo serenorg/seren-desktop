@@ -4,6 +4,8 @@ param(
 
   [switch]$AllowUnsignedPrArtifact,
 
+  [switch]$AllowUnsignedBudgetBlockedArtifact,
+
   [int]$RemoteDebugPort = 9222,
 
   [string]$InstallDir = "",
@@ -63,8 +65,19 @@ function Require-ValidSignature([string]$Path, [string]$Label) {
 }
 
 function Require-SignedOrExplicitPrArtifact([string]$Path, [string]$Label) {
-  if (-not $AllowUnsignedPrArtifact) {
+  if (-not $AllowUnsignedPrArtifact -and -not $AllowUnsignedBudgetBlockedArtifact) {
     Require-ValidSignature $Path $Label
+    return
+  }
+
+  if ($AllowUnsignedBudgetBlockedArtifact) {
+    if ($env:SEREN_E2E_RELEASE_RUN -ne "1" -or $env:SEREN_E2E_WINDOWS_SIGNING_BLOCKED -ne "1") {
+      Fail "-AllowUnsignedBudgetBlockedArtifact requires an explicit budget-blocked release run."
+    }
+    if (-not (Test-Path -LiteralPath $Path)) {
+      Fail "$Label not found: $Path"
+    }
+    Write-Host "::warning::$Label Authenticode validation skipped for explicit MAX_SIGNATURES-blocked release: $Path"
     return
   }
 
@@ -413,7 +426,7 @@ $installExitCode = Invoke-ProcessWithTimeout $resolvedInstaller $installArgs $In
 if ($installExitCode -ne 0) {
   Fail "NSIS installer exited with $installExitCode"
 }
-if ($AllowUnsignedPrArtifact) {
+if ($AllowUnsignedPrArtifact -or $AllowUnsignedBudgetBlockedArtifact) {
   Clear-DownloadMarksUnder $InstallDir
 }
 

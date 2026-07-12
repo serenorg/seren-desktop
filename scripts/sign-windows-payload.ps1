@@ -1,6 +1,6 @@
 # ABOUTME: Signs Windows PE binaries in place with signtool using the eSigner CKA-loaded EV cert (#2276).
 # ABOUTME: Takes signables from -Root/-File/-ListFile, skips already-signed, signs in throttled batches (#2282), fails loud if any file is left unsigned.
-# ABOUTME: Reports the Windows release signature budget and writes per-invocation telemetry (#2818/#2821).
+# ABOUTME: Hard-stops before signtool when the cumulative release budget would be exceeded and records per-source telemetry.
 
 [CmdletBinding()]
 param(
@@ -22,22 +22,26 @@ param(
   # file, so bursting the whole payload trips SSL.com's per-minute rate limit
   # (#2282). Pausing between batches holds the request rate under that ceiling.
   [int]$DelaySeconds = 0,
-  # Maximum cumulative cloud hash-signing operations expected for this release job.
-  # Defaults from MAX_SIGNATURES; unset/-1 disables the warning for local ad-hoc use.
+  # Maximum cumulative cloud hash-signing operations allowed for this release job.
+  # Defaults from the required MAX_SIGNATURES environment variable.
   [int]$MaxSignatures = -1,
   # JSONL telemetry file shared across signer invocations in one release job.
   # Defaults from WINDOWS_SIGN_TELEMETRY_FILE.
   [string]$TelemetryFile = "",
+  # Human-readable source shown in budget telemetry.
+  [string]$SigningSource = "",
   [int]$MaxRetries = 3
 )
 
 $ErrorActionPreference = "Stop"
 
-function Resolve-MaxSignatureBudget {
-  param([int]$Explicit)
+function Resolve-MaxSignatureBudget([int]$Explicit) {
   if ($Explicit -ge 0) { return $Explicit }
   $raw = $env:MAX_SIGNATURES
-  if (-not $raw) { return -1 }
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    Write-Host "::error::MAX_SIGNATURES is required and must be a non-negative integer."
+    exit 1
+  }
   [int]$parsed = 0
   if (-not [int]::TryParse($raw, [ref]$parsed) -or $parsed -lt 0) {
     Write-Host "::error::MAX_SIGNATURES must be a non-negative integer, got '$raw'."
@@ -47,27 +51,12 @@ function Resolve-MaxSignatureBudget {
 }
 
 function Get-SigningSource {
+  if ($SigningSource) { return $SigningSource }
   if ($ListFile) { return "list:$ListFile" }
-  if ($File.Count -gt 0 -and $Root.Count -eq 0) { return "file" }
+  if ($File.Count -eq 1 -and $Root.Count -eq 0) { return "file:$([IO.Path]::GetFileName($File[0]))" }
+  if ($File.Count -gt 1 -and $Root.Count -eq 0) { return "files:$($File.Count)" }
   if ($Root.Count -gt 0 -and $File.Count -eq 0) { return "root" }
   return "mixed"
-}
-
-function Read-PreviousSignedCount {
-  param([string]$Path)
-  if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return 0 }
-  [int]$total = 0
-  foreach ($line in (Get-Content -LiteralPath $Path)) {
-    $trimmed = $line.Trim()
-    if (-not $trimmed) { continue }
-    try {
-      $record = $trimmed | ConvertFrom-Json
-      if ($null -ne $record.signed) { $total += [int]$record.signed }
-    } catch {
-      Write-Host "::warning::Ignoring malformed Windows signing telemetry line in ${Path}: $trimmed"
-    }
-  }
-  return $total
 }
 
 function Write-SigningTelemetry {
@@ -81,6 +70,7 @@ function Write-SigningTelemetry {
     [int]$Signed,
     [int]$PreviousSigned,
     [int]$Max,
+    [int]$ProjectedTotal,
     [int]$UniqueHashes = 0,
     [int]$AliasesRestored = 0
   )
@@ -100,7 +90,9 @@ function Write-SigningTelemetry {
     unique_hashes = $UniqueHashes
     aliases_restored = $AliasesRestored
     previous_signed = $PreviousSigned
-    max_signatures = if ($Max -ge 0) { $Max } else { $null }
+    max_signatures = $Max
+    projected_total = $ProjectedTotal
+    blocked = $false
   }
   ($record | ConvertTo-Json -Compress) | Add-Content -LiteralPath $Path
 }
@@ -112,7 +104,7 @@ if (-not $Thumbprint) {
   Write-Host "::error::No certificate thumbprint: pass -Thumbprint or set WINDOWS_SIGN_THUMBPRINT (exported by the eSigner CKA setup step)."
   exit 1
 }
-$maxSignatureBudget = Resolve-MaxSignatureBudget -Explicit $MaxSignatures
+$maxSignatureBudget = Resolve-MaxSignatureBudget $MaxSignatures
 if (-not $TelemetryFile) { $TelemetryFile = $env:WINDOWS_SIGN_TELEMETRY_FILE }
 $signingSource = Get-SigningSource
 
@@ -176,31 +168,51 @@ if ($skipped -gt 0) {
 }
 if ($targets.Count -eq 0) {
   Write-Host "All $discovered discovered file(s) already validly signed; nothing to do."
-  $previousSigned = Read-PreviousSignedCount -Path $TelemetryFile
-  Write-SigningTelemetry -Path $TelemetryFile -Status "success" -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign 0 -Signed 0 -PreviousSigned $previousSigned -Max $maxSignatureBudget
-  exit 0
-}
-# Deduplicate identical unsigned files by content hash so byte-identical targets
-# (e.g. the three reproducible pip launchers, #2926) spend one cloud signature,
-# not one each. The signed representative is propagated to its aliases after
-# signing; every alias is verified below.
-$hashGroups = @($targets | Group-Object -Property { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash })
-$representatives = @($hashGroups | ForEach-Object { $_.Group[0] })
-$aliasesRestored = $targets.Count - $representatives.Count
-if ($aliasesRestored -gt 0) {
-  Write-Host "Deduplicated $($targets.Count) unsigned file(s) to $($representatives.Count) unique hash(es); $aliasesRestored alias(es) will reuse a signed representative."
+  $representatives = @()
+  $aliasesRestored = 0
+} else {
+  # Deduplicate identical unsigned files by content hash so byte-identical targets
+  # (e.g. the three reproducible pip launchers, #2926) spend one cloud signature,
+  # not one each. The signed representative is propagated to its aliases after
+  # signing; every alias is verified below.
+  $hashGroups = @($targets | Group-Object -Property { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash })
+  $representatives = @($hashGroups | ForEach-Object { $_.Group[0] })
+  $aliasesRestored = $targets.Count - $representatives.Count
+  if ($aliasesRestored -gt 0) {
+    Write-Host "Deduplicated $($targets.Count) unsigned file(s) to $($representatives.Count) unique hash(es); $aliasesRestored alias(es) will reuse a signed representative."
+  }
 }
 
-$previousSigned = Read-PreviousSignedCount -Path $TelemetryFile
-$projectedSigned = $previousSigned + $representatives.Count
-$telemetryStatus = "success"
-if ($maxSignatureBudget -ge 0) {
-  Write-Host "Windows signing budget: $previousSigned already signed, this invocation would sign $($representatives.Count), max $maxSignatureBudget."
-  if ($projectedSigned -gt $maxSignatureBudget) {
-    Write-Host "::warning::Windows signing budget exceeded: signing $($representatives.Count) more file(s) would bring this release to $projectedSigned cloud signature(s), above MAX_SIGNATURES=$maxSignatureBudget."
-    Write-Host "::warning::Release signing will continue. Audit sign-targets.txt / Windows signing telemetry and raise MAX_SIGNATURES if this release intentionally needs the extra signatures."
-    $telemetryStatus = "over_budget"
+$budgetScript = Join-Path $PSScriptRoot "windows-signing-budget.ps1"
+& $budgetScript `
+  -Source $signingSource `
+  -Discovered $discovered `
+  -Skipped $skipped `
+  -WouldSign $representatives.Count `
+  -UniqueHashes $representatives.Count `
+  -AliasesRestored $aliasesRestored `
+  -MaxSignatures $maxSignatureBudget `
+  -TelemetryFile $TelemetryFile
+$budgetExit = $LASTEXITCODE
+if ($budgetExit -eq 2) {
+  Write-Host "Skipping source '$signingSource' because the Windows signing budget is blocked."
+  exit 0
+}
+if ($budgetExit -ne 0) { exit $budgetExit }
+
+$previousSigned = 0
+if (Test-Path -LiteralPath $TelemetryFile) {
+  foreach ($line in (Get-Content -LiteralPath $TelemetryFile)) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed) { continue }
+    $record = $trimmed | ConvertFrom-Json
+    $previousSigned += [int]$record.signed
   }
+}
+$projectedSigned = $previousSigned + $representatives.Count
+if ($representatives.Count -eq 0) {
+  Write-SigningTelemetry -Path $TelemetryFile -Status "success" -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign 0 -Signed 0 -PreviousSigned $previousSigned -Max $maxSignatureBudget -ProjectedTotal $projectedSigned
+  exit 0
 }
 Write-Host "Signing $($representatives.Count) unique file(s) in batches of $BatchSize (delay ${DelaySeconds}s between batches)..."
 
@@ -264,5 +276,5 @@ if ($unsigned.Count -gt 0) {
   $unsigned | ForEach-Object { Write-Host "    $_" }
   exit 1
 }
-Write-SigningTelemetry -Path $TelemetryFile -Status $telemetryStatus -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign $representatives.Count -Signed $representatives.Count -UniqueHashes $representatives.Count -AliasesRestored $aliasesRestored -PreviousSigned $previousSigned -Max $maxSignatureBudget
+Write-SigningTelemetry -Path $TelemetryFile -Status "success" -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign $representatives.Count -Signed $representatives.Count -UniqueHashes $representatives.Count -AliasesRestored $aliasesRestored -PreviousSigned $previousSigned -Max $maxSignatureBudget -ProjectedTotal $projectedSigned
 Write-Host "All $($targets.Count) file(s) carry a Valid Authenticode signature ($($representatives.Count) cloud signature(s), $aliasesRestored alias(es) reused)."

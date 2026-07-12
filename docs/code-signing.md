@@ -48,7 +48,7 @@ Add these secrets to the repository settings (Settings → Secrets → Actions):
 
 | Variable | Description |
 |----------|-------------|
-| `MAX_SIGNATURES` | Warning threshold for SSL.com cloud hash-signing operations in one Windows release job. Defaults to `850` in `release.yml`; raise only after reviewing `sign-targets.txt` and the Windows signing job summary. |
+| `MAX_SIGNATURES` | Fail-closed ceiling for SSL.com cloud hash-signing operations in one Windows release job. Defaults to `100` in `release.yml`; an intentional cold/full cache reseed above that ceiling requires an explicit repository-variable override after reviewing the signable inventory. |
 | `WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED` | Hard-fail threshold for fresh embedded-runtime signatures when the signable manifest matches the previous release. Defaults to `25`; keep this low so a broken signature cache fails before release artifacts publish. |
 
 ## Certificate Setup
@@ -169,16 +169,30 @@ the artifact that embeds it is produced:
    is re-packed from the signed `.exe` and its `.nsis.zip.sig` re-signed with
    the Tauri updater key (`#2236`).
 
-### Budget telemetry (release CI, warning-only)
+### Signing budget barrier (release CI, fail-closed)
 
 Each Windows release writes a **Windows signing budget** section to the GitHub
 job summary. Recent audits found roughly 715-729 embedded-runtime signables,
-plus the NSIS/tooling and Tauri wrapper signings. The default warning threshold
-is `850`, leaving limited headroom for normal drift while making unexpected
-growth visible without blocking a production release. Review the discovered,
-skipped, and cloud-signatures-spent counts before changing `MAX_SIGNATURES`; a
-threshold bump should be paired with an audit of the added files and why they
-must be signed.
+but healthy cache-backed releases spend roughly 0-10 fresh cloud signatures.
+The default ceiling is `100`: enough for ordinary drift, but low enough to stop
+a collapsed cache or unexpected signing source. A deliberate cold/full cache
+reseed can exceed that value only through an explicit audited `MAX_SIGNATURES`
+repository-variable override.
+
+Every signer invocation contributes to one shared JSONL ledger, including the
+embedded runtime and MCP binaries, NSIS stock plugins, Seren.exe, helper DLLs,
+the uninstaller, and the setup executable. Before `signtool` is discovered or
+called, the signer checks `actual signed so far + this source's unique unsigned
+hashes`. Exceeding the ceiling writes `blocked_over_budget`, persists a block
+state, and makes every later signing source record-and-skip without contacting
+SSL.com. Malformed telemetry or a missing/invalid `MAX_SIGNATURES` fails the run
+as CI misconfiguration instead of disabling the barrier.
+
+A runtime budget block protects spend, not availability. The Windows build and
+real AWS-hosted app walkthrough continue, signature-only verification gates are
+skipped, and CI asserts that the resulting setup executable is not EV signed.
+The installer and updater artifacts still publish, while release notes are
+resolved to **NOT EV code signed** from the uploaded budget-state artifact.
 
 The embedded-runtime signature cache should make the second release with an
 unchanged runtime report most of that large payload as skipped already valid,
@@ -204,12 +218,13 @@ and runs `scripts/assert-windows-signature-cache.ps1` against the real signer
 telemetry.
 
 If the manifest hash matches the previous release, the embedded-runtime set is
-unchanged. In that case, the cache must restore almost all previously signed
-binaries before the signer runs. Fresh embedded-runtime signatures above
-`WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED` fail the Windows build with an
-explicit cache-regression error. If no previous state exists yet, or the
-manifest hash changed because the runtime genuinely changed, the gate writes
-the current state and skips the assertion for that release.
+unchanged. In that case, fresh embedded-runtime signatures above
+`WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED` fail the Windows build. If the
+manifest changed, the cache must still restore at least
+`WINDOWS_EMBEDDED_RUNTIME_CACHE_MIN_RESTORE_RATE` percent of the per-file set.
+The cache-health gate remains independent of the release-wide budget barrier;
+on a budget-blocked unsigned fallback it does not attempt to certify signed
+output or upload a signed-cache state for the next release.
 
 ### Verification gates (release CI, hard-fail)
 

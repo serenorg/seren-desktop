@@ -20,6 +20,8 @@ param(
 
   [switch]$AllowUnsignedPrArtifact,
 
+  [switch]$AllowUnsignedBudgetBlockedArtifact,
+
   [switch]$AllowMissingAgentCredentials
 )
 
@@ -221,6 +223,7 @@ try {
   $psSecretPrefix = Convert-ToSingleQuotedPowerShellString $SecretParameterPrefix.TrimEnd("/")
   $psTaskLog = Convert-ToSingleQuotedPowerShellString $taskLogPath
   $psAllowUnsignedPrArtifact = if ($AllowUnsignedPrArtifact) { "`$true" } else { "`$false" }
+  $psAllowUnsignedBudgetBlockedArtifact = if ($AllowUnsignedBudgetBlockedArtifact) { "`$true" } else { "`$false" }
   $psAllowMissingAgentCredentials = if ($AllowMissingAgentCredentials) { "`$true" } else { "`$false" }
   $taskScript = @"
 `$ErrorActionPreference = "Stop"
@@ -234,6 +237,7 @@ Set-StrictMode -Version Latest
 `$startupTimeoutSeconds = $StartupTimeoutSeconds
 `$probeTimeoutSeconds = $ProbeTimeoutSeconds
 `$allowUnsignedPrArtifact = $psAllowUnsignedPrArtifact
+`$allowUnsignedBudgetBlockedArtifact = $psAllowUnsignedBudgetBlockedArtifact
 `$allowMissingAgentCredentials = $psAllowMissingAgentCredentials
 `$installDir = Join-Path `$env:SystemDrive "SerenDesktopE2E"
 `$installerTimeoutSeconds = $InstallerTimeoutSeconds
@@ -441,7 +445,10 @@ try {
     }
   }
   [Environment]::SetEnvironmentVariable("SEREN_E2E_API_BASE", "https://api.serendb.com", "Process")
-  if (`$allowUnsignedPrArtifact) {
+  if (`$allowUnsignedBudgetBlockedArtifact) {
+    [Environment]::SetEnvironmentVariable("SEREN_E2E_RELEASE_RUN", "1", "Process")
+    [Environment]::SetEnvironmentVariable("SEREN_E2E_WINDOWS_SIGNING_BLOCKED", "1", "Process")
+  } elseif (`$allowUnsignedPrArtifact) {
     [Environment]::SetEnvironmentVariable("SEREN_E2E_UNSIGNED_PR_RUN", "1", "Process")
   } else {
     [Environment]::SetEnvironmentVariable("SEREN_E2E_RELEASE_RUN", "1", "Process")
@@ -511,6 +518,9 @@ try {
   )
   if (`$allowUnsignedPrArtifact) {
     `$harnessArgs += "-AllowUnsignedPrArtifact"
+  }
+  if (`$allowUnsignedBudgetBlockedArtifact) {
+    `$harnessArgs += "-AllowUnsignedBudgetBlockedArtifact"
   }
   `$harnessTimeoutSeconds = [Math]::Max(600, `$installerTimeoutSeconds + `$probeTimeoutSeconds + 300)
   Invoke-LoggedNative "Windows app harness" "powershell" `$harnessArgs `$harnessTimeoutSeconds

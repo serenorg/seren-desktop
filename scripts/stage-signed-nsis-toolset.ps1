@@ -99,7 +99,7 @@ if ($CacheDir) {
 }
 
 Write-Host "Signing $($stock.Count) stock NSIS plugin DLL(s) in the toolset cache..."
-& (Join-Path $PSScriptRoot "sign-windows-payload.ps1") -File $pluginPaths
+& (Join-Path $PSScriptRoot "sign-windows-payload.ps1") -File $pluginPaths -SigningSource "nsis-stock-plugins"
 $signExit = $LASTEXITCODE
 if ($signExit -ne 0) { exit $signExit }
 
