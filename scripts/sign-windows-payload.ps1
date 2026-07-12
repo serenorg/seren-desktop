@@ -80,7 +80,9 @@ function Write-SigningTelemetry {
     [int]$WouldSign,
     [int]$Signed,
     [int]$PreviousSigned,
-    [int]$Max
+    [int]$Max,
+    [int]$UniqueHashes = 0,
+    [int]$AliasesRestored = 0
   )
   if (-not $Path) { return }
   $dir = Split-Path -Parent $Path
@@ -95,6 +97,8 @@ function Write-SigningTelemetry {
     skipped = $Skipped
     would_sign = $WouldSign
     signed = $Signed
+    unique_hashes = $UniqueHashes
+    aliases_restored = $AliasesRestored
     previous_signed = $PreviousSigned
     max_signatures = if ($Max -ge 0) { $Max } else { $null }
   }
@@ -176,18 +180,29 @@ if ($targets.Count -eq 0) {
   Write-SigningTelemetry -Path $TelemetryFile -Status "success" -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign 0 -Signed 0 -PreviousSigned $previousSigned -Max $maxSignatureBudget
   exit 0
 }
+# Deduplicate identical unsigned files by content hash so byte-identical targets
+# (e.g. the three reproducible pip launchers, #2926) spend one cloud signature,
+# not one each. The signed representative is propagated to its aliases after
+# signing; every alias is verified below.
+$hashGroups = @($targets | Group-Object -Property { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash })
+$representatives = @($hashGroups | ForEach-Object { $_.Group[0] })
+$aliasesRestored = $targets.Count - $representatives.Count
+if ($aliasesRestored -gt 0) {
+  Write-Host "Deduplicated $($targets.Count) unsigned file(s) to $($representatives.Count) unique hash(es); $aliasesRestored alias(es) will reuse a signed representative."
+}
+
 $previousSigned = Read-PreviousSignedCount -Path $TelemetryFile
-$projectedSigned = $previousSigned + $targets.Count
+$projectedSigned = $previousSigned + $representatives.Count
 $telemetryStatus = "success"
 if ($maxSignatureBudget -ge 0) {
-  Write-Host "Windows signing budget: $previousSigned already signed, this invocation would sign $($targets.Count), max $maxSignatureBudget."
+  Write-Host "Windows signing budget: $previousSigned already signed, this invocation would sign $($representatives.Count), max $maxSignatureBudget."
   if ($projectedSigned -gt $maxSignatureBudget) {
-    Write-Host "::warning::Windows signing budget exceeded: signing $($targets.Count) more file(s) would bring this release to $projectedSigned cloud signature(s), above MAX_SIGNATURES=$maxSignatureBudget."
+    Write-Host "::warning::Windows signing budget exceeded: signing $($representatives.Count) more file(s) would bring this release to $projectedSigned cloud signature(s), above MAX_SIGNATURES=$maxSignatureBudget."
     Write-Host "::warning::Release signing will continue. Audit sign-targets.txt / Windows signing telemetry and raise MAX_SIGNATURES if this release intentionally needs the extra signatures."
     $telemetryStatus = "over_budget"
   }
 }
-Write-Host "Signing $($targets.Count) file(s) in batches of $BatchSize (delay ${DelaySeconds}s between batches)..."
+Write-Host "Signing $($representatives.Count) unique file(s) in batches of $BatchSize (delay ${DelaySeconds}s between batches)..."
 
 # Discover the newest x64 signtool.exe from the installed Windows 10 SDK rather
 # than hardcoding an SDK version that drifts on the hosted runner.
@@ -204,9 +219,9 @@ Write-Host "Using signtool: $($signtool.FullName)"
 # signtool signs each file by sending only its hash to the SSL.com cloud (one op
 # per file). Retry each batch for transient cloud/timestamp failures.
 $ts = "http://ts.ssl.com"
-for ($i = 0; $i -lt $targets.Count; $i += $BatchSize) {
-  $end = [Math]::Min($i + $BatchSize - 1, $targets.Count - 1)
-  $batch = @($targets[$i..$end])
+for ($i = 0; $i -lt $representatives.Count; $i += $BatchSize) {
+  $end = [Math]::Min($i + $BatchSize - 1, $representatives.Count - 1)
+  $batch = @($representatives[$i..$end])
   $attempt = 0
   while ($true) {
     $attempt++
@@ -219,10 +234,21 @@ for ($i = 0; $i -lt $targets.Count; $i += $BatchSize) {
     Write-Host "signtool batch failed (exit $LASTEXITCODE); retry $attempt/$MaxRetries after backoff..."
     Start-Sleep -Seconds (5 * $attempt)
   }
-  Write-Host "  signed $([Math]::Min($i + $BatchSize, $targets.Count))/$($targets.Count)"
+  Write-Host "  signed $([Math]::Min($i + $BatchSize, $representatives.Count))/$($representatives.Count)"
   # Throttle between batches (not after the last) to stay under the rate limit.
-  if ($DelaySeconds -gt 0 -and ($i + $BatchSize) -lt $targets.Count) {
+  if ($DelaySeconds -gt 0 -and ($i + $BatchSize) -lt $representatives.Count) {
     Start-Sleep -Seconds $DelaySeconds
+  }
+}
+
+# Propagate each signed representative to its byte-identical aliases. They had
+# the same unsigned content, so the representative's Authenticode signature is
+# valid for them too (signtool binds to content, not filename). Every alias is
+# verified in the loop below.
+foreach ($group in $hashGroups) {
+  $rep = $group.Group[0]
+  foreach ($alias in @($group.Group | Select-Object -Skip 1)) {
+    Copy-Item -LiteralPath $rep -Destination $alias -Force
   }
 }
 
@@ -238,5 +264,5 @@ if ($unsigned.Count -gt 0) {
   $unsigned | ForEach-Object { Write-Host "    $_" }
   exit 1
 }
-Write-SigningTelemetry -Path $TelemetryFile -Status $telemetryStatus -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign $targets.Count -Signed $targets.Count -PreviousSigned $previousSigned -Max $maxSignatureBudget
-Write-Host "All $($targets.Count) file(s) carry a Valid Authenticode signature."
+Write-SigningTelemetry -Path $TelemetryFile -Status $telemetryStatus -Source $signingSource -Discovered $discovered -Skipped $skipped -WouldSign $representatives.Count -Signed $representatives.Count -UniqueHashes $representatives.Count -AliasesRestored $aliasesRestored -PreviousSigned $previousSigned -Max $maxSignatureBudget
+Write-Host "All $($targets.Count) file(s) carry a Valid Authenticode signature ($($representatives.Count) cloud signature(s), $aliasesRestored alias(es) reused)."

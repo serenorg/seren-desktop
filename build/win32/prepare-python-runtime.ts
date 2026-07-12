@@ -2,6 +2,7 @@
 // ABOUTME: Bundles Python with the Tauri installer so skills work without a system install.
 
 import { execSync } from "child_process";
+import { createHash } from "node:crypto";
 import * as fs from "fs";
 import * as https from "https";
 import * as path from "path";
@@ -29,6 +30,95 @@ function downloadConfig(arch: "x64" | "arm64"): DownloadConfig {
 }
 
 const GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py";
+
+// Pinned pip so the launcher-generating input never floats. get-pip bundles a
+// pip wheel, but we install this exact version explicitly so a silent upstream
+// bump cannot change the launcher bytes. Bump alongside PIP_SOURCE_DATE_EPOCH
+// when intentionally reseeding the embedded runtime (an explicit +1 signing op).
+const PIP_VERSION = "26.1.2";
+
+// Fixed source epoch for reproducible launcher bytes (#2926). pip's vendored
+// distlib ScriptMaker stamps SOURCE_DATE_EPOCH — or the current time when unset
+// — into each Windows console launcher's embedded ZIP. Unset, two clean builds
+// at different times produce different pip.exe/pip3.exe/pip3.12.exe hashes even
+// with identical pip and build path, so the content-addressed signature cache
+// always misses them and re-signs three files every release. A fixed value
+// makes the launchers byte-identical across builds and cacheable. Bump on any
+// intentional Python/pip upgrade so the reseed is explicit.
+const PIP_SOURCE_DATE_EPOCH = 1735689600; // 2025-01-01T00:00:00Z
+
+// Optional integrity pin for the floating get-pip.py bootstrap. When
+// GET_PIP_SHA256 is set, a mismatch fails closed before executing the
+// downloaded script; otherwise the observed digest is recorded in the manifest
+// for auditing.
+const GET_PIP_SHA256 = process.env.GET_PIP_SHA256 ?? "";
+
+/**
+ * Build the pip bootstrap command. Installs the exact pinned pip so the
+ * launcher generator is deterministic. Exported for unit testing.
+ */
+export function buildPipBootstrapCommand(
+	pythonExe: string,
+	getPipPath: string,
+	pipVersion: string,
+): string {
+	return `"${pythonExe}" "${getPipPath}" "pip==${pipVersion}" --no-warn-script-location --disable-pip-version-check`;
+}
+
+/**
+ * Environment for the pip bootstrap subprocess, forcing a fixed
+ * SOURCE_DATE_EPOCH so distlib produces reproducible launcher ZIPs (#2926).
+ * Exported for unit testing.
+ */
+export function pipBootstrapEnv(
+	baseEnv: NodeJS.ProcessEnv,
+	sourceDateEpoch: number,
+): NodeJS.ProcessEnv {
+	return { ...baseEnv, SOURCE_DATE_EPOCH: String(sourceDateEpoch) };
+}
+
+// The three console-script launchers pip generates are byte-identical to each
+// other within a build. A divergence means a launcher-generating input drifted.
+const PIP_LAUNCHERS = ["pip.exe", "pip3.exe", "pip3.12.exe"];
+
+function sha256File(filePath: string): string {
+	return createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+/**
+ * Fail closed when the pip launchers are not reproducible (#2926 §5): they must
+ * all share one unsigned hash. Returns that shared hash. Exported for testing.
+ */
+export function assertLaunchersReproducible(
+	hashes: Array<{ name: string; sha256: string }>,
+): string {
+	const unique = new Set(hashes.map((h) => h.sha256.toLowerCase()));
+	if (unique.size !== 1) {
+		const detail = hashes.map((h) => `${h.name}=${h.sha256}`).join(", ");
+		throw new Error(
+			`pip launchers are not reproducible (expected one shared hash, got ${unique.size}): ${detail}. ` +
+				"A launcher-generating input drifted; reseed with a bumped PIP_SOURCE_DATE_EPOCH.",
+		);
+	}
+	return [...unique][0];
+}
+
+/**
+ * Fail closed when a pinned get-pip digest is configured and does not match the
+ * downloaded bootstrap. An empty expected digest records-only (no gate).
+ * Exported for unit testing.
+ */
+export function assertGetPipIntegrity(
+	actualSha256: string,
+	expectedSha256: string,
+): void {
+	if (expectedSha256 && expectedSha256.toLowerCase() !== actualSha256.toLowerCase()) {
+		throw new Error(
+			`get-pip.py integrity check failed: expected ${expectedSha256}, got ${actualSha256}. ` +
+				"Audit the new bootstrap and update GET_PIP_SHA256 before proceeding.",
+		);
+	}
+}
 
 interface PrepareOptions {
 	arch: "x64" | "arm64";
@@ -100,28 +190,57 @@ export function enableSitePackages(pthContents: string): string {
 	return rewritten.join("\n");
 }
 
-async function installPip(pythonDir: string): Promise<void> {
-	console.log(`Bootstrapping pip in ${pythonDir}...`);
+interface PipBootstrapResult {
+	getPipSha256: string;
+	pipLauncherSha256: string | null;
+}
+
+async function installPip(pythonDir: string): Promise<PipBootstrapResult> {
+	console.log(`Bootstrapping pip ${PIP_VERSION} in ${pythonDir}...`);
 	const getPipPath = path.join(pythonDir, "get-pip.py");
 	await downloadFile(GET_PIP_URL, getPipPath);
 
+	const getPipSha256 = sha256File(getPipPath);
+	try {
+		assertGetPipIntegrity(getPipSha256, GET_PIP_SHA256);
+	} catch (err) {
+		fs.unlinkSync(getPipPath);
+		throw err;
+	}
+
 	const pythonExe = path.join(pythonDir, "python.exe");
-	execSync(
-		`"${pythonExe}" "${getPipPath}" --no-warn-script-location --disable-pip-version-check`,
-		{ stdio: "inherit" },
-	);
+	// SOURCE_DATE_EPOCH makes the pip-generated launchers reproducible so the
+	// signature cache restores them instead of re-signing three files (#2926).
+	execSync(buildPipBootstrapCommand(pythonExe, getPipPath, PIP_VERSION), {
+		stdio: "inherit",
+		env: pipBootstrapEnv(process.env, PIP_SOURCE_DATE_EPOCH),
+	});
 
 	fs.unlinkSync(getPipPath);
+
+	// #2926 §5: the launchers must be reproducible. Assert they share one hash
+	// and record it, so a launcher-generating drift is caught (and the recorded
+	// hash lets a future release compare against the prior runtime state).
+	const scriptsDir = path.join(pythonDir, "Scripts");
+	const launcherHashes = PIP_LAUNCHERS.map((name) => path.join(scriptsDir, name))
+		.filter((p) => fs.existsSync(p))
+		.map((p) => ({ name: path.basename(p), sha256: sha256File(p) }));
+	const pipLauncherSha256 =
+		launcherHashes.length > 0 ? assertLaunchersReproducible(launcherHashes) : null;
+
+	return { getPipSha256, pipLauncherSha256 };
 }
 
-async function preparePython(options: PrepareOptions): Promise<string> {
+async function preparePython(
+	options: PrepareOptions,
+): Promise<{ pythonDir: string; getPipSha256: string | null; pipLauncherSha256: string | null }> {
 	const { arch, outputDir } = options;
 	const cfg = downloadConfig(arch);
 	const pythonDir = path.join(outputDir, "python");
 
 	if (fs.existsSync(pythonDir)) {
 		console.log(`Python directory already exists at ${pythonDir}, skipping...`);
-		return pythonDir;
+		return { pythonDir, getPipSha256: null, pipLauncherSha256: null };
 	}
 
 	fs.mkdirSync(pythonDir, { recursive: true });
@@ -157,8 +276,10 @@ async function preparePython(options: PrepareOptions): Promise<string> {
 	// Only run pip install when the build host can execute the downloaded
 	// python.exe — i.e. the host is Windows. Cross-platform CI prepares
 	// the zip extraction only; pip install happens on the Windows runner.
+	let getPipSha256: string | null = null;
+	let pipLauncherSha256: string | null = null;
 	if (process.platform === "win32") {
-		await installPip(pythonDir);
+		({ getPipSha256, pipLauncherSha256 } = await installPip(pythonDir));
 	} else {
 		console.log(
 			"[prepare-python-runtime] Skipping pip bootstrap on non-Windows host — " +
@@ -170,7 +291,7 @@ async function preparePython(options: PrepareOptions): Promise<string> {
 	fs.unlinkSync(zipPath);
 
 	console.log(`Python prepared at ${pythonDir}`);
-	return pythonDir;
+	return { pythonDir, getPipSha256, pipLauncherSha256 };
 }
 
 export async function preparePythonRuntime(
@@ -180,11 +301,18 @@ export async function preparePythonRuntime(
 	console.log(`Preparing embedded Python runtime for Windows ${arch}...`);
 
 	fs.mkdirSync(outputDir, { recursive: true });
-	const pythonDir = await preparePython({ arch, outputDir });
+	const { pythonDir, getPipSha256, pipLauncherSha256 } = await preparePython({
+		arch,
+		outputDir,
+	});
 
 	const manifestPath = path.join(outputDir, "embedded-python.json");
 	const manifest = {
 		python: PYTHON_VERSION,
+		pip: PIP_VERSION,
+		pipSourceDateEpoch: PIP_SOURCE_DATE_EPOCH,
+		getPipSha256,
+		pipLauncherSha256,
 		arch,
 		platform: "win32",
 		preparedAt: new Date().toISOString(),
@@ -233,4 +361,4 @@ if (isInvokedAsCli(import.meta.url, process.argv[1])) {
 		});
 }
 
-export { PYTHON_VERSION };
+export { PYTHON_VERSION, PIP_VERSION, PIP_SOURCE_DATE_EPOCH };
