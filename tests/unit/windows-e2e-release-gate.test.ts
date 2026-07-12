@@ -331,13 +331,19 @@ describe("Windows production e2e release gate", () => {
     expect(probe).toContain("initialModelId");
   });
 
-  it("keeps unsigned PR artifact mode explicit and forbidden for release runs", () => {
+  it("allows unsigned release walkthroughs only for an explicit MAX_SIGNATURES block", () => {
     expect(runner).toContain("[switch]$AllowUnsignedPrArtifact");
+    expect(runner).toContain("[switch]$AllowUnsignedBudgetBlockedArtifact");
     expect(runner).toContain("SEREN_E2E_UNSIGNED_PR_RUN");
     expect(runner).toContain("SEREN_E2E_RELEASE_RUN");
+    expect(runner).toContain("SEREN_E2E_WINDOWS_SIGNING_BLOCKED");
     expect(runner).toContain("is forbidden for release Windows e2e runs");
+    expect(runner).toContain("requires an explicit budget-blocked release run");
+    expect(taskUserRunner).toContain("AllowUnsignedBudgetBlockedArtifact");
 
     const releaseGate = workflowJob("windows-app-e2e");
+    expect(releaseGate).toContain("Download Windows signing budget state");
+    expect(releaseGate).toContain("windows-signing-budget-state.json");
     expect(releaseGate).toContain("aws s3 presign");
     expect(releaseGate).toContain("Invoke-WebRequest -Uri");
     expect(releaseGate).toContain(
@@ -349,6 +355,7 @@ describe("Windows production e2e release gate", () => {
       "Windows app scheduled-task harness failed with exit code",
     );
     expect(releaseGate).not.toContain("-AllowUnsignedPrArtifact");
+    expect(releaseGate).toContain("-AllowUnsignedBudgetBlockedArtifact");
     expect(releaseGate).not.toContain("-AllowMissingAgentCredentials");
     expect(releaseGate).not.toContain("SEREN_E2E_UNSIGNED_PR_RUN");
   });
@@ -509,6 +516,8 @@ describe("Windows production e2e release gate", () => {
       "github-token: ${{ secrets.GITHUB_TOKEN }}",
     );
     expect(manualPublishWorkflow).toContain("WINDOWS_SIGNING_NOTE");
+    expect(manualPublishWorkflow).toContain("windows-signing-budget-state.json");
+    expect(manualPublishWorkflow).toContain("windowsSigningBlocked");
     expect(manualPublishWorkflow).toContain("latest.json");
     expect(manualPublishWorkflow).not.toContain("windows-app-e2e");
   });
