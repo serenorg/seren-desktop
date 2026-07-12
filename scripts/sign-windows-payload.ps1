@@ -200,6 +200,25 @@ if ($budgetExit -eq 2) {
 }
 if ($budgetExit -ne 0) { exit $budgetExit }
 
+function Block-MonthlySigning([string]$Source, [int]$Invocation, [int]$Operations) {
+  $monthlyScript = Join-Path $PSScriptRoot "windows-signing-monthly-budget.ps1"
+  $monthlyState = $env:WINDOWS_SIGNING_MONTHLY_STATE_FILE
+  & $monthlyScript -Mode Reserve -Source $Source -Invocation $Invocation -Operations $Operations -OutputFile $monthlyState
+  $monthlyExit = $LASTEXITCODE
+  if ($monthlyExit -eq 2) {
+    $state = [PSCustomObject]@{ schema_version=1; status="blocked_monthly_budget"; source=$Source; invocation=$Invocation; operations=$Operations; created_at=(Get-Date).ToUniversalTime().ToString("o") }
+    ($state | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $env:WINDOWS_SIGNING_BLOCK_FILE
+    if ($env:GITHUB_ENV) {
+      "WINDOWS_SIGNING_BLOCKED=true" | Add-Content -LiteralPath $env:GITHUB_ENV
+      "WINDOWS_SIGNING_MONTHLY_BLOCKED=true" | Add-Content -LiteralPath $env:GITHUB_ENV
+    }
+    Write-SigningTelemetry -Path $TelemetryFile -Status "blocked_monthly_budget" -Source $Source -Discovered $discovered -Skipped $skipped -WouldSign $Operations -Signed 0 -PreviousSigned $previousSigned -Max $maxSignatureBudget -ProjectedTotal $projectedSigned
+    return $true
+  }
+  if ($monthlyExit -ne 0) { exit $monthlyExit }
+  return $false
+}
+
 $previousSigned = 0
 if (Test-Path -LiteralPath $TelemetryFile) {
   foreach ($line in (Get-Content -LiteralPath $TelemetryFile)) {
@@ -237,6 +256,13 @@ for ($i = 0; $i -lt $representatives.Count; $i += $BatchSize) {
   $attempt = 0
   while ($true) {
     $attempt++
+    # A failed signtool call may still have reached SSL.com. Every real retry is
+    # therefore a distinct reservation, immediately before the cloud call.
+    $cloudInvocation = [int](($i / $BatchSize) * $MaxRetries) + $attempt
+    if (Block-MonthlySigning $signingSource $cloudInvocation $batch.Count) {
+      Write-Host "Skipping source '$signingSource' because the monthly SSL.com budget is exhausted."
+      exit 0
+    }
     & $signtool.FullName sign /fd sha256 /tr $ts /td sha256 /sha1 $Thumbprint $batch
     if ($LASTEXITCODE -eq 0) { break }
     if ($attempt -ge $MaxRetries) {

@@ -37,6 +37,18 @@ env:
   # Windows release job. Normal releases spend roughly 0-10; 100 leaves ample
   # drift while a cold/full cache reseed requires an explicit audited repo override.
   MAX_SIGNATURES: ${{ vars.MAX_SIGNATURES || '100' }}
+  # Persistent Tier 1 monthly barrier (#2931). Currency is integer cents only;
+  # account/certificate and invoice boundary are explicit repository variables.
+  SSL_SIGNING_MONTHLY_BUDGET_CENTS: ${{ vars.SSL_SIGNING_MONTHLY_BUDGET_CENTS || '10000' }}
+  SSL_SIGNING_TIER_BASE_CENTS: ${{ vars.SSL_SIGNING_TIER_BASE_CENTS || '2000' }}
+  SSL_SIGNING_TIER_INCLUDED_OPERATIONS: ${{ vars.SSL_SIGNING_TIER_INCLUDED_OPERATIONS || '20' }}
+  SSL_SIGNING_TIER_OVERAGE_CENTS: ${{ vars.SSL_SIGNING_TIER_OVERAGE_CENTS || '100' }}
+  SSL_SIGNING_OTHER_FIXED_MONTHLY_CENTS: ${{ vars.SSL_SIGNING_OTHER_FIXED_MONTHLY_CENTS || '0' }}
+  SSL_SIGNING_BILLING_ANCHOR_DAY: ${{ vars.SSL_SIGNING_BILLING_ANCHOR_DAY }}
+  SSL_SIGNING_BILLING_TIMEZONE: ${{ vars.SSL_SIGNING_BILLING_TIMEZONE }}
+  SSL_SIGNING_ACCOUNT: ${{ vars.SSL_SIGNING_ACCOUNT }}
+  SSL_SIGNING_CERTIFICATE: ${{ vars.SSL_SIGNING_CERTIFICATE }}
+  SSL_SIGNING_LEDGER_R2_PREFIX: windows-signing-ledgers/v1
   # Hard gate for unchanged embedded-runtime releases: if the manifest matches
   # the previous release, a working signature cache should make this near zero.
   WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED: ${{ vars.WINDOWS_EMBEDDED_RUNTIME_CACHE_HIT_MAX_SIGNED || '25' }}
@@ -326,6 +338,11 @@ jobs:
       - name: Initialize Windows signing budget telemetry
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         shell: pwsh
+        env:
+          MONTHLY_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          MONTHLY_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          MONTHLY_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          MONTHLY_R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
         run: |
           [int]$max = 0
           if (-not [int]::TryParse($env:MAX_SIGNATURES, [ref]$max) -or $max -lt 0) {
@@ -334,11 +351,19 @@ jobs:
           }
           $telemetry = Join-Path $env:RUNNER_TEMP "windows-signing-telemetry.jsonl"
           $blockFile = Join-Path $env:RUNNER_TEMP "windows-signing-budget-block.json"
+          $monthlyState = Join-Path $env:RUNNER_TEMP "windows-signing-monthly-state.json"
           Remove-Item -LiteralPath $telemetry -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath $blockFile -Force -ErrorAction SilentlyContinue
           "WINDOWS_SIGN_TELEMETRY_FILE=$telemetry" >> $env:GITHUB_ENV
           "WINDOWS_SIGNING_BLOCK_FILE=$blockFile" >> $env:GITHUB_ENV
+          "WINDOWS_SIGNING_MONTHLY_STATE_FILE=$monthlyState" >> $env:GITHUB_ENV
           "WINDOWS_SIGNING_BLOCKED=false" >> $env:GITHUB_ENV
+          "WINDOWS_SIGNING_MONTHLY_BLOCKED=false" >> $env:GITHUB_ENV
+          "AWS_ACCESS_KEY_ID=$env:MONTHLY_R2_ACCESS_KEY_ID" >> $env:GITHUB_ENV
+          "AWS_SECRET_ACCESS_KEY=$env:MONTHLY_R2_SECRET_ACCESS_KEY" >> $env:GITHUB_ENV
+          "AWS_DEFAULT_REGION=auto" >> $env:GITHUB_ENV
+          "AWS_ENDPOINT_URL=$env:MONTHLY_R2_ENDPOINT" >> $env:GITHUB_ENV
+          "R2_BUCKET=$env:MONTHLY_R2_BUCKET" >> $env:GITHUB_ENV
           Write-Host "Windows signing telemetry: $telemetry"
           Write-Host "Windows signing block state: $blockFile"
           Write-Host "Windows signing MAX_SIGNATURES=$max"
@@ -772,15 +797,24 @@ jobs:
             if ($null -ne $record.skipped) { $skipped += [int]$record.skipped }
             if ($null -ne $record.would_sign) { $wouldSign += [int]$record.would_sign }
             if ($null -ne $record.signed) { $signed += [int]$record.signed }
-            if ($record.status -eq "blocked_over_budget" -or $record.status -eq "skipped_budget_blocked") { $blocked = $true }
+            if ($record.status -eq "blocked_over_budget" -or $record.status -eq "skipped_budget_blocked" -or $record.status -eq "blocked_monthly_budget") { $blocked = $true }
           }
-          $status = if ($blocked) { "blocked_over_budget" } else { "within_budget" }
+          $monthlyBlocked = $records.status -contains "blocked_monthly_budget"
+          $status = if ($monthlyBlocked) { "blocked_monthly_budget" } elseif ($blocked) { "blocked_over_budget" } else { "within_budget" }
           Add-Content -LiteralPath $summary -Value "- Status: $status"
           Add-Content -LiteralPath $summary -Value "- Projected cloud signatures: $wouldSign"
           Add-Content -LiteralPath $summary -Value "- Discovered: $discovered"
           Add-Content -LiteralPath $summary -Value "- Skipped already valid: $skipped"
           Add-Content -LiteralPath $summary -Value "- Actual cloud signatures spent: $signed"
           Add-Content -LiteralPath $summary -Value "- Signing blocked: $($blocked.ToString().ToLowerInvariant())"
+          if (Test-Path -LiteralPath $env:WINDOWS_SIGNING_MONTHLY_STATE_FILE) {
+            $monthly = Get-Content -Raw -LiteralPath $env:WINDOWS_SIGNING_MONTHLY_STATE_FILE | ConvertFrom-Json
+            Add-Content -LiteralPath $summary -Value "- Monthly cycle: $($monthly.billing_cycle) ($($monthly.cycle_starts_at) to $($monthly.cycle_ends_at))"
+            Add-Content -LiteralPath $summary -Value "- Monthly operations used/reserved: $($monthly.committed_or_reserved_operations)"
+            Add-Content -LiteralPath $summary -Value "- Monthly operations remaining at configured cost: $([Math]::Max(0, $monthly.configuration.included_operations + [Math]::Floor(($monthly.configuration.budget_cents - $monthly.configuration.base_cents - $monthly.configuration.other_fixed_monthly_cents) / $monthly.configuration.overage_cents) - $monthly.committed_or_reserved_operations))"
+            Add-Content -LiteralPath $summary -Value "- Monthly projected charge: `$$('{0:F2}' -f ($monthly.projected_cost_cents / 100))"
+            Add-Content -LiteralPath $summary -Value "- Monthly ledger version: $($monthly.version)"
+          }
           Add-Content -LiteralPath $summary -Value ""
           Add-Content -LiteralPath $summary -Value "| Status | Source | Discovered | Skipped | Would sign | Signed | Previous signed |"
           Add-Content -LiteralPath $summary -Value "|---|---|---:|---:|---:|---:|---:|"
@@ -795,6 +829,7 @@ jobs:
             max_signatures = [int]$env:MAX_SIGNATURES
             projected_total = $wouldSign
             actual_signed = $signed
+            monthly = if (Test-Path -LiteralPath $env:WINDOWS_SIGNING_MONTHLY_STATE_FILE) { Get-Content -Raw -LiteralPath $env:WINDOWS_SIGNING_MONTHLY_STATE_FILE | ConvertFrom-Json } else { $null }
             sources = @($records)
           }
           ($state | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath "windows-signing-budget-state.json"

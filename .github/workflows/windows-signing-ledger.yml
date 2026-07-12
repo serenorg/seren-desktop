@@ -1,0 +1,73 @@
+name: Windows signing monthly ledger
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/windows-signing-monthly-budget.ps1'
+      - 'scripts/test-windows-signing-monthly-budget-live.ps1'
+      - 'scripts/sign-windows-payload.ps1'
+      - '.github/workflows/windows-signing-ledger.yml'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "live-test or bootstrap-active-cycle"
+        required: true
+        type: choice
+        options: [live-test, bootstrap-active-cycle]
+      authoritative_operations:
+        description: "SSL.com operations already billed in the active cycle (bootstrap only)"
+        required: false
+        default: ""
+      authoritative_source:
+        description: "Invoice/dashboard evidence and timestamp (bootstrap only)"
+        required: false
+        default: ""
+      approval:
+        description: "Type BOOTSTRAP MONTHLY SSL LEDGER (bootstrap only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  ledger:
+    runs-on: windows-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+      SSL_SIGNING_MONTHLY_BUDGET_CENTS: ${{ vars.SSL_SIGNING_MONTHLY_BUDGET_CENTS || '10000' }}
+      SSL_SIGNING_TIER_BASE_CENTS: ${{ vars.SSL_SIGNING_TIER_BASE_CENTS || '2000' }}
+      SSL_SIGNING_TIER_INCLUDED_OPERATIONS: ${{ vars.SSL_SIGNING_TIER_INCLUDED_OPERATIONS || '20' }}
+      SSL_SIGNING_TIER_OVERAGE_CENTS: ${{ vars.SSL_SIGNING_TIER_OVERAGE_CENTS || '100' }}
+      SSL_SIGNING_OTHER_FIXED_MONTHLY_CENTS: ${{ vars.SSL_SIGNING_OTHER_FIXED_MONTHLY_CENTS || '0' }}
+      SSL_SIGNING_BILLING_ANCHOR_DAY: ${{ vars.SSL_SIGNING_BILLING_ANCHOR_DAY }}
+      SSL_SIGNING_BILLING_TIMEZONE: ${{ vars.SSL_SIGNING_BILLING_TIMEZONE }}
+      SSL_SIGNING_ACCOUNT: ${{ vars.SSL_SIGNING_ACCOUNT }}
+      SSL_SIGNING_CERTIFICATE: ${{ vars.SSL_SIGNING_CERTIFICATE }}
+      SSL_SIGNING_LEDGER_R2_PREFIX: windows-signing-ledgers/v1
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Bootstrap active billing cycle
+        if: inputs.operation == 'bootstrap-active-cycle'
+        shell: pwsh
+        env:
+          BOOTSTRAP_OPERATIONS: ${{ inputs.authoritative_operations }}
+          BOOTSTRAP_SOURCE: ${{ inputs.authoritative_source }}
+          BOOTSTRAP_APPROVAL: ${{ inputs.approval }}
+        run: |
+          if ($env:BOOTSTRAP_APPROVAL -cne "BOOTSTRAP MONTHLY SSL LEDGER") { throw "Exact audited approval phrase is required." }
+          [int]$operations = -1
+          if (-not [int]::TryParse($env:BOOTSTRAP_OPERATIONS, [ref]$operations) -or $operations -lt 0) { throw "authoritative_operations must be a non-negative integer." }
+          ./scripts/windows-signing-monthly-budget.ps1 -Mode Bootstrap -BootstrapOperations $operations -BootstrapSource $env:BOOTSTRAP_SOURCE -BootstrapApprovedBy '${{ github.actor }}'
+
+      - name: Live R2 CAS and persistence test
+        if: github.event_name == 'pull_request' || inputs.operation == 'live-test'
+        shell: pwsh
+        run: ./scripts/test-windows-signing-monthly-budget-live.ps1
