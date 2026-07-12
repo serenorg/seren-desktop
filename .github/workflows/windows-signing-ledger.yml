@@ -1,6 +1,14 @@
 name: Windows signing monthly ledger
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/windows-signing-monthly-budget.ps1'
+      - 'scripts/test-windows-signing-monthly-budget-live.ps1'
+      - 'scripts/sign-windows-payload.ps1'
+      - '.github/workflows/windows-signing-ledger.yml'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
     inputs:
       operation:
@@ -60,43 +68,6 @@ jobs:
           ./scripts/windows-signing-monthly-budget.ps1 -Mode Bootstrap -BootstrapOperations $operations -BootstrapSource $env:BOOTSTRAP_SOURCE -BootstrapApprovedBy '${{ github.actor }}'
 
       - name: Live R2 CAS and persistence test
-        if: inputs.operation == 'live-test'
+        if: github.event_name == 'pull_request' || inputs.operation == 'live-test'
         shell: pwsh
-        run: |
-          $env:SSL_SIGNING_MONTHLY_BUDGET_CENTS = "10000"
-          $env:SSL_SIGNING_TIER_BASE_CENTS = "2000"
-          $env:SSL_SIGNING_TIER_INCLUDED_OPERATIONS = "20"
-          $env:SSL_SIGNING_TIER_OVERAGE_CENTS = "100"
-          $env:SSL_SIGNING_OTHER_FIXED_MONTHLY_CENTS = "0"
-          $env:SSL_SIGNING_BILLING_ANCHOR_DAY = "1"
-          $env:SSL_SIGNING_BILLING_TIMEZONE = "UTC"
-          $env:SSL_SIGNING_ACCOUNT = "live-cas-test"
-          $env:SSL_SIGNING_CERTIFICATE = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-sequential"
-          $env:SSL_SIGNING_LEDGER_R2_PREFIX = "windows-signing-ledgers/live-tests"
-          ./scripts/windows-signing-monthly-budget.ps1 -Mode Bootstrap -BootstrapOperations 0 -BootstrapSource "live workflow CAS test" -BootstrapApprovedBy '${{ github.actor }}'
-          foreach ($release in 1..14) {
-            ./scripts/windows-signing-monthly-budget.ps1 -Mode Reserve -Source "seven-operation-release-$release" -Invocation 1 -Operations 7
-            if ($LASTEXITCODE -ne 0) { throw "Sequential reservation $release should have been admitted." }
-          }
-          ./scripts/windows-signing-monthly-budget.ps1 -Mode Reserve -Source "seven-operation-release-15" -Invocation 1 -Operations 7
-          if ($LASTEXITCODE -ne 2) { throw "The fifteenth seven-operation release was not blocked." }
-
-          # Use another isolated real ledger for a simultaneous near-limit CAS.
-          $env:SSL_SIGNING_MONTHLY_BUDGET_CENTS = "2000"
-          $env:SSL_SIGNING_TIER_BASE_CENTS = "0"
-          $env:SSL_SIGNING_TIER_INCLUDED_OPERATIONS = "0"
-          $env:SSL_SIGNING_TIER_OVERAGE_CENTS = "2000"
-          $env:SSL_SIGNING_CERTIFICATE = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-concurrent"
-          ./scripts/windows-signing-monthly-budget.ps1 -Mode Bootstrap -BootstrapOperations 0 -BootstrapSource "live workflow concurrent CAS test" -BootstrapApprovedBy '${{ github.actor }}'
-          $script = (Resolve-Path ./scripts/windows-signing-monthly-budget.ps1).Path
-          $aOut = Join-Path $env:RUNNER_TEMP "a.out"; $aErr = Join-Path $env:RUNNER_TEMP "a.err"
-          $bOut = Join-Path $env:RUNNER_TEMP "b.out"; $bErr = Join-Path $env:RUNNER_TEMP "b.err"
-          $a = Start-Process pwsh -PassThru -ArgumentList @('-NoProfile','-File',$script,'-Mode','Reserve','-Source','concurrent-a','-Invocation','1','-Operations','1') -RedirectStandardOutput $aOut -RedirectStandardError $aErr
-          $b = Start-Process pwsh -PassThru -ArgumentList @('-NoProfile','-File',$script,'-Mode','Reserve','-Source','concurrent-b','-Invocation','1','-Operations','1') -RedirectStandardOutput $bOut -RedirectStandardError $bErr
-          $a.WaitForExit(); $b.WaitForExit()
-          Get-Content $aOut,$aErr,$bOut,$bErr -ErrorAction SilentlyContinue
-          $codes = @($a.ExitCode, $b.ExitCode) | Sort-Object
-          if (($codes -join ',') -ne '0,2') { throw "CAS test expected one admission and one budget block, got $($codes -join ',')." }
-          # A fresh process must observe the committed reservation (durability).
-          ./scripts/windows-signing-monthly-budget.ps1 -Mode Reserve -Source "persistence-check" -Invocation 1 -Operations 1
-          if ($LASTEXITCODE -ne 2) { throw "A separate process did not observe the persisted reservation." }
+        run: ./scripts/test-windows-signing-monthly-budget-live.ps1
