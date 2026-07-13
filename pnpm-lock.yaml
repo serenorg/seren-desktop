@@ -18,8 +18,8 @@ importers:
         specifier: ^1.7.0
         version: 1.7.0
       '@playwright/mcp':
-        specifier: ^0.0.77
-        version: 0.0.77
+        specifier: ^0.0.78
+        version: 0.0.78
       '@seren/chat-ui':
         specifier: workspace:*
         version: link:packages/chat-ui
@@ -925,8 +925,8 @@ packages:
     resolution: {integrity: sha512-IHnV6A+zxU7XwmKFinmYjUcwlyK9+xkG3/s9KcQhI9BjQKycrJ1JRO+FbNYPwZiPKW3je/DR0k7w8/gLa5eaxQ==}
     deprecated: 'Switch to "qr" (new package name) for security updates: npm install qr'
 
-  '@playwright/mcp@0.0.77':
-    resolution: {integrity: sha512-vf3PmCdOWVvEc3Vmh8DVWvsbz6/rIGi+OG0cyC/2YTn10U8tZMHEiRG62LHdPTTf0qCjoS7/1mbyS5F0RHoTzQ==}
+  '@playwright/mcp@0.0.78':
+    resolution: {integrity: sha512-XLTUeA6mEN9sQ+hJ4dfG8EIkDbxS0K3Trc2RBkUJuf02TgE2FQRNTMtq/aJfhyRMINsRl/Ybc4sxcWLtFn4/TQ==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -3587,9 +3587,9 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  playwright-core@1.62.0-alpha-2026-06-29:
-    resolution: {integrity: sha512-/13EvW8l9Bmvt9nKHey+OcvZ8nob2FM8BCKBsUNwbXgmT4Hc0XX2b6mOErU0RBYNedOCa9q15USI7SY9K17v4w==}
-    engines: {node: '>=18'}
+  playwright-core@1.62.0-alpha-1783623505000:
+    resolution: {integrity: sha512-CPJZdsA/KGT2QQlekiV6Wt+QlQrZHVSZ6oiNtOI/bYYOIVLM8jfKGWTM4zQiyd4UN+40Cq4cA6lxmZHZbtPvJQ==}
+    engines: {node: '>=20'}
     hasBin: true
 
   playwright@1.61.1:
@@ -3597,9 +3597,9 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  playwright@1.62.0-alpha-2026-06-29:
-    resolution: {integrity: sha512-ugaMuh6rAOqmbaxrM7+XQSs7M6yPXykq5gVugJPClHcJ4Cqxmky5rDHhrCt4wmaILUeMdI7kPBCx3zMx2Qu+bg==}
-    engines: {node: '>=18'}
+  playwright@1.62.0-alpha-1783623505000:
+    resolution: {integrity: sha512-6KV9h4PP3hqu4NaGdxxcijWfYh9LJcFI/R2sP4TTC4I5cFo3oRawN0ETlW5MkE3cQEgKhhoj0KUNz4sfpCT0Tg==}
+    engines: {node: '>=20'}
     hasBin: true
 
   pngjs@5.0.0:
@@ -5522,10 +5522,10 @@ snapshots:
 
   '@paulmillr/qr@0.2.1': {}
 
-  '@playwright/mcp@0.0.77':
+  '@playwright/mcp@0.0.78':
     dependencies:
-      playwright: 1.62.0-alpha-2026-06-29
-      playwright-core: 1.62.0-alpha-2026-06-29
+      playwright: 1.62.0-alpha-1783623505000
+      playwright-core: 1.62.0-alpha-1783623505000
 
   '@playwright/test@1.61.1':
     dependencies:
@@ -9145,7 +9145,7 @@ snapshots:
 
   playwright-core@1.61.1: {}
 
-  playwright-core@1.62.0-alpha-2026-06-29: {}
+  playwright-core@1.62.0-alpha-1783623505000: {}
 
   playwright@1.61.1:
     dependencies:
@@ -9153,9 +9153,9 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.2
 
-  playwright@1.62.0-alpha-2026-06-29:
+  playwright@1.62.0-alpha-1783623505000:
     dependencies:
-      playwright-core: 1.62.0-alpha-2026-06-29
+      playwright-core: 1.62.0-alpha-1783623505000
     optionalDependencies:
       fsevents: 2.3.2
 
