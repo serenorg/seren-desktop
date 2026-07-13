@@ -35,6 +35,11 @@ export type UnlistenFn = () => void;
 /** Roles inside a paired `claude-codex` thread (#2368). */
 export type PairedRole = "planner" | "executor";
 
+export interface AgentOAuthRouting {
+  publishers: Record<string, string>;
+  ambiguous: Record<string, string>;
+}
+
 export function supportsConversationFork(agentType: AgentType): boolean {
   // Paired threads span two inner sessions; forking one coherent copy is
   // not supported.
@@ -596,6 +601,13 @@ export async function setPermissionMode(
   mode: string,
 ): Promise<void> {
   return invokeProvider("provider_set_permission_mode", { sessionId, mode });
+}
+
+export async function setOAuthRouting(
+  sessionId: string,
+  routing: AgentOAuthRouting,
+): Promise<void> {
+  return invokeProvider("provider_set_oauth_routing", { sessionId, routing });
 }
 
 /**

@@ -20,9 +20,13 @@ import {
   getDesktopOAuthCallbackUrl,
   getValidationRuntimeInfo,
 } from "@/services/oauth-callback";
+import type { AgentOAuthRouting } from "@/services/providers";
 import {
+  getOAuthConnectionsForProvider,
+  hasAmbiguousOAuthConnections,
   markOAuthConnectionsChanged,
   type OAuthConnection,
+  resolveThreadOAuthConnection,
 } from "@/stores/oauth-account.store";
 
 export interface PublisherOAuthProviderResolution {
@@ -106,6 +110,58 @@ async function loadPublisherOAuthProviderLookup(): Promise<
   }
 
   return lookup;
+}
+
+export async function listPublisherOAuthProviderResolutions(): Promise<
+  PublisherOAuthProviderResolution[]
+> {
+  providerLookupPromise ??= loadPublisherOAuthProviderLookup();
+  const lookup = await providerLookupPromise;
+  return Array.from(lookup.values());
+}
+
+export async function computeAgentOAuthRouting(
+  threadId: string | null,
+): Promise<AgentOAuthRouting> {
+  try {
+    const [resolutions, connections] = await Promise.all([
+      listPublisherOAuthProviderResolutions(),
+      listConnectedPublishers(),
+    ]);
+    const routing: AgentOAuthRouting = { publishers: {}, ambiguous: {} };
+    for (const resolution of resolutions) {
+      const validConnections = getOAuthConnectionsForProvider(
+        connections,
+        resolution.providerSlug,
+      );
+      if (validConnections.length === 0) continue;
+      if (
+        hasAmbiguousOAuthConnections(
+          threadId,
+          resolution.providerSlug,
+          connections,
+        )
+      ) {
+        routing.ambiguous[resolution.publisherSlug] =
+          `Multiple ${resolution.providerName} accounts are connected. Choose an active account for this chat in the header account switcher before running ${resolution.publisherSlug} tools.`;
+        continue;
+      }
+      const connection = resolveThreadOAuthConnection(
+        threadId,
+        resolution.providerSlug,
+        connections,
+      );
+      if (connection)
+        routing.publishers[resolution.publisherSlug] = connection.id;
+    }
+    return routing;
+  } catch (error) {
+    console.warn(
+      "[PublisherOAuth] Failed to compute agent OAuth routing:",
+      error,
+    );
+    return { publishers: {}, ambiguous: {} };
+  }
 }
 
 /**

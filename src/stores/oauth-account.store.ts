@@ -58,8 +58,10 @@ const [selections, setSelections] = createSignal<ThreadConnectionSelections>(
   readSelections(),
 );
 const [connectionsRevision, setConnectionsRevision] = createSignal(0);
+const [selectionsRevision, setSelectionsRevision] = createSignal(0);
 
 export const oauthConnectionsRevision = connectionsRevision;
+export const oauthSelectionsRevision = selectionsRevision;
 
 export function markOAuthConnectionsChanged(): void {
   setConnectionsRevision((revision) => revision + 1);
@@ -126,6 +128,7 @@ export function setThreadOAuthConnectionId(
 
   setSelections(next);
   writeSelections(next);
+  setSelectionsRevision((revision) => revision + 1);
 }
 
 export function resolveThreadOAuthConnection(

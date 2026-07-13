@@ -171,7 +171,7 @@ export const GatewayToolApproval: Component = () => {
   );
 
   const shouldRenderAccountChoices = createMemo(
-    () => validConnections().length > 1 && !hasDefaultConnection(),
+    () => validConnections().length > 1,
   );
 
   const needsConnectionChoice = createMemo(() => {
@@ -378,7 +378,15 @@ export const GatewayToolApproval: Component = () => {
                       <span class="text-[0.8rem] text-warning/90">
                         {validConnections().length}{" "}
                         {providerResolution()?.providerName ?? "OAuth"} accounts
-                        are connected and no default is set.
+                        are connected
+                        <Show when={!hasDefaultConnection()}>
+                          {" "}
+                          and no default is set.
+                        </Show>
+                        <Show when={hasDefaultConnection()}>
+                          {" "}
+                          Confirm which account to send from.
+                        </Show>
                       </span>
                       <For each={validConnections()}>
                         {(connection) => {

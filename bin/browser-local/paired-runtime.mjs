@@ -1589,6 +1589,18 @@ export function createPairedRuntime({ emit, inner }) {
     emitPairedStatus(paired);
   }
 
+  async function setOAuthRouting({ sessionId, routing }) {
+    const paired = requirePaired(sessionId);
+    await Promise.all(
+      [paired.roles.planner, paired.roles.executor].map((role) =>
+        inner.setOAuthRouting({
+          sessionId: role.innerSessionId,
+          routing,
+        }),
+      ),
+    );
+  }
+
   async function respondToPermission({ sessionId, requestId, optionId }) {
     const paired = requirePaired(sessionId);
     const innerSessionId = paired.permissionRoutes.get(requestId);
@@ -1622,6 +1634,7 @@ export function createPairedRuntime({ emit, inner }) {
     setSessionModel,
     updateSessionConfigOption,
     setPermissionMode,
+    setOAuthRouting,
     respondToPermission,
   };
 }
