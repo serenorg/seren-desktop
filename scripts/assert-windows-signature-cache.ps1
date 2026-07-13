@@ -130,7 +130,8 @@ function Read-TelemetrySummary {
     }
     if ($null -ne $record.signed) { $totalSigned += [int]$record.signed }
     $source = [string]$record.source
-    if ($source.StartsWith("list:", [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($source.StartsWith("list:", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $source.StartsWith("embedded-runtime", [System.StringComparison]::OrdinalIgnoreCase)) {
       $embeddedRecords++
       if ($null -ne $record.discovered) { $embeddedDiscovered += [int]$record.discovered }
       if ($null -ne $record.skipped) { $embeddedSkipped += [int]$record.skipped }
@@ -140,7 +141,7 @@ function Read-TelemetrySummary {
   }
 
   if ($embeddedRecords -eq 0) {
-    throw "No embedded-runtime list telemetry found in $Path."
+    throw "No embedded-runtime signing telemetry found in $Path."
   }
 
   [PSCustomObject]@{
