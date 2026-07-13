@@ -17,6 +17,7 @@ import { listenForOAuthCallback } from "@/lib/tauri-bridge";
 import {
   connectPublisher,
   listConnectedPublishers,
+  setDefaultOAuthConnection,
 } from "@/services/publisher-oauth";
 import {
   formatOAuthConnectionLabel,
@@ -52,6 +53,9 @@ export const OAuthAccountSwitcher: Component<OAuthAccountSwitcherProps> = (
     string | null
   >(null);
   const [connectError, setConnectError] = createSignal<string | null>(null);
+  const [defaultingConnection, setDefaultingConnection] = createSignal<
+    string | null
+  >(null);
   let rootRef: HTMLDivElement | undefined;
   let connectTimeout: ReturnType<typeof setTimeout> | null = null;
   const [connections] = createResource(oauthConnectionsRevision, async () =>
@@ -209,17 +213,23 @@ export const OAuthAccountSwitcher: Component<OAuthAccountSwitcherProps> = (
                           (!group.selected && item.is_default);
 
                         return (
-                          <button
-                            type="button"
+                          <div
                             class={`w-full text-left px-3 py-2 flex items-center justify-between gap-3 hover:bg-surface-2 transition-colors ${
                               selected()
                                 ? "text-foreground"
                                 : "text-muted-foreground"
                             }`}
                             role="menuitem"
+                            tabIndex={0}
                             onClick={() =>
                               chooseConnection(group.providerSlug, item)
                             }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                chooseConnection(group.providerSlug, item);
+                              }
+                            }}
                           >
                             <span class="min-w-0">
                               <span class="block text-[0.85rem] truncate">
@@ -231,12 +241,42 @@ export const OAuthAccountSwitcher: Component<OAuthAccountSwitcherProps> = (
                                 </span>
                               </Show>
                             </span>
-                            <Show when={selected()}>
-                              <span class="text-success text-xs font-semibold">
-                                Active
-                              </span>
-                            </Show>
-                          </button>
+                            <span class="flex items-center gap-2 shrink-0">
+                              <Show when={selected()}>
+                                <span class="text-success text-xs font-semibold">
+                                  Active
+                                </span>
+                              </Show>
+                              <Show when={!item.is_default}>
+                                <button
+                                  type="button"
+                                  class="text-[0.7rem] text-muted-foreground hover:text-foreground underline underline-offset-2 disabled:opacity-50"
+                                  disabled={defaultingConnection() !== null}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setDefaultingConnection(item.id);
+                                    setConnectError(null);
+                                    void setDefaultOAuthConnection(item.id)
+                                      .catch((error) => {
+                                        setConnectError(
+                                          error instanceof Error
+                                            ? error.message
+                                            : "Failed to set default account",
+                                        );
+                                      })
+                                      .finally(() =>
+                                        setDefaultingConnection(null),
+                                      );
+                                  }}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                >
+                                  {defaultingConnection() === item.id
+                                    ? "Setting…"
+                                    : "Set default"}
+                                </button>
+                              </Show>
+                            </span>
+                          </div>
                         );
                       }}
                     </For>

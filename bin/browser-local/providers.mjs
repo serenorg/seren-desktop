@@ -119,6 +119,7 @@ export function createUnavailableRuntime(label, reason) {
     cancelPrompt: unavailable,
     terminateSession: unavailable,
     setPermissionMode: unavailable,
+    setOAuthRouting: unavailable,
     respondToPermission: unavailable,
     listRemoteSessions: unavailable,
     setModel: unavailable,
@@ -1866,6 +1867,24 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     emit("provider://session-status", buildSessionStatus(session));
   }
 
+  async function setOAuthRouting({ sessionId, routing }) {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      if (pairedRuntime.hasSession(sessionId)) {
+        return pairedRuntime.setOAuthRouting({ sessionId, routing });
+      }
+      if (geminiRuntime.hasSession(sessionId)) {
+        return geminiRuntime.setOAuthRouting({ sessionId, routing });
+      }
+      if (lmStudioRuntime.hasSession(sessionId)) {
+        return lmStudioRuntime.setOAuthRouting({ sessionId, routing });
+      }
+      return claudeRuntime.setOAuthRouting({ sessionId, routing });
+    }
+    // Native Codex sessions do not use Seren MCP OAuth routing yet.
+    console.info(`[provider-runtime] OAuth routing is a no-op for ${session.agentType} session ${sessionId}`);
+  }
+
   async function respondToPermission({ sessionId, requestId, optionId }) {
     const session = sessions.get(sessionId);
     if (!session) {
@@ -2186,6 +2205,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         listSessionModels,
         updateSessionConfigOption,
         setPermissionMode,
+        setOAuthRouting,
         respondToPermission,
       },
     },
@@ -2198,6 +2218,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     terminateSession,
     listSessions,
     setPermissionMode,
+    setOAuthRouting,
     respondToPermission,
     respondToDiffProposal,
     getAvailableAgents,

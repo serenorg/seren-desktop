@@ -1720,6 +1720,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
     terminateSession,
     listSessions,
     setPermissionMode,
+    setOAuthRouting: async () => {},
     respondToPermission,
     setSessionModel,
     updateSessionConfigOption,

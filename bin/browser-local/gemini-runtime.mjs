@@ -1090,6 +1090,7 @@ export function createGeminiRuntime({ emit, runtimeMode = "provider-runtime" }) 
     terminateSession,
     listSessions,
     setPermissionMode,
+    setOAuthRouting: async () => {},
     respondToPermission,
     setModel,
   };

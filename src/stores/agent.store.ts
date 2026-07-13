@@ -2,6 +2,7 @@
 // ABOUTME: Stores agent sessions, message streams, tool calls, and plan state.
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { createEffect, createRoot } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import {
   extractEvidenceFromAgentMessages,
@@ -570,11 +571,16 @@ import type {
   ToolCallEvent,
 } from "@/services/providers";
 import * as providerService from "@/services/providers";
+import { computeAgentOAuthRouting } from "@/services/publisher-oauth";
 import {
   authStore,
   ensureApiKey,
   requestSignInModal,
 } from "@/stores/auth.store";
+import {
+  oauthConnectionsRevision,
+  oauthSelectionsRevision,
+} from "@/stores/oauth-account.store";
 
 /** Set once we've subscribed to `provider-runtime://ready` so repeated
  *  initialize() calls don't stack listeners. */
@@ -1750,6 +1756,30 @@ const [state, setState] = createStore<AgentState>({
   agentModeEnabled: false,
 });
 
+async function refreshAgentOAuthRouting(conversationId: string): Promise<void> {
+  try {
+    const routing = await computeAgentOAuthRouting(conversationId);
+    await providerService.setOAuthRouting(conversationId, routing);
+  } catch (error) {
+    console.warn(
+      `[AgentStore] Failed to refresh OAuth routing for ${conversationId}:`,
+      error,
+    );
+  }
+}
+
+createRoot(() => {
+  createEffect(() => {
+    oauthConnectionsRevision();
+    oauthSelectionsRevision();
+    for (const session of Object.values(state.sessions)) {
+      if (session.conversationId) {
+        void refreshAgentOAuthRouting(session.conversationId);
+      }
+    }
+  });
+});
+
 let globalUnsubscribe: UnlistenFn | null = null;
 const pendingSessionEvents = new Map<string, AgentEvent[]>();
 
@@ -2024,6 +2054,8 @@ function getIdleClaudeSessionIds(excludeConversationId?: string): string[] {
 // ============================================================================
 
 export const agentStore = {
+  refreshAgentOAuthRouting,
+
   // ============================================================================
   // Getters
   // ============================================================================
@@ -3215,6 +3247,7 @@ export const agentStore = {
           settingsStore.settings.lmStudioApiKey,
         );
         console.log("[AgentStore] Spawn result:", info);
+        await refreshAgentOAuthRouting(localSessionId ?? info.id);
         expectedReadySessionId = info.id;
 
         // The new session is alive — immediately clear the terminated flag so
@@ -3806,6 +3839,7 @@ export const agentStore = {
       };
       setState("sessions", conversationId, session);
       setState("activeSessionId", conversationId);
+      await refreshAgentOAuthRouting(conversationId);
 
       if (rehydratedPendingPermissions.length > 0) {
         const seenRequestIds = new Set(

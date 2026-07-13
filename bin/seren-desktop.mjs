@@ -248,6 +248,10 @@ function registerBrowserLocalHandlers() {
     providerHandlers.setPermissionMode,
   );
   registerHandler(
+    "provider_set_oauth_routing",
+    providerHandlers.setOAuthRouting,
+  );
+  registerHandler(
     "provider_respond_to_permission",
     providerHandlers.respondToPermission,
   );

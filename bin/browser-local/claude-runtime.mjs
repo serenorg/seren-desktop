@@ -992,6 +992,22 @@ const INITIALIZE_MAX_ATTEMPTS = 2;
 // tools re-fetch, no process restart) before surfacing a degraded state. #2802
 const SEREN_MCP_SERVER_NAME = "seren-mcp";
 const SEREN_MCP_TOOL_PREFIX = `mcp__${SEREN_MCP_SERVER_NAME}__`;
+
+function applySerenMcpOAuthRouting(routing, toolName, toolInput) {
+  if (toolName !== `${SEREN_MCP_TOOL_PREFIX}call_publisher`) {
+    return { input: toolInput, denyMessage: null };
+  }
+  if (typeof toolInput?.connection_id === "string" && toolInput.connection_id.trim()) {
+    return { input: toolInput, denyMessage: null };
+  }
+  const publisher = toolInput?.publisher;
+  const denyMessage = routing?.ambiguous?.[publisher];
+  if (denyMessage) return { input: toolInput, denyMessage };
+  const connectionId = routing?.publishers?.[publisher];
+  return connectionId
+    ? { input: { ...toolInput, connection_id: connectionId }, denyMessage: null }
+    : { input: toolInput, denyMessage: null };
+}
 // The remote HTTP gateway's connect + tools/list races in the background and is
 // often still `pending` when the first `system init` fires, so a bare "0 tools
 // at init" is NOT yet a failure. Give the connection this long to register its
@@ -1665,7 +1681,7 @@ function handlePermissionRequest(emit, session, payload) {
 
   const toolName =
     payload.request.tool_name ?? payload.request.toolName ?? "Tool";
-  const toolInput =
+  let toolInput =
     payload.request.input ??
     payload.request.tool_input ??
     payload.request.toolInput ??
@@ -1676,6 +1692,21 @@ function handlePermissionRequest(emit, session, payload) {
   const toolUseId =
     payload.request.tool_use_id ?? payload.request.toolUseId ?? randomUUID();
 
+  const routed = applySerenMcpOAuthRouting(
+    session.oauthRouting,
+    toolName,
+    toolInput,
+  );
+  if (routed.denyMessage) {
+    emitToolResult(emit, session, toolUseId, routed.denyMessage, true);
+    respondToControlRequest(session, payload, {
+      behavior: "deny",
+      message: routed.denyMessage,
+      interrupt: false,
+    });
+    return;
+  }
+  toolInput = routed.input;
   emitToolCall(emit, session, toolName, toolInput, toolUseId, "pending");
 
   // AskUserQuestion (#1731): Claude Code's built-in interactive picker has
@@ -2830,6 +2861,12 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     emit("provider://session-status", buildSessionStatus(session));
   }
 
+  async function setOAuthRouting({ sessionId, routing }) {
+    const session = sessions.get(sessionId);
+    if (session) session.oauthRouting = routing;
+    else console.warn(`[claude-runtime] OAuth routing session not found: ${sessionId}`);
+  }
+
   async function respondToPermission({ sessionId, requestId, optionId }) {
     const session = sessions.get(sessionId);
     if (!session) {
@@ -3059,6 +3096,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     listSessions,
     listRemoteSessions,
     setPermissionMode,
+    setOAuthRouting,
     respondToPermission,
     setModel,
     listSessionModels,
@@ -3090,4 +3128,5 @@ export {
   handleStreamEvent as _handleStreamEvent,
   countSerenMcpTools as _countSerenMcpTools,
   SEREN_MCP_TOOL_PREFIX as _SEREN_MCP_TOOL_PREFIX,
+  applySerenMcpOAuthRouting as _applySerenMcpOAuthRouting,
 };
