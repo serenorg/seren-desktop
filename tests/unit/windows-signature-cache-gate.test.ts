@@ -39,7 +39,7 @@ function writeArtifacts(
     telemetry,
     `${JSON.stringify({
       status: "success",
-      source: "list:sign-targets.txt",
+      source: "embedded-runtime-and-mcp",
       discovered: 729,
       skipped,
       would_sign: signed,

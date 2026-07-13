@@ -184,6 +184,28 @@ describe("release workflow contract", () => {
     expect(uploadStateAt).toBeGreaterThan(uploadWindowsAt);
   });
 
+  it("keeps the embedded-runtime sign source recognized by the cache-hit assert (#2948)", () => {
+    // The sign step's -SigningSource becomes the telemetry `source` field, and
+    // the cache-hit assert isolates the embedded-runtime batch by that field's
+    // prefix. When #2930 renamed the source to "embedded-runtime-and-mcp" but
+    // the assert still only matched "list:", every Windows release failed with
+    // zero embedded records (v3.69.2). This ties the producer to the consumer.
+    const signStepAt = workflow.indexOf("Sign embedded runtime (Windows)");
+    const nextStepAt = workflow.indexOf("Save Windows signature cache to R2", signStepAt);
+    const signStep = workflow.slice(signStepAt, nextStepAt);
+    const sourceMatch = signStep.match(/-SigningSource\s+"([^"]+)"/);
+    expect(sourceMatch).not.toBeNull();
+    const signingSource = sourceMatch?.[1] ?? "";
+
+    const assertScript = readFileSync(
+      path.join(repoRoot, "scripts", "assert-windows-signature-cache.ps1"),
+      "utf8",
+    );
+    const prefixes = [...assertScript.matchAll(/StartsWith\("([^"]+)"/g)].map((match) => match[1]);
+    expect(prefixes.length).toBeGreaterThan(0);
+    expect(prefixes.some((prefix) => signingSource.startsWith(prefix))).toBe(true);
+  });
+
   it("hard-blocks Windows signing before signtool and preserves the unsigned fallback (#2929)", () => {
     const signer = readFileSync(signerScript, "utf8");
     const budget = readFileSync(path.join(repoRoot, "scripts", "windows-signing-budget.ps1"), "utf8");
