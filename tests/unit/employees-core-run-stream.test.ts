@@ -261,6 +261,62 @@ describe("employees-core sequenced run stream", () => {
     expect(summary?.approvalLabel).toBe("No approval");
   });
 
+  it("summarizes effective tool policy when present", () => {
+    expect(
+      employeeToolGroupSummaries([
+        {
+          id: "publisher_actions",
+          label: "Publisher actions",
+          description: "Call connected tools.",
+          tool_count: 1,
+          tool_names: ["seren_publisher_request"],
+          side_effecting: true,
+          approval_type: "none",
+          effective_policy: {
+            status: "blocked",
+            source: "deployment_approval_policy",
+            reason: "Side-effecting tools are disabled.",
+          },
+        },
+        {
+          id: "database",
+          label: "Database",
+          description: "Query SerenDB.",
+          tool_count: 1,
+          tool_names: ["seren_db_query"],
+          side_effecting: false,
+          approval_type: "none",
+          effective_policy: {
+            status: "allowed",
+            source: "tool_definition",
+            conditional_status: "requires_approval",
+          },
+        },
+      ]),
+    ).toEqual([
+      {
+        id: "publisher_actions",
+        label: "Publisher actions",
+        description: "Call connected tools.",
+        toolCount: 1,
+        toolPreview: "publisher request",
+        modeLabel: "Action-capable",
+        approvalLabel: "Blocked",
+        tone: "warning",
+      },
+      {
+        id: "database",
+        label: "Database",
+        description: "Query SerenDB.",
+        toolCount: 1,
+        toolPreview: "db query",
+        modeLabel: "Read-only",
+        approvalLabel: "Conditional approval",
+        tone: "warning",
+      },
+    ]);
+  });
+
   it("sanitizes unknown provider details and redacts fallback identifiers", () => {
     expect(
       sanitizeEmployeeErrorText(

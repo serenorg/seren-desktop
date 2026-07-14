@@ -132,7 +132,15 @@ export interface EmployeeToolGroupInput {
   side_effecting?: boolean | null;
   checkpoint_required?: boolean | null;
   approval_type?: string | null;
+  effective_policy?: EmployeeToolEffectivePolicyInput | null;
   data_labels?: readonly string[] | null;
+}
+
+export interface EmployeeToolEffectivePolicyInput {
+  status?: string | null;
+  source?: string | null;
+  conditional_status?: string | null;
+  reason?: string | null;
 }
 
 export interface EmployeeToolGroupSummary {
@@ -1457,6 +1465,11 @@ export function employeeToolGroupSummaries(
     const toolNames = group.tool_names ?? [];
     const toolCount = group.tool_count ?? toolNames.length;
     const actionCapable = Boolean(group.side_effecting);
+    const approvalLabel = employeeToolPolicyLabel(
+      group.effective_policy,
+      group.approval_type,
+    );
+    const tone = employeeToolPolicyTone(group.effective_policy, actionCapable);
     return {
       id: group.id,
       label: group.label,
@@ -1464,13 +1477,48 @@ export function employeeToolGroupSummaries(
       toolCount,
       toolPreview: employeeToolPreview(toolNames, toolCount),
       modeLabel: actionCapable ? "Action-capable" : "Read-only",
-      approvalLabel: employeeApprovalTypeLabel(group.approval_type),
-      tone:
-        group.approval_type === "required" || actionCapable
-          ? "warning"
-          : "success",
+      approvalLabel,
+      tone,
     };
   });
+}
+
+export function employeeToolPolicyLabel(
+  policy: EmployeeToolEffectivePolicyInput | null | undefined,
+  fallbackApprovalType?: string | null,
+): string {
+  const status = policy?.status;
+  const conditional = policy?.conditional_status;
+  if (status === "blocked") return "Blocked";
+  if (status === "requires_approval") return "Approval required";
+  if (status === "audited") {
+    return conditional === "requires_approval"
+      ? "Audited + conditional"
+      : "Audited";
+  }
+  if (conditional === "requires_approval") return "Conditional approval";
+  if (conditional === "audited") return "Conditional audit";
+  return employeeApprovalTypeLabel(fallbackApprovalType);
+}
+
+function employeeToolPolicyTone(
+  policy: EmployeeToolEffectivePolicyInput | null | undefined,
+  actionCapable: boolean,
+): "neutral" | "success" | "warning" {
+  if (
+    policy?.status === "blocked" ||
+    policy?.status === "requires_approval" ||
+    policy?.conditional_status === "requires_approval"
+  ) {
+    return "warning";
+  }
+  if (
+    policy?.status === "audited" ||
+    policy?.conditional_status === "audited"
+  ) {
+    return "neutral";
+  }
+  return actionCapable ? "warning" : "success";
 }
 
 export function employeeCapabilityGuidanceForError(

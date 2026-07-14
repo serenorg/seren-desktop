@@ -1938,6 +1938,7 @@ export type DataResponseManagedAgentToolCatalogEntry = {
         checkpoint_required: boolean;
         data_labels?: Array<string>;
         description: string;
+        effective_policy: ManagedAgentToolEffectivePolicy;
         input_schema?: unknown;
         name: string;
         preset?: null | ManagedAgentToolPreset;
@@ -3010,6 +3011,7 @@ export type ManagedAgentToolCatalogEntry = {
     checkpoint_required: boolean;
     data_labels?: Array<string>;
     description: string;
+    effective_policy: ManagedAgentToolEffectivePolicy;
     input_schema?: unknown;
     name: string;
     preset?: null | ManagedAgentToolPreset;
@@ -3029,6 +3031,13 @@ export type ManagedAgentToolCatalogResponse = {
     tools: Array<ManagedAgentToolCatalogEntry>;
 };
 
+export type ManagedAgentToolEffectivePolicy = {
+    conditional_status?: null | ManagedAgentToolPolicyStatus;
+    reason?: string | null;
+    source: ManagedAgentToolPolicySource;
+    status: ManagedAgentToolPolicyStatus;
+};
+
 export type ManagedAgentToolGroupEntry = {
     approval_type: ToolApprovalType;
     /**
@@ -3038,6 +3047,7 @@ export type ManagedAgentToolGroupEntry = {
     checkpoint_required: boolean;
     data_labels?: Array<string>;
     description: string;
+    effective_policy: ManagedAgentToolEffectivePolicy;
     id: string;
     label: string;
     preset?: null | ManagedAgentToolPreset;
@@ -3060,6 +3070,10 @@ export type ManagedAgentToolGroupResponse = {
      */
     tool_groups: Array<ManagedAgentToolGroupEntry>;
 };
+
+export type ManagedAgentToolPolicySource = 'deployment_approval_policy' | 'tool_definition';
+
+export type ManagedAgentToolPolicyStatus = 'allowed' | 'audited' | 'requires_approval' | 'blocked';
 
 export type ManagedAgentToolPreset = 'live_data' | 'publisher_actions' | 'database';
 
