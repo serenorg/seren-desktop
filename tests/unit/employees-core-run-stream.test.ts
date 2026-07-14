@@ -318,6 +318,42 @@ describe("employees-core sequenced run stream", () => {
     ]);
   });
 
+  it("lets an explicit allowed policy override the tool approval type", () => {
+    const [summary] = employeeToolGroupSummaries([
+      {
+        id: "database",
+        label: "Database",
+        description: "Query SerenDB.",
+        tool_count: 1,
+        tool_names: ["seren_db_query"],
+        side_effecting: false,
+        approval_type: "required",
+        effective_policy: {
+          status: "allowed",
+          source: "deployment_approval_policy",
+        },
+      },
+    ]);
+    expect(summary?.approvalLabel).toBe("No approval");
+    expect(summary?.tone).toBe("success");
+  });
+
+  it("keeps the warning tone for approval-required groups without a policy", () => {
+    const [summary] = employeeToolGroupSummaries([
+      {
+        id: "database",
+        label: "Database",
+        description: "Query SerenDB.",
+        tool_count: 1,
+        tool_names: ["seren_db_query"],
+        side_effecting: false,
+        approval_type: "required",
+      },
+    ]);
+    expect(summary?.approvalLabel).toBe("Approval required");
+    expect(summary?.tone).toBe("warning");
+  });
+
   it("sanitizes unknown provider details and redacts fallback identifiers", () => {
     expect(
       sanitizeEmployeeErrorText(
@@ -469,11 +505,18 @@ describe("employees-core sequenced run stream", () => {
       retryable: true,
       sequence_number: 3,
     };
+    const successEvent: EmployeeOutputEventEnvelope = {
+      type: "tool_result",
+      id: "tool_2",
+      content: "done",
+      is_error: false,
+      sequence_number: 4,
+    };
     const { api } = runtimeApi(
-      [ev(started), ev(completed), ev(resultEvent), control("end")],
+      [ev(started), ev(completed), ev(resultEvent), ev(successEvent), control("end")],
       // Cumulative terminal row replays the same tool events; content-based
       // dedupe must collapse them.
-      runEvent("completed", [started, completed, resultEvent]),
+      runEvent("completed", [started, completed, resultEvent, successEvent]),
     );
     const onToolCall = vi.fn();
     const onToolResult = vi.fn();
@@ -487,13 +530,23 @@ describe("employees-core sequenced run stream", () => {
       "running",
       "completed",
     ]);
-    expect(onToolResult).toHaveBeenCalledTimes(1);
+    expect(onToolResult).toHaveBeenCalledTimes(2);
     expect(onToolResult).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "tool_1",
         isError: true,
         code: "tool_rate_limited",
         retryable: true,
+      }),
+    );
+    // Success envelopes without structured error metadata map through with
+    // null code/retryable rather than being dropped or coerced to errors.
+    expect(onToolResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "tool_2",
+        isError: false,
+        code: null,
+        retryable: null,
       }),
     );
   });

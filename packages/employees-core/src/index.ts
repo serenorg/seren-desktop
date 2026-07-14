@@ -1498,7 +1498,11 @@ export function employeeToolGroupSummaries(
       group.effective_policy,
       group.approval_type,
     );
-    const tone = employeeToolPolicyTone(group.effective_policy, actionCapable);
+    const tone = employeeToolPolicyTone(
+      group.effective_policy,
+      actionCapable,
+      group.approval_type,
+    );
     return {
       id: group.id,
       label: group.label,
@@ -1527,12 +1531,16 @@ export function employeeToolPolicyLabel(
   }
   if (conditional === "requires_approval") return "Conditional approval";
   if (conditional === "audited") return "Conditional audit";
+  // An explicit allowed status overrides the tool definition's approval
+  // type; only fall back to it when no effective policy was reported.
+  if (status === "allowed") return "No approval";
   return employeeApprovalTypeLabel(fallbackApprovalType);
 }
 
 function employeeToolPolicyTone(
   policy: EmployeeToolEffectivePolicyInput | null | undefined,
   actionCapable: boolean,
+  fallbackApprovalType?: string | null,
 ): "neutral" | "success" | "warning" {
   if (
     policy?.status === "blocked" ||
@@ -1547,7 +1555,14 @@ function employeeToolPolicyTone(
   ) {
     return "neutral";
   }
-  return actionCapable ? "warning" : "success";
+  if (policy?.status === "allowed") {
+    return actionCapable ? "warning" : "success";
+  }
+  // No effective policy reported: keep the pre-policy behavior where an
+  // approval-required or action-capable group renders as a warning.
+  return fallbackApprovalType === "required" || actionCapable
+    ? "warning"
+    : "success";
 }
 
 export function employeeCapabilityGuidanceForError(
@@ -1900,4 +1915,5 @@ function formatToolAuditBytes(label: string, value: unknown): string | null {
     ? `${label} ${value}B`
     : null;
 }
+
 export * from "./connector-setup";

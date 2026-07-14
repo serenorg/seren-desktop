@@ -1,4 +1,5 @@
-// Framework-agnostic controller for the connect-a-channel setup flow.
+// ABOUTME: Framework-agnostic controller for the connect-a-channel setup flow.
+// ABOUTME: Shared by the desktop settings surface and the employees web app.
 //
 // Both the desktop settings surface and the hosted employees web app walk
 // the same steps: choose a connector from the platform catalog, collect
@@ -129,7 +130,12 @@ export function connectorSetupBack(
     return { ...CONNECTOR_SETUP_INITIAL_STATE };
   }
   if (state.step === "attach") {
-    return { ...state, step: "credentials", verifiedIdentity: null, error: null };
+    return {
+      ...state,
+      step: "credentials",
+      verifiedIdentity: null,
+      error: null,
+    };
   }
   return state;
 }
@@ -174,9 +180,7 @@ export function connectorSetupSecretNames(
   const provided = connectorSetupProvidedValues(values);
   return entry.credentials
     .filter((field) => field.name in provided)
-    .map((field) =>
-      connectorSetupSecretStorageName(deploymentId, field.name),
-    );
+    .map((field) => connectorSetupSecretStorageName(deploymentId, field.name));
 }
 
 /// Merge the connector tool ref into the deployment's existing refs.
@@ -346,5 +350,7 @@ export async function connectorSetupAttach(
   if (result.error) {
     return { ...busyState, busy: false, error: result.error };
   }
-  return { ...busyState, busy: false, step: "done", error: null };
+  // Drop the plaintext credential values once they are persisted server
+  // side so completed flows do not retain tokens in host UI state.
+  return { ...busyState, values: {}, busy: false, step: "done", error: null };
 }

@@ -289,5 +289,7 @@ describe("connector setup controller", () => {
       credentials: [],
     });
     expect(state.step).toBe("done");
+    // Plaintext credential values must not survive a completed flow.
+    expect(state.values).toEqual({});
   });
 });

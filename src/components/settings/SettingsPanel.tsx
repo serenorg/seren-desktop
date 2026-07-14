@@ -52,10 +52,10 @@ import {
 } from "@/stores/settings.store";
 import { claimDaily, walletState } from "@/stores/wallet.store";
 import { SendTransferModal } from "../wallet/SendTransferModal";
+import { ConnectorSettings } from "./ConnectorSettings";
 import { KeybindingsSettings } from "./KeybindingsSettings";
 import { KeysSettings } from "./KeysSettings";
 import { MessagingSettings } from "./MessagingSettings";
-import { ConnectorSettings } from "./ConnectorSettings";
 import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
 import { RecordingsSettings } from "./RecordingsSettings";

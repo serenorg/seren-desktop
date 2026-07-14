@@ -3,7 +3,6 @@
 
 import {
   CONNECTOR_SETUP_INITIAL_STATE,
-  VERIFIABLE_CONNECTOR_REFS,
   type ConnectorCatalogEntryLike,
   type ConnectorSetupApi,
   type ConnectorSetupState,
@@ -14,8 +13,9 @@ import {
   connectorSetupSecretNames,
   connectorSetupSelect,
   connectorSetupVerify,
+  VERIFIABLE_CONNECTOR_REFS,
 } from "@seren/employees-core";
-import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 
 import {
   serenAgentGetManagedDeployment,
@@ -27,11 +27,9 @@ import {
   serenCloudUpsertCredentialSecret,
   serenCloudVerifyConnectorCredentials,
 } from "@/api/seren-cloud";
+import { formatApiError } from "@/lib/api-errors";
 import { openExternalLink } from "@/lib/external-link";
-import {
-  loadedResource,
-  loadResourceState,
-} from "./resource-state";
+import { loadedResource, loadResourceState } from "./resource-state";
 
 const setupApi: ConnectorSetupApi = {
   async verifyCredentials(connectorRef, credentials) {
@@ -59,10 +57,13 @@ const setupApi: ConnectorSetupApi = {
       throwOnError: false,
     });
     if (result.error) {
-      const message =
-        (result.error as { message?: string }).message ??
-        "The deployment update was rejected.";
-      return { error: message };
+      return {
+        error: formatApiError(
+          result.error,
+          result.response,
+          "The deployment update was rejected.",
+        ),
+      };
     }
     return {};
   },
@@ -77,10 +78,13 @@ const setupApi: ConnectorSetupApi = {
       throwOnError: false,
     });
     if (result.error) {
-      const message =
-        (result.error as { message?: string }).message ??
-        `Failed to store the ${request.name} secret.`;
-      return { error: message };
+      return {
+        error: formatApiError(
+          result.error,
+          result.response,
+          `Failed to store the ${request.name} secret.`,
+        ),
+      };
     }
     return {};
   },
@@ -137,34 +141,41 @@ export function ConnectorSettings() {
   const selectedEntry = createMemo<ConnectorCatalogEntryLike | null>(() => {
     const current = state();
     return (
-      catalog().find(
-        (entry) => entry.connector_ref === current.selectedRef,
-      ) ?? null
+      catalog().find((entry) => entry.connector_ref === current.selectedRef) ??
+      null
     );
   });
 
   function employeeHasConnector(connectorRef: string): boolean {
     return (detail()?.tool_refs ?? []).some(
-      (ref) =>
-        ref.kind === "connector" && ref.connector_ref === connectorRef,
+      (ref) => ref.kind === "connector" && ref.connector_ref === connectorRef,
     );
   }
 
   async function verify() {
     const entry = selectedEntry();
-    if (!entry) return;
-    setState(await connectorSetupVerify(setupApi, state(), entry));
+    if (!entry || state().busy) return;
+    const id = employeeId();
+    setState((current) => ({ ...current, busy: true, error: null }));
+    const next = await connectorSetupVerify(setupApi, state(), entry);
+    // The employee select resets the wizard; a result that raced that
+    // reset would resurrect the old flow against the new employee.
+    if (employeeId() !== id) return;
+    setState(next);
   }
 
   async function attach() {
     const entry = selectedEntry();
     const currentDetail = detail();
-    if (!entry || !currentDetail) return;
+    if (!entry || !currentDetail || state().busy) return;
+    const id = employeeId();
+    setState((current) => ({ ...current, busy: true, error: null }));
     const next = await connectorSetupAttach(setupApi, state(), entry, {
-      deploymentId: employeeId(),
+      deploymentId: id,
       toolRefs: currentDetail.tool_refs ?? [],
       credentials: currentDetail.credentials ?? [],
     });
+    if (employeeId() !== id) return;
     setState(next);
     if (next.step === "done") void refetchDetail();
   }
@@ -180,7 +191,10 @@ export function ConnectorSettings() {
 
       <div class="overflow-hidden rounded-lg border border-border bg-surface-1/40">
         <div class="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
-          <label class="flex min-w-0 flex-1 flex-col gap-0.5" for="connector-employee">
+          <label
+            class="flex min-w-0 flex-1 flex-col gap-0.5"
+            for="connector-employee"
+          >
             <span class="text-[0.95rem] font-medium text-foreground">
               Cloud employee
             </span>
@@ -232,9 +246,15 @@ export function ConnectorSettings() {
           </div>
 
           <Show when={detailState()?.failed}>
-            <div class="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-[0.85rem] text-destructive">
-              Employee details could not be loaded. Select the employee again
-              to retry.
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-[0.85rem] text-destructive">
+              <span>Employee details could not be loaded.</span>
+              <button
+                class="rounded-md border border-destructive/40 bg-transparent px-2.5 py-1 text-[0.8rem] font-medium text-destructive transition-colors hover:bg-destructive/10"
+                onClick={() => void refetchDetail()}
+                type="button"
+              >
+                Retry
+              </button>
             </div>
           </Show>
           <Show
@@ -248,7 +268,8 @@ export function ConnectorSettings() {
             <Show
               fallback={
                 <div class="rounded-md border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-[0.85rem] text-destructive">
-                  Connectors could not be loaded. Try opening this section again.
+                  Connectors could not be loaded. Try opening this section
+                  again.
                 </div>
               }
               when={!catalogState()?.failed}
@@ -276,7 +297,7 @@ export function ConnectorSettings() {
                         fallback={
                           <Show when={entry.connected}>
                             <span class="shrink-0 rounded-full border border-border-strong bg-surface-3/70 px-2.5 py-1 text-[0.7rem] font-medium text-muted-foreground">
-                              Available
+                              Connected to organization
                             </span>
                           </Show>
                         }
@@ -326,18 +347,17 @@ export function ConnectorSettings() {
                       </p>
                       <ol class="m-0 mt-1.5 grid gap-1 pl-4">
                         <li>
-                          Click Create an App, then choose From scratch. Enter an
-                          app name, select your workspace, and click Create App.
-                          If your app already appears on this page, select it
-                          instead.
+                          Click Create an App, then choose From scratch. Enter
+                          an app name, select your workspace, and click Create
+                          App. If your app already appears on this page, select
+                          it instead.
                         </li>
                         <li>
                           Do not click Generate Token under Your App
                           Configuration Tokens. Seren does not use that token.
                         </li>
                         <li>
-                          In OAuth &amp; Permissions, add the Bot Token Scopes
-                          {" "}
+                          In OAuth &amp; Permissions, add the Bot Token Scopes{" "}
                           <code>chat:write</code> and{" "}
                           <code>app_mentions:read</code>. Click Install to
                           Workspace and approve the installation.
@@ -353,9 +373,8 @@ export function ConnectorSettings() {
                           Generate.
                         </li>
                         <li>
-                          Copy the generated{" "}
-                          <code>xapp-</code> token and paste it into App-level
-                          token below.
+                          Copy the generated <code>xapp-</code> token and paste
+                          it into App-level token below.
                         </li>
                       </ol>
                     </div>
@@ -371,13 +390,15 @@ export function ConnectorSettings() {
                       {field.label}
                       <Show when={!field.required}>
                         <span class="font-normal text-muted-foreground">
-                          {" "}(optional)
+                          {" "}
+                          (optional)
                         </span>
                       </Show>
                     </span>
                     <input
                       autocomplete="off"
-                      class="h-9 w-full rounded-md border border-border-strong bg-surface-3/80 px-3 text-[0.85rem] text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
+                      class="h-9 w-full rounded-md border border-border-strong bg-surface-3/80 px-3 text-[0.85rem] text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={state().busy}
                       onInput={(event) =>
                         setState(
                           connectorSetupEnterValue(
@@ -399,8 +420,10 @@ export function ConnectorSettings() {
               <button
                 class="rounded-md border border-accent bg-accent px-4 py-2 text-[0.85rem] font-medium text-accent-foreground transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={
-                  !connectorSetupRequiredFieldsFilled(entry(), state().values) ||
-                  state().busy
+                  !connectorSetupRequiredFieldsFilled(
+                    entry(),
+                    state().values,
+                  ) || state().busy
                 }
                 onClick={() => void verify()}
                 type="button"
@@ -412,7 +435,8 @@ export function ConnectorSettings() {
                     : "Continue"}
               </button>
               <button
-                class="rounded-md border border-border-strong bg-transparent px-4 py-2 text-[0.85rem] font-medium text-muted-foreground transition-colors hover:bg-surface-3/60 hover:text-foreground"
+                class="rounded-md border border-border-strong bg-transparent px-4 py-2 text-[0.85rem] font-medium text-muted-foreground transition-colors hover:bg-surface-3/60 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={state().busy}
                 onClick={() => setState(connectorSetupBack(state()))}
                 type="button"
               >
@@ -468,7 +492,8 @@ export function ConnectorSettings() {
                 {state().busy ? "Attaching..." : "Attach channel"}
               </button>
               <button
-                class="rounded-md border border-border-strong bg-transparent px-4 py-2 text-[0.85rem] font-medium text-muted-foreground transition-colors hover:bg-surface-3/60 hover:text-foreground"
+                class="rounded-md border border-border-strong bg-transparent px-4 py-2 text-[0.85rem] font-medium text-muted-foreground transition-colors hover:bg-surface-3/60 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={state().busy}
                 onClick={() => setState(connectorSetupBack(state()))}
                 type="button"
               >
