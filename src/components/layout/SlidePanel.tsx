@@ -125,10 +125,12 @@ export const SlidePanel: Component<SlidePanelProps> = (props) => {
           />
         </Show>
         <div
-          class="relative max-w-[90vw] h-full bg-surface-1 border-l border-border overflow-x-hidden overflow-y-auto"
+          class="relative max-w-[90vw] h-full bg-surface-1 border-l border-border overflow-x-hidden"
           classList={{
             "bg-surface-1/95 backdrop-blur-xl shadow-[var(--shadow-lg)] animate-[slideInRight_200ms_ease]":
               !props.docked,
+            "overflow-y-hidden": props.wide,
+            "overflow-y-auto": !props.wide,
           }}
           style={{ width: panelWidth() }}
         >

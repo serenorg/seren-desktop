@@ -44,6 +44,25 @@ export type AgentBundle = {
     instructions?: Array<AgentInstructionFile>;
 };
 
+export type AgentCredentialSecret = {
+    created_at: string;
+    created_by?: string | null;
+    description?: string | null;
+    id: string;
+    name: string;
+    organization_id: string;
+    owner_user_id?: string | null;
+    scope: AgentCredentialSecretScope;
+    updated_at: string;
+};
+
+export type AgentCredentialSecretDeleted = {
+    deleted: boolean;
+    id: string;
+};
+
+export type AgentCredentialSecretScope = 'organization' | 'user';
+
 /**
  * One authored instruction file.
  *
@@ -1229,6 +1248,81 @@ export type CloudRunToolAuditStatus = 'success' | 'failure';
  */
 export type CloudRunToolRefKind = 'publisher' | 'mcp' | 'connector' | 'remote_agent' | 'remote_http' | 'preset_group' | 'builtin' | 'unknown';
 
+/**
+ * One connector the platform supports for managed deployments.
+ */
+export type ConnectorCatalogEntry = {
+    /**
+     * Connector capability grouping; messaging connectors deliver chat events.
+     */
+    capability: string;
+    /**
+     * Whether the organization already has an approved connection binding.
+     */
+    connected: boolean;
+    /**
+     * Value used in `AgentToolRef::Connector.connector_ref`.
+     */
+    connector_ref: string;
+    /**
+     * Credential and configuration fields the connector expects.
+     */
+    credentials: Array<ConnectorCredentialField>;
+    /**
+     * Short product description of what connecting it enables.
+     */
+    description: string;
+    /**
+     * Display name for setup surfaces.
+     */
+    display_name: string;
+    /**
+     * Whether attaching this connector requires an always-on deployment.
+     */
+    requires_always_on: boolean;
+    /**
+     * Provider console URL where the required credentials are created.
+     */
+    setup_url?: string | null;
+    /**
+     * Whether Seren mints a public webhook route for inbound events.
+     */
+    supports_webhook_ingress: boolean;
+};
+
+/**
+ * Catalog response listing supported connectors for the organization.
+ */
+export type ConnectorCatalogResponse = {
+    connectors: Array<ConnectorCatalogEntry>;
+};
+
+/**
+ * One credential or configuration field a connector requires.
+ */
+export type ConnectorCredentialField = {
+    /**
+     * Short hint about the expected value shape, such as a token prefix.
+     */
+    format_hint?: string | null;
+    /**
+     * Human-readable label for setup surfaces.
+     */
+    label: string;
+    /**
+     * Stable field name used as the secret key or config key.
+     */
+    name: string;
+    /**
+     * Whether the connector cannot operate without this field.
+     */
+    required: boolean;
+    /**
+     * Whether the value must be stored as a secret rather than plain config.
+     */
+    secret: boolean;
+};
+
 export type ConversationMessageOrder = 'asc' | 'desc';
 
 /**
@@ -1343,6 +1437,169 @@ export type CreateCloudEvalSetRequest = {
     metadata?: unknown;
     name: string;
     schedule?: null | CloudEvalSetScheduleRequest;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseAgentCredentialSecret = {
+    data: {
+        created_at: string;
+        created_by?: string | null;
+        description?: string | null;
+        id: string;
+        name: string;
+        organization_id: string;
+        owner_user_id?: string | null;
+        scope: AgentCredentialSecretScope;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseAgentCredentialSecretDeleted = {
+    data: {
+        deleted: boolean;
+        id: string;
+    };
+    pagination?: null | PaginationMeta;
 };
 
 /**
@@ -3791,6 +4048,86 @@ export type DataResponseCloudRunReplayComparison = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseConnectorCatalogResponse = {
+    /**
+     * Catalog response listing supported connectors for the organization.
+     */
+    data: {
+        connectors: Array<ConnectorCatalogEntry>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseCreateCloudDeploymentBundleResponse = {
     /**
      * Response returned when a deployment bundle is registered.
@@ -3892,6 +4229,91 @@ export type DataResponseDeploymentSpendSummary = {
         run_count: number;
         total_cost_usd: string;
     };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecAgentCredentialSecret = {
+    data: Array<{
+        created_at: string;
+        created_by?: string | null;
+        description?: string | null;
+        id: string;
+        name: string;
+        organization_id: string;
+        owner_user_id?: string | null;
+        scope: AgentCredentialSecretScope;
+        updated_at: string;
+    }>;
     pagination?: null | PaginationMeta;
 };
 
@@ -5185,6 +5607,99 @@ export type DataResponseVerificationResult = {
 };
 
 /**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVerifyConnectorCredentialsResponse = {
+    /**
+     * Result of a live connector credential verification.
+     */
+    data: {
+        connector_ref: string;
+        /**
+         * Provider-reported reason when verification fails.
+         */
+        failure_reason?: string | null;
+        /**
+         * Human-readable identity the provider resolved on success, such as
+         * the bot and workspace name.
+         */
+        identity?: string | null;
+        /**
+         * Whether the provider accepted the credentials.
+         */
+        ok: boolean;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
  * Aggregated spend summary for a single cloud deployment.
  */
 export type DeploymentSpendSummary = {
@@ -5471,6 +5986,13 @@ export type UpdateCloudEvalSetRequest = {
     schedule?: null | CloudEvalSetScheduleRequest;
 };
 
+export type UpsertAgentCredentialSecretRequest = {
+    description?: string | null;
+    name: string;
+    scope?: AgentCredentialSecretScope;
+    value: string;
+};
+
 /**
  * Result of verifying the audit chain integrity.
  */
@@ -5479,6 +6001,40 @@ export type VerificationResult = {
     error?: string | null;
     first_invalid_sequence?: number | null;
     verified: boolean;
+};
+
+/**
+ * Request to verify connector credentials against the provider before
+ * storing them. Values are used for the live check only and are never
+ * stored or logged.
+ */
+export type VerifyConnectorCredentialsRequest = {
+    /**
+     * Credential values keyed by the catalog field names.
+     */
+    credentials: {
+        [key: string]: string;
+    };
+};
+
+/**
+ * Result of a live connector credential verification.
+ */
+export type VerifyConnectorCredentialsResponse = {
+    connector_ref: string;
+    /**
+     * Provider-reported reason when verification fails.
+     */
+    failure_reason?: string | null;
+    /**
+     * Human-readable identity the provider resolved on success, such as
+     * the bot and workspace name.
+     */
+    identity?: string | null;
+    /**
+     * Whether the provider accepted the credentials.
+     */
+    ok: boolean;
 };
 
 /**
@@ -5670,6 +6226,181 @@ export type SerenCloudGetAuditEntryResponses = {
 };
 
 export type SerenCloudGetAuditEntryResponse = SerenCloudGetAuditEntryResponses[keyof SerenCloudGetAuditEntryResponses];
+
+export type SerenCloudListConnectorsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/connectors';
+};
+
+export type SerenCloudListConnectorsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+};
+
+export type SerenCloudListConnectorsResponses = {
+    /**
+     * Supported connectors with credential fields and connection status
+     */
+    200: DataResponseConnectorCatalogResponse;
+};
+
+export type SerenCloudListConnectorsResponse = SerenCloudListConnectorsResponses[keyof SerenCloudListConnectorsResponses];
+
+export type SerenCloudVerifyConnectorCredentialsData = {
+    body: VerifyConnectorCredentialsRequest;
+    path: {
+        /**
+         * Connector catalog reference
+         */
+        connector_ref: string;
+    };
+    query?: never;
+    url: '/connectors/{connector_ref}/verify';
+};
+
+export type SerenCloudVerifyConnectorCredentialsErrors = {
+    /**
+     * Unsupported connector or malformed request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Unknown connector
+     */
+    404: unknown;
+    /**
+     * Connector provider is temporarily unavailable
+     */
+    502: unknown;
+};
+
+export type SerenCloudVerifyConnectorCredentialsResponses = {
+    /**
+     * Verification outcome; invalid credentials return ok=false
+     */
+    200: DataResponseVerifyConnectorCredentialsResponse;
+};
+
+export type SerenCloudVerifyConnectorCredentialsResponse = SerenCloudVerifyConnectorCredentialsResponses[keyof SerenCloudVerifyConnectorCredentialsResponses];
+
+export type SerenCloudListCredentialSecretsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Filter by scope: organization or user
+         */
+        scope?: string;
+    };
+    url: '/credential-secrets';
+};
+
+export type SerenCloudListCredentialSecretsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+};
+
+export type SerenCloudListCredentialSecretsResponses = {
+    /**
+     * Credential secret metadata; values are never returned
+     */
+    200: DataResponseVecAgentCredentialSecret;
+};
+
+export type SerenCloudListCredentialSecretsResponse = SerenCloudListCredentialSecretsResponses[keyof SerenCloudListCredentialSecretsResponses];
+
+export type SerenCloudUpsertCredentialSecretData = {
+    body: UpsertAgentCredentialSecretRequest;
+    path?: never;
+    query?: never;
+    url: '/credential-secrets';
+};
+
+export type SerenCloudUpsertCredentialSecretErrors = {
+    /**
+     * Invalid secret name or value
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+};
+
+export type SerenCloudUpsertCredentialSecretResponses = {
+    /**
+     * Credential secret stored; the value is encrypted and never echoed back
+     */
+    200: DataResponseAgentCredentialSecret;
+};
+
+export type SerenCloudUpsertCredentialSecretResponse = SerenCloudUpsertCredentialSecretResponses[keyof SerenCloudUpsertCredentialSecretResponses];
+
+export type SerenCloudDeleteCredentialSecretData = {
+    body?: never;
+    path: {
+        /**
+         * Credential secret name
+         */
+        name: string;
+    };
+    query?: {
+        /**
+         * Scope to delete from: organization (default) or user
+         */
+        scope?: string;
+    };
+    url: '/credential-secrets/{name}';
+};
+
+export type SerenCloudDeleteCredentialSecretErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Credential secret not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudDeleteCredentialSecretResponses = {
+    /**
+     * Credential secret deleted
+     */
+    200: DataResponseAgentCredentialSecretDeleted;
+};
+
+export type SerenCloudDeleteCredentialSecretResponse = SerenCloudDeleteCredentialSecretResponses[keyof SerenCloudDeleteCredentialSecretResponses];
 
 export type SerenCloudDeployData = {
     body: CreateCloudDeploymentRequest;

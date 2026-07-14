@@ -55,6 +55,7 @@ import { SendTransferModal } from "../wallet/SendTransferModal";
 import { KeybindingsSettings } from "./KeybindingsSettings";
 import { KeysSettings } from "./KeysSettings";
 import { MessagingSettings } from "./MessagingSettings";
+import { ConnectorSettings } from "./ConnectorSettings";
 import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
 import { RecordingsSettings } from "./RecordingsSettings";
@@ -73,6 +74,7 @@ type SettingsSection =
   | "editor"
   | "wallet"
   | "messaging"
+  | "connectors"
   | "indexing"
   | "recordings"
   | "appearance"
@@ -381,6 +383,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "editor", label: "Editor", icon: "📝" },
     { id: "wallet", label: "Wallet", icon: "💳" },
     { id: "messaging", label: "Messaging", icon: "💬" },
+    { id: "connectors", label: "Connectors", icon: "🔗" },
     { id: "indexing", label: "Code Indexing", icon: "🔍" },
     { id: "recordings", label: "Recordings", icon: "🎬" },
     { id: "appearance", label: "Appearance", icon: "🎨" },
@@ -443,12 +446,12 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   });
 
   return (
-    <div class="flex h-full bg-surface text-foreground">
-      <aside class="w-[220px] min-w-[180px] flex flex-col bg-popover border-r border-border-strong">
+    <div class="flex h-full min-h-0 overflow-hidden bg-surface text-foreground">
+      <aside class="w-[220px] min-w-[180px] min-h-0 flex flex-col bg-popover border-r border-border-strong">
         <h2 class="px-4 pt-5 pb-3 m-0 text-[1.1rem] font-semibold text-foreground">
           Settings
         </h2>
-        <nav class="flex-1 flex flex-col px-2 py-1 gap-0.5">
+        <nav class="min-h-0 flex-1 flex flex-col overflow-y-auto px-2 py-1 gap-0.5">
           <For each={visibleSections()}>
             {(section) => (
               <button
@@ -477,7 +480,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
         </div>
       </aside>
 
-      <main class="flex-1 px-8 py-6 overflow-y-auto">
+      <main class="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-8 py-6">
         <Show when={activeSection() === "chat"}>
           <section>
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
@@ -1874,6 +1877,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
         <Show when={activeSection() === "messaging"}>
           <MessagingSettings />
+        </Show>
+
+        <Show when={activeSection() === "connectors"}>
+          <ConnectorSettings />
         </Show>
 
         <Show when={activeSection() === "recordings"}>

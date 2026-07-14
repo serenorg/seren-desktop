@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { type Options, serenCloudApprovalInboxDecide, serenCloudApprovalInboxList, serenCloudCancelAgentSchedule, serenCloudCompleteDeploymentBundleUpload, serenCloudCreateAgentSchedule, serenCloudCreateDeploymentBundle, serenCloudCreateEnvironment, serenCloudCreateEvalSet, serenCloudCreateInteractiveSession, serenCloudDelete, serenCloudDeleteEnvironment, serenCloudDeploy, serenCloudDeploymentAudit, serenCloudDeploymentPendingApprovals, serenCloudDeploymentRun, serenCloudDeploymentRunArtifacts, serenCloudDeploymentRunCancel, serenCloudDeploymentRunEvals, serenCloudDeploymentRunEvents, serenCloudDeploymentRunPendingApprovals, serenCloudDeploymentRunResume, serenCloudDeploymentRuns, serenCloudDeploymentRunState, serenCloudEvalCases, serenCloudEvalRunResults, serenCloudEvalRuns, serenCloudEvalSets, serenCloudGetAuditEntry, serenCloudGetConversationMessages, serenCloudGetDeployment, serenCloudGetDeploymentBundle, serenCloudGetDeploymentBundleDownload, serenCloudGetDeploymentEvalDrift, serenCloudGetDeploymentSpend, serenCloudGetEnvironment, serenCloudGetEvalCase, serenCloudGetEvalCaseResult, serenCloudGetEvalRun, serenCloudGetEvalSet, serenCloudGetInteractiveSession, serenCloudInteractiveSessions, serenCloudListAgentSchedules, serenCloudListAuditEntries, serenCloudListConversations, serenCloudListDeployments, serenCloudListEnvironments, serenCloudPendingApprovals, serenCloudPostInteractiveSessionMessage, serenCloudPromoteRunToEvalCase, serenCloudRun, serenCloudRunArtifacts, serenCloudRunAudit, serenCloudRunCancel, serenCloudRunCompare, serenCloudRunDetail, serenCloudRunEvals, serenCloudRunEvalSet, serenCloudRunEvents, serenCloudRunPendingApprovals, serenCloudRunResume, serenCloudRuns, serenCloudRunState, serenCloudStart, serenCloudStop, serenCloudUpdateConfig, serenCloudUpdateEnvironment, serenCloudUpdateEvalSet, serenCloudVerifyAudit } from '../sdk.gen';
-import type { SerenCloudApprovalInboxDecideData, SerenCloudApprovalInboxDecideResponse, SerenCloudApprovalInboxListData, SerenCloudApprovalInboxListResponse, SerenCloudCancelAgentScheduleData, SerenCloudCancelAgentScheduleResponse, SerenCloudCompleteDeploymentBundleUploadData, SerenCloudCompleteDeploymentBundleUploadResponse, SerenCloudCreateAgentScheduleData, SerenCloudCreateAgentScheduleResponse, SerenCloudCreateDeploymentBundleData, SerenCloudCreateDeploymentBundleResponse, SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentResponse, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetResponse, SerenCloudCreateInteractiveSessionData, SerenCloudCreateInteractiveSessionResponse, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentResponse, SerenCloudDeleteResponse, SerenCloudDeployData, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditResponse, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsResponse, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsResponse, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelResponse, SerenCloudDeploymentRunData, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsResponse, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsResponse, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsResponse, SerenCloudDeploymentRunResponse, SerenCloudDeploymentRunResumeData, SerenCloudDeploymentRunResumeResponse, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsResponse, SerenCloudDeploymentRunStateData, SerenCloudDeploymentRunStateResponse, SerenCloudDeployResponse, SerenCloudEvalCasesData, SerenCloudEvalCasesResponse, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsResponse, SerenCloudEvalRunsData, SerenCloudEvalRunsResponse, SerenCloudEvalSetsData, SerenCloudEvalSetsResponse, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryResponse, SerenCloudGetConversationMessagesData, SerenCloudGetConversationMessagesResponse, SerenCloudGetDeploymentBundleData, SerenCloudGetDeploymentBundleDownloadData, SerenCloudGetDeploymentBundleDownloadResponse, SerenCloudGetDeploymentBundleResponse, SerenCloudGetDeploymentData, SerenCloudGetDeploymentEvalDriftData, SerenCloudGetDeploymentEvalDriftResponse, SerenCloudGetDeploymentResponse, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendResponse, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentResponse, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseResponse, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultResponse, SerenCloudGetEvalRunData, SerenCloudGetEvalRunResponse, SerenCloudGetEvalSetData, SerenCloudGetEvalSetResponse, SerenCloudGetInteractiveSessionData, SerenCloudGetInteractiveSessionResponse, SerenCloudInteractiveSessionsData, SerenCloudInteractiveSessionsResponse, SerenCloudListAgentSchedulesData, SerenCloudListAgentSchedulesResponse, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponse, SerenCloudListConversationsData, SerenCloudListConversationsResponse, SerenCloudListDeploymentsData, SerenCloudListDeploymentsResponse, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponse, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsResponse, SerenCloudPostInteractiveSessionMessageData, SerenCloudPostInteractiveSessionMessageResponse, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseResponse, SerenCloudRunArtifactsData, SerenCloudRunArtifactsResponse, SerenCloudRunAuditData, SerenCloudRunAuditResponse, SerenCloudRunCancelData, SerenCloudRunCancelResponse, SerenCloudRunCompareData, SerenCloudRunCompareResponse, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailResponse, SerenCloudRunEvalsData, SerenCloudRunEvalSetData, SerenCloudRunEvalSetResponse, SerenCloudRunEvalsResponse, SerenCloudRunEventsData, SerenCloudRunEventsResponse, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsResponse, SerenCloudRunResponse, SerenCloudRunResumeData, SerenCloudRunResumeResponse, SerenCloudRunsData, SerenCloudRunsResponse, SerenCloudRunStateData, SerenCloudRunStateResponse, SerenCloudStartData, SerenCloudStartResponse, SerenCloudStopData, SerenCloudStopResponse, SerenCloudUpdateConfigData, SerenCloudUpdateConfigResponse, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentResponse, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetResponse, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponse } from '../types.gen';
+import { type Options, serenCloudApprovalInboxDecide, serenCloudApprovalInboxList, serenCloudCancelAgentSchedule, serenCloudCompleteDeploymentBundleUpload, serenCloudCreateAgentSchedule, serenCloudCreateDeploymentBundle, serenCloudCreateEnvironment, serenCloudCreateEvalSet, serenCloudCreateInteractiveSession, serenCloudDelete, serenCloudDeleteCredentialSecret, serenCloudDeleteEnvironment, serenCloudDeploy, serenCloudDeploymentAudit, serenCloudDeploymentPendingApprovals, serenCloudDeploymentRun, serenCloudDeploymentRunArtifacts, serenCloudDeploymentRunCancel, serenCloudDeploymentRunEvals, serenCloudDeploymentRunEvents, serenCloudDeploymentRunPendingApprovals, serenCloudDeploymentRunResume, serenCloudDeploymentRuns, serenCloudDeploymentRunState, serenCloudEvalCases, serenCloudEvalRunResults, serenCloudEvalRuns, serenCloudEvalSets, serenCloudGetAuditEntry, serenCloudGetConversationMessages, serenCloudGetDeployment, serenCloudGetDeploymentBundle, serenCloudGetDeploymentBundleDownload, serenCloudGetDeploymentEvalDrift, serenCloudGetDeploymentSpend, serenCloudGetEnvironment, serenCloudGetEvalCase, serenCloudGetEvalCaseResult, serenCloudGetEvalRun, serenCloudGetEvalSet, serenCloudGetInteractiveSession, serenCloudInteractiveSessions, serenCloudListAgentSchedules, serenCloudListAuditEntries, serenCloudListConnectors, serenCloudListConversations, serenCloudListCredentialSecrets, serenCloudListDeployments, serenCloudListEnvironments, serenCloudPendingApprovals, serenCloudPostInteractiveSessionMessage, serenCloudPromoteRunToEvalCase, serenCloudRun, serenCloudRunArtifacts, serenCloudRunAudit, serenCloudRunCancel, serenCloudRunCompare, serenCloudRunDetail, serenCloudRunEvals, serenCloudRunEvalSet, serenCloudRunEvents, serenCloudRunPendingApprovals, serenCloudRunResume, serenCloudRuns, serenCloudRunState, serenCloudStart, serenCloudStop, serenCloudUpdateConfig, serenCloudUpdateEnvironment, serenCloudUpdateEvalSet, serenCloudUpsertCredentialSecret, serenCloudVerifyAudit, serenCloudVerifyConnectorCredentials } from '../sdk.gen';
+import type { SerenCloudApprovalInboxDecideData, SerenCloudApprovalInboxDecideResponse, SerenCloudApprovalInboxListData, SerenCloudApprovalInboxListResponse, SerenCloudCancelAgentScheduleData, SerenCloudCancelAgentScheduleResponse, SerenCloudCompleteDeploymentBundleUploadData, SerenCloudCompleteDeploymentBundleUploadResponse, SerenCloudCreateAgentScheduleData, SerenCloudCreateAgentScheduleResponse, SerenCloudCreateDeploymentBundleData, SerenCloudCreateDeploymentBundleResponse, SerenCloudCreateEnvironmentData, SerenCloudCreateEnvironmentResponse, SerenCloudCreateEvalSetData, SerenCloudCreateEvalSetResponse, SerenCloudCreateInteractiveSessionData, SerenCloudCreateInteractiveSessionResponse, SerenCloudDeleteCredentialSecretData, SerenCloudDeleteCredentialSecretResponse, SerenCloudDeleteData, SerenCloudDeleteEnvironmentData, SerenCloudDeleteEnvironmentResponse, SerenCloudDeleteResponse, SerenCloudDeployData, SerenCloudDeploymentAuditData, SerenCloudDeploymentAuditResponse, SerenCloudDeploymentPendingApprovalsData, SerenCloudDeploymentPendingApprovalsResponse, SerenCloudDeploymentRunArtifactsData, SerenCloudDeploymentRunArtifactsResponse, SerenCloudDeploymentRunCancelData, SerenCloudDeploymentRunCancelResponse, SerenCloudDeploymentRunData, SerenCloudDeploymentRunEvalsData, SerenCloudDeploymentRunEvalsResponse, SerenCloudDeploymentRunEventsData, SerenCloudDeploymentRunEventsResponse, SerenCloudDeploymentRunPendingApprovalsData, SerenCloudDeploymentRunPendingApprovalsResponse, SerenCloudDeploymentRunResponse, SerenCloudDeploymentRunResumeData, SerenCloudDeploymentRunResumeResponse, SerenCloudDeploymentRunsData, SerenCloudDeploymentRunsResponse, SerenCloudDeploymentRunStateData, SerenCloudDeploymentRunStateResponse, SerenCloudDeployResponse, SerenCloudEvalCasesData, SerenCloudEvalCasesResponse, SerenCloudEvalRunResultsData, SerenCloudEvalRunResultsResponse, SerenCloudEvalRunsData, SerenCloudEvalRunsResponse, SerenCloudEvalSetsData, SerenCloudEvalSetsResponse, SerenCloudGetAuditEntryData, SerenCloudGetAuditEntryResponse, SerenCloudGetConversationMessagesData, SerenCloudGetConversationMessagesResponse, SerenCloudGetDeploymentBundleData, SerenCloudGetDeploymentBundleDownloadData, SerenCloudGetDeploymentBundleDownloadResponse, SerenCloudGetDeploymentBundleResponse, SerenCloudGetDeploymentData, SerenCloudGetDeploymentEvalDriftData, SerenCloudGetDeploymentEvalDriftResponse, SerenCloudGetDeploymentResponse, SerenCloudGetDeploymentSpendData, SerenCloudGetDeploymentSpendResponse, SerenCloudGetEnvironmentData, SerenCloudGetEnvironmentResponse, SerenCloudGetEvalCaseData, SerenCloudGetEvalCaseResponse, SerenCloudGetEvalCaseResultData, SerenCloudGetEvalCaseResultResponse, SerenCloudGetEvalRunData, SerenCloudGetEvalRunResponse, SerenCloudGetEvalSetData, SerenCloudGetEvalSetResponse, SerenCloudGetInteractiveSessionData, SerenCloudGetInteractiveSessionResponse, SerenCloudInteractiveSessionsData, SerenCloudInteractiveSessionsResponse, SerenCloudListAgentSchedulesData, SerenCloudListAgentSchedulesResponse, SerenCloudListAuditEntriesData, SerenCloudListAuditEntriesResponse, SerenCloudListConnectorsData, SerenCloudListConnectorsResponse, SerenCloudListConversationsData, SerenCloudListConversationsResponse, SerenCloudListCredentialSecretsData, SerenCloudListCredentialSecretsResponse, SerenCloudListDeploymentsData, SerenCloudListDeploymentsResponse, SerenCloudListEnvironmentsData, SerenCloudListEnvironmentsResponse, SerenCloudPendingApprovalsData, SerenCloudPendingApprovalsResponse, SerenCloudPostInteractiveSessionMessageData, SerenCloudPostInteractiveSessionMessageResponse, SerenCloudPromoteRunToEvalCaseData, SerenCloudPromoteRunToEvalCaseResponse, SerenCloudRunArtifactsData, SerenCloudRunArtifactsResponse, SerenCloudRunAuditData, SerenCloudRunAuditResponse, SerenCloudRunCancelData, SerenCloudRunCancelResponse, SerenCloudRunCompareData, SerenCloudRunCompareResponse, SerenCloudRunData, SerenCloudRunDetailData, SerenCloudRunDetailResponse, SerenCloudRunEvalsData, SerenCloudRunEvalSetData, SerenCloudRunEvalSetResponse, SerenCloudRunEvalsResponse, SerenCloudRunEventsData, SerenCloudRunEventsResponse, SerenCloudRunPendingApprovalsData, SerenCloudRunPendingApprovalsResponse, SerenCloudRunResponse, SerenCloudRunResumeData, SerenCloudRunResumeResponse, SerenCloudRunsData, SerenCloudRunsResponse, SerenCloudRunStateData, SerenCloudRunStateResponse, SerenCloudStartData, SerenCloudStartResponse, SerenCloudStopData, SerenCloudStopResponse, SerenCloudUpdateConfigData, SerenCloudUpdateConfigResponse, SerenCloudUpdateEnvironmentData, SerenCloudUpdateEnvironmentResponse, SerenCloudUpdateEvalSetData, SerenCloudUpdateEvalSetResponse, SerenCloudUpsertCredentialSecretData, SerenCloudUpsertCredentialSecretResponse, SerenCloudVerifyAuditData, SerenCloudVerifyAuditResponse, SerenCloudVerifyConnectorCredentialsData, SerenCloudVerifyConnectorCredentialsResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -151,6 +151,94 @@ export const serenCloudGetAuditEntryOptions = (options: Options<SerenCloudGetAud
     },
     queryKey: serenCloudGetAuditEntryQueryKey(options)
 });
+
+export const serenCloudListConnectorsQueryKey = (options?: Options<SerenCloudListConnectorsData>) => createQueryKey('serenCloudListConnectors', options);
+
+/**
+ * List supported messaging connectors with credential requirements and
+ * this organization's connection status.
+ */
+export const serenCloudListConnectorsOptions = (options?: Options<SerenCloudListConnectorsData>) => queryOptions<SerenCloudListConnectorsResponse, DefaultError, SerenCloudListConnectorsResponse, ReturnType<typeof serenCloudListConnectorsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await serenCloudListConnectors({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: serenCloudListConnectorsQueryKey(options)
+});
+
+/**
+ * Verify connector credentials against the provider without storing them.
+ */
+export const serenCloudVerifyConnectorCredentialsMutation = (options?: Partial<Options<SerenCloudVerifyConnectorCredentialsData>>): MutationOptions<SerenCloudVerifyConnectorCredentialsResponse, DefaultError, Options<SerenCloudVerifyConnectorCredentialsData>> => {
+    const mutationOptions: MutationOptions<SerenCloudVerifyConnectorCredentialsResponse, DefaultError, Options<SerenCloudVerifyConnectorCredentialsData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await serenCloudVerifyConnectorCredentials({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const serenCloudListCredentialSecretsQueryKey = (options?: Options<SerenCloudListCredentialSecretsData>) => createQueryKey('serenCloudListCredentialSecrets', options);
+
+/**
+ * List managed-agent credential secret metadata for the organization.
+ */
+export const serenCloudListCredentialSecretsOptions = (options?: Options<SerenCloudListCredentialSecretsData>) => queryOptions<SerenCloudListCredentialSecretsResponse, DefaultError, SerenCloudListCredentialSecretsResponse, ReturnType<typeof serenCloudListCredentialSecretsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await serenCloudListCredentialSecrets({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: serenCloudListCredentialSecretsQueryKey(options)
+});
+
+/**
+ * Store or rotate a managed-agent credential secret.
+ */
+export const serenCloudUpsertCredentialSecretMutation = (options?: Partial<Options<SerenCloudUpsertCredentialSecretData>>): MutationOptions<SerenCloudUpsertCredentialSecretResponse, DefaultError, Options<SerenCloudUpsertCredentialSecretData>> => {
+    const mutationOptions: MutationOptions<SerenCloudUpsertCredentialSecretResponse, DefaultError, Options<SerenCloudUpsertCredentialSecretData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await serenCloudUpsertCredentialSecret({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Delete a managed-agent credential secret by name.
+ */
+export const serenCloudDeleteCredentialSecretMutation = (options?: Partial<Options<SerenCloudDeleteCredentialSecretData>>): MutationOptions<SerenCloudDeleteCredentialSecretResponse, DefaultError, Options<SerenCloudDeleteCredentialSecretData>> => {
+    const mutationOptions: MutationOptions<SerenCloudDeleteCredentialSecretResponse, DefaultError, Options<SerenCloudDeleteCredentialSecretData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await serenCloudDeleteCredentialSecret({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
 
 /**
  * Deploy a skill to seren-cloud.

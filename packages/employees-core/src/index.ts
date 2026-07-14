@@ -1900,3 +1900,4 @@ function formatToolAuditBytes(label: string, value: unknown): string | null {
     ? `${label} ${value}B`
     : null;
 }
+export * from "./connector-setup";
