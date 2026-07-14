@@ -754,6 +754,16 @@ jobs:
           # re-preparation so the build does not overwrite the signed binaries
           # with fresh unsigned downloads (#2235).
           SEREN_TAURI_SKIP_PREP: "1"
+          # The bundler's signCommand child reserves each app/setup signature
+          # against the persistent monthly R2 ledger (#2931) before signtool, so
+          # it needs the same R2 credentials the direct sign steps carry. Without
+          # them windows-signing-monthly-budget.ps1 exits and the bundle fails at
+          # "failed to run pwsh".
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
         shell: pwsh
         run: |
           pnpm tsx scripts/print-windows-sign-overlay.ts "$env:GITHUB_WORKSPACE" > sign-overlay.json

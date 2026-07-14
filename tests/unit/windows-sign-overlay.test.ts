@@ -206,6 +206,25 @@ describe("release workflow contract", () => {
     expect(prefixes.some((prefix) => signingSource.startsWith(prefix))).toBe(true);
   });
 
+  it("gives the Windows signing build the R2 creds its signCommand needs to reserve the monthly ledger (#2950)", () => {
+    // Tauri's signCommand child runs sign-windows-payload.ps1 on each fresh
+    // app/setup binary, which reserves against the monthly R2 ledger before
+    // signtool. That reservation reads R2_BUCKET / AWS_ENDPOINT_URL and the AWS
+    // credentials; if the build step omits them the bundle dies at "failed to
+    // run pwsh" (v3.69.2). Keep the signing build step carrying them.
+    const stepAt = workflow.indexOf("- name: Build Tauri app (budget-aware, Windows)");
+    const nextStepAt = workflow.indexOf("\n      - name:", stepAt + 1);
+    const step = workflow.slice(stepAt, nextStepAt === -1 ? undefined : nextStepAt);
+    for (const key of [
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_ENDPOINT_URL",
+      "R2_BUCKET",
+    ]) {
+      expect(step).toContain(key);
+    }
+  });
+
   it("hard-blocks Windows signing before signtool and preserves the unsigned fallback (#2929)", () => {
     const signer = readFileSync(signerScript, "utf8");
     const budget = readFileSync(path.join(repoRoot, "scripts", "windows-signing-budget.ps1"), "utf8");
