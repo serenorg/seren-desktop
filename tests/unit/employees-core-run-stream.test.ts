@@ -5,6 +5,7 @@ import {
   employeeCapabilityGuidanceForError,
   employeeErrorCodeFromConversationMessage,
   employeeToolGroupSummaries,
+  employeeToolResultStatusLabel,
   employeeTextFromConversationMessage,
   errorTextFromOutputEvents,
   type EmployeeOutputEventEnvelope,
@@ -462,8 +463,10 @@ describe("employees-core sequenced run stream", () => {
     const resultEvent: EmployeeOutputEventEnvelope = {
       type: "tool_result",
       id: "tool_1",
-      content: "done",
-      is_error: false,
+      content: "rate limit",
+      is_error: true,
+      code: "tool_rate_limited",
+      retryable: true,
       sequence_number: 3,
     };
     const { api } = runtimeApi(
@@ -485,6 +488,40 @@ describe("employees-core sequenced run stream", () => {
       "completed",
     ]);
     expect(onToolResult).toHaveBeenCalledTimes(1);
+    expect(onToolResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "tool_1",
+        isError: true,
+        code: "tool_rate_limited",
+        retryable: true,
+      }),
+    );
+  });
+
+  it("summarizes structured tool result failures for live status", () => {
+    expect(
+      employeeToolResultStatusLabel({
+        isError: false,
+      }),
+    ).toBe("Tool completed");
+    expect(
+      employeeToolResultStatusLabel({
+        isError: true,
+        code: "tool_missing_credential",
+      }),
+    ).toBe("Tool needs credentials");
+    expect(
+      employeeToolResultStatusLabel({
+        isError: true,
+        code: "tool_rate_limited",
+      }),
+    ).toBe("Tool rate-limited");
+    expect(
+      employeeToolResultStatusLabel({
+        isError: true,
+        code: "unknown",
+      }),
+    ).toBe("Tool returned an error");
   });
 
   it("ignores replay_complete and applies events on either side of it", async () => {

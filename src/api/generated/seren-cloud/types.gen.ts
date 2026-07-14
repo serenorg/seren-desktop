@@ -1056,9 +1056,11 @@ export type CloudRunOutputEvent = {
     status?: string | null;
     type: 'tool_call';
 } | {
+    code?: null | CloudRunErrorCode;
     content: string;
     id: string;
     is_error: boolean;
+    retryable?: boolean;
     type: 'tool_result';
 } | {
     action?: string | null;

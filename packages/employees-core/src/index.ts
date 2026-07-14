@@ -203,6 +203,8 @@ export type EmployeeOutputEventEnvelope =
       id: string;
       content: string;
       is_error: boolean;
+      code?: string | null;
+      retryable?: boolean | null;
       sequence_number?: number | null;
       event_type?: string | null;
       kind?: string | null;
@@ -306,6 +308,8 @@ export interface ToolResultEvent {
   id: string;
   content: string;
   isError: boolean;
+  code?: string | null;
+  retryable?: boolean | null;
   runId?: string;
   sequenceNumber?: number | null;
   eventType?: string | null;
@@ -1116,6 +1120,31 @@ export function employeeErrorTextFromCode(
   }
 }
 
+export function employeeToolResultStatusLabel(
+  event: Pick<ToolResultEvent, "isError" | "code">,
+): string {
+  if (!event.isError) return "Tool completed";
+  switch (event.code) {
+    case "tool_unavailable":
+    case "tool_not_configured":
+      return "Tool not configured";
+    case "tool_missing_credential":
+      return "Tool needs credentials";
+    case "tool_permission_denied":
+      return "Tool not allowed";
+    case "tool_rate_limited":
+      return "Tool rate-limited";
+    case "approval_required":
+      return "Tool needs approval";
+    case "timeout":
+      return "Tool timed out";
+    case "tool_provider_failed":
+      return "Tool provider failed";
+    default:
+      return "Tool returned an error";
+  }
+}
+
 export function sanitizeEmployeeErrorText(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return "";
@@ -1691,6 +1720,8 @@ function applyEnvelope(
         id: raw.id,
         content: raw.content,
         isError: raw.is_error,
+        code: raw.code ?? null,
+        retryable: raw.retryable ?? null,
         runId,
         sequenceNumber: raw.sequence_number ?? null,
         eventType: raw.event_type ?? null,
