@@ -12,6 +12,7 @@ const {
   captureErrorMock,
   invokeMock,
   messageMock,
+  getValidationRuntimeInfoMock,
 } = vi.hoisted(() => ({
   mockStoreState: {} as Record<string, unknown>,
   isTauriRuntimeMock: vi.fn<() => boolean>(),
@@ -21,6 +22,7 @@ const {
   captureErrorMock: vi.fn(),
   invokeMock: vi.fn(),
   messageMock: vi.fn(),
+  getValidationRuntimeInfoMock: vi.fn(),
 }));
 
 vi.mock("solid-js/store", () => ({
@@ -35,6 +37,10 @@ vi.mock("solid-js/store", () => ({
 
 vi.mock("@/lib/tauri-bridge", () => ({
   isTauriRuntime: isTauriRuntimeMock,
+}));
+
+vi.mock("@/services/oauth-callback", () => ({
+  getValidationRuntimeInfo: getValidationRuntimeInfoMock,
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -76,7 +82,15 @@ describe("updaterStore install flow", () => {
     captureErrorMock.mockReset();
     invokeMock.mockReset();
     messageMock.mockReset();
+    getValidationRuntimeInfoMock.mockReset();
     messageMock.mockResolvedValue(undefined);
+    getValidationRuntimeInfoMock.mockResolvedValue({
+      isValidation: false,
+      controlEnabled: false,
+      identifier: "com.serendb.desktop",
+      oauthCallbackPort: 8787,
+      processId: 1,
+    });
     invokeMock.mockImplementation(async (command: string) => {
       if (command === "updater_install_preflight") {
         return {
@@ -158,6 +172,43 @@ describe("updaterStore install flow", () => {
 
     await updaterStore.initUpdater();
 
+    expect(downloadAndInstallMock).not.toHaveBeenCalled();
+    expect(relaunchMock).not.toHaveBeenCalled();
+  });
+
+  it("never checks or installs updates in a validation release (#2962)", async () => {
+    isTauriRuntimeMock.mockReturnValue(true);
+    const downloadAndInstallMock = vi.fn(async () => {});
+    checkMock.mockResolvedValue({
+      version: "1.3.53",
+      downloadAndInstall: downloadAndInstallMock,
+    });
+
+    const { updaterStore } = await import("@/stores/updater.store");
+
+    // Seed a pending update as a production runtime so the install assertion
+    // proves the validation guard wins even when update state already exists.
+    await updaterStore.checkForUpdates();
+    expect(checkMock).toHaveBeenCalledOnce();
+
+    checkMock.mockClear();
+    invokeMock.mockClear();
+    getValidationRuntimeInfoMock.mockResolvedValue({
+      isValidation: true,
+      controlEnabled: true,
+      identifier: "com.serendb.desktop.validation",
+      oauthCallbackPort: 0,
+      processId: 2,
+    });
+
+    await updaterStore.initUpdater();
+    await updaterStore.checkForUpdates(true);
+    await updaterStore.installAvailableUpdate();
+
+    expect(updaterStore.state.status).toBe("unsupported");
+    expect(checkMock).not.toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalledWith("updater_install_preflight");
+    expect(invokeMock).not.toHaveBeenCalledWith("updater_pre_install");
     expect(downloadAndInstallMock).not.toHaveBeenCalled();
     expect(relaunchMock).not.toHaveBeenCalled();
   });
