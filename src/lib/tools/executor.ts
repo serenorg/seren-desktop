@@ -12,18 +12,10 @@ import {
   callSerenTool,
   type PaymentProxyInfo,
 } from "@/services/mcp-gateway";
-import {
-  listConnectedPublishers,
-  resolveOAuthProviderForPublisher,
-} from "@/services/publisher-oauth";
+import { computeAgentOAuthRouting } from "@/services/publisher-oauth";
 import { startShellProgressListener } from "@/services/shell-progress";
 import { x402Service } from "@/services/x402";
 import { conversationStore } from "@/stores/conversation.store";
-import {
-  getOAuthConnectionsForProvider,
-  hasAmbiguousOAuthConnections,
-  resolveThreadOAuthConnection,
-} from "@/stores/oauth-account.store";
 import { getApprovalRequirement, requiresApproval } from "./approval-config";
 import { parseGatewayToolName, parseMcpToolName } from "./definitions";
 
@@ -211,45 +203,26 @@ async function resolveGatewayOAuthConnectionArgs(
     return { args };
   }
 
-  try {
-    const [provider, connections] = await Promise.all([
-      resolveOAuthProviderForPublisher(publisherSlug),
-      listConnectedPublishers(),
-    ]);
-    const providerConnections = getOAuthConnectionsForProvider(
-      connections,
-      provider.providerSlug,
-    );
-    if (providerConnections.length === 0) return { args };
-
-    const threadId = conversationId ?? conversationStore.activeConversationId;
-    const selected = resolveThreadOAuthConnection(
-      threadId,
-      provider.providerSlug,
-      connections,
-    );
-
-    if (selected) {
-      return { args: { ...args, connection_id: selected.id } };
-    }
-
-    if (
-      hasAmbiguousOAuthConnections(threadId, provider.providerSlug, connections)
-    ) {
-      return {
-        args,
-        error: `Multiple ${provider.providerName} accounts are connected. Choose an active account for this chat before running ${publisherSlug}/${toolName}.`,
-      };
-    }
-
-    return { args };
-  } catch (err) {
-    console.warn(
-      `[Tool Executor] Failed to resolve OAuth connection for ${publisherSlug}:`,
-      err,
-    );
-    return { args };
+  const threadId = conversationId ?? conversationStore.activeConversationId;
+  const routing = await computeAgentOAuthRouting(threadId);
+  if (routing.available === false) {
+    return {
+      args,
+      error: `OAuth account routing is unavailable. Retry ${publisherSlug}/${toolName} after connected accounts finish loading; refusing to use a default account.`,
+    };
   }
+
+  const ambiguity = routing.ambiguous[publisherSlug];
+  if (ambiguity) {
+    return { args, error: ambiguity };
+  }
+
+  const connectionId = routing.publishers[publisherSlug];
+  if (connectionId) {
+    return { args: { ...args, connection_id: connectionId } };
+  }
+
+  return { args };
 }
 
 /**

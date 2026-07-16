@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
+import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
 import {
   buildEffortArgs,
   buildEffortConfigOption,
@@ -2269,6 +2270,8 @@ function attachProcessListeners(emit, sessions, session, exitPromises) {
       return;
     }
 
+    void session.serenMcpProxy?.close();
+
     const diagnosticSuffix = stderrTail
       ? ` (${exitDetail}): ${stderrTail.split("\n").pop()}`
       : ` (${exitDetail})`;
@@ -2341,6 +2344,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     spawnEnv = {},
     reasoningEffort = DEFAULT_CLAUDE_EFFORT,
     serenMcpConfigured = false,
+    serenMcpProxy = null,
   }) {
     return {
       id: sessionId,
@@ -2378,6 +2382,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       // audit has already run. See maybeAuditSerenMcpTools / #2802.
       serenMcpConfigured,
       serenMcpToolsChecked: false,
+      serenMcpProxy,
     };
   }
 
@@ -2405,7 +2410,6 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     }
 
     const remoteSessionId = resumeAgentSessionId ?? randomUUID();
-    const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
     // The Seren gateway is only in the MCP config when an API key is present
     // (see createRemoteSerenServer). Mirror that check so the post-spawn tool
     // audit only runs for sessions that actually expect gateway tools. #2802
@@ -2429,13 +2433,27 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       typeof initialModelId === "string" && initialModelId.length > 0
         ? initialModelId
         : DEFAULT_PREFERRED_MODEL;
-    const claudeArgs = buildClaudeArgs({
-      sessionId: remoteSessionId,
-      resumeSessionId: resumeAgentSessionId ?? null,
-      preferredModel,
-      mcpConfigJson: mcpConfig.claudeMcpConfigJson,
-      effort: effectiveEffort,
-    });
+    let serenMcpProxy = null;
+    let mcpConfig;
+    let claudeArgs;
+    try {
+      if (apiKey) serenMcpProxy = await createSerenMcpOAuthProxy();
+      mcpConfig = buildProviderMcpConfig({
+        apiKey,
+        mcpServers,
+        serenMcpGatewayUrl: serenMcpProxy?.url,
+      });
+      claudeArgs = buildClaudeArgs({
+        sessionId: remoteSessionId,
+        resumeSessionId: resumeAgentSessionId ?? null,
+        preferredModel,
+        mcpConfigJson: mcpConfig.claudeMcpConfigJson,
+        effort: effectiveEffort,
+      });
+    } catch (error) {
+      await serenMcpProxy?.close();
+      throw error;
+    }
     // Surface the resolved --model value at every spawn so UI/runtime model
     // mismatches (e.g. picker shows [1m] but the spawned session reports a
     // 200K window) are diagnosable without ad-hoc instrumentation. Goes to
@@ -2511,6 +2529,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         }
         console.error(`${claudeLogPrefix} Spawn error: ${spawnError.message}`);
         sessions.delete(sessionId);
+        void serenMcpProxy?.close();
         // macOS surfaces a wrong-arch binary as `errno: -86` / "Bad CPU type in
         // executable" (EBADARCH). It hits when a prior install dropped the wrong
         // slice (e.g. x86_64 claude on an arm64 Mac without Rosetta) and our
@@ -2557,6 +2576,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         spawnEnv: mcpConfig.childEnv,
         reasoningEffort: effectiveEffort,
         serenMcpConfigured,
+        serenMcpProxy,
       });
 
       sessions.set(sessionId, launchedSession);
@@ -2564,9 +2584,10 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       return { processHandle, session: launchedSession };
     };
 
-    let { processHandle, session } = launchClaudeProcess();
-
+    let processHandle;
+    let session;
     try {
+      ({ processHandle, session } = launchClaudeProcess());
       // Initialize handshake with kill+respawn. A first-run stall can wedge the
       // CLI so it never answers the request; re-asking the SAME process can't
       // recover (it's already stuck), so on timeout we kill it and hand the
@@ -2681,7 +2702,8 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       sessions.delete(sessionId);
-      killChildTree(processHandle);
+      if (processHandle) killChildTree(processHandle);
+      await serenMcpProxy?.close();
       emit("provider://error", {
         sessionId,
         error: isAuthError(message)
@@ -2795,6 +2817,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     );
     rejectCurrentPrompt(session, new Error("Session terminated."));
     session.output.close();
+    await session.serenMcpProxy?.close();
     killChildTree(session.process);
     emit("provider://session-status", {
       sessionId,
@@ -2863,8 +2886,11 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
 
   async function setOAuthRouting({ sessionId, routing }) {
     const session = sessions.get(sessionId);
-    if (session) session.oauthRouting = routing;
-    else console.warn(`[claude-runtime] OAuth routing session not found: ${sessionId}`);
+    if (!session) {
+      throw new Error(`OAuth routing session not found: ${sessionId}`);
+    }
+    session.oauthRouting = routing;
+    session.serenMcpProxy?.setRouting(routing);
   }
 
   async function respondToPermission({ sessionId, requestId, optionId }) {

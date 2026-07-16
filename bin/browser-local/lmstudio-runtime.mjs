@@ -17,6 +17,7 @@ import {
   writeFile,
 } from "./fs.mjs";
 import { providerLogPrefix } from "./logging.mjs";
+import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
 
 const DEFAULT_BASE_URL = "http://localhost:1234";
 const DEFAULT_MCP_GATEWAY_URL =
@@ -1532,39 +1533,59 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
       .then((info) => info.version)
       .catch(() => null);
 
-    const session = {
-      id: sessionId,
-      agentType: LMSTUDIO_AGENT_TYPE,
-      cwd: params.cwd,
-      status: "initializing",
-      createdAt: new Date().toISOString(),
-      agentSessionId: sessionId,
-      timeoutSecs: params.timeoutSecs ?? undefined,
-      baseUrl,
-      apiKey: lmStudioApiKey,
-      client,
-      mcpGateway: createMcpGatewayClient({ apiKey: serenApiKey }),
-      availableModelRecords,
-      currentModelId: initialModel.modelId,
-      currentModeId: params.approvalPolicy === "never" ? "auto" : "ask",
-      currentPrompt: null,
-      pendingPermissions: new Map(),
-      approvedForSession: new Set(),
-      messages: [],
-      toolIncompatibleModelIds: new Set(),
-      loadedModelKey: null,
-      loadedModelIdentifier: null,
-      loadedModelHandle: null,
-      loadedBySession: false,
-      contextLength: null,
-      lmStudioVersion,
-      logPrefix,
-      emit,
-    };
+    let serenMcpProxy = null;
+    try {
+      if (serenApiKey) serenMcpProxy = await createSerenMcpOAuthProxy();
+    } catch (error) {
+      await client[Symbol.asyncDispose]?.().catch(() => {});
+      throw error;
+    }
 
-    sessions.set(sessionId, session);
-    session.status = "ready";
-    emit("provider://session-status", buildSessionStatus(session, "ready"));
+    let session;
+    try {
+      session = {
+        id: sessionId,
+        agentType: LMSTUDIO_AGENT_TYPE,
+        cwd: params.cwd,
+        status: "initializing",
+        createdAt: new Date().toISOString(),
+        agentSessionId: sessionId,
+        timeoutSecs: params.timeoutSecs ?? undefined,
+        baseUrl,
+        apiKey: lmStudioApiKey,
+        client,
+        mcpGateway: createMcpGatewayClient({
+          apiKey: serenApiKey,
+          url: serenMcpProxy?.url,
+        }),
+        serenMcpProxy,
+        availableModelRecords,
+        currentModelId: initialModel.modelId,
+        currentModeId: params.approvalPolicy === "never" ? "auto" : "ask",
+        currentPrompt: null,
+        pendingPermissions: new Map(),
+        approvedForSession: new Set(),
+        messages: [],
+        toolIncompatibleModelIds: new Set(),
+        loadedModelKey: null,
+        loadedModelIdentifier: null,
+        loadedModelHandle: null,
+        loadedBySession: false,
+        contextLength: null,
+        lmStudioVersion,
+        logPrefix,
+        emit,
+      };
+
+      sessions.set(sessionId, session);
+      session.status = "ready";
+      emit("provider://session-status", buildSessionStatus(session, "ready"));
+    } catch (error) {
+      sessions.delete(sessionId);
+      await serenMcpProxy?.close();
+      await client[Symbol.asyncDispose]?.().catch(() => {});
+      throw error;
+    }
 
     return {
       id: session.id,
@@ -1604,6 +1625,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
         console.warn(`${logPrefix} failed to unload model:`, error);
       });
     }
+    await session.serenMcpProxy?.close();
     await session.client[Symbol.asyncDispose]?.().catch(() => {});
     emit("provider://session-status", {
       sessionId,
@@ -1632,6 +1654,12 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
     if (!session) throw new Error(`Unknown LM Studio session: ${sessionId}`);
     session.currentModeId = mode === "auto" ? "auto" : "ask";
     emit("provider://session-status", buildSessionStatus(session));
+  }
+
+  async function setOAuthRouting({ sessionId, routing }) {
+    const session = sessions.get(sessionId);
+    if (!session) throw new Error(`Unknown LM Studio session: ${sessionId}`);
+    session.serenMcpProxy?.setRouting(routing);
   }
 
   async function respondToPermission({ sessionId, requestId, optionId }) {
@@ -1720,7 +1748,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
     terminateSession,
     listSessions,
     setPermissionMode,
-    setOAuthRouting: async () => {},
+    setOAuthRouting,
     respondToPermission,
     setSessionModel,
     updateSessionConfigOption,
