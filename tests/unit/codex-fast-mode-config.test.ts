@@ -14,6 +14,7 @@ const {
   _codexServiceTierFromFastModeValue: codexServiceTierFromFastModeValue,
   _normalizeCodexModelRecords: normalizeCodexModelRecords,
   _resolveCodexInitialReasoningEffort: resolveCodexInitialReasoningEffort,
+  _resolveCodexInitialServiceTier: resolveCodexInitialServiceTier,
   _resolveCodexPreferredModelRecord: resolveCodexPreferredModelRecord,
 } = await import(/* @vite-ignore */ modulePath);
 
@@ -27,8 +28,10 @@ function modelListResult() {
         hidden: false,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: [
+          { reasoningEffort: "low", description: "Less depth" },
           { reasoningEffort: "medium", description: "Balanced" },
           { reasoningEffort: "high", description: "More depth" },
+          { reasoningEffort: "xhigh", description: "Maximum depth" },
         ],
         defaultServiceTier: null,
         serviceTiers: [
@@ -81,7 +84,7 @@ describe("#2890 Codex GPT-5.6 defaults", () => {
     expect(preferred?.name).toBe("GPT-5.6 Sol");
     expect(
       resolveCodexInitialReasoningEffort(preferred, { intent: "direct" }),
-    ).toBe("medium");
+    ).toBe("xhigh");
   });
 
   it("prefers GPT-5.6 Luna with low effort for the paired Claude + Codex executor even when model/list is stale", () => {
@@ -122,6 +125,50 @@ describe("#2890 Codex GPT-5.6 defaults", () => {
       approvalPolicy: "never",
       sandbox: "danger-full-access",
       model: "gpt-5.6-sol",
+    });
+  });
+});
+
+describe("#2957 direct Codex spawn defaults", () => {
+  it("defaults direct Codex to xhigh and Fast while leaving paired executor defaults unchanged", () => {
+    const records = normalizeCodexModelRecords(modelListResult());
+    const directModel = records[0];
+
+    expect(
+      resolveCodexInitialReasoningEffort(directModel, { intent: "direct" }),
+    ).toBe("xhigh");
+    expect(
+      resolveCodexInitialServiceTier(directModel, { intent: "direct" }),
+    ).toBe("fast");
+    expect(
+      resolveCodexInitialReasoningEffort(directModel, {
+        intent: "paired-executor",
+      }),
+    ).toBe("low");
+    expect(
+      resolveCodexInitialServiceTier(directModel, {
+        intent: "paired-executor",
+      }),
+    ).toBeNull();
+
+    expect(
+      buildCodexThreadStartParams(
+        session({ reasoningEffort: "xhigh", serviceTier: "fast" }),
+        "/repo",
+        "auto",
+        "danger-full-access",
+      ),
+    ).toMatchObject({ model: "gpt-5.5", serviceTier: "fast" });
+    expect(
+      buildCodexTurnStartParams(
+        session({ reasoningEffort: "xhigh", serviceTier: "fast" }),
+        "hello",
+        [],
+      ),
+    ).toMatchObject({
+      model: "gpt-5.5",
+      effort: "xhigh",
+      serviceTier: "fast",
     });
   });
 });

@@ -540,12 +540,22 @@ function resolveCodexInitialReasoningEffort(
       ? explicitEffort
       : normalizeCodexDefaultIntent(intent) === "paired-executor"
         ? "low"
-        : (modelRecord?.defaultReasoningEffort ?? "medium");
+        : "xhigh";
 
   if (supports(preferred)) return preferred;
   const modelDefault = modelRecord?.defaultReasoningEffort ?? null;
   if (modelDefault && supports(modelDefault)) return modelDefault;
   return supported[0] ?? "medium";
+}
+
+function resolveCodexInitialServiceTier(
+  modelRecord,
+  { intent = "direct" } = {},
+) {
+  if (normalizeCodexDefaultIntent(intent) === "paired-executor") {
+    return null;
+  }
+  return getFastServiceTier(modelRecord)?.id ?? null;
 }
 
 function getSelectedModelRecord(session) {
@@ -1545,6 +1555,10 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
           explicitEffort: reasoningEffort,
         },
       );
+      session.serviceTier = resolveCodexInitialServiceTier(
+        preferredModelRecord,
+        { intent: defaultIntent },
+      );
 
       const threadParams = {
         cwd,
@@ -1620,22 +1634,15 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       session.currentModelId = resumedExistingThread
         ? (servedModelId ?? requestedModelId ?? null)
         : (requestedModelId ?? servedModelId ?? null);
-      if (resumedExistingThread) {
-        session.reasoningEffort =
-          threadResult?.reasoningEffort ??
-          getSelectedModelRecord(session)?.defaultReasoningEffort ??
-          session.reasoningEffort ??
-          "medium";
-      } else {
-        session.reasoningEffort = resolveCodexInitialReasoningEffort(
-          getSelectedModelRecord(session),
-          {
-            intent: defaultIntent,
-            explicitEffort: reasoningEffort,
-          },
-        );
-      }
-      session.serviceTier = normalizeServiceTier(threadResult?.serviceTier);
+      session.reasoningEffort = resolveCodexInitialReasoningEffort(
+        getSelectedModelRecord(session),
+        {
+          intent: defaultIntent,
+          explicitEffort: reasoningEffort,
+        },
+      );
+      session.serviceTier =
+        session.serviceTier ?? normalizeServiceTier(threadResult?.serviceTier);
 
       if (resumedExistingThread && session.agentSessionId) {
         let replayThread = threadResult?.thread;
@@ -2247,6 +2254,7 @@ export {
   modeFromApprovalPolicy as _modeFromApprovalPolicy,
   normalizeModelRecords as _normalizeCodexModelRecords,
   resolveCodexInitialReasoningEffort as _resolveCodexInitialReasoningEffort,
+  resolveCodexInitialServiceTier as _resolveCodexInitialServiceTier,
   resolveCodexPreferredModelRecord as _resolveCodexPreferredModelRecord,
   sandboxFromMode as _sandboxFromMode,
 };
