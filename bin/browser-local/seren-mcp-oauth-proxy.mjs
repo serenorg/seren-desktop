@@ -1,4 +1,4 @@
-// ABOUTME: Per-Codex-session loopback proxy for deterministic Seren OAuth account routing.
+// ABOUTME: Per-agent-session loopback proxy for deterministic Seren OAuth account routing.
 // ABOUTME: Forwards MCP traffic unchanged except selected call_publisher requests, which use the supported Core selector header.
 
 import { randomBytes } from "node:crypto";
@@ -250,11 +250,21 @@ function textResponseBody(response, bytes) {
   });
 }
 
+function x402PaymentHeaderName(payment) {
+  try {
+    const payload = JSON.parse(Buffer.from(payment, "base64").toString("utf8"));
+    if (payload?.x402Version === 2) return "PAYMENT-SIGNATURE";
+  } catch {
+    // Legacy v1 payloads and opaque gateway-issued values use X-PAYMENT.
+  }
+  return "X-PAYMENT";
+}
+
 export function buildSerenPublisherRequest(plan, authorization, apiUrl) {
   const headers = new Headers({
     Accept: "application/json",
     Authorization: authorization,
-    "User-Agent": "Seren-Desktop-Codex-OAuth-Router",
+    "User-Agent": "Seren-Desktop-OAuth-Router",
     "x-seren-oauth-connection-id": plan.connectionId,
   });
 
@@ -264,7 +274,8 @@ export function buildSerenPublisherRequest(plan, authorization, apiUrl) {
     headers.set("Idempotency-Key", plan.request.requestId.trim());
   }
   if (nonEmptyString(plan.request.payment)) {
-    headers.set("X-PAYMENT", plan.request.payment.trim());
+    const payment = plan.request.payment.trim();
+    headers.set(x402PaymentHeaderName(payment), payment);
   }
   const body = buildPublisherBody(plan.request, headers);
 
@@ -318,9 +329,16 @@ async function executePublisherPlan(plan, authorization, apiUrl, signal) {
       signal,
     });
     const bytes = Buffer.from(await response.arrayBuffer());
+    const paymentRequiredHeader = response.headers.get("payment-required");
     const text =
-      textResponseBody(response, bytes) ||
-      JSON.stringify({ data: { status: response.status } });
+      response.status === 402 && paymentRequiredHeader
+        ? JSON.stringify({
+            error: "payment_required",
+            proxy_payment: true,
+            payment_required_header: paymentRequiredHeader,
+          })
+        : textResponseBody(response, bytes) ||
+          JSON.stringify({ data: { status: response.status } });
     return {
       jsonrpc: "2.0",
       id: plan.id,

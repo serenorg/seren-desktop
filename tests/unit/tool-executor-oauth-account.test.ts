@@ -3,8 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   callGatewayTool: vi.fn(),
   callSerenTool: vi.fn(),
-  listConnectedPublishers: vi.fn(),
-  resolveOAuthProviderForPublisher: vi.fn(),
+  computeAgentOAuthRouting: vi.fn(),
   emit: vi.fn(),
   listen: vi.fn(),
   invoke: vi.fn(),
@@ -18,8 +17,7 @@ vi.mock("@/services/mcp-gateway", () => ({
 }));
 
 vi.mock("@/services/publisher-oauth", () => ({
-  listConnectedPublishers: mocks.listConnectedPublishers,
-  resolveOAuthProviderForPublisher: mocks.resolveOAuthProviderForPublisher,
+  computeAgentOAuthRouting: mocks.computeAgentOAuthRouting,
 }));
 
 vi.mock("@/stores/conversation.store", () => ({
@@ -47,29 +45,6 @@ vi.mock("@/services/x402", () => ({
   },
 }));
 
-const googleConnections = [
-  {
-    id: "conn-google-work",
-    provider_slug: "google",
-    provider_email: "work@example.com",
-    provider_user_id: "work",
-    is_valid: true,
-    is_default: false,
-    connected_at: "2026-06-01T00:00:00Z",
-    last_used_at: null,
-  },
-  {
-    id: "conn-google-personal",
-    provider_slug: "google",
-    provider_email: "personal@example.com",
-    provider_user_id: "personal",
-    is_valid: true,
-    is_default: false,
-    connected_at: "2026-06-15T00:00:00Z",
-    last_used_at: null,
-  },
-];
-
 describe("tool executor OAuth account routing", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -78,12 +53,11 @@ describe("tool executor OAuth account routing", () => {
     );
     setThreadOAuthConnectionId("thread-1", "google", null);
     setThreadOAuthConnectionId("thread-2", "google", null);
-    mocks.resolveOAuthProviderForPublisher.mockResolvedValue({
-      publisherSlug: "gmail",
-      providerSlug: "google",
-      providerName: "Google",
+    mocks.computeAgentOAuthRouting.mockResolvedValue({
+      publishers: {},
+      ambiguous: {},
+      available: true,
     });
-    mocks.listConnectedPublishers.mockResolvedValue(googleConnections);
     mocks.callGatewayTool.mockResolvedValue({
       result: "ok",
       is_error: false,
@@ -101,6 +75,11 @@ describe("tool executor OAuth account routing", () => {
       "google",
       "conn-google-personal",
     );
+    mocks.computeAgentOAuthRouting.mockResolvedValue({
+      publishers: { gmail: "conn-google-personal" },
+      ambiguous: {},
+      available: true,
+    });
 
     const result = await executeTool({
       id: "tool-call-1",
@@ -128,6 +107,16 @@ describe("tool executor OAuth account routing", () => {
     // while a background run in thread-2 selected the personal account.
     setThreadOAuthConnectionId("thread-1", "google", "conn-google-work");
     setThreadOAuthConnectionId("thread-2", "google", "conn-google-personal");
+    mocks.computeAgentOAuthRouting.mockImplementation(async (threadId) => ({
+      publishers: {
+        gmail:
+          threadId === "thread-2"
+            ? "conn-google-personal"
+            : "conn-google-work",
+      },
+      ambiguous: {},
+      available: true,
+    }));
 
     const result = await executeTool(
       {
@@ -150,6 +139,14 @@ describe("tool executor OAuth account routing", () => {
 
   it("fails closed before dispatch when multiple accounts have no default or chat selection", async () => {
     const { executeTool } = await import("@/lib/tools/executor");
+    mocks.computeAgentOAuthRouting.mockResolvedValue({
+      publishers: {},
+      ambiguous: {
+        gmail:
+          "Multiple Google accounts are connected. Choose an active account for this chat.",
+      },
+      available: true,
+    });
 
     const result = await executeTool({
       id: "tool-call-2",
@@ -163,5 +160,87 @@ describe("tool executor OAuth account routing", () => {
     expect(result.is_error).toBe(true);
     expect(result.content).toContain("Multiple Google accounts are connected");
     expect(mocks.callGatewayTool).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when connected-account discovery is unavailable", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.computeAgentOAuthRouting.mockResolvedValue({
+      publishers: {},
+      ambiguous: {},
+      available: false,
+    });
+
+    const result = await executeTool({
+      id: "tool-call-unavailable",
+      type: "function",
+      function: {
+        name: "gateway__gmail__messages",
+        arguments: JSON.stringify({ q: "safe-read" }),
+      },
+    });
+
+    expect(result.is_error).toBe(true);
+    expect(result.content).toContain("OAuth account routing is unavailable");
+    expect(mocks.callGatewayTool).not.toHaveBeenCalled();
+  });
+
+  it("retains the owning OAuth connection when retrying a signed x402 payment", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    const paymentRequiredHeader = btoa(
+      JSON.stringify({ x402Version: 2, accepts: [] }),
+    );
+    const signedV2Payment = btoa(JSON.stringify({ x402Version: 2 }));
+    mocks.computeAgentOAuthRouting.mockResolvedValue({
+      publishers: { gmail: "conn-google-personal" },
+      ambiguous: {},
+      available: true,
+    });
+    mocks.callGatewayTool
+      .mockResolvedValueOnce({
+        result: "payment required",
+        is_error: true,
+        payment_proxy: {
+          payment_required_header: paymentRequiredHeader,
+        },
+      })
+      .mockResolvedValueOnce({ result: "paid", is_error: false });
+    mocks.handlePaymentRequired.mockResolvedValue({
+      success: true,
+      method: "crypto",
+      paymentHeader: signedV2Payment,
+    });
+
+    const result = await executeTool(
+      {
+        id: "tool-call-paid",
+        type: "function",
+        function: {
+          name: "gateway__gmail__messages",
+          arguments: JSON.stringify({ q: "safe-read" }),
+        },
+      },
+      "thread-2",
+    );
+
+    expect(result.is_error).toBe(false);
+    expect(mocks.callGatewayTool).toHaveBeenNthCalledWith(
+      1,
+      "gmail",
+      "messages",
+      {
+        q: "safe-read",
+        connection_id: "conn-google-personal",
+      },
+    );
+    expect(mocks.callGatewayTool).toHaveBeenNthCalledWith(
+      2,
+      "gmail",
+      "messages",
+      {
+        q: "safe-read",
+        connection_id: "conn-google-personal",
+        _x402_payment: signedV2Payment,
+      },
+    );
   });
 });

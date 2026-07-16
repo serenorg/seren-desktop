@@ -3,12 +3,19 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const gatewayFetchMock = vi.hoisted(() => vi.fn());
+
 // Mock tauri-bridge to avoid localStorage dependency in Node.
 vi.mock("@/lib/tauri-bridge", () => ({
   getSerenApiKey: vi.fn().mockResolvedValue("test-api-key"),
   clearSerenApiKey: vi.fn().mockResolvedValue(undefined),
   isTauri: vi.fn().mockReturnValue(false),
   isTauriRuntime: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock("@/lib/tauri-fetch", () => ({
+  getTauriFetch: vi.fn(async () => gatewayFetchMock),
+  shouldUseRustGatewayAuth: vi.fn(() => false),
 }));
 
 // Mock the support pipeline so captureSupportError is a no-op. Otherwise
@@ -332,7 +339,7 @@ describe("MCP Gateway Native Tool Routing (#1329)", () => {
     expect(result.is_error).toBe(false);
   });
 
-  it("should pass connection_id as call_publisher metadata for REST publisher tools", async () => {
+  it("should route a selected REST publisher tool through Core's selector header", async () => {
     const { mcpClient } = await import("@/lib/mcp/client");
     const callToolMock = vi.mocked(mcpClient.callToolHttp);
 
@@ -381,28 +388,40 @@ describe("MCP Gateway Native Tool Routing (#1329)", () => {
 
     await initializeGateway();
     callToolMock.mockClear();
-    callToolMock.mockResolvedValue({
-      content: [{ type: "text", text: "sent" }],
-      isError: false,
-    });
+    gatewayFetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ data: { sent: true } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
 
+    const signedV2Payment = btoa(JSON.stringify({ x402Version: 2 }));
     const result = await callGatewayTool("gmail", "post_messages_send", {
       connection_id: "conn_google_1",
-      to: "user@example.com",
+      _x402_payment: signedV2Payment,
+      to: "recipient@example.invalid",
       subject: "Hello",
     });
 
-    expect(callToolMock).toHaveBeenCalledWith("seren-gateway", {
-      name: "call_publisher",
-      arguments: {
-        publisher: "gmail",
-        tool: "post_messages_send",
-        connection_id: "conn_google_1",
-        tool_args: {
-          to: "user@example.com",
-          subject: "Hello",
-        },
-      },
+    expect(callToolMock).not.toHaveBeenCalled();
+    expect(gatewayFetchMock).toHaveBeenCalledOnce();
+    const [url, init] = gatewayFetchMock.mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe(
+      "https://api.serendb.com/publishers/gmail/_mcp/tools/post_messages_send",
+    );
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer test-api-key",
+      "Content-Type": "application/json",
+      "PAYMENT-SIGNATURE": signedV2Payment,
+      "x-seren-oauth-connection-id": "conn_google_1",
+    });
+    expect(init.headers).not.toHaveProperty("X-PAYMENT");
+    expect(JSON.parse(String(init.body))).toEqual({
+      to: "recipient@example.invalid",
+      subject: "Hello",
     });
     expect(result.is_error).toBe(false);
   });

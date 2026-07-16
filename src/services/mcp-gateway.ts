@@ -1,12 +1,17 @@
 // ABOUTME: MCP Gateway service for connecting to Seren MCP gateway via MCP protocol.
 // ABOUTME: Uses rmcp HTTP streaming transport to connect to mcp.serendb.com/mcp.
 
-import { MCP_GATEWAY_INITIALIZE_METHOD, MCP_GATEWAY_URL } from "@/lib/config";
+import {
+  API_BASE,
+  MCP_GATEWAY_INITIALIZE_METHOD,
+  MCP_GATEWAY_URL,
+} from "@/lib/config";
 import { mcpClient } from "@/lib/mcp/client";
 import type { McpTool, McpToolResult } from "@/lib/mcp/types";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import { captureSupportError } from "@/lib/support/hook";
 import { getSerenApiKey } from "@/lib/tauri-bridge";
+import { getTauriFetch, shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 
 const SEREN_MCP_SERVER_NAME = "seren-gateway";
 
@@ -625,6 +630,77 @@ function parsePaymentProxyError(content: unknown): PaymentProxyInfo | null {
   return null;
 }
 
+function x402PaymentHeaderName(
+  payment: string,
+): "X-PAYMENT" | "PAYMENT-SIGNATURE" {
+  try {
+    const payload = JSON.parse(atob(payment)) as { x402Version?: unknown };
+    if (payload.x402Version === 2) return "PAYMENT-SIGNATURE";
+  } catch {
+    // Legacy v1 payloads and opaque gateway-issued values use X-PAYMENT.
+  }
+  return "X-PAYMENT";
+}
+
+async function callSelectedPublisherTool(
+  publisherSlug: string,
+  toolName: string,
+  toolArgs: Record<string, unknown>,
+  connectionId: string,
+  payment: unknown,
+  startTime: number,
+): Promise<McpToolCallResponse> {
+  const url = `${API_BASE}/publishers/${encodeURIComponent(
+    publisherSlug,
+  )}/_mcp/tools/${encodeURIComponent(toolName)}`;
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "x-seren-oauth-connection-id": connectionId,
+  };
+
+  if (typeof payment === "string" && payment.length > 0) {
+    headers[x402PaymentHeaderName(payment)] = payment;
+  }
+  if (!shouldUseRustGatewayAuth(url)) {
+    const apiKey = await getSerenApiKey();
+    if (!apiKey) {
+      throw new McpGatewayError(
+        "Seren API key required - please log in",
+        401,
+        url,
+      );
+    }
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  const fetchFn = await getTauriFetch();
+  const response = await fetchFn(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(toolArgs),
+  });
+  const responseText = await response.text();
+  const text =
+    responseText || JSON.stringify({ data: { status: response.status } });
+  const content = [{ type: "text", text }];
+  const paymentRequiredHeader = response.headers.get("payment-required");
+  const parsedPaymentProxy = parsePaymentProxyError(content);
+  const paymentProxy =
+    parsedPaymentProxy ??
+    (response.status === 402 && paymentRequiredHeader
+      ? { payment_required_header: paymentRequiredHeader }
+      : null);
+
+  return {
+    result: content,
+    is_error: !response.ok,
+    execution_time_ms: Date.now() - startTime,
+    response_bytes: new TextEncoder().encode(responseText).byteLength,
+    ...(paymentProxy ? { payment_proxy: paymentProxy } : {}),
+  };
+}
+
 /**
  * Call a tool via the MCP Gateway.
  *
@@ -651,6 +727,21 @@ export async function callGatewayTool(
     // Separate gateway metadata from publisher tool args.
     const { _x402_payment, connection_id, ...toolArgs } = args;
 
+    // A selected OAuth identity must use Core's ownership-checked selector
+    // header. The MCP call_publisher tool ignores unknown top-level metadata,
+    // so forwarding connection_id there silently executes as the default
+    // account instead.
+    if (typeof connection_id === "string" && connection_id.length > 0) {
+      return await callSelectedPublisherTool(
+        publisherSlug,
+        toolName,
+        toolArgs,
+        connection_id,
+        _x402_payment,
+        startTime,
+      );
+    }
+
     // Check if this is a first-class MCP tool on the gateway.
     // Native tools (from the gateway's list_tools response) are called directly
     // via MCP protocol, bypassing the call_publisher dispatch mechanism.
@@ -673,10 +764,6 @@ export async function callGatewayTool(
       if (_x402_payment !== undefined) {
         dispatchArgs._x402_payment = _x402_payment;
       }
-      if (typeof connection_id === "string" && connection_id.length > 0) {
-        dispatchArgs.connection_id = connection_id;
-      }
-
       result = await mcpClient.callToolHttp(SEREN_MCP_SERVER_NAME, {
         name: "call_publisher",
         arguments: dispatchArgs,

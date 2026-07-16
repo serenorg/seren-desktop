@@ -10,6 +10,7 @@ import readline from "node:readline";
 
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
 import { providerLogPrefix } from "./logging.mjs";
+import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
 
 // ============================================================================
 // Binary resolution
@@ -246,6 +247,7 @@ function createGeminiSessionRecord({
   timeoutSecs,
   currentModeId,
   logPrefix,
+  serenMcpProxy = null,
 }) {
   return {
     id: sessionId,
@@ -269,6 +271,7 @@ function createGeminiSessionRecord({
     // the choice but does NOT yet re-spawn gemini-cli with --model
     // (phase 2 of #1480 follow-up).
     currentModelId: GEMINI_DEFAULT_MODEL_ID,
+    serenMcpProxy,
   };
 }
 
@@ -662,9 +665,18 @@ function attachProcessListeners(emit, sessions, session) {
     }
   });
 
-  session.process.on("exit", () => {
+  // ChildProcess emits `error` before `close` when spawning fails. Keep an
+  // error listener installed so the provider runtime does not crash; `close`
+  // remains the single cleanup path for both spawn failures and normal exits.
+  session.process.on("error", (error) => {
+    console.error(`${logPrefix} process error: ${error.message}`);
+  });
+
+  session.process.on("close", () => {
     const wasTracked = sessions.delete(session.id);
     if (!wasTracked) return;
+
+    void session.serenMcpProxy?.close();
 
     rejectPendingRequests(
       session,
@@ -713,21 +725,38 @@ export function createGeminiRuntime({ emit, runtimeMode = "provider-runtime" }) 
 
     const sessionId = localSessionId ?? randomUUID();
     const resolvedMode = geminiApprovalMode(approvalPolicy, sandboxMode);
-    const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
-    const processHandle = spawnGeminiProcess(cwd, {
-      extraEnv: mcpConfig.childEnv,
-    });
-    const session = createGeminiSessionRecord({
-      sessionId,
-      cwd,
-      processHandle,
-      timeoutSecs,
-      currentModeId: resolvedMode,
-      logPrefix: geminiLogPrefix,
-    });
+    let serenMcpProxy = null;
+    let mcpConfig;
+    let processHandle;
+    let session;
+    try {
+      if (apiKey) serenMcpProxy = await createSerenMcpOAuthProxy();
+      mcpConfig = buildProviderMcpConfig({
+        apiKey,
+        mcpServers,
+        serenMcpGatewayUrl: serenMcpProxy?.url,
+      });
+      processHandle = spawnGeminiProcess(cwd, {
+        extraEnv: mcpConfig.childEnv,
+      });
+      session = createGeminiSessionRecord({
+        sessionId,
+        cwd,
+        processHandle,
+        timeoutSecs,
+        currentModeId: resolvedMode,
+        logPrefix: geminiLogPrefix,
+        serenMcpProxy,
+      });
 
-    sessions.set(sessionId, session);
-    attachProcessListeners(emit, sessions, session);
+      sessions.set(sessionId, session);
+      attachProcessListeners(emit, sessions, session);
+    } catch (error) {
+      sessions.delete(sessionId);
+      if (processHandle) killChildTree(processHandle);
+      await serenMcpProxy?.close();
+      throw error;
+    }
 
     try {
       // ACP step 1: initialize handshake
@@ -796,6 +825,7 @@ export function createGeminiRuntime({ emit, runtimeMode = "provider-runtime" }) 
 
       sessions.delete(sessionId);
       killChildTree(processHandle);
+      await serenMcpProxy?.close();
 
       if (authFailed) {
         // Emit a typed event so agent.store can auto-trigger launchLogin
@@ -949,6 +979,7 @@ export function createGeminiRuntime({ emit, runtimeMode = "provider-runtime" }) 
     } catch {
       // Ignore double-close races.
     }
+    await session.serenMcpProxy?.close();
     killChildTree(session.process);
     emit("provider://session-status", {
       sessionId,
@@ -995,6 +1026,14 @@ export function createGeminiRuntime({ emit, runtimeMode = "provider-runtime" }) 
       // Best-effort — older gemini-cli builds may not support set_mode yet.
     });
     emit("provider://session-status", buildSessionStatus(session));
+  }
+
+  async function setOAuthRouting({ sessionId, routing }) {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`No Gemini session: ${sessionId}`);
+    }
+    session.serenMcpProxy?.setRouting(routing);
   }
 
   async function respondToPermission({ sessionId, requestId, optionId }) {
@@ -1090,7 +1129,7 @@ export function createGeminiRuntime({ emit, runtimeMode = "provider-runtime" }) 
     terminateSession,
     listSessions,
     setPermissionMode,
-    setOAuthRouting: async () => {},
+    setOAuthRouting,
     respondToPermission,
     setModel,
   };

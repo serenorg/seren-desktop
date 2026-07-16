@@ -339,8 +339,10 @@ describe("LM Studio runtime wiring", () => {
     expect(runtimeSource).toContain("const lmStudioApiKey");
     expect(runtimeSource).toContain("const serenApiKey");
     expect(runtimeSource).toContain(
-      "mcpGateway: createMcpGatewayClient({ apiKey: serenApiKey })",
+      "mcpGateway: createMcpGatewayClient({",
     );
+    expect(runtimeSource).toContain("apiKey: serenApiKey");
+    expect(runtimeSource).toContain("url: serenMcpProxy?.url");
   });
 
   it("is wired into the provider dispatcher", () => {
