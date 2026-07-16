@@ -68,7 +68,7 @@ function normalizeLocalServer(server) {
   };
 }
 
-function createRemoteSerenServer(apiKey) {
+function createRemoteSerenServer(apiKey, gatewayUrl = SEREN_MCP_GATEWAY_URL) {
   if (!trimToNull(apiKey)) {
     return null;
   }
@@ -76,7 +76,7 @@ function createRemoteSerenServer(apiKey) {
   return {
     name: SEREN_MCP_SERVER_NAME,
     type: "http",
-    url: SEREN_MCP_GATEWAY_URL,
+    url: gatewayUrl,
     headers: {
       Authorization: `Bearer \${${SEREN_MCP_API_KEY_ENV}}`,
     },
@@ -236,9 +236,13 @@ function buildGeminiMcpServers(servers, { mcpCapabilities = {} } = {}) {
   return out;
 }
 
-export function buildProviderMcpConfig({ apiKey, mcpServers } = {}) {
+export function buildProviderMcpConfig({
+  apiKey,
+  mcpServers,
+  serenMcpGatewayUrl,
+} = {}) {
   const normalizedServers = dedupeServers([
-    createRemoteSerenServer(apiKey),
+    createRemoteSerenServer(apiKey, serenMcpGatewayUrl),
     ...((Array.isArray(mcpServers) ? mcpServers : [])
       .map((server) => normalizeLocalServer(server))
       .filter(Boolean)),

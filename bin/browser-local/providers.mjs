@@ -8,6 +8,7 @@ import {
   createBrowserLocalAgentRegistry,
   resolveInstalledCodexBinary,
 } from "./agent-registry.mjs";
+import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
 import { providerLogPrefix } from "./logging.mjs";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
 import { composeWindowsShellCommand } from "./windows-shell-args.mjs";
@@ -314,8 +315,15 @@ function buildInitializeParams() {
   };
 }
 
-function spawnCodexProcess(cwd, { apiKey, mcpServers } = {}) {
-  const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
+function spawnCodexProcess(
+  cwd,
+  { apiKey, mcpServers, serenMcpGatewayUrl } = {},
+) {
+  const mcpConfig = buildProviderMcpConfig({
+    apiKey,
+    mcpServers,
+    serenMcpGatewayUrl,
+  });
   const useWindowsShell = process.platform === "win32";
   const args = ["app-server"];
   if (mcpConfig.codexMcpConfigOverride) {
@@ -352,6 +360,7 @@ function createCodexSessionRecord({
   sessionId,
   cwd,
   processHandle,
+  serenMcpProxy,
   timeoutSecs,
   currentModeId,
 }) {
@@ -362,6 +371,7 @@ function createCodexSessionRecord({
     status: "initializing",
     createdAt: new Date().toISOString(),
     process: processHandle,
+    serenMcpProxy,
     output: readline.createInterface({ input: processHandle.stdout }),
     pendingRequests: new Map(),
     nextRequestId: 1,
@@ -1333,6 +1343,7 @@ function attachProcessListeners(
         : `Codex spawn error: ${err?.message ?? String(err)}`;
     console.warn(`${logPrefix} ${message}`);
     sessions.delete(session.id);
+    void session.serenMcpProxy?.close();
     if (session.currentPrompt) {
       rejectCurrentPrompt(session, new Error(message));
     }
@@ -1351,6 +1362,7 @@ function attachProcessListeners(
 
   session.process.on("exit", () => {
     const wasTracked = sessions.delete(session.id);
+    void session.serenMcpProxy?.close();
     if (!wasTracked) {
       return;
     }
@@ -1488,11 +1500,24 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     const sessionId = localSessionId ?? randomUUID();
     const resolvedMode = modeFromApprovalPolicy(approvalPolicy);
     const resolvedSandbox = sandboxFromMode(sandboxMode, networkEnabled);
-    const processHandle = spawnCodexProcess(cwd, { apiKey, mcpServers });
+    let serenMcpProxy = null;
+    let processHandle;
+    try {
+      if (apiKey) serenMcpProxy = await createSerenMcpOAuthProxy();
+      processHandle = spawnCodexProcess(cwd, {
+        apiKey,
+        mcpServers,
+        serenMcpGatewayUrl: serenMcpProxy?.url,
+      });
+    } catch (error) {
+      await serenMcpProxy?.close();
+      throw error;
+    }
     const session = createCodexSessionRecord({
       sessionId,
       cwd,
       processHandle,
+      serenMcpProxy,
       timeoutSecs,
       currentModeId: resolvedMode,
     });
@@ -1677,6 +1702,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       const message = error instanceof Error ? error.message : String(error);
       sessions.delete(sessionId);
       killChildTree(processHandle);
+      await serenMcpProxy?.close();
       emit("provider://error", {
         sessionId,
         error: isAuthError(message)
@@ -1820,6 +1846,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     rejectCurrentPrompt(session, new Error("Session terminated."));
     session.output.close();
     killChildTree(session.process);
+    await session.serenMcpProxy?.close();
     emit("provider://session-status", {
       sessionId,
       status: "terminated",
@@ -1881,8 +1908,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       }
       return claudeRuntime.setOAuthRouting({ sessionId, routing });
     }
-    // Native Codex sessions do not use Seren MCP OAuth routing yet.
-    console.info(`[provider-runtime] OAuth routing is a no-op for ${session.agentType} session ${sessionId}`);
+    session.serenMcpProxy?.setRouting(routing);
   }
 
   async function respondToPermission({ sessionId, requestId, optionId }) {

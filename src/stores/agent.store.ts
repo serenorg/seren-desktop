@@ -1756,16 +1756,81 @@ const [state, setState] = createStore<AgentState>({
   agentModeEnabled: false,
 });
 
-async function refreshAgentOAuthRouting(conversationId: string): Promise<void> {
+const agentOAuthRoutingRefreshes = new Map<string, Promise<boolean>>();
+const agentOAuthRoutingAvailability = new Map<string, boolean>();
+const agentOAuthRoutingDelivery = new Map<string, boolean>();
+const agentOAuthRoutingRevisions = new Map<string, string>();
+const agentOAuthRoutingSelectionThreads = new Map<string, string>();
+
+function currentAgentOAuthRoutingRevision(): string {
+  return `${oauthConnectionsRevision()}:${oauthSelectionsRevision()}`;
+}
+
+async function refreshAgentOAuthRouting(
+  providerSessionId: string,
+  selectionThreadId = providerSessionId,
+): Promise<boolean> {
+  const previous = agentOAuthRoutingRefreshes.get(providerSessionId);
+  const refresh = (previous ?? Promise.resolve(true))
+    .catch(() => false)
+    .then(async () => {
+      const revision = currentAgentOAuthRoutingRevision();
+      try {
+        const routing = await computeAgentOAuthRouting(selectionThreadId);
+        await providerService.setOAuthRouting(providerSessionId, routing);
+        agentOAuthRoutingAvailability.set(
+          providerSessionId,
+          routing.available !== false,
+        );
+        agentOAuthRoutingDelivery.set(providerSessionId, true);
+        agentOAuthRoutingRevisions.set(providerSessionId, revision);
+        agentOAuthRoutingSelectionThreads.set(
+          providerSessionId,
+          selectionThreadId,
+        );
+        return true;
+      } catch (error) {
+        agentOAuthRoutingAvailability.set(providerSessionId, false);
+        agentOAuthRoutingDelivery.set(providerSessionId, false);
+        console.warn(
+          `[AgentStore] Failed to refresh OAuth routing for ${selectionThreadId}:`,
+          error,
+        );
+        return false;
+      }
+    });
+  agentOAuthRoutingRefreshes.set(providerSessionId, refresh);
   try {
-    const routing = await computeAgentOAuthRouting(conversationId);
-    await providerService.setOAuthRouting(conversationId, routing);
-  } catch (error) {
-    console.warn(
-      `[AgentStore] Failed to refresh OAuth routing for ${conversationId}:`,
-      error,
-    );
+    return await refresh;
+  } finally {
+    if (agentOAuthRoutingRefreshes.get(providerSessionId) === refresh) {
+      agentOAuthRoutingRefreshes.delete(providerSessionId);
+    }
   }
+}
+
+async function awaitAgentOAuthRoutingForPrompt(
+  providerSessionId: string,
+  selectionThreadId: string,
+): Promise<boolean> {
+  await agentOAuthRoutingRefreshes.get(providerSessionId);
+  if (
+    agentOAuthRoutingAvailability.get(providerSessionId) === false ||
+    agentOAuthRoutingDelivery.get(providerSessionId) === false ||
+    agentOAuthRoutingRevisions.get(providerSessionId) !==
+      currentAgentOAuthRoutingRevision() ||
+    agentOAuthRoutingSelectionThreads.get(providerSessionId) !==
+      selectionThreadId
+  ) {
+    await refreshAgentOAuthRouting(providerSessionId, selectionThreadId);
+  }
+  return (
+    agentOAuthRoutingDelivery.get(providerSessionId) === true &&
+    agentOAuthRoutingRevisions.get(providerSessionId) ===
+      currentAgentOAuthRoutingRevision() &&
+    agentOAuthRoutingSelectionThreads.get(providerSessionId) ===
+      selectionThreadId
+  );
 }
 
 createRoot(() => {
@@ -1774,7 +1839,7 @@ createRoot(() => {
     oauthSelectionsRevision();
     for (const session of Object.values(state.sessions)) {
       if (session.conversationId) {
-        void refreshAgentOAuthRouting(session.conversationId);
+        void refreshAgentOAuthRouting(session.info.id, session.conversationId);
       }
     }
   });
@@ -3247,7 +3312,7 @@ export const agentStore = {
           settingsStore.settings.lmStudioApiKey,
         );
         console.log("[AgentStore] Spawn result:", info);
-        await refreshAgentOAuthRouting(localSessionId ?? info.id);
+        await refreshAgentOAuthRouting(info.id, localSessionId ?? info.id);
         expectedReadySessionId = info.id;
 
         // The new session is alive — immediately clear the terminated flag so
@@ -3839,7 +3904,7 @@ export const agentStore = {
       };
       setState("sessions", conversationId, session);
       setState("activeSessionId", conversationId);
-      await refreshAgentOAuthRouting(conversationId);
+      await refreshAgentOAuthRouting(liveInfo.id, conversationId);
 
       if (rehydratedPendingPermissions.length > 0) {
         const seenRequestIds = new Set(
@@ -5805,6 +5870,23 @@ export const agentStore = {
       } else {
         setState("error", "Session has ended. Please start a new session.");
       }
+      return;
+    }
+
+    if (
+      session.conversationId &&
+      !(await awaitAgentOAuthRoutingForPrompt(
+        session.info.id,
+        session.conversationId,
+      ))
+    ) {
+      setState(
+        "sessions",
+        sessionId,
+        "error",
+        "Connected account routing is temporarily unavailable. Retry after your accounts finish loading.",
+      );
+      if (threadId) this.setTurnInFlight(threadId, false);
       return;
     }
 
