@@ -38,6 +38,8 @@ export type PairedRole = "planner" | "executor";
 export interface AgentOAuthRouting {
   publishers: Record<string, string>;
   ambiguous: Record<string, string>;
+  /** False when account discovery failed, so runtimes can refuse default-account fallback. */
+  available?: boolean;
 }
 
 export function supportsConversationFork(agentType: AgentType): boolean {

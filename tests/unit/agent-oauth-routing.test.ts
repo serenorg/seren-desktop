@@ -40,6 +40,7 @@ describe("computeAgentOAuthRouting", () => {
     await expect(computeAgentOAuthRouting("thread-routing")).resolves.toEqual({
       publishers: { gmail: "conn-other", google: "conn-other" },
       ambiguous: {},
+      available: true,
     });
   });
 
@@ -48,6 +49,7 @@ describe("computeAgentOAuthRouting", () => {
     await expect(computeAgentOAuthRouting("thread-default")).resolves.toEqual({
       publishers: { gmail: "conn-default", google: "conn-default" },
       ambiguous: {},
+      available: true,
     });
 
     mocks.listConnections.mockResolvedValue({
@@ -56,6 +58,7 @@ describe("computeAgentOAuthRouting", () => {
     await expect(computeAgentOAuthRouting("thread-sole")).resolves.toEqual({
       publishers: { gmail: "conn-other", google: "conn-other" },
       ambiguous: {},
+      available: true,
     });
   });
 
@@ -70,6 +73,17 @@ describe("computeAgentOAuthRouting", () => {
         gmail: expect.stringContaining("Multiple Google accounts are connected"),
         google: expect.stringContaining("Multiple Google accounts are connected"),
       },
+      available: true,
+    });
+  });
+
+  it("marks routing unavailable when account discovery fails", async () => {
+    mocks.listConnections.mockResolvedValue({ error: "offline" });
+    const { computeAgentOAuthRouting } = await import("@/services/publisher-oauth");
+    await expect(computeAgentOAuthRouting("thread-error")).resolves.toEqual({
+      publishers: {},
+      ambiguous: {},
+      available: false,
     });
   });
 });

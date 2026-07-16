@@ -72,6 +72,10 @@ async function loadPublisherOAuthProviderLookup(): Promise<
     }),
   ]);
 
+  if (providerResult.error || publisherResult.error) {
+    throw new Error("OAuth publisher metadata is unavailable");
+  }
+
   const providers = providerResult.data?.providers ?? [];
   const publishers = publisherResult.data?.data ?? [];
   const providersById = new Map(
@@ -116,19 +120,31 @@ export async function listPublisherOAuthProviderResolutions(): Promise<
   PublisherOAuthProviderResolution[]
 > {
   providerLookupPromise ??= loadPublisherOAuthProviderLookup();
-  const lookup = await providerLookupPromise;
-  return Array.from(lookup.values());
+  try {
+    const lookup = await providerLookupPromise;
+    return Array.from(lookup.values());
+  } catch (error) {
+    providerLookupPromise = null;
+    throw error;
+  }
 }
 
 export async function computeAgentOAuthRouting(
   threadId: string | null,
 ): Promise<AgentOAuthRouting> {
   try {
+    if (!(await getToken())) {
+      throw new Error("OAuth account discovery requires authentication");
+    }
     const [resolutions, connections] = await Promise.all([
       listPublisherOAuthProviderResolutions(),
       listConnectedPublishers(),
     ]);
-    const routing: AgentOAuthRouting = { publishers: {}, ambiguous: {} };
+    const routing: AgentOAuthRouting = {
+      publishers: {},
+      ambiguous: {},
+      available: true,
+    };
     for (const resolution of resolutions) {
       const validConnections = getOAuthConnectionsForProvider(
         connections,
@@ -160,7 +176,7 @@ export async function computeAgentOAuthRouting(
       "[PublisherOAuth] Failed to compute agent OAuth routing:",
       error,
     );
-    return { publishers: {}, ambiguous: {} };
+    return { publishers: {}, ambiguous: {}, available: false };
   }
 }
 
