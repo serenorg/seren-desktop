@@ -540,12 +540,24 @@ function resolveCodexInitialReasoningEffort(
       ? explicitEffort
       : normalizeCodexDefaultIntent(intent) === "paired-executor"
         ? "low"
-        : (modelRecord?.defaultReasoningEffort ?? "medium");
+        : supported.includes("xhigh")
+          ? "xhigh"
+          : (modelRecord?.defaultReasoningEffort ?? "medium");
 
   if (supports(preferred)) return preferred;
   const modelDefault = modelRecord?.defaultReasoningEffort ?? null;
   if (modelDefault && supports(modelDefault)) return modelDefault;
   return supported[0] ?? "medium";
+}
+
+function resolveCodexInitialServiceTier(
+  modelRecord,
+  { intent = "direct" } = {},
+) {
+  if (normalizeCodexDefaultIntent(intent) !== "direct") {
+    return null;
+  }
+  return getFastServiceTier(modelRecord)?.id ?? null;
 }
 
 function getSelectedModelRecord(session) {
@@ -1545,6 +1557,10 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
           explicitEffort: reasoningEffort,
         },
       );
+      session.serviceTier = resolveCodexInitialServiceTier(
+        preferredModelRecord,
+        { intent: defaultIntent },
+      );
 
       const threadParams = {
         cwd,
@@ -1620,7 +1636,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       session.currentModelId = resumedExistingThread
         ? (servedModelId ?? requestedModelId ?? null)
         : (requestedModelId ?? servedModelId ?? null);
-      if (resumedExistingThread) {
+      if (resumedExistingThread && defaultIntent === "paired-executor") {
         session.reasoningEffort =
           threadResult?.reasoningEffort ??
           getSelectedModelRecord(session)?.defaultReasoningEffort ??
@@ -2247,6 +2263,7 @@ export {
   modeFromApprovalPolicy as _modeFromApprovalPolicy,
   normalizeModelRecords as _normalizeCodexModelRecords,
   resolveCodexInitialReasoningEffort as _resolveCodexInitialReasoningEffort,
+  resolveCodexInitialServiceTier as _resolveCodexInitialServiceTier,
   resolveCodexPreferredModelRecord as _resolveCodexPreferredModelRecord,
   sandboxFromMode as _sandboxFromMode,
 };

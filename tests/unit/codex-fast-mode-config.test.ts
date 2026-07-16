@@ -1,5 +1,5 @@
-// ABOUTME: Critical guards for #2888 — Codex Fast Mode maps to app-server serviceTier.
-// ABOUTME: Keeps model service-tier metadata, config options, and turn payloads wired.
+// ABOUTME: Critical guards for Codex reasoning and Fast service-tier defaults.
+// ABOUTME: Keeps #2957 direct-spawn defaults isolated from paired executor behavior.
 
 import { describe, expect, it } from "vitest";
 
@@ -14,6 +14,7 @@ const {
   _codexServiceTierFromFastModeValue: codexServiceTierFromFastModeValue,
   _normalizeCodexModelRecords: normalizeCodexModelRecords,
   _resolveCodexInitialReasoningEffort: resolveCodexInitialReasoningEffort,
+  _resolveCodexInitialServiceTier: resolveCodexInitialServiceTier,
   _resolveCodexPreferredModelRecord: resolveCodexPreferredModelRecord,
 } = await import(/* @vite-ignore */ modulePath);
 
@@ -81,7 +82,7 @@ describe("#2890 Codex GPT-5.6 defaults", () => {
     expect(preferred?.name).toBe("GPT-5.6 Sol");
     expect(
       resolveCodexInitialReasoningEffort(preferred, { intent: "direct" }),
-    ).toBe("medium");
+    ).toBe("xhigh");
   });
 
   it("prefers GPT-5.6 Luna with low effort for the paired Claude + Codex executor even when model/list is stale", () => {
@@ -123,6 +124,73 @@ describe("#2890 Codex GPT-5.6 defaults", () => {
       sandbox: "danger-full-access",
       model: "gpt-5.6-sol",
     });
+  });
+});
+
+describe("#2957 direct Codex spawn defaults", () => {
+  it("selects xhigh and Fast for direct sessions without changing paired defaults", () => {
+    const baseModel = session().availableModelRecords[0];
+    const model = {
+      ...baseModel,
+      defaultReasoningEffort: "low",
+      supportedReasoningEfforts: [
+        { value: "low", name: "low" },
+        ...baseModel.supportedReasoningEfforts,
+        { value: "xhigh", name: "xhigh" },
+      ],
+    };
+
+    expect(
+      resolveCodexInitialReasoningEffort(model, { intent: "direct" }),
+    ).toBe("xhigh");
+    expect(
+      resolveCodexInitialServiceTier(model, { intent: "direct" }),
+    ).toBe("fast");
+
+    const directSession = session({
+      availableModelRecords: [model],
+      currentModelId: model.modelId,
+      reasoningEffort: "xhigh",
+      serviceTier: "fast",
+    });
+    expect(
+      buildCodexThreadStartParams(
+        directSession,
+        "/repo",
+        "auto",
+        "danger-full-access",
+      ),
+    ).toMatchObject({ serviceTier: "fast" });
+    expect(buildCodexSessionStatus(directSession).configOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "reasoning_effort",
+          currentValue: "xhigh",
+        }),
+        expect.objectContaining({ id: "fast_mode", currentValue: "on" }),
+      ]),
+    );
+
+    expect(
+      resolveCodexInitialReasoningEffort(model, {
+        intent: "paired-executor",
+      }),
+    ).toBe("low");
+    expect(
+      resolveCodexInitialServiceTier(model, {
+        intent: "paired-executor",
+      }),
+    ).toBeNull();
+
+    const unsupportedModel = session().availableModelRecords[1];
+    expect(
+      resolveCodexInitialReasoningEffort(unsupportedModel, {
+        intent: "direct",
+      }),
+    ).toBe("medium");
+    expect(
+      resolveCodexInitialServiceTier(unsupportedModel, { intent: "direct" }),
+    ).toBeNull();
   });
 });
 
