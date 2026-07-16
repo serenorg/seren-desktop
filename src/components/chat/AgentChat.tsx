@@ -1688,8 +1688,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       </Show>
 
       {/* Action Buttons Header */}
-      <Show when={threadMessages().length > 0}>
-        <div class="flex items-center justify-end gap-2 px-4 py-2 border-b border-surface-3">
+      <div
+        class="flex items-center justify-end gap-2 px-4 py-2 border-b border-surface-3"
+        data-testid="agent-chat-account-header"
+      >
+        <Show when={threadMessages().length > 0}>
           <Show when={!isPairedThread()}>
             <button
               type="button"
@@ -1763,9 +1766,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           >
             Clear
           </button>
-          <OAuthAccountSwitcher threadId={props.threadId} />
-        </div>
-      </Show>
+        </Show>
+        <OAuthAccountSwitcher threadId={props.threadId} />
+      </div>
 
       {/* Messages Area */}
       <div
