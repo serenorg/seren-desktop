@@ -42,7 +42,6 @@ import {
 import type { CommandContext } from "@/lib/commands/types";
 import { collapseDirectoryListings } from "@/lib/directory-listing";
 import { createDragDrop } from "@/lib/drag-drop";
-import { escapeHtml } from "@/lib/escape-html";
 import { openExternalLink } from "@/lib/external-link";
 import { openFileInTab } from "@/lib/files/service";
 import { formatDurationWithVerb } from "@/lib/format-duration";
@@ -56,7 +55,10 @@ import {
   getModelDisplayName,
   mapAgentModelToChat,
 } from "@/lib/rate-limit-fallback";
-import { escapeHtmlWithSkillsAndLinks } from "@/lib/render-markdown";
+import {
+  escapeHtmlWithSkillsAndLinks,
+  renderMarkdown,
+} from "@/lib/render-markdown";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
@@ -373,6 +375,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     if (!thread) return "";
     return agentStore.getStreamingContentForConversation(thread.id);
   });
+  const threadStreamingHtml = createMemo(() =>
+    collapseBuildOutput(
+      collapseDirectoryListings(renderMarkdown(threadStreamingContent())),
+    ),
+  );
 
   // Enqueue finalized assistant messages to the render worker.
   // The worker returns HTML via onmessage → setHtmlCache → reactive DOM update.
@@ -1487,8 +1494,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     class="chat-message-content leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-[1.15em] [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-[1em] [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.92em] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[0.92em] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
                     innerHTML={collapseBuildOutput(
                       collapseDirectoryListings(
-                        htmlCache[message.id] ??
-                          escapeHtml(visibleContent).replace(/\n/g, "<br>"),
+                        htmlCache[message.id] ?? renderMarkdown(visibleContent),
                       ),
                     )}
                   />
@@ -1903,7 +1909,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <article class="chat-message-row px-5 py-4 border-b border-surface-2">
               <div
                 class="chat-message-content leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-[1.15em] [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-[1em] [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.92em] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[0.92em] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
-                textContent={threadStreamingContent()}
+                innerHTML={threadStreamingHtml()}
               />
               <span class="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" />
             </article>

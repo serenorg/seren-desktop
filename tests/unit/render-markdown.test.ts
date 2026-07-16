@@ -2,7 +2,49 @@
 // ABOUTME: Covers isCodeLine and wrapCodeIslands against real Codex output patterns.
 
 import { describe, expect, it } from "vitest";
-import { isCodeLine, wrapCodeIslands } from "@/lib/render-markdown";
+import {
+  isCodeLine,
+  renderMarkdown,
+  wrapCodeIslands,
+} from "@/lib/render-markdown";
+
+const assistantMarkdownFixture = `# Release notes
+
+## Markdown blocks
+
+**Bold text** stays inside a normal paragraph.
+
+| Item | State |
+| --- | --- |
+| Alpha | Ready |
+| Beta | Queued |
+
+- First item
+- Second item
+
+~~~text
+status: ready
+~~~
+
+Paragraph one keeps its own rhythm.
+
+Paragraph two remains separate from paragraph one.
+
+Paragraph three closes the sample.`;
+
+it("renders the assistant fixture as structured GFM", () => {
+  const html = renderMarkdown(assistantMarkdownFixture);
+
+  expect(html).toContain("<h1>Release notes</h1>");
+  expect(html).toContain("<h2>Markdown blocks</h2>");
+  expect(html).toContain("<strong>Bold text</strong>");
+  expect(html).toContain("<table>");
+  expect(html).toContain("<ul>");
+  expect(html).toContain("status: ready");
+  expect(html.match(/<p>/g)).toHaveLength(4);
+  expect(html).not.toContain("# Release notes");
+  expect(html).not.toContain("**Bold text**");
+});
 
 describe("isCodeLine", () => {
   it("recognises JSDoc openers", () => {

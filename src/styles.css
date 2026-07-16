@@ -592,6 +592,27 @@ footer.status-bar {
 }
 
 /* Markdown code block styles (render-markdown.ts injects these class names) */
+.chat-surface .chat-message-content {
+  @apply font-normal;
+}
+
+.chat-surface .chat-message-content p {
+  @apply font-normal;
+}
+
+.chat-surface .chat-message-content table {
+  @apply w-full my-4 border-collapse text-left;
+}
+
+.chat-surface .chat-message-content th,
+.chat-surface .chat-message-content td {
+  @apply border border-surface-3 px-3 py-2 align-top;
+}
+
+.chat-surface .chat-message-content th {
+  @apply bg-surface-1 font-semibold;
+}
+
 .code-block-wrapper {
   @apply relative my-4 bg-surface-0 border border-surface-3 rounded-[10px] overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.2)];
 }
