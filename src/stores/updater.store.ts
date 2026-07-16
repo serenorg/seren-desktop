@@ -6,6 +6,7 @@ import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import { createStore } from "solid-js/store";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
+import { getValidationRuntimeInfo } from "@/services/oauth-callback";
 import { telemetry } from "@/services/telemetry";
 
 export type UpdateStatus =
@@ -56,6 +57,14 @@ function isDevRuntime(): boolean {
   return import.meta.env.DEV === true;
 }
 
+async function isValidationRuntime(): Promise<boolean> {
+  const runtime = await getValidationRuntimeInfo();
+  if (!runtime.isValidation) return false;
+
+  setState({ status: "unsupported" });
+  return true;
+}
+
 async function initUpdater(): Promise<void> {
   if (initialized) return;
   initialized = true;
@@ -70,6 +79,8 @@ async function initUpdater(): Promise<void> {
     setState({ status: "unsupported" });
     return;
   }
+
+  if (await isValidationRuntime()) return;
 
   await checkForUpdates();
 
@@ -102,6 +113,8 @@ async function checkForUpdates(_manual = false): Promise<void> {
     setState({ status: "unsupported" });
     return;
   }
+
+  if (await isValidationRuntime()) return;
 
   setState({ status: "checking", error: null });
 
@@ -307,6 +320,7 @@ async function installAvailableUpdate(
     console.warn("[Updater] Install skipped: not Tauri runtime");
     return;
   }
+  if (await isValidationRuntime()) return;
   if (!pendingUpdate) {
     console.warn("[Updater] Install skipped: no pending update");
     setState({
