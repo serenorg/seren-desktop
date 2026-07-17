@@ -884,8 +884,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     });
 
     // Cold-start path (#1631): if the thread has no live session yet,
-    // turn on the thinking indicator and spawn synchronously so the user
-    // bubble + dots appear before the first stream chunk arrives.
+    // turn on the thinking indicator and resume synchronously so the user
+    // bubble + dots appear before the first stream chunk arrives. Resuming
+    // preserves persisted history and provider context after Login → Dismiss.
     const thread = activeAgentThread();
     if (!hasSession()) {
       if (!trimmed) {
@@ -910,10 +911,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       agentStore.setTurnInFlight(thread.id, true);
       agentStore.armRestartTimer(thread.id, 60_000, "spawn_failed");
       try {
-        const sid = await agentStore.spawnSession(
-          fileTreeState.rootPath,
-          lockedAgentType(),
-          { localSessionId: thread.id },
+        const sid = await agentStore.resumeAgentConversation(
+          thread.id,
+          thread.projectRoot || fileTreeState.rootPath,
         );
         // User pressed Stop mid-spawn — abortTurn flipped turnInFlight off.
         // Honor the cancel: terminate the spawn we just created (if any) and
