@@ -8,10 +8,9 @@ import {
   type ConnectorSetupApi,
   connectorSetupAttach,
   connectorSetupEnterValue,
-  connectorSetupMergeCredentialRefs,
   connectorSetupMergeToolRefs,
+  connectorSetupProvidedFieldNames,
   connectorSetupRequiredFieldsFilled,
-  connectorSetupSecretNames,
   connectorSetupSelect,
   connectorSetupVerify,
 } from "../../packages/employees-core/src/connector-setup";
@@ -56,6 +55,31 @@ const WEBHOOK: ConnectorCatalogEntryLike = {
   ],
 };
 
+function testApi(overrides: Partial<ConnectorSetupApi>): ConnectorSetupApi {
+  const unexpected = async (): Promise<never> => {
+    throw new Error("unexpected API call");
+  };
+  return {
+    verifyCredentials: unexpected,
+    ensureEmployeeIdentity: unexpected,
+    storeCredential: unexpected,
+    previewEmployeeSecretRefs: unexpected,
+    bindConnectorSecrets: unexpected,
+    createEmployeeDelegation: unexpected,
+    authorizeEmployeeDelegation: unexpected,
+    attachConnector: unexpected,
+    ...overrides,
+  };
+}
+
+const DEPLOYMENT = {
+  deploymentId: "dep-1",
+  organizationId: "org-1",
+  displayName: "Support employee",
+  agentIdentityId: null,
+  toolRefs: [],
+};
+
 describe("connector setup controller", () => {
   it("requires the required fields before verification", () => {
     let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
@@ -63,17 +87,19 @@ describe("connector setup controller", () => {
     expect(connectorSetupRequiredFieldsFilled(SLACK, state.values)).toBe(false);
     state = connectorSetupEnterValue(state, "SLACK_BOT_TOKEN", "xoxb-token");
     expect(connectorSetupRequiredFieldsFilled(SLACK, state.values)).toBe(true);
+    expect(connectorSetupProvidedFieldNames(SLACK, state.values)).toEqual([
+      "SLACK_BOT_TOKEN",
+    ]);
   });
 
   it("verification success advances with the provider identity", async () => {
-    const api: ConnectorSetupApi = {
+    const api = testApi({
       verifyCredentials: async (ref, credentials) => {
         expect(ref).toBe("slack");
         expect(credentials).toEqual({ SLACK_BOT_TOKEN: "xoxb-token" });
         return { ok: true, identity: "bot @ workspace" };
       },
-      attachConnector: async () => ({}),
-    };
+    });
     let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
     state = connectorSetupEnterValue(state, "SLACK_BOT_TOKEN", " xoxb-token ");
     state = await connectorSetupVerify(api, state, SLACK);
@@ -82,14 +108,13 @@ describe("connector setup controller", () => {
     expect(state.error).toBeNull();
   });
 
-  it("verification rejection keeps the flow on credentials with the reason", async () => {
-    const api: ConnectorSetupApi = {
+  it("verification rejection keeps the flow resumable", async () => {
+    const api = testApi({
       verifyCredentials: async () => ({
         ok: false,
         failure_reason: "invalid_auth",
       }),
-      attachConnector: async () => ({}),
-    };
+    });
     let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
     state = connectorSetupEnterValue(state, "SLACK_BOT_TOKEN", "bad");
     state = await connectorSetupVerify(api, state, SLACK);
@@ -98,198 +123,198 @@ describe("connector setup controller", () => {
   });
 
   it("non-verifiable connectors skip the probe", async () => {
-    const api: ConnectorSetupApi = {
-      verifyCredentials: async () => {
-        throw new Error("must not be called");
-      },
-      attachConnector: async () => ({}),
-    };
+    const api = testApi({});
     let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, WEBHOOK);
     state = await connectorSetupVerify(api, state, WEBHOOK);
     expect(state.step).toBe("attach");
     expect(state.verifiedIdentity).toBeNull();
   });
 
-  it("tool ref merge is idempotent", () => {
+  it("tool ref merge is idempotent and corrects stale capability metadata", () => {
     const first = connectorSetupMergeToolRefs([], SLACK);
     expect(first).toHaveLength(1);
-    const second = connectorSetupMergeToolRefs(first, SLACK);
-    expect(second).toBe(first);
-  });
-
-  it("tool ref merge corrects stale connector capability metadata", () => {
-    const existing = [
+    expect(connectorSetupMergeToolRefs(first, SLACK)).toBe(first);
+    expect(
+      connectorSetupMergeToolRefs(
+        [
+          {
+            kind: "connector",
+            connector_ref: "slack",
+            capability: "tools",
+            scopes: ["chat:write"],
+          },
+        ],
+        SLACK,
+      ),
+    ).toEqual([
       {
         kind: "connector",
         connector_ref: "slack",
-        capability: "tools",
+        capability: "messaging",
         scopes: ["chat:write"],
       },
-    ];
-    expect(connectorSetupMergeToolRefs(existing, SLACK)).toEqual([
-      { ...existing[0], capability: "messaging" },
     ]);
   });
 
-  it("credential ref merge scopes provided fields to the deployment", () => {
-    const values = { SLACK_BOT_TOKEN: "xoxb-token", SLACK_APP_TOKEN: "" };
-    const existing = [
-      {
-        name: "SLACK_BOT_TOKEN",
-        ref_uri: "org-secret://SLACK_BOT_TOKEN",
-        kind: "api_key",
-        binding: "env",
-      },
-    ];
-    const { merged, changed } = connectorSetupMergeCredentialRefs(
-      existing,
-      SLACK,
-      values,
-      "dep-1",
-    );
-    expect(changed).toBe(1);
-    expect(merged).toHaveLength(1);
-    expect(merged[0]?.ref_uri).toBe(
-      "org-secret://connector-dep-1-SLACK_BOT_TOKEN",
-    );
-    expect(connectorSetupSecretNames(SLACK, values, "dep-1")).toEqual([
-      "connector-dep-1-SLACK_BOT_TOKEN",
-    ]);
-  });
-
-  it("credential ref merge corrects a conflicting same-name reference", () => {
-    const existing = [
-      {
-        name: "SLACK_BOT_TOKEN",
-        ref_uri: "user-secret://SLACK_BOT_TOKEN",
-        kind: "api_key",
-        binding: "header",
-        binding_target: "Authorization",
-      },
-    ];
-    const { merged, changed } = connectorSetupMergeCredentialRefs(
-      existing,
-      SLACK,
-      { SLACK_BOT_TOKEN: "xoxb-token" },
-      "dep-1",
-    );
-    expect(changed).toBe(1);
-    expect(merged).toEqual([
-      {
-        name: "SLACK_BOT_TOKEN",
-        ref_uri: "org-secret://connector-dep-1-SLACK_BOT_TOKEN",
-        kind: "api_key",
-        binding: "env",
-      },
-    ]);
-  });
-
-  it("credential ref merge removes a stale env binding target", () => {
-    const { merged, changed } = connectorSetupMergeCredentialRefs(
-      [
-        {
-          name: "SLACK_BOT_TOKEN",
-          ref_uri: "org-secret://connector-dep-1-SLACK_BOT_TOKEN",
-          kind: "api_key",
-          binding: "env",
-          binding_target: "Authorization",
-        },
-      ],
-      SLACK,
-      { SLACK_BOT_TOKEN: "xoxb-token" },
-      "dep-1",
-    );
-    expect(changed).toBe(1);
-    expect(merged[0]).not.toHaveProperty("binding_target");
-  });
-
-  it("attach surfaces the update error and stays resumable", async () => {
-    const api: ConnectorSetupApi = {
-      verifyCredentials: async () => ({ ok: true }),
-      attachConnector: async () => ({
-        error:
-          "credential references target organization secrets that do not exist: SLACK_BOT_TOKEN",
-      }),
-    };
-    let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
-    state = connectorSetupEnterValue(state, "SLACK_BOT_TOKEN", "xoxb-token");
-    state = await connectorSetupAttach(api, state, SLACK, {
-      deploymentId: "dep-1",
-      toolRefs: [],
-      credentials: [],
-    });
-    expect(state.step).toBe("credentials");
-    expect(state.error).toContain("SLACK_BOT_TOKEN");
-  });
-
-  it("attach stores provided secrets before updating the deployment", async () => {
+  it("attach follows the Passwords authorization transaction", async () => {
     const calls: string[] = [];
-    const api: ConnectorSetupApi = {
-      verifyCredentials: async () => ({ ok: true }),
-      attachConnector: async () => {
+    const api = testApi({
+      ensureEmployeeIdentity: async (request) => {
+        calls.push("identity");
+        expect(request.currentAgentIdentityId).toBeNull();
+        return { agentIdentityId: "agent-1" };
+      },
+      storeCredential: async (request) => {
+        calls.push("store");
+        expect(request.deploymentId).toBe("dep-1");
+        expect(request.credentials).toEqual({ SLACK_BOT_TOKEN: "xoxb-token" });
+        return {
+          references: {
+            SLACK_BOT_TOKEN:
+              "seren-secrets://11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/SLACK_BOT_TOKEN",
+          },
+        };
+      },
+      previewEmployeeSecretRefs: async (request) => {
+        calls.push("preview");
+        return { secretRefs: request.additionalRefs };
+      },
+      createEmployeeDelegation: async (request) => {
+        calls.push("delegate");
+        expect(request.organizationId).toBe("org-1");
+        expect(request.agentIdentityId).toBe("agent-1");
+        expect(request.secretRefs).toHaveLength(1);
+        return { secretResolutionDelegation: "signed-delegation" };
+      },
+      authorizeEmployeeDelegation: async (request) => {
+        calls.push("authorize");
+        expect(request.secretResolutionDelegation).toBe("signed-delegation");
+        return {};
+      },
+      bindConnectorSecrets: async (request) => {
+        calls.push("bind");
+        expect(request.connectorRef).toBe("slack");
+        return { secretRefs: Object.values(request.secretRefs) };
+      },
+      attachConnector: async (request) => {
         calls.push("attach");
+        expect(request.agentIdentityId).toBe("agent-1");
+        expect(request.secretResolutionDelegation).toBe("signed-delegation");
+        expect(request.toolRefs).toHaveLength(1);
+        expect(request).not.toHaveProperty("credentials");
         return {};
       },
-      storeSecret: async (request) => {
-        calls.push(`store:${request.name}`);
-        expect(request.name).toBe("connector-dep-1-SLACK_BOT_TOKEN");
-        expect(request.value).toBe("xoxb-token");
-        expect(request.description).toBe("Slack connector credential");
-        return {};
-      },
-    };
+    });
     let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
     state = connectorSetupEnterValue(state, "SLACK_BOT_TOKEN", "xoxb-token");
-    state = await connectorSetupAttach(api, state, SLACK, {
-      deploymentId: "dep-1",
-      toolRefs: [],
-      credentials: [],
-    });
-    expect(state.step).toBe("done");
+    state = await connectorSetupAttach(api, state, SLACK, DEPLOYMENT);
     expect(calls).toEqual([
-      "store:connector-dep-1-SLACK_BOT_TOKEN",
+      "identity",
+      "store",
+      "preview",
+      "delegate",
+      "authorize",
+      "bind",
       "attach",
     ]);
-  });
-
-  it("a secret store failure stops before the deployment update", async () => {
-    const api: ConnectorSetupApi = {
-      verifyCredentials: async () => ({ ok: true }),
-      attachConnector: async () => {
-        throw new Error("must not be called");
-      },
-      storeSecret: async () => ({ error: "secret store unavailable" }),
-    };
-    let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
-    state = connectorSetupEnterValue(state, "SLACK_BOT_TOKEN", "xoxb-token");
-    state = await connectorSetupAttach(api, state, SLACK, {
-      deploymentId: "dep-1",
-      toolRefs: [],
-      credentials: [],
-    });
-    expect(state.step).toBe("credentials");
-    expect(state.error).toBe("secret store unavailable");
-  });
-
-  it("attach success completes the flow", async () => {
-    const api: ConnectorSetupApi = {
-      verifyCredentials: async () => ({ ok: true }),
-      attachConnector: async (request) => {
-        expect(request.deploymentId).toBe("dep-1");
-        expect(request.toolRefs).toHaveLength(1);
-        expect(request.credentials).toHaveLength(1);
-        return {};
-      },
-    };
-    let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
-    state = connectorSetupEnterValue(state, "SLACK_BOT_TOKEN", "xoxb-token");
-    state = await connectorSetupAttach(api, state, SLACK, {
-      deploymentId: "dep-1",
-      toolRefs: [],
-      credentials: [],
-    });
     expect(state.step).toBe("done");
-    // Plaintext credential values must not survive a completed flow.
     expect(state.values).toEqual({});
+  });
+
+  it("a Passwords failure stops before references are bound", async () => {
+    const api = testApi({
+      ensureEmployeeIdentity: async () => ({ agentIdentityId: "agent-1" }),
+      storeCredential: async () => ({
+        error: "Unlock a writable Seren Passwords vault first",
+      }),
+    });
+    let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
+    state = connectorSetupEnterValue(state, "SLACK_BOT_TOKEN", "xoxb-token");
+    state = await connectorSetupAttach(api, state, SLACK, DEPLOYMENT);
+    expect(state.step).toBe("credentials");
+    expect(state.error).toContain("Unlock a writable");
+    expect(state.values.SLACK_BOT_TOKEN).toBe("xoxb-token");
+  });
+
+  it("a final deployment update error remains resumable", async () => {
+    const api = testApi({
+      ensureEmployeeIdentity: async () => ({ agentIdentityId: "agent-1" }),
+      storeCredential: async () => ({
+        references: { SLACK_BOT_TOKEN: "seren-secrets://vault/item/field" },
+      }),
+      previewEmployeeSecretRefs: async () => ({
+        secretRefs: ["seren-secrets://vault/item/field"],
+      }),
+      createEmployeeDelegation: async () => ({
+        secretResolutionDelegation: "signed-delegation",
+      }),
+      authorizeEmployeeDelegation: async () => ({}),
+      bindConnectorSecrets: async () => ({
+        secretRefs: ["seren-secrets://vault/item/field"],
+      }),
+      attachConnector: async () => ({ error: "deployment update rejected" }),
+    });
+    let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
+    state = connectorSetupEnterValue(state, "SLACK_BOT_TOKEN", "xoxb-token");
+    state = await connectorSetupAttach(api, state, SLACK, DEPLOYMENT);
+    expect(state.step).toBe("credentials");
+    expect(state.error).toBe("deployment update rejected");
+  });
+
+  it("allows connector rotation when the signed preview contains replaced references", async () => {
+    const oldReference =
+      "seren-secrets://11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/SLACK_BOT_TOKEN";
+    const newReference =
+      "seren-secrets://11111111-1111-1111-1111-111111111111/33333333-3333-3333-3333-333333333333/SLACK_BOT_TOKEN";
+    const api = testApi({
+      ensureEmployeeIdentity: async () => ({ agentIdentityId: "agent-1" }),
+      storeCredential: async () => ({
+        references: { SLACK_BOT_TOKEN: newReference },
+      }),
+      previewEmployeeSecretRefs: async () => ({
+        secretRefs: [oldReference, newReference],
+      }),
+      createEmployeeDelegation: async () => ({
+        secretResolutionDelegation: "signed-delegation",
+      }),
+      authorizeEmployeeDelegation: async () => ({}),
+      bindConnectorSecrets: async () => ({ secretRefs: [newReference] }),
+      attachConnector: async () => ({}),
+    });
+    let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
+    state = connectorSetupEnterValue(state, "SLACK_BOT_TOKEN", "xoxb-rotated");
+
+    state = await connectorSetupAttach(api, state, SLACK, DEPLOYMENT);
+
+    expect(state.step).toBe("done");
+    expect(state.error).toBeNull();
+  });
+
+  it("rejects a post-bind reference that was not covered by the delegation", async () => {
+    const authorizedReference =
+      "seren-secrets://11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/SLACK_BOT_TOKEN";
+    const unauthorizedReference =
+      "seren-secrets://11111111-1111-1111-1111-111111111111/33333333-3333-3333-3333-333333333333/SLACK_BOT_TOKEN";
+    const api = testApi({
+      ensureEmployeeIdentity: async () => ({ agentIdentityId: "agent-1" }),
+      storeCredential: async () => ({
+        references: { SLACK_BOT_TOKEN: authorizedReference },
+      }),
+      previewEmployeeSecretRefs: async () => ({
+        secretRefs: [authorizedReference],
+      }),
+      createEmployeeDelegation: async () => ({
+        secretResolutionDelegation: "signed-delegation",
+      }),
+      authorizeEmployeeDelegation: async () => ({}),
+      bindConnectorSecrets: async () => ({ secretRefs: [unauthorizedReference] }),
+    });
+    let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
+    state = connectorSetupEnterValue(state, "SLACK_BOT_TOKEN", "xoxb-token");
+
+    state = await connectorSetupAttach(api, state, SLACK, DEPLOYMENT);
+
+    expect(state.step).toBe("credentials");
+    expect(state.error).toContain("credentials changed during authorization");
   });
 });

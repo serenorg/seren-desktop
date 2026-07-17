@@ -3,9 +3,9 @@
 //
 // Both the desktop settings surface and the hosted employees web app walk
 // the same steps: choose a connector from the platform catalog, collect
-// its credential fields, verify them live against the provider, then
-// attach the connector reference and env-bound credential references to
-// the managed deployment. Hosts supply their generated API clients
+// its credential fields, verify them live against the provider, then store
+// them in Seren Passwords and authorize the managed employee to resolve
+// only their opaque references. Hosts supply their generated API clients
 // through `ConnectorSetupApi`; this module owns the state transitions so
 // the flow behaves identically everywhere.
 
@@ -50,14 +50,6 @@ export interface ConnectorToolRefLike {
   [extra: string]: unknown;
 }
 
-export interface ConnectorCredentialRefLike {
-  name: string;
-  ref_uri: string;
-  kind: string;
-  binding: string;
-  [extra: string]: unknown;
-}
-
 export interface ConnectorSetupState {
   step: ConnectorSetupStep;
   selectedRef: string | null;
@@ -87,16 +79,39 @@ export interface ConnectorSetupApi {
   attachConnector(request: {
     deploymentId: string;
     toolRefs: ConnectorToolRefLike[];
-    credentials?: ConnectorCredentialRefLike[];
+    agentIdentityId: string;
+    secretResolutionDelegation: string;
   }): Promise<{ error?: string }>;
-  /// Persist one credential value as an organization secret so the
-  /// deployment's `org-secret://` references resolve. Optional: hosts
-  /// without a secret-store client fall back to attach-only, and the
-  /// platform's pre-deploy validation names any missing secrets.
-  storeSecret?(request: {
-    name: string;
-    value: string;
-    description?: string;
+  ensureEmployeeIdentity(request: {
+    deploymentId: string;
+    displayName: string;
+    currentAgentIdentityId?: string | null;
+  }): Promise<{ agentIdentityId?: string; error?: string }>;
+  storeCredential(request: {
+    deploymentId: string;
+    title: string;
+    serviceName: string;
+    credentials: Record<string, string>;
+  }): Promise<{ references?: Record<string, string>; error?: string }>;
+  bindConnectorSecrets(request: {
+    deploymentId: string;
+    connectorRef: string;
+    secretRefs: Record<string, string>;
+  }): Promise<{ secretRefs?: string[]; error?: string }>;
+  previewEmployeeSecretRefs(request: {
+    deploymentId: string;
+    additionalRefs: string[];
+  }): Promise<{ secretRefs?: string[]; error?: string }>;
+  createEmployeeDelegation(request: {
+    deploymentId: string;
+    organizationId: string;
+    agentIdentityId: string;
+    secretRefs: string[];
+  }): Promise<{ secretResolutionDelegation?: string; error?: string }>;
+  authorizeEmployeeDelegation(request: {
+    deploymentId: string;
+    agentIdentityId: string;
+    secretResolutionDelegation: string;
   }): Promise<{ error?: string }>;
 }
 
@@ -160,27 +175,15 @@ export function connectorSetupProvidedValues(
   );
 }
 
-/// Organization-secret key used by the wizard for one deployment field.
-/// The injected credential name remains the provider env name, while the
-/// stored key is deployment-scoped so connecting another employee cannot
-/// rotate this employee's credential.
-export function connectorSetupSecretStorageName(
-  deploymentId: string,
-  fieldName: string,
-): string {
-  return `connector-${deploymentId}-${fieldName}`;
-}
-
-/// Names of the organization secrets the attach step will reference.
-export function connectorSetupSecretNames(
+/// Credential field names the attach step will store in Seren Passwords.
+export function connectorSetupProvidedFieldNames(
   entry: ConnectorCatalogEntryLike,
   values: Record<string, string>,
-  deploymentId: string,
 ): string[] {
   const provided = connectorSetupProvidedValues(values);
   return entry.credentials
     .filter((field) => field.name in provided)
-    .map((field) => connectorSetupSecretStorageName(deploymentId, field.name));
+    .map((field) => field.name);
 }
 
 /// Merge the connector tool ref into the deployment's existing refs.
@@ -209,62 +212,6 @@ export function connectorSetupMergeToolRefs(
       capability: entry.capability,
     },
   ];
-}
-
-/// Env-bound `org-secret://` references for each provided credential field.
-/// Existing same-name refs are corrected when they point at another store or
-/// use a non-env binding, so a successful attach cannot silently leave the
-/// connector without the organization secret that was just persisted.
-export function connectorSetupMergeCredentialRefs(
-  existing: ConnectorCredentialRefLike[],
-  entry: ConnectorCatalogEntryLike,
-  values: Record<string, string>,
-  deploymentId: string,
-): { merged: ConnectorCredentialRefLike[]; changed: number } {
-  const provided = connectorSetupProvidedValues(values);
-  const desired = new Map(
-    entry.credentials
-      .filter((field) => field.name in provided)
-      .map(
-        (field) =>
-          [
-            field.name,
-            {
-              name: field.name,
-              ref_uri: `org-secret://${connectorSetupSecretStorageName(
-                deploymentId,
-                field.name,
-              )}`,
-              kind: "api_key",
-              binding: "env",
-            },
-          ] as const,
-      ),
-  );
-  let changed = 0;
-  const existingNames = new Set(existing.map((ref) => ref.name));
-  const merged = existing.map((ref) => {
-    const replacement = desired.get(ref.name);
-    if (!replacement) return ref;
-    if (
-      ref.ref_uri === replacement.ref_uri &&
-      ref.kind === replacement.kind &&
-      ref.binding === replacement.binding &&
-      ref.binding_target === undefined
-    ) {
-      return ref;
-    }
-    changed += 1;
-    const corrected: ConnectorCredentialRefLike = { ...ref, ...replacement };
-    delete corrected.binding_target;
-    return corrected;
-  });
-  for (const [name, addition] of desired) {
-    if (existingNames.has(name)) continue;
-    merged.push(addition);
-    changed += 1;
-  }
-  return { merged, changed };
 }
 
 /// Run the live verification step. Connectors without a verification
@@ -302,50 +249,139 @@ export async function connectorSetupVerify(
   };
 }
 
-/// Run the attach step: store provided values as organization secrets
-/// (when the host supplies a secret-store client), then update the
-/// deployment. A store failure stops before attach so the flow never
-/// attaches references to secrets that were not persisted.
+/// Run the attach step through the Passwords trust boundary. Plaintext is
+/// handed only to the host's local Passwords implementation; Core receives
+/// opaque references and a user-signed delegation for their complete set.
 export async function connectorSetupAttach(
   api: ConnectorSetupApi,
   state: ConnectorSetupState,
   entry: ConnectorCatalogEntryLike,
   deployment: {
     deploymentId: string;
+    organizationId: string;
+    displayName: string;
+    agentIdentityId?: string | null;
     toolRefs: ConnectorToolRefLike[];
-    credentials: ConnectorCredentialRefLike[];
+  },
+): Promise<ConnectorSetupState> {
+  try {
+    return await connectorSetupAttachInner(api, state, entry, deployment);
+  } catch (error) {
+    return {
+      ...state,
+      busy: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function connectorSetupAttachInner(
+  api: ConnectorSetupApi,
+  state: ConnectorSetupState,
+  entry: ConnectorCatalogEntryLike,
+  deployment: {
+    deploymentId: string;
+    organizationId: string;
+    displayName: string;
+    agentIdentityId?: string | null;
+    toolRefs: ConnectorToolRefLike[];
   },
 ): Promise<ConnectorSetupState> {
   const busyState = { ...state, busy: true, error: null };
-  if (api.storeSecret) {
-    const provided = connectorSetupProvidedValues(busyState.values);
-    for (const field of entry.credentials) {
-      const value = provided[field.name];
-      if (value === undefined) continue;
-      const stored = await api.storeSecret({
-        name: connectorSetupSecretStorageName(
-          deployment.deploymentId,
-          field.name,
-        ),
-        value,
-        description: `${entry.display_name} connector credential`,
-      });
-      if (stored.error) {
-        return { ...busyState, busy: false, error: stored.error };
-      }
-    }
+  const identity = await api.ensureEmployeeIdentity({
+    deploymentId: deployment.deploymentId,
+    displayName: deployment.displayName,
+    currentAgentIdentityId: deployment.agentIdentityId,
+  });
+  if (identity.error || !identity.agentIdentityId) {
+    return {
+      ...busyState,
+      busy: false,
+      error: identity.error ?? "The employee identity could not be created.",
+    };
   }
+
+  const stored = await api.storeCredential({
+    deploymentId: deployment.deploymentId,
+    title: `${deployment.displayName} - ${entry.display_name}`,
+    serviceName: entry.connector_ref,
+    credentials: connectorSetupProvidedValues(busyState.values),
+  });
+  if (stored.error || !stored.references) {
+    return {
+      ...busyState,
+      busy: false,
+      error: stored.error ?? "The credential could not be stored.",
+    };
+  }
+
+  const preview = await api.previewEmployeeSecretRefs({
+    deploymentId: deployment.deploymentId,
+    additionalRefs: Object.values(stored.references),
+  });
+  if (preview.error || !preview.secretRefs) {
+    return {
+      ...busyState,
+      busy: false,
+      error:
+        preview.error ??
+        "The complete credential reference set could not be prepared.",
+    };
+  }
+
+  const delegation = await api.createEmployeeDelegation({
+    deploymentId: deployment.deploymentId,
+    organizationId: deployment.organizationId,
+    agentIdentityId: identity.agentIdentityId,
+    secretRefs: preview.secretRefs,
+  });
+  if (delegation.error || !delegation.secretResolutionDelegation) {
+    return {
+      ...busyState,
+      busy: false,
+      error:
+        delegation.error ??
+        "The employee secret access could not be authorized.",
+    };
+  }
+
+  const authorized = await api.authorizeEmployeeDelegation({
+    deploymentId: deployment.deploymentId,
+    agentIdentityId: identity.agentIdentityId,
+    secretResolutionDelegation: delegation.secretResolutionDelegation,
+  });
+  if (authorized.error) {
+    return { ...busyState, busy: false, error: authorized.error };
+  }
+
+  const bound = await api.bindConnectorSecrets({
+    deploymentId: deployment.deploymentId,
+    connectorRef: entry.connector_ref,
+    secretRefs: stored.references,
+  });
+  if (bound.error || !bound.secretRefs) {
+    return {
+      ...busyState,
+      busy: false,
+      error: bound.error ?? "The credential references could not be bound.",
+    };
+  }
+  const authorizedRefs = new Set(preview.secretRefs);
+  if (bound.secretRefs.some((reference) => !authorizedRefs.has(reference))) {
+    return {
+      ...busyState,
+      busy: false,
+      error:
+        "The employee credentials changed during authorization. Retry the attachment.",
+    };
+  }
+
   const toolRefs = connectorSetupMergeToolRefs(deployment.toolRefs, entry);
-  const { merged, changed } = connectorSetupMergeCredentialRefs(
-    deployment.credentials,
-    entry,
-    busyState.values,
-    deployment.deploymentId,
-  );
   const result = await api.attachConnector({
     deploymentId: deployment.deploymentId,
     toolRefs,
-    ...(changed > 0 ? { credentials: merged } : {}),
+    agentIdentityId: identity.agentIdentityId,
+    secretResolutionDelegation: delegation.secretResolutionDelegation,
   });
   if (result.error) {
     return { ...busyState, busy: false, error: result.error };

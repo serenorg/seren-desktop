@@ -243,6 +243,12 @@ export type ApprovalInboxToolCall = {
     tool_ref: string;
 };
 
+export type AttachManagedStorageRequest = {
+    bucket_slug: string;
+    permission: ManagedStoragePermission;
+    workspace?: null | ManagedStorageWorkspaceRequest;
+};
+
 /**
  * A single audit trail entry.
  */
@@ -258,6 +264,26 @@ export type AuditEntry = {
     prev_hash: string;
     publisher_id?: string | null;
     sequence_number: number;
+};
+
+export type BindConnectorSecretsRequest = {
+    /**
+     * Connector credential field names mapped to opaque Seren Passwords references.
+     */
+    secret_refs: {
+        [key: string]: string;
+    };
+};
+
+export type BoundConnectorSecrets = {
+    connector_ref: string;
+    deployment_id: string;
+    secret_fields: Array<string>;
+    /**
+     * Complete opaque reference set the client must cover with the next
+     * user-signed secret resolution delegation.
+     */
+    secret_refs: Array<string>;
 };
 
 export type CloudConversationListResponse = {
@@ -1853,6 +1879,90 @@ export type DataResponseAuditEntry = {
         prev_hash: string;
         publisher_id?: string | null;
         sequence_number: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseBoundConnectorSecrets = {
+    data: {
+        connector_ref: string;
+        deployment_id: string;
+        secret_fields: Array<string>;
+        /**
+         * Complete opaque reference set the client must cover with the next
+         * user-signed secret resolution delegation.
+         */
+        secret_refs: Array<string>;
     };
     pagination?: null | PaginationMeta;
 };
@@ -4302,6 +4412,243 @@ export type DataResponseDeploymentSpendSummary = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseManagedEmployeeSecretRefsPreview = {
+    data: {
+        deployment_id: string;
+        /**
+         * Complete reference set the client must cover with the next user-signed delegation.
+         */
+        secret_refs: Array<string>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseManagedStorageAttachment = {
+    data: {
+        agent_identity_id: string;
+        bucket_slug: string;
+        deployment_id: string;
+        permission: ManagedStoragePermission;
+        workspace?: null | ManagedStorageWorkspaceRequest;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseValue = {
+    data: unknown;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseVecAgentCredentialSecret = {
     data: Array<{
         created_at: string;
@@ -5593,6 +5940,84 @@ export type DataResponseVecCloudRunOutputEventEnvelope = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseVecManagedStorageBucket = {
+    data: Array<{
+        display_name?: string | null;
+        slug: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseVerificationResult = {
     /**
      * Result of verifying the audit chain integrity.
@@ -5797,6 +6222,36 @@ export type ManagedAgentTemplate = 'research_monitor' | 'workflow_agent';
 
 export type ManagedAgentToolPreset = 'live_data' | 'publisher_actions' | 'database';
 
+export type ManagedEmployeeSecretRefsPreview = {
+    deployment_id: string;
+    /**
+     * Complete reference set the client must cover with the next user-signed delegation.
+     */
+    secret_refs: Array<string>;
+};
+
+export type ManagedStorageAttachment = {
+    agent_identity_id: string;
+    bucket_slug: string;
+    deployment_id: string;
+    permission: ManagedStoragePermission;
+    workspace?: null | ManagedStorageWorkspaceRequest;
+};
+
+export type ManagedStorageBucket = {
+    display_name?: string | null;
+    slug: string;
+};
+
+export type ManagedStoragePermission = 'reader' | 'writer';
+
+export type ManagedStorageWorkspaceRequest = {
+    restore_on_start?: boolean;
+    retention_count?: number;
+    snapshot_interval_seconds?: number;
+    snapshot_on_stop?: boolean;
+};
+
 /**
  * Cloud deployment orchestration mode.
  *
@@ -5829,6 +6284,13 @@ export type PaginationMeta = {
      * Total number of items across all pages
      */
     total: number;
+};
+
+export type PreviewManagedEmployeeSecretRefsRequest = {
+    /**
+     * Opaque references proposed for the next employee configuration.
+     */
+    additional_refs: Array<string>;
 };
 
 /**
@@ -6676,6 +7138,50 @@ export type SerenCloudDeploymentAuditResponses = {
 
 export type SerenCloudDeploymentAuditResponse = SerenCloudDeploymentAuditResponses[keyof SerenCloudDeploymentAuditResponses];
 
+export type SerenCloudBindConnectorSecretsData = {
+    body: BindConnectorSecretsRequest;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+        /**
+         * Connector catalog reference
+         */
+        connector_ref: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/connectors/{connector_ref}';
+};
+
+export type SerenCloudBindConnectorSecretsErrors = {
+    /**
+     * Invalid connector secret references
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment or connector not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudBindConnectorSecretsResponses = {
+    /**
+     * Connector secret references bound to the managed employee
+     */
+    200: DataResponseBoundConnectorSecrets;
+};
+
+export type SerenCloudBindConnectorSecretsResponse = SerenCloudBindConnectorSecretsResponses[keyof SerenCloudBindConnectorSecretsResponses];
+
 export type SerenCloudListConversationsData = {
     body?: never;
     path: {
@@ -7439,6 +7945,46 @@ export type SerenCloudCancelAgentScheduleResponses = {
 
 export type SerenCloudCancelAgentScheduleResponse = SerenCloudCancelAgentScheduleResponses[keyof SerenCloudCancelAgentScheduleResponses];
 
+export type SerenCloudPreviewManagedEmployeeSecretRefsData = {
+    body: PreviewManagedEmployeeSecretRefsRequest;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/secret-refs/preview';
+};
+
+export type SerenCloudPreviewManagedEmployeeSecretRefsErrors = {
+    /**
+     * Invalid employee secret references
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudPreviewManagedEmployeeSecretRefsResponses = {
+    /**
+     * Complete secret reference set for delegation signing
+     */
+    200: DataResponseManagedEmployeeSecretRefsPreview;
+};
+
+export type SerenCloudPreviewManagedEmployeeSecretRefsResponse = SerenCloudPreviewManagedEmployeeSecretRefsResponses[keyof SerenCloudPreviewManagedEmployeeSecretRefsResponses];
+
 export type SerenCloudInteractiveSessionsData = {
     body?: never;
     path: {
@@ -7688,6 +8234,110 @@ export type SerenCloudStopResponses = {
 };
 
 export type SerenCloudStopResponse = SerenCloudStopResponses[keyof SerenCloudStopResponses];
+
+export type SerenCloudDetachStorageData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/storage';
+};
+
+export type SerenCloudDetachStorageErrors = {
+    /**
+     * Deployment or organization storage management permission required
+     */
+    403: unknown;
+    /**
+     * Deployment or storage attachment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudDetachStorageResponses = {
+    /**
+     * Storage detached from the managed employee
+     */
+    200: DataResponseValue;
+};
+
+export type SerenCloudDetachStorageResponse = SerenCloudDetachStorageResponses[keyof SerenCloudDetachStorageResponses];
+
+export type SerenCloudGetStorageData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/storage';
+};
+
+export type SerenCloudGetStorageErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment or storage attachment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudGetStorageResponses = {
+    /**
+     * Managed employee storage attachment
+     */
+    200: DataResponseManagedStorageAttachment;
+};
+
+export type SerenCloudGetStorageResponse = SerenCloudGetStorageResponses[keyof SerenCloudGetStorageResponses];
+
+export type SerenCloudAttachStorageData = {
+    body: AttachManagedStorageRequest;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/storage';
+};
+
+export type SerenCloudAttachStorageErrors = {
+    /**
+     * Invalid storage attachment
+     */
+    400: unknown;
+    /**
+     * Deployment or organization storage management permission required
+     */
+    403: unknown;
+    /**
+     * Deployment or storage bucket not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudAttachStorageResponses = {
+    /**
+     * Storage attached to the managed employee
+     */
+    200: DataResponseManagedStorageAttachment;
+};
+
+export type SerenCloudAttachStorageResponse = SerenCloudAttachStorageResponses[keyof SerenCloudAttachStorageResponses];
 
 export type SerenCloudListEnvironmentsData = {
     body?: never;
@@ -8785,3 +9435,34 @@ export type SerenCloudRunStreamResponses = {
      */
     200: unknown;
 };
+
+export type SerenCloudListStorageBucketsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/storage/buckets';
+};
+
+export type SerenCloudListStorageBucketsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Storage is temporarily unavailable
+     */
+    502: unknown;
+};
+
+export type SerenCloudListStorageBucketsResponses = {
+    /**
+     * Organization storage buckets
+     */
+    200: DataResponseVecManagedStorageBucket;
+};
+
+export type SerenCloudListStorageBucketsResponse = SerenCloudListStorageBucketsResponses[keyof SerenCloudListStorageBucketsResponses];

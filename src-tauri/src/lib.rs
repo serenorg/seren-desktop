@@ -1122,6 +1122,9 @@ pub fn run() {
             passwords::list_passwords_items,
             passwords::get_passwords_item,
             passwords::save_passwords_api_credential,
+            passwords::save_passwords_employee_credential,
+            passwords::ensure_passwords_employee_identity,
+            passwords::create_passwords_employee_delegation,
             // Polymarket WebSocket commands
             polymarket::commands::connect_polymarket_websocket,
             polymarket::commands::subscribe_polymarket_market,

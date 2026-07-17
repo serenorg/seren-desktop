@@ -45,7 +45,7 @@ tokio = { version = "1", features = ["process", "io-util", "sync", "io-std", "ti
 tokio-util = { version = "0.7", features = ["compat"] }
 futures = "0.3"
 async-trait = "0.1"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v5"] }
 portable-pty = "0.9"
 termwiz = "0.23"
 unicode-width = "0.2"
@@ -64,7 +64,7 @@ postgres = { version = "0.19", features = ["with-serde_json-1"] }
 postgres-native-tls = "0.5"
 native-tls = "0.2"
 seren-memory-sdk = { git = "https://github.com/serenorg/seren-memory-sdk.git", branch = "main" }
-seren-secrets-crypto = { git = "https://github.com/serenorg/seren-secrets.git", tag = "v0.2.0" }
+seren-secrets-crypto = { git = "https://github.com/serenorg/seren-secrets.git", tag = "v0.4.0" }
 rmcp = { version = "1.2", features = [
     "client",
     "transport-io",                           # stdio for local MCP servers

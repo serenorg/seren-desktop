@@ -93,6 +93,15 @@ export interface SavePasswordsApiCredentialRequest {
   fields: PasswordsSecretFieldInput[];
 }
 
+export interface PasswordsEmployeeIdentityResponse {
+  agentIdentityId: string;
+}
+
+export interface PasswordsEmployeeDelegationResponse {
+  agentIdentityId: string;
+  secretResolutionDelegation: string;
+}
+
 async function invokeTauri<T>(
   command: string,
   params?: Record<string, unknown>,
@@ -192,6 +201,40 @@ export async function savePasswordsApiCredential(
 ): Promise<CreatePasswordsApiCredentialResponse> {
   return invokeTauri<CreatePasswordsApiCredentialResponse>(
     "save_passwords_api_credential",
+    { request },
+  );
+}
+
+export async function savePasswordsEmployeeCredential(request: {
+  deploymentId: string;
+  title: string;
+  serviceName: string;
+  fields: PasswordsSecretFieldInput[];
+}): Promise<CreatePasswordsApiCredentialResponse> {
+  return invokeTauri<CreatePasswordsApiCredentialResponse>(
+    "save_passwords_employee_credential",
+    { request },
+  );
+}
+
+export async function ensurePasswordsEmployeeIdentity(
+  deploymentId: string,
+  displayName: string,
+): Promise<PasswordsEmployeeIdentityResponse> {
+  return invokeTauri<PasswordsEmployeeIdentityResponse>(
+    "ensure_passwords_employee_identity",
+    { deploymentId, displayName },
+  );
+}
+
+export async function createPasswordsEmployeeDelegation(request: {
+  deploymentId: string;
+  organizationId: string;
+  agentIdentityId: string;
+  secretRefs: string[];
+}): Promise<PasswordsEmployeeDelegationResponse> {
+  return invokeTauri<PasswordsEmployeeDelegationResponse>(
+    "create_passwords_employee_delegation",
     { request },
   );
 }

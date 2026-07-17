@@ -9,8 +9,8 @@ import {
   connectorSetupAttach,
   connectorSetupBack,
   connectorSetupEnterValue,
+  connectorSetupProvidedFieldNames,
   connectorSetupRequiredFieldsFilled,
-  connectorSetupSecretNames,
   connectorSetupSelect,
   connectorSetupVerify,
   VERIFIABLE_CONNECTOR_REFS,
@@ -23,12 +23,18 @@ import {
   serenAgentUpdateManagedDeployment,
 } from "@/api/seren-agent";
 import {
+  serenCloudBindConnectorSecrets,
   serenCloudListConnectors,
-  serenCloudUpsertCredentialSecret,
+  serenCloudPreviewManagedEmployeeSecretRefs,
   serenCloudVerifyConnectorCredentials,
 } from "@/api/seren-cloud";
 import { formatApiError } from "@/lib/api-errors";
 import { openExternalLink } from "@/lib/external-link";
+import {
+  createPasswordsEmployeeDelegation,
+  ensurePasswordsEmployeeIdentity,
+  savePasswordsEmployeeCredential,
+} from "@/services/keys";
 import { loadedResource, loadResourceState } from "./resource-state";
 
 const setupApi: ConnectorSetupApi = {
@@ -47,12 +53,9 @@ const setupApi: ConnectorSetupApi = {
     const result = await serenAgentUpdateManagedDeployment({
       path: { id: request.deploymentId },
       body: {
-        // The shared controller emits structural refs; the generated
-        // request types match the same wire shape.
         tool_refs: request.toolRefs as never,
-        ...(request.credentials
-          ? { credentials: request.credentials as never }
-          : {}),
+        agent_identity_id: request.agentIdentityId,
+        secret_resolution_delegation: request.secretResolutionDelegation,
       },
       throwOnError: false,
     });
@@ -67,13 +70,108 @@ const setupApi: ConnectorSetupApi = {
     }
     return {};
   },
-  async storeSecret(request) {
-    const result = await serenCloudUpsertCredentialSecret({
+  async ensureEmployeeIdentity(request) {
+    try {
+      const identity = await ensurePasswordsEmployeeIdentity(
+        request.deploymentId,
+        request.displayName,
+      );
+      if (request.currentAgentIdentityId !== identity.agentIdentityId) {
+        const update = await serenAgentUpdateManagedDeployment({
+          path: { id: request.deploymentId },
+          body: { agent_identity_id: identity.agentIdentityId },
+          throwOnError: false,
+        });
+        if (update.error) {
+          return {
+            error: formatApiError(
+              update.error,
+              update.response,
+              "The employee identity could not be attached.",
+            ),
+          };
+        }
+      }
+      return { agentIdentityId: identity.agentIdentityId };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  },
+  async storeCredential(request) {
+    try {
+      const stored = await savePasswordsEmployeeCredential({
+        deploymentId: request.deploymentId,
+        title: request.title,
+        serviceName: request.serviceName,
+        fields: Object.entries(request.credentials).map(([name, value]) => ({
+          name,
+          value,
+        })),
+      });
+      return { references: stored.references };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  },
+  async bindConnectorSecrets(request) {
+    const result = await serenCloudBindConnectorSecrets({
+      path: {
+        id: request.deploymentId,
+        connector_ref: request.connectorRef,
+      },
+      body: { secret_refs: request.secretRefs },
+      throwOnError: false,
+    });
+    if (result.error || !result.data) {
+      return {
+        error: formatApiError(
+          result.error,
+          result.response,
+          "The connector credential references could not be bound.",
+        ),
+      };
+    }
+    return { secretRefs: result.data.data.secret_refs };
+  },
+  async previewEmployeeSecretRefs(request) {
+    const result = await serenCloudPreviewManagedEmployeeSecretRefs({
+      path: { id: request.deploymentId },
+      body: { additional_refs: request.additionalRefs },
+      throwOnError: false,
+    });
+    if (result.error || !result.data) {
+      return {
+        error: formatApiError(
+          result.error,
+          result.response,
+          "The complete credential reference set could not be prepared.",
+        ),
+      };
+    }
+    return { secretRefs: result.data.data.secret_refs };
+  },
+  async createEmployeeDelegation(request) {
+    try {
+      const delegation = await createPasswordsEmployeeDelegation(request);
+      return {
+        secretResolutionDelegation: delegation.secretResolutionDelegation,
+      };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  },
+  async authorizeEmployeeDelegation(request) {
+    const result = await serenAgentUpdateManagedDeployment({
+      path: { id: request.deploymentId },
       body: {
-        name: request.name,
-        value: request.value,
-        scope: "organization",
-        description: request.description,
+        agent_identity_id: request.agentIdentityId,
+        secret_resolution_delegation: request.secretResolutionDelegation,
       },
       throwOnError: false,
     });
@@ -82,7 +180,7 @@ const setupApi: ConnectorSetupApi = {
         error: formatApiError(
           result.error,
           result.response,
-          `Failed to store the ${request.name} secret.`,
+          "The employee secret authorization could not be installed.",
         ),
       };
     }
@@ -118,6 +216,10 @@ export function ConnectorSettings() {
     (deploymentState()?.data ?? []).filter(
       (deployment) => deployment.managed_agent,
     ),
+  );
+  const selectedEmployee = createMemo(
+    () =>
+      employees().find((deployment) => deployment.id === employeeId()) ?? null,
   );
   const [detailState, { refetch: refetchDetail }] = createResource(
     employeeId,
@@ -167,13 +269,16 @@ export function ConnectorSettings() {
   async function attach() {
     const entry = selectedEntry();
     const currentDetail = detail();
-    if (!entry || !currentDetail || state().busy) return;
+    const employee = selectedEmployee();
+    if (!entry || !currentDetail || !employee || state().busy) return;
     const id = employeeId();
     setState((current) => ({ ...current, busy: true, error: null }));
     const next = await connectorSetupAttach(setupApi, state(), entry, {
       deploymentId: id,
+      organizationId: employee.organization_id,
+      displayName: currentDetail.name,
+      agentIdentityId: currentDetail.agent_identity_id,
       toolRefs: currentDetail.tool_refs ?? [],
-      credentials: currentDetail.credentials ?? [],
     });
     if (employeeId() !== id) return;
     setState(next);
@@ -464,16 +569,14 @@ export function ConnectorSettings() {
               </div>
             </Show>
             <p class="m-0 text-[0.85rem] leading-relaxed text-muted-foreground">
-              The provided values will be stored as organization secrets and
-              referenced by this employee.
+              The provided values will be encrypted in a dedicated Seren
+              Passwords vault for this employee. The employee receives read-only
+              access to that vault, while its scripts receive only opaque
+              references. Unlock Seren Passwords before attaching the channel.
             </p>
             <ul class="my-3 grid gap-1 rounded-md border border-border bg-surface-0/50 px-3 py-2.5">
               <For
-                each={connectorSetupSecretNames(
-                  entry(),
-                  state().values,
-                  employeeId(),
-                )}
+                each={connectorSetupProvidedFieldNames(entry(), state().values)}
               >
                 {(name) => (
                   <li class="list-none font-mono text-[0.75rem] text-muted-foreground">

@@ -15,6 +15,10 @@ use seren_secrets_crypto::keys::{
     VaultKey,
 };
 use seren_secrets_crypto::protocol::account::{AccountSecrets, account_setup, unlock_account};
+use seren_secrets_crypto::protocol::agent_grant_delegation::{
+    AgentGrantDelegation, AgentGrantDelegationEntry, AgentGrantDelegationScope,
+    sign_agent_grant_delegation,
+};
 use seren_secrets_crypto::protocol::item::{
     ApiCredentialContent, ApiCredentialKind, CustomField, CustomFieldKind, DecryptedItemContent,
     FieldPurpose, ItemContent, LoginContent, LoginUrl, TotpAlgorithm, TotpConfig,
@@ -36,6 +40,11 @@ const PASSWORDS_BASE_URL: &str = "https://api.serendb.com/publishers/seren-passw
 const DESKTOP_MCP_AGENT_CONTEXT: &str = "seren-desktop";
 const DESKTOP_MCP_AGENT_DISPLAY_NAME: &str = "Seren Desktop";
 const DESKTOP_MCP_AGENT_ACCESS_LEVEL: &str = "write";
+const EMPLOYEE_AGENT_ACCESS_LEVEL: &str = "read";
+const EMPLOYEE_AGENT_CONTEXT_PREFIX: &str = "seren-cloud-employee:";
+const EMPLOYEE_VAULT_NAMESPACE: Uuid = Uuid::from_u128(0x2b72a9ce_7a94_5f81_aef7_8693ff594f1b);
+const EMPLOYEE_DELEGATION_VALIDITY_SECONDS: i64 = 365 * 24 * 60 * 60;
+const EMPLOYEE_DELEGATION_CLOCK_SKEW_SECONDS: i64 = 60;
 const MAX_SECRET_FIELDS: usize = 16;
 const MAX_FIELD_NAME_LEN: usize = 128;
 const MAX_FIELD_VALUE_LEN: usize = 32 * 1024;
@@ -159,6 +168,37 @@ pub struct SavePasswordsApiCredentialRequest {
     fields: Vec<PasswordsSecretFieldInput>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavePasswordsEmployeeCredentialRequest {
+    deployment_id: String,
+    title: String,
+    service_name: String,
+    fields: Vec<PasswordsSecretFieldInput>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordsEmployeeIdentityResponse {
+    agent_identity_id: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePasswordsEmployeeDelegationRequest {
+    deployment_id: String,
+    organization_id: String,
+    agent_identity_id: String,
+    secret_refs: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordsEmployeeDelegationResponse {
+    agent_identity_id: Uuid,
+    secret_resolution_delegation: String,
+}
+
 struct PasswordsSession {
     // KEM public key proven to match the unwrapped private key at unlock;
     // later wrap operations must use this copy rather than re-fetching the
@@ -252,6 +292,13 @@ struct IdentityRecord {
     owner_user_id: Option<Uuid>,
     kem_public_key: String,
     signing_public_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SecretsGatewayDelegationConfig {
+    grant_delegate_signer_key_id: String,
+    default_max_grant_ttl_seconds: u64,
+    delegation_epoch_unix_milliseconds: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -497,15 +544,78 @@ pub async fn save_passwords_api_credential(
     let mut fields = request.fields;
     let title = sanitize_title(&request.title, &request.service_name);
 
-    let result = save_passwords_api_credential_inner(&app, vault_id, item_id, &title, &mut fields)
-        .await
-        .map_err(|err| err.to_string());
+    let result =
+        save_passwords_api_credential_inner(&app, vault_id, item_id, None, &title, &mut fields)
+            .await
+            .map_err(|err| err.to_string());
 
     for field in &mut fields {
         field.value.zeroize();
     }
 
     result
+}
+
+#[tauri::command]
+pub async fn save_passwords_employee_credential(
+    app: AppHandle,
+    request: SavePasswordsEmployeeCredentialRequest,
+) -> Result<CreatePasswordsApiCredentialResponse, String> {
+    let deployment_id = parse_uuid(&request.deployment_id, "deployment_id")?;
+    let vault_id = ensure_passwords_employee_vault_inner(&app, deployment_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut fields = request.fields;
+    let title = sanitize_title(&request.title, &request.service_name);
+    let item_id = employee_credential_item_id(vault_id, &request.service_name);
+    let result = save_passwords_api_credential_inner(
+        &app,
+        vault_id,
+        None,
+        Some(item_id),
+        &title,
+        &mut fields,
+    )
+    .await
+    .map_err(|error| error.to_string());
+    for field in &mut fields {
+        field.value.zeroize();
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn ensure_passwords_employee_identity(
+    app: AppHandle,
+    deployment_id: String,
+    display_name: String,
+) -> Result<PasswordsEmployeeIdentityResponse, String> {
+    let deployment_id = parse_uuid(&deployment_id, "deployment_id")?;
+    ensure_passwords_employee_identity_inner(&app, deployment_id, &display_name)
+        .await
+        .map_err(|error| error.to_string())
+        .map(|agent| PasswordsEmployeeIdentityResponse {
+            agent_identity_id: agent.identity_id,
+        })
+}
+
+#[tauri::command]
+pub async fn create_passwords_employee_delegation(
+    app: AppHandle,
+    request: CreatePasswordsEmployeeDelegationRequest,
+) -> Result<PasswordsEmployeeDelegationResponse, String> {
+    let deployment_id = parse_uuid(&request.deployment_id, "deployment_id")?;
+    let organization_id = parse_uuid(&request.organization_id, "organization_id")?;
+    let agent_identity_id = parse_uuid(&request.agent_identity_id, "agent_identity_id")?;
+    create_passwords_employee_delegation_inner(
+        &app,
+        deployment_id,
+        organization_id,
+        agent_identity_id,
+        &request.secret_refs,
+    )
+    .await
+    .map_err(|error| error.to_string())
 }
 
 async fn create_passwords_api_credential_inner(
@@ -692,6 +802,15 @@ async fn create_passwords_vault_inner(
     name: &str,
     description: Option<&str>,
 ) -> anyhow::Result<UnlockPasswordsVaultResponse> {
+    create_passwords_vault_with_id_inner(app, Uuid::new_v4(), name, description).await
+}
+
+async fn create_passwords_vault_with_id_inner(
+    app: &AppHandle,
+    vault_id: Uuid,
+    name: &str,
+    description: Option<&str>,
+) -> anyhow::Result<UnlockPasswordsVaultResponse> {
     // Creating a vault is a post-unlock action: refuse unless a session is
     // live so the new vault key can be cached alongside the others. The new
     // vault key is sealed to the session's KEM public key, which unlock
@@ -711,7 +830,6 @@ async fn create_passwords_vault_inner(
 
     let client = reqwest::Client::new();
 
-    let vault_id = Uuid::new_v4();
     let vault_key = generate_vault_key();
     let mut wrapped_vault_key = wrap_vault_key_for_identity(&vault_key, &kem_public);
     let mut name_ciphertext = encrypt_vault_name(&vault_key, vault_id.as_bytes(), name);
@@ -796,6 +914,45 @@ async fn create_passwords_vault_inner(
     })
 }
 
+fn employee_vault_id(deployment_id: Uuid) -> Uuid {
+    Uuid::new_v5(&EMPLOYEE_VAULT_NAMESPACE, deployment_id.as_bytes())
+}
+
+fn employee_credential_item_id(vault_id: Uuid, service_name: &str) -> Uuid {
+    Uuid::new_v5(&vault_id, service_name.as_bytes())
+}
+
+async fn ensure_passwords_employee_vault_inner(
+    app: &AppHandle,
+    deployment_id: Uuid,
+) -> anyhow::Result<Uuid> {
+    let vault_id = employee_vault_id(deployment_id);
+    {
+        let session = passwords_session().lock().await;
+        let session = session
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Unlock Seren Passwords first"))?;
+        if let Some(vault) = session.vaults.get(&vault_id) {
+            if !vault.writable {
+                return Err(anyhow::anyhow!(
+                    "The managed employee credential vault is read-only"
+                ));
+            }
+            return Ok(vault_id);
+        }
+    }
+
+    let name = format!("Seren Cloud employee credentials ({deployment_id})");
+    create_passwords_vault_with_id_inner(
+        app,
+        vault_id,
+        &name,
+        Some("Credentials isolated for one Seren Cloud employee deployment."),
+    )
+    .await?;
+    Ok(vault_id)
+}
+
 async fn list_passwords_items_inner(
     app: &AppHandle,
     vault_id: Uuid,
@@ -824,6 +981,7 @@ async fn save_passwords_api_credential_inner(
     app: &AppHandle,
     vault_id: Uuid,
     item_id: Option<Uuid>,
+    create_item_id: Option<Uuid>,
     title: &str,
     fields: &mut [PasswordsSecretFieldInput],
 ) -> anyhow::Result<CreatePasswordsApiCredentialResponse> {
@@ -832,9 +990,16 @@ async fn save_passwords_api_credential_inner(
         return Err(anyhow::anyhow!("Selected vault is read-only"));
     }
 
-    let update_existing = item_id.is_some();
-    let item_id = item_id.unwrap_or_else(Uuid::new_v4);
     let client = reqwest::Client::new();
+    let update_existing = match (item_id, create_item_id) {
+        (Some(_), _) => true,
+        (None, Some(candidate)) => list_item_summaries(app, &client, vault_id)
+            .await?
+            .iter()
+            .any(|item| item.item_id == candidate),
+        (None, None) => false,
+    };
+    let item_id = item_id.or(create_item_id).unwrap_or_else(Uuid::new_v4);
     let existing_state = if update_existing {
         Some(load_existing_item_state(app, &client, &vault, item_id).await?)
     } else {
@@ -1472,6 +1637,222 @@ async fn ensure_desktop_mcp_agent(
     })
 }
 
+async fn ensure_passwords_employee_identity_inner(
+    app: &AppHandle,
+    deployment_id: Uuid,
+    display_name: &str,
+) -> anyhow::Result<DesktopMcpAgentGrantSession> {
+    let signing_private = {
+        let session = passwords_session().lock().await;
+        session
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Unlock Seren Passwords first"))?
+            .signing_private
+            .clone()
+    };
+    let context = format!("{EMPLOYEE_AGENT_CONTEXT_PREFIX}{deployment_id}");
+    let display_name = sanitize_display_name(display_name);
+    let key_provenance = serde_json::json!({
+        "kind": "hosted_employee",
+        "context": context,
+        "client": "seren-desktop",
+        "deployment_id": deployment_id,
+    });
+    let request = signed_hosted_agent_request(&signing_private, &display_name, key_provenance)?;
+    let client = reqwest::Client::new();
+    let agent = post_ensure_hosted_agent(app, &client, &request).await?;
+    let kem_public = IdentityKemPublicKey::from_slice(&decode_b64(
+        &agent.kem_public_key,
+        "employee agent kem_public_key",
+    )?)?;
+    Ok(DesktopMcpAgentGrantSession {
+        identity_id: agent.identity_id,
+        kem_public,
+    })
+}
+
+async fn create_passwords_employee_delegation_inner(
+    app: &AppHandle,
+    deployment_id: Uuid,
+    organization_id: Uuid,
+    agent_identity_id: Uuid,
+    secret_refs: &[String],
+) -> anyhow::Result<PasswordsEmployeeDelegationResponse> {
+    if secret_refs.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Employee secret delegation requires at least one Seren Secrets reference"
+        ));
+    }
+    let (signing_private, vaults) = {
+        let session = passwords_session().lock().await;
+        let session = session
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Unlock Seren Passwords first"))?;
+        (session.signing_private.clone(), session.vaults.clone())
+    };
+    let client = reqwest::Client::new();
+    let context = format!("{EMPLOYEE_AGENT_CONTEXT_PREFIX}{deployment_id}");
+    let key_provenance = serde_json::json!({
+        "kind": "hosted_employee",
+        "context": context,
+        "client": "seren-desktop",
+        "deployment_id": deployment_id,
+    });
+    let ensure_request =
+        signed_hosted_agent_request(&signing_private, "Seren Cloud employee", key_provenance)?;
+    let agent = post_ensure_hosted_agent(app, &client, &ensure_request).await?;
+    if agent.identity_id != agent_identity_id {
+        return Err(anyhow::anyhow!(
+            "Employee Passwords identity does not match the managed deployment"
+        ));
+    }
+    let agent_kem_public = IdentityKemPublicKey::from_slice(&decode_b64(
+        &agent.kem_public_key,
+        "employee agent kem_public_key",
+    )?)?;
+    let user_identity: IdentityRecord = get_data(app, &client, "/identities/me").await?;
+    let user_id = user_identity
+        .owner_user_id
+        .ok_or_else(|| anyhow::anyhow!("Seren Passwords user identity is missing its owner"))?;
+
+    let mut parsed_refs = secret_refs
+        .iter()
+        .map(|reference| parse_employee_secret_ref(reference))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    parsed_refs.sort();
+    parsed_refs.dedup();
+    let dedicated_vault_id = employee_vault_id(deployment_id);
+    if parsed_refs
+        .iter()
+        .any(|(vault_id, _, _)| *vault_id != dedicated_vault_id)
+    {
+        return Err(anyhow::anyhow!(
+            "Employee credentials must be stored in the deployment's dedicated Passwords vault"
+        ));
+    }
+
+    let mut granted_vaults = BTreeSet::new();
+    let mut entries = Vec::with_capacity(parsed_refs.len());
+    for (vault_id, item_id, field) in parsed_refs {
+        let vault = vaults
+            .get(&vault_id)
+            .ok_or_else(|| anyhow::anyhow!("Unlock the Passwords vault containing {vault_id}"))?;
+        if granted_vaults.insert(vault_id) {
+            grant_employee_agent_vault_access(
+                app,
+                &client,
+                &signing_private,
+                agent_identity_id,
+                &agent_kem_public,
+                vault,
+            )
+            .await?;
+        }
+        let item = get_item_record(app, &client, vault_id, item_id).await?;
+        if item.vault_id != vault_id || item.item_id != item_id {
+            return Err(anyhow::anyhow!(
+                "Seren Passwords returned an item outside the requested secret reference"
+            ));
+        }
+        let item_key_wrap = decode_b64(&item.content_key_wrap, "content_key_wrap")?;
+        entries.push(AgentGrantDelegationEntry {
+            vault_id,
+            item_id,
+            field,
+            item_key_wrap,
+        });
+    }
+
+    let config: SecretsGatewayDelegationConfig =
+        get_data(app, &client, "/secrets-gateway/delegation-config").await?;
+    if config.default_max_grant_ttl_seconds == 0 {
+        return Err(anyhow::anyhow!(
+            "Seren Passwords returned an invalid delegated grant TTL"
+        ));
+    }
+    if config.delegation_epoch_unix_milliseconds == 0 {
+        return Err(anyhow::anyhow!(
+            "Seren Passwords returned an invalid delegation epoch"
+        ));
+    }
+    let now = current_unix_timestamp()?;
+    let delegation = AgentGrantDelegation {
+        scope: AgentGrantDelegationScope {
+            user_id,
+            organization_id,
+            workspace_id: None,
+            agent_identity_id,
+        },
+        agent_kem_public_key: agent_kem_public,
+        delegation_id: Uuid::new_v4(),
+        delegate_signer_key_id: config.grant_delegate_signer_key_id,
+        entries,
+        not_before: now.saturating_sub(EMPLOYEE_DELEGATION_CLOCK_SKEW_SECONDS),
+        expires_at: now.saturating_add(EMPLOYEE_DELEGATION_VALIDITY_SECONDS),
+        max_grant_ttl_seconds: config.default_max_grant_ttl_seconds,
+        delegation_epoch: config.delegation_epoch_unix_milliseconds,
+    };
+    let wire = sign_agent_grant_delegation(&signing_private, &delegation)?;
+    Ok(PasswordsEmployeeDelegationResponse {
+        agent_identity_id,
+        secret_resolution_delegation: B64.encode(wire),
+    })
+}
+
+fn parse_employee_secret_ref(reference: &str) -> anyhow::Result<(Uuid, Uuid, String)> {
+    let path = reference.strip_prefix("seren-secrets://").ok_or_else(|| {
+        anyhow::anyhow!("Employee credentials must use seren-secrets:// references")
+    })?;
+    let mut parts = path.split('/');
+    let (Some(vault_id), Some(item_id), Some(field), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err(anyhow::anyhow!(
+            "Employee credential reference must use seren-secrets://{{vault_id}}/{{item_id}}/{{field}}"
+        ));
+    };
+    let vault_id = Uuid::parse_str(vault_id)?;
+    let item_id = Uuid::parse_str(item_id)?;
+    if field.is_empty()
+        || field.contains('?')
+        || field.contains('#')
+        || field.bytes().any(|byte| byte <= b' ' || byte == 0x7f)
+    {
+        return Err(anyhow::anyhow!(
+            "Employee credential reference contains an invalid field"
+        ));
+    }
+    Ok((vault_id, item_id, field.to_string()))
+}
+
+async fn grant_employee_agent_vault_access(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    signing_private: &IdentitySigningPrivateKey,
+    agent_identity_id: Uuid,
+    agent_kem_public: &IdentityKemPublicKey,
+    vault: &UnlockedVault,
+) -> anyhow::Result<()> {
+    let mut wrapped_vault_key = wrap_vault_key_for_identity(&vault.vault_key, agent_kem_public);
+    let mut signature = membership_grant::sign_membership_grant(
+        signing_private,
+        vault.vault_id.as_bytes(),
+        agent_identity_id.as_bytes(),
+        membership_grant::ACCESS_LEVEL_READ,
+        &wrapped_vault_key,
+    );
+    let request = MembershipGrantRequest {
+        identity_id: agent_identity_id,
+        wrapped_vault_key: B64.encode(&wrapped_vault_key),
+        access_level: EMPLOYEE_AGENT_ACCESS_LEVEL,
+        granted_signature: B64.encode(&signature),
+    };
+    let result = post_membership_grant(app, client, vault.vault_id, &request).await;
+    wrapped_vault_key.zeroize();
+    signature.zeroize();
+    result
+}
+
 fn signed_desktop_mcp_agent_request(
     signing_private: &IdentitySigningPrivateKey,
 ) -> anyhow::Result<EnsureHostedAgentIdentityRequest> {
@@ -1480,17 +1861,25 @@ fn signed_desktop_mcp_agent_request(
         "context": DESKTOP_MCP_AGENT_CONTEXT,
         "client": "seren-desktop",
     });
+    signed_hosted_agent_request(
+        signing_private,
+        DESKTOP_MCP_AGENT_DISPLAY_NAME,
+        key_provenance,
+    )
+}
+
+fn signed_hosted_agent_request(
+    signing_private: &IdentitySigningPrivateKey,
+    display_name: &str,
+    key_provenance: serde_json::Value,
+) -> anyhow::Result<EnsureHostedAgentIdentityRequest> {
     let issued_at = current_unix_timestamp()?;
     let nonce = Uuid::new_v4().to_string();
-    let canonical = canonical_hosted_agent_request_bytes(
-        DESKTOP_MCP_AGENT_DISPLAY_NAME,
-        &key_provenance,
-        issued_at,
-        &nonce,
-    )?;
+    let canonical =
+        canonical_hosted_agent_request_bytes(display_name, &key_provenance, issued_at, &nonce)?;
     let signature = signing::sign(signing_private, &canonical);
     Ok(EnsureHostedAgentIdentityRequest {
-        display_name: DESKTOP_MCP_AGENT_DISPLAY_NAME.to_string(),
+        display_name: display_name.to_string(),
         key_provenance,
         issued_at,
         nonce,
@@ -2366,6 +2755,45 @@ mod tests {
         assert_eq!(
             passwords_url(&item_path(vault_id, item_id)),
             "https://api.serendb.com/publishers/seren-passwords/vaults/11111111-1111-4111-8111-111111111111/items/22222222-2222-4222-8222-222222222222"
+        );
+    }
+
+    #[test]
+    fn employee_secret_refs_require_full_canonical_coordinates() {
+        let vault_id = Uuid::from_u128(1);
+        let item_id = Uuid::from_u128(2);
+        let reference = format!("seren-secrets://{vault_id}/{item_id}/SLACK_BOT_TOKEN");
+        assert_eq!(
+            parse_employee_secret_ref(&reference).unwrap(),
+            (vault_id, item_id, "SLACK_BOT_TOKEN".to_string())
+        );
+        assert!(parse_employee_secret_ref("org-secret://token").is_err());
+        assert!(
+            parse_employee_secret_ref(&format!("seren-secrets://{vault_id}/{item_id}")).is_err()
+        );
+        assert!(
+            parse_employee_secret_ref(&format!(
+                "seren-secrets://{vault_id}/{item_id}/SLACK_BOT_TOKEN/extra"
+            ))
+            .is_err()
+        );
+        assert!(
+            parse_employee_secret_ref(&format!(
+                "seren-secrets://{vault_id}/{item_id}/SLACK BOT TOKEN"
+            ))
+            .is_err()
+        );
+        let deployment_id = Uuid::from_u128(3);
+        let employee_vault = employee_vault_id(deployment_id);
+        assert_eq!(employee_vault, employee_vault_id(deployment_id));
+        assert_ne!(employee_vault, employee_vault_id(Uuid::from_u128(4)));
+        assert_eq!(
+            employee_credential_item_id(employee_vault, "slack"),
+            employee_credential_item_id(employee_vault, "slack")
+        );
+        assert_ne!(
+            employee_credential_item_id(employee_vault, "slack"),
+            employee_credential_item_id(employee_vault, "telegram")
         );
     }
 
