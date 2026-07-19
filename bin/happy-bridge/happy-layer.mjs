@@ -393,9 +393,6 @@ export function createHappyLayer({
   }
 
   async function findOrCreateSession(sessionId, summary = null) {
-    if (summary && !["error", "terminated"].includes(summary.status)) {
-      terminatedSessions.forget(sessionId);
-    }
     if (terminatedSessions.has(sessionId)) return null;
     const existing = sessions.get(sessionId);
     if (existing) return existing;
@@ -427,21 +424,25 @@ export function createHappyLayer({
       terminatedSessions.mark(event.sessionId);
     } else {
       liveSessions.add(event.sessionId);
+      terminatedSessions.forget(event.sessionId);
     }
     rememberPermission(event);
     if (terminal && !sessions.has(event.sessionId)) return;
     const summary = (await source.listSessions()).find((item) => item.sessionId === event.sessionId);
     const entry = await findOrCreateSession(event.sessionId, summary);
-    if (!entry || (terminal && terminatedSessions.has(event.sessionId))) return;
+    if (!entry) return;
     const provider = summary?.agentType === "claude-code" ? "claude" : summary?.agentType ?? "codex";
     for (const message of translateNeutralEvent(event, { provider })) {
       if (message.transport === "session") entry.client.sendSessionProtocolMessage(message.envelope);
       if (message.transport === "agent") entry.client.sendAgentMessage(message.provider, message.body);
     }
     if (terminal) {
-      const terminalEntry = sessions.get(event.sessionId);
-      sessions.delete(event.sessionId);
-      void terminalEntry?.client.close().catch(() => debug("failed to close Happy session"));
+      await completeTerminalSession({
+        sessions,
+        sessionId: event.sessionId,
+        entry,
+        send: async () => {},
+      }).catch(() => debug("failed to close Happy session"));
     }
     if (event.kind === "permission-request" && api) {
       const notification = composeApprovalNotification();
@@ -624,4 +625,10 @@ export function createHappyLayer({
       api = null;
     },
   };
+}
+
+export async function completeTerminalSession({ sessions, sessionId, entry, send }) {
+  await send(entry);
+  sessions.delete(sessionId);
+  await entry.client.close();
 }

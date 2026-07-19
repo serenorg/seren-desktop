@@ -68,23 +68,36 @@ export function translateProviderEvent(method, params = {}) {
 }
 
 class ProviderRuntimeClient {
-  constructor(config) {
+  constructor(config, { onUnexpectedDisconnect = () => {} } = {}) {
     this.config = config;
     this.socket = null;
     this.nextId = 0;
     this.pending = new Map();
     this.notificationListeners = new Set();
+    this.onUnexpectedDisconnect = onUnexpectedDisconnect;
+    this.intentionalClose = false;
+    this.disconnectReported = false;
+    this.handshakeComplete = false;
   }
 
   async connect() {
     const { host, port, token } = this.config.providerRuntime;
     this.socket = new WebSocket(`ws://${host}:${port}`);
     this.socket.on("message", (raw) => this.handleMessage(raw));
+    this.socket.on("error", () => this.reportUnexpectedDisconnect("error"));
+    this.socket.on("close", () => this.reportUnexpectedDisconnect("close"));
     await new Promise((resolve, reject) => {
       this.socket.once("open", resolve);
       this.socket.once("error", () => reject(new Error("provider runtime connection failed")));
     });
     await this.call("auth", { token });
+    this.handshakeComplete = true;
+  }
+
+  reportUnexpectedDisconnect(reason) {
+    if (this.intentionalClose || !this.handshakeComplete || this.disconnectReported) return;
+    this.disconnectReported = true;
+    this.onUnexpectedDisconnect(reason);
   }
 
   handleMessage(raw) {
@@ -136,6 +149,7 @@ class ProviderRuntimeClient {
   }
 
   close() {
+    this.intentionalClose = true;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(new Error("provider runtime client closed"));
@@ -149,8 +163,8 @@ class ProviderRuntimeClient {
   }
 }
 
-export function createProviderRuntimeClient(config) {
-  return new ProviderRuntimeClient(config);
+export function createProviderRuntimeClient(config, options) {
+  return new ProviderRuntimeClient(config, options);
 }
 
 function normalizeSession(session) {
