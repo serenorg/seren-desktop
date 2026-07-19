@@ -564,6 +564,7 @@ import type {
   PairedTranscriptEvent,
   PermissionRequestEvent,
   PlanEntry,
+  ProviderOrigin,
   RemoteSessionInfo,
   SessionConfigOption,
   SessionStatus,
@@ -951,6 +952,8 @@ export interface AgentMessage {
   docNames?: string[];
   /** Producer provenance — the agent type that emitted this message. */
   provider?: string;
+  /** Prompt provenance for remote-control activity attribution. */
+  origin?: ProviderOrigin;
 }
 
 export interface AgentModelInfo {
@@ -991,6 +994,8 @@ export interface ActiveSession {
   pendingUserMessageId?: string;
   /** Timestamp for buffered replay user message (ms epoch). */
   pendingUserMessageTimestamp?: number;
+  /** Source of the buffered prompt, used for remote activity attribution. */
+  pendingUserMessageOrigin?: ProviderOrigin;
   cwd: string;
   /** Local persisted conversation id (SQLite). */
   conversationId: string;
@@ -6004,6 +6009,7 @@ export const agentStore = {
     setState("sessions", sessionId, "pendingUserMessage", "");
     setState("sessions", sessionId, "pendingUserMessageId", undefined);
     setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
+    setState("sessions", sessionId, "pendingUserMessageOrigin", undefined);
 
     // Derive tab title from the first user prompt
     if (!state.sessions[sessionId]?.title) {
@@ -6660,6 +6666,7 @@ export const agentStore = {
             event.data.text,
             event.data.messageId,
             event.data.timestamp,
+            event.data.origin,
           );
         }
         break;
@@ -7399,6 +7406,7 @@ export const agentStore = {
       setState("sessions", sessionId, "pendingUserMessage", "");
       setState("sessions", sessionId, "pendingUserMessageId", undefined);
       setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
+      setState("sessions", sessionId, "pendingUserMessageOrigin", undefined);
       return;
     }
 
@@ -7408,6 +7416,7 @@ export const agentStore = {
       setState("sessions", sessionId, "pendingUserMessage", "");
       setState("sessions", sessionId, "pendingUserMessageId", undefined);
       setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
+      setState("sessions", sessionId, "pendingUserMessageOrigin", undefined);
       return;
     }
 
@@ -7416,6 +7425,9 @@ export const agentStore = {
       type: "user",
       content: session.pendingUserMessage,
       timestamp: session.pendingUserMessageTimestamp ?? Date.now(),
+      ...(session.pendingUserMessageOrigin
+        ? { origin: session.pendingUserMessageOrigin }
+        : {}),
     };
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, userMsg]);
     if (session.conversationId)
@@ -7427,6 +7439,7 @@ export const agentStore = {
     setState("sessions", sessionId, "pendingUserMessage", "");
     setState("sessions", sessionId, "pendingUserMessageId", undefined);
     setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
+    setState("sessions", sessionId, "pendingUserMessageOrigin", undefined);
   },
 
   appendReplayUserChunk(
@@ -7434,6 +7447,7 @@ export const agentStore = {
     text: string,
     messageId?: string,
     timestamp?: number,
+    origin?: ProviderOrigin,
   ) {
     const session = state.sessions[sessionId];
     if (!session) return;
@@ -7476,6 +7490,9 @@ export const agentStore = {
         "pendingUserMessageTimestamp",
         timestamp ?? Date.now(),
       );
+    }
+    if (origin) {
+      setState("sessions", sessionId, "pendingUserMessageOrigin", origin);
     }
   },
 

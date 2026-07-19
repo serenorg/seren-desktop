@@ -1277,6 +1277,8 @@ pub fn run() {
             commands::happy_bridge::happy_bridge_status,
             commands::happy_bridge::happy_bridge_start_pairing,
             commands::happy_bridge::happy_bridge_reset_identity,
+            commands::happy_bridge::happy_bridge_get_advertised_roots,
+            commands::happy_bridge::happy_bridge_update_roots,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -117,7 +117,7 @@ impl HappyBridgeManager {
         });
         // Reuse the existing conversation reader as the source of recent project roots.
         // There is no separate Rust recent-project registry in this repository.
-        let advertised_roots = crate::commands::chat::list_conversations(
+        let discovered_roots = crate::commands::chat::list_conversations(
             app.clone(),
             None,
             None,
@@ -133,6 +133,10 @@ impl HappyBridgeManager {
             }
             roots
         });
+        let advertised_roots = crate::commands::happy_bridge::effective_advertised_roots(
+            app,
+            discovered_roots,
+        );
         let config = HappyBridgeConfig {
             provider_runtime: ProviderRuntimeConnection {
                 host: provider_runtime.host,
@@ -224,6 +228,23 @@ impl HappyBridgeManager {
 
     pub async fn status(&self) -> HappyBridgeStatus {
         self.status.lock().await.clone()
+    }
+
+    pub async fn update_roots(&self, roots: Vec<String>) -> Result<(), String> {
+        let guard = self.process.lock().await;
+        let Some(process) = guard.as_ref() else {
+            return Err("Happy bridge is not running".to_string());
+        };
+        write_supervisor_notification(
+            &process._stdin,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "roots_update",
+                "params": { "roots": roots },
+            }),
+        )
+        .await;
+        Ok(())
     }
 
     pub async fn wait_for_pairing_payload(&self) -> Result<String, String> {

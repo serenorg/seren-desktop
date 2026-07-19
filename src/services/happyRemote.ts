@@ -26,6 +26,20 @@ export async function getRemoteAccessStatus(): Promise<HappyRemoteStatus> {
   return invoke<HappyRemoteStatus>("happy_bridge_status");
 }
 
+export async function getAdvertisedRoots(): Promise<string[] | null> {
+  return invoke<string[] | null>("happy_bridge_get_advertised_roots");
+}
+
+export async function updateAdvertisedRoots(
+  roots: string[],
+): Promise<HappyRemoteStatus> {
+  return invoke<HappyRemoteStatus>("happy_bridge_update_roots", { roots });
+}
+
+export async function resetRemoteIdentity(): Promise<void> {
+  return invoke<void>("happy_bridge_reset_identity");
+}
+
 export async function startPairing(): Promise<string> {
   return invoke<string>("happy_bridge_start_pairing");
 }

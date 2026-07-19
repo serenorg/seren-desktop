@@ -1410,6 +1410,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 installedSkillSlugs(),
               )}
             />
+            <Show when={message.origin === "remote"}>
+              <div class="mt-2 text-xs text-muted-foreground">— from phone</div>
+            </Show>
             <Show when={forkSupported()}>
               <button
                 type="button"
