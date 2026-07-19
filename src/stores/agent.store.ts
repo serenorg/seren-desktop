@@ -4409,6 +4409,9 @@ export const agentStore = {
           pendingBootstrapMessages: bootstrapPromptContext
             ? session.messages
             : undefined,
+          pairedConfig: providerService.pairedSpawnConfigFromStatus(
+            session.paired,
+          ),
         }),
       ).catch((error) => {
         console.warn("Failed to persist agent bootstrap context", error);
@@ -6308,29 +6311,7 @@ export const agentStore = {
     const conversationId = session?.conversationId;
     if (!conversationId) return;
 
-    const roleConfig = (
-      role: PairedStatus["planner"],
-    ):
-      | { modelId?: string; effort?: string; serviceTier?: string }
-      | undefined => {
-      const config = {
-        ...(role.pinnedModelId ? { modelId: role.pinnedModelId } : {}),
-        ...(role.pinnedEffort ? { effort: role.pinnedEffort } : {}),
-        ...(role.pinnedServiceTier
-          ? { serviceTier: role.pinnedServiceTier }
-          : {}),
-      };
-      return Object.keys(config).length > 0 ? config : undefined;
-    };
-    const planner = roleConfig(paired.planner);
-    const executor = roleConfig(paired.executor);
-    const pairedConfig: PairedSpawnConfig | undefined =
-      planner || executor
-        ? {
-            ...(planner ? { planner } : {}),
-            ...(executor ? { executor } : {}),
-          }
-        : undefined;
+    const pairedConfig = providerService.pairedSpawnConfigFromStatus(paired);
 
     const serialized = JSON.stringify(pairedConfig ?? null);
     if (pairedConfigPersisted.get(conversationId) === serialized) return;
@@ -8273,6 +8254,10 @@ export const agentStore = {
 
     const agentType = session.info.agentType;
     const cwd = session.cwd;
+    const newConversationId = crypto.randomUUID();
+    const pairedConfig = providerService.pairedSpawnConfigFromStatus(
+      session.paired,
+    );
 
     // 1. Collect messages up to the fork point.
     const allMessages = session.messages;
@@ -8283,7 +8268,15 @@ export const agentStore = {
       );
       return null;
     }
-    const forkedMessages = allMessages.slice(0, forkIndex + 1);
+    const forkedMessages = allMessages.slice(0, forkIndex + 1).map((message) =>
+      agentType === "claude-codex" &&
+      message.id === `paired-declaration-${session.conversationId}`
+        ? {
+            ...message,
+            id: `paired-declaration-${newConversationId}`,
+          }
+        : message,
+    );
     const isHeadFork = forkIndex === allMessages.length - 1;
     const useNativeFork =
       providerService.supportsNativeProviderFork(agentType) && isHeadFork;
@@ -8345,7 +8338,6 @@ export const agentStore = {
     }
 
     // 2. Create a new local conversation in SQLite.
-    const newConversationId = crypto.randomUUID();
     const forkTitle = `Fork of ${session.title ?? "Agent"}`;
     try {
       await createAgentConversation(
@@ -8360,6 +8352,7 @@ export const agentStore = {
           pendingBootstrapMessages: bootstrapPromptContext
             ? forkedMessages
             : undefined,
+          pairedConfig,
         }) ?? undefined,
       );
     } catch (err) {
@@ -8376,6 +8369,7 @@ export const agentStore = {
       restoredMessages: forkedMessages,
       bootstrapPromptContext,
       initialModelId: session.currentModelId,
+      paired: pairedConfig,
     });
 
     if (!newSessionId) {

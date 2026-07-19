@@ -43,9 +43,16 @@ export interface AgentOAuthRouting {
 }
 
 export function supportsConversationFork(agentType: AgentType): boolean {
-  // Paired threads span two inner sessions; forking one coherent copy is
-  // not supported.
-  return agentType !== "claude-codex";
+  // Provider-native forking is narrower (Claude only), but every agent can
+  // branch through the fresh-session transcript bootstrap. Paired threads use
+  // that path to start a new coordinated planner/executor pair.
+  return (
+    agentType === "claude-code" ||
+    agentType === "codex" ||
+    agentType === "gemini" ||
+    agentType === "claude-codex" ||
+    agentType === "lmstudio"
+  );
 }
 
 export function supportsNativeProviderFork(agentType: AgentType): boolean {
@@ -289,6 +296,37 @@ export interface PairedTranscriptEvent {
 export interface PairedSpawnConfig {
   planner?: { modelId?: string; effort?: string; serviceTier?: string };
   executor?: { modelId?: string; effort?: string; serviceTier?: string };
+}
+
+/** Capture only explicit paired role pins that a fresh session can restore. */
+export function pairedSpawnConfigFromStatus(
+  paired?: PairedStatus,
+): PairedSpawnConfig | undefined {
+  if (!paired) return undefined;
+
+  const roleConfig = (
+    role: PairedRoleStatus,
+  ):
+    | { modelId?: string; effort?: string; serviceTier?: string }
+    | undefined => {
+    const config = {
+      ...(role.pinnedModelId ? { modelId: role.pinnedModelId } : {}),
+      ...(role.pinnedEffort ? { effort: role.pinnedEffort } : {}),
+      ...(role.pinnedServiceTier
+        ? { serviceTier: role.pinnedServiceTier }
+        : {}),
+    };
+    return Object.keys(config).length > 0 ? config : undefined;
+  };
+
+  const planner = roleConfig(paired.planner);
+  const executor = roleConfig(paired.executor);
+  return planner || executor
+    ? {
+        ...(planner ? { planner } : {}),
+        ...(executor ? { executor } : {}),
+      }
+    : undefined;
 }
 
 export interface SessionStatusEvent {
