@@ -123,6 +123,13 @@ function happyAgentType(agent) {
   return typeof agent === "string" && agent.length > 0 ? agent : "claude-code";
 }
 
+function defaultApprovalPolicy(agentType) {
+  // Match the desktop's fresh-session defaults. Codex is explicitly
+  // on-failure; Claude and Gemini resolve their normal defaults in their
+  // runtimes when no stricter policy is supplied.
+  return agentType === "codex" ? DEFAULT_CODEX_APPROVAL_POLICY : undefined;
+}
+
 function sessionMetadata(config, summary, machineId) {
   const cwd = typeof summary.cwd === "string" && summary.cwd.length > 0 ? summary.cwd : os.homedir();
   return {
@@ -367,8 +374,9 @@ export function createHappyLayer({
       agentType,
       cwd: validation.root,
       localSessionId: conversation.conversationId,
-      approvalPolicy: DEFAULT_CODEX_APPROVAL_POLICY,
+      approvalPolicy: defaultApprovalPolicy(agentType),
     });
+    if (!spawned?.sessionId) throw new Error("provider spawn returned no session");
     sessions.delete(pendingSessionId);
     sessions.set(spawned.sessionId, { ...pending, sessionId: spawned.sessionId, summary: spawned });
     liveSessions.delete(pendingSessionId);
