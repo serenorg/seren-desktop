@@ -53,6 +53,7 @@ import {
 import { claimDaily, walletState } from "@/stores/wallet.store";
 import { SendTransferModal } from "../wallet/SendTransferModal";
 import { ConnectorSettings } from "./ConnectorSettings";
+import { HappyRemoteSettings } from "./HappyRemoteSettings";
 import { KeybindingsSettings } from "./KeybindingsSettings";
 import { KeysSettings } from "./KeysSettings";
 import { MessagingSettings } from "./MessagingSettings";
@@ -79,6 +80,7 @@ type SettingsSection =
   | "recordings"
   | "appearance"
   | "general"
+  | "remote"
   | "mcp";
 
 let lastSettingsSection: SettingsSection = "chat";
@@ -389,6 +391,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "appearance", label: "Appearance", icon: "🎨" },
     { id: "shortcuts", label: "Shortcuts", icon: "⌨️" },
     { id: "general", label: "General", icon: "⚙️" },
+    { id: "remote", label: "Remote access", icon: "↗" },
     { id: "mcp", label: "MCP Servers", icon: "🔌" },
   ];
   const visibleSections = () =>
@@ -2279,6 +2282,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </div>
             </Show>
           </section>
+        </Show>
+
+        <Show when={activeSection() === "remote"}>
+          <HappyRemoteSettings />
         </Show>
 
         <Show when={activeSection() === "mcp"}>
