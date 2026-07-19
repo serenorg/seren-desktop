@@ -379,6 +379,7 @@ export function createHappyLayer({
       liveSessions.add(event.sessionId);
     }
     rememberPermission(event);
+    if (terminal && !sessions.has(event.sessionId)) return;
     const summary = (await source.listSessions()).find((item) => item.sessionId === event.sessionId);
     const entry = await findOrCreateSession(event.sessionId, summary);
     const provider = summary?.agentType === "claude-code" ? "claude" : summary?.agentType ?? "codex";
