@@ -7,6 +7,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_store::StoreExt;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
@@ -16,6 +17,8 @@ const MAX_RESTART_ATTEMPTS: u32 = 3;
 const MAX_BACKOFF_SECONDS: u64 = 30;
 const STOP_GRACE_PERIOD: Duration = Duration::from_secs(5);
 const STATUS_EVENT: &str = "happy-bridge://status";
+const CREDENTIAL_STORE: &str = "happy_bridge.json";
+const CREDENTIAL_KEY: &str = "credential_blob";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -188,6 +191,35 @@ impl HappyBridgeManager {
 
     pub async fn status(&self) -> HappyBridgeStatus {
         self.status.lock().await.clone()
+    }
+
+    /// Store the opaque credential received during future pairing. This follows
+    /// the existing encrypted Tauri store pattern used by auth.rs; no bridge
+    /// identity is generated locally in Phase 1.
+    pub fn store_pairing_credential(
+        &self,
+        app: &AppHandle,
+        credential: &str,
+    ) -> Result<(), String> {
+        if credential.trim().is_empty() {
+            return Err("pairing credential must not be empty".to_string());
+        }
+        let store = app.store(CREDENTIAL_STORE).map_err(|err| err.to_string())?;
+        store.set(CREDENTIAL_KEY, serde_json::json!(credential));
+        store.save().map_err(|err| err.to_string())
+    }
+
+    pub fn load_pairing_credential(&self, app: &AppHandle) -> Result<Option<String>, String> {
+        let store = app.store(CREDENTIAL_STORE).map_err(|err| err.to_string())?;
+        Ok(store
+            .get(CREDENTIAL_KEY)
+            .and_then(|value| value.as_str().map(String::from)))
+    }
+
+    pub fn delete_pairing_credential(&self, app: &AppHandle) -> Result<(), String> {
+        let store = app.store(CREDENTIAL_STORE).map_err(|err| err.to_string())?;
+        store.delete(CREDENTIAL_KEY);
+        store.save().map_err(|err| err.to_string())
     }
 
     async fn set_status(&self, app: &AppHandle, state: HappyBridgeState, detail: Option<String>) {

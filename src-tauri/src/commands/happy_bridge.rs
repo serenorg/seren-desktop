@@ -53,6 +53,14 @@ pub async fn happy_bridge_status(
     Ok(state.status().await)
 }
 
+#[tauri::command]
+pub fn happy_bridge_reset_identity(
+    app: AppHandle,
+    state: State<'_, HappyBridgeManager>,
+) -> Result<(), String> {
+    state.delete_pairing_credential(&app)
+}
+
 pub async fn auto_start_if_enabled(app: AppHandle) {
     if !is_enabled(&app) {
         return;
