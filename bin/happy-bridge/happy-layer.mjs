@@ -180,7 +180,7 @@ export function createHappyLayer({
   function rememberPendingPermissions(sessionId, permissions) {
     if (!Array.isArray(permissions)) return;
     for (const permission of permissions) {
-      if (permission?.sessionId !== sessionId || typeof permission.requestId !== "string") continue;
+      if (typeof permission?.requestId !== "string") continue;
       rememberPermission({
         kind: "permission-request",
         sessionId,
@@ -192,19 +192,34 @@ export function createHappyLayer({
   function registerInbound(entry) {
     const { sessionId, client } = entry;
     client.onUserMessage((message) => {
-      void handleUserMessage(entry, message).catch(() => debug("dropped invalid Happy user message"));
+      void handleUserMessage(entry, message).catch(() => debug("ignored Happy inbound user message"));
     });
     client.rpcHandlerManager.registerHandler("abort", async () => {
-      await source.cancel(sessionId);
-      return { ok: true };
+      try {
+        await source.cancel(sessionId);
+        return { ok: true };
+      } catch {
+        debug("ignored failed Happy abort request");
+        return { ok: false };
+      }
     });
     client.rpcHandlerManager.registerHandler("switch", async () => {
-      await source.cancel(sessionId);
-      return { ok: true };
+      try {
+        await source.cancel(sessionId);
+        return { ok: true };
+      } catch {
+        debug("ignored failed Happy switch request");
+        return { ok: false };
+      }
     });
-    client.rpcHandlerManager.registerHandler("permission", async (response) =>
-      handlePermissionResponse(entry, response),
-    );
+    client.rpcHandlerManager.registerHandler("permission", async (response) => {
+      try {
+        return await handlePermissionResponse(entry, response);
+      } catch {
+        debug("ignored failed Happy permission request");
+        return { ok: false };
+      }
+    });
   }
 
   async function handleUserMessage(entry, message) {
@@ -217,6 +232,10 @@ export function createHappyLayer({
       return;
     }
     const mode = message.meta?.permissionMode;
+    if (message.meta && mode !== undefined && typeof mode !== "string") {
+      debug("dropped invalid Happy permission mode");
+      return;
+    }
     if (typeof mode === "string") await source.setPermissionMode(entry.sessionId, mode);
     await source.sendPrompt(entry.sessionId, message.content.text);
   }
