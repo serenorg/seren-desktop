@@ -339,6 +339,34 @@ async function readSessionsIndex(cwd) {
   }
 }
 
+async function listSessionTranscripts(cwd) {
+  const indexPath = await findSessionsIndexPath(cwd);
+  const projectDir = indexPath
+    ? path.dirname(indexPath)
+    : path.join(claudeProjectsRoot(), encodeProjectDirName(cwd));
+  let entries;
+  try {
+    entries = await fs.readdir(projectDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const transcripts = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+    const sessionId = entry.name.slice(0, -".jsonl".length);
+    if (!sessionId) continue;
+    const fullPath = path.join(projectDir, entry.name);
+    try {
+      const stat = await fs.stat(fullPath);
+      transcripts.push({ sessionId, fullPath, updatedAt: stat.mtime.toISOString() });
+    } catch {
+      // Ignore transcripts removed during enumeration.
+    }
+  }
+  return transcripts.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
 async function findSessionJsonlPath(cwd, sessionId) {
   const index = await readSessionsIndex(cwd);
   const entry = index?.entries?.find?.((candidate) => candidate.sessionId === sessionId);
@@ -2842,15 +2870,25 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
   }
 
   async function listRemoteSessions({ cwd }) {
+    const transcripts = await listSessionTranscripts(cwd);
     const index = await readSessionsIndex(cwd);
-    const entries = Array.isArray(index?.entries) ? index.entries : [];
+    const entries = transcripts.length > 0
+      ? transcripts
+      : Array.isArray(index?.entries)
+        ? index.entries.map((entry) => ({
+            sessionId: entry.sessionId,
+            fullPath: entry.fullPath,
+            title: entry.firstPrompt ?? null,
+            updatedAt: entry.modified ?? null,
+          }))
+        : [];
 
     return {
       sessions: entries.map((entry) => ({
         sessionId: entry.sessionId,
         cwd: entry.projectPath ?? cwd,
-        title: entry.firstPrompt ?? null,
-        updatedAt: entry.modified ?? null,
+        title: entry.title ?? null,
+        updatedAt: entry.updatedAt ?? null,
       })),
       nextCursor: null,
     };

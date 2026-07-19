@@ -6,6 +6,7 @@ import {
   chmodSync,
   cpSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -120,6 +121,28 @@ function main(): void {
     ["install", "--prod", "--ignore-workspace", "--ignore-scripts", "--node-linker=hoisted"],
     destDir,
   );
+
+  const bundleNodeModules = path.join(destDir, "node_modules");
+  const bundleSizeBeforePrune = spawnSync("du", ["-sh", bundleNodeModules], {
+    encoding: "utf8",
+  }).stdout.trim();
+  console.log(`provider-runtime/node_modules before Happy SDK binary prune: ${bundleSizeBeforePrune}`);
+  const happyLib = path.join(bundleNodeModules, "happy", "lib");
+  const happyReferenceCheck = spawnSync("grep", ["-rl", "claude-agent-sdk", happyLib], {
+    encoding: "utf8",
+  });
+  if (happyReferenceCheck.status === 0) {
+    throw new Error("happy/lib references claude-agent-sdk; refusing to prune its binaries");
+  }
+  const anthropicModules = path.join(bundleNodeModules, "@anthropic-ai");
+  for (const entry of readdirSync(anthropicModules, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name.startsWith("claude-agent-sdk-")) {
+      rmSync(path.join(anthropicModules, entry.name), { recursive: true, force: true });
+    }
+  }
+  const bundleSize = spawnSync("du", ["-sh", bundleNodeModules], { encoding: "utf8" })
+    .stdout.trim();
+  console.log(`provider-runtime/node_modules after Happy SDK binary prune: ${bundleSize}`);
 
   writeFileSync(
     markerPath,
