@@ -192,6 +192,34 @@ function sessionMetadata(config, summary, machineId) {
   };
 }
 
+// Modes the provider runtimes accept. A remote peer may only move a session
+// between these; anything else is rejected at the bridge boundary rather than
+// coerced, because codex maps unknown modes to its permissive "auto".
+const SUPPORTED_PERMISSION_MODES = new Set([
+  "default",
+  "acceptEdits",
+  "plan",
+  "bypassPermissions",
+  "read-only",
+  "safe-yolo",
+  "yolo",
+  "ask",
+  "auto",
+]);
+
+export function isSupportedPermissionMode(mode) {
+  return typeof mode === "string" && SUPPORTED_PERMISSION_MODES.has(mode);
+}
+
+// An already-tracked entry wins over the terminated mark, so a terminal event
+// can still flush its envelopes and close the relay client. The mark only blocks
+// *creating* a new entry for a session that has already ended.
+export function resolveTrackedSession({ sessions, terminatedSessions, sessionId }) {
+  const entry = sessions.get(sessionId);
+  if (entry) return { entry, blocked: false };
+  return { entry: null, blocked: terminatedSessions.has(sessionId) };
+}
+
 export function createTerminatedSessionTracker(maxSize = 256) {
   const terminated = new Set();
   const order = [];
@@ -330,7 +358,7 @@ export function createHappyLayer({
       return;
     }
     const mode = message.meta?.permissionMode;
-    if (message.meta && mode !== undefined && typeof mode !== "string") {
+    if (message.meta && mode !== undefined && !isSupportedPermissionMode(mode)) {
       debug("dropped invalid Happy permission mode");
       return;
     }
@@ -393,9 +421,9 @@ export function createHappyLayer({
   }
 
   async function findOrCreateSession(sessionId, summary = null) {
-    if (terminatedSessions.has(sessionId)) return null;
-    const existing = sessions.get(sessionId);
-    if (existing) return existing;
+    const tracked = resolveTrackedSession({ sessions, terminatedSessions, sessionId });
+    if (tracked.entry) return tracked.entry;
+    if (tracked.blocked) return null;
     const inFlight = sessionCreationPromises.get(sessionId);
     if (inFlight) return inFlight;
     const creation = (async () => {

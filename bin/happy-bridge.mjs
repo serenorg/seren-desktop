@@ -63,8 +63,10 @@ async function shutdown(exitCode = 0) {
   setImmediate(() => process.exit(exitCode));
 }
 
-process.once("SIGTERM", shutdown);
-process.once("SIGINT", shutdown);
+// Signal handlers receive the signal name as their first argument, which is not
+// a valid exit code; pass an explicit one.
+process.once("SIGTERM", () => void shutdown(0));
+process.once("SIGINT", () => void shutdown(0));
 
 try {
   const { configPromise, queuedResponses } = startInputReader();

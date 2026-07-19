@@ -121,7 +121,12 @@ pub async fn happy_bridge_start_pairing(
     app: AppHandle,
     state: State<'_, HappyBridgeManager>,
 ) -> Result<String, String> {
-    if matches!(state.status().await.state, HappyBridgeState::Stopped) {
+    // Any state other than Running means there is no usable pairing code: the
+    // payload is consumed on first read, and a timed-out or failed pairing
+    // leaves a bridge that will never emit another one. Restart so the user
+    // always gets a fresh code instead of a dead one.
+    if !matches!(state.status().await.state, HappyBridgeState::Running) {
+        state.stop(&app).await?;
         state.start(&app).await?;
     }
     state.wait_for_pairing_payload().await

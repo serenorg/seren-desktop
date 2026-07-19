@@ -10,6 +10,8 @@ import {
   createStartupStatusGate,
   completeTerminalSession,
   createTerminatedSessionTracker,
+  isSupportedPermissionMode,
+  resolveTrackedSession,
   selectApprovalOption,
 } from "../../bin/happy-bridge/happy-layer.mjs";
 
@@ -114,5 +116,37 @@ describe("provider resolution arbitration", () => {
     expect(emitted).toEqual(["terminal"]);
     expect(sessions.has("session-1")).toBe(false);
     expect(closed).toBe(true);
+  });
+
+  it("still resolves a tracked session after it is marked terminated", () => {
+    const terminatedSessions = createTerminatedSessionTracker();
+    const entry = { sessionId: "session-1" };
+    const sessions = new Map([["session-1", entry]]);
+    terminatedSessions.mark("session-1");
+
+    // Without this precedence the terminal event returns early and the relay
+    // client is never closed, leaking one socket per finished session.
+    expect(resolveTrackedSession({ sessions, terminatedSessions, sessionId: "session-1" })).toEqual({
+      entry,
+      blocked: false,
+    });
+  });
+
+  it("refuses to create a new session for an id that already terminated", () => {
+    const terminatedSessions = createTerminatedSessionTracker();
+    terminatedSessions.mark("session-2");
+
+    expect(
+      resolveTrackedSession({ sessions: new Map(), terminatedSessions, sessionId: "session-2" }),
+    ).toEqual({ entry: null, blocked: true });
+  });
+
+  it("rejects permission modes the provider runtimes do not accept", () => {
+    for (const mode of ["default", "plan", "bypassPermissions", "ask", "auto"]) {
+      expect(isSupportedPermissionMode(mode)).toBe(true);
+    }
+    for (const mode of ["", "sudo", "PLAN", 1, null, undefined]) {
+      expect(isSupportedPermissionMode(mode)).toBe(false);
+    }
   });
 });
