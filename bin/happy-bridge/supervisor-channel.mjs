@@ -49,6 +49,10 @@ export function createSupervisorChannel({
     });
   }
 
+  function notify(method, params = {}) {
+    write(JSON.stringify({ jsonrpc: "2.0", method, params }));
+  }
+
   function close() {
     for (const request of pending.values()) {
       clearTimeout(request.timer);
@@ -57,5 +61,5 @@ export function createSupervisorChannel({
     pending.clear();
   }
 
-  return { call, close, handleLine };
+  return { call, close, handleLine, notify };
 }

@@ -4,7 +4,7 @@
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_store::StoreExt;
 
-use crate::happy_bridge::{HappyBridgeManager, HappyBridgeStatus};
+use crate::happy_bridge::{HappyBridgeManager, HappyBridgeState, HappyBridgeStatus};
 
 const SETTINGS_STORE: &str = "settings.json";
 const ENABLED_KEY: &str = "happy_bridge_enabled";
@@ -51,6 +51,17 @@ pub async fn happy_bridge_status(
     state: State<'_, HappyBridgeManager>,
 ) -> Result<HappyBridgeStatus, String> {
     Ok(state.status().await)
+}
+
+#[tauri::command]
+pub async fn happy_bridge_start_pairing(
+    app: AppHandle,
+    state: State<'_, HappyBridgeManager>,
+) -> Result<String, String> {
+    if matches!(state.status().await.state, HappyBridgeState::Stopped) {
+        state.start(&app).await?;
+    }
+    state.wait_for_pairing_payload().await
 }
 
 #[tauri::command]

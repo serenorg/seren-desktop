@@ -7,11 +7,13 @@ import {
   createProviderSource,
   validateBridgeConfig,
 } from "./happy-bridge/provider-source.mjs";
+import { createHappyLayer } from "./happy-bridge/happy-layer.mjs";
 import { createSupervisorChannel } from "./happy-bridge/supervisor-channel.mjs";
 
 let client = null;
 let input = null;
 let supervisorChannel = null;
+let happyLayer = null;
 let shuttingDown = false;
 
 function startInputReader() {
@@ -54,6 +56,7 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   client?.close();
+  happyLayer?.close();
   supervisorChannel?.close();
   input?.close();
   process.exitCode = 0;
@@ -78,6 +81,12 @@ try {
   });
   const sessions = await source.listSessions();
   console.error(`happy-bridge: config ok, ${sessions.length} sessions`);
+  happyLayer = createHappyLayer({
+    config,
+    supervisorChannel,
+    debugLog: (message) => console.error(`happy-bridge: ${message}`),
+  });
+  await happyLayer.start();
 } catch (error) {
   console.error(`happy-bridge: ${error instanceof Error ? error.message : "startup failed"}`);
   await shutdown();
