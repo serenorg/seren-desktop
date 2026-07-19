@@ -77,9 +77,7 @@ export const HappyRemoteSettings: Component = () => {
       const discovered = uniqueRoots(rows);
       setRoots(discovered);
       setAdvertisedRoots(
-        saved === null
-          ? discovered
-          : saved.filter((root) => discovered.includes(root)),
+        saved === null ? [] : saved.filter((root) => discovered.includes(root)),
       );
     } catch {
       setMessage("Could not load available project folders.");

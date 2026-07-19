@@ -203,12 +203,14 @@ export function createHappyLayer({
   let api = null;
   let machineClient = null;
   let pairingPromise = null;
+  let latestPairingPayload = null;
   let sourceSubscription = null;
   let supervisorSubscription = null;
   let advertisedRoots = [];
   let advertisedAgents = [];
   const sessions = new Map();
   const sessionCreationPromises = new Map();
+  const terminatedSessions = new Set();
   const pendingRequests = Object.create(null);
   const liveSessions = new Set();
 
@@ -348,6 +350,7 @@ export function createHappyLayer({
   }
 
   async function findOrCreateSession(sessionId, summary = null) {
+    if (terminatedSessions.has(sessionId)) return null;
     const existing = sessions.get(sessionId);
     if (existing) return existing;
     const inFlight = sessionCreationPromises.get(sessionId);
@@ -375,6 +378,7 @@ export function createHappyLayer({
     if (terminal) {
       liveSessions.delete(event.sessionId);
       delete pendingRequests[event.sessionId];
+      terminatedSessions.add(event.sessionId);
     } else {
       liveSessions.add(event.sessionId);
     }
@@ -382,6 +386,7 @@ export function createHappyLayer({
     if (terminal && !sessions.has(event.sessionId)) return;
     const summary = (await source.listSessions()).find((item) => item.sessionId === event.sessionId);
     const entry = await findOrCreateSession(event.sessionId, summary);
+    if (!entry || (terminal && terminatedSessions.has(event.sessionId))) return;
     const provider = summary?.agentType === "claude-code" ? "claude" : summary?.agentType ?? "codex";
     for (const message of translateNeutralEvent(event, { provider })) {
       if (message.transport === "session") entry.client.sendSessionProtocolMessage(message.envelope);
@@ -390,7 +395,7 @@ export function createHappyLayer({
     if (terminal) {
       const terminalEntry = sessions.get(event.sessionId);
       sessions.delete(event.sessionId);
-      void terminalEntry?.client.close();
+      void terminalEntry?.client.close().catch(() => debug("failed to close Happy session"));
     }
     if (event.kind === "permission-request" && api) {
       const notification = composeApprovalNotification();
@@ -451,7 +456,11 @@ export function createHappyLayer({
     machineClient.setRPCHandlers({
       spawnSession: handleSpawn,
       stopSession: (sessionId) => {
-        void source.cancel(sessionId).catch(() => debug("failed to cancel Happy session"));
+        const entry = Array.from(sessions.values()).find(
+          (candidate) => candidate.happySessionId === sessionId,
+        );
+        if (!entry) return false;
+        void source.cancel(entry.sessionId).catch(() => debug("failed to cancel Happy session"));
         return true;
       },
       requestShutdown: () => debug("Happy client requested bridge shutdown"),
@@ -494,23 +503,35 @@ export function createHappyLayer({
           }
         });
         await finishRegistration();
-        return;
+        return true;
       }
       await new Promise((resolve) => setTimeout(resolve, AUTH_POLL_MS));
     }
     debug("pairing authorization timed out");
+    return false;
   }
 
   async function startPairing() {
-    if (pairingPromise) return pairingPromise;
+    if (pairingPromise) {
+      if (latestPairingPayload) {
+        supervisorChannel.notify("pairing_payload", { payload: latestPairingPayload });
+      }
+      return pairingPromise;
+    }
     pairingPromise = (async () => {
       const keyPair = nacl.box.keyPair();
       await postAuthRequest(config.relayUrl, keyPair.publicKey);
       const payload = `happy://terminal?${encodeBase64Url(keyPair.publicKey)}`;
+      latestPairingPayload = payload;
       supervisorChannel.notify("pairing_payload", { payload });
-      void waitForAuthorization(keyPair).catch((error) => {
-        debug(`pairing authorization failed: ${error instanceof Error ? error.message : "unknown error"}`);
-      });
+      void waitForAuthorization(keyPair)
+        .then((authorized) => {
+          if (!authorized) pairingPromise = null;
+        })
+        .catch((error) => {
+          pairingPromise = null;
+          debug(`pairing authorization failed: ${error instanceof Error ? error.message : "unknown error"}`);
+        });
       return payload;
     })();
     return pairingPromise;
@@ -546,8 +567,11 @@ export function createHappyLayer({
     close() {
       sourceSubscription?.();
       supervisorSubscription?.();
-      for (const entry of sessions.values()) void entry.client.close();
+      for (const entry of sessions.values()) {
+        void entry.client.close().catch(() => debug("failed to close Happy session"));
+      }
       sessions.clear();
+      terminatedSessions.clear();
       machineClient?.shutdown();
       machineClient = null;
       api = null;

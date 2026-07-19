@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -62,6 +63,7 @@ pub struct HappyBridgeManager {
     monitor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     status: Arc<Mutex<HappyBridgeStatus>>,
     restart_attempts: Arc<Mutex<u32>>,
+    stopping: Arc<AtomicBool>,
     pairing_payload: Arc<Mutex<Option<String>>>,
 }
 
@@ -75,6 +77,7 @@ impl HappyBridgeManager {
                 detail: None,
             })),
             restart_attempts: Arc::new(Mutex::new(0)),
+            stopping: Arc::new(AtomicBool::new(false)),
             pairing_payload: Arc::new(Mutex::new(None)),
         }
     }
@@ -96,6 +99,7 @@ impl HappyBridgeManager {
         }
 
         self.set_status(app, HappyBridgeState::Starting, None).await;
+        self.stopping.store(false, Ordering::Release);
         *self.restart_attempts.lock().await = 0;
         if let Err(error) = self.start_process(app).await {
             self.set_status(app, HappyBridgeState::Error, Some(error.clone()))
@@ -210,12 +214,14 @@ impl HappyBridgeManager {
         let process = Arc::clone(&self.process);
         let status = Arc::clone(&self.status);
         let restart_attempts = Arc::clone(&self.restart_attempts);
+        let stopping = Arc::clone(&self.stopping);
         *guard = Some(tokio::spawn(async move {
-            monitor_process(app, process, status, restart_attempts).await;
+            monitor_process(app, process, status, restart_attempts, stopping).await;
         }));
     }
 
     pub async fn stop(&self, app: &AppHandle) -> Result<(), String> {
+        self.stopping.store(true, Ordering::Release);
         if let Some(handle) = self.monitor_handle.lock().await.take() {
             handle.abort();
         }
@@ -230,6 +236,15 @@ impl HappyBridgeManager {
 
     pub async fn status(&self) -> HappyBridgeStatus {
         self.status.lock().await.clone()
+    }
+
+    pub async fn process_exists(&self) -> bool {
+        self.process
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|process| process.child.id())
+            .is_some()
     }
 
     pub async fn update_roots(&self, roots: Vec<String>) -> Result<(), String> {
@@ -265,6 +280,7 @@ impl HappyBridgeManager {
     async fn record_status_report(&self, app: &AppHandle, detail: Option<String>) {
         let mut status = self.status.lock().await;
         if detail.as_deref() == Some("Connected") {
+            *self.restart_attempts.lock().await = 0;
             status.state = HappyBridgeState::Running;
         }
         status.detail = detail;
@@ -374,13 +390,19 @@ async fn monitor_process(
     process: Arc<Mutex<Option<HappyBridgeProcess>>>,
     status: Arc<Mutex<HappyBridgeStatus>>,
     restart_attempts: Arc<Mutex<u32>>,
+    stopping: Arc<AtomicBool>,
 ) {
     loop {
         tokio::time::sleep(Duration::from_secs(2)).await;
         let exited = {
             let mut guard = process.lock().await;
             match guard.as_mut() {
-                None => return,
+                None => {
+                    if stopping.load(Ordering::Acquire) {
+                        return;
+                    }
+                    true
+                }
                 Some(process) => match process.child.try_wait() {
                     Ok(None) => false,
                     Ok(Some(_)) => {
@@ -400,7 +422,7 @@ async fn monitor_process(
 
         let attempt = {
             let mut attempts = restart_attempts.lock().await;
-            if !restart_allowed(*attempts) {
+            let Some(next) = next_restart_attempt(*attempts) else {
                 let failed = HappyBridgeStatus {
                     state: HappyBridgeState::Error,
                     detail: Some("restart budget exhausted".to_string()),
@@ -408,9 +430,9 @@ async fn monitor_process(
                 *status.lock().await = failed.clone();
                 let _ = app.emit(STATUS_EVENT, failed);
                 return;
-            }
-            *attempts += 1;
-            *attempts
+            };
+            *attempts = next;
+            next
         };
         let delay = restart_delay(attempt - 1);
         {
@@ -461,6 +483,10 @@ fn restart_delay(attempt: u32) -> Duration {
 
 fn restart_allowed(attempts: u32) -> bool {
     attempts < MAX_RESTART_ATTEMPTS
+}
+
+fn next_restart_attempt(attempts: u32) -> Option<u32> {
+    restart_allowed(attempts).then_some(attempts + 1)
 }
 
 fn resolve_node_binary(app: &AppHandle) -> PathBuf {
@@ -823,7 +849,8 @@ fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: App
 mod tests {
     use super::{
         BoundedLine, MAX_RESTART_ATTEMPTS, MAX_SUPERVISOR_LINE_BYTES, error_response,
-        parse_supervisor_line, read_bounded_line, restart_allowed, restart_delay,
+        next_restart_attempt, parse_supervisor_line, read_bounded_line, restart_allowed,
+        restart_delay,
     };
     use serde_json::Value;
     use std::time::Duration;
@@ -842,6 +869,22 @@ mod tests {
         assert!(restart_allowed(0));
         assert!(restart_allowed(MAX_RESTART_ATTEMPTS - 1));
         assert!(!restart_allowed(MAX_RESTART_ATTEMPTS));
+    }
+
+    #[test]
+    fn failed_restart_retries_until_budget_then_errors_and_stop_is_distinct() {
+        let mut attempts = 0;
+        let mut failed_starts = 0;
+        while let Some(next) = next_restart_attempt(attempts) {
+            attempts = next;
+            failed_starts += 1;
+        }
+        assert_eq!(failed_starts, MAX_RESTART_ATTEMPTS);
+        assert_eq!(next_restart_attempt(attempts), None);
+        assert!(
+            restart_allowed(0),
+            "an intentional stop does not consume restart budget"
+        );
     }
 
     #[test]

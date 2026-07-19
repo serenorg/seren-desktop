@@ -80,7 +80,7 @@ pub async fn happy_bridge_update_roots(
         }
     }
     save_advertised_roots(&app, &normalized)?;
-    if matches!(state.status().await.state, HappyBridgeState::Running) {
+    if state.process_exists().await {
         state.update_roots(normalized).await?;
     }
     Ok(state.status().await)
