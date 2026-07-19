@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   cpSync,
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -127,17 +128,44 @@ function main(): void {
     encoding: "utf8",
   }).stdout.trim();
   console.log(`provider-runtime/node_modules before Happy SDK binary prune: ${bundleSizeBeforePrune}`);
-  const happyLib = path.join(bundleNodeModules, "happy", "lib");
-  const happyReferenceCheck = spawnSync("grep", ["-rl", "claude-agent-sdk", happyLib], {
-    encoding: "utf8",
-  });
-  if (happyReferenceCheck.status === 0) {
-    throw new Error("happy/lib references claude-agent-sdk; refusing to prune its binaries");
+  const happyPackage = path.join(bundleNodeModules, "happy");
+  const sdkPackage = path.join(bundleNodeModules, "@anthropic-ai", "claude-agent-sdk");
+  const happyReferenceRoot = existsSync(path.join(happyPackage, "lib"))
+    ? path.join(happyPackage, "lib")
+    : path.join(happyPackage, "dist");
+  const platformBinaryPattern =
+    "(from[[:space:]]+|import[[:space:]]*\\(|require[[:space:]]*\\()[[:space:]]*['\"][^'\"]*claude-agent-sdk-(linux-x64|linux-arm64|linux-x64-musl|linux-arm64-musl|darwin-x64|darwin-arm64|win32-x64|win32-arm64)[^'\"]*['\"]";
+  // Keep the SDK JS package: Happy's types chunk embeds its version string and
+  // declares the JS package as a regular dependency. Only its optional,
+  // platform-specific native binaries are prunable; Seren runs agents through
+  // its provider runtime and never invokes Happy's agent-runner modules.
+  const happyReferenceCheck = spawnSync(
+    "grep",
+    [
+      "-REl",
+      "--include=*.js",
+      "--include=*.mjs",
+      "--include=*.cjs",
+      platformBinaryPattern,
+      happyReferenceRoot,
+      sdkPackage,
+    ],
+    { encoding: "utf8" },
+  );
+  const scanFailed = Boolean(happyReferenceCheck.error) || happyReferenceCheck.status === null;
+  const referencesBinary = happyReferenceCheck.status === 0;
+  if (scanFailed || referencesBinary || happyReferenceCheck.status !== 1) {
+    const matchedFiles = referencesBinary ? happyReferenceCheck.stdout.trim() : "";
+    console.warn(
+      `Skipping Happy SDK binary prune: ${scanFailed ? "reference scan failed" : referencesBinary ? `binary specifier found in ${matchedFiles}` : "unexpected scan result"}`,
+    );
   }
   const anthropicModules = path.join(bundleNodeModules, "@anthropic-ai");
-  for (const entry of readdirSync(anthropicModules, { withFileTypes: true })) {
-    if (entry.isDirectory() && entry.name.startsWith("claude-agent-sdk-")) {
-      rmSync(path.join(anthropicModules, entry.name), { recursive: true, force: true });
+  if (!scanFailed && !referencesBinary && happyReferenceCheck.status === 1 && existsSync(anthropicModules)) {
+    for (const entry of readdirSync(anthropicModules, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name.startsWith("claude-agent-sdk-")) {
+        rmSync(path.join(anthropicModules, entry.name), { recursive: true, force: true });
+      }
     }
   }
   const bundleSize = spawnSync("du", ["-sh", bundleNodeModules], { encoding: "utf8" })

@@ -6,7 +6,10 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error — the provider runtime is plain ESM without declarations.
 import { createResolutionTracker } from "../../bin/browser-local/providers.mjs";
 // @ts-expect-error — the bridge layer is plain ESM without declarations.
-import { selectApprovalOption } from "../../bin/happy-bridge/happy-layer.mjs";
+import {
+  createTerminatedSessionTracker,
+  selectApprovalOption,
+} from "../../bin/happy-bridge/happy-layer.mjs";
 
 describe("provider resolution arbitration", () => {
   it("returns a success-shaped alreadyResolved result for duplicate responses", () => {
@@ -55,5 +58,13 @@ describe("provider resolution arbitration", () => {
         true,
       ),
     ).toBe("custom_allow");
+  });
+
+  it("allows a terminated session id to be recreated when announced live again", () => {
+    const tracker = createTerminatedSessionTracker(2);
+    tracker.mark("session-1");
+    expect(tracker.has("session-1")).toBe(true);
+    tracker.forget("session-1");
+    expect(tracker.has("session-1")).toBe(false);
   });
 });
