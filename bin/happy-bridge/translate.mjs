@@ -102,13 +102,21 @@ export function translateNeutralEvent(event, { provider = AGENT_PROVIDER } = {})
       return [service(payload, summary ? `Plan updated:\n${summary}` : "Plan updated.")];
     }
     case "permission-request":
+      {
+        const toolCall = payload.toolCall && typeof payload.toolCall === "object"
+          ? payload.toolCall
+          : {};
       return [{ ...acp({
         type: "permission-request",
         permissionId: stringValue(payload.requestId, "unknown-request"),
-        toolName: stringValue(payload.toolName, "tool"),
-        description: stringValue(payload.description, "Approval required"),
+        toolName: stringValue(payload.toolName, stringValue(toolCall.name, "tool")),
+        description: stringValue(
+          payload.description,
+          stringValue(toolCall.description, "Approval required"),
+        ),
         options: Array.isArray(payload.options) ? payload.options : [],
       }), provider }];
+      }
     case "permission-resolved":
       return [service(payload, "Approval resolved.")];
     case "turn-complete": {
@@ -126,6 +134,15 @@ export function translateNeutralEvent(event, { provider = AGENT_PROVIDER } = {})
     }
     case "status": {
       const status = stringValue(payload.status, "unknown");
+      if (["prompting", "busy", "running"].includes(status)) {
+        return [eventEnvelope("agent", { t: "turn-start" }, payload, "turn-start")];
+      }
+      if (["ready", "idle", "completed"].includes(status)) {
+        return [eventEnvelope("agent", { t: "turn-end", status: "completed" }, payload, "turn-end")];
+      }
+      if (["error", "terminated"].includes(status)) {
+        return [eventEnvelope("agent", { t: "turn-end", status: "failed" }, payload, "turn-end")];
+      }
       return [service(payload, `Session status: ${status}`)];
     }
     case "error":

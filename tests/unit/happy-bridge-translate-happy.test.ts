@@ -57,6 +57,19 @@ describe("neutral-to-Happy session translation", () => {
     expect(translateNeutralEvent({ kind: "unknown", sessionId: "session-1", payload })).toEqual([]);
   });
 
+  it.each([
+    ["prompting", "turn-start"],
+    ["ready", "turn-end"],
+    ["error", "turn-end"],
+  ])("maps status %s to a Happy %s event", (status, eventType) => {
+    const [message] = translateNeutralEvent({
+      kind: "status",
+      sessionId: "session-1",
+      payload: { status },
+    });
+    expect(message.envelope.ev.t).toBe(eventType);
+  });
+
   it("keeps approval push copy free of session metadata", () => {
     const output = JSON.stringify(composeApprovalNotification({
       sessionTitle: "Project title",
@@ -71,4 +84,3 @@ describe("neutral-to-Happy session translation", () => {
     expect(output).toContain("Approval needed");
   });
 });
-

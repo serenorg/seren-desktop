@@ -156,6 +156,7 @@ export function createHappyLayer({
   let advertisedRoots = [];
   let advertisedAgents = [];
   const sessions = new Map();
+  const sessionCreationPromises = new Map();
   const pendingRequests = Object.create(null);
   const liveSessions = new Set();
 
@@ -167,11 +168,24 @@ export function createHappyLayer({
     if (event.kind === "permission-request") {
       const options = Array.isArray(event.payload?.options) ? event.payload.options : [];
       if (!pendingRequests[event.sessionId]) pendingRequests[event.sessionId] = Object.create(null);
-      pendingRequests[event.sessionId][event.payload?.requestId] = {
+      if (typeof event.payload?.requestId !== "string") return;
+      pendingRequests[event.sessionId][event.payload.requestId] = {
         optionIds: options.map((option) => option?.optionId ?? option?.id).filter(Boolean),
       };
     } else if (event.kind === "permission-resolved") {
       delete pendingRequests[event.sessionId]?.[event.payload?.requestId];
+    }
+  }
+
+  function rememberPendingPermissions(sessionId, permissions) {
+    if (!Array.isArray(permissions)) return;
+    for (const permission of permissions) {
+      if (permission?.sessionId !== sessionId || typeof permission.requestId !== "string") continue;
+      rememberPermission({
+        kind: "permission-request",
+        sessionId,
+        payload: permission,
+      });
     }
   }
 
@@ -194,16 +208,16 @@ export function createHappyLayer({
   }
 
   async function handleUserMessage(entry, message) {
-    const mode = message?.meta?.permissionMode;
-    if (typeof mode === "string") await source.setPermissionMode(entry.sessionId, mode);
     if (message?.role !== "user" || message?.content?.type !== "text") {
-      if (typeof mode !== "string") debug("dropped invalid Happy user message");
+      debug("dropped invalid Happy user message");
       return;
     }
     if (typeof message.content.text !== "string" || message.content.text.length === 0) {
       debug("dropped empty Happy user message");
       return;
     }
+    const mode = message.meta?.permissionMode;
+    if (typeof mode === "string") await source.setPermissionMode(entry.sessionId, mode);
     await source.sendPrompt(entry.sessionId, message.content.text);
   }
 
@@ -248,6 +262,7 @@ export function createHappyLayer({
     const entry = { sessionId, happySessionId: session.id, summary, session, client };
     sessions.set(sessionId, entry);
     liveSessions.add(sessionId);
+    rememberPendingPermissions(sessionId, summary?.pendingPermissions);
     registerInbound(entry);
     client.sendSessionEvent({ type: "switch", mode: "remote" });
     return entry;
@@ -256,17 +271,34 @@ export function createHappyLayer({
   async function findOrCreateSession(sessionId, summary = null) {
     const existing = sessions.get(sessionId);
     if (existing) return existing;
-    const listed = summary ?? (await source.listSessions()).find((item) => item.sessionId === sessionId);
-    return createSessionEntry(sessionId, listed ?? {
-      sessionId,
-      agentType: "claude-code",
-      cwd: os.homedir(),
-      status: "ready",
-    });
+    const inFlight = sessionCreationPromises.get(sessionId);
+    if (inFlight) return inFlight;
+    const creation = (async () => {
+      const listed = summary ?? (await source.listSessions()).find((item) => item.sessionId === sessionId);
+      return createSessionEntry(sessionId, listed ?? {
+        sessionId,
+        agentType: "claude-code",
+        cwd: os.homedir(),
+        status: "ready",
+      });
+    })();
+    sessionCreationPromises.set(sessionId, creation);
+    try {
+      return await creation;
+    } finally {
+      sessionCreationPromises.delete(sessionId);
+    }
   }
 
   async function publishEvent(event) {
-    liveSessions.add(event.sessionId);
+    const terminal =
+      event.kind === "status" && ["error", "terminated"].includes(event.payload?.status);
+    if (terminal) {
+      liveSessions.delete(event.sessionId);
+      delete pendingRequests[event.sessionId];
+    } else {
+      liveSessions.add(event.sessionId);
+    }
     rememberPermission(event);
     const summary = (await source.listSessions()).find((item) => item.sessionId === event.sessionId);
     const entry = await findOrCreateSession(event.sessionId, summary);
@@ -355,7 +387,6 @@ export function createHappyLayer({
     machineClient = api.machineSyncClient(machine);
     setupMachineHandlers();
     machineClient.connect();
-    await updateCapabilities();
     supervisorChannel.notify("status_report", { state: "connected", detail: "Connected" });
     return true;
   }
@@ -392,13 +423,13 @@ export function createHappyLayer({
 
   return {
     async start() {
+      supervisorSubscription = supervisorChannel.onNotification((method, params) => {
+        if (method === "roots_update") {
+          advertisedRoots = Array.isArray(params?.roots) ? params.roots : [];
+          void updateCapabilities().catch(() => debug("failed to update Happy capabilities"));
+        }
+      });
       if (await registerMachine()) {
-        supervisorSubscription = supervisorChannel.onNotification((method, params) => {
-          if (method === "roots_update") {
-            advertisedRoots = Array.isArray(params?.roots) ? params.roots : [];
-            void updateCapabilities().catch(() => debug("failed to update Happy capabilities"));
-          }
-        });
         await updateCapabilities();
         const listed = await source.listSessions();
         for (const summary of listed) await createSessionEntry(summary.sessionId, summary);
@@ -407,6 +438,8 @@ export function createHappyLayer({
         });
         return;
       }
+      supervisorSubscription?.();
+      supervisorSubscription = null;
       return startPairing();
     },
     startPairing,

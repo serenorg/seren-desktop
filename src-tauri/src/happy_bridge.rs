@@ -121,7 +121,7 @@ impl HappyBridgeManager {
             app.clone(),
             None,
             None,
-            Some(200),
+            None,
         )
         .await
         .unwrap_or_default()

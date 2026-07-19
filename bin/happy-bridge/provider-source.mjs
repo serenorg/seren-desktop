@@ -167,12 +167,36 @@ function normalizeSession(session) {
   };
 }
 
+function providerPermissionMode(mode, agentType) {
+  if (agentType === "codex") {
+    if (mode === "ask" || mode === "auto") return mode;
+    return ["plan", "read-only"].includes(mode) ? "ask" : "auto";
+  }
+  if (agentType === "gemini") {
+    return {
+      default: "default",
+      acceptEdits: "auto_edit",
+      bypassPermissions: "yolo",
+      plan: "plan",
+      "read-only": "plan",
+      "safe-yolo": "yolo",
+      yolo: "yolo",
+    }[mode] ?? mode;
+  }
+  return mode;
+}
+
 export function createProviderSource({ client, config, debugLog = () => {} }) {
+  const agentTypes = new Map();
+
   return {
     async listSessions() {
       const result = await client.call("provider_list_sessions");
       const sessions = Array.isArray(result) ? result : result?.sessions;
-      return Array.isArray(sessions) ? sessions.map(normalizeSession) : [];
+      if (!Array.isArray(sessions)) return [];
+      const normalized = sessions.map(normalizeSession);
+      for (const session of normalized) agentTypes.set(session.sessionId, session.agentType);
+      return normalized;
     },
 
     subscribe(onEvent) {
@@ -204,7 +228,11 @@ export function createProviderSource({ client, config, debugLog = () => {} }) {
     },
 
     async setPermissionMode(sessionId, mode) {
-      await client.call("provider_set_permission_mode", { sessionId, mode });
+      const agentType = agentTypes.get(sessionId);
+      await client.call("provider_set_permission_mode", {
+        sessionId,
+        mode: providerPermissionMode(mode, agentType),
+      });
     },
 
     async spawn(spec) {
@@ -220,7 +248,9 @@ export function createProviderSource({ client, config, debugLog = () => {} }) {
         initialModelId: spec.initialModelId ?? null,
         reasoningEffort: spec.reasoningEffort ?? null,
       });
-      return normalizeSession(result);
+      const session = normalizeSession(result);
+      agentTypes.set(session.sessionId, session.agentType);
+      return session;
     },
 
     async advertise() {

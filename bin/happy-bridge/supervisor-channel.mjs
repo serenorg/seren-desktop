@@ -14,6 +14,17 @@ export function createSupervisorChannel({
   let nextId = 0;
   const pending = new Map();
   const notificationListeners = new Set();
+  const notificationQueue = [];
+  const MAX_QUEUED_NOTIFICATIONS = 32;
+
+  function dispatchNotification(method, params) {
+    if (notificationListeners.size === 0) {
+      if (notificationQueue.length === MAX_QUEUED_NOTIFICATIONS) notificationQueue.shift();
+      notificationQueue.push({ method, params });
+      return;
+    }
+    for (const listener of notificationListeners) listener(method, params);
+  }
 
   function handleLine(line) {
     if (Buffer.byteLength(line, "utf8") > MAX_LINE_BYTES) return;
@@ -27,9 +38,7 @@ export function createSupervisorChannel({
 
     if (response?.id === undefined || response?.id === null) {
       if (typeof response?.method === "string") {
-        for (const listener of notificationListeners) {
-          listener(response.method, response.params ?? {});
-        }
+        dispatchNotification(response.method, response.params ?? {});
       }
       return;
     }
@@ -63,6 +72,10 @@ export function createSupervisorChannel({
 
   function onNotification(listener) {
     notificationListeners.add(listener);
+    while (notificationQueue.length > 0) {
+      const notification = notificationQueue.shift();
+      listener(notification.method, notification.params);
+    }
     return () => notificationListeners.delete(listener);
   }
 
@@ -73,6 +86,7 @@ export function createSupervisorChannel({
     }
     pending.clear();
     notificationListeners.clear();
+    notificationQueue.length = 0;
   }
 
   return { call, close, handleLine, notify, onNotification };
