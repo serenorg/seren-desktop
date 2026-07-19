@@ -15,6 +15,12 @@ const forkEnd = agentStoreSource.indexOf(
   forkStart,
 );
 const forkBody = agentStoreSource.slice(forkStart, forkEnd);
+const spawnStart = agentStoreSource.indexOf("async spawnSession(");
+const spawnEnd = agentStoreSource.indexOf(
+  "async resumeAgentConversation(",
+  spawnStart,
+);
+const spawnBody = agentStoreSource.slice(spawnStart, spawnEnd);
 
 describe("#2971 — paired agent conversation fork", () => {
   it("carries paired role pins through conversation metadata and spawn", () => {
@@ -47,5 +53,12 @@ describe("#2971 — paired agent conversation fork", () => {
     expect(setterStart).toBeGreaterThan(0);
     expect(setterBody).toContain("pairedSpawnConfigFromStatus(");
     expect(setterBody).toContain("session.paired");
+  });
+
+  it("preserves the explicit fork title in the live session", () => {
+    expect(spawnStart).toBeGreaterThan(0);
+    expect(forkBody).toContain("conversationTitle: forkTitle");
+    expect(spawnBody).toContain("title: opts?.conversationTitle,");
+    expect(spawnBody).not.toContain("title: conversationTitle,");
   });
 });
