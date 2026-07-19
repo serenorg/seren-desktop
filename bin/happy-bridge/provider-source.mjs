@@ -203,6 +203,10 @@ export function createProviderSource({ client, config, debugLog = () => {} }) {
       return { ok: true };
     },
 
+    async setPermissionMode(sessionId, mode) {
+      await client.call("provider_set_permission_mode", { sessionId, mode });
+    },
+
     async spawn(spec) {
       const result = await client.call("provider_spawn", {
         agentType: spec.agentType,

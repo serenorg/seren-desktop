@@ -1,58 +1,20 @@
-// ABOUTME: Defines the machine-facing session seam used by the remote bridge.
-// ABOUTME: Keeps provider and future relay types separated by neutral shapes.
+// ABOUTME: Defines the provider-neutral session seam used by the Happy adapter.
+// ABOUTME: It contains contracts only so protocol code cannot leak into providers.
 
 /**
- * @typedef {Object} SessionSummary
- * @property {string} sessionId
- * @property {string} agentType
- * @property {string} cwd
- * @property {string} status
- * @property {string} createdAt
- * @property {string=} agentSessionId
- * @property {Array<Object>=} pendingPermissions
- */
-
-/**
- * @typedef {Object} SessionEvent
- * @property {string} kind
- * @property {string} sessionId
- * @property {Object} payload
- */
-
-/**
- * @typedef {Object} RespondResult
- * @property {boolean} ok
- */
-
-/**
- * @typedef {Object} SpawnSpec
- * @property {string} agentType
- * @property {string} cwd
- * @property {string=} title
- * @property {string=} localSessionId
- * @property {string=} resumeAgentSessionId
- * @property {string=} sandboxMode
- * @property {string=} approvalPolicy
- * @property {boolean=} networkEnabled
- * @property {number=} timeoutSecs
- * @property {string=} initialModelId
- * @property {string=} reasoningEffort
- */
-
-/**
- * @typedef {Object} Advertisement
- * @property {string} machineName
- * @property {Array<Object>} agents
- * @property {string[]} roots
- */
-
-/**
+ * @typedef {{sessionId: string, agentType: string, cwd: string, status?: string, title?: string, createdAt?: string, agentSessionId?: string, pendingPermissions?: unknown[]}} SessionSummary
+ * @typedef {{kind: string, sessionId: string, payload: Record<string, unknown>}} SessionEvent
+ * @typedef {{agentType: string, cwd: string, title?: string, localSessionId?: string, resumeAgentSessionId?: string, sandboxMode?: string, approvalPolicy?: string, networkEnabled?: boolean, timeoutSecs?: number, initialModelId?: string, reasoningEffort?: string, permissionMode?: string}} SpawnSpec
+ * @typedef {{machineName: string, agents: unknown[], roots: string[]}} Advertisement
  * @typedef {Object} SessionSource
  * @property {() => Promise<SessionSummary[]>} listSessions
- * @property {(onEvent: (evt: SessionEvent) => void) => () => void} subscribe
+ * @property {(listener: (event: SessionEvent) => void) => (() => void)} subscribe
  * @property {(sessionId: string, text: string) => Promise<void>} sendPrompt
  * @property {(sessionId: string) => Promise<void>} cancel
- * @property {(sessionId: string, requestId: string, optionId: string) => Promise<RespondResult>} respondToPermission
+ * @property {(sessionId: string, requestId: string, optionId: string) => Promise<{ok: boolean}>} respondToPermission
+ * @property {(sessionId: string, mode: string) => Promise<void>} setPermissionMode
  * @property {(spec: SpawnSpec) => Promise<SessionSummary>} spawn
  * @property {() => Promise<Advertisement>} advertise
  */
+
+export {};

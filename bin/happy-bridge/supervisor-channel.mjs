@@ -13,6 +13,7 @@ export function createSupervisorChannel({
 } = {}) {
   let nextId = 0;
   const pending = new Map();
+  const notificationListeners = new Set();
 
   function handleLine(line) {
     if (Buffer.byteLength(line, "utf8") > MAX_LINE_BYTES) return;
@@ -24,7 +25,14 @@ export function createSupervisorChannel({
       return;
     }
 
-    if (response?.id === undefined || response?.id === null) return;
+    if (response?.id === undefined || response?.id === null) {
+      if (typeof response?.method === "string") {
+        for (const listener of notificationListeners) {
+          listener(response.method, response.params ?? {});
+        }
+      }
+      return;
+    }
     const request = pending.get(response.id);
     if (!request) return;
 
@@ -53,13 +61,19 @@ export function createSupervisorChannel({
     write(JSON.stringify({ jsonrpc: "2.0", method, params }));
   }
 
+  function onNotification(listener) {
+    notificationListeners.add(listener);
+    return () => notificationListeners.delete(listener);
+  }
+
   function close() {
     for (const request of pending.values()) {
       clearTimeout(request.timer);
       request.reject(new Error("supervisor channel closed"));
     }
     pending.clear();
+    notificationListeners.clear();
   }
 
-  return { call, close, handleLine, notify };
+  return { call, close, handleLine, notify, onNotification };
 }

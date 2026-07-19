@@ -84,6 +84,7 @@ try {
   happyLayer = createHappyLayer({
     config,
     supervisorChannel,
+    source,
     debugLog: (message) => console.error(`happy-bridge: ${message}`),
   });
   await happyLayer.start();
