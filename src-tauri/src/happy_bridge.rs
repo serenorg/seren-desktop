@@ -115,6 +115,24 @@ impl HappyBridgeManager {
         let machine_identity = self.load_pairing_credential(app)?.map(|credential| {
             serde_json::from_str(&credential).unwrap_or_else(|_| Value::String(credential))
         });
+        // Reuse the existing conversation reader as the source of recent project roots.
+        // There is no separate Rust recent-project registry in this repository.
+        let advertised_roots = crate::commands::chat::list_conversations(
+            app.clone(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|conversation| conversation.project_root.or(conversation.agent_cwd))
+        .fold(Vec::<String>::new(), |mut roots, root| {
+            if !roots.iter().any(|existing| existing == &root) {
+                roots.push(root);
+            }
+            roots
+        });
         let config = HappyBridgeConfig {
             provider_runtime: ProviderRuntimeConnection {
                 host: provider_runtime.host,
@@ -161,6 +179,15 @@ impl HappyBridgeManager {
             .map_err(|err| format!("Failed to flush Happy bridge config: {err}"))?;
 
         let stdin = Arc::new(Mutex::new(stdin));
+        write_supervisor_notification(
+            &stdin,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "roots_update",
+                "params": { "roots": advertised_roots },
+            }),
+        )
+        .await;
         pipe_bridge_output(&mut child, Arc::clone(&stdin), app.clone());
         *self.process.lock().await = Some(HappyBridgeProcess {
             child,
@@ -652,6 +679,22 @@ where
     }
     if let Err(error) = writer.flush().await {
         log::warn!("[HappyBridge] Failed to flush supervisor response: {error}");
+    }
+}
+
+async fn write_supervisor_notification(writer: &Arc<Mutex<ChildStdin>>, notification: Value) {
+    let Ok(mut encoded) = serde_json::to_vec(&notification) else {
+        log::warn!("[HappyBridge] Failed to encode supervisor notification");
+        return;
+    };
+    encoded.push(b'\n');
+    let mut writer = writer.lock().await;
+    if let Err(error) = writer.write_all(&encoded).await {
+        log::warn!("[HappyBridge] Failed to write supervisor notification: {error}");
+        return;
+    }
+    if let Err(error) = writer.flush().await {
+        log::warn!("[HappyBridge] Failed to flush supervisor notification: {error}");
     }
 }
 

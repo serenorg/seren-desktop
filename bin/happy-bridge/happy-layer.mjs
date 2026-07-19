@@ -1,4 +1,4 @@
-// ABOUTME: Owns the narrow Happy client and hosted-relay pairing adapter.
+// ABOUTME: Owns the narrow Happy client, session stream, and hosted-relay adapter.
 // ABOUTME: Pairing material crosses the supervisor channel only and is never logged.
 
 import { randomUUID } from "node:crypto";
@@ -6,8 +6,12 @@ import os from "node:os";
 import { ApiClient, configuration } from "happy/lib";
 import nacl from "tweetnacl";
 
+import { translateNeutralEvent, composeApprovalNotification } from "./translate.mjs";
+import { validatePermissionResponse, validateSpawnRoot } from "./validate.mjs";
+
 const AUTH_POLL_MS = 1000;
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_CODEX_APPROVAL_POLICY = "on-failure";
 
 function encodeBase64(bytes) {
   return Buffer.from(bytes).toString("base64");
@@ -65,11 +69,7 @@ function identityFromAuthResponse(token, decrypted) {
   if (!decrypted) throw new Error("Happy pairing response could not be decrypted");
   const machineId = randomUUID();
   if (decrypted.length === 32) {
-    return {
-      token,
-      machineId,
-      encryption: { type: "legacy", secret: encodeBase64(decrypted) },
-    };
+    return { token, machineId, encryption: { type: "legacy", secret: encodeBase64(decrypted) } };
   }
   if (decrypted.length === 33 && decrypted[0] === 0) {
     return {
@@ -104,7 +104,7 @@ async function readAuthRequest(relayUrl, publicKey) {
   return response.json();
 }
 
-function machineMetadata(config) {
+function machineMetadata(config, capabilities = { agents: [], roots: [] }) {
   return {
     host: config.machineName,
     platform: `${process.platform}-${process.arch}`,
@@ -112,15 +112,290 @@ function machineMetadata(config) {
     homeDir: os.homedir(),
     happyHomeDir: os.homedir(),
     happyLibDir: "seren-desktop",
+    remoteCapabilities: capabilities,
   };
 }
 
-export function createHappyLayer({ config, supervisorChannel, debugLog = () => {} }) {
+function happyAgentType(agent) {
+  if (agent === "claude") return "claude-code";
+  if (agent === "gemini") return "gemini";
+  if (agent === "codex") return "codex";
+  return typeof agent === "string" && agent.length > 0 ? agent : "claude-code";
+}
+
+function defaultApprovalPolicy(agentType) {
+  // Match the desktop's fresh-session defaults. Codex is explicitly
+  // on-failure; Claude and Gemini resolve their normal defaults in their
+  // runtimes when no stricter policy is supplied.
+  return agentType === "codex" ? DEFAULT_CODEX_APPROVAL_POLICY : undefined;
+}
+
+function sessionMetadata(config, summary, machineId) {
+  const cwd = typeof summary.cwd === "string" && summary.cwd.length > 0 ? summary.cwd : os.homedir();
+  return {
+    path: cwd,
+    host: config.machineName,
+    name: summary.title ?? `${summary.agentType ?? "Agent"} session`,
+    version: "seren-desktop",
+    os: process.platform,
+    machineId,
+    homeDir: os.homedir(),
+    happyHomeDir: os.homedir(),
+    happyLibDir: "seren-desktop",
+    lifecycleState: "running",
+    lifecycleStateSince: Date.now(),
+  };
+}
+
+export function createHappyLayer({
+  config,
+  supervisorChannel,
+  source,
+  debugLog = () => {},
+}) {
   configuration.serverUrl = config.relayUrl;
   let identity = config.machineIdentity;
   let api = null;
   let machineClient = null;
   let pairingPromise = null;
+  let sourceSubscription = null;
+  let supervisorSubscription = null;
+  let advertisedRoots = [];
+  let advertisedAgents = [];
+  const sessions = new Map();
+  const sessionCreationPromises = new Map();
+  const pendingRequests = Object.create(null);
+  const liveSessions = new Set();
+
+  function debug(message) {
+    debugLog(message);
+  }
+
+  function rememberPermission(event) {
+    if (event.kind === "permission-request") {
+      const options = Array.isArray(event.payload?.options) ? event.payload.options : [];
+      if (!pendingRequests[event.sessionId]) pendingRequests[event.sessionId] = Object.create(null);
+      if (typeof event.payload?.requestId !== "string") return;
+      pendingRequests[event.sessionId][event.payload.requestId] = {
+        optionIds: options.map((option) => option?.optionId ?? option?.id).filter(Boolean),
+      };
+    } else if (event.kind === "permission-resolved") {
+      delete pendingRequests[event.sessionId]?.[event.payload?.requestId];
+    }
+  }
+
+  function rememberPendingPermissions(sessionId, permissions) {
+    if (!Array.isArray(permissions)) return;
+    for (const permission of permissions) {
+      if (typeof permission?.requestId !== "string") continue;
+      rememberPermission({
+        kind: "permission-request",
+        sessionId,
+        payload: permission,
+      });
+    }
+  }
+
+  function registerInbound(entry) {
+    const { sessionId, client } = entry;
+    client.onUserMessage((message) => {
+      void handleUserMessage(entry, message).catch(() => debug("ignored Happy inbound user message"));
+    });
+    client.rpcHandlerManager.registerHandler("abort", async () => {
+      try {
+        await source.cancel(sessionId);
+        return { ok: true };
+      } catch {
+        debug("ignored failed Happy abort request");
+        return { ok: false };
+      }
+    });
+    client.rpcHandlerManager.registerHandler("switch", async () => {
+      try {
+        await source.cancel(sessionId);
+        return { ok: true };
+      } catch {
+        debug("ignored failed Happy switch request");
+        return { ok: false };
+      }
+    });
+    client.rpcHandlerManager.registerHandler("permission", async (response) => {
+      try {
+        return await handlePermissionResponse(entry, response);
+      } catch {
+        debug("ignored failed Happy permission request");
+        return { ok: false };
+      }
+    });
+  }
+
+  async function handleUserMessage(entry, message) {
+    if (message?.role !== "user" || message?.content?.type !== "text") {
+      debug("dropped invalid Happy user message");
+      return;
+    }
+    if (typeof message.content.text !== "string" || message.content.text.length === 0) {
+      debug("dropped empty Happy user message");
+      return;
+    }
+    const mode = message.meta?.permissionMode;
+    if (message.meta && mode !== undefined && typeof mode !== "string") {
+      debug("dropped invalid Happy permission mode");
+      return;
+    }
+    if (typeof mode === "string") await source.setPermissionMode(entry.sessionId, mode);
+    await source.sendPrompt(entry.sessionId, message.content.text);
+  }
+
+  async function handlePermissionResponse(entry, response) {
+    const requestId = response?.id ?? response?.requestId;
+    const offered = pendingRequests[entry.sessionId]?.[requestId];
+    let optionId = response?.optionId;
+    if (!optionId && offered?.optionIds) {
+      optionId = response?.approved
+        ? offered.optionIds.find((id) => !["deny", "decline", "reject", "cancel"].includes(id))
+        : offered.optionIds.find((id) => ["deny", "decline", "reject", "cancel"].includes(id));
+    }
+    if (typeof requestId !== "string" || typeof optionId !== "string") {
+      debug("dropped invalid Happy permission response");
+      return { ok: false };
+    }
+    const validation = validatePermissionResponse(entry.sessionId, requestId, optionId, {
+      liveSessions,
+      pendingRequests,
+    });
+    if (!validation.ok) {
+      debug("dropped invalid Happy permission response");
+      return { ok: false };
+    }
+    await source.respondToPermission(entry.sessionId, requestId, optionId);
+    delete pendingRequests[entry.sessionId]?.[requestId];
+    return { ok: true };
+  }
+
+  async function createSessionEntry(sessionId, summary, existingSession = null) {
+    const existing = sessions.get(sessionId);
+    if (existing) return existing;
+    if (!api || !identity) throw new Error("Happy API is not registered");
+    const machineId = identity.machineId ?? "seren-desktop";
+    const session = existingSession ?? await api.getOrCreateSession({
+      tag: `seren-${sessionId}`,
+      metadata: sessionMetadata(config, summary, machineId),
+      state: { controlledByUser: true },
+    });
+    if (!session) throw new Error("Happy relay did not return a session");
+    const client = api.sessionSyncClient(session);
+    const entry = { sessionId, happySessionId: session.id, summary, session, client };
+    sessions.set(sessionId, entry);
+    liveSessions.add(sessionId);
+    rememberPendingPermissions(sessionId, summary?.pendingPermissions);
+    registerInbound(entry);
+    client.sendSessionEvent({ type: "switch", mode: "remote" });
+    return entry;
+  }
+
+  async function findOrCreateSession(sessionId, summary = null) {
+    const existing = sessions.get(sessionId);
+    if (existing) return existing;
+    const inFlight = sessionCreationPromises.get(sessionId);
+    if (inFlight) return inFlight;
+    const creation = (async () => {
+      const listed = summary ?? (await source.listSessions()).find((item) => item.sessionId === sessionId);
+      return createSessionEntry(sessionId, listed ?? {
+        sessionId,
+        agentType: "claude-code",
+        cwd: os.homedir(),
+        status: "ready",
+      });
+    })();
+    sessionCreationPromises.set(sessionId, creation);
+    try {
+      return await creation;
+    } finally {
+      sessionCreationPromises.delete(sessionId);
+    }
+  }
+
+  async function publishEvent(event) {
+    const terminal =
+      event.kind === "status" && ["error", "terminated"].includes(event.payload?.status);
+    if (terminal) {
+      liveSessions.delete(event.sessionId);
+      delete pendingRequests[event.sessionId];
+    } else {
+      liveSessions.add(event.sessionId);
+    }
+    rememberPermission(event);
+    const summary = (await source.listSessions()).find((item) => item.sessionId === event.sessionId);
+    const entry = await findOrCreateSession(event.sessionId, summary);
+    const provider = summary?.agentType === "claude-code" ? "claude" : summary?.agentType ?? "codex";
+    for (const message of translateNeutralEvent(event, { provider })) {
+      if (message.transport === "session") entry.client.sendSessionProtocolMessage(message.envelope);
+      if (message.transport === "agent") entry.client.sendAgentMessage(message.provider, message.body);
+    }
+    if (event.kind === "permission-request" && api) {
+      const notification = composeApprovalNotification();
+      api.push().sendToAllDevices(notification.title, notification.body, notification.data);
+    }
+  }
+
+  async function updateCapabilities() {
+    if (!machineClient || !source) return;
+    const advertised = await source.advertise();
+    advertisedAgents = Array.isArray(advertised.agents) ? advertised.agents : [];
+    await machineClient.updateMachineMetadata((metadata) => ({
+      ...(metadata ?? machineMetadata(config)),
+      remoteCapabilities: { agents: advertisedAgents, roots: advertisedRoots },
+    }));
+  }
+
+  async function handleSpawn(options) {
+    const validation = validateSpawnRoot(options?.directory, advertisedRoots);
+    if (!validation.ok) {
+      debug("refused spawn outside advertised roots");
+      return { type: "error", errorMessage: "Requested directory is not an advertised root" };
+    }
+    const agentType = happyAgentType(options?.agent);
+    const pendingSessionId = `spawn-${randomUUID()}`;
+    const pending = await createSessionEntry(pendingSessionId, {
+      sessionId: pendingSessionId,
+      agentType,
+      cwd: validation.root,
+      title: `${agentType} Agent`,
+      status: "initializing",
+    });
+    const conversation = await supervisorChannel.call("conversation_create", {
+      agentType,
+      cwd: validation.root,
+      title: `${agentType} Agent`,
+      happySessionId: pending.happySessionId,
+    });
+    const spawned = await source.spawn({
+      agentType,
+      cwd: validation.root,
+      localSessionId: conversation.conversationId,
+      approvalPolicy: defaultApprovalPolicy(agentType),
+    });
+    if (!spawned?.sessionId) throw new Error("provider spawn returned no session");
+    sessions.delete(pendingSessionId);
+    sessions.set(spawned.sessionId, { ...pending, sessionId: spawned.sessionId, summary: spawned });
+    liveSessions.delete(pendingSessionId);
+    liveSessions.add(spawned.sessionId);
+    pendingRequests[spawned.sessionId] = pendingRequests[pendingSessionId] ?? Object.create(null);
+    delete pendingRequests[pendingSessionId];
+    return { type: "success", sessionId: pending.happySessionId };
+  }
+
+  function setupMachineHandlers() {
+    machineClient.setRPCHandlers({
+      spawnSession: handleSpawn,
+      stopSession: (sessionId) => {
+        void source.cancel(sessionId).catch(() => debug("failed to cancel Happy session"));
+        return true;
+      },
+      requestShutdown: () => debug("Happy client requested bridge shutdown"),
+    });
+  }
 
   async function registerMachine() {
     if (!identity) return false;
@@ -137,6 +412,7 @@ export function createHappyLayer({ config, supervisorChannel, debugLog = () => {
       daemonState: { status: "running", pid: process.pid, startedAt: Date.now() },
     });
     machineClient = api.machineSyncClient(machine);
+    setupMachineHandlers();
     machineClient.connect();
     supervisorChannel.notify("status_report", { state: "connected", detail: "Connected" });
     return true;
@@ -154,7 +430,7 @@ export function createHappyLayer({ config, supervisorChannel, debugLog = () => {
       }
       await new Promise((resolve) => setTimeout(resolve, AUTH_POLL_MS));
     }
-    debugLog("pairing authorization timed out");
+    debug("pairing authorization timed out");
   }
 
   async function startPairing() {
@@ -165,7 +441,7 @@ export function createHappyLayer({ config, supervisorChannel, debugLog = () => {
       const payload = `happy://terminal?${encodeBase64Url(keyPair.publicKey)}`;
       supervisorChannel.notify("pairing_payload", { payload });
       void waitForAuthorization(keyPair).catch((error) => {
-        debugLog(`pairing authorization failed: ${error instanceof Error ? error.message : "unknown error"}`);
+        debug(`pairing authorization failed: ${error instanceof Error ? error.message : "unknown error"}`);
       });
       return payload;
     })();
@@ -174,11 +450,31 @@ export function createHappyLayer({ config, supervisorChannel, debugLog = () => {
 
   return {
     async start() {
-      if (await registerMachine()) return;
+      supervisorSubscription = supervisorChannel.onNotification((method, params) => {
+        if (method === "roots_update") {
+          advertisedRoots = Array.isArray(params?.roots) ? params.roots : [];
+          void updateCapabilities().catch(() => debug("failed to update Happy capabilities"));
+        }
+      });
+      if (await registerMachine()) {
+        await updateCapabilities();
+        const listed = await source.listSessions();
+        for (const summary of listed) await createSessionEntry(summary.sessionId, summary);
+        sourceSubscription = source.subscribe((event) => {
+          void publishEvent(event).catch(() => debug("failed to publish Happy session event"));
+        });
+        return;
+      }
+      supervisorSubscription?.();
+      supervisorSubscription = null;
       return startPairing();
     },
     startPairing,
     close() {
+      sourceSubscription?.();
+      supervisorSubscription?.();
+      for (const entry of sessions.values()) void entry.client.close();
+      sessions.clear();
       machineClient?.shutdown();
       machineClient = null;
       api = null;
