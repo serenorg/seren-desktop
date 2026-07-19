@@ -80,6 +80,9 @@ function main(): void {
     path.join(repoRoot, "bin", "happy-bridge.mjs"),
     path.join(destDir, "happy-bridge.mjs"),
   );
+  cpSync(path.join(repoRoot, "bin", "happy-bridge"), path.join(destDir, "happy-bridge"), {
+    recursive: true,
+  });
   cpSync(browserLocalSrcDir, path.join(destDir, "browser-local"), {
     recursive: true,
   });
