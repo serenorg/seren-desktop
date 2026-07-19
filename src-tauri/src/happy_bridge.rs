@@ -61,6 +61,7 @@ pub struct HappyBridgeManager {
     process: Arc<Mutex<Option<HappyBridgeProcess>>>,
     monitor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     status: Arc<Mutex<HappyBridgeStatus>>,
+    restart_attempts: Arc<Mutex<u32>>,
     pairing_payload: Arc<Mutex<Option<String>>>,
 }
 
@@ -73,6 +74,7 @@ impl HappyBridgeManager {
                 state: HappyBridgeState::Stopped,
                 detail: None,
             })),
+            restart_attempts: Arc::new(Mutex::new(0)),
             pairing_payload: Arc::new(Mutex::new(None)),
         }
     }
@@ -94,13 +96,13 @@ impl HappyBridgeManager {
         }
 
         self.set_status(app, HappyBridgeState::Starting, None).await;
+        *self.restart_attempts.lock().await = 0;
         if let Err(error) = self.start_process(app).await {
             self.set_status(app, HappyBridgeState::Error, Some(error.clone()))
                 .await;
             return Err(error);
         }
 
-        self.set_status(app, HappyBridgeState::Running, None).await;
         self.ensure_monitor(app.clone()).await;
         Ok(())
     }
@@ -117,26 +119,20 @@ impl HappyBridgeManager {
         });
         // Reuse the existing conversation reader as the source of recent project roots.
         // There is no separate Rust recent-project registry in this repository.
-        let discovered_roots = crate::commands::chat::list_conversations(
-            app.clone(),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|conversation| conversation.project_root.or(conversation.agent_cwd))
-        .fold(Vec::<String>::new(), |mut roots, root| {
-            if !roots.iter().any(|existing| existing == &root) {
-                roots.push(root);
-            }
-            roots
-        });
-        let advertised_roots = crate::commands::happy_bridge::effective_advertised_roots(
-            app,
-            discovered_roots,
-        );
+        let discovered_roots =
+            crate::commands::chat::list_conversations(app.clone(), None, None, None)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|conversation| conversation.project_root.or(conversation.agent_cwd))
+                .fold(Vec::<String>::new(), |mut roots, root| {
+                    if !roots.iter().any(|existing| existing == &root) {
+                        roots.push(root);
+                    }
+                    roots
+                });
+        let advertised_roots =
+            crate::commands::happy_bridge::effective_advertised_roots(app, discovered_roots);
         let config = HappyBridgeConfig {
             provider_runtime: ProviderRuntimeConnection {
                 host: provider_runtime.host,
@@ -148,7 +144,7 @@ impl HappyBridgeManager {
             machine_name: "seren-desktop".to_string(),
         };
 
-        let mut command = Command::new(node_binary);
+        let mut command = Command::new(&node_binary);
         command
             .arg(&bridge_entry)
             .kill_on_drop(true)
@@ -213,8 +209,9 @@ impl HappyBridgeManager {
         guard.take();
         let process = Arc::clone(&self.process);
         let status = Arc::clone(&self.status);
+        let restart_attempts = Arc::clone(&self.restart_attempts);
         *guard = Some(tokio::spawn(async move {
-            monitor_process(app, process, status).await;
+            monitor_process(app, process, status, restart_attempts).await;
         }));
     }
 
@@ -376,6 +373,7 @@ async fn monitor_process(
     app: AppHandle,
     process: Arc<Mutex<Option<HappyBridgeProcess>>>,
     status: Arc<Mutex<HappyBridgeStatus>>,
+    restart_attempts: Arc<Mutex<u32>>,
 ) {
     loop {
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -400,42 +398,40 @@ async fn monitor_process(
             continue;
         }
 
-        for attempt in 0..MAX_RESTART_ATTEMPTS {
-            let delay = restart_delay(attempt);
-            {
-                let mut current = status.lock().await;
-                current.state = HappyBridgeState::Starting;
-                current.detail = Some(format!(
-                    "restart attempt {}/{}",
-                    attempt + 1,
-                    MAX_RESTART_ATTEMPTS
-                ));
-                let _ = app.emit(STATUS_EVENT, current.clone());
+        let attempt = {
+            let mut attempts = restart_attempts.lock().await;
+            if !restart_allowed(*attempts) {
+                let failed = HappyBridgeStatus {
+                    state: HappyBridgeState::Error,
+                    detail: Some("restart budget exhausted".to_string()),
+                };
+                *status.lock().await = failed.clone();
+                let _ = app.emit(STATUS_EVENT, failed);
+                return;
             }
-            tokio::time::sleep(delay).await;
+            *attempts += 1;
+            *attempts
+        };
+        let delay = restart_delay(attempt - 1);
+        {
+            let mut current = status.lock().await;
+            current.state = HappyBridgeState::Starting;
+            current.detail = Some(format!("restart attempt {attempt}/{MAX_RESTART_ATTEMPTS}"));
+            let _ = app.emit(STATUS_EVENT, current.clone());
+        }
+        tokio::time::sleep(delay).await;
 
-            let manager = app.state::<HappyBridgeManager>();
-            match manager.start_process(&app).await {
-                Ok(()) => {
-                    let running = HappyBridgeStatus {
-                        state: HappyBridgeState::Running,
-                        detail: None,
-                    };
-                    *status.lock().await = running.clone();
-                    let _ = app.emit(STATUS_EVENT, running);
-                    break;
-                }
-                Err(error) if attempt + 1 == MAX_RESTART_ATTEMPTS => {
-                    let failed = HappyBridgeStatus {
-                        state: HappyBridgeState::Error,
-                        detail: Some(error),
-                    };
-                    *status.lock().await = failed.clone();
-                    let _ = app.emit(STATUS_EVENT, failed);
-                }
-                Err(error) => {
-                    log::warn!("[HappyBridge] Restart failed: {error}");
-                }
+        let manager = app.state::<HappyBridgeManager>();
+        if let Err(error) = manager.start_process(&app).await {
+            if attempt >= MAX_RESTART_ATTEMPTS {
+                let failed = HappyBridgeStatus {
+                    state: HappyBridgeState::Error,
+                    detail: Some(error),
+                };
+                *status.lock().await = failed.clone();
+                let _ = app.emit(STATUS_EVENT, failed);
+            } else {
+                log::warn!("[HappyBridge] Restart failed: {error}");
             }
         }
     }
@@ -461,6 +457,10 @@ async fn terminate_child(child: &mut Child) -> Result<(), String> {
 fn restart_delay(attempt: u32) -> Duration {
     let seconds = 2u64.saturating_pow(attempt).min(MAX_BACKOFF_SECONDS);
     Duration::from_secs(seconds)
+}
+
+fn restart_allowed(attempts: u32) -> bool {
+    attempts < MAX_RESTART_ATTEMPTS
 }
 
 fn resolve_node_binary(app: &AppHandle) -> PathBuf {
@@ -822,8 +822,8 @@ fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: App
 #[cfg(test)]
 mod tests {
     use super::{
-        BoundedLine, MAX_SUPERVISOR_LINE_BYTES, error_response, parse_supervisor_line,
-        read_bounded_line, restart_delay,
+        BoundedLine, MAX_RESTART_ATTEMPTS, MAX_SUPERVISOR_LINE_BYTES, error_response,
+        parse_supervisor_line, read_bounded_line, restart_allowed, restart_delay,
     };
     use serde_json::Value;
     use std::time::Duration;
@@ -835,6 +835,13 @@ mod tests {
         assert_eq!(restart_delay(1), Duration::from_secs(2));
         assert_eq!(restart_delay(2), Duration::from_secs(4));
         assert_eq!(restart_delay(10), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn restart_budget_is_global_and_exhausts() {
+        assert!(restart_allowed(0));
+        assert!(restart_allowed(MAX_RESTART_ATTEMPTS - 1));
+        assert!(!restart_allowed(MAX_RESTART_ATTEMPTS));
     }
 
     #[test]
