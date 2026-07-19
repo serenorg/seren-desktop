@@ -1,7 +1,12 @@
 import { onRuntimeEvent } from "@/lib/browser-local-runtime";
 import {
+  pairedSpawnConfigFromStatus,
   subscribeToAllEvents,
   subscribeToSession,
+  supportsConversationFork,
+  supportsNativeProviderFork,
+  type AgentType,
+  type PairedStatus,
   type UnlistenFn,
 } from "@/services/providers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +18,56 @@ vi.mock("@/lib/browser-local-runtime", () => ({
 }));
 
 const onRuntimeEventMock = vi.mocked(onRuntimeEvent);
+
+describe("provider fork capabilities", () => {
+  it("supports conversation branches for every desktop agent type", () => {
+    const agentTypes: AgentType[] = [
+      "claude-code",
+      "codex",
+      "gemini",
+      "claude-codex",
+      "lmstudio",
+    ];
+
+    expect(agentTypes.every(supportsConversationFork)).toBe(true);
+    expect(agentTypes.filter(supportsNativeProviderFork)).toEqual([
+      "claude-code",
+    ]);
+  });
+
+  it("copies explicit paired role pins into a fresh-session config", () => {
+    const paired = {
+      state: "idle",
+      activeRole: null,
+      planner: {
+        role: "planner",
+        label: "Claude",
+        agentType: "claude-code",
+        defaultModelLabel: "Claude Default",
+        pinnedModelId: "planner-model",
+        pinnedEffort: "high",
+      },
+      executor: {
+        role: "executor",
+        label: "Codex",
+        agentType: "codex",
+        defaultModelLabel: "Codex Recommended",
+        pinnedModelId: "executor-model",
+        pinnedEffort: "medium",
+        pinnedServiceTier: "fast",
+      },
+    } satisfies PairedStatus;
+
+    expect(pairedSpawnConfigFromStatus(paired)).toEqual({
+      planner: { modelId: "planner-model", effort: "high" },
+      executor: {
+        modelId: "executor-model",
+        effort: "medium",
+        serviceTier: "fast",
+      },
+    });
+  });
+});
 
 function mockRuntimeSubscriptions(failOnCall?: number) {
   const unlisteners: Array<ReturnType<typeof vi.fn>> = [];
