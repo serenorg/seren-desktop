@@ -17,6 +17,7 @@ const MAX_RESTART_ATTEMPTS: u32 = 3;
 const MAX_BACKOFF_SECONDS: u64 = 30;
 const STOP_GRACE_PERIOD: Duration = Duration::from_secs(5);
 const STATUS_EVENT: &str = "happy-bridge://status";
+const PAIRING_EVENT: &str = "happy-bridge://pairing";
 const CREDENTIAL_ACCOUNT: &str = "happy-bridge-pairing-credential";
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,6 +61,7 @@ pub struct HappyBridgeManager {
     process: Arc<Mutex<Option<HappyBridgeProcess>>>,
     monitor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     status: Arc<Mutex<HappyBridgeStatus>>,
+    pairing_payload: Arc<Mutex<Option<String>>>,
 }
 
 impl HappyBridgeManager {
@@ -71,6 +73,7 @@ impl HappyBridgeManager {
                 state: HappyBridgeState::Stopped,
                 detail: None,
             })),
+            pairing_payload: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -194,6 +197,33 @@ impl HappyBridgeManager {
 
     pub async fn status(&self) -> HappyBridgeStatus {
         self.status.lock().await.clone()
+    }
+
+    pub async fn wait_for_pairing_payload(&self) -> Result<String, String> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(payload) = self.pairing_payload.lock().await.take() {
+                return Ok(payload);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err("Happy pairing payload was not produced".to_string());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn record_status_report(&self, app: &AppHandle, detail: Option<String>) {
+        let mut status = self.status.lock().await;
+        if detail.as_deref() == Some("Connected") {
+            status.state = HappyBridgeState::Running;
+        }
+        status.detail = detail;
+        let _ = app.emit(STATUS_EVENT, status.clone());
+    }
+
+    async fn record_pairing_payload(&self, app: &AppHandle, payload: String) {
+        *self.pairing_payload.lock().await = Some(payload.clone());
+        let _ = app.emit(PAIRING_EVENT, payload);
     }
 
     /// Store the opaque credential received during pairing in the OS credential
@@ -558,6 +588,34 @@ async fn dispatch_supervisor_request(
 }
 
 async fn dispatch_supervisor_line(app: &AppHandle, line: &str, stdin: &Arc<Mutex<ChildStdin>>) {
+    if let Ok(value) = serde_json::from_str::<Value>(line) {
+        if let Some(object) = value.as_object()
+            && object.get("id").is_none()
+            && let Some(method) = object.get("method").and_then(Value::as_str)
+        {
+            let params = object.get("params").cloned().unwrap_or_else(|| json!({}));
+            let manager = app.state::<HappyBridgeManager>();
+            match method {
+                "status_report" => {
+                    let detail = params
+                        .get("detail")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned);
+                    manager.record_status_report(app, detail).await;
+                }
+                "pairing_payload" => {
+                    if let Some(payload) = params.get("payload").and_then(Value::as_str) {
+                        manager
+                            .record_pairing_payload(app, payload.to_string())
+                            .await;
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+    }
+
     let response = match parse_supervisor_line(line) {
         Err(response) => response,
         Ok(request) => {

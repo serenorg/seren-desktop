@@ -60,6 +60,7 @@
     "@seren/passwords-core": "workspace:*",
     "@seren/recording-core": "workspace:*",
     "@seren/recording-ui": "workspace:*",
+    "@slopus/happy-wire": "0.1.0",
     "@tailwindcss/vite": "4",
     "@tanstack/solid-query": "^5.101.2",
     "@tauri-apps/api": "^2",
@@ -72,6 +73,7 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@tauri-apps/plugin-updater": "^2.10.1",
+    "happy": "1.2.0",
     "highlight.js": "^11.11.1",
     "marked": "^18.0.6",
     "monaco-editor": "^0.55.1",
@@ -81,6 +83,7 @@
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "4",
     "thirdweb": "^5.120.1",
+    "tweetnacl": "1.0.3",
     "ws": "^8.21.0"
   },
   "devDependencies": {
