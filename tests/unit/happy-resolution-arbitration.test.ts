@@ -32,6 +32,19 @@ describe("provider resolution arbitration", () => {
     ).toBe("allow_once");
   });
 
+  it("maps a Codex-style approval denial to the explicit decline option", () => {
+    expect(
+      selectApprovalOption(
+        [
+          { optionId: "accept" },
+          { optionId: "acceptForSession" },
+          { optionId: "decline" },
+        ],
+        false,
+      ),
+    ).toBe("decline");
+  });
+
   it("uses the first non-deny option only when no known allow id or kind is offered", () => {
     expect(
       selectApprovalOption(

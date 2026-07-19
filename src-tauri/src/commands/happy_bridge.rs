@@ -30,11 +30,11 @@ pub fn effective_advertised_roots(app: &AppHandle, discovered: Vec<String>) -> V
         .ok()
         .and_then(|store| store.get(ADVERTISED_ROOTS_KEY))
     else {
-        return discovered;
+        return Vec::new();
     };
 
     let Some(saved) = value.as_array() else {
-        return discovered;
+        return Vec::new();
     };
     saved
         .iter()

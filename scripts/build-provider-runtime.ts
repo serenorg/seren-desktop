@@ -68,6 +68,9 @@ function main(): void {
   // the package must be present in the bundle or the runtime exits before it
   // becomes ready (#2456).
   const lmstudioSdkVersion = rootPackageJson.dependencies?.["@lmstudio/sdk"] ?? "1.5.0";
+  const happyVersion = rootPackageJson.dependencies?.happy ?? "1.2.0";
+  const tweetnaclVersion = rootPackageJson.dependencies?.tweetnacl ?? "1.0.3";
+  const happyWireVersion = rootPackageJson.dependencies?.["@slopus/happy-wire"] ?? "0.1.0";
 
   rmSync(destDir, { recursive: true, force: true });
   mkdirSync(destDir, { recursive: true });
@@ -97,6 +100,9 @@ function main(): void {
         type: "module",
         dependencies: {
           "@lmstudio/sdk": lmstudioSdkVersion,
+          "@slopus/happy-wire": happyWireVersion,
+          happy: happyVersion,
+          tweetnacl: tweetnaclVersion,
           ws: wsVersion,
         },
       },
@@ -122,6 +128,9 @@ function main(): void {
         builtAt: new Date().toISOString(),
         dependencies: {
           "@lmstudio/sdk": lmstudioSdkVersion,
+          "@slopus/happy-wire": happyWireVersion,
+          happy: happyVersion,
+          tweetnacl: tweetnaclVersion,
           ws: wsVersion,
         },
       },

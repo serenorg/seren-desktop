@@ -10,6 +10,7 @@ import {
   Show,
 } from "solid-js";
 import { toDataURL } from "@/lib/qrcode-shim";
+import { captureSupportError } from "@/lib/support/hook";
 import { listConversations } from "@/lib/tauri-bridge";
 import {
   disableRemoteAccess,
@@ -96,7 +97,15 @@ export const HappyRemoteSettings: Component = () => {
   onMount(() => {
     void refreshStatus();
     void loadRoots();
-    void onStatusChange((next) => setStatus(next)).then((unlisten) => {
+    void onStatusChange((next) => {
+      setStatus(next);
+      if (next.state === "error") {
+        void captureSupportError({
+          kind: "HappyBridgeError",
+          message: next.detail ?? "Happy bridge stopped unexpectedly",
+        });
+      }
+    }).then((unlisten) => {
       unlistenStatus = unlisten;
     });
   });

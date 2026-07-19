@@ -1047,6 +1047,11 @@ function buildApprovalOptions() {
       label: "Approve session",
       description: "Allow similar actions for the rest of this session.",
     },
+    {
+      optionId: "decline",
+      label: "Deny",
+      description: "Reject this action.",
+    },
   ];
 }
 
