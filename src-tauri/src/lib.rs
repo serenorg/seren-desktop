@@ -16,6 +16,7 @@ pub mod commands {
     pub mod conversation_search;
     pub mod employees_archive;
     pub mod gateway_http;
+    pub mod happy_bridge;
     pub mod history_sync;
     pub mod indexing;
     pub mod memory;
@@ -939,6 +940,10 @@ pub fn run() {
                 ));
             }
 
+            tauri::async_runtime::spawn(commands::happy_bridge::auto_start_if_enabled(
+                app.handle().clone(),
+            ));
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1263,6 +1268,10 @@ pub fn run() {
             commands::session::add_session_event,
             commands::session::get_session_events,
             commands::session::update_session_event_status,
+            // Happy Remote Access bridge
+            commands::happy_bridge::happy_bridge_enable,
+            commands::happy_bridge::happy_bridge_disable,
+            commands::happy_bridge::happy_bridge_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
