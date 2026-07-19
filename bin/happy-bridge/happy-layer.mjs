@@ -217,6 +217,21 @@ export function createTerminatedSessionTracker(maxSize = 256) {
   };
 }
 
+export function createStartupStatusGate(notify) {
+  return {
+    async complete(startupWork) {
+      try {
+        const result = await startupWork();
+        notify({ state: "connected", detail: "Connected" });
+        return result;
+      } catch (error) {
+        notify({ state: "error", detail: "startup failed" });
+        throw error;
+      }
+    },
+  };
+}
+
 export function createHappyLayer({
   config,
   supervisorChannel,
@@ -233,6 +248,9 @@ export function createHappyLayer({
   let supervisorSubscription = null;
   let advertisedRoots = [];
   let advertisedAgents = [];
+  const startupStatusGate = createStartupStatusGate((status) => {
+    supervisorChannel.notify("status_report", status);
+  });
   const sessions = new Map();
   const sessionCreationPromises = new Map();
   const terminatedSessions = createTerminatedSessionTracker();
@@ -512,7 +530,6 @@ export function createHappyLayer({
     machineClient = api.machineSyncClient(machine);
     setupMachineHandlers();
     machineClient.connect();
-    supervisorChannel.notify("status_report", { state: "connected", detail: "Connected" });
     return true;
   }
 
@@ -566,12 +583,14 @@ export function createHappyLayer({
   }
 
   async function finishRegistration() {
-    await updateCapabilities();
-    const listed = await source.listSessions();
-    for (const summary of listed) await createSessionEntry(summary.sessionId, summary);
-    sourceSubscription?.();
-    sourceSubscription = source.subscribe((event) => {
-      void publishEvent(event).catch(() => debug("failed to publish Happy session event"));
+    return startupStatusGate.complete(async () => {
+      await updateCapabilities();
+      const listed = await source.listSessions();
+      for (const summary of listed) await createSessionEntry(summary.sessionId, summary);
+      sourceSubscription?.();
+      sourceSubscription = source.subscribe((event) => {
+        void publishEvent(event).catch(() => debug("failed to publish Happy session event"));
+      });
     });
   }
 

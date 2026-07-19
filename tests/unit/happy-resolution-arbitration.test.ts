@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { createResolutionTracker } from "../../bin/browser-local/providers.mjs";
 // @ts-expect-error — the bridge layer is plain ESM without declarations.
 import {
+  createStartupStatusGate,
   createTerminatedSessionTracker,
   selectApprovalOption,
 } from "../../bin/happy-bridge/happy-layer.mjs";
@@ -66,5 +67,32 @@ describe("provider resolution arbitration", () => {
     expect(tracker.has("session-1")).toBe(true);
     tracker.forget("session-1");
     expect(tracker.has("session-1")).toBe(false);
+  });
+
+  it("does not report connected until registration work completes", async () => {
+    const statuses = [];
+    let resolveStartup;
+    const gate = createStartupStatusGate((status) => statuses.push(status));
+    const startup = gate.complete(
+      () => new Promise((resolve) => {
+        resolveStartup = resolve;
+      }),
+    );
+
+    await Promise.resolve();
+    expect(statuses).toEqual([]);
+    resolveStartup();
+    await startup;
+    expect(statuses).toEqual([{ state: "connected", detail: "Connected" }]);
+  });
+
+  it("reports a non-connected status when registration work fails", async () => {
+    const statuses = [];
+    const gate = createStartupStatusGate((status) => statuses.push(status));
+
+    await expect(gate.complete(async () => { throw new Error("unreachable relay"); })).rejects.toThrow(
+      "unreachable relay",
+    );
+    expect(statuses).toEqual([{ state: "error", detail: "startup failed" }]);
   });
 });
