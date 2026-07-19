@@ -96,7 +96,7 @@ export function validatePermissionResponse(
 
   const offeredOptions = pending.optionIds ?? pending.options ?? [];
   const offeredIds = Array.from(offeredOptions, (option) =>
-    typeof option === "string" ? option : option?.id,
+    typeof option === "string" ? option : (option?.optionId ?? option?.id),
   );
   if (!offeredIds.includes(optionId)) {
     return { ok: false, reason: "permission option was not offered" };

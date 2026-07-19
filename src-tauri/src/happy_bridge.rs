@@ -201,7 +201,16 @@ impl HappyBridgeManager {
         )
         .await;
         pipe_bridge_output(&mut child, Arc::clone(&stdin), app.clone());
-        *self.process.lock().await = Some(HappyBridgeProcess {
+        let mut guard = self.process.lock().await;
+        // `stop()` can take the process slot while a start is still in flight.
+        // Storing the child now would leave a live bridge accepting inbound
+        // requests behind a "Stopped" status, so discard it instead.
+        if self.stopping.load(Ordering::Acquire) {
+            drop(guard);
+            let _ = child.kill().await;
+            return Ok(());
+        }
+        *guard = Some(HappyBridgeProcess {
             child,
             _stdin: stdin,
             spawned_at: Instant::now(),
@@ -288,9 +297,10 @@ impl HappyBridgeManager {
         state: Option<String>,
         detail: Option<String>,
     ) {
-        if state.as_deref() == Some("connected") || detail.as_deref() == Some("Connected") {
-            *self.restart_attempts.lock().await = 0;
-        }
+        // The restart budget is refunded only by sustained uptime (see
+        // `should_rearm`). A connection report says startup succeeded once, not
+        // that the process is durable, so refunding here would let a bridge that
+        // connects and immediately dies respawn forever.
         let mut status = self.status.lock().await;
         if let Some(next_state) = report_state(state.as_deref()) {
             status.state = next_state;
@@ -602,6 +612,19 @@ struct SupervisorRequest {
     params: Value,
 }
 
+/// Mirrors `validate.mjs`: an advertised root must match after canonicalization,
+/// so symlink escapes and `..` traversal are both rejected. Fails closed when no
+/// roots are advertised or a path cannot be resolved.
+fn is_advertised_root(app: &AppHandle, cwd: &str) -> bool {
+    let Ok(candidate) = std::fs::canonicalize(cwd) else {
+        return false;
+    };
+    crate::commands::happy_bridge::effective_advertised_roots(app, Vec::new())
+        .iter()
+        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .any(|root| root == candidate)
+}
+
 fn error_response(id: Value, code: i32, message: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
@@ -662,6 +685,12 @@ async fn dispatch_supervisor_request(
             let agent_type = required_string(&request.params, "agentType")?;
             let cwd = required_string(&request.params, "cwd")?;
             let title = required_string(&request.params, "title")?;
+            // The bridge is the process parsing attacker-controlled relay
+            // traffic, so its advertised-root check is re-run here rather than
+            // trusted. Defense in depth for remote session spawn.
+            if !is_advertised_root(app, &cwd) {
+                return Err("cwd is not an advertised root".to_string());
+            }
             let happy_session_id = required_string(&request.params, "happySessionId")?;
             let metadata = serde_json::to_string(&json!({
                 "happy_session_id": happy_session_id,
@@ -891,7 +920,11 @@ fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: App
         tauri::async_runtime::spawn(async move {
             let mut reader = BufReader::new(stderr);
             while let Ok(Some(BoundedLine::Complete(line))) = read_bounded_line(&mut reader).await {
-                log::info!("[HappyBridge] {line}");
+                // The bridge holds the relay token, the NaCl secret, and the
+                // provider-runtime token. Its stderr is not a vetted channel, so
+                // it stays out of the default log; status flows through
+                // `status_report` instead.
+                log::debug!("[HappyBridge] {line}");
             }
         });
     }
