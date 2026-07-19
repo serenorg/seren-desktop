@@ -12,6 +12,24 @@ import { validatePermissionResponse, validateSpawnRoot } from "./validate.mjs";
 const AUTH_POLL_MS = 1000;
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_CODEX_APPROVAL_POLICY = "on-failure";
+const DENY_OPTION_IDS = new Set([
+  "deny",
+  "decline",
+  "reject",
+  "reject_once",
+  "reject_always",
+  "cancel",
+]);
+// These are the affirmative option ids currently emitted by the supported
+// desktop runtimes. Prefer the one-turn variant whenever it is offered.
+const NARROW_ALLOW_OPTION_IDS = new Set([
+  "accept",
+  "accept_once",
+  "allow_once",
+  "allow-once",
+  "approve",
+]);
+const NARROW_ALLOW_KINDS = new Set(["allow_once", "allow-once"]);
 
 function encodeBase64(bytes) {
   return Buffer.from(bytes).toString("base64");
@@ -130,6 +148,33 @@ function defaultApprovalPolicy(agentType) {
   return agentType === "codex" ? DEFAULT_CODEX_APPROVAL_POLICY : undefined;
 }
 
+export function selectApprovalOption(options, approved) {
+  const normalized = (Array.isArray(options) ? options : [])
+    .map((option) => (typeof option === "string" ? { optionId: option } : option))
+    .filter((option) => typeof option?.optionId === "string");
+  if (!approved) {
+    return normalized.find(
+      (option) =>
+        DENY_OPTION_IDS.has(option.optionId) ||
+        DENY_OPTION_IDS.has(option.kind) ||
+        DENY_OPTION_IDS.has(option.description),
+    )?.optionId;
+  }
+
+  const narrow = normalized.find(
+    (option) =>
+      NARROW_ALLOW_OPTION_IDS.has(option.optionId) ||
+      NARROW_ALLOW_KINDS.has(option.kind) ||
+      NARROW_ALLOW_KINDS.has(option.description),
+  );
+  return narrow?.optionId ?? normalized.find(
+    (option) =>
+      !DENY_OPTION_IDS.has(option.optionId) &&
+      !DENY_OPTION_IDS.has(option.kind) &&
+      !DENY_OPTION_IDS.has(option.description),
+  )?.optionId;
+}
+
 function sessionMetadata(config, summary, machineId) {
   const cwd = typeof summary.cwd === "string" && summary.cwd.length > 0 ? summary.cwd : os.homedir();
   return {
@@ -178,6 +223,7 @@ export function createHappyLayer({
       if (typeof event.payload?.requestId !== "string") return;
       pendingRequests[event.sessionId][event.payload.requestId] = {
         optionIds: options.map((option) => option?.optionId ?? option?.id).filter(Boolean),
+        options,
       };
     } else if (event.kind === "permission-resolved") {
       delete pendingRequests[event.sessionId]?.[event.payload?.requestId];
@@ -251,10 +297,16 @@ export function createHappyLayer({
     const requestId = response?.id ?? response?.requestId;
     const offered = pendingRequests[entry.sessionId]?.[requestId];
     let optionId = response?.optionId;
-    if (!optionId && offered?.optionIds) {
-      optionId = response?.approved
-        ? offered.optionIds.find((id) => !["deny", "decline", "reject", "cancel"].includes(id))
-        : offered.optionIds.find((id) => ["deny", "decline", "reject", "cancel"].includes(id));
+    if (!optionId && offered) {
+      optionId = selectApprovalOption(
+        offered.options ?? offered.optionIds,
+        response?.approved === true,
+      );
+      debug(
+        `selected approval option (${optionId ? "matched" : "none"}; ${
+          response?.approved === true ? "approve" : "deny"
+        })`,
+      );
     }
     if (typeof requestId !== "string" || typeof optionId !== "string") {
       debug("dropped invalid Happy permission response");

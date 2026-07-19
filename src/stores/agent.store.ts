@@ -6651,12 +6651,17 @@ export const agentStore = {
         break;
 
       case "userMessage":
-        this.appendReplayUserChunk(
-          sessionId,
-          event.data.text,
-          event.data.messageId,
-          event.data.timestamp,
-        );
+        // Desktop prompts are already appended by sendPrompt's UI path.
+        // Remote prompts and history replay are the provider's source of
+        // truth and must be reflected in the thread.
+        if (event.data.replay === true || event.data.origin === "remote") {
+          this.appendReplayUserChunk(
+            sessionId,
+            event.data.text,
+            event.data.messageId,
+            event.data.timestamp,
+          );
+        }
         break;
 
       case "promptComplete": {
@@ -7363,6 +7368,24 @@ export const agentStore = {
         ]);
         break;
       }
+
+      case "permissionResolved":
+        setState(
+          "pendingPermissions",
+          state.pendingPermissions.filter(
+            (permission) => permission.requestId !== event.data.requestId,
+          ),
+        );
+        break;
+
+      case "diffProposalResolved":
+        setState(
+          "pendingDiffProposals",
+          state.pendingDiffProposals.filter(
+            (proposal) => proposal.proposalId !== event.data.proposalId,
+          ),
+        );
+        break;
     }
   },
 

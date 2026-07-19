@@ -110,10 +110,10 @@ describe("provider runtime event subscriptions", () => {
     const unlisteners = mockRuntimeSubscriptions();
 
     const dispose = await subscribeToSession("session-1", vi.fn());
-    expect(onRuntimeEventMock).toHaveBeenCalledTimes(14);
+    expect(onRuntimeEventMock).toHaveBeenCalledTimes(16);
 
     dispose();
-    expect(unlisteners).toHaveLength(14);
+    expect(unlisteners).toHaveLength(16);
     for (const unlisten of unlisteners) {
       expect(unlisten).toHaveBeenCalledTimes(1);
     }
@@ -124,8 +124,8 @@ describe("provider runtime event subscriptions", () => {
 
     await expectAggregateError(subscribeToSession("session-1", vi.fn()));
 
-    expect(onRuntimeEventMock).toHaveBeenCalledTimes(14);
-    expect(unlisteners).toHaveLength(13);
+    expect(onRuntimeEventMock).toHaveBeenCalledTimes(16);
+    expect(unlisteners).toHaveLength(15);
     for (const unlisten of unlisteners) {
       expect(unlisten).toHaveBeenCalledTimes(1);
     }
@@ -135,10 +135,10 @@ describe("provider runtime event subscriptions", () => {
     const unlisteners = mockRuntimeSubscriptions();
 
     const dispose = await subscribeToAllEvents(vi.fn());
-    expect(onRuntimeEventMock).toHaveBeenCalledTimes(15);
+    expect(onRuntimeEventMock).toHaveBeenCalledTimes(17);
 
     dispose();
-    expect(unlisteners).toHaveLength(15);
+    expect(unlisteners).toHaveLength(17);
     for (const unlisten of unlisteners) {
       expect(unlisten).toHaveBeenCalledTimes(1);
     }
@@ -149,8 +149,8 @@ describe("provider runtime event subscriptions", () => {
 
     await expectAggregateError(subscribeToAllEvents(vi.fn()));
 
-    expect(onRuntimeEventMock).toHaveBeenCalledTimes(15);
-    expect(unlisteners).toHaveLength(14);
+    expect(onRuntimeEventMock).toHaveBeenCalledTimes(17);
+    expect(unlisteners).toHaveLength(16);
     for (const unlisten of unlisteners) {
       expect(unlisten).toHaveBeenCalledTimes(1);
     }

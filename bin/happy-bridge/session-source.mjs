@@ -12,6 +12,7 @@
  * @property {(sessionId: string, text: string) => Promise<void>} sendPrompt
  * @property {(sessionId: string) => Promise<void>} cancel
  * @property {(sessionId: string, requestId: string, optionId: string) => Promise<{ok: boolean}>} respondToPermission
+ * @property {(sessionId: string, proposalId: string, accepted: boolean) => Promise<{ok: boolean}>} respondToDiffProposal
  * @property {(sessionId: string, mode: string) => Promise<void>} setPermissionMode
  * @property {(spec: SpawnSpec) => Promise<SessionSummary>} spawn
  * @property {() => Promise<Advertisement>} advertise
