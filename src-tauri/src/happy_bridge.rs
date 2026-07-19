@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
@@ -56,6 +56,8 @@ struct ProviderRuntimeConnection {
 struct HappyBridgeProcess {
     child: Child,
     _stdin: Arc<Mutex<ChildStdin>>,
+    spawned_at: Instant,
+    restart_budget_rearmed: bool,
 }
 
 pub struct HappyBridgeManager {
@@ -202,6 +204,8 @@ impl HappyBridgeManager {
         *self.process.lock().await = Some(HappyBridgeProcess {
             child,
             _stdin: stdin,
+            spawned_at: Instant::now(),
+            restart_budget_rearmed: false,
         });
         Ok(())
     }
@@ -278,12 +282,19 @@ impl HappyBridgeManager {
         }
     }
 
-    async fn record_status_report(&self, app: &AppHandle, detail: Option<String>) {
-        if detail.as_deref() == Some("Connected") {
+    async fn record_status_report(
+        &self,
+        app: &AppHandle,
+        state: Option<String>,
+        detail: Option<String>,
+    ) {
+        if state.as_deref() == Some("connected") || detail.as_deref() == Some("Connected") {
             *self.restart_attempts.lock().await = 0;
         }
         let mut status = self.status.lock().await;
-        if detail.as_deref() == Some("Connected") {
+        if let Some(next_state) = report_state(state.as_deref()) {
+            status.state = next_state;
+        } else if detail.as_deref() == Some("Connected") {
             status.state = HappyBridgeState::Running;
         }
         status.detail = detail;
@@ -397,28 +408,42 @@ async fn monitor_process(
 ) {
     loop {
         tokio::time::sleep(Duration::from_secs(2)).await;
-        let exited = {
+        let (exited, should_rearm) = {
             let mut guard = process.lock().await;
             match guard.as_mut() {
                 None => {
                     if stopping.load(Ordering::Acquire) {
                         return;
                     }
-                    true
+                    (true, false)
                 }
                 Some(process) => match process.child.try_wait() {
-                    Ok(None) => false,
+                    Ok(None) => {
+                        let rearm = should_rearm(
+                            process.spawned_at,
+                            process.restart_budget_rearmed,
+                            Instant::now(),
+                        );
+                        if rearm {
+                            process.restart_budget_rearmed = true;
+                        }
+                        (false, rearm)
+                    }
                     Ok(Some(_)) => {
                         *guard = None;
-                        true
+                        (true, false)
                     }
                     Err(error) => {
                         log::warn!("[HappyBridge] Failed checking process status: {error}");
-                        false
+                        (false, false)
                     }
                 },
             }
         };
+        if should_rearm {
+            *restart_attempts.lock().await = 0;
+        }
+        let exited = exited;
         if !exited {
             continue;
         }
@@ -498,6 +523,18 @@ fn restart_allowed(attempts: u32) -> bool {
 
 fn next_restart_attempt(attempts: u32) -> Option<u32> {
     restart_allowed(attempts).then_some(attempts + 1)
+}
+
+fn report_state(state: Option<&str>) -> Option<HappyBridgeState> {
+    match state {
+        Some("connected") => Some(HappyBridgeState::Running),
+        Some("error") => Some(HappyBridgeState::Error),
+        _ => None,
+    }
+}
+
+fn should_rearm(spawned_at: Instant, already_rearmed: bool, now: Instant) -> bool {
+    !already_rearmed && now.duration_since(spawned_at) >= Duration::from_secs(60)
 }
 
 fn resolve_node_binary(app: &AppHandle) -> PathBuf {
@@ -687,11 +724,15 @@ async fn dispatch_supervisor_line(app: &AppHandle, line: &str, stdin: &Arc<Mutex
             let manager = app.state::<HappyBridgeManager>();
             match method {
                 "status_report" => {
+                    let state = params
+                        .get("state")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned);
                     let detail = params
                         .get("detail")
                         .and_then(Value::as_str)
                         .map(ToOwned::to_owned);
-                    manager.record_status_report(app, detail).await;
+                    manager.record_status_report(app, state, detail).await;
                 }
                 "pairing_payload" => {
                     if let Some(payload) = params.get("payload").and_then(Value::as_str) {
@@ -859,9 +900,9 @@ fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: App
 #[cfg(test)]
 mod tests {
     use super::{
-        BoundedLine, MAX_RESTART_ATTEMPTS, MAX_SUPERVISOR_LINE_BYTES, error_response,
+        BoundedLine, HappyBridgeState, MAX_RESTART_ATTEMPTS, MAX_SUPERVISOR_LINE_BYTES, error_response,
         next_restart_attempt, parse_supervisor_line, read_bounded_line, restart_allowed,
-        restart_delay,
+        restart_delay, report_state, should_rearm,
     };
     use serde_json::Value;
     use std::time::Duration;
@@ -896,6 +937,25 @@ mod tests {
             restart_allowed(0),
             "an intentional stop does not consume restart budget"
         );
+    }
+
+    #[test]
+    fn bridge_error_status_is_preserved_as_error() {
+        assert!(matches!(report_state(Some("error")), Some(HappyBridgeState::Error)));
+        assert!(matches!(report_state(Some("connected")), Some(HappyBridgeState::Running)));
+        assert!(report_state(Some("starting")).is_none());
+    }
+
+    #[test]
+    fn restart_budget_rearms_once_after_sustained_uptime() {
+        let spawned = std::time::Instant::now() - Duration::from_secs(60);
+        assert!(should_rearm(spawned, false, std::time::Instant::now()));
+        assert!(!should_rearm(spawned, true, std::time::Instant::now()));
+        assert!(!should_rearm(
+            std::time::Instant::now(),
+            false,
+            std::time::Instant::now()
+        ));
     }
 
     #[test]

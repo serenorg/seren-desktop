@@ -52,15 +52,15 @@ function startInputReader() {
   return { configPromise, queuedResponses };
 }
 
-async function shutdown() {
+async function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   client?.close();
   happyLayer?.close();
   supervisorChannel?.close();
   input?.close();
-  process.exitCode = 0;
-  setImmediate(() => process.exit(0));
+  process.exitCode = exitCode;
+  setImmediate(() => process.exit(exitCode));
 }
 
 process.once("SIGTERM", shutdown);
@@ -72,7 +72,15 @@ try {
   supervisorChannel = createSupervisorChannel();
   for (const line of queuedResponses) supervisorChannel.handleLine(line);
 
-  client = createProviderRuntimeClient(config);
+  client = createProviderRuntimeClient(config, {
+    onUnexpectedDisconnect: (reason) => {
+      supervisorChannel?.notify("status_report", {
+        state: "error",
+        detail: `provider runtime connection lost (${reason})`,
+      });
+      void shutdown(1);
+    },
+  });
   await client.connect();
   const source = createProviderSource({
     client,

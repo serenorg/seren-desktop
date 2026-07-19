@@ -8,6 +8,7 @@ import { createResolutionTracker } from "../../bin/browser-local/providers.mjs";
 // @ts-expect-error — the bridge layer is plain ESM without declarations.
 import {
   createStartupStatusGate,
+  completeTerminalSession,
   createTerminatedSessionTracker,
   selectApprovalOption,
 } from "../../bin/happy-bridge/happy-layer.mjs";
@@ -94,5 +95,24 @@ describe("provider resolution arbitration", () => {
       "unreachable relay",
     );
     expect(statuses).toEqual([{ state: "error", detail: "startup failed" }]);
+  });
+
+  it("emits a terminal message before removing and closing the live session", async () => {
+    const sessions = new Map();
+    let closed = false;
+    const entry = { client: { close: async () => { closed = true; } } };
+    sessions.set("session-1", entry);
+    const emitted = [];
+
+    await completeTerminalSession({
+      sessions,
+      sessionId: "session-1",
+      entry,
+      send: async () => emitted.push("terminal"),
+    });
+
+    expect(emitted).toEqual(["terminal"]);
+    expect(sessions.has("session-1")).toBe(false);
+    expect(closed).toBe(true);
   });
 });
