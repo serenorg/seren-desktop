@@ -3367,6 +3367,9 @@ export const agentStore = {
           : null;
         const session: ActiveSession = {
           info,
+          // Only explicit titles belong in live state. Fresh conversations omit
+          // this option so their first user prompt can still derive the title.
+          title: opts?.conversationTitle,
           messages: opts?.restoredMessages ?? [],
           plan: [],
           pendingToolCalls: new Map(),
