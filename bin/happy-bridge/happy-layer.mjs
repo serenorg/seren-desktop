@@ -243,13 +243,13 @@ export function createHappyLayer({
   }
 
   function registerInbound(entry) {
-    const { sessionId, client } = entry;
+    const { client } = entry;
     client.onUserMessage((message) => {
       void handleUserMessage(entry, message).catch(() => debug("ignored Happy inbound user message"));
     });
     client.rpcHandlerManager.registerHandler("abort", async () => {
       try {
-        await source.cancel(sessionId);
+        await source.cancel(entry.sessionId);
         return { ok: true };
       } catch {
         debug("ignored failed Happy abort request");
@@ -258,7 +258,7 @@ export function createHappyLayer({
     });
     client.rpcHandlerManager.registerHandler("switch", async () => {
       try {
-        await source.cancel(sessionId);
+        await source.cancel(entry.sessionId);
         return { ok: true };
       } catch {
         debug("ignored failed Happy switch request");
@@ -295,7 +295,8 @@ export function createHappyLayer({
 
   async function handlePermissionResponse(entry, response) {
     const requestId = response?.id ?? response?.requestId;
-    const offered = pendingRequests[entry.sessionId]?.[requestId];
+    const sessionId = entry.sessionId;
+    const offered = pendingRequests[sessionId]?.[requestId];
     let optionId = response?.optionId;
     if (!optionId && offered) {
       optionId = selectApprovalOption(
@@ -312,7 +313,7 @@ export function createHappyLayer({
       debug("dropped invalid Happy permission response");
       return { ok: false };
     }
-    const validation = validatePermissionResponse(entry.sessionId, requestId, optionId, {
+    const validation = validatePermissionResponse(sessionId, requestId, optionId, {
       liveSessions,
       pendingRequests,
     });
@@ -320,8 +321,8 @@ export function createHappyLayer({
       debug("dropped invalid Happy permission response");
       return { ok: false };
     }
-    await source.respondToPermission(entry.sessionId, requestId, optionId);
-    delete pendingRequests[entry.sessionId]?.[requestId];
+    await source.respondToPermission(sessionId, requestId, optionId);
+    delete pendingRequests[sessionId]?.[requestId];
     return { ok: true };
   }
 
@@ -385,6 +386,11 @@ export function createHappyLayer({
       if (message.transport === "session") entry.client.sendSessionProtocolMessage(message.envelope);
       if (message.transport === "agent") entry.client.sendAgentMessage(message.provider, message.body);
     }
+    if (terminal) {
+      const terminalEntry = sessions.get(event.sessionId);
+      sessions.delete(event.sessionId);
+      void terminalEntry?.client.close();
+    }
     if (event.kind === "permission-request" && api) {
       const notification = composeApprovalNotification();
       api.push().sendToAllDevices(notification.title, notification.body, notification.data);
@@ -430,7 +436,9 @@ export function createHappyLayer({
     });
     if (!spawned?.sessionId) throw new Error("provider spawn returned no session");
     sessions.delete(pendingSessionId);
-    sessions.set(spawned.sessionId, { ...pending, sessionId: spawned.sessionId, summary: spawned });
+    pending.sessionId = spawned.sessionId;
+    pending.summary = spawned;
+    sessions.set(spawned.sessionId, pending);
     liveSessions.delete(pendingSessionId);
     liveSessions.add(spawned.sessionId);
     pendingRequests[spawned.sessionId] = pendingRequests[pendingSessionId] ?? Object.create(null);
@@ -478,6 +486,13 @@ export function createHappyLayer({
         identity = identityFromAuthResponse(result.token, decryptAuthResponse(result.response, keyPair.secretKey));
         await supervisorChannel.call("identity_store", { identity });
         await registerMachine();
+        supervisorSubscription = supervisorChannel.onNotification((method, params) => {
+          if (method === "roots_update") {
+            advertisedRoots = Array.isArray(params?.roots) ? params.roots : [];
+            void updateCapabilities().catch(() => debug("failed to update Happy capabilities"));
+          }
+        });
+        await finishRegistration();
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, AUTH_POLL_MS));
@@ -500,6 +515,16 @@ export function createHappyLayer({
     return pairingPromise;
   }
 
+  async function finishRegistration() {
+    await updateCapabilities();
+    const listed = await source.listSessions();
+    for (const summary of listed) await createSessionEntry(summary.sessionId, summary);
+    sourceSubscription?.();
+    sourceSubscription = source.subscribe((event) => {
+      void publishEvent(event).catch(() => debug("failed to publish Happy session event"));
+    });
+  }
+
   return {
     async start() {
       supervisorSubscription = supervisorChannel.onNotification((method, params) => {
@@ -509,12 +534,7 @@ export function createHappyLayer({
         }
       });
       if (await registerMachine()) {
-        await updateCapabilities();
-        const listed = await source.listSessions();
-        for (const summary of listed) await createSessionEntry(summary.sessionId, summary);
-        sourceSubscription = source.subscribe((event) => {
-          void publishEvent(event).catch(() => debug("failed to publish Happy session event"));
-        });
+        await finishRegistration();
         return;
       }
       supervisorSubscription?.();

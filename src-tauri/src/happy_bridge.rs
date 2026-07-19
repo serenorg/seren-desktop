@@ -155,6 +155,11 @@ impl HappyBridgeManager {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        let embedded_path = crate::embedded_runtime::get_embedded_path();
+        if !embedded_path.is_empty() {
+            command.env("PATH", embedded_path);
+        }
+        command.env("SEREN_EMBEDDED_NODE_BIN", &node_binary);
         crate::embedded_runtime::sanitize_spawn_env(&mut command);
 
         #[cfg(windows)]
