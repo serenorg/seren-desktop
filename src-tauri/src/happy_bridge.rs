@@ -8,8 +8,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_store::StoreExt;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
 
@@ -18,8 +17,7 @@ const MAX_RESTART_ATTEMPTS: u32 = 3;
 const MAX_BACKOFF_SECONDS: u64 = 30;
 const STOP_GRACE_PERIOD: Duration = Duration::from_secs(5);
 const STATUS_EVENT: &str = "happy-bridge://status";
-const CREDENTIAL_STORE: &str = "happy_bridge.json";
-const CREDENTIAL_KEY: &str = "credential_blob";
+const CREDENTIAL_ACCOUNT: &str = "happy-bridge-pairing-credential";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -111,6 +109,9 @@ impl HappyBridgeManager {
             .await?;
         let node_binary = resolve_node_binary(app);
         let bridge_entry = find_happy_bridge_mjs()?;
+        let machine_identity = self.load_pairing_credential(app)?.map(|credential| {
+            serde_json::from_str(&credential).unwrap_or_else(|_| Value::String(credential))
+        });
         let config = HappyBridgeConfig {
             provider_runtime: ProviderRuntimeConnection {
                 host: provider_runtime.host,
@@ -118,7 +119,7 @@ impl HappyBridgeManager {
                 token: provider_runtime.token,
             },
             relay_url: HAPPY_RELAY_URL.to_string(),
-            machine_identity: None,
+            machine_identity,
             machine_name: "seren-desktop".to_string(),
         };
 
@@ -195,9 +196,8 @@ impl HappyBridgeManager {
         self.status.lock().await.clone()
     }
 
-    /// Store the opaque credential received during future pairing. This follows
-    /// the existing encrypted Tauri store pattern used by auth.rs; no bridge
-    /// identity is generated locally in Phase 1.
+    /// Store the opaque credential received during pairing in the OS credential
+    /// store. The value is never inspected, serialized into app data, or logged.
     pub fn store_pairing_credential(
         &self,
         app: &AppHandle,
@@ -206,22 +206,35 @@ impl HappyBridgeManager {
         if credential.trim().is_empty() {
             return Err("pairing credential must not be empty".to_string());
         }
-        let store = app.store(CREDENTIAL_STORE).map_err(|err| err.to_string())?;
-        store.set(CREDENTIAL_KEY, serde_json::json!(credential));
-        store.save().map_err(|err| err.to_string())
+        let entry = credential_entry(app)?;
+        entry
+            .set_password(credential)
+            .map_err(|err| format!("failed to store pairing credential: {err}"))?;
+        remove_legacy_credential_store(app);
+        Ok(())
     }
 
     pub fn load_pairing_credential(&self, app: &AppHandle) -> Result<Option<String>, String> {
-        let store = app.store(CREDENTIAL_STORE).map_err(|err| err.to_string())?;
-        Ok(store
-            .get(CREDENTIAL_KEY)
-            .and_then(|value| value.as_str().map(String::from)))
+        let entry = credential_entry(app)?;
+        let result = match entry.get_password() {
+            Ok(credential) => Some(credential),
+            Err(keyring::Error::NoEntry) => None,
+            Err(err) => {
+                return Err(format!("failed to load pairing credential: {err}"));
+            }
+        };
+        remove_legacy_credential_store(app);
+        Ok(result)
     }
 
     pub fn delete_pairing_credential(&self, app: &AppHandle) -> Result<(), String> {
-        let store = app.store(CREDENTIAL_STORE).map_err(|err| err.to_string())?;
-        store.delete(CREDENTIAL_KEY);
-        store.save().map_err(|err| err.to_string())
+        let entry = credential_entry(app)?;
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(err) => return Err(format!("failed to delete pairing credential: {err}")),
+        }
+        remove_legacy_credential_store(app);
+        Ok(())
     }
 
     async fn set_status(&self, app: &AppHandle, state: HappyBridgeState, detail: Option<String>) {
@@ -256,6 +269,18 @@ impl HappyBridgeManager {
             *guard = None;
         }
     }
+}
+
+fn credential_entry(app: &AppHandle) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(&app.config().identifier, CREDENTIAL_ACCOUNT)
+        .map_err(|err| format!("failed to open pairing credential store: {err}"))
+}
+
+fn remove_legacy_credential_store(app: &AppHandle) {
+    let Ok(app_data_dir) = app.path().app_data_dir() else {
+        return;
+    };
+    let _ = std::fs::remove_file(app_data_dir.join("happy_bridge.json"));
 }
 
 impl Default for HappyBridgeManager {
@@ -544,6 +569,13 @@ async fn dispatch_supervisor_line(app: &AppHandle, line: &str, stdin: &Arc<Mutex
         }
     };
 
+    write_supervisor_response(stdin, response).await;
+}
+
+async fn write_supervisor_response<W>(writer: &Arc<Mutex<W>>, response: Value)
+where
+    W: AsyncWrite + Unpin,
+{
     let encoded = match serde_json::to_vec(&response) {
         Ok(encoded) => encoded,
         Err(error) => {
@@ -551,7 +583,7 @@ async fn dispatch_supervisor_line(app: &AppHandle, line: &str, stdin: &Arc<Mutex
             return;
         }
     };
-    let mut writer = stdin.lock().await;
+    let mut writer = writer.lock().await;
     if let Err(error) = writer.write_all(&encoded).await {
         log::warn!("[HappyBridge] Failed to write supervisor response: {error}");
         return;
@@ -565,20 +597,95 @@ async fn dispatch_supervisor_line(app: &AppHandle, line: &str, stdin: &Arc<Mutex
     }
 }
 
+enum BoundedLine {
+    Complete(String),
+    Oversized,
+}
+
+async fn read_bounded_line<R>(reader: &mut R) -> std::io::Result<Option<BoundedLine>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut line = Vec::new();
+    let mut oversized = false;
+
+    loop {
+        let buffer = reader.fill_buf().await?;
+        if buffer.is_empty() {
+            if line.is_empty() && !oversized {
+                return Ok(None);
+            }
+            return Ok(Some(if oversized {
+                BoundedLine::Oversized
+            } else {
+                BoundedLine::Complete(String::from_utf8(line).map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "supervisor line is not UTF-8",
+                    )
+                })?)
+            }));
+        }
+
+        if let Some(newline_at) = buffer.iter().position(|byte| *byte == b'\n') {
+            if line.len() + newline_at > MAX_SUPERVISOR_LINE_BYTES {
+                oversized = true;
+            } else if !oversized {
+                line.extend_from_slice(&buffer[..newline_at]);
+            }
+            reader.consume(newline_at + 1);
+            return Ok(Some(if oversized {
+                BoundedLine::Oversized
+            } else {
+                BoundedLine::Complete(String::from_utf8(line).map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "supervisor line is not UTF-8",
+                    )
+                })?)
+            }));
+        }
+
+        if !oversized && line.len() + buffer.len() <= MAX_SUPERVISOR_LINE_BYTES {
+            line.extend_from_slice(buffer);
+        } else {
+            oversized = true;
+        }
+        let consumed = buffer.len();
+        reader.consume(consumed);
+    }
+}
+
 fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: AppHandle) {
     if let Some(stdout) = child.stdout.take() {
         let stdout_stdin = Arc::clone(&stdin);
         tauri::async_runtime::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                dispatch_supervisor_line(&app, &line, &stdout_stdin).await;
+            let mut reader = BufReader::new(stdout);
+            loop {
+                match read_bounded_line(&mut reader).await {
+                    Ok(Some(BoundedLine::Complete(line))) => {
+                        dispatch_supervisor_line(&app, &line, &stdout_stdin).await;
+                    }
+                    Ok(Some(BoundedLine::Oversized)) => {
+                        write_supervisor_response(
+                            &stdout_stdin,
+                            error_response(
+                                Value::Null,
+                                -32600,
+                                "supervisor request line is too large",
+                            ),
+                        )
+                        .await;
+                    }
+                    Ok(None) | Err(_) => break,
+                }
             }
         });
     }
     if let Some(stderr) = child.stderr.take() {
         tauri::async_runtime::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
+            let mut reader = BufReader::new(stderr);
+            while let Ok(Some(BoundedLine::Complete(line))) = read_bounded_line(&mut reader).await {
                 log::info!("[HappyBridge] {line}");
             }
         });
@@ -587,9 +694,13 @@ fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: App
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_SUPERVISOR_LINE_BYTES, error_response, parse_supervisor_line, restart_delay};
+    use super::{
+        BoundedLine, MAX_SUPERVISOR_LINE_BYTES, error_response, parse_supervisor_line,
+        read_bounded_line, restart_delay,
+    };
     use serde_json::Value;
     use std::time::Duration;
+    use tokio::io::{AsyncWriteExt, BufReader, duplex};
 
     #[test]
     fn restart_backoff_is_capped() {
@@ -629,5 +740,68 @@ mod tests {
         let response = error_response(Value::Null, -32000, "test");
         assert_eq!(response["jsonrpc"], "2.0");
         assert_eq!(response["error"]["message"], "test");
+    }
+
+    #[tokio::test]
+    async fn bounded_stdout_reader_discards_over_cap_line_and_resynchronizes() {
+        let (mut writer, reader) = duplex(64 * 1024);
+        let writer_task = tokio::spawn(async move {
+            writer
+                .write_all(&vec![b'x'; MAX_SUPERVISOR_LINE_BYTES + 1])
+                .await
+                .unwrap();
+            writer.write_all(b"\n{}\n").await.unwrap();
+        });
+        let mut reader = BufReader::new(reader);
+
+        assert!(matches!(
+            read_bounded_line(&mut reader).await.unwrap(),
+            Some(BoundedLine::Oversized)
+        ));
+        assert!(matches!(
+            read_bounded_line(&mut reader).await.unwrap(),
+            Some(BoundedLine::Complete(line)) if line == "{}"
+        ));
+        writer_task.await.unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn keyring_credential_round_trip_uses_macos_keychain() {
+        let account = format!("happy-bridge-test-{}", std::process::id());
+        let entry = keyring::Entry::new("com.serendb.desktop", &account).unwrap();
+        let _ = entry.delete_credential();
+        entry.set_password("phase5-round-trip-value").unwrap();
+        assert!(
+            std::process::Command::new("security")
+                .args([
+                    "find-generic-password",
+                    "-s",
+                    "com.serendb.desktop",
+                    "-a",
+                    &account
+                ])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        assert_eq!(entry.get_password().unwrap(), "phase5-round-trip-value");
+        entry.delete_credential().unwrap();
+        assert!(
+            !std::process::Command::new("security")
+                .args([
+                    "find-generic-password",
+                    "-s",
+                    "com.serendb.desktop",
+                    "-a",
+                    &account
+                ])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(matches!(entry.get_password(), Err(keyring::Error::NoEntry)));
     }
 }

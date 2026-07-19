@@ -52,7 +52,7 @@ export function validateSpawnRoot(requestedPath, advertisedRoots) {
 function containsValue(collection, value) {
   if (collection instanceof Set) return collection.has(value);
   if (Array.isArray(collection)) return collection.includes(value);
-  return Boolean(collection && collection[value]);
+  return Boolean(collection && Object.hasOwn(collection, value) && collection[value]);
 }
 
 function pendingRequestFor(trackedState, sessionId, requestId) {
@@ -61,9 +61,15 @@ function pendingRequestFor(trackedState, sessionId, requestId) {
     const sessionRequests = requests.get(sessionId);
     return sessionRequests instanceof Map
       ? sessionRequests.get(requestId)
-      : sessionRequests?.[requestId];
+      : sessionRequests && Object.hasOwn(sessionRequests, requestId)
+        ? sessionRequests[requestId]
+        : undefined;
   }
-  return requests?.[sessionId]?.[requestId];
+  if (!requests || !Object.hasOwn(requests, sessionId)) return undefined;
+  const sessionRequests = requests[sessionId];
+  return sessionRequests && Object.hasOwn(sessionRequests, requestId)
+    ? sessionRequests[requestId]
+    : undefined;
 }
 
 /**

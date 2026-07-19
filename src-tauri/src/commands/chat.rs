@@ -662,10 +662,12 @@ pub(crate) async fn lookup_agent_conversation_by_happy_session(
                     agent_cwd, agent_model_id, agent_permission_mode,
                     agent_metadata, project_id, project_root, is_archived
              FROM conversations
-             WHERE kind = 'agent' AND agent_metadata IS NOT NULL",
+             WHERE kind = 'agent'
+               AND json_extract(agent_metadata, '$.happy_session_id') = ?1
+             LIMIT 1",
         )?;
 
-        let rows = stmt.query_map([], |row| {
+        let conversation = stmt.query_row(params![happy_session_id], |row| {
             Ok(AgentConversation {
                 id: row.get(0)?,
                 title: row.get(1)?,
@@ -680,24 +682,13 @@ pub(crate) async fn lookup_agent_conversation_by_happy_session(
                 project_root: row.get(10)?,
                 is_archived: row.get::<_, i32>(11)? != 0,
             })
-        })?;
+        });
 
-        for row in rows {
-            let conversation = row?;
-            let Some(metadata) = conversation.agent_metadata.as_deref() else {
-                continue;
-            };
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(metadata) else {
-                continue;
-            };
-            if value.get("happy_session_id").and_then(|id| id.as_str())
-                == Some(happy_session_id.as_str())
-            {
-                return Ok(Some(conversation));
-            }
+        match conversation {
+            Ok(conversation) => Ok(Some(conversation)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error),
         }
-
-        Ok(None)
     })
     .await
 }
