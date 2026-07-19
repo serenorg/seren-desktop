@@ -142,4 +142,22 @@ describe("validatePermissionResponse", () => {
       validatePermissionResponse("session-1", "request-1", "admin", trackedState),
     ).toEqual({ ok: false, reason: "permission option was not offered" });
   });
+
+  it("rejects inherited live-session ids", () => {
+    expect(
+      validatePermissionResponse("constructor", "request-1", "allow-once", {
+        liveSessions: {},
+        pendingRequests: {},
+      }),
+    ).toEqual({ ok: false, reason: "session is not live" });
+  });
+
+  it("rejects inherited pending-request ids", () => {
+    expect(
+      validatePermissionResponse("session-1", "toString", "allow-once", {
+        liveSessions: { "session-1": true },
+        pendingRequests: { "session-1": {} },
+      }),
+    ).toEqual({ ok: false, reason: "permission request is not pending" });
+  });
 });

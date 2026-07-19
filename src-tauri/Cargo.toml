@@ -87,6 +87,7 @@ tree-sitter-typescript = "0.23.2"
 sonora = "0.1.0"
 
 tokio-tungstenite = { version = "0.28" }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 # Messaging transport adapters (opt-in via cargo features)
 teloxide = { version = "0.14", features = ["macros"], optional = true }
