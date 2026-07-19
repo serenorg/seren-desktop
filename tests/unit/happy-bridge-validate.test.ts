@@ -114,6 +114,17 @@ describe("validatePermissionResponse", () => {
     ).toEqual({ ok: true });
   });
 
+  it("accepts a Set of offered options", () => {
+    expect(
+      validatePermissionResponse("session-1", "request-1", "deny", {
+        liveSessions: new Set(["session-1"]),
+        pendingRequests: {
+          "session-1": { "request-1": { options: new Set(["deny"]) } },
+        },
+      }),
+    ).toEqual({ ok: true });
+  });
+
   it("rejects a response for a dead session", () => {
     expect(
       validatePermissionResponse("session-dead", "request-1", "allow-once", trackedState),

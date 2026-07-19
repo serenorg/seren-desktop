@@ -89,7 +89,7 @@ export function validatePermissionResponse(
   }
 
   const offeredOptions = pending.optionIds ?? pending.options ?? [];
-  const offeredIds = offeredOptions.map((option) =>
+  const offeredIds = Array.from(offeredOptions, (option) =>
     typeof option === "string" ? option : option?.id,
   );
   if (!offeredIds.includes(optionId)) {
