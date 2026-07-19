@@ -16,6 +16,7 @@ pub mod commands {
     pub mod conversation_search;
     pub mod employees_archive;
     pub mod gateway_http;
+    pub mod happy_bridge;
     pub mod history_sync;
     pub mod indexing;
     pub mod memory;
@@ -48,6 +49,7 @@ pub mod claude_memory;
 mod claude_setup;
 mod embedded_runtime;
 mod files;
+pub mod happy_bridge;
 mod mcp;
 pub mod messaging;
 mod oauth;
@@ -622,6 +624,7 @@ pub fn run() {
             .manage(orchestrator::eval::EvalState::new())
             .manage(orchestrator::tool_bridge::ToolResultBridge::new())
             .manage(provider_runtime::ProviderRuntimeState::new())
+            .manage(happy_bridge::HappyBridgeManager::new())
             .manage(std::sync::Arc::new(
                 commands::updater::ShutdownGuard::default(),
             ))
@@ -936,6 +939,10 @@ pub fn run() {
                     cache_path,
                 ));
             }
+
+            tauri::async_runtime::spawn(commands::happy_bridge::auto_start_if_enabled(
+                app.handle().clone(),
+            ));
 
             Ok(())
         })
@@ -1264,6 +1271,11 @@ pub fn run() {
             commands::session::add_session_event,
             commands::session::get_session_events,
             commands::session::update_session_event_status,
+            // Happy Remote Access bridge
+            commands::happy_bridge::happy_bridge_enable,
+            commands::happy_bridge::happy_bridge_disable,
+            commands::happy_bridge::happy_bridge_status,
+            commands::happy_bridge::happy_bridge_reset_identity,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1292,6 +1304,9 @@ pub fn run() {
                 // Stop the provider runtime node process
                 if let Some(rt_state) = app.try_state::<provider_runtime::ProviderRuntimeState>() {
                     rt_state.kill_sync();
+                }
+                if let Some(happy_state) = app.try_state::<happy_bridge::HappyBridgeManager>() {
+                    happy_state.kill_sync();
                 }
                 // Stop an in-progress native recorder so a screen-capture child
                 // process is not orphaned and left recording the screen after
