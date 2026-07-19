@@ -2,6 +2,7 @@
 // ABOUTME: Builds its provider-runtime config in Rust so secrets never enter argv.
 
 use serde::Serialize;
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -54,7 +55,7 @@ struct ProviderRuntimeConnection {
 
 struct HappyBridgeProcess {
     child: Child,
-    _stdin: ChildStdin,
+    _stdin: Arc<Mutex<ChildStdin>>,
 }
 
 pub struct HappyBridgeManager {
@@ -155,7 +156,8 @@ impl HappyBridgeManager {
             .await
             .map_err(|err| format!("Failed to flush Happy bridge config: {err}"))?;
 
-        pipe_bridge_output(&mut child);
+        let stdin = Arc::new(Mutex::new(stdin));
+        pipe_bridge_output(&mut child, Arc::clone(&stdin), app.clone());
         *self.process.lock().await = Some(HappyBridgeProcess {
             child,
             _stdin: stdin,
@@ -409,11 +411,168 @@ fn find_happy_bridge_mjs() -> Result<PathBuf, String> {
         })
 }
 
-fn pipe_bridge_output(child: &mut Child) {
+const MAX_SUPERVISOR_LINE_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug)]
+struct SupervisorRequest {
+    id: Value,
+    method: String,
+    params: Value,
+}
+
+fn error_response(id: Value, code: i32, message: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": code, "message": message },
+    })
+}
+
+fn parse_supervisor_line(line: &str) -> Result<SupervisorRequest, Value> {
+    if line.len() > MAX_SUPERVISOR_LINE_BYTES {
+        return Err(error_response(
+            Value::Null,
+            -32600,
+            "supervisor request line is too large",
+        ));
+    }
+
+    let value: Value = serde_json::from_str(line)
+        .map_err(|_| error_response(Value::Null, -32700, "parse error"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| error_response(Value::Null, -32600, "invalid supervisor request"))?;
+    let id = object.get("id").cloned().unwrap_or(Value::Null);
+    let method = object
+        .get("method")
+        .and_then(Value::as_str)
+        .ok_or_else(|| error_response(id.clone(), -32600, "method is required"))?;
+
+    if !matches!(
+        method,
+        "conversation_create" | "conversation_lookup" | "identity_store"
+    ) {
+        return Err(error_response(id, -32601, "unknown supervisor method"));
+    }
+
+    Ok(SupervisorRequest {
+        id,
+        method: method.to_string(),
+        params: object.get("params").cloned().unwrap_or_else(|| json!({})),
+    })
+}
+
+fn required_string(params: &Value, key: &str) -> Result<String, String> {
+    params
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| format!("{key} is required"))
+}
+
+async fn dispatch_supervisor_request(
+    app: &AppHandle,
+    request: SupervisorRequest,
+) -> Result<Value, String> {
+    match request.method.as_str() {
+        "conversation_create" => {
+            let agent_type = required_string(&request.params, "agentType")?;
+            let cwd = required_string(&request.params, "cwd")?;
+            let title = required_string(&request.params, "title")?;
+            let happy_session_id = required_string(&request.params, "happySessionId")?;
+            let metadata = serde_json::to_string(&json!({
+                "happy_session_id": happy_session_id,
+            }))
+            .map_err(|error| error.to_string())?;
+            let conversation = crate::commands::chat::create_agent_conversation_record(
+                app.clone(),
+                uuid::Uuid::new_v4().to_string(),
+                title,
+                agent_type,
+                Some(cwd.clone()),
+                Some(cwd),
+                None,
+                Some(metadata),
+            )
+            .await?;
+            Ok(json!({ "conversationId": conversation.id }))
+        }
+        "conversation_lookup" => {
+            let happy_session_id = required_string(&request.params, "happySessionId")?;
+            let conversation = crate::commands::chat::lookup_agent_conversation_by_happy_session(
+                app.clone(),
+                happy_session_id,
+            )
+            .await?;
+            Ok(match conversation {
+                Some(conversation) => json!({
+                    "conversationId": conversation.id,
+                    "agentSessionId": conversation.agent_session_id,
+                    "cwd": conversation.agent_cwd,
+                    "agentType": conversation.agent_type,
+                }),
+                None => json!({}),
+            })
+        }
+        "identity_store" => {
+            let identity = request
+                .params
+                .get("identity")
+                .ok_or_else(|| "identity is required".to_string())?;
+            let credential = identity
+                .as_str()
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| identity.to_string());
+            app.state::<HappyBridgeManager>()
+                .store_pairing_credential(app, &credential)?;
+            Ok(json!({ "stored": true }))
+        }
+        _ => Err("unknown supervisor method".to_string()),
+    }
+}
+
+async fn dispatch_supervisor_line(app: &AppHandle, line: &str, stdin: &Arc<Mutex<ChildStdin>>) {
+    let response = match parse_supervisor_line(line) {
+        Err(response) => response,
+        Ok(request) => {
+            let id = request.id.clone();
+            match dispatch_supervisor_request(app, request).await {
+                Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+                Err(error) => error_response(id, -32000, &error),
+            }
+        }
+    };
+
+    let encoded = match serde_json::to_vec(&response) {
+        Ok(encoded) => encoded,
+        Err(error) => {
+            log::warn!("[HappyBridge] Failed to encode supervisor response: {error}");
+            return;
+        }
+    };
+    let mut writer = stdin.lock().await;
+    if let Err(error) = writer.write_all(&encoded).await {
+        log::warn!("[HappyBridge] Failed to write supervisor response: {error}");
+        return;
+    }
+    if let Err(error) = writer.write_all(b"\n").await {
+        log::warn!("[HappyBridge] Failed to finish supervisor response: {error}");
+        return;
+    }
+    if let Err(error) = writer.flush().await {
+        log::warn!("[HappyBridge] Failed to flush supervisor response: {error}");
+    }
+}
+
+fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: AppHandle) {
     if let Some(stdout) = child.stdout.take() {
+        let stdout_stdin = Arc::clone(&stdin);
         tauri::async_runtime::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
-            while let Ok(Some(_line)) = lines.next_line().await {}
+            while let Ok(Some(line)) = lines.next_line().await {
+                dispatch_supervisor_line(&app, &line, &stdout_stdin).await;
+            }
         });
     }
     if let Some(stderr) = child.stderr.take() {
@@ -428,7 +587,8 @@ fn pipe_bridge_output(child: &mut Child) {
 
 #[cfg(test)]
 mod tests {
-    use super::restart_delay;
+    use super::{MAX_SUPERVISOR_LINE_BYTES, error_response, parse_supervisor_line, restart_delay};
+    use serde_json::Value;
     use std::time::Duration;
 
     #[test]
@@ -437,5 +597,37 @@ mod tests {
         assert_eq!(restart_delay(1), Duration::from_secs(2));
         assert_eq!(restart_delay(2), Duration::from_secs(4));
         assert_eq!(restart_delay(10), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn supervisor_channel_dispatch_garbage_json_returns_error_response() {
+        let response = parse_supervisor_line("not-json").expect_err("garbage must fail");
+        assert_eq!(response["error"]["code"], -32700);
+        assert_eq!(response["id"], Value::Null);
+    }
+
+    #[test]
+    fn supervisor_channel_dispatch_unknown_method_returns_error_response() {
+        let response = parse_supervisor_line(
+            r#"{"jsonrpc":"2.0","id":7,"method":"unknown_method","params":{}}"#,
+        )
+        .expect_err("unknown method must fail");
+        assert_eq!(response["error"]["code"], -32601);
+        assert_eq!(response["id"], 7);
+    }
+
+    #[test]
+    fn supervisor_channel_dispatch_oversized_line_returns_error_response() {
+        let line = "x".repeat(MAX_SUPERVISOR_LINE_BYTES + 1);
+        let response = parse_supervisor_line(&line).expect_err("oversized line must fail");
+        assert_eq!(response["error"]["code"], -32600);
+        assert_eq!(response["id"], Value::Null);
+    }
+
+    #[test]
+    fn supervisor_error_response_has_jsonrpc_shape() {
+        let response = error_response(Value::Null, -32000, "test");
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["error"]["message"], "test");
     }
 }

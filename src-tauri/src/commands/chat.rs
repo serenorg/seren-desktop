@@ -560,6 +560,29 @@ pub async fn create_agent_conversation(
     agent_session_id: Option<String>,
     agent_metadata: Option<String>,
 ) -> Result<AgentConversation, String> {
+    create_agent_conversation_record(
+        app,
+        id,
+        title,
+        agent_type,
+        agent_cwd,
+        project_root,
+        agent_session_id,
+        agent_metadata,
+    )
+    .await
+}
+
+pub(crate) async fn create_agent_conversation_record(
+    app: AppHandle,
+    id: String,
+    title: String,
+    agent_type: String,
+    agent_cwd: Option<String>,
+    project_root: Option<String>,
+    agent_session_id: Option<String>,
+    agent_metadata: Option<String>,
+) -> Result<AgentConversation, String> {
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -627,6 +650,56 @@ pub async fn create_agent_conversation(
     .await?;
 
     Ok(convo)
+}
+
+pub(crate) async fn lookup_agent_conversation_by_happy_session(
+    app: AppHandle,
+    happy_session_id: String,
+) -> Result<Option<AgentConversation>, String> {
+    run_db(app, move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, title, created_at, agent_type, agent_session_id,
+                    agent_cwd, agent_model_id, agent_permission_mode,
+                    agent_metadata, project_id, project_root, is_archived
+             FROM conversations
+             WHERE kind = 'agent' AND agent_metadata IS NOT NULL",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(AgentConversation {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                created_at: row.get(2)?,
+                agent_type: row.get(3)?,
+                agent_session_id: row.get(4)?,
+                agent_cwd: row.get(5)?,
+                agent_model_id: row.get(6)?,
+                agent_permission_mode: row.get(7)?,
+                agent_metadata: row.get(8)?,
+                project_id: row.get(9)?,
+                project_root: row.get(10)?,
+                is_archived: row.get::<_, i32>(11)? != 0,
+            })
+        })?;
+
+        for row in rows {
+            let conversation = row?;
+            let Some(metadata) = conversation.agent_metadata.as_deref() else {
+                continue;
+            };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(metadata) else {
+                continue;
+            };
+            if value.get("happy_session_id").and_then(|id| id.as_str())
+                == Some(happy_session_id.as_str())
+            {
+                return Ok(Some(conversation));
+            }
+        }
+
+        Ok(None)
+    })
+    .await
 }
 
 #[tauri::command]
