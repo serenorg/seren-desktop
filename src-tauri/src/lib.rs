@@ -1275,6 +1275,7 @@ pub fn run() {
             commands::happy_bridge::happy_bridge_enable,
             commands::happy_bridge::happy_bridge_disable,
             commands::happy_bridge::happy_bridge_status,
+            commands::happy_bridge::happy_bridge_start_pairing,
             commands::happy_bridge::happy_bridge_reset_identity,
         ])
         .build(tauri::generate_context!())
