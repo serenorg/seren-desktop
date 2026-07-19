@@ -16,7 +16,6 @@ import { humanizeOAuthProviderSlug } from "@/lib/oauth-provider-resolution";
 import { listenForOAuthCallback } from "@/lib/tauri-bridge";
 import {
   connectPublisher,
-  listConnectedPublishers,
   setDefaultOAuthConnection,
 } from "@/services/publisher-oauth";
 import {
@@ -28,6 +27,7 @@ import {
   resolveThreadOAuthConnection,
   setThreadOAuthConnectionId,
 } from "@/stores/oauth-account.store";
+import { loadOAuthAccountSwitcherState } from "./oauth-account-switcher-load";
 
 interface OAuthAccountSwitcherProps {
   threadId?: string | null;
@@ -58,8 +58,9 @@ export const OAuthAccountSwitcher: Component<OAuthAccountSwitcherProps> = (
   >(null);
   let rootRef: HTMLDivElement | undefined;
   let connectTimeout: ReturnType<typeof setTimeout> | null = null;
-  const [connections] = createResource(oauthConnectionsRevision, async () =>
-    listConnectedPublishers(),
+  const [accountLoad, { refetch: refetchAccounts }] = createResource(
+    oauthConnectionsRevision,
+    loadOAuthAccountSwitcherState,
   );
 
   onMount(() => {
@@ -102,7 +103,7 @@ export const OAuthAccountSwitcher: Component<OAuthAccountSwitcherProps> = (
   });
 
   const groups = createMemo<ProviderAccountGroup[]>(() => {
-    const allConnections = connections() ?? [];
+    const allConnections = accountLoad()?.connections ?? [];
     const providerSlugs = Array.from(
       new Set(
         allConnections
@@ -178,7 +179,35 @@ export const OAuthAccountSwitcher: Component<OAuthAccountSwitcherProps> = (
   };
 
   return (
-    <Show when={primaryConnection()}>
+    <Show
+      when={primaryConnection()}
+      fallback={
+        <Show when={accountLoad()?.error}>
+          {(message) => (
+            <div
+              class="fixed right-4 top-14 z-50 w-[300px] max-w-[calc(100vw-2rem)] rounded-lg border border-destructive/40 bg-background p-3 text-left shadow-[var(--shadow-lg)]"
+              role="alert"
+              aria-live="polite"
+              data-testid="oauth-account-load-error"
+            >
+              <div class="text-[0.8rem] font-semibold text-foreground">
+                Couldn&apos;t load connected accounts
+              </div>
+              <div class="mt-1 text-[0.75rem] text-muted-foreground">
+                {message()}
+              </div>
+              <button
+                type="button"
+                class="mt-2 text-[0.75rem] font-medium text-foreground underline underline-offset-2 hover:text-muted-foreground"
+                onClick={() => void refetchAccounts()}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+        </Show>
+      }
+    >
       {(connection) => (
         <div ref={rootRef} class="relative">
           <button
