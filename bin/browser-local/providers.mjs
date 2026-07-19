@@ -207,6 +207,49 @@ function mapDecision(optionId) {
   }
 }
 
+function normalizeOrigin(origin) {
+  return origin === "remote" ? "remote" : "desktop";
+}
+
+/**
+ * Keep resolution idempotency separate from the runtime-specific request
+ * objects. The provider runtime can receive the same response from the
+ * desktop and a remote client during a race, and both callers need a
+ * success-shaped result.
+ */
+export function createResolutionTracker() {
+  const resolved = new Set();
+  const inFlight = new Set();
+  const keyFor = (sessionId, requestId) => `${sessionId}:${requestId}`;
+
+  return {
+    claim(sessionId, requestId) {
+      const key = keyFor(sessionId, requestId);
+      if (resolved.has(key) || inFlight.has(key)) {
+        return { alreadyResolved: true };
+      }
+      inFlight.add(key);
+      return null;
+    },
+    resolve(sessionId, requestId) {
+      const key = keyFor(sessionId, requestId);
+      inFlight.delete(key);
+      resolved.add(key);
+    },
+    release(sessionId, requestId) {
+      inFlight.delete(keyFor(sessionId, requestId));
+    },
+    duplicate(sessionId, requestId) {
+      return resolved.has(keyFor(sessionId, requestId))
+        ? { alreadyResolved: true }
+        : null;
+    },
+    mark(sessionId, requestId) {
+      this.resolve(sessionId, requestId);
+    },
+  };
+}
+
 function modeFromApprovalPolicy(approvalPolicy) {
   switch (approvalPolicy) {
     case "on-request":
@@ -1404,6 +1447,8 @@ function attachProcessListeners(
 
 export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-runtime" }) {
   const sessions = new Map();
+  const permissionResolutions = createResolutionTracker();
+  const diffProposalResolutions = createResolutionTracker();
   // Paired-thread interceptor (#2368): events from inner Claude/Codex
   // sessions that belong to a paired `claude-codex` thread are remapped to
   // the paired session id (with role attribution) before reaching the
@@ -1412,6 +1457,33 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
   const emit = (channel, payload) => {
     if (pairedRuntime?.interceptEmit(channel, payload)) return;
     rawEmit(channel, payload);
+  };
+  const publishPermissionResolution = (sessionId, requestId, optionId, source) => {
+    emit("provider://permission-resolved", {
+      sessionId,
+      requestId,
+      resolution: { optionId, source },
+      origin: source,
+    });
+  };
+  const runPermissionResolution = async ({
+    sessionId,
+    requestId,
+    optionId,
+    source,
+    action,
+  }) => {
+    const duplicate = permissionResolutions.claim(sessionId, requestId);
+    if (duplicate) return duplicate;
+    try {
+      const result = await action();
+      permissionResolutions.resolve(sessionId, requestId);
+      publishPermissionResolution(sessionId, requestId, optionId, source);
+      return result ?? { ok: true };
+    } catch (error) {
+      permissionResolutions.release(sessionId, requestId);
+      throw error;
+    }
   };
   const codexLogPrefix = providerLogPrefix("codex", runtimeMode);
   const agentRegistry = createBrowserLocalAgentRegistry({ emit });
@@ -1720,19 +1792,40 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     }
   }
 
-  async function sendPrompt({ sessionId, prompt, context }) {
+  async function sendPrompt({ sessionId, prompt, context, origin = "desktop" }) {
+    const source = normalizeOrigin(origin);
     const session = sessions.get(sessionId);
     if (!session) {
       if (pairedRuntime.hasSession(sessionId)) {
-        return pairedRuntime.sendPrompt({ sessionId, prompt, context });
+        emit("provider://user-message", {
+          sessionId,
+          text: prompt,
+          origin: source,
+        });
+        return pairedRuntime.sendPrompt({ sessionId, prompt, context, origin: source });
       }
       if (geminiRuntime.hasSession(sessionId)) {
-        return geminiRuntime.sendPrompt({ sessionId, prompt, context });
+        emit("provider://user-message", {
+          sessionId,
+          text: prompt,
+          origin: source,
+        });
+        return geminiRuntime.sendPrompt({ sessionId, prompt, context, origin: source });
       }
       if (lmStudioRuntime.hasSession(sessionId)) {
-        return lmStudioRuntime.sendPrompt({ sessionId, prompt, context });
+        emit("provider://user-message", {
+          sessionId,
+          text: prompt,
+          origin: source,
+        });
+        return lmStudioRuntime.sendPrompt({ sessionId, prompt, context, origin: source });
       }
-      return claudeRuntime.sendPrompt({ sessionId, prompt, context });
+      emit("provider://user-message", {
+        sessionId,
+        text: prompt,
+        origin: source,
+      });
+      return claudeRuntime.sendPrompt({ sessionId, prompt, context, origin: source });
     }
     if (session.currentPrompt) {
       throw new Error("Another prompt is already active for this session.");
@@ -1740,6 +1833,11 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
 
     session.status = "prompting";
     session.latestTurnUsage = undefined;
+    emit("provider://user-message", {
+      sessionId,
+      text: prompt,
+      origin: source,
+    });
     emit("provider://session-status", {
       sessionId,
       status: "prompting",
@@ -1918,46 +2016,85 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     session.serenMcpProxy?.setRouting(routing);
   }
 
-  async function respondToPermission({ sessionId, requestId, optionId }) {
+  async function respondToPermission({
+    sessionId,
+    requestId,
+    optionId,
+    origin = "desktop",
+  }) {
+    const source = normalizeOrigin(origin);
     const session = sessions.get(sessionId);
     if (!session) {
       if (pairedRuntime.hasSession(sessionId)) {
-        return pairedRuntime.respondToPermission({
-          sessionId,
-          requestId,
-          optionId,
+        return runPermissionResolution({
+          sessionId, requestId, optionId, source,
+          action: () => pairedRuntime.respondToPermission({
+            sessionId,
+            requestId,
+            optionId,
+          }),
         });
       }
       if (geminiRuntime.hasSession(sessionId)) {
-        return geminiRuntime.respondToPermission({ sessionId, requestId, optionId });
-      }
-      if (lmStudioRuntime.hasSession(sessionId)) {
-        return lmStudioRuntime.respondToPermission({
-          sessionId,
-          requestId,
-          optionId,
+        return runPermissionResolution({
+          sessionId, requestId, optionId, source,
+          action: () => geminiRuntime.respondToPermission({ sessionId, requestId, optionId }),
         });
       }
-      return claudeRuntime.respondToPermission({ sessionId, requestId, optionId });
+      if (lmStudioRuntime.hasSession(sessionId)) {
+        return runPermissionResolution({
+          sessionId, requestId, optionId, source,
+          action: () => lmStudioRuntime.respondToPermission({
+            sessionId,
+            requestId,
+            optionId,
+          }),
+        });
+      }
+      return runPermissionResolution({
+        sessionId, requestId, optionId, source,
+        action: () => claudeRuntime.respondToPermission({ sessionId, requestId, optionId }),
+      });
     }
 
-    const pending = session.pendingPermissions.get(requestId);
-    if (!pending) {
-      throw new Error(`No pending permission request: ${requestId}`);
-    }
+    return runPermissionResolution({
+      sessionId, requestId, optionId, source,
+      action: () => {
+        const pending = session.pendingPermissions.get(requestId);
+        if (!pending) {
+          throw new Error(`No pending permission request: ${requestId}`);
+        }
 
-    session.pendingPermissions.delete(requestId);
-    writeMessage(session, {
-      jsonrpc: "2.0",
-      id: pending.jsonRpcId,
-      result: {
-        decision: mapDecision(optionId),
+        session.pendingPermissions.delete(requestId);
+        writeMessage(session, {
+          jsonrpc: "2.0",
+          id: pending.jsonRpcId,
+          result: {
+            decision: mapDecision(optionId),
+          },
+        });
       },
     });
   }
 
-  async function respondToDiffProposal() {
-    return null;
+  async function respondToDiffProposal({
+    sessionId,
+    proposalId,
+    accepted,
+    origin = "desktop",
+  }) {
+    const duplicate = diffProposalResolutions.claim(sessionId, proposalId);
+    if (duplicate) return duplicate;
+
+    const source = normalizeOrigin(origin);
+    diffProposalResolutions.resolve(sessionId, proposalId);
+    emit("provider://diff-proposal-resolved", {
+      sessionId,
+      proposalId,
+      resolution: { accepted: accepted === true, source },
+      origin: source,
+    });
+    return { ok: true };
   }
 
   async function getAvailableAgents() {

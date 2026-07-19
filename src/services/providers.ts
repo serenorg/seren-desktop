@@ -32,6 +32,8 @@ export type AgentType =
   | "lmstudio";
 export type UnlistenFn = () => void;
 
+export type ProviderOrigin = "desktop" | "remote";
+
 /** Roles inside a paired `claude-codex` thread (#2368). */
 export type PairedRole = "planner" | "executor";
 
@@ -238,6 +240,16 @@ export interface PermissionRequestEvent {
   options: PermissionOption[];
 }
 
+export interface PermissionResolvedEvent {
+  sessionId: string;
+  requestId: string;
+  resolution: {
+    optionId: string;
+    source: ProviderOrigin;
+  };
+  origin?: ProviderOrigin;
+}
+
 /** Paired workflow stage shown in the thread header (#2368). */
 export type PairedState =
   | "idle"
@@ -371,6 +383,16 @@ export interface DiffProposalEvent {
   newText: string;
 }
 
+export interface DiffProposalResolvedEvent {
+  sessionId: string;
+  proposalId: string;
+  resolution: {
+    accepted: boolean;
+    source: ProviderOrigin;
+  };
+  origin?: ProviderOrigin;
+}
+
 export interface ConfigOptionsUpdateEvent {
   sessionId: string;
   configOptions: SessionConfigOption[];
@@ -385,6 +407,7 @@ export interface UserMessageEvent {
   timestamp?: number;
   /** True when this user message was emitted from session history replay. */
   replay?: boolean;
+  origin?: ProviderOrigin;
 }
 
 export interface ErrorEvent {
@@ -427,7 +450,9 @@ export type AgentEvent =
   | { type: "planUpdate"; data: PlanUpdateEvent }
   | { type: "promptComplete"; data: PromptCompleteEvent }
   | { type: "permissionRequest"; data: PermissionRequestEvent }
+  | { type: "permissionResolved"; data: PermissionResolvedEvent }
   | { type: "diffProposal"; data: DiffProposalEvent }
+  | { type: "diffProposalResolved"; data: DiffProposalResolvedEvent }
   | { type: "configOptionsUpdate"; data: ConfigOptionsUpdateEvent }
   | { type: "sessionStatus"; data: SessionStatusEvent }
   | { type: "userMessage"; data: UserMessageEvent }
@@ -516,10 +541,11 @@ export async function sendPrompt(
   sessionId: string,
   prompt: string,
   context?: Array<Record<string, string>>,
+  origin?: ProviderOrigin,
 ): Promise<void> {
   return invokeProvider(
     "provider_prompt",
-    { sessionId, prompt, context },
+    { sessionId, prompt, context, ...(origin ? { origin } : {}) },
     { timeoutMs: null },
   );
 }
@@ -657,11 +683,13 @@ export async function respondToPermission(
   sessionId: string,
   requestId: string,
   optionId: string,
+  origin?: ProviderOrigin,
 ): Promise<void> {
   return invokeProvider("provider_respond_to_permission", {
     sessionId,
     requestId,
     optionId,
+    ...(origin ? { origin } : {}),
   });
 }
 
@@ -672,11 +700,13 @@ export async function respondToDiffProposal(
   sessionId: string,
   proposalId: string,
   accepted: boolean,
+  origin?: ProviderOrigin,
 ): Promise<void> {
   return invokeProvider("provider_respond_to_diff_proposal", {
     sessionId,
     proposalId,
     accepted,
+    ...(origin ? { origin } : {}),
   });
 }
 
@@ -820,7 +850,9 @@ const EVENT_SUFFIXES = {
   planUpdate: "plan-update",
   promptComplete: "prompt-complete",
   permissionRequest: "permission-request",
+  permissionResolved: "permission-resolved",
   diffProposal: "diff-proposal",
+  diffProposalResolved: "diff-proposal-resolved",
   sessionStatus: "session-status",
   configOptionsUpdate: "config-options-update",
   userMessage: "user-message",
@@ -948,11 +980,25 @@ export async function subscribeToSession(
         data: PermissionRequestEvent;
       }>("permissionRequest"),
     ),
+    subscribeToEvent<PermissionResolvedEvent>(
+      "permissionResolved",
+      createHandler<{
+        type: "permissionResolved";
+        data: PermissionResolvedEvent;
+      }>("permissionResolved"),
+    ),
     subscribeToEvent<DiffProposalEvent>(
       "diffProposal",
       createHandler<{ type: "diffProposal"; data: DiffProposalEvent }>(
         "diffProposal",
       ),
+    ),
+    subscribeToEvent<DiffProposalResolvedEvent>(
+      "diffProposalResolved",
+      createHandler<{
+        type: "diffProposalResolved";
+        data: DiffProposalResolvedEvent;
+      }>("diffProposalResolved"),
     ),
     subscribeToEvent<SessionStatusEvent>(
       "sessionStatus",
@@ -1018,8 +1064,15 @@ export async function subscribeToAllEvents(
     subscribeToEvent<PermissionRequestEvent>("permissionRequest", (data) =>
       callback({ type: "permissionRequest", data }),
     ),
+    subscribeToEvent<PermissionResolvedEvent>("permissionResolved", (data) =>
+      callback({ type: "permissionResolved", data }),
+    ),
     subscribeToEvent<DiffProposalEvent>("diffProposal", (data) =>
       callback({ type: "diffProposal", data }),
+    ),
+    subscribeToEvent<DiffProposalResolvedEvent>(
+      "diffProposalResolved",
+      (data) => callback({ type: "diffProposalResolved", data }),
     ),
     subscribeToEvent<SessionStatusEvent>("sessionStatus", (data) =>
       callback({ type: "sessionStatus", data }),

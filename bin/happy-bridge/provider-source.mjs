@@ -211,7 +211,11 @@ export function createProviderSource({ client, config, debugLog = () => {} }) {
     },
 
     async sendPrompt(sessionId, text) {
-      await client.call("provider_prompt", { sessionId, prompt: text });
+      await client.call("provider_prompt", {
+        sessionId,
+        prompt: text,
+        origin: "remote",
+      });
     },
 
     async cancel(sessionId) {
@@ -223,6 +227,17 @@ export function createProviderSource({ client, config, debugLog = () => {} }) {
         sessionId,
         requestId,
         optionId,
+        origin: "remote",
+      });
+      return { ok: true };
+    },
+
+    async respondToDiffProposal(sessionId, proposalId, accepted) {
+      await client.call("provider_respond_to_diff_proposal", {
+        sessionId,
+        proposalId,
+        accepted,
+        origin: "remote",
       });
       return { ok: true };
     },
