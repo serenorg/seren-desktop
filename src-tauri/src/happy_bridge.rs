@@ -62,6 +62,7 @@ pub struct HappyBridgeManager {
     process: Arc<Mutex<Option<HappyBridgeProcess>>>,
     monitor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     status: Arc<Mutex<HappyBridgeStatus>>,
+    // These mutexes are always acquired independently; never hold one while awaiting the other.
     restart_attempts: Arc<Mutex<u32>>,
     stopping: Arc<AtomicBool>,
     pairing_payload: Arc<Mutex<Option<String>>>,
@@ -278,9 +279,11 @@ impl HappyBridgeManager {
     }
 
     async fn record_status_report(&self, app: &AppHandle, detail: Option<String>) {
-        let mut status = self.status.lock().await;
         if detail.as_deref() == Some("Connected") {
             *self.restart_attempts.lock().await = 0;
+        }
+        let mut status = self.status.lock().await;
+        if detail.as_deref() == Some("Connected") {
             status.state = HappyBridgeState::Running;
         }
         status.detail = detail;
@@ -420,20 +423,28 @@ async fn monitor_process(
             continue;
         }
 
-        let attempt = {
+        let (attempt, exhausted) = {
             let mut attempts = restart_attempts.lock().await;
-            let Some(next) = next_restart_attempt(*attempts) else {
-                let failed = HappyBridgeStatus {
-                    state: HappyBridgeState::Error,
-                    detail: Some("restart budget exhausted".to_string()),
-                };
-                *status.lock().await = failed.clone();
-                let _ = app.emit(STATUS_EVENT, failed);
-                return;
-            };
-            *attempts = next;
-            next
+            match next_restart_attempt(*attempts) {
+                Some(next) => {
+                    *attempts = next;
+                    (next, false)
+                }
+                None => (0, true),
+            }
         };
+        if exhausted {
+            let failed = HappyBridgeStatus {
+                state: HappyBridgeState::Error,
+                detail: Some("restart budget exhausted".to_string()),
+            };
+            {
+                let mut current = status.lock().await;
+                *current = failed.clone();
+            };
+            let _ = app.emit(STATUS_EVENT, failed);
+            return;
+        }
         let delay = restart_delay(attempt - 1);
         {
             let mut current = status.lock().await;

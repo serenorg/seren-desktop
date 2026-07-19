@@ -192,6 +192,31 @@ function sessionMetadata(config, summary, machineId) {
   };
 }
 
+export function createTerminatedSessionTracker(maxSize = 256) {
+  const terminated = new Set();
+  const order = [];
+  return {
+    mark(sessionId) {
+      if (terminated.has(sessionId)) return;
+      terminated.add(sessionId);
+      order.push(sessionId);
+      while (order.length > maxSize) terminated.delete(order.shift());
+    },
+    forget(sessionId) {
+      if (!terminated.delete(sessionId)) return;
+      const index = order.indexOf(sessionId);
+      if (index >= 0) order.splice(index, 1);
+    },
+    has(sessionId) {
+      return terminated.has(sessionId);
+    },
+    clear() {
+      terminated.clear();
+      order.length = 0;
+    },
+  };
+}
+
 export function createHappyLayer({
   config,
   supervisorChannel,
@@ -210,7 +235,7 @@ export function createHappyLayer({
   let advertisedAgents = [];
   const sessions = new Map();
   const sessionCreationPromises = new Map();
-  const terminatedSessions = new Set();
+  const terminatedSessions = createTerminatedSessionTracker();
   const pendingRequests = Object.create(null);
   const liveSessions = new Set();
 
@@ -350,6 +375,9 @@ export function createHappyLayer({
   }
 
   async function findOrCreateSession(sessionId, summary = null) {
+    if (summary && !["error", "terminated"].includes(summary.status)) {
+      terminatedSessions.forget(sessionId);
+    }
     if (terminatedSessions.has(sessionId)) return null;
     const existing = sessions.get(sessionId);
     if (existing) return existing;
@@ -378,7 +406,7 @@ export function createHappyLayer({
     if (terminal) {
       liveSessions.delete(event.sessionId);
       delete pendingRequests[event.sessionId];
-      terminatedSessions.add(event.sessionId);
+      terminatedSessions.mark(event.sessionId);
     } else {
       liveSessions.add(event.sessionId);
     }
