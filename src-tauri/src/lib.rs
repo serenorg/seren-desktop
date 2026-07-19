@@ -48,6 +48,7 @@ pub mod claude_memory;
 mod claude_setup;
 mod embedded_runtime;
 mod files;
+pub mod happy_bridge;
 mod mcp;
 pub mod messaging;
 mod oauth;
@@ -622,6 +623,7 @@ pub fn run() {
             .manage(orchestrator::eval::EvalState::new())
             .manage(orchestrator::tool_bridge::ToolResultBridge::new())
             .manage(provider_runtime::ProviderRuntimeState::new())
+            .manage(happy_bridge::HappyBridgeManager::new())
             .manage(std::sync::Arc::new(
                 commands::updater::ShutdownGuard::default(),
             ))
@@ -1289,6 +1291,9 @@ pub fn run() {
                 // Stop the provider runtime node process
                 if let Some(rt_state) = app.try_state::<provider_runtime::ProviderRuntimeState>() {
                     rt_state.kill_sync();
+                }
+                if let Some(happy_state) = app.try_state::<happy_bridge::HappyBridgeManager>() {
+                    happy_state.kill_sync();
                 }
                 // Stop an in-progress native recorder so a screen-capture child
                 // process is not orphaned and left recording the screen after
