@@ -9,8 +9,8 @@ import {
   createSignal,
   type JSX,
   onCleanup,
-  untrack,
   Show,
+  untrack,
 } from "solid-js";
 import {
   formatMicrosUsd,
