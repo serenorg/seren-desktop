@@ -7,10 +7,15 @@ import { ApiClient, configuration } from "happy/lib";
 import nacl from "tweetnacl";
 
 import { translateNeutralEvent, composeApprovalNotification } from "./translate.mjs";
-import { validatePermissionResponse, validateSpawnRoot } from "./validate.mjs";
+import {
+  isWithinAdvertisedRoots,
+  validatePermissionResponse,
+  validateSpawnRoot,
+} from "./validate.mjs";
 
 const AUTH_POLL_MS = 1000;
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+const SUMMARY_CACHE_TTL_MS = 1000;
 const DEFAULT_CODEX_APPROVAL_POLICY = "on-failure";
 const DENY_OPTION_IDS = new Set([
   "deny",
@@ -134,11 +139,19 @@ function machineMetadata(config, capabilities = { agents: [], roots: [] }) {
   };
 }
 
+// The remote peer names the agent, and the value is persisted as a conversation
+// row before the provider runtime ever validates it. Resolve to a known agent or
+// refuse, so an arbitrary remote string cannot reach the database.
+const HAPPY_AGENT_TYPES = new Map([
+  ["claude", "claude-code"],
+  ["claude-code", "claude-code"],
+  ["gemini", "gemini"],
+  ["codex", "codex"],
+]);
+
 function happyAgentType(agent) {
-  if (agent === "claude") return "claude-code";
-  if (agent === "gemini") return "gemini";
-  if (agent === "codex") return "codex";
-  return typeof agent === "string" && agent.length > 0 ? agent : "claude-code";
+  if (agent === undefined || agent === null) return "claude-code";
+  return HAPPY_AGENT_TYPES.get(agent) ?? null;
 }
 
 function defaultApprovalPolicy(agentType) {
@@ -285,8 +298,55 @@ export function createHappyLayer({
   const pendingRequests = Object.create(null);
   const liveSessions = new Set();
 
+  const sessionSummaries = new Map();
+  let summariesFetchedAt = 0;
+
   function debug(message) {
     debugLog(message);
+  }
+
+  /// Listing every session once per streamed event issued one provider RPC per
+  /// assistant delta. Summaries are stable for the fields consumed here
+  /// (agentType, cwd), so they are cached and only re-listed for a session the
+  /// cache has never seen, at most once per interval.
+  async function refreshSessionSummaries() {
+    const listed = await source.listSessions();
+    sessionSummaries.clear();
+    for (const summary of listed) sessionSummaries.set(summary.sessionId, summary);
+    summariesFetchedAt = Date.now();
+    return listed;
+  }
+
+  async function sessionSummary(sessionId) {
+    if (
+      !sessionSummaries.has(sessionId) &&
+      Date.now() - summariesFetchedAt > SUMMARY_CACHE_TTL_MS
+    ) {
+      await refreshSessionSummaries();
+    }
+    return sessionSummaries.get(sessionId) ?? null;
+  }
+
+  /// A paired device may only observe and drive sessions in folders the user
+  /// shared. Spawning still requires the path to *be* an advertised root; an
+  /// already-running session inside one is in scope.
+  function isSessionInScope(summary) {
+    return isWithinAdvertisedRoots(summary?.cwd, advertisedRoots);
+  }
+
+  /// Called whenever the advertised roots change so sessions that fall out of
+  /// scope stop being observable rather than lingering until restart.
+  async function dropSessionsOutOfScope() {
+    for (const [sessionId, entry] of Array.from(sessions.entries())) {
+      if (isSessionInScope(entry.summary)) continue;
+      sessions.delete(sessionId);
+      liveSessions.delete(sessionId);
+      delete pendingRequests[sessionId];
+      sessionCreationPromises.delete(sessionId);
+      await entry.client
+        .close()
+        .catch(() => debug("failed to close Happy session leaving scope"));
+    }
   }
 
   function rememberPermission(event) {
@@ -320,24 +380,25 @@ export function createHappyLayer({
     client.onUserMessage((message) => {
       void handleUserMessage(entry, message).catch(() => debug("ignored Happy inbound user message"));
     });
-    client.rpcHandlerManager.registerHandler("abort", async () => {
+    // Decryption failure yields null params rather than throwing, and these two
+    // handlers ignore their argument, so without this guard a relay could cancel
+    // a live turn with ciphertext it cannot even produce. A legitimate empty
+    // payload decrypts to {}, so null is unambiguously a failed decrypt.
+    const cancelSession = (label) => async (params) => {
+      if (params === null) {
+        debug(`dropped unauthenticated Happy ${label} request`);
+        return { ok: false };
+      }
       try {
         await source.cancel(entry.sessionId);
         return { ok: true };
       } catch {
-        debug("ignored failed Happy abort request");
+        debug(`ignored failed Happy ${label} request`);
         return { ok: false };
       }
-    });
-    client.rpcHandlerManager.registerHandler("switch", async () => {
-      try {
-        await source.cancel(entry.sessionId);
-        return { ok: true };
-      } catch {
-        debug("ignored failed Happy switch request");
-        return { ok: false };
-      }
-    });
+    };
+    client.rpcHandlerManager.registerHandler("abort", cancelSession("abort"));
+    client.rpcHandlerManager.registerHandler("switch", cancelSession("switch"));
     client.rpcHandlerManager.registerHandler("permission", async (response) => {
       try {
         return await handlePermissionResponse(entry, response);
@@ -427,13 +488,15 @@ export function createHappyLayer({
     const inFlight = sessionCreationPromises.get(sessionId);
     if (inFlight) return inFlight;
     const creation = (async () => {
-      const listed = summary ?? (await source.listSessions()).find((item) => item.sessionId === sessionId);
-      return createSessionEntry(sessionId, listed ?? {
-        sessionId,
-        agentType: "claude-code",
-        cwd: os.homedir(),
-        status: "ready",
-      });
+      const listed = summary ?? (await sessionSummary(sessionId));
+      // The previous fallback invented a summary rooted at the home directory,
+      // which is not a folder the user shared. A session the provider runtime
+      // cannot describe stays out of scope rather than being exposed.
+      if (!listed || !isSessionInScope(listed)) {
+        debug("skipped Happy session outside advertised roots");
+        return null;
+      }
+      return createSessionEntry(sessionId, listed);
     })();
     sessionCreationPromises.set(sessionId, creation);
     try {
@@ -444,6 +507,15 @@ export function createHappyLayer({
   }
 
   async function publishEvent(event) {
+    // An entry only exists if it passed the scope check when it was created, so
+    // a tracked session stays tracked; an unknown one is gated here, before any
+    // bookkeeping, so out-of-scope sessions accumulate no state either.
+    const summary =
+      (await sessionSummary(event.sessionId)) ?? sessions.get(event.sessionId)?.summary ?? null;
+    if (!sessions.has(event.sessionId) && !isSessionInScope(summary)) {
+      debug("dropped event for session outside advertised roots");
+      return;
+    }
     const terminal =
       event.kind === "status" && ["error", "terminated"].includes(event.payload?.status);
     if (terminal) {
@@ -456,7 +528,6 @@ export function createHappyLayer({
     }
     rememberPermission(event);
     if (terminal && !sessions.has(event.sessionId)) return;
-    const summary = (await source.listSessions()).find((item) => item.sessionId === event.sessionId);
     const entry = await findOrCreateSession(event.sessionId, summary);
     if (!entry) return;
     const provider = summary?.agentType === "claude-code" ? "claude" : summary?.agentType ?? "codex";
@@ -495,6 +566,10 @@ export function createHappyLayer({
       return { type: "error", errorMessage: "Requested directory is not an advertised root" };
     }
     const agentType = happyAgentType(options?.agent);
+    if (!agentType) {
+      debug("refused spawn for unknown agent type");
+      return { type: "error", errorMessage: "Requested agent is not available" };
+    }
     const pendingSessionId = `spawn-${randomUUID()}`;
     const pending = await createSessionEntry(pendingSessionId, {
       sessionId: pendingSessionId,
@@ -503,28 +578,66 @@ export function createHappyLayer({
       title: `${agentType} Agent`,
       status: "initializing",
     });
-    const conversation = await supervisorChannel.call("conversation_create", {
-      agentType,
-      cwd: validation.root,
-      title: `${agentType} Agent`,
-      happySessionId: pending.happySessionId,
+    // Everything past this point can reject, and the pending entry already holds
+    // an open sync client and a relay-side session. Unwind it on failure so a
+    // repeated failing spawn cannot accumulate open sockets.
+    try {
+      const conversation = await supervisorChannel.call("conversation_create", {
+        agentType,
+        cwd: validation.root,
+        title: `${agentType} Agent`,
+        happySessionId: pending.happySessionId,
+      });
+      const spawned = await source.spawn({
+        agentType,
+        cwd: validation.root,
+        localSessionId: conversation.conversationId,
+        approvalPolicy: defaultApprovalPolicy(agentType),
+      });
+      if (!spawned?.sessionId) throw new Error("provider spawn returned no session");
+      sessions.delete(pendingSessionId);
+      pending.sessionId = spawned.sessionId;
+      pending.summary = spawned;
+      sessions.set(spawned.sessionId, pending);
+      liveSessions.delete(pendingSessionId);
+      liveSessions.add(spawned.sessionId);
+      pendingRequests[spawned.sessionId] = pendingRequests[pendingSessionId] ?? Object.create(null);
+      delete pendingRequests[pendingSessionId];
+      // Seed the cache so the first streamed event resolves this session's
+      // provider without re-listing.
+      sessionSummaries.set(spawned.sessionId, spawned);
+      return { type: "success", sessionId: pending.happySessionId };
+    } catch (error) {
+      await discardPendingSpawn(pendingSessionId, pending);
+      debug("failed to spawn Happy session");
+      return {
+        type: "error",
+        errorMessage: error instanceof Error ? error.message : "spawn failed",
+      };
+    }
+  }
+
+  /// Registered from both the freshly-paired and already-paired startup paths.
+  /// A single listener keeps `dispatchNotification`'s queueing behaviour intact —
+  /// it stops queueing as soon as any listener exists, so adding a second one
+  /// elsewhere would drop notifications this one is waiting for.
+  function subscribeToSupervisor() {
+    supervisorSubscription = supervisorChannel.onNotification((method, params) => {
+      if (method !== "roots_update") return;
+      advertisedRoots = Array.isArray(params?.roots) ? params.roots : [];
+      void (async () => {
+        await dropSessionsOutOfScope();
+        await updateCapabilities();
+      })().catch(() => debug("failed to apply Happy roots update"));
     });
-    const spawned = await source.spawn({
-      agentType,
-      cwd: validation.root,
-      localSessionId: conversation.conversationId,
-      approvalPolicy: defaultApprovalPolicy(agentType),
-    });
-    if (!spawned?.sessionId) throw new Error("provider spawn returned no session");
+  }
+
+  async function discardPendingSpawn(pendingSessionId, pending) {
     sessions.delete(pendingSessionId);
-    pending.sessionId = spawned.sessionId;
-    pending.summary = spawned;
-    sessions.set(spawned.sessionId, pending);
     liveSessions.delete(pendingSessionId);
-    liveSessions.add(spawned.sessionId);
-    pendingRequests[spawned.sessionId] = pendingRequests[pendingSessionId] ?? Object.create(null);
     delete pendingRequests[pendingSessionId];
-    return { type: "success", sessionId: pending.happySessionId };
+    sessionCreationPromises.delete(pendingSessionId);
+    await pending.client.close().catch(() => debug("failed to close abandoned Happy session"));
   }
 
   function setupMachineHandlers() {
@@ -570,12 +683,7 @@ export function createHappyLayer({
         identity = identityFromAuthResponse(result.token, decryptAuthResponse(result.response, keyPair.secretKey));
         await supervisorChannel.call("identity_store", { identity });
         await registerMachine();
-        supervisorSubscription = supervisorChannel.onNotification((method, params) => {
-          if (method === "roots_update") {
-            advertisedRoots = Array.isArray(params?.roots) ? params.roots : [];
-            void updateCapabilities().catch(() => debug("failed to update Happy capabilities"));
-          }
-        });
+        supervisorSubscription = subscribeToSupervisor();
         await finishRegistration();
         return true;
       }
@@ -614,8 +722,11 @@ export function createHappyLayer({
   async function finishRegistration() {
     return startupStatusGate.complete(async () => {
       await updateCapabilities();
-      const listed = await source.listSessions();
-      for (const summary of listed) await createSessionEntry(summary.sessionId, summary);
+      const listed = await refreshSessionSummaries();
+      for (const summary of listed) {
+        if (!isSessionInScope(summary)) continue;
+        await createSessionEntry(summary.sessionId, summary);
+      }
       sourceSubscription?.();
       sourceSubscription = source.subscribe((event) => {
         void publishEvent(event).catch(() => debug("failed to publish Happy session event"));
@@ -625,12 +736,7 @@ export function createHappyLayer({
 
   return {
     async start() {
-      supervisorSubscription = supervisorChannel.onNotification((method, params) => {
-        if (method === "roots_update") {
-          advertisedRoots = Array.isArray(params?.roots) ? params.roots : [];
-          void updateCapabilities().catch(() => debug("failed to update Happy capabilities"));
-        }
-      });
+      supervisorSubscription = subscribeToSupervisor();
       if (await registerMachine()) {
         await finishRegistration();
         return;
