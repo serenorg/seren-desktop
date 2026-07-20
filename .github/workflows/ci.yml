@@ -212,6 +212,10 @@ jobs:
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
     strategy:
+      # Report every platform. Under fail-fast one platform's failure cancels the
+      # others, so a single real break reads as three red legs with no error of
+      # their own — that misdirected the diagnosis of #3075 for hours.
+      fail-fast: false
       matrix:
         # Only run Linux on direct pushes to main, full matrix on PRs
         os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
