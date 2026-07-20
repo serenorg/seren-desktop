@@ -96,6 +96,7 @@ try {
     supervisorChannel,
     source,
     debugLog: (message) => console.error(`happy-bridge: ${message}`),
+    onShutdownRequest: () => shutdown(0),
   });
   await happyLayer.start();
 } catch (error) {

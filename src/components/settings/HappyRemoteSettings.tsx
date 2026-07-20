@@ -13,6 +13,7 @@ import { toDataURL } from "@/lib/qrcode-shim";
 import { captureSupportError } from "@/lib/support/hook";
 import { listConversations } from "@/lib/tauri-bridge";
 import {
+  cancelPairing,
   disableRemoteAccess,
   enableRemoteAccess,
   getAdvertisedRoots,
@@ -150,6 +151,22 @@ export const HappyRemoteSettings: Component = () => {
     }
   };
 
+  // Dismissing the dialog has to tell the bridge to stop waiting. Clearing the
+  // local signals alone left the pairing window open for its full timeout,
+  // still ready to accept whoever scanned the code.
+  const dismissPairing = async () => {
+    setPairingPayload(null);
+    setPairingQr(null);
+    try {
+      await cancelPairing();
+    } catch {
+      setMessage(
+        "Could not cancel pairing. Turn remote access off to be sure.",
+      );
+    }
+    await refreshStatus();
+  };
+
   const toggleRoot = async (root: string, included: boolean) => {
     const previous = advertisedRoots();
     const next = included
@@ -236,14 +253,20 @@ export const HappyRemoteSettings: Component = () => {
             Pair a phone
           </span>
           <span class="text-[0.8rem] text-muted-foreground">
-            Scan a one-time pairing code in the Happy mobile app
+            {status().state === "running"
+              ? "This device is already paired. Reset the pairing first to pair a different phone."
+              : "Scan a one-time pairing code in the Happy mobile app"}
           </span>
         </span>
         <button
           type="button"
           class="px-4 py-1.5 border border-border-strong rounded-md bg-transparent text-foreground text-[0.85rem] cursor-pointer hover:bg-border disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={() => void pairPhone()}
-          disabled={busy()}
+          // A paired bridge never re-enters the pairing path, so the request
+          // would stall for the full payload timeout and then error. Re-pairing
+          // also mints a new machineId and replaces the stored identity, which
+          // would orphan the existing pairing rather than add a second device.
+          disabled={busy() || status().state === "running"}
         >
           Pair a phone
         </button>
@@ -308,10 +331,7 @@ export const HappyRemoteSettings: Component = () => {
         {(payload) => (
           <div
             class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000]"
-            onClick={() => {
-              setPairingPayload(null);
-              setPairingQr(null);
-            }}
+            onClick={() => void dismissPairing()}
           >
             <div
               class="bg-popover border border-border-strong rounded-xl p-6 max-w-[420px] w-[90%]"
@@ -346,10 +366,7 @@ export const HappyRemoteSettings: Component = () => {
               <button
                 type="button"
                 class="mt-4 w-full px-4 py-2 bg-transparent border border-border-strong rounded-md text-muted-foreground text-[0.9rem] cursor-pointer hover:bg-border"
-                onClick={() => {
-                  setPairingPayload(null);
-                  setPairingQr(null);
-                }}
+                onClick={() => void dismissPairing()}
               >
                 Close
               </button>

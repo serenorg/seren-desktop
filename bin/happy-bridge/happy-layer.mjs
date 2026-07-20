@@ -278,6 +278,7 @@ export function createHappyLayer({
   supervisorChannel,
   source,
   debugLog = () => {},
+  onShutdownRequest = async () => {},
 }) {
   configuration.serverUrl = config.relayUrl;
   let identity = config.machineIdentity;
@@ -285,6 +286,7 @@ export function createHappyLayer({
   let machineClient = null;
   let pairingPromise = null;
   let latestPairingPayload = null;
+  let pairingCancelled = false;
   let sourceSubscription = null;
   let supervisorSubscription = null;
   let advertisedRoots = [];
@@ -305,10 +307,10 @@ export function createHappyLayer({
     debugLog(message);
   }
 
-  /// Listing every session once per streamed event issued one provider RPC per
-  /// assistant delta. Summaries are stable for the fields consumed here
-  /// (agentType, cwd), so they are cached and only re-listed for a session the
-  /// cache has never seen, at most once per interval.
+  // Listing every session once per streamed event issued one provider RPC per
+  // assistant delta. Summaries are stable for the fields consumed here
+  // (agentType, cwd), so they are cached and only re-listed for a session the
+  // cache has never seen, at most once per interval.
   async function refreshSessionSummaries() {
     const listed = await source.listSessions();
     sessionSummaries.clear();
@@ -327,15 +329,15 @@ export function createHappyLayer({
     return sessionSummaries.get(sessionId) ?? null;
   }
 
-  /// A paired device may only observe and drive sessions in folders the user
-  /// shared. Spawning still requires the path to *be* an advertised root; an
-  /// already-running session inside one is in scope.
+  // A paired device may only observe and drive sessions in folders the user
+  // shared. Spawning still requires the path to *be* an advertised root; an
+  // already-running session inside one is in scope.
   function isSessionInScope(summary) {
     return isWithinAdvertisedRoots(summary?.cwd, advertisedRoots);
   }
 
-  /// Called whenever the advertised roots change so sessions that fall out of
-  /// scope stop being observable rather than lingering until restart.
+  // Called whenever the advertised roots change so sessions that fall out of
+  // scope stop being observable rather than lingering until restart.
   async function dropSessionsOutOfScope() {
     for (const [sessionId, entry] of Array.from(sessions.entries())) {
       if (isSessionInScope(entry.summary)) continue;
@@ -617,18 +619,30 @@ export function createHappyLayer({
     }
   }
 
-  /// Registered from both the freshly-paired and already-paired startup paths.
-  /// A single listener keeps `dispatchNotification`'s queueing behaviour intact —
-  /// it stops queueing as soon as any listener exists, so adding a second one
-  /// elsewhere would drop notifications this one is waiting for.
+  // Registered from both the freshly-paired and already-paired startup paths.
+  // A single listener keeps `dispatchNotification`'s queueing behaviour intact —
+  // it stops queueing as soon as any listener exists, so adding a second one
+  // elsewhere would drop notifications this one is waiting for.
   function subscribeToSupervisor() {
     supervisorSubscription = supervisorChannel.onNotification((method, params) => {
-      if (method !== "roots_update") return;
-      advertisedRoots = Array.isArray(params?.roots) ? params.roots : [];
-      void (async () => {
-        await dropSessionsOutOfScope();
-        await updateCapabilities();
-      })().catch(() => debug("failed to apply Happy roots update"));
+      if (method === "roots_update") {
+        advertisedRoots = Array.isArray(params?.roots) ? params.roots : [];
+        void (async () => {
+          await dropSessionsOutOfScope();
+          await updateCapabilities();
+        })().catch(() => debug("failed to apply Happy roots update"));
+        return;
+      }
+      if (method === "cancel_pairing") {
+        cancelPairing();
+        return;
+      }
+      if (method === "shutdown") {
+        // Windows has no SIGTERM, so a graceful stop has to arrive over the
+        // channel that already exists. Handled inside this listener rather than
+        // a second one, which would defeat `dispatchNotification`'s queueing.
+        void onShutdownRequest().catch(() => debug("failed to handle shutdown request"));
+      }
     });
   }
 
@@ -678,7 +692,17 @@ export function createHappyLayer({
   async function waitForAuthorization(keyPair) {
     const deadline = Date.now() + AUTH_TIMEOUT_MS;
     while (Date.now() < deadline) {
+      if (pairingCancelled) {
+        debug("pairing abandoned before authorization");
+        return false;
+      }
       const result = await readAuthRequest(config.relayUrl, keyPair.publicKey);
+      // Checked again after the round trip: an authorization that lands while
+      // the user is dismissing the dialog must not be accepted.
+      if (pairingCancelled) {
+        debug("pairing abandoned before authorization");
+        return false;
+      }
       if (result.state === "authorized") {
         identity = identityFromAuthResponse(result.token, decryptAuthResponse(result.response, keyPair.secretKey));
         await supervisorChannel.call("identity_store", { identity });
@@ -693,7 +717,19 @@ export function createHappyLayer({
     return false;
   }
 
+  // Abandons an in-flight pairing wait. Without this, dismissing the QR dialog
+  // left `waitForAuthorization` polling for the full timeout and still
+  // accepting whoever scanned the code in the meantime.
+  function cancelPairing() {
+    if (!pairingPromise && !latestPairingPayload) return;
+    pairingCancelled = true;
+    pairingPromise = null;
+    latestPairingPayload = null;
+    debug("pairing cancelled by supervisor");
+  }
+
   async function startPairing() {
+    pairingCancelled = false;
     if (pairingPromise) {
       if (latestPairingPayload) {
         supervisorChannel.notify("pairing_payload", { payload: latestPairingPayload });

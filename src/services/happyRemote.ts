@@ -44,6 +44,10 @@ export async function startPairing(): Promise<string> {
   return invoke<string>("happy_bridge_start_pairing");
 }
 
+export async function cancelPairing(): Promise<void> {
+  return invoke<void>("happy_bridge_cancel_pairing");
+}
+
 export function onStatusChange(
   callback: (status: HappyRemoteStatus) => void,
 ): Promise<UnlistenFn> {
