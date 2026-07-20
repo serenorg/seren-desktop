@@ -98,7 +98,10 @@ export const ThreadTabBar: Component = () => {
     setShowNewMenu(false);
     const cwd = fileTreeState.rootPath;
     if (!cwd) return;
-    await threadStore.createAgentThread(agentType, cwd);
+    const threadId = await threadStore.createAgentThread(agentType, cwd);
+    if (!threadId && agentStore.error) {
+      setShowNewMenu(true);
+    }
   };
 
   const handleNewTerminal = async (options?: {
@@ -227,6 +230,23 @@ export const ThreadTabBar: Component = () => {
 
         <Show when={showNewMenu()}>
           <div class="absolute top-full right-0 min-w-[300px] max-h-[70vh] overflow-y-auto bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
+            <Show when={agentStore.error}>
+              <div
+                data-testid="agent-launch-error"
+                role="alert"
+                class="m-1 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive"
+              >
+                <span class="min-w-0 flex-1">{agentStore.error}</span>
+                <button
+                  type="button"
+                  class="shrink-0 border-0 bg-transparent p-0 text-destructive cursor-pointer"
+                  aria-label="Dismiss agent launch error"
+                  onClick={() => agentStore.clearError()}
+                >
+                  ×
+                </button>
+              </div>
+            </Show>
             <Show when={allowsSerenPublicModels(authStore.privateChatPolicy)}>
               <button
                 type="button"

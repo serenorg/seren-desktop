@@ -293,6 +293,20 @@ describe("Launcher policy freshness", () => {
   });
 });
 
+describe("Coding-agent launch failures (#3089)", () => {
+  it("reopens both launch menus and renders the existing agent error", () => {
+    expect(sidebarTsx).toContain("if (!threadId && agentStore.error)");
+    expect(sidebarTsx).toContain("setShowLauncher(true)");
+    expect(tabBarTsx).toContain("if (!threadId && agentStore.error)");
+    expect(tabBarTsx).toContain("setShowNewMenu(true)");
+    for (const source of [sidebarTsx, tabBarTsx]) {
+      expect(source).toContain('data-testid="agent-launch-error"');
+      expect(source).toContain('role="alert"');
+      expect(source).toContain("agentStore.clearError()");
+    }
+  });
+});
+
 describe("ThreadSidebar — LM Studio local agent row (#2444)", () => {
   it("renders LM Studio in Coding agents with local copy and dispatch", () => {
     expect(sidebarTsx).toContain('data-testid="new-lmstudio-agent"');

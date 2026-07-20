@@ -249,7 +249,10 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     if (!cwd) return;
     setSpawning(true);
     try {
-      await threadStore.createAgentThread(agentType, cwd);
+      const threadId = await threadStore.createAgentThread(agentType, cwd);
+      if (!threadId && agentStore.error) {
+        setShowLauncher(true);
+      }
     } finally {
       setSpawning(false);
     }
@@ -622,6 +625,23 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
           <Show when={showLauncher()}>
             <div class="absolute top-[calc(100%+4px)] left-3 right-3 max-h-[60vh] overflow-y-auto bg-surface-2 border border-border rounded-lg z-20 shadow-lg animate-[slideDown_150ms_ease] py-1">
+              <Show when={agentStore.error}>
+                <div
+                  data-testid="agent-launch-error"
+                  role="alert"
+                  class="mx-2 my-1 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive"
+                >
+                  <span class="min-w-0 flex-1">{agentStore.error}</span>
+                  <button
+                    type="button"
+                    class="shrink-0 border-0 bg-transparent p-0 text-destructive cursor-pointer"
+                    aria-label="Dismiss agent launch error"
+                    onClick={() => agentStore.clearError()}
+                  >
+                    ×
+                  </button>
+                </div>
+              </Show>
               {/* ---------- Chat ---------- */}
               <Show when={hasChatSection()}>
                 <SectionLabel>Chat</SectionLabel>
