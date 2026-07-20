@@ -183,6 +183,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const [showRevisions, setShowRevisions] = createSignal(false);
   const [manualRun, setManualRun] = createSignal<ManualRunState | null>(null);
   const [runsRefreshNonce, setRunsRefreshNonce] = createSignal(0);
+  let delayedRunRefresh: ReturnType<typeof setTimeout> | null = null;
   const [detailRunId, setDetailRunId] = createSignal<string | null>(null);
   const [editingEvalGate, setEditingEvalGate] = createSignal(false);
   const [showCheckpoints, setShowCheckpoints] = createSignal(true);
@@ -315,7 +316,18 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   onCleanup(() => {
     document.removeEventListener("keydown", handleDocumentKeydown);
     document.removeEventListener("mousedown", handleDocumentMousedown);
+    if (delayedRunRefresh !== null) clearTimeout(delayedRunRefresh);
   });
+
+  const refreshRunData = () => {
+    setRunsRefreshNonce((n) => n + 1);
+    if (delayedRunRefresh !== null) clearTimeout(delayedRunRefresh);
+    // Spend aggregation can trail the completed run event by a short window.
+    delayedRunRefresh = setTimeout(() => {
+      delayedRunRefresh = null;
+      setRunsRefreshNonce((n) => n + 1);
+    }, 3_000);
+  };
 
   const status = () => summary()?.status ?? "pending";
   const isRunning = () => status() === "running";
@@ -483,7 +495,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
       });
     } finally {
       // Pull the persisted run into the list once cloud storage catches up.
-      setRunsRefreshNonce((n) => n + 1);
+      refreshRunData();
     }
   };
 
