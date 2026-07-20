@@ -7,16 +7,31 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
+    # Groups are limited to minor/patch. A major belongs in its own PR, judged on
+    # its own merits: an unrestricted group folded TypeScript 6 -> 7 into a
+    # routine-looking "4 updates" PR, and TS 7 drops the JS compiler API (#3064).
+    # Caveat: dependabot-core#14202 means a grouped dependency's major may be
+    # suppressed rather than raised on its own. Majors for these packages are
+    # therefore a manual, deliberate upgrade — do not expect a PR to appear.
     groups:
       # Group Playwright updates together
       playwright:
         patterns:
           - "@playwright/*"
           - "playwright*"
-      # Group Tauri updates together
+        update-types:
+          - "minor"
+          - "patch"
+      # Group Tauri updates together. The npm side of a Tauri plugin must land
+      # with its Cargo crate: tauri fails the build when the two drift across a
+      # major/minor boundary (#3064, #1453). Dependabot cannot open a joint
+      # npm+cargo PR, so pair these with src-tauri/Cargo.lock by hand.
       tauri:
         patterns:
           - "@tauri-apps/*"
+        update-types:
+          - "minor"
+          - "patch"
       # Group dev tools
       dev-tools:
         patterns:
@@ -24,6 +39,9 @@ updates:
           - "vite*"
           - "vitest"
           - "typescript"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Rust dependencies (Cargo)
   - package-ecosystem: "cargo"
