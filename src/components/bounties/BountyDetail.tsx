@@ -746,6 +746,7 @@ export const BountyDetail: Component<BountyDetailProps> = (props) => {
       value === "claude-code" ||
       value === "codex" ||
       value === "gemini" ||
+      value === "grok" ||
       value === "claude-codex" ||
       value === "lmstudio"
     );

@@ -14,6 +14,7 @@ import {
   allowsClaudeAgent,
   allowsCodexAgent,
   allowsGeminiAgent,
+  allowsGrokAgent,
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
 } from "@/services/organization-policy";
@@ -92,12 +93,15 @@ export const ThreadTabBar: Component = () => {
   };
 
   const handleNewAgent = async (
-    agentType: "claude-code" | "codex" | "gemini" | "claude-codex",
+    agentType: "claude-code" | "codex" | "gemini" | "grok" | "claude-codex",
   ) => {
     setShowNewMenu(false);
     const cwd = fileTreeState.rootPath;
     if (!cwd) return;
-    await threadStore.createAgentThread(agentType, cwd);
+    const threadId = await threadStore.createAgentThread(agentType, cwd);
+    if (!threadId && agentStore.error) {
+      setShowNewMenu(true);
+    }
   };
 
   const handleNewTerminal = async (options?: {
@@ -113,6 +117,7 @@ export const ThreadTabBar: Component = () => {
       return providerGlyph(thread.provider ?? "seren");
     if (thread.agentType === "codex") return "⚡";
     if (thread.agentType === "gemini") return "✨";
+    if (thread.agentType === "grok") return "𝕏";
     if (thread.agentType === "claude-codex") return "🤝";
     return "🤖";
   };
@@ -225,6 +230,23 @@ export const ThreadTabBar: Component = () => {
 
         <Show when={showNewMenu()}>
           <div class="absolute top-full right-0 min-w-[300px] max-h-[70vh] overflow-y-auto bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
+            <Show when={agentStore.error}>
+              <div
+                data-testid="agent-launch-error"
+                role="alert"
+                class="m-1 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive"
+              >
+                <span class="min-w-0 flex-1">{agentStore.error}</span>
+                <button
+                  type="button"
+                  class="shrink-0 border-0 bg-transparent p-0 text-destructive cursor-pointer"
+                  aria-label="Dismiss agent launch error"
+                  onClick={() => agentStore.clearError()}
+                >
+                  ×
+                </button>
+              </div>
+            </Show>
             <Show when={allowsSerenPublicModels(authStore.privateChatPolicy)}>
               <button
                 type="button"
@@ -338,6 +360,24 @@ export const ThreadTabBar: Component = () => {
                 </span>
                 <div class="flex-1 min-w-0 font-medium">Gemini</div>
                 <Chip variant="subscription">Subscription</Chip>
+              </button>
+            </Show>
+            <Show when={allowsGrokAgent(authStore.privateChatPolicy)}>
+              <button
+                type="button"
+                data-testid="new-grok-agent"
+                class="flex items-center gap-2.5 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                onClick={() => handleNewAgent("grok")}
+                disabled={!fileTreeState.rootPath}
+                title={
+                  !fileTreeState.rootPath
+                    ? "Open a folder first to use agents"
+                    : undefined
+                }
+              >
+                <span class="text-[13px] w-[18px] text-center shrink-0">𝕏</span>
+                <div class="flex-1 min-w-0 font-medium">Grok</div>
+                <Chip variant="subscription">Subscription / API key</Chip>
               </button>
             </Show>
             <Show when={!authStore.privateChatPolicy?.disable_local_agents}>

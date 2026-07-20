@@ -11,12 +11,12 @@ function readSource(relativePath: string): string {
 
 describe("native agent selected OAuth identity routing", () => {
   const claudeSource = readSource("bin/browser-local/claude-runtime.mjs");
-  const geminiSource = readSource("bin/browser-local/gemini-runtime.mjs");
+  const acpSource = readSource("bin/browser-local/acp-runtime.mjs");
   const lmStudioSource = readSource("bin/browser-local/lmstudio-runtime.mjs");
 
   it.each([
     ["Claude", claudeSource],
-    ["Gemini", geminiSource],
+    ["ACP agents", acpSource],
     ["LM Studio", lmStudioSource],
   ])("routes %s Seren MCP calls through a session proxy", (_name, source) => {
     expect(source).toContain("createSerenMcpOAuthProxy");

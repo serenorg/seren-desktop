@@ -214,7 +214,7 @@ fn choose_authenticated_agent(
         }
     }
 
-    ["claude-code", "codex", "gemini", "lmstudio"]
+    ["claude-code", "codex", "gemini", "grok", "lmstudio"]
         .into_iter()
         .find(|agent_type| is_authenticated(agent_type))
         .map(str::to_string)
@@ -231,6 +231,9 @@ fn preferred_agent_for_model(model: &str) -> Option<&'static str> {
     }
     if bare.starts_with("gemini-") {
         return Some("gemini");
+    }
+    if bare.starts_with("grok-") {
+        return Some("grok");
     }
     if normalized.starts_with("lmstudio/") || bare.starts_with("lmstudio-") {
         return Some("lmstudio");
@@ -275,6 +278,7 @@ fn agent_model_for_request(agent_type: &str, requested_model: &str) -> Option<St
                 || lower.starts_with("o4")
         }
         "gemini" => lower.starts_with("gemini-"),
+        "grok" => lower.starts_with("grok-"),
         _ => false,
     };
     compatible.then(|| trimmed.to_string())
@@ -290,7 +294,7 @@ fn seren_models_fallback_model(requested_model: &str) -> String {
 /// the provider isn't authenticated, or the provider's subscription has no
 /// remaining capacity (quota/rate-limit), or the local provider runtime
 /// transport dropped mid one-shot. A long meeting that exhausts the user's
-/// Claude/Codex/Gemini subscription mid-pass must still produce notes, and a
+/// Claude/Codex/Gemini/Grok subscription mid-pass must still produce notes, and a
 /// Windows loopback socket reset must not strand a saved transcript without
 /// notes. Safety errors (e.g. a tool-call abort) are deliberately excluded so
 /// they still fail closed. #2397 #2680.
@@ -365,6 +369,15 @@ mod tests {
             CompletionRoute::ProviderAgent {
                 agent_type: "claude-code".to_string(),
                 model: Some("claude-opus-4-8".to_string()),
+            }
+        );
+
+        let agents = vec![agent("grok", true), agent("codex", true)];
+        assert_eq!(
+            resolve_completion_route_from_agents(&agents, "grok-4.5"),
+            CompletionRoute::ProviderAgent {
+                agent_type: "grok".to_string(),
+                model: Some("grok-4.5".to_string()),
             }
         );
     }

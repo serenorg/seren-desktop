@@ -9,8 +9,8 @@ const codexSource = readFileSync(
   resolve("bin/browser-local/providers.mjs"),
   "utf-8",
 );
-const geminiSource = readFileSync(
-  resolve("bin/browser-local/gemini-runtime.mjs"),
+const acpSource = readFileSync(
+  resolve("bin/browser-local/acp-runtime.mjs"),
   "utf-8",
 );
 
@@ -53,11 +53,11 @@ describe("#2304 — Codex cancelPrompt escalates to a hard kill when interrupt f
   });
 });
 
-describe("#2304 — Gemini cancelPrompt escalates to a hard kill when the agent does not stop", () => {
-  const body = sliceAsyncFn(geminiSource, "async function cancelPrompt({ sessionId })");
+describe("#2304 — ACP cancelPrompt escalates to a hard kill when the agent does not stop", () => {
+  const body = sliceAsyncFn(acpSource, "async function cancelPrompt({ sessionId })");
 
   it("body extraction succeeds and still sends the cooperative cancel", () => {
-    expect(body, "Gemini cancelPrompt body must be non-empty").not.toBe("");
+    expect(body, "ACP cancelPrompt body must be non-empty").not.toBe("");
     expect(body).toContain("session/cancel");
   });
 
@@ -67,7 +67,7 @@ describe("#2304 — Gemini cancelPrompt escalates to a hard kill when the agent 
     // turn still being active after a grace window (currentPrompt not cleared).
     expect(
       body,
-      "Gemini cancelPrompt must hard-kill the child when the cooperative cancel is not honored.",
+      "ACP cancelPrompt must hard-kill the child when the cooperative cancel is not honored.",
     ).toContain("killChildTree");
     expect(
       body,

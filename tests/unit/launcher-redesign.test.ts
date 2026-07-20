@@ -37,6 +37,7 @@ describe("ThreadSidebar — stable testids on every row (#1832)", () => {
     "new-claude-agent",
     "new-codex-agent",
     "new-gemini-agent",
+    "new-grok-agent",
     "new-lmstudio-agent",
     "new-claude-cli",
     "new-codex-cli",
@@ -57,7 +58,7 @@ describe("ThreadSidebar — chip vocabulary (#1832)", () => {
     expect(chips.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("uses 'Subscription' for Claude / Codex / Gemini coding-agent rows", () => {
+  it("uses 'Subscription' for Claude / Codex / Gemini / Grok coding-agent rows", () => {
     const chips = sidebarTsx.match(/>\s*Subscription\s*</g) ?? [];
     expect(chips.length).toBeGreaterThanOrEqual(3);
   });
@@ -95,6 +96,7 @@ describe("ThreadSidebar — gating preserved (#1832)", () => {
     expect(sidebarTsx).toContain("allowsClaudeAgent(authStore.privateChatPolicy)");
     expect(sidebarTsx).toContain("allowsCodexAgent(authStore.privateChatPolicy)");
     expect(sidebarTsx).toContain("allowsGeminiAgent(authStore.privateChatPolicy)");
+    expect(sidebarTsx).toContain("allowsGrokAgent(authStore.privateChatPolicy)");
     expect(sidebarTsx).toContain("allowsLmStudioAgent(authStore.privateChatPolicy)");
   });
 });
@@ -122,6 +124,7 @@ describe("ThreadSidebar — dispatch preserved (#1832)", () => {
     expect(sidebarTsx).toContain('handleNewAgent("claude-code")');
     expect(sidebarTsx).toContain('handleNewAgent("codex")');
     expect(sidebarTsx).toContain('handleNewAgent("gemini")');
+    expect(sidebarTsx).toContain('handleNewAgent("grok")');
     expect(sidebarTsx).toContain('handleNewAgent("lmstudio")');
   });
 
@@ -158,6 +161,7 @@ describe("ThreadTabBar — chip vocabulary on the secondary +New menu (#1832)", 
     expect(tabBarTsx).toContain("allowsClaudeAgent(authStore.privateChatPolicy)");
     expect(tabBarTsx).toContain("allowsCodexAgent(authStore.privateChatPolicy)");
     expect(tabBarTsx).toContain("allowsGeminiAgent(authStore.privateChatPolicy)");
+    expect(tabBarTsx).toContain("allowsGrokAgent(authStore.privateChatPolicy)");
   });
 
   it("does not add LM Studio to the secondary top-tab +New menu", () => {
@@ -259,6 +263,7 @@ describe("ThreadSidebar — launcher rows are policy-gated, not probe-gated", ()
       "const showClaudeAgent",
       "const showCodexAgent",
       "const showGeminiAgent",
+      "const showGrokAgent",
       "const showLmStudioAgent",
     ]) {
       const gate = sidebarTsx.slice(
@@ -285,6 +290,20 @@ describe("Launcher policy freshness", () => {
   it("refreshes private chat policy when either +New menu opens", () => {
     expect(sidebarTsx).toContain("refreshPrivateChatPolicy");
     expect(tabBarTsx).toContain("refreshPrivateChatPolicy");
+  });
+});
+
+describe("Coding-agent launch failures (#3089)", () => {
+  it("reopens both launch menus and renders the existing agent error", () => {
+    expect(sidebarTsx).toContain("if (!threadId && agentStore.error)");
+    expect(sidebarTsx).toContain("setShowLauncher(true)");
+    expect(tabBarTsx).toContain("if (!threadId && agentStore.error)");
+    expect(tabBarTsx).toContain("setShowNewMenu(true)");
+    for (const source of [sidebarTsx, tabBarTsx]) {
+      expect(source).toContain('data-testid="agent-launch-error"');
+      expect(source).toContain('role="alert"');
+      expect(source).toContain("agentStore.clearError()");
+    }
   });
 });
 

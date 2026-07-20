@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as https from 'https';
 import { pipeline } from 'stream/promises';
 import { execSync } from 'child_process';
+import { pathToFileURL } from 'url';
 
 // Version configuration - update these for new releases
 const NODE_VERSION = '22.12.0';
@@ -24,6 +25,12 @@ const NODE_DOWNLOADS: Record<string, { url: string }> = {
 interface DownloadOptions {
 	arch: 'x64' | 'arm64';
 	outputDir: string;
+}
+
+/** Replace an extracted symlink with a regular wrapper without touching its target. */
+export function replaceRuntimeShim(wrapperPath: string, contents: string): void {
+	fs.rmSync(wrapperPath, { force: true });
+	fs.writeFileSync(wrapperPath, contents, { mode: 0o755 });
 }
 
 async function downloadFile(url: string, dest: string): Promise<void> {
@@ -105,9 +112,9 @@ async function prepareNodejs(options: DownloadOptions): Promise<string> {
 	const npmWrapper = `#!/bin/sh\nexec "$(dirname "$0")/node" "$(dirname "$0")/../lib/node_modules/npm/bin/npm-cli.js" "$@"\n`;
 	const npxWrapper = `#!/bin/sh\nexec "$(dirname "$0")/node" "$(dirname "$0")/../lib/node_modules/npm/bin/npx-cli.js" "$@"\n`;
 	const corepackWrapper = `#!/bin/sh\nexec "$(dirname "$0")/node" "$(dirname "$0")/../lib/node_modules/corepack/dist/corepack.js" "$@"\n`;
-	fs.writeFileSync(path.join(nodeDir, 'bin', 'npm'), npmWrapper, { mode: 0o755 });
-	fs.writeFileSync(path.join(nodeDir, 'bin', 'npx'), npxWrapper, { mode: 0o755 });
-	fs.writeFileSync(path.join(nodeDir, 'bin', 'corepack'), corepackWrapper, { mode: 0o755 });
+	replaceRuntimeShim(path.join(nodeDir, 'bin', 'npm'), npmWrapper);
+	replaceRuntimeShim(path.join(nodeDir, 'bin', 'npx'), npxWrapper);
+	replaceRuntimeShim(path.join(nodeDir, 'bin', 'corepack'), corepackWrapper);
 	console.log('Replaced bin/npm, bin/npx, and bin/corepack with Tauri-safe shell wrappers.');
 
 	console.log(`Node.js prepared at ${nodeDir}`);
@@ -179,13 +186,16 @@ export async function prepareEmbeddedRuntime(arch: 'x64' | 'arm64', outputDir: s
 	return { nodeDir, gitDir };
 }
 
-// CLI entry point (ESM compatible)
-const arch = (process.argv[2] as 'x64' | 'arm64') || 'arm64';
-const outputDir = process.argv[3] || path.join(process.cwd(), 'src-tauri', 'embedded-runtime', `darwin-${arch}`);
+// CLI entry point (ESM compatible). Keep imports side-effect free so the
+// symlink replacement contract can be exercised against a real temp tree.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+	const arch = (process.argv[2] as 'x64' | 'arm64') || 'arm64';
+	const outputDir = process.argv[3] || path.join(process.cwd(), 'src-tauri', 'embedded-runtime', `darwin-${arch}`);
 
-prepareEmbeddedRuntime(arch, outputDir)
-	.then(() => process.exit(0))
-	.catch((err) => {
-		console.error('Failed to prepare embedded runtime:', err);
-		process.exit(1);
-	});
+	prepareEmbeddedRuntime(arch, outputDir)
+		.then(() => process.exit(0))
+		.catch((err) => {
+			console.error('Failed to prepare embedded runtime:', err);
+			process.exit(1);
+		});
+}

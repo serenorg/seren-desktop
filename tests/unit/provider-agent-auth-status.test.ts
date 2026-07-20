@@ -16,6 +16,7 @@ describe("provider agent authentication status", () => {
     expect(registrySource).toContain('path.join(home, ".claude", ".credentials.json")');
     expect(registrySource).toContain('path.join(home, ".codex", "auth.json")');
     expect(registrySource).toContain('path.join(home, ".gemini", "oauth_creds.json")');
+    expect(registrySource).toContain('path.join(os.homedir(), ".grok", "auth.json")');
   });
 
   it("exposes a provider_check_agent_authenticated RPC", () => {

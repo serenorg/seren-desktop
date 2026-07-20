@@ -148,6 +148,7 @@ const DEFAULT_SEREN_MODELS: Record<AgentType, string> = {
   "claude-code": "arcee-ai/trinity-large-thinking",
   codex: "arcee-ai/trinity-large-thinking",
   gemini: "google/gemini-2.5-pro",
+  grok: "arcee-ai/trinity-large-thinking",
   "claude-codex": "arcee-ai/trinity-large-thinking",
   lmstudio: "arcee-ai/trinity-large-thinking",
 };
@@ -241,11 +242,13 @@ export function buildRedirectMessage(
       ? "Codex"
       : agentType === "gemini"
         ? "Gemini"
-        : agentType === "claude-codex"
-          ? "Claude + Codex"
-          : agentType === "lmstudio"
-            ? "LM Studio"
-            : "Claude Code";
+        : agentType === "grok"
+          ? "Grok"
+          : agentType === "claude-codex"
+            ? "Claude + Codex"
+            : agentType === "lmstudio"
+              ? "LM Studio"
+              : "Claude Code";
   const reasonText =
     reason === "prompt_too_long"
       ? `${agentName} agent's context window is full.`
@@ -296,11 +299,13 @@ export async function performAgentFallback(
       ? "Codex"
       : agentType === "gemini"
         ? "Gemini"
-        : agentType === "claude-codex"
-          ? "Claude + Codex"
-          : agentType === "lmstudio"
-            ? "LM Studio"
-            : "Claude";
+        : agentType === "grok"
+          ? "Grok"
+          : agentType === "claude-codex"
+            ? "Claude + Codex"
+            : agentType === "lmstudio"
+              ? "LM Studio"
+              : "Claude";
   const title = sessionTitle || `${agentName} Agent (continued)`;
 
   try {

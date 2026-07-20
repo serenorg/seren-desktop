@@ -226,7 +226,7 @@ function mapSessionStatusToThread(status: SessionStatus): ThreadStatus {
  * If preferChat is set, always returns chat.
  * Otherwise respects `agentStore.selectedAgentType` as the user's preference,
  * then falls back to availability order:
- * claude-code > codex > gemini > lmstudio > chat.
+ * claude-code > codex > gemini > grok > lmstudio > chat.
  */
 function getBestAgent():
   | { kind: "agent"; agentType: AgentType }
@@ -258,6 +258,11 @@ function getBestAgent():
     (a) => a.type === "gemini" && canAutoSelectAgent(a),
   );
   if (gemini) return { kind: "agent", agentType: "gemini" };
+
+  const grok = agents.find(
+    (agent) => agent.type === "grok" && canAutoSelectAgent(agent),
+  );
+  if (grok) return { kind: "agent", agentType: "grok" };
 
   const lmStudio = agents.find(
     (a) => a.type === "lmstudio" && canAutoSelectAgent(a),

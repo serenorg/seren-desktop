@@ -203,6 +203,19 @@ export function providerPermissionMode(mode, agentType) {
       yolo: "yolo",
     }[mode] ?? mode;
   }
+  if (agentType === "grok") {
+    return {
+      default: "default",
+      auto_edit: "acceptEdits",
+      acceptEdits: "acceptEdits",
+      dontAsk: "dontAsk",
+      bypassPermissions: "bypassPermissions",
+      plan: "plan",
+      "read-only": "plan",
+      "safe-yolo": "bypassPermissions",
+      yolo: "bypassPermissions",
+    }[mode] ?? mode;
+  }
   return mode;
 }
 

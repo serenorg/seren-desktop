@@ -487,6 +487,7 @@ const CLAUDE_1M_TIER_CAPABLE_MODELS = new Set([
 function defaultContextWindowFor(agentType: string, modelId?: string): number {
   if (agentType === "codex") return 1_000_000;
   if (agentType === "gemini") return 1_000_000;
+  if (agentType === "grok") return 1_000_000;
   if (agentType === "lmstudio") return 128_000;
   // Paired threads gauge against the planner (Claude defaults to the 1M
   // tier); the runtime-reported contextWindow corrects this per turn.
@@ -1148,6 +1149,8 @@ export function agentDisplayName(agentType?: string): string {
       return "Claude Code";
     case "gemini":
       return "Gemini";
+    case "grok":
+      return "Grok";
     case "claude-codex":
       return "Claude + Codex";
     case "lmstudio":
@@ -1164,11 +1167,13 @@ function agentInitializationFailureMessage(agentType?: string): string {
       ? "Codex is installed and signed in"
       : agentType === "gemini"
         ? "Gemini is installed and signed in"
-        : agentType === "lmstudio"
-          ? "LM Studio is running and reachable"
-          : agentType === "claude-codex"
-            ? "Claude Code and Codex are installed and signed in"
-            : `${agentName} is installed and authenticated`;
+        : agentType === "grok"
+          ? "Grok is installed and signed in"
+          : agentType === "lmstudio"
+            ? "LM Studio is running and reachable"
+            : agentType === "claude-codex"
+              ? "Claude Code and Codex are installed and signed in"
+              : `${agentName} is installed and authenticated`;
 
   return `Agent session terminated before initialization completed. Check that ${remediation}.`;
 }
@@ -3034,11 +3039,13 @@ export const agentStore = {
         ? "Codex Agent"
         : resolvedAgentType === "gemini"
           ? "Gemini Agent"
-          : resolvedAgentType === "claude-codex"
-            ? "Claude + Codex"
-            : resolvedAgentType === "lmstudio"
-              ? "LM Studio Agent"
-              : "Claude Code Agent");
+          : resolvedAgentType === "grok"
+            ? "Grok Agent"
+            : resolvedAgentType === "claude-codex"
+              ? "Claude + Codex"
+              : resolvedAgentType === "lmstudio"
+                ? "LM Studio Agent"
+                : "Claude Code Agent");
 
     // Prevent concurrent spawns for the same conversation. Internal retries
     // (initRetryAttempt > 0) are allowed through because they are sequential
@@ -3196,9 +3203,11 @@ export const agentStore = {
               ? providerService.ensureCodexCli
               : resolvedAgentType === "gemini"
                 ? providerService.ensureGeminiCli
-                : resolvedAgentType === "claude-codex"
-                  ? providerService.ensurePairedCli
-                  : null;
+                : resolvedAgentType === "grok"
+                  ? providerService.ensureGrokCli
+                  : resolvedAgentType === "claude-codex"
+                    ? providerService.ensurePairedCli
+                    : null;
 
         if (ensureFn) {
           console.log("[AgentStore] Ensuring CLI is installed...");
@@ -4055,6 +4064,7 @@ export const agentStore = {
       convo.agent_type === "codex" ||
       convo.agent_type === "claude-code" ||
       convo.agent_type === "gemini" ||
+      convo.agent_type === "grok" ||
       convo.agent_type === "claude-codex" ||
       convo.agent_type === "lmstudio"
         ? (convo.agent_type as AgentType)

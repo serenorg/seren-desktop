@@ -13,6 +13,10 @@ const geminiRuntimeMjs = readFileSync(
   resolve("bin/browser-local/gemini-runtime.mjs"),
   "utf-8",
 );
+const acpRuntimeMjs = readFileSync(
+  resolve("bin/browser-local/acp-runtime.mjs"),
+  "utf-8",
+);
 
 describe("Gemini Agent #1480 — bottom-control regression guards", () => {
   it("lockedAgentType filter accepts gemini (not just codex/claude-code)", () => {
@@ -37,11 +41,14 @@ describe("Gemini Agent #1480 — bottom-control regression guards", () => {
     // hidden-picker / wrong-label state.
     expect(geminiRuntimeMjs).toContain("GEMINI_AVAILABLE_MODELS");
     expect(geminiRuntimeMjs).toContain("gemini-2.5-pro");
-    // buildSessionStatus must reference the constant, not the empty array.
-    const buildIdx = geminiRuntimeMjs.indexOf("function buildSessionStatus");
+    expect(geminiRuntimeMjs).toContain(
+      "availableModels: GEMINI_AVAILABLE_MODELS",
+    );
+    // The shared status builder must surface the adapter's non-empty list.
+    const buildIdx = acpRuntimeMjs.indexOf("function buildSessionStatus");
     expect(buildIdx).toBeGreaterThan(-1);
-    const fn = geminiRuntimeMjs.slice(buildIdx, buildIdx + 800);
-    expect(fn).toContain("availableModels: GEMINI_AVAILABLE_MODELS");
+    const fn = acpRuntimeMjs.slice(buildIdx, buildIdx + 800);
+    expect(fn).toContain("availableModels: session.availableModels");
     // Negative: must NOT be the empty array literal anymore.
     expect(fn).not.toMatch(/availableModels:\s*\[\s*\]/);
   });

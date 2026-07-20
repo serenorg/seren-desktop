@@ -28,6 +28,7 @@ export type AgentType =
   | "claude-code"
   | "codex"
   | "gemini"
+  | "grok"
   | "claude-codex"
   | "lmstudio";
 export type UnlistenFn = () => void;
@@ -52,6 +53,7 @@ export function supportsConversationFork(agentType: AgentType): boolean {
     agentType === "claude-code" ||
     agentType === "codex" ||
     agentType === "gemini" ||
+    agentType === "grok" ||
     agentType === "claude-codex" ||
     agentType === "lmstudio"
   );
@@ -416,7 +418,7 @@ export interface ErrorEvent {
 }
 
 /**
- * Emitted by an agent runtime (gemini-runtime today) when a spawn fails
+ * Emitted by an agent runtime when a spawn fails
  * because the user has not yet authenticated with the upstream CLI.
  * Triggers the desktop to call `launchLogin(agentType)` automatically so
  * the user finishes sign-in in a Terminal/browser without needing to know
@@ -746,6 +748,13 @@ export async function ensureCodexCli(): Promise<string> {
 export async function ensureGeminiCli(): Promise<string> {
   return invokeProvider<string>("provider_ensure_agent_cli", {
     agentType: "gemini",
+  });
+}
+
+/** Ensure the official Grok Build CLI is installed in the embedded runtime. */
+export async function ensureGrokCli(): Promise<string> {
+  return invokeProvider<string>("provider_ensure_agent_cli", {
+    agentType: "grok",
   });
 }
 

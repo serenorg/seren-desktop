@@ -9,7 +9,9 @@ import { providerLogPrefix } from "../../bin/browser-local/logging.mjs";
 
 const runtimeLogFiles = [
   "bin/browser-local/claude-runtime.mjs",
+  "bin/browser-local/acp-runtime.mjs",
   "bin/browser-local/gemini-runtime.mjs",
+  "bin/browser-local/grok-runtime.mjs",
   "bin/browser-local/providers.mjs",
 ];
 

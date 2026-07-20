@@ -32,6 +32,7 @@ import {
   allowsClaudeAgent,
   allowsCodexAgent,
   allowsGeminiAgent,
+  allowsGrokAgent,
   allowsLmStudioAgent,
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
@@ -248,7 +249,10 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     if (!cwd) return;
     setSpawning(true);
     try {
-      await threadStore.createAgentThread(agentType, cwd);
+      const threadId = await threadStore.createAgentThread(agentType, cwd);
+      if (!threadId && agentStore.error) {
+        setShowLauncher(true);
+      }
     } finally {
       setSpawning(false);
     }
@@ -440,6 +444,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   const showGeminiAgent = createMemo(() =>
     allowsGeminiAgent(authStore.privateChatPolicy),
   );
+  const showGrokAgent = createMemo(() =>
+    allowsGrokAgent(authStore.privateChatPolicy),
+  );
   const showLmStudioAgent = createMemo(() =>
     allowsLmStudioAgent(authStore.privateChatPolicy),
   );
@@ -462,6 +469,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       showCodexAgent() ||
       showPairedAgent() ||
       showGeminiAgent() ||
+      showGrokAgent() ||
       showLmStudioAgent(),
   );
   const hasCliSection = createMemo(() => showCliLaunchers());
@@ -617,6 +625,23 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
           <Show when={showLauncher()}>
             <div class="absolute top-[calc(100%+4px)] left-3 right-3 max-h-[60vh] overflow-y-auto bg-surface-2 border border-border rounded-lg z-20 shadow-lg animate-[slideDown_150ms_ease] py-1">
+              <Show when={agentStore.error}>
+                <div
+                  data-testid="agent-launch-error"
+                  role="alert"
+                  class="mx-2 my-1 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive"
+                >
+                  <span class="min-w-0 flex-1">{agentStore.error}</span>
+                  <button
+                    type="button"
+                    class="shrink-0 border-0 bg-transparent p-0 text-destructive cursor-pointer"
+                    aria-label="Dismiss agent launch error"
+                    onClick={() => agentStore.clearError()}
+                  >
+                    ×
+                  </button>
+                </div>
+              </Show>
               {/* ---------- Chat ---------- */}
               <Show when={hasChatSection()}>
                 <SectionLabel>Chat</SectionLabel>
@@ -748,6 +773,27 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                   </div>
                   <LauncherChip variant="subscription">
                     Subscription
+                  </LauncherChip>
+                </button>
+              </Show>
+              <Show when={showGrokAgent()}>
+                <button
+                  type="button"
+                  data-testid="new-grok-agent"
+                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                  onClick={() => void handleNewAgent("grok")}
+                >
+                  <span class="text-[14px] w-[22px] text-center shrink-0">
+                    𝕏
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">Grok</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      xAI · chat-style coding agent
+                    </div>
+                  </div>
+                  <LauncherChip variant="subscription">
+                    Subscription / API key
                   </LauncherChip>
                 </button>
               </Show>
@@ -1038,11 +1084,13 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                                   ? "\u26A1"
                                   : thread.agentType === "gemini"
                                     ? "\u2728"
-                                    : thread.agentType === "claude-codex"
-                                      ? "\u{1F91D}"
-                                      : thread.agentType === "lmstudio"
-                                        ? "\u{1F5A5}\uFE0F"
-                                        : "\u{1F916}"}
+                                    : thread.agentType === "grok"
+                                      ? "𝕏"
+                                      : thread.agentType === "claude-codex"
+                                        ? "\u{1F91D}"
+                                        : thread.agentType === "lmstudio"
+                                          ? "\u{1F5A5}\uFE0F"
+                                          : "\u{1F916}"}
                               </span>
                             </Show>
                           </div>

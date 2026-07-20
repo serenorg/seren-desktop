@@ -79,7 +79,7 @@ describe("#1718 Gemini runtime — mid-session setModel surfaces as a warn", () 
     // Mid-session setModel does not plumb to gemini-cli (Phase 1 limitation
     // documented in the runtime). Without a log the user can change the
     // picker and never know the running process is unchanged.
-    const fnIdx = geminiRuntime.indexOf("async function setModel(");
+    const fnIdx = geminiRuntime.indexOf("async setModel(");
     expect(fnIdx).toBeGreaterThan(0);
     const region = geminiRuntime.slice(fnIdx, fnIdx + 1200);
     expect(region).toContain("console.warn(");
