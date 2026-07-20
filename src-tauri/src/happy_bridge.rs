@@ -17,6 +17,8 @@ pub const HAPPY_RELAY_URL: &str = "https://api.cluster-fluster.com";
 const MAX_RESTART_ATTEMPTS: u32 = 3;
 const MAX_BACKOFF_SECONDS: u64 = 30;
 const STOP_GRACE_PERIOD: Duration = Duration::from_secs(5);
+const KILL_LOCK_ATTEMPTS: u32 = 20;
+const KILL_LOCK_RETRY_DELAY: Duration = Duration::from_millis(25);
 const STATUS_EVENT: &str = "happy-bridge://status";
 const PAIRING_EVENT: &str = "happy-bridge://pairing";
 const CREDENTIAL_ACCOUNT: &str = "happy-bridge-pairing-credential";
@@ -163,6 +165,21 @@ impl HappyBridgeManager {
             command.env("PATH", embedded_path);
         }
         command.env("SEREN_EMBEDDED_NODE_BIN", &node_binary);
+        // Left unset, the vendored Happy configuration roots itself at
+        // `~/.happy` and appends to a per-start log file there unconditionally.
+        // That sits outside app data, outside log retention, and outside
+        // support-report redaction, so the whole tree is relocated under the
+        // app's own directory.
+        if let Some(happy_home) = happy_home_dir(app) {
+            match std::fs::create_dir_all(&happy_home) {
+                Ok(()) => {
+                    command.env("HAPPY_HOME_DIR", &happy_home);
+                }
+                Err(error) => {
+                    log::warn!("[HappyBridge] Failed to create Happy home dir: {error}");
+                }
+            }
+        }
         crate::embedded_runtime::sanitize_spawn_env(&mut command);
 
         #[cfg(windows)]
@@ -266,12 +283,19 @@ impl HappyBridgeManager {
     }
 
     pub async fn update_roots(&self, roots: Vec<String>) -> Result<(), String> {
-        let guard = self.process.lock().await;
-        let Some(process) = guard.as_ref() else {
-            return Err("Happy bridge is not running".to_string());
+        // The stdin handle is cloned out and the process lock released before
+        // writing. A bridge that is alive but not draining stdin blocks the
+        // write once the pipe buffer fills, and holding the lock across that
+        // would wedge `stop`, `process_exists` and the monitor loop with it.
+        let stdin = {
+            let guard = self.process.lock().await;
+            let Some(process) = guard.as_ref() else {
+                return Err("Happy bridge is not running".to_string());
+            };
+            Arc::clone(&process._stdin)
         };
         write_supervisor_notification(
-            &process._stdin,
+            &stdin,
             json!({
                 "jsonrpc": "2.0",
                 "method": "roots_update",
@@ -378,9 +402,26 @@ impl HappyBridgeManager {
                 handle.abort();
             }
         }
-        if let Ok(mut guard) = self.process.try_lock() {
+        // The monitor loop takes this same lock every 2s, so a single `try_lock`
+        // can lose the race. Tauri exits via `process::exit`, which skips
+        // `Drop`/`kill_on_drop`, and a missed kill leaves an orphaned bridge
+        // holding the relay connection after the app is gone.
+        let mut process_guard = None;
+        for _ in 0..KILL_LOCK_ATTEMPTS {
+            if let Ok(guard) = self.process.try_lock() {
+                process_guard = Some(guard);
+                break;
+            }
+            std::thread::sleep(KILL_LOCK_RETRY_DELAY);
+        }
+        let Some(mut guard) = process_guard else {
+            log::warn!("[HappyBridge] Could not acquire process lock; bridge may be orphaned");
+            return;
+        };
+        {
             if let Some(process) = guard.as_ref() {
                 if let Some(pid) = process.child.id() {
+                    log::info!("[HappyBridge] Killing bridge pid {pid}");
                     #[cfg(unix)]
                     unsafe {
                         libc::kill(pid as i32, libc::SIGKILL);
@@ -554,6 +595,16 @@ fn report_state(state: Option<&str>) -> Option<HappyBridgeState> {
 
 fn should_rearm(spawned_at: Instant, already_rearmed: bool, now: Instant) -> bool {
     !already_rearmed && now.duration_since(spawned_at) >= Duration::from_secs(60)
+}
+
+/// Keeps the vendored Happy client's state and logs inside the app's own data
+/// directory rather than `~/.happy`.
+fn happy_home_dir(app: &AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("happy-bridge"))
 }
 
 fn resolve_node_binary(app: &AppHandle) -> PathBuf {
@@ -920,7 +971,25 @@ fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: App
                         )
                         .await;
                     }
-                    Ok(None) | Err(_) => break,
+                    // A single non-UTF-8 byte is a corrupt line, not a dead
+                    // pipe. Breaking here left the child alive with its control
+                    // channel silently dead while the UI still read Connected,
+                    // so only a real read error ends the loop.
+                    Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                        log::warn!("[HappyBridge] Discarded non-UTF-8 supervisor line");
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        log::warn!("[HappyBridge] Supervisor channel read failed: {error}");
+                        app.state::<HappyBridgeManager>()
+                            .set_status(
+                                &app,
+                                HappyBridgeState::Error,
+                                Some("supervisor channel closed".to_string()),
+                            )
+                            .await;
+                        break;
+                    }
                 }
             }
         });
@@ -1185,6 +1254,34 @@ mod tests {
             read_bounded_line(&mut reader).await.unwrap(),
             Some(BoundedLine::Complete(line)) if line == "{}"
         ));
+        writer_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn non_utf8_line_is_discarded_without_ending_the_channel() {
+        // The stdout loop treats InvalidData as a corrupt line rather than a
+        // dead pipe. That is only safe because the bad line is consumed before
+        // the UTF-8 check fails, so the very next read must still succeed —
+        // otherwise the loop would spin on the same bytes forever.
+        let (reader, mut writer) = duplex(1024);
+        let writer_task = tokio::spawn(async move {
+            writer.write_all(&[0xff, 0xfe]).await.unwrap();
+            writer.write_all(b"\n{\"jsonrpc\":\"2.0\"}\n").await.unwrap();
+        });
+        let mut reader = BufReader::new(reader);
+
+        let corrupt = read_bounded_line(&mut reader).await;
+        assert!(
+            matches!(&corrupt, Err(error) if error.kind() == std::io::ErrorKind::InvalidData),
+            "a non-UTF-8 line surfaces as InvalidData"
+        );
+        assert!(
+            matches!(
+                read_bounded_line(&mut reader).await.unwrap(),
+                Some(BoundedLine::Complete(line)) if line == "{\"jsonrpc\":\"2.0\"}"
+            ),
+            "the channel stays usable for the next supervisor line"
+        );
         writer_task.await.unwrap();
     }
 

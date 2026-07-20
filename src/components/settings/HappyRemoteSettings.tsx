@@ -41,15 +41,20 @@ function uniqueRoots(
 }
 
 function statusLabel(status: HappyRemoteStatus): string {
+  // A restart is reported as `starting` with a "restart attempt N/M" detail, so
+  // the check has to come before the state switch. Nested under `error` it was
+  // unreachable, and a crash-looping bridge read as "Connecting…" until the
+  // budget ran out.
+  if (status.detail?.startsWith("restart attempt")) {
+    return `Offline — retrying (${status.detail.replace("restart attempt ", "")})`;
+  }
   switch (status.state) {
     case "starting":
       return "Connecting…";
     case "running":
       return "Connected";
     case "error":
-      return status.detail?.startsWith("restart attempt")
-        ? "Offline — retrying"
-        : `Error: ${status.detail ?? "bridge unavailable"}`;
+      return `Error: ${status.detail ?? "bridge unavailable"}`;
     default:
       return "Off";
   }
