@@ -52,7 +52,7 @@ jobs:
       - name: Prepare MCP servers
         run: pnpm prepare:mcp-servers
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install agent dependencies
