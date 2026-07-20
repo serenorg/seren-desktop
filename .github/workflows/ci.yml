@@ -32,6 +32,9 @@ env:
   # multiplexing so one dropped connection cannot fail the Rust test or build job.
   CARGO_NET_RETRY: "10"
   CARGO_HTTP_MULTIPLEXING: "false"
+  # Dependabot and fork PRs cannot read Actions secrets. Do not install an
+  # empty credential that breaks otherwise-public GitHub dependency fetches.
+  HAS_GH_PAT: ${{ secrets.GH_PAT != '' }}
 
 jobs:
   check-commit-subjects:
@@ -96,7 +99,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Configure git for private dependencies
-        run: git config --global url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
+        if: env.HAS_GH_PAT == 'true'
+        shell: bash
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -223,7 +230,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Configure git for private dependencies
-        run: git config --global url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
+        if: env.HAS_GH_PAT == 'true'
+        shell: bash
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
       - uses: pnpm/action-setup@v5
         with:
           version: 9
