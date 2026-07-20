@@ -664,6 +664,7 @@ pub fn run() {
                         "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --remote-debugging-port={port} --remote-allow-origins=*"
                     )
                 });
+            let validation_window = validation::is_validation_identifier(&app.config().identifier);
             let window_configs = app.config().app.windows.clone();
             for window_config in &window_configs {
                 let mut window_builder =
@@ -676,6 +677,12 @@ pub fn run() {
                     );
                 }
                 window_builder.build()?;
+            }
+
+            if validation_window {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.set_title("SerenDesktop (Validation)")?;
+                }
             }
 
             let app_identifier = app.config().identifier.clone();

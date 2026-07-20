@@ -6,6 +6,24 @@
     "beforeDevCommand": "pnpm prepare:mcp-servers && pnpm build:provider-runtime && pnpm dev --host 127.0.0.1 --port 1422",
     "devUrl": "http://127.0.0.1:1422"
   },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "SerenDesktop (Validation)",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false,
+        "minWidth": 800,
+        "minHeight": 600,
+        "devtools": true,
+        "hiddenTitle": true,
+        "dragDropEnabled": false
+      }
+    ]
+  },
   "plugins": {
     "deep-link": {
       "desktop": {
