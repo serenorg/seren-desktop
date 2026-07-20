@@ -84,7 +84,7 @@
     "tailwindcss": "4",
     "thirdweb": "^5.120.1",
     "tweetnacl": "1.0.3",
-    "ws": "^8.21.0"
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.2",
