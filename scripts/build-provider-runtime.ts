@@ -191,6 +191,35 @@ function main(): void {
     }
   }
 
+  // `ps-list` arrives as a Happy dependency and vendors two prebuilt Windows
+  // executables. They are only reached by `ps-list`'s `windows()` branch, and
+  // nothing on the bridge's load path reaches `ps-list` at all: the bridge
+  // imports `happy/lib` only, and loading that entry pulls 246 modules with
+  // `ps-list` among none of them. Its importers are Happy's CLI and
+  // agent-runner entrypoints, which Seren never invokes.
+  //
+  // Signing them would apply Seren's EV certificate to vendored third-party
+  // binaries and bill two extra SSL.com operations on every release.
+  //
+  // The guard checks the entry the bridge actually loads: if a future Happy
+  // version makes `lib` depend on `ps-list`, the prune backs off.
+  const psListVendor = path.join(bundleNodeModules, "ps-list", "vendor");
+  if (existsSync(psListVendor)) {
+    const happyLibEntry = path.join(happyPackage, "dist", "lib.cjs");
+    const libUsesPsList =
+      existsSync(happyLibEntry) && readFileSync(happyLibEntry, "utf8").includes("ps-list");
+    if (libUsesPsList) {
+      console.warn("Skipping ps-list vendor prune: happy/lib references ps-list");
+    } else {
+      for (const entry of readdirSync(psListVendor, { withFileTypes: true })) {
+        if (entry.isFile() && entry.name.toLowerCase().endsWith(".exe")) {
+          rmSync(path.join(psListVendor, entry.name), { force: true });
+        }
+      }
+      console.log("Pruned ps-list/vendor executables (unreachable from the bridge)");
+    }
+  }
+
   const bundleSize = spawnSync("du", ["-sh", bundleNodeModules], { encoding: "utf8" })
     .stdout.trim();
   console.log(`provider-runtime/node_modules after Happy SDK binary prune: ${bundleSize}`);
