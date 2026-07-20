@@ -1,14 +1,14 @@
 // ABOUTME: Tauri commands for enabling, disabling, and inspecting Happy Remote Access.
 // ABOUTME: Persists only the opt-in flag here; pairing credentials are handled separately.
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_store::StoreExt;
 
 use crate::happy_bridge::{HappyBridgeManager, HappyBridgeState, HappyBridgeStatus};
 
-const SETTINGS_STORE: &str = "settings.json";
+pub(crate) const SETTINGS_STORE: &str = "settings.json";
 const ENABLED_KEY: &str = "happy_bridge_enabled";
-const ADVERTISED_ROOTS_KEY: &str = "happy_bridge_advertised_roots";
+pub(crate) const ADVERTISED_ROOTS_KEY: &str = "happy_bridge_advertised_roots";
 
 fn set_enabled(app: &AppHandle, enabled: bool) -> Result<(), String> {
     let store = app.store(SETTINGS_STORE).map_err(|err| err.to_string())?;
@@ -24,23 +24,35 @@ fn is_enabled(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
-pub fn effective_advertised_roots(app: &AppHandle, discovered: Vec<String>) -> Vec<String> {
-    let Some(value) = app
-        .store(SETTINGS_STORE)
+/// The roots the user has explicitly consented to, unfiltered. This is the
+/// authoritative record of consent: `happy_bridge_update_roots` advertises
+/// exactly this set, so the spawn re-check must validate against it rather than
+/// against the start-time intersection, which is narrower and drifts as soon as
+/// the user edits their selection.
+pub fn saved_advertised_roots<R: Runtime>(app: &AppHandle<R>) -> Vec<String> {
+    app.store(SETTINGS_STORE)
         .ok()
         .and_then(|store| store.get(ADVERTISED_ROOTS_KEY))
-    else {
-        return Vec::new();
-    };
+        .and_then(|value| {
+            value.as_array().map(|saved| {
+                saved
+                    .iter()
+                    .filter_map(|root| root.as_str().map(str::to_string))
+                    .collect()
+            })
+        })
+        .unwrap_or_default()
+}
 
-    let Some(saved) = value.as_array() else {
-        return Vec::new();
-    };
-    saved
-        .iter()
-        .filter_map(|value| value.as_str())
+/// The subset of consented roots that still correspond to a known project, used
+/// to decide what the bridge advertises at startup.
+pub fn effective_advertised_roots<R: Runtime>(
+    app: &AppHandle<R>,
+    discovered: Vec<String>,
+) -> Vec<String> {
+    saved_advertised_roots(app)
+        .into_iter()
         .filter(|root| discovered.iter().any(|candidate| candidate == root))
-        .map(str::to_string)
         .collect()
 }
 

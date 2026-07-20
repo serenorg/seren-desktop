@@ -181,10 +181,16 @@ function normalizeSession(session) {
   };
 }
 
-function providerPermissionMode(mode, agentType) {
+// codex collapses every mode onto two approval policies: "ask" prompts via
+// ActionConfirmation, everything else runs unattended. Only a mode that
+// explicitly asks to skip approvals may reach "auto" — anything else, including
+// the baseline "default" a remote peer sends by omission, must fail closed to
+// "ask" so approval prompts are never dropped silently.
+const CODEX_UNATTENDED_MODES = new Set(["auto", "bypassPermissions", "safe-yolo", "yolo"]);
+
+export function providerPermissionMode(mode, agentType) {
   if (agentType === "codex") {
-    if (mode === "ask" || mode === "auto") return mode;
-    return ["plan", "read-only"].includes(mode) ? "ask" : "auto";
+    return CODEX_UNATTENDED_MODES.has(mode) ? "auto" : "ask";
   }
   if (agentType === "gemini") {
     return {

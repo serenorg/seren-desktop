@@ -234,7 +234,7 @@ impl HappyBridgeManager {
         }));
     }
 
-    pub async fn stop(&self, app: &AppHandle) -> Result<(), String> {
+    pub async fn stop<R: tauri::Runtime>(&self, app: &AppHandle<R>) -> Result<(), String> {
         self.stopping.store(true, Ordering::Release);
         if let Some(handle) = self.monitor_handle.lock().await.take() {
             handle.abort();
@@ -244,6 +244,10 @@ impl HappyBridgeManager {
         if let Some(mut process) = process {
             terminate_child(&mut process.child).await?;
         }
+        // A pairing payload is only usable while the process that minted it is
+        // alive, because the matching secret key lives in that process. Drop it
+        // so a restart cannot hand back a code whose secret half is gone.
+        *self.pairing_payload.lock().await = None;
         self.set_status(app, HappyBridgeState::Stopped, None).await;
         Ok(())
     }
@@ -311,7 +315,7 @@ impl HappyBridgeManager {
         let _ = app.emit(STATUS_EVENT, status.clone());
     }
 
-    async fn record_pairing_payload(&self, app: &AppHandle, payload: String) {
+    async fn record_pairing_payload<R: tauri::Runtime>(&self, app: &AppHandle<R>, payload: String) {
         *self.pairing_payload.lock().await = Some(payload.clone());
         let _ = app.emit(PAIRING_EVENT, payload);
     }
@@ -357,7 +361,12 @@ impl HappyBridgeManager {
         Ok(())
     }
 
-    async fn set_status(&self, app: &AppHandle, state: HappyBridgeState, detail: Option<String>) {
+    async fn set_status<R: tauri::Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        state: HappyBridgeState,
+        detail: Option<String>,
+    ) {
         let status = HappyBridgeStatus { state, detail };
         *self.status.lock().await = status.clone();
         let _ = app.emit(STATUS_EVENT, status);
@@ -615,11 +624,11 @@ struct SupervisorRequest {
 /// Mirrors `validate.mjs`: an advertised root must match after canonicalization,
 /// so symlink escapes and `..` traversal are both rejected. Fails closed when no
 /// roots are advertised or a path cannot be resolved.
-fn is_advertised_root(app: &AppHandle, cwd: &str) -> bool {
+fn is_advertised_root<R: tauri::Runtime>(app: &AppHandle<R>, cwd: &str) -> bool {
     let Ok(candidate) = std::fs::canonicalize(cwd) else {
         return false;
     };
-    crate::commands::happy_bridge::effective_advertised_roots(app, Vec::new())
+    crate::commands::happy_bridge::saved_advertised_roots(app)
         .iter()
         .filter_map(|root| std::fs::canonicalize(root).ok())
         .any(|root| root == candidate)
@@ -934,12 +943,145 @@ fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: App
 mod tests {
     use super::{
         BoundedLine, HappyBridgeState, MAX_RESTART_ATTEMPTS, MAX_SUPERVISOR_LINE_BYTES, error_response,
-        next_restart_attempt, parse_supervisor_line, read_bounded_line, restart_allowed,
-        restart_delay, report_state, should_rearm,
+        is_advertised_root, next_restart_attempt, parse_supervisor_line, read_bounded_line,
+        restart_allowed, restart_delay, report_state, should_rearm,
     };
+    use crate::commands::happy_bridge::{ADVERTISED_ROOTS_KEY, SETTINGS_STORE};
     use serde_json::Value;
     use std::time::Duration;
+    use tauri_plugin_store::StoreExt;
     use tokio::io::{AsyncWriteExt, BufReader, duplex};
+
+    /// The store persists to the mock runtime's data dir, which sibling tests on
+    /// the same host share, so the key is always reset rather than assumed absent.
+    fn mock_app_with_roots(roots: Option<Vec<String>>) -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app builds");
+        let store = app.store(SETTINGS_STORE).expect("settings store opens");
+        store.delete(ADVERTISED_ROOTS_KEY);
+        if let Some(roots) = roots {
+            store.set(ADVERTISED_ROOTS_KEY, serde_json::json!(roots));
+        }
+        app
+    }
+
+    #[tokio::test]
+    async fn stopping_discards_the_pairing_payload_of_the_dead_process() {
+        // Regression: the payload outlived the process that minted it, so
+        // `happy_bridge_start_pairing`'s stop/start handed back a QR code whose
+        // secret key had died with the previous bridge and pairing never completed.
+        let app = mock_app_with_roots(None);
+        let manager = super::HappyBridgeManager::new();
+
+        manager
+            .record_pairing_payload(app.handle(), "payload-from-bridge-a".to_string())
+            .await;
+        assert!(
+            manager.pairing_payload.lock().await.is_some(),
+            "the live bridge's payload is available before the stop"
+        );
+
+        manager.stop(app.handle()).await.expect("stop succeeds");
+
+        // Asserted on the stored value rather than through
+        // `wait_for_pairing_payload`, which would burn its full 10s deadline.
+        assert!(
+            manager.pairing_payload.lock().await.is_none(),
+            "a payload minted by a stopped bridge must not be handed out"
+        );
+    }
+
+    #[test]
+    fn advertised_root_accepts_a_consented_root() {
+        // Regression: the re-check intersected the saved roots against an empty
+        // `discovered` set, so it returned false for every path and remote
+        // session spawn failed unconditionally.
+        let consented = tempfile::tempdir().expect("temp dir");
+        let consented_path = consented.path().to_string_lossy().to_string();
+        let app = mock_app_with_roots(Some(vec![consented_path.clone()]));
+
+        assert!(
+            is_advertised_root(app.handle(), &consented_path),
+            "a root the user consented to must pass the spawn re-check"
+        );
+    }
+
+    #[test]
+    fn advertised_root_rejects_paths_outside_the_consented_set() {
+        let consented = tempfile::tempdir().expect("temp dir");
+        let sibling = tempfile::tempdir().expect("temp dir");
+        let nested = consented.path().join("nested");
+        std::fs::create_dir(&nested).expect("nested dir");
+
+        let app = mock_app_with_roots(Some(vec![
+            consented.path().to_string_lossy().to_string(),
+        ]));
+
+        let sibling_path = sibling.path().to_string_lossy().to_string();
+        assert!(
+            !is_advertised_root(app.handle(), &sibling_path),
+            "an unrelated directory must be rejected"
+        );
+
+        // Membership is canonical equality, not prefix containment, so a
+        // subdirectory of a consented root is still not itself a root.
+        assert!(
+            !is_advertised_root(app.handle(), &nested.to_string_lossy()),
+            "a nested directory must not inherit its parent's consent"
+        );
+
+        // `..` traversal out of a consented root canonicalizes to the sibling.
+        let escape = consented.path().join("..").join(
+            sibling
+                .path()
+                .file_name()
+                .expect("sibling has a final component"),
+        );
+        assert!(
+            !is_advertised_root(app.handle(), &escape.to_string_lossy()),
+            "traversal out of a consented root must be rejected"
+        );
+    }
+
+    #[test]
+    fn advertised_root_fails_closed_when_nothing_is_consented() {
+        let candidate = tempfile::tempdir().expect("temp dir");
+        let candidate_path = candidate.path().to_string_lossy().to_string();
+
+        let unset = mock_app_with_roots(None);
+        assert!(
+            !is_advertised_root(unset.handle(), &candidate_path),
+            "no saved roots must reject every path"
+        );
+
+        let empty = mock_app_with_roots(Some(Vec::new()));
+        assert!(
+            !is_advertised_root(empty.handle(), &candidate_path),
+            "an empty consent list must reject every path"
+        );
+    }
+
+    #[test]
+    fn effective_advertised_roots_keeps_only_discovered_projects() {
+        let consented = tempfile::tempdir().expect("temp dir");
+        let consented_path = consented.path().to_string_lossy().to_string();
+        let app = mock_app_with_roots(Some(vec![consented_path.clone()]));
+
+        assert_eq!(
+            crate::commands::happy_bridge::effective_advertised_roots(
+                app.handle(),
+                vec![consented_path.clone()],
+            ),
+            vec![consented_path.clone()],
+        );
+        assert!(
+            crate::commands::happy_bridge::effective_advertised_roots(app.handle(), Vec::new())
+                .is_empty(),
+            "a root with no matching project is not advertised at startup"
+        );
+    }
 
     #[test]
     fn restart_backoff_is_capped() {
