@@ -1,7 +1,9 @@
 import type { EmployeeRun } from "@/lib/employees/types";
 import {
   formatMicrosUsd,
+  nextSpendPollDelayMs,
   parseUsdToMicros,
+  SPEND_POLL_DELAYS_MS,
   sumRunCostMicros,
 } from "@/lib/employees/spend";
 import { describe, expect, it } from "vitest";
@@ -39,5 +41,15 @@ describe("employee spend", () => {
     expect(formatMicrosUsd(311)).toBe("$0.0003");
     expect(formatMicrosUsd(0)).toBe("$0.00");
     expect(formatMicrosUsd(1_234_567)).toBe("$1.23");
+  });
+
+  it("bounds spend convergence polling and stops after the run count advances", () => {
+    expect(nextSpendPollDelayMs(0, 1, 1)).toBe(1_000);
+    expect(nextSpendPollDelayMs(1, 1, 1)).toBe(2_000);
+    expect(nextSpendPollDelayMs(0, 1, 2)).toBeNull();
+    expect(nextSpendPollDelayMs(0, null, 5)).toBeNull();
+    expect(
+      nextSpendPollDelayMs(SPEND_POLL_DELAYS_MS.length, 1, 1),
+    ).toBeNull();
   });
 });
