@@ -1,8 +1,16 @@
 // ABOUTME: Critical regression guards for the native Grok ACP agent (#3084).
 // ABOUTME: Protects its thin-adapter boundary, auth ordering, CLI safety flags, and desktop routing.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { resolveGrokBinary } from "../../bin/browser-local/grok-binary.mjs";
 import { describe, expect, it } from "vitest";
 
 function readSource(relativePath: string): string {
@@ -51,6 +59,55 @@ describe("Grok native ACP agent (#3084)", () => {
     expect(grokSource).toContain('"agent"');
     expect(grokSource).toContain('"stdio"');
     expect(registrySource).toContain('packageName: "@xai-official/grok"');
+  });
+
+  it("prefers the package-owned native binary over a Tauri-relocated npm shim", () => {
+    const root = mkdtempSync(join(tmpdir(), "seren-grok-binary-"));
+    try {
+      const prefix = join(root, "node");
+      const execPath = join(prefix, "bin", "node");
+      const relocatedShim = join(prefix, "bin", "grok");
+      const nativeBinary = join(
+        prefix,
+        "lib",
+        "node_modules",
+        "@xai-official",
+        "grok",
+        "node_modules",
+        "@xai-official",
+        "grok-darwin-x64",
+        "bin",
+        "grok",
+      );
+      mkdirSync(join(prefix, "bin"), { recursive: true });
+      mkdirSync(dirname(nativeBinary), { recursive: true });
+      writeFileSync(execPath, "");
+      writeFileSync(relocatedShim, "const { spawn } = require('child_process');\n");
+      writeFileSync(nativeBinary, "native executable");
+
+      expect(
+        resolveGrokBinary({
+          execPath,
+          platform: "darwin",
+          arch: "x64",
+          home: join(root, "home"),
+          appData: "",
+        }),
+      ).toBe(nativeBinary);
+
+      rmSync(nativeBinary);
+      expect(
+        resolveGrokBinary({
+          execPath,
+          platform: "darwin",
+          arch: "x64",
+          home: join(root, "home"),
+          appData: "",
+        }),
+      ).toBe("grok");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("routes Grok through the registry, runtime dispatcher, and public agent type", () => {
