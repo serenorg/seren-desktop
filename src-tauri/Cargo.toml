@@ -86,7 +86,7 @@ tree-sitter-rust = "0.24.2"
 tree-sitter-typescript = "0.23.2"
 sonora = "0.1.0"
 
-tokio-tungstenite = { version = "0.28" }
+tokio-tungstenite = { version = "0.30" }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 # Messaging transport adapters (opt-in via cargo features)
