@@ -12,6 +12,7 @@ describe("providerNeedsBootstrap", () => {
     expect(providerNeedsBootstrap("claude-code")).toBe(true);
     expect(providerNeedsBootstrap("codex")).toBe(true);
     expect(providerNeedsBootstrap("gemini")).toBe(true);
+    expect(providerNeedsBootstrap("grok")).toBe(true);
     expect(providerNeedsBootstrap("lmstudio")).toBe(true);
   });
 

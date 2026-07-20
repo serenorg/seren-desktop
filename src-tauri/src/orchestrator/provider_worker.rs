@@ -309,7 +309,7 @@ pub async fn complete_oneshot(
             spawn_params["lmStudioApiKey"] = json!(api_key);
         }
     }
-    if agent_type == "claude-code" || agent_type == "lmstudio" {
+    if agent_type == "claude-code" || agent_type == "grok" || agent_type == "lmstudio" {
         if let Some(model) = request
             .model
             .as_deref()
@@ -358,7 +358,7 @@ pub async fn complete_oneshot(
         // rejects an unknown model id with a hard error, but a toolless
         // summarization does not need an exact model — log and proceed on the
         // agent default rather than failing the whole completion. #2398.
-        if agent_type != "gemini" {
+        if agent_type != "gemini" && agent_type != "grok" {
             if let Some(model) = request
                 .model
                 .as_deref()
@@ -631,7 +631,7 @@ fn provider_oneshot_cwd(app: &AppHandle) -> Result<String, String> {
 
 fn provider_oneshot_permission_mode(agent_type: &str) -> &'static str {
     match agent_type {
-        "claude-code" | "gemini" => "plan",
+        "claude-code" | "gemini" | "grok" => "plan",
         "codex" => "ask",
         _ => "ask",
     }
@@ -837,6 +837,7 @@ mod tests {
         // gets an auto-approving mode in a one-shot.
         assert_eq!(provider_oneshot_permission_mode("claude-code"), "plan");
         assert_eq!(provider_oneshot_permission_mode("gemini"), "plan");
+        assert_eq!(provider_oneshot_permission_mode("grok"), "plan");
         assert_eq!(provider_oneshot_permission_mode("codex"), "ask");
         assert_eq!(provider_oneshot_permission_mode("lmstudio"), "ask");
         assert_eq!(provider_oneshot_permission_mode("unknown"), "ask");

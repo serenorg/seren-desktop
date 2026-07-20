@@ -24,7 +24,7 @@ Seren is built for people who spend their day making decisions, not stitching to
 - **Analysts, operators, and finance teams** - automate reporting, reconciliation, intake, and back-office workflows
 - **Job seekers and independent professionals** - automate a full pipeline: company discovery, contact research, personalized outreach, and application tracking
 - **Finance and tax filers** - process bank statements, reconcile transactions, and prepare crypto and traditional tax filings
-- **Developers and engineers** - use Codex, Claude Code, or Gemini, open terminals, and work across project files
+- **Developers and engineers** - use Codex, Claude Code, Gemini, or Grok, open terminals, and work across project files
 
 ---
 
@@ -65,9 +65,9 @@ Browse open bounties from the sidebar, review the reward pool and tiers, and joi
 
 ### Work with native agents
 
-Use Codex, Claude Code, or Gemini directly inside Seren and switch providers mid-task without losing the conversation. Open a project, drop files into a thread, edit them in the built-in editor, and review diffs before they land.
+Use Codex, Claude Code, Gemini, or Grok directly inside Seren and switch providers mid-task without losing the conversation. Open a project, drop files into a thread, edit them in the built-in editor, and review diffs before they land.
 
-- Use Codex, Claude Code, or Gemini in the same workspace
+- Use Codex, Claude Code, Gemini, or Grok in the same workspace
 - Run terminal-based Codex or Claude Code for a CLI-feel session inside the app
 - Open a plain terminal alongside your threads for shell work and one-off commands
 - Edit files in the built-in editor while a thread is running

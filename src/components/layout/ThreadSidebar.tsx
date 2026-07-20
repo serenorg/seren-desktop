@@ -32,6 +32,7 @@ import {
   allowsClaudeAgent,
   allowsCodexAgent,
   allowsGeminiAgent,
+  allowsGrokAgent,
   allowsLmStudioAgent,
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
@@ -440,6 +441,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   const showGeminiAgent = createMemo(() =>
     allowsGeminiAgent(authStore.privateChatPolicy),
   );
+  const showGrokAgent = createMemo(() =>
+    allowsGrokAgent(authStore.privateChatPolicy),
+  );
   const showLmStudioAgent = createMemo(() =>
     allowsLmStudioAgent(authStore.privateChatPolicy),
   );
@@ -462,6 +466,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       showCodexAgent() ||
       showPairedAgent() ||
       showGeminiAgent() ||
+      showGrokAgent() ||
       showLmStudioAgent(),
   );
   const hasCliSection = createMemo(() => showCliLaunchers());
@@ -748,6 +753,27 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                   </div>
                   <LauncherChip variant="subscription">
                     Subscription
+                  </LauncherChip>
+                </button>
+              </Show>
+              <Show when={showGrokAgent()}>
+                <button
+                  type="button"
+                  data-testid="new-grok-agent"
+                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                  onClick={() => void handleNewAgent("grok")}
+                >
+                  <span class="text-[14px] w-[22px] text-center shrink-0">
+                    𝕏
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium">Grok</div>
+                    <div class="text-[11px] text-muted-foreground">
+                      xAI · chat-style coding agent
+                    </div>
+                  </div>
+                  <LauncherChip variant="subscription">
+                    Subscription / API key
                   </LauncherChip>
                 </button>
               </Show>
@@ -1038,11 +1064,13 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                                   ? "\u26A1"
                                   : thread.agentType === "gemini"
                                     ? "\u2728"
-                                    : thread.agentType === "claude-codex"
-                                      ? "\u{1F91D}"
-                                      : thread.agentType === "lmstudio"
-                                        ? "\u{1F5A5}\uFE0F"
-                                        : "\u{1F916}"}
+                                    : thread.agentType === "grok"
+                                      ? "𝕏"
+                                      : thread.agentType === "claude-codex"
+                                        ? "\u{1F91D}"
+                                        : thread.agentType === "lmstudio"
+                                          ? "\u{1F5A5}\uFE0F"
+                                          : "\u{1F916}"}
                               </span>
                             </Show>
                           </div>

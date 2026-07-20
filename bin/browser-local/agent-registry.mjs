@@ -19,6 +19,7 @@ import {
   isBelowBaseline,
   runInstalledVersion,
 } from "./cli-updater.mjs";
+import { resolveGrokBinary } from "./grok-binary.mjs";
 
 // LM Studio support is loaded lazily so a missing LM Studio dependency (e.g.
 // @lmstudio/sdk) never crashes the registry, which every agent relies on for
@@ -306,6 +307,13 @@ function hasGeminiCredentials() {
     ]);
 }
 
+function hasGrokCredentials() {
+  return (
+    Boolean(process.env.XAI_API_KEY) ||
+    hasAnyCredentialPath([path.join(os.homedir(), ".grok", "auth.json")])
+  );
+}
+
 function isAgentAuthenticated(agentType) {
   switch (agentType) {
     case "claude-code":
@@ -314,6 +322,8 @@ function isAgentAuthenticated(agentType) {
       return hasCodexCredentials();
     case "gemini":
       return hasGeminiCredentials();
+    case "grok":
+      return hasGrokCredentials();
     case "lmstudio":
       return false;
     case "claude-codex":
@@ -1019,6 +1029,50 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         // with the WORKING binary (with compiled keytar), not the broken one.
         const resolved = resolveInstalledGeminiBinary();
         launchLoginCommand(resolved !== "gemini" ? resolved : "gemini");
+      },
+    },
+    grok: {
+      type: "grok",
+      name: "Grok",
+      description: "xAI Grok Build via Agent Client Protocol",
+      command: "grok",
+      async getAvailability() {
+        const resolved = resolveGrokBinary();
+        const installed = resolved !== "grok";
+        return {
+          type: "grok",
+          name: "Grok",
+          description: "xAI Grok Build via Agent Client Protocol",
+          command: "grok",
+          available: true,
+          authenticated: isAgentAuthenticated("grok"),
+          ...(installed
+            ? {}
+            : {
+                unavailableReason:
+                  "Grok CLI is not installed yet. Seren can install it automatically on first launch.",
+              }),
+        };
+      },
+      async canSpawn() {
+        return true;
+      },
+      async ensureCli() {
+        const resolved = resolveGrokBinary();
+        if (resolved !== "grok") {
+          return resolved;
+        }
+        await ensureGlobalNpmPackage({
+          emit,
+          command: "grok",
+          packageName: "@xai-official/grok",
+          label: "Grok",
+        });
+        return resolveGrokBinary();
+      },
+      launchLogin() {
+        const resolved = resolveGrokBinary();
+        launchLoginCommand(resolved !== "grok" ? resolved : "grok");
       },
     },
     lmstudio: {

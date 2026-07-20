@@ -14,6 +14,7 @@ const NATIVE_AGENT_PROVIDERS: ReadonlySet<AgentType> = new Set<AgentType>([
   "claude-code",
   "codex",
   "gemini",
+  "grok",
   "lmstudio",
 ]);
 

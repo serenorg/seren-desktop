@@ -336,7 +336,7 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
 
   /**
    * Switch the active thread INTO a native-agent provider (claude-code /
-   * codex / gemini). Passes a null model so the agent's runtime decides
+   * codex / gemini / grok). Passes a null model so the agent's runtime decides
    * which model to spawn with; the user can refine via AgentChat's
    * AgentModelSelector after the session is live. The cross-category
    * machinery in `switchChatProvider` handles the cache move, native

@@ -62,6 +62,7 @@ describe("providerDisplayName", () => {
     expect(providerDisplayName("claude-code")).toBe("Claude Code");
     expect(providerDisplayName("codex")).toBe("Codex");
     expect(providerDisplayName("gemini")).toBe("Gemini");
+    expect(providerDisplayName("grok")).toBe("Grok");
     expect(providerDisplayName("lmstudio")).toBe("LM Studio");
   });
 

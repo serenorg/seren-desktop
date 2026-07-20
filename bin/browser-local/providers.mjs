@@ -37,6 +37,10 @@ const geminiRuntimeModule = await loadAgentRuntimeModule(
   "gemini",
   () => import("./gemini-runtime.mjs"),
 );
+const grokRuntimeModule = await loadAgentRuntimeModule(
+  "grok",
+  () => import("./grok-runtime.mjs"),
+);
 const lmStudioRuntimeModule = await loadAgentRuntimeModule(
   "lmstudio",
   () => import("./lmstudio-runtime.mjs"),
@@ -1504,6 +1508,12 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     "createGeminiRuntime",
     { emit, runtimeMode },
   );
+  const grokRuntime = instantiateAgentRuntime(
+    "grok",
+    grokRuntimeModule,
+    "createGrokRuntime",
+    { emit, runtimeMode },
+  );
   const lmStudioRuntime = instantiateAgentRuntime(
     "lmstudio",
     lmStudioRuntimeModule,
@@ -1574,6 +1584,10 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
 
     if (agentType === "gemini") {
       return geminiRuntime.spawnSession(params);
+    }
+
+    if (agentType === "grok") {
+      return grokRuntime.spawnSession(params);
     }
 
     if (agentType === "lmstudio") {
@@ -1817,6 +1831,14 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         });
         return geminiRuntime.sendPrompt({ sessionId, prompt, context, origin: source });
       }
+      if (grokRuntime.hasSession(sessionId)) {
+        emit("provider://user-message", {
+          sessionId,
+          text: prompt,
+          origin: source,
+        });
+        return grokRuntime.sendPrompt({ sessionId, prompt, context, origin: source });
+      }
       if (lmStudioRuntime.hasSession(sessionId)) {
         emit("provider://user-message", {
           sessionId,
@@ -1889,6 +1911,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.cancelPrompt({ sessionId });
       }
+      if (grokRuntime.hasSession(sessionId)) {
+        return grokRuntime.cancelPrompt({ sessionId });
+      }
       if (lmStudioRuntime.hasSession(sessionId)) {
         return lmStudioRuntime.cancelPrompt({ sessionId });
       }
@@ -1942,6 +1967,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.terminateSession({ sessionId });
       }
+      if (grokRuntime.hasSession(sessionId)) {
+        return grokRuntime.terminateSession({ sessionId });
+      }
       if (lmStudioRuntime.hasSession(sessionId)) {
         return lmStudioRuntime.terminateSession({ sessionId });
       }
@@ -1980,6 +2008,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       })),
       ...(await claudeRuntime.listSessions()),
       ...(await geminiRuntime.listSessions()),
+      ...(await grokRuntime.listSessions()),
       ...(await lmStudioRuntime.listSessions()),
       ...(await pairedRuntime.listSessions()),
     ];
@@ -1993,6 +2022,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       }
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.setPermissionMode({ sessionId, mode });
+      }
+      if (grokRuntime.hasSession(sessionId)) {
+        return grokRuntime.setPermissionMode({ sessionId, mode });
       }
       if (lmStudioRuntime.hasSession(sessionId)) {
         return lmStudioRuntime.setPermissionMode({ sessionId, mode });
@@ -2012,6 +2044,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       }
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.setOAuthRouting({ sessionId, routing });
+      }
+      if (grokRuntime.hasSession(sessionId)) {
+        return grokRuntime.setOAuthRouting({ sessionId, routing });
       }
       if (lmStudioRuntime.hasSession(sessionId)) {
         return lmStudioRuntime.setOAuthRouting({ sessionId, routing });
@@ -2044,6 +2079,16 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         return runPermissionResolution({
           sessionId, requestId, optionId, source,
           action: () => geminiRuntime.respondToPermission({ sessionId, requestId, optionId }),
+        });
+      }
+      if (grokRuntime.hasSession(sessionId)) {
+        return runPermissionResolution({
+          sessionId,
+          requestId,
+          optionId,
+          source,
+          action: () =>
+            grokRuntime.respondToPermission({ sessionId, requestId, optionId }),
         });
       }
       if (lmStudioRuntime.hasSession(sessionId)) {
@@ -2133,10 +2178,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       return { sessions: [], nextCursor: null };
     }
 
-    if (agentType === "gemini") {
-      // gemini-cli supports `--list-sessions` and `--resume <index>` but the
-      // ACP `session/load` flow is not yet wired through the desktop. Return
-      // an empty list so the UI doesn't fail; users always get a fresh thread.
+    if (agentType === "gemini" || agentType === "grok") {
+      // ACP session/load is not yet wired through the desktop for these
+      // agents. Return an empty list so the UI starts a fresh thread.
       return { sessions: [], nextCursor: null };
     }
 
@@ -2232,6 +2276,9 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       if (geminiRuntime.hasSession(sessionId)) {
         return geminiRuntime.setModel({ sessionId, modelId });
       }
+      if (grokRuntime.hasSession(sessionId)) {
+        return grokRuntime.setModel({ sessionId, modelId });
+      }
       if (lmStudioRuntime.hasSession(sessionId)) {
         return lmStudioRuntime.setSessionModel({ sessionId, modelId });
       }
@@ -2306,6 +2353,10 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       }
       if (geminiRuntime.hasSession(sessionId)) {
         // Gemini exposes no config options today — silently no-op.
+        return null;
+      }
+      if (grokRuntime.hasSession(sessionId)) {
+        // Grok exposes model/mode controls through the existing session RPCs.
         return null;
       }
       if (lmStudioRuntime.hasSession(sessionId)) {

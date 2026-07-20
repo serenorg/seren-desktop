@@ -25,6 +25,8 @@ export function providerDisplayName(
       return "Codex";
     case "gemini":
       return "Gemini";
+    case "grok":
+      return "Grok";
     case "claude-codex":
       return "Claude + Codex";
     case "lmstudio":

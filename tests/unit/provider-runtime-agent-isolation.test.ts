@@ -46,6 +46,7 @@ describe("#2457 — agent runtimes are not statically imported at startup", () =
     for (const mod of [
       "claude-runtime.mjs",
       "gemini-runtime.mjs",
+      "grok-runtime.mjs",
       "lmstudio-runtime.mjs",
       "paired-runtime.mjs",
     ]) {

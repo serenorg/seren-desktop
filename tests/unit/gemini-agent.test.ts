@@ -17,6 +17,10 @@ const geminiRuntimeMjs = readFileSync(
   resolve("bin/browser-local/gemini-runtime.mjs"),
   "utf-8",
 );
+const acpRuntimeMjs = readFileSync(
+  resolve("bin/browser-local/acp-runtime.mjs"),
+  "utf-8",
+);
 const agentStoreTs = readFileSync(
   resolve("src/stores/agent.store.ts"),
   "utf-8",
@@ -79,17 +83,21 @@ describe("Gemini Agent — registry definition (#1471)", () => {
   });
 });
 
-describe("Gemini Agent — gemini-runtime.mjs ACP client (#1471)", () => {
-  it("exports createGeminiRuntime factory matching the claude-runtime contract", () => {
+describe("Gemini Agent — shared ACP client (#1471, #3084)", () => {
+  it("keeps createGeminiRuntime as a thin adapter over the shared factory", () => {
     expect(geminiRuntimeMjs).toContain("export function createGeminiRuntime");
+    expect(geminiRuntimeMjs).toContain(
+      'import { createAcpRuntime } from "./acp-runtime.mjs"',
+    );
+    expect(geminiRuntimeMjs).toContain("adapter: GEMINI_ADAPTER");
     // Must expose hasSession so providers.mjs fallback chain works.
-    expect(geminiRuntimeMjs).toContain("hasSession(sessionId)");
+    expect(acpRuntimeMjs).toContain("hasSession(sessionId)");
     // Public RPC surface.
-    expect(geminiRuntimeMjs).toContain("spawnSession");
-    expect(geminiRuntimeMjs).toContain("sendPrompt");
-    expect(geminiRuntimeMjs).toContain("cancelPrompt");
-    expect(geminiRuntimeMjs).toContain("terminateSession");
-    expect(geminiRuntimeMjs).toContain("respondToPermission");
+    expect(acpRuntimeMjs).toContain("spawnSession");
+    expect(acpRuntimeMjs).toContain("sendPrompt");
+    expect(acpRuntimeMjs).toContain("cancelPrompt");
+    expect(acpRuntimeMjs).toContain("terminateSession");
+    expect(acpRuntimeMjs).toContain("respondToPermission");
   });
 
   it("spawns gemini-cli with the --acp flag", () => {
@@ -100,28 +108,28 @@ describe("Gemini Agent — gemini-runtime.mjs ACP client (#1471)", () => {
 
   it("speaks ACP method names verbatim from the schema", () => {
     // Catches accidental rename to e.g. "session/newSession" or "newSession".
-    expect(geminiRuntimeMjs).toContain('"initialize"');
-    expect(geminiRuntimeMjs).toContain('"session/new"');
-    expect(geminiRuntimeMjs).toContain('"session/prompt"');
-    expect(geminiRuntimeMjs).toContain('"session/cancel"');
-    expect(geminiRuntimeMjs).toContain('"session/request_permission"');
+    expect(acpRuntimeMjs).toContain('"initialize"');
+    expect(acpRuntimeMjs).toContain('"session/new"');
+    expect(acpRuntimeMjs).toContain('"session/prompt"');
+    expect(acpRuntimeMjs).toContain('"session/cancel"');
+    expect(acpRuntimeMjs).toContain('"session/request_permission"');
   });
 
   it("translates ACP session/update notifications to provider:// events", () => {
     // The session/update branch must handle each ACP update type and emit
     // the existing provider:// events the desktop already knows.
-    expect(geminiRuntimeMjs).toContain('"agent_message_chunk"');
-    expect(geminiRuntimeMjs).toContain('"agent_thought_chunk"');
-    expect(geminiRuntimeMjs).toContain('"tool_call"');
-    expect(geminiRuntimeMjs).toContain('"tool_call_update"');
-    expect(geminiRuntimeMjs).toContain('"plan"');
-    expect(geminiRuntimeMjs).toContain('"provider://message-chunk"');
-    expect(geminiRuntimeMjs).toContain('"provider://tool-call"');
-    expect(geminiRuntimeMjs).toContain('"provider://prompt-complete"');
+    expect(acpRuntimeMjs).toContain('"agent_message_chunk"');
+    expect(acpRuntimeMjs).toContain('"agent_thought_chunk"');
+    expect(acpRuntimeMjs).toContain('"tool_call"');
+    expect(acpRuntimeMjs).toContain('"tool_call_update"');
+    expect(acpRuntimeMjs).toContain('"plan"');
+    expect(acpRuntimeMjs).toContain('"provider://message-chunk"');
+    expect(acpRuntimeMjs).toContain('"provider://tool-call"');
+    expect(acpRuntimeMjs).toContain('"provider://prompt-complete"');
   });
 
   it("declares an ACP protocol version constant", () => {
-    expect(geminiRuntimeMjs).toContain("ACP_PROTOCOL_VERSION");
+    expect(acpRuntimeMjs).toContain("ACP_PROTOCOL_VERSION");
   });
 });
 
@@ -198,7 +206,7 @@ describe("Gemini Agent — UI surface (#1471)", () => {
 
   it("handleNewAgent type signature accepts 'gemini'", () => {
     expect(threadTabBarTsx).toMatch(
-      /agentType:\s*"claude-code"\s*\|\s*"codex"\s*\|\s*"gemini"/,
+      /agentType:[\s\S]{0,120}"claude-code"[\s\S]{0,120}"codex"[\s\S]{0,120}"gemini"/,
     );
   });
 });

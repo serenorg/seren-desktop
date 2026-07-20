@@ -113,7 +113,7 @@ export async function switchChatProvider(
   }
 
   // Build a deterministic bootstrap when switching into a provider that
-  // owns a fresh native session - claude-code / codex / gemini have no
+  // owns a fresh native session - claude-code / codex / gemini / grok have no
   // way to see the prior chat transcript otherwise. Chat-side switches
   // skip this: they re-read the canonical Seren transcript directly.
   const bootstrap = providerNeedsBootstrap(targetProvider)

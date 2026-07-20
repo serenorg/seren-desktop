@@ -24,7 +24,7 @@ describe("#2313 — runtime spawn response carries the agent child PID", () => {
     for (const file of [
       "bin/browser-local/claude-runtime.mjs",
       "bin/browser-local/providers.mjs",
-      "bin/browser-local/gemini-runtime.mjs",
+      "bin/browser-local/acp-runtime.mjs",
     ]) {
       const src = readFileSync(resolve(file), "utf-8");
       expect(src, `${file} must report the child pid`).toContain(

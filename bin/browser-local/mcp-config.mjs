@@ -188,17 +188,15 @@ function buildCodexMcpOverride(servers) {
   return `mcp_servers=${encodeTomlValue(mcpServers)}`;
 }
 
-// serenorg/seren-desktop#1887 — Gemini consumes MCP via the ACP `session/new`
-// JSON-RPC `mcpServers` parameter, a discriminated union on `type` with
-// `headers`/`env` encoded as `[{name, value}]` arrays. Returned as a function
-// so the caller can pass the live `mcpCapabilities` block from `initialize`,
-// dropping HTTP/SSE entries if the running gemini-cli build does not
-// advertise support for them.
-function encodeGeminiPairs(record) {
+// ACP agents consume MCP via the `session/new` JSON-RPC `mcpServers`
+// parameter, a discriminated union on `type` with `headers`/`env` encoded as
+// `[{name, value}]` arrays. The live initialize capabilities gate optional
+// HTTP/SSE entries; stdio is part of the baseline protocol. #1887, #3084.
+function encodeAcpPairs(record) {
   return Object.entries(record ?? {}).map(([name, value]) => ({ name, value }));
 }
 
-function buildGeminiMcpServers(servers, { mcpCapabilities = {} } = {}) {
+function buildAcpMcpServers(servers, { mcpCapabilities = {} } = {}) {
   if (servers.length === 0) return [];
   const supportsHttp = mcpCapabilities.http === true;
   const supportsSse = mcpCapabilities.sse === true;
@@ -211,7 +209,7 @@ function buildGeminiMcpServers(servers, { mcpCapabilities = {} } = {}) {
         type: "http",
         name: server.name,
         url: server.url,
-        headers: encodeGeminiPairs(server.headers),
+        headers: encodeAcpPairs(server.headers),
       });
       continue;
     }
@@ -221,7 +219,7 @@ function buildGeminiMcpServers(servers, { mcpCapabilities = {} } = {}) {
         type: "sse",
         name: server.name,
         url: server.url,
-        headers: encodeGeminiPairs(server.headers),
+        headers: encodeAcpPairs(server.headers),
       });
       continue;
     }
@@ -230,7 +228,7 @@ function buildGeminiMcpServers(servers, { mcpCapabilities = {} } = {}) {
       name: server.name,
       command: resolveLocalServerCommand(server.command),
       args: server.args ?? [],
-      env: encodeGeminiPairs(server.env),
+      env: encodeAcpPairs(server.env),
     });
   }
   return out;
@@ -255,7 +253,10 @@ export function buildProviderMcpConfig({
         : { [SEREN_MCP_API_KEY_ENV]: trimToNull(apiKey) },
     claudeMcpConfigJson: buildClaudeMcpConfig(normalizedServers),
     codexMcpConfigOverride: buildCodexMcpOverride(normalizedServers),
+    acpMcpServers: (mcpCapabilities) =>
+      buildAcpMcpServers(normalizedServers, { mcpCapabilities }),
+    // Compatibility alias for existing callers and focused #1887 coverage.
     geminiMcpServers: (mcpCapabilities) =>
-      buildGeminiMcpServers(normalizedServers, { mcpCapabilities }),
+      buildAcpMcpServers(normalizedServers, { mcpCapabilities }),
   };
 }

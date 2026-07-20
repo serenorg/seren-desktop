@@ -25,6 +25,7 @@ describe("provider fork capabilities", () => {
       "claude-code",
       "codex",
       "gemini",
+      "grok",
       "claude-codex",
       "lmstudio",
     ];

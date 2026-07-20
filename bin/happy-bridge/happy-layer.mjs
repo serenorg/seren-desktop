@@ -146,6 +146,7 @@ const HAPPY_AGENT_TYPES = new Map([
   ["claude", "claude-code"],
   ["claude-code", "claude-code"],
   ["gemini", "gemini"],
+  ["grok", "grok"],
   ["codex", "codex"],
 ]);
 
@@ -156,7 +157,7 @@ function happyAgentType(agent) {
 
 function defaultApprovalPolicy(agentType) {
   // Match the desktop's fresh-session defaults. Codex is explicitly
-  // on-failure; Claude and Gemini resolve their normal defaults in their
+  // on-failure; Claude, Gemini, and Grok resolve their normal defaults in their
   // runtimes when no stricter policy is supplied.
   return agentType === "codex" ? DEFAULT_CODEX_APPROVAL_POLICY : undefined;
 }
