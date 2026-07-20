@@ -17,6 +17,7 @@ pub const HAPPY_RELAY_URL: &str = "https://api.cluster-fluster.com";
 const MAX_RESTART_ATTEMPTS: u32 = 3;
 const MAX_BACKOFF_SECONDS: u64 = 30;
 const STOP_GRACE_PERIOD: Duration = Duration::from_secs(5);
+const SHUTDOWN_NOTIFY_TIMEOUT: Duration = Duration::from_millis(500);
 const KILL_LOCK_ATTEMPTS: u32 = 20;
 const KILL_LOCK_RETRY_DELAY: Duration = Duration::from_millis(25);
 const STATUS_EVENT: &str = "happy-bridge://status";
@@ -259,7 +260,8 @@ impl HappyBridgeManager {
 
         let process = self.process.lock().await.take();
         if let Some(mut process) = process {
-            terminate_child(&mut process.child).await?;
+            let stdin = Arc::clone(&process._stdin);
+            terminate_child(&mut process.child, Some(&stdin)).await?;
         }
         // A pairing payload is only usable while the process that minted it is
         // alive, because the matching secret key lives in that process. Drop it
@@ -304,6 +306,23 @@ impl HappyBridgeManager {
         )
         .await;
         Ok(())
+    }
+
+    /// Tells a running bridge to abandon an in-flight pairing wait, and drops any
+    /// payload already minted so it cannot be handed out afterwards.
+    pub async fn cancel_pairing(&self) {
+        let stdin = {
+            let guard = self.process.lock().await;
+            guard.as_ref().map(|process| Arc::clone(&process._stdin))
+        };
+        *self.pairing_payload.lock().await = None;
+        if let Some(stdin) = stdin {
+            write_supervisor_notification(
+                &stdin,
+                json!({ "jsonrpc": "2.0", "method": "cancel_pairing" }),
+            )
+            .await;
+        }
     }
 
     pub async fn wait_for_pairing_payload(&self) -> Result<String, String> {
@@ -555,7 +574,29 @@ async fn monitor_process(
     }
 }
 
-async fn terminate_child(child: &mut Child) -> Result<(), String> {
+/// Asks the bridge to shut down over the supervisor channel, then falls back to
+/// signals. Windows has no SIGTERM, so before this the child was never told to
+/// exit: every stop burned the full grace period and was then hard-killed,
+/// skipping the relay disconnect so the machine was left to time out. The
+/// notification is sent on every platform, which also gives unix a clean
+/// shutdown ahead of SIGTERM rather than relying on the signal handler alone.
+async fn terminate_child(
+    child: &mut Child,
+    stdin: Option<&Arc<Mutex<ChildStdin>>>,
+) -> Result<(), String> {
+    if let Some(stdin) = stdin {
+        // Bounded: a wedged bridge that is not draining stdin must not stall the
+        // stop path, which is exactly the deadlock the grace period exists for.
+        let _ = tokio::time::timeout(
+            SHUTDOWN_NOTIFY_TIMEOUT,
+            write_supervisor_notification(
+                stdin,
+                json!({ "jsonrpc": "2.0", "method": "shutdown" }),
+            ),
+        )
+        .await;
+    }
+
     #[cfg(unix)]
     if let Some(pid) = child.id() {
         unsafe {
