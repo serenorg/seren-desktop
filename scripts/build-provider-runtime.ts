@@ -168,6 +168,29 @@ function main(): void {
       }
     }
   }
+  // Happy vendors ripgrep and difftastic as per-platform tarballs under
+  // `tools/archives`. Apple's notary service reads inside archives, so the
+  // unsigned Mach-O binaries in the darwin tarballs get the whole DMG rejected
+  // ("The binary is not signed", "does not have the hardened runtime enabled").
+  // That blocked the v3.71.0 macOS release (#3048).
+  //
+  // They are also dead weight: the binaries are resolved from `tools/unpacked`,
+  // which only its postinstall creates, and the install above runs with
+  // `--ignore-scripts`. The guard below keeps that reasoning honest — if a
+  // future change ever does unpack them, the prune backs off instead of
+  // silently deleting something that became load-bearing.
+  const happyTools = path.join(happyPackage, "tools");
+  const happyArchives = path.join(happyTools, "archives");
+  if (existsSync(happyArchives)) {
+    if (existsSync(path.join(happyTools, "unpacked"))) {
+      console.warn("Skipping Happy tool archive prune: tools/unpacked exists, archives may be in use");
+    } else {
+      // `tools/licenses` is deliberately kept for attribution.
+      rmSync(happyArchives, { recursive: true, force: true });
+      console.log("Pruned happy/tools/archives (unsigned platform binaries)");
+    }
+  }
+
   const bundleSize = spawnSync("du", ["-sh", bundleNodeModules], { encoding: "utf8" })
     .stdout.trim();
   console.log(`provider-runtime/node_modules after Happy SDK binary prune: ${bundleSize}`);
