@@ -13,10 +13,14 @@ import {
   untrack,
 } from "solid-js";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
+import {
+  employeeHealth,
+  healthDotClass,
+  healthLabel,
+} from "@/lib/employees/health";
 import type {
   ArchivedEmployee,
   EmployeeMode,
-  EmployeeStatus,
   EmployeeSummary,
 } from "@/lib/employees/types";
 import {
@@ -63,31 +67,6 @@ const Avatar: Component<{ name: string; seed: string; size?: number }> = (
     </div>
   );
 };
-
-function statusDotClass(status: EmployeeStatus, mode: EmployeeMode): string {
-  // A faint colored shadow on healthy/live dots reads as a hardware LED;
-  // operators scan the sidebar for "what's lit up". Stopped/idle stays flat.
-  if (status === "running") {
-    return mode === "cron"
-      ? "bg-amber-400 shadow-[0_0_4px_rgba(251,191,36,0.55)]"
-      : "bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.55)]";
-  }
-  if (status === "failed")
-    return "bg-red-500 shadow-[0_0_3px_rgba(248,113,113,0.5)]";
-  if (status === "stopped") return "bg-slate-500";
-  if (status === "pending" || status === "building")
-    return "bg-sky-400 animate-pulse";
-  return "bg-slate-500";
-}
-
-function statusLabel(status: EmployeeStatus, mode: EmployeeMode): string {
-  if (status === "running") return mode === "cron" ? "Scheduled" : "Live";
-  if (status === "failed") return "Error";
-  if (status === "stopped") return "Suspended";
-  if (status === "pending") return "Pending";
-  if (status === "building") return "Deploying";
-  return status;
-}
 
 function modeLabel(mode: EmployeeMode): string {
   if (mode === "always_on") return "On-call";
@@ -157,6 +136,11 @@ const EmployeeRow: Component<{
   pendingCount: number;
   onSelect: (id: string) => void;
 }> = (props) => {
+  const health = () =>
+    employeeHealth({
+      status: props.employee.status,
+      errorMessage: props.employee.errorMessage,
+    });
   const pluralRuns = () => (props.pendingCount === 1 ? "" : "s");
   const ariaSuffix = () =>
     props.pendingCount > 0
@@ -172,7 +156,7 @@ const EmployeeRow: Component<{
       aria-current={props.active ? "page" : undefined}
       onClick={() => props.onSelect(props.employee.id)}
       title={`${props.employee.name} (${modeLabel(props.employee.mode)})`}
-      aria-label={`Open ${props.employee.name}, ${modeLabel(props.employee.mode)}, ${statusLabel(props.employee.status, props.employee.mode)}${ariaSuffix()}`}
+      aria-label={`Open ${props.employee.name}, ${modeLabel(props.employee.mode)}, ${healthLabel(health())}${ariaSuffix()}`}
     >
       <Avatar name={props.employee.name} seed={props.employee.avatarSeed} />
       <div class="flex-1 min-w-0">
@@ -181,8 +165,8 @@ const EmployeeRow: Component<{
         </div>
         <div class="thread-list-meta text-muted-foreground truncate">
           {modeLabel(props.employee.mode)}
-          {" - "}
-          {statusLabel(props.employee.status, props.employee.mode)}
+          {" · "}
+          {healthLabel(health())}
         </div>
       </div>
       <Show when={props.pendingCount > 0}>
@@ -195,7 +179,7 @@ const EmployeeRow: Component<{
         </span>
       </Show>
       <span
-        class={`w-1.5 h-1.5 rounded-full flex-none ${statusDotClass(props.employee.status, props.employee.mode)}`}
+        class={`w-1.5 h-1.5 rounded-full flex-none ${healthDotClass(health())}`}
         aria-hidden="true"
       />
     </button>

@@ -150,6 +150,8 @@ export type EmployeeRun = {
   statusMessage: string | null;
   stopReason: string | null;
   output: string | null;
+  inferenceCostAtomic: number;
+  computeCostAtomic: number;
 };
 
 export type EmployeeRunDetail = EmployeeRun & {

@@ -12,6 +12,7 @@ import {
   Show,
 } from "solid-js";
 import { EmployeeRunDetailModal } from "@/components/employees/EmployeeRunDetailModal";
+import { formatMicrosUsd } from "@/lib/employees/spend";
 import type { EmployeeRun } from "@/lib/employees/types";
 import { employees as svc } from "@/services/employees";
 
@@ -250,6 +251,11 @@ export const EmployeeRunsList: Component<EmployeeRunsListProps> = (props) => {
                         Copy
                       </button>
                       <span>{durationLabel(run.executionTimeMs)}</span>
+                      <span>
+                        {formatMicrosUsd(
+                          run.inferenceCostAtomic + run.computeCostAtomic,
+                        )}
+                      </span>
                       <Show
                         when={run.status === "awaiting_approval"}
                         fallback={
