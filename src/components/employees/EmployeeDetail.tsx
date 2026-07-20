@@ -17,6 +17,8 @@ import {
   Show,
 } from "solid-js";
 import { EmployeeCheckpointsList } from "@/components/employees/EmployeeCheckpointsList";
+import { EmployeeControlBar } from "@/components/employees/EmployeeControlBar";
+import { EmployeeCostSummary } from "@/components/employees/EmployeeCostSummary";
 import { EmployeeEvalDriftCard } from "@/components/employees/EmployeeEvalDriftCard";
 import { EmployeeRevisionsModal } from "@/components/employees/EmployeeRevisionsModal";
 import { EmployeeRunDetailModal } from "@/components/employees/EmployeeRunDetailModal";
@@ -24,12 +26,14 @@ import { EmployeeRunsList } from "@/components/employees/EmployeeRunsList";
 import { EvalGateEditor } from "@/components/employees/EvalGateEditor";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import { gradientFor, initialFor } from "@/lib/employees/avatar";
+import {
+  type EmployeeHealth,
+  employeeHealth,
+  healthDotClass,
+  healthLabel,
+} from "@/lib/employees/health";
 import { extractInstructionSections } from "@/lib/employees/instructions";
-import type {
-  EmployeeMode,
-  EmployeeStatus,
-  EmployeeSummary,
-} from "@/lib/employees/types";
+import type { EmployeeMode, EmployeeSummary } from "@/lib/employees/types";
 import { getDefaultOrganizationId } from "@/lib/tauri-bridge";
 import { employees as svc } from "@/services/employees";
 import { employeesArchiveStore } from "@/services/employees-archive";
@@ -68,21 +72,14 @@ function modeLabel(mode: EmployeeMode): string {
   return "On-demand";
 }
 
-function statusLabel(status: EmployeeStatus): string {
-  if (status === "running") return "Live";
-  if (status === "stopped") return "Suspended";
-  if (status === "failed") return "Error";
-  if (status === "pending") return "Pending";
-  if (status === "building") return "Deploying";
-  return status;
-}
-
-function statusPillClass(status: EmployeeStatus): string {
-  if (status === "running")
+function statusPillClass(health: EmployeeHealth): string {
+  if (health === "healthy")
     return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
-  if (status === "failed")
+  if (health === "degraded")
+    return "bg-amber-500/15 text-amber-300 border-amber-500/30";
+  if (health === "faulted")
     return "bg-red-500/15 text-red-400 border-red-500/30";
-  if (status === "stopped")
+  if (health === "suspended")
     return "bg-slate-500/15 text-slate-300 border-slate-500/30";
   return "bg-sky-500/15 text-sky-300 border-sky-500/30";
 }
@@ -105,12 +102,6 @@ function capabilityGroupClass(tone: "neutral" | "success" | "warning") {
     return "border-amber-500/25 bg-amber-500/[0.08]";
   }
   return "border-border bg-surface-2";
-}
-
-function primaryCtaLabel(mode: EmployeeMode): string {
-  if (mode === "always_on") return "New conversation";
-  if (mode === "cron") return "Run now";
-  return "Run now";
 }
 
 const Avatar: Component<{ name: string; seed: string; size?: number }> = (
@@ -138,26 +129,18 @@ const Avatar: Component<{ name: string; seed: string; size?: number }> = (
  * transitory states (running/building/pending) so the operator gets an
  * ambient "this is live" signal without scanning text.
  */
-const StatusDot: Component<{ status: EmployeeStatus }> = (props) => {
-  const tone = () => {
-    if (props.status === "running") return "bg-emerald-400";
-    if (props.status === "failed") return "bg-red-400";
-    if (props.status === "stopped") return "bg-slate-400";
-    return "bg-sky-400";
-  };
+const StatusDot: Component<{ health: EmployeeHealth }> = (props) => {
   const transitory = () =>
-    props.status === "running" ||
-    props.status === "pending" ||
-    props.status === "building";
+    props.health === "healthy" || props.health === "transitioning";
   return (
     <span class="relative inline-flex w-1.5 h-1.5 shrink-0" aria-hidden="true">
       <Show when={transitory()}>
         <span
-          class={`absolute inset-0 rounded-full ${tone()} opacity-60 animate-ping`}
+          class={`absolute inset-0 rounded-full ${healthDotClass(props.health)} opacity-60 animate-ping`}
         />
       </Show>
       <span
-        class={`relative inline-block w-1.5 h-1.5 rounded-full ${tone()}`}
+        class={`relative inline-block w-1.5 h-1.5 rounded-full ${healthDotClass(props.health)}`}
       />
     </span>
   );
@@ -168,18 +151,9 @@ const StatusDot: Component<{ status: EmployeeStatus }> = (props) => {
  * Conveys deployment status at a glance even when the status pill is off
  * screen (e.g. when the operator is reading past the header).
  */
-const AvatarPresence: Component<{ status: EmployeeStatus }> = (props) => (
+const AvatarPresence: Component<{ health: EmployeeHealth }> = (props) => (
   <span
-    class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-[2px] border-background"
-    classList={{
-      "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.55)]":
-        props.status === "running",
-      "bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.55)]":
-        props.status === "failed",
-      "bg-sky-400 animate-pulse":
-        props.status === "pending" || props.status === "building",
-      "bg-slate-500": props.status === "stopped",
-    }}
+    class={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-[2px] border-background ${healthDotClass(props.health)}`}
     aria-hidden="true"
   />
 );
@@ -347,6 +321,12 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const isRunning = () => status() === "running";
   const isWakeable = () => status() === "stopped" || status() === "failed";
   const canStartRun = () => isRunning() && actionPending() === null;
+  const health = () =>
+    employeeHealth({
+      status: status(),
+      errorMessage: summary()?.errorMessage,
+      hasAlertConditions: alertConditions().length > 0,
+    });
 
   const handleSuspendOrWake = async () => {
     const id = props.employeeId;
@@ -549,113 +529,6 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
     }
   };
 
-  const PrimaryActionButton: Component<{
-    employee: EmployeeSummary;
-    variant?: "full" | "compact";
-  }> = (buttonProps) => {
-    const isCompact = () => buttonProps.variant === "compact";
-    const isAlwaysOn = () => buttonProps.employee.mode === "always_on";
-    // Only on-demand/cron buttons drive a manual run; always-on never enters
-    // this loading state because the action opens a chat instead.
-    const isManualRunInFlight = () =>
-      !isAlwaysOn() && manualRun()?.kind === "running";
-    const isDisabled = () => isManualRunInFlight() || !canStartRun();
-    const actionNoun = () => (isAlwaysOn() ? "chat" : "run");
-    const title = () => {
-      if (!canStartRun()) {
-        return `${buttonProps.employee.name} is ${statusLabel(
-          buttonProps.employee.status,
-        ).toLowerCase()}; wake it before starting a ${actionNoun()}`;
-      }
-      return isAlwaysOn()
-        ? `Open a new chat with ${buttonProps.employee.name}`
-        : `Run ${buttonProps.employee.name} once now`;
-    };
-
-    // `min-w-[12rem]` keeps the compact button at a stable footprint so the
-    // header doesn't reflow when the label or icon changes width.
-    const compactClass =
-      "inline-flex h-10 min-w-[12rem] items-center justify-center gap-2 rounded-md border border-primary bg-primary px-4 text-[13.5px] font-medium text-primary-foreground shadow-sm shadow-primary/20 transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background";
-    const fullClass =
-      "inline-flex w-full items-center justify-center gap-2 py-3 px-4 rounded-lg bg-primary text-primary-foreground font-medium text-[14px] transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background";
-
-    return (
-      <button
-        type="button"
-        class={isCompact() ? compactClass : fullClass}
-        disabled={isDisabled()}
-        title={title()}
-        onClick={handlePrimaryAction}
-      >
-        <Show
-          when={!isManualRunInFlight()}
-          fallback={
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 16 16"
-              fill="none"
-              aria-hidden="true"
-              class="shrink-0 animate-spin"
-            >
-              <circle
-                cx="8"
-                cy="8"
-                r="6"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-dasharray="22 14"
-              />
-            </svg>
-          }
-        >
-          <Show
-            when={isAlwaysOn()}
-            fallback={
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-                class="shrink-0"
-              >
-                <path
-                  d="M5 4 L12 8 L5 12 Z"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linejoin="round"
-                  stroke-linecap="round"
-                />
-              </svg>
-            }
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="none"
-              aria-hidden="true"
-              class="shrink-0"
-            >
-              <path
-                d="M3.5 4.5h9v5.5h-5l-3 2v-2h-1z"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linejoin="round"
-                stroke-linecap="round"
-              />
-            </svg>
-          </Show>
-        </Show>
-        {isManualRunInFlight()
-          ? "Running..."
-          : primaryCtaLabel(buttonProps.employee.mode)}
-      </button>
-    );
-  };
-
   return (
     <div class="flex flex-col h-full overflow-hidden bg-background">
       <Show
@@ -689,7 +562,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
             <div class="flex items-start gap-4 px-6 py-5 border-b border-border">
               <div class="relative flex-none">
                 <Avatar name={emp().name} seed={emp().avatarSeed} />
-                <AvatarPresence status={emp().status} />
+                <AvatarPresence health={health()} />
               </div>
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
@@ -697,10 +570,10 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                     {emp().name}
                   </h1>
                   <span
-                    class={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[11px] font-medium ${statusPillClass(emp().status)}`}
+                    class={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[11px] font-medium ${statusPillClass(health())}`}
                   >
-                    <StatusDot status={emp().status} />
-                    {statusLabel(emp().status)}
+                    <StatusDot health={health()} />
+                    {healthLabel(health())}
                   </span>
                 </div>
                 <div class="mt-1 text-[12px] text-muted-foreground flex items-center gap-3 flex-wrap">
@@ -788,46 +661,6 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                 </Show>
               </div>
               <div class="flex items-center justify-end gap-2 flex-none relative flex-wrap max-w-[420px]">
-                <Show when={emp().mode === "always_on"}>
-                  <PrimaryActionButton employee={emp()} variant="compact" />
-                </Show>
-                <Show when={emp().mode === "always_on" && !canStartRun()}>
-                  <div class="basis-full text-right text-[12px] text-muted-foreground">
-                    Wake this employee before starting a chat.
-                  </div>
-                </Show>
-                <Show
-                  when={isRunning() || isWakeable() || actionPending() !== null}
-                  fallback={
-                    <span
-                      class="px-3 py-1.5 rounded-md border border-border text-[12px] font-medium text-muted-foreground"
-                      aria-label={`Status: ${statusLabel(emp().status)}`}
-                    >
-                      {statusLabel(emp().status)}
-                    </span>
-                  }
-                >
-                  <button
-                    type="button"
-                    class="px-3 py-1.5 rounded-md border text-[12px] font-medium transition-colors disabled:opacity-50"
-                    classList={{
-                      "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10":
-                        isWakeable(),
-                      "border-amber-500/40 text-amber-300 hover:bg-amber-500/10":
-                        isRunning(),
-                    }}
-                    disabled={actionPending() !== null}
-                    onClick={handleSuspendOrWake}
-                  >
-                    <Show when={actionPending() === "suspend"}>
-                      Suspending...
-                    </Show>
-                    <Show when={actionPending() === "wake"}>Waking...</Show>
-                    <Show when={actionPending() === null}>
-                      {isRunning() ? "Suspend" : "Wake"}
-                    </Show>
-                  </button>
-                </Show>
                 <div ref={kebabContainerRef} class="relative">
                   <button
                     type="button"
@@ -921,6 +754,22 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
               </div>
             </div>
 
+            <EmployeeControlBar
+              employee={emp()}
+              health={health()}
+              isRunning={isRunning()}
+              isWakeable={isWakeable()}
+              actionPending={actionPending()}
+              manualRunInFlight={manualRun()?.kind === "running"}
+              canStartRun={canStartRun()}
+              onPrimary={handlePrimaryAction}
+              onSuspendOrWake={handleSuspendOrWake}
+            />
+            <EmployeeCostSummary
+              employeeId={props.employeeId}
+              refreshNonce={runsRefreshNonce()}
+            />
+
             {/* Body */}
             <div class="flex-1 overflow-y-auto px-6 py-6 w-full min-w-0">
               <Show when={actionError()}>
@@ -930,15 +779,6 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                 >
                   {actionError()}
                 </div>
-              </Show>
-
-              <Show when={emp().mode !== "always_on"}>
-                <PrimaryActionButton employee={emp()} />
-                <Show when={!canStartRun()}>
-                  <div class="mt-2 mb-4 text-[12px] text-muted-foreground">
-                    Wake this employee before starting a run.
-                  </div>
-                </Show>
               </Show>
 
               {/* Inline manual-run status (cron / on-demand only) */}

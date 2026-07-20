@@ -35,9 +35,11 @@ import {
   serenCloudDeploymentRunArtifacts,
   serenCloudDeploymentRunPendingApprovals,
   serenCloudDeploymentRuns,
+  serenCloudGetDeploymentSpend,
   serenCloudRun,
 } from "@/api/seren-cloud";
 import { formatApiError } from "@/lib/api-errors";
+import { parseUsdToMicros } from "@/lib/employees/spend";
 import type {
   EmployeeDetail,
   EmployeePatch,
@@ -208,6 +210,8 @@ function runFromCloud(row: CloudDeploymentRunEvent): EmployeeRun {
     statusMessage: row.status_message ?? null,
     stopReason: row.stop_reason ?? null,
     output: row.output ?? null,
+    inferenceCostAtomic: row.inference_cost_atomic,
+    computeCostAtomic: row.compute_cost_atomic,
   };
 }
 
@@ -645,6 +649,62 @@ export const employees = {
       hasMore: data?.pagination?.has_more ?? false,
       total: data?.pagination?.total ?? rows.length,
     };
+  },
+
+  async getSpend(id: string): Promise<{
+    totalMicros: number;
+    inferenceMicros: number;
+    computeMicros: number;
+    runCount: number;
+  }> {
+    const { data, error, response } = await serenCloudGetDeploymentSpend({
+      path: { id },
+      throwOnError: false,
+    });
+    if (error || !data?.data) {
+      throw new Error(
+        `Failed to load employee spend: ${formatApiError(error, response, "")}`,
+      );
+    }
+    // Deliberately leave first_event_at/last_event_at unmapped: the live API
+    // serializes them as arrays despite the spec declaring date-time strings.
+    return {
+      totalMicros: parseUsdToMicros(data.data.total_cost_usd),
+      inferenceMicros: parseUsdToMicros(data.data.inference_cost_usd),
+      computeMicros: parseUsdToMicros(data.data.compute_cost_usd),
+      runCount: data.data.run_count,
+    };
+  },
+
+  async listRunsSince(
+    id: string,
+    sinceIso: string,
+    maxPages = 5,
+  ): Promise<{ rows: EmployeeRun[]; truncated: boolean }> {
+    const rows: EmployeeRun[] = [];
+    let offset = 0;
+    let truncated = false;
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const { data, error, response } = await serenCloudDeploymentRuns({
+        path: { id },
+        query: { limit: 100, offset, started_after: sinceIso },
+        throwOnError: false,
+      });
+      if (error) {
+        throw new Error(
+          `Failed to list employee runs: ${formatApiError(error, response, "")}`,
+        );
+      }
+      const pageRows = data?.data ?? [];
+      rows.push(...pageRows.map(runFromCloud));
+      const hasMore = data?.pagination?.has_more ?? false;
+      if (!hasMore) return { rows, truncated: false };
+      offset += 100;
+      if (page === maxPages - 1) truncated = true;
+    }
+
+    return { rows, truncated };
   },
 
   async listPendingApprovals(
