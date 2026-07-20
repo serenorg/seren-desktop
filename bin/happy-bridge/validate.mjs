@@ -2,7 +2,7 @@
 // ABOUTME: Canonical equality is required so path tricks cannot widen authority.
 
 import { realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { isAbsolute, sep } from "node:path";
 
 function canonicalAbsolutePath(value) {
   if (typeof value !== "string" || !isAbsolute(value)) {
@@ -47,6 +47,38 @@ export function validateSpawnRoot(requestedPath, advertisedRoots) {
   }
 
   return { ok: false, reason: "requested path is not an advertised root" };
+}
+
+/**
+ * Visibility scope for an existing session. Spawning requires the requested path
+ * to *be* an advertised root; a session already running inside one is in scope
+ * too, since the user shared that folder. Both sides are canonicalized first so
+ * a symlink cannot smuggle a path in, and the boundary check requires a
+ * separator so `/srv/project-secret` is not treated as inside `/srv/project`.
+ *
+ * @param {string} sessionCwd
+ * @param {string[]} advertisedRoots
+ * @returns {boolean}
+ */
+export function isWithinAdvertisedRoots(sessionCwd, advertisedRoots) {
+  if (!Array.isArray(advertisedRoots) || advertisedRoots.length === 0) {
+    return false;
+  }
+
+  const canonicalCwd = canonicalAbsolutePath(sessionCwd);
+  if (!canonicalCwd) {
+    return false;
+  }
+
+  for (const advertisedRoot of advertisedRoots) {
+    const canonicalRoot = canonicalAbsolutePath(advertisedRoot);
+    if (!canonicalRoot) continue;
+    if (canonicalCwd === canonicalRoot) return true;
+    const boundary = canonicalRoot.endsWith(sep) ? canonicalRoot : `${canonicalRoot}${sep}`;
+    if (canonicalCwd.startsWith(boundary)) return true;
+  }
+
+  return false;
 }
 
 function containsValue(collection, value) {
