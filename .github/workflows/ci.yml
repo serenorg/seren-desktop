@@ -248,6 +248,13 @@ jobs:
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: pnpm tauri build --bundles deb,appimage --config src-tauri/tauri.ci.json
+      - name: Verify Happy bridge graceful shutdown (Windows)
+        # Windows has no SIGTERM, so the bridge is stopped by a supervisor
+        # notification instead (#3031). That path cannot be exercised on the
+        # other runners, and a regression there silently costs every stop the
+        # full 5s grace period plus a hard kill.
+        if: matrix.os == 'windows-latest'
+        run: node scripts/verify-happy-bridge-shutdown.mjs
       - name: Verify frontend dist is current
         run: pnpm verify:frontend-build
       - uses: actions/upload-artifact@v7
