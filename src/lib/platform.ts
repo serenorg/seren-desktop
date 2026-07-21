@@ -17,3 +17,18 @@ export function isMacPlatform(): boolean {
   const userAgent = navigator.userAgent ?? "";
   return /mac os x|macintosh|iphone|ipad|ipod/i.test(userAgent);
 }
+
+/**
+ * True when running on native Windows.
+ *
+ * Anchored on `Win32`/`Win64` so `Darwin` cannot match, with the same blank
+ * `navigator.platform` fallback as {@link isMacPlatform}. WSL2 runs a Linux
+ * webview and correctly reports false.
+ */
+export function isWindowsPlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const platform = navigator.platform ?? "";
+  if (/^win/i.test(platform)) return true;
+  const userAgent = navigator.userAgent ?? "";
+  return /windows/i.test(userAgent);
+}

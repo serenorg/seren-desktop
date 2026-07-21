@@ -422,6 +422,7 @@ const CLI_INSTALL_INSTRUCTIONS = {
   "@anthropic-ai/claude-code":
     "https://code.claude.com/docs/en/installation",
   "@openai/codex": "https://developers.openai.com/codex/cli/",
+  "@xai-official/grok": "https://docs.x.ai/build/overview",
 };
 
 function emitCliActionRequired(
@@ -969,7 +970,27 @@ export function createBrowserLocalAgentRegistry({ emit }) {
           packageName: "@xai-official/grok",
           label: "Grok",
         });
-        return resolveGrokBinary();
+        const installed = resolveGrokBinary();
+        if (installed !== "grok") {
+          return installed;
+        }
+        // A user-managed grok outside the paths resolveGrokBinary knows is
+        // still spawnable, so PATH decides before we give up.
+        if (await isCommandAvailable("grok")) {
+          return "grok";
+        }
+        // Returning the bare command here spawned an ENOENT that surfaced as
+        // "Grok agent stopped before request completed", which says nothing
+        // about a missing install. Mirrors Claude/Codex. #3154
+        const url = emitCliActionRequired(emit, {
+          label: "Grok",
+          bareCommand: "grok",
+          packageName: "@xai-official/grok",
+          reason: "installation_required",
+        });
+        throw new Error(
+          `Grok CLI is not installed in a verifiable location. Install it from ${url}, then retry.`,
+        );
       },
       launchLogin() {
         const resolved = resolveGrokBinary();
@@ -1191,3 +1212,8 @@ export function createBrowserLocalAgentRegistry({ emit }) {
     },
   };
 }
+
+// Exported for regression tests. A package missing from this map makes its
+// ensureCli failure interpolate `undefined` in place of the install URL,
+// which is the unhelpful error #3154 was filed about.
+export { CLI_INSTALL_INSTRUCTIONS as _CLI_INSTALL_INSTRUCTIONS };

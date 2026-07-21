@@ -92,10 +92,28 @@ export function allowsGeminiAgent(
   return policy?.allow_gemini_agent ?? true;
 }
 
+// Local agents that shipped before allow_grok_agent existed. An admin who set
+// every one of these to false expressed a lockdown they had no field to extend
+// to Grok, so Grok inherits that answer instead of appearing on upgrade with
+// workspace write access.
+function disabledEveryPriorLocalAgent(
+  policy: OrganizationPrivateModelsPolicy,
+): boolean {
+  return (
+    policy.allow_claude_agent === false &&
+    policy.allow_codex_agent === false &&
+    policy.allow_gemini_agent === false &&
+    policy.allow_lmstudio_agent === false
+  );
+}
+
 export function allowsGrokAgent(
   policy: OrganizationPrivateModelsPolicy | null | undefined,
 ): boolean {
-  return policy?.allow_grok_agent ?? true;
+  if (!policy) return true;
+  if (policy.allow_grok_agent !== undefined) return policy.allow_grok_agent;
+  if (policy.disable_local_agents) return false;
+  return !disabledEveryPriorLocalAgent(policy);
 }
 
 export function allowsLmStudioAgent(

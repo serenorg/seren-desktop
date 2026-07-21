@@ -11,6 +11,7 @@ import {
   Show,
 } from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
+import { isWindowsPlatform } from "@/lib/platform";
 import { type BuildInfo, getBuildInfo } from "@/services/buildInfo";
 import {
   getClaudeMemoryStatus,
@@ -1324,6 +1325,25 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 </For>
               </div>
             </div>
+
+            <Show
+              when={
+                isWindowsPlatform() &&
+                settingsState.app.agentSandboxMode !== "full-access"
+              }
+            >
+              <p class="m-0 py-3 border-b border-border text-[0.8rem] text-muted-foreground leading-normal">
+                <span class="font-medium text-foreground">
+                  On Windows this bounds the agent's file, search, and web tools
+                  only.
+                </span>{" "}
+                Shell commands are not bounded. Claude Code's operating-system
+                sandbox does not support native Windows, so a shell command the
+                agent runs can read and write anywhere your account can. Set
+                Approval Policy to Untrusted or On Failure to review each
+                command before it runs.
+              </p>
+            </Show>
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
