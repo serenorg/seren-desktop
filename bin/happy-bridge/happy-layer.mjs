@@ -783,12 +783,17 @@ export function createHappyLayer({
       return startPairing();
     },
     startPairing,
-    close() {
+    async close() {
       sourceSubscription?.();
       supervisorSubscription?.();
-      for (const entry of sessions.values()) {
-        void entry.client.close().catch(() => debug("failed to close Happy session"));
-      }
+      // Awaited rather than fire-and-forget: the caller exits the process once
+      // this resolves, and tearing the event loop down while these closes are
+      // still in flight aborts the process on Windows.
+      await Promise.allSettled(
+        [...sessions.values()].map((entry) =>
+          entry.client.close().catch(() => debug("failed to close Happy session")),
+        ),
+      );
       sessions.clear();
       terminatedSessions.clear();
       machineClient?.shutdown();
