@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error — the bridge seam is plain ESM and has no generated declarations.
 import {
   composeApprovalNotification,
+  createAssistantMessageCoalescer,
   createTurnCorrelator,
   translateNeutralEvent,
 } from "../../bin/happy-bridge/translate.mjs";
@@ -73,30 +74,40 @@ describe("neutral-to-Happy session translation", () => {
     const correlator = createTurnCorrelator({
       createTurnId: () => `turn-remote-${++sequence}`,
     });
+    const coalescer = createAssistantMessageCoalescer({
+      createMessageId: () => "message-remote-1",
+    });
     const remotePrompt = correlator.correlate({
       kind: "user-message",
       sessionId: "session-1",
       payload: { text: "remote prompt", origin: "remote" },
     });
-    const [turnStart] = translateNeutralEvent(correlator.correlate({
+    const [turnStartEvent] = coalescer.consume(correlator.correlate({
       kind: "status",
       sessionId: "session-1",
       payload: { status: "prompting" },
     }));
-    const [assistant] = translateNeutralEvent(correlator.correlate({
-      kind: "assistant-delta",
-      sessionId: "session-1",
-      payload: { text: "assistant response" },
-    }));
-    const [turnEnd] = translateNeutralEvent(correlator.correlate({
+    for (const text of ["TURN", "315", "7", "FIX", "ED"]) {
+      expect(coalescer.consume(correlator.correlate({
+        kind: "assistant-delta",
+        sessionId: "session-1",
+        payload: { text },
+      }))).toEqual([]);
+    }
+    const [assistantEvent, turnEndEvent] = coalescer.consume(correlator.correlate({
       kind: "turn-complete",
       sessionId: "session-1",
       payload: { stopReason: "end_turn" },
     }));
+    const [turnStart] = translateNeutralEvent(turnStartEvent);
+    const [assistant] = translateNeutralEvent(assistantEvent);
+    const [turnEnd] = translateNeutralEvent(turnEndEvent);
 
     expect(translateNeutralEvent(remotePrompt)).toEqual([]);
     expect(turnStart.envelope.turn).toBe("turn-remote-1");
     expect(assistant.envelope.turn).toBe("turn-remote-1");
+    expect(assistant.envelope.id).toBe("message-remote-1");
+    expect(assistant.envelope.ev.text).toBe("TURN3157FIXED");
     expect(turnEnd.envelope.turn).toBe("turn-remote-1");
   });
 

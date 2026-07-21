@@ -138,6 +138,79 @@ export function createTurnCorrelator({ createTurnId = randomUUID } = {}) {
 }
 
 /**
+ * Provider `assistant-delta` events are stream fragments, while Happy text
+ * envelopes are complete chat messages. Buffer contiguous fragments so one
+ * provider response does not become one mobile bubble per token.
+ *
+ * @param {{createMessageId?: () => string}} options
+ */
+export function createAssistantMessageCoalescer({ createMessageId = randomUUID } = {}) {
+  const pending = new Map();
+
+  function flush(sessionId) {
+    const buffered = pending.get(sessionId);
+    if (!buffered) return [];
+    pending.delete(sessionId);
+    return [{
+      ...buffered.event,
+      payload: {
+        ...buffered.payload,
+        text: buffered.text,
+        messageId: buffered.messageId,
+      },
+    }];
+  }
+
+  function consume(event) {
+    if (!event || typeof event !== "object" || typeof event.sessionId !== "string") {
+      return [];
+    }
+    const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+    if (event.kind !== "assistant-delta") {
+      return [...flush(event.sessionId), event];
+    }
+
+    const text = stringValue(payload.text);
+    if (!text) return [];
+    const suppliedMessageId = stringValue(payload.messageId);
+    const turnId = stringValue(payload.turnId) || stringValue(payload.turn);
+    const isThought = payload.isThought === true;
+    const buffered = pending.get(event.sessionId);
+    const sameMessage = buffered &&
+      buffered.turnId === turnId &&
+      buffered.isThought === isThought &&
+      (!suppliedMessageId || buffered.suppliedMessageId === suppliedMessageId);
+
+    const flushed = sameMessage ? [] : flush(event.sessionId);
+    if (sameMessage) {
+      buffered.text += text;
+      buffered.payload = payload;
+    } else {
+      pending.set(event.sessionId, {
+        event,
+        payload,
+        text,
+        turnId,
+        isThought,
+        suppliedMessageId,
+        messageId: suppliedMessageId || createMessageId(),
+      });
+    }
+    return flushed;
+  }
+
+  return {
+    consume,
+    clear(sessionId) {
+      pending.delete(sessionId);
+    },
+    close() {
+      pending.clear();
+    },
+  };
+}
+
+/**
  * Convert exactly one neutral event. The returned list is deliberate: a
  * completion can carry both a turn boundary and usage metadata.
  *
