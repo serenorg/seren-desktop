@@ -129,6 +129,28 @@ function main(): void {
   }).stdout.trim();
   console.log(`provider-runtime/node_modules before Happy SDK binary prune: ${bundleSizeBeforePrune}`);
   const happyPackage = path.join(bundleNodeModules, "happy");
+  const workspaceHappyDist = path.join(
+    repoRoot,
+    "node_modules",
+    "happy",
+    "dist",
+  );
+  const bundledHappyDist = path.join(happyPackage, "dist");
+  if (!existsSync(workspaceHappyDist)) {
+    throw new Error(
+      "Workspace Happy dependency is missing; run pnpm install before building the provider runtime",
+    );
+  }
+  // The isolated install above intentionally ignores the root workspace, so it
+  // cannot see pnpm-workspace.yaml's patchedDependencies entry. Replace its raw
+  // Happy distribution with the already-patched workspace distribution before
+  // this directory becomes the production Tauri resource bundle.
+  rmSync(bundledHappyDist, { recursive: true, force: true });
+  cpSync(workspaceHappyDist, bundledHappyDist, {
+    recursive: true,
+    force: true,
+    dereference: true,
+  });
   const sdkPackage = path.join(bundleNodeModules, "@anthropic-ai", "claude-agent-sdk");
   const happyReferenceRoot = existsSync(path.join(happyPackage, "lib"))
     ? path.join(happyPackage, "lib")

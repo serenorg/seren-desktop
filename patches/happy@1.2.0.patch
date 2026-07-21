@@ -110,3 +110,115 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..e222a76faae481cbfc2814568349c10e
      this.sendSync.stop();
      this.receiveSync.stop();
      if (this.reconnectInterval) {
+diff --git a/dist/types-D0KwHfY9.cjs b/dist/types-D0KwHfY9.cjs
+index 4aebb1233520dbe47c2069294ff3664300e99177..577cd7e5d4985c746db1f3867f8559c53fb7ac7d 100644
+--- a/dist/types-D0KwHfY9.cjs
++++ b/dist/types-D0KwHfY9.cjs
+@@ -2145,6 +2145,7 @@ class ApiSessionClient extends node_events.EventEmitter {
+   };
+   lastSeq = 0;
+   pendingOutbox = [];
++  outboundMessageLocalIds = /* @__PURE__ */ new Set();
+   sendSync;
+   receiveSync;
+   constructor(token, session) {
+@@ -2209,18 +2210,22 @@ class ApiSessionClient extends node_events.EventEmitter {
+           return;
+         }
+         if (data.body.t === "new-message") {
+-          const messageSeq = data.body.message?.seq;
+-          if (typeof messageSeq !== "number" || messageSeq !== this.lastSeq + 1 || data.body.message.content.t !== "encrypted") {
++          const message = data.body.message;
++          const messageSeq = message?.seq;
++          if (typeof messageSeq !== "number" || messageSeq !== this.lastSeq + 1 || message?.content?.t !== "encrypted") {
+             this.receiveSync.invalidate();
+             return;
+           }
+-          const body = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(data.body.message.content.c));
++          this.lastSeq = messageSeq;
++          if (this.outboundMessageLocalIds.delete(message.localId)) {
++            return;
++          }
++          const body = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(message.content.c));
+           logger.debug("[SOCKET] [UPDATE] Decrypted message", {
+             role: typeof body?.role === "string" ? body.role : "unknown",
+             contentType: typeof body?.content?.type === "string" ? body.content.type : "unknown"
+           });
+           this.routeIncomingMessage(body);
+-          this.lastSeq = messageSeq;
+         } else if (data.body.t === "update-session") {
+           if (data.body.metadata && data.body.metadata.version > this.metadataVersion) {
+             this.metadata = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(data.body.metadata.value));
+@@ -2457,7 +2462,17 @@ class ApiSessionClient extends node_events.EventEmitter {
+         if (message.seq > maxSeq) {
+           maxSeq = message.seq;
+         }
+-        if (skipRouting) continue;
++        // The socket handler routes live messages and advances lastSeq while
++        // this fetch is parked on its await. Without this guard the page that
++        // comes back re-routes anything the socket already delivered, and a
++        // user prompt is executed twice. lastSeq advances per message rather
++        // than after the loop so the two paths cannot overlap.
++        if (message.seq <= this.lastSeq) {
++          continue;
++        }
++        this.lastSeq = message.seq;
++        const isOutboundEcho = this.outboundMessageLocalIds.delete(message.localId);
++        if (skipRouting || isOutboundEcho) continue;
+         if (message.content?.t !== "encrypted") {
+           continue;
+         }
+@@ -2490,10 +2505,13 @@ class ApiSessionClient extends node_events.EventEmitter {
+   static MAX_OUTBOX_BATCH_SIZE = 50;
+   async flushOutbox() {
+     while (this.pendingOutbox.length > 0) {
++      // Drain from the head. Slicing the tail sent any backlog over the batch
++      // cap newest-block-first, so the relay assigned sequence numbers that did
++      // not match production order and the phone rendered the turn scrambled.
+       const batchSize = Math.min(this.pendingOutbox.length, ApiSessionClient.MAX_OUTBOX_BATCH_SIZE);
+-      const batchStart = this.pendingOutbox.length - batchSize;
+-      const batch = this.pendingOutbox.slice(batchStart);
+-      const response = await axios.post(
++      const batchStart = 0;
++      const batch = this.pendingOutbox.slice(batchStart, batchSize);
++      await axios.post(
+         `${configuration.serverUrl}/v3/sessions/${encodeURIComponent(this.sessionId)}/messages`,
+         {
+           messages: batch
+@@ -2503,17 +2521,16 @@ class ApiSessionClient extends node_events.EventEmitter {
+           timeout: 6e4
+         }
+       );
+-      const messages = Array.isArray(response.data.messages) ? response.data.messages : [];
+-      const maxSeq = messages.reduce((acc, message) => message.seq > acc ? message.seq : acc, this.lastSeq);
+-      this.lastSeq = maxSeq;
+       this.pendingOutbox.splice(batchStart, batch.length);
+     }
+   }
+   enqueueMessage(content, invalidate = true) {
+     const encrypted = encodeBase64(encrypt(this.encryptionKey, this.encryptionVariant, content));
++    const localId = node_crypto.randomUUID();
++    this.outboundMessageLocalIds.add(localId);
+     this.pendingOutbox.push({
+       content: encrypted,
+-      localId: node_crypto.randomUUID()
++      localId
+     });
+     if (invalidate) {
+       this.sendSync.invalidate();
+@@ -2780,6 +2797,15 @@ class ApiSessionClient extends node_events.EventEmitter {
+   }
+   async close() {
+     logger.debug("[API] socket.close() called");
++    // Drain anything still queued before stopping the sync. stop() latches a
++    // flag that makes the pending flush return without running, so closing
++    // first discarded the tail of every turn — the final assistant text never
++    // reached the relay.
++    try {
++      await this.flushOutbox();
++    } catch (error) {
++      logger.debug("[API] Failed to flush outbox during close", { error });
++    }
+     this.sendSync.stop();
+     this.receiveSync.stop();
+     if (this.reconnectInterval) {
