@@ -17,7 +17,7 @@ pub const HAPPY_RELAY_URL: &str = "https://api.cluster-fluster.com";
 const MAX_RESTART_ATTEMPTS: u32 = 3;
 const MAX_BACKOFF_SECONDS: u64 = 30;
 const STOP_GRACE_PERIOD: Duration = Duration::from_secs(5);
-const SHUTDOWN_NOTIFY_TIMEOUT: Duration = Duration::from_millis(500);
+const SUPERVISOR_NOTIFY_TIMEOUT: Duration = Duration::from_millis(500);
 const KILL_LOCK_ATTEMPTS: u32 = 20;
 const KILL_LOCK_RETRY_DELAY: Duration = Duration::from_millis(25);
 const STATUS_EVENT: &str = "happy-bridge://status";
@@ -132,22 +132,15 @@ impl HappyBridgeManager {
         // Agent conversations only, matching the set HappyRemoteSettings renders
         // checkboxes for. Including chat conversations advertised roots the user
         // was never shown and could not withdraw. #3144
-        let discovered_roots = crate::commands::chat::list_conversations(
-            app.clone(),
-            Some("agent".to_string()),
-            None,
-            None,
-        )
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|conversation| conversation.project_root.or(conversation.agent_cwd))
-                .fold(Vec::<String>::new(), |mut roots, root| {
-                    if !roots.iter().any(|existing| existing == &root) {
-                        roots.push(root);
-                    }
-                    roots
-                });
+        let discovered_roots = discovered_project_roots(
+            crate::commands::chat::list_conversations(
+                app.clone(),
+                Some("agent".to_string()),
+                None,
+                None,
+            )
+            .await,
+        )?;
         let advertised_roots =
             crate::commands::happy_bridge::effective_advertised_roots(app, discovered_roots);
         let config = HappyBridgeConfig {
@@ -216,7 +209,7 @@ impl HappyBridgeManager {
             .map_err(|err| format!("Failed to flush Happy bridge config: {err}"))?;
 
         let stdin = Arc::new(Mutex::new(stdin));
-        write_supervisor_notification(
+        notify_supervisor(
             &stdin,
             json!({
                 "jsonrpc": "2.0",
@@ -224,7 +217,8 @@ impl HappyBridgeManager {
                 "params": { "roots": advertised_roots },
             }),
         )
-        .await;
+        .await
+        .map_err(|error| format!("Failed to advertise Happy project folders: {error}"))?;
         pipe_bridge_output(&mut child, Arc::clone(&stdin), app.clone());
         let mut guard = self.process.lock().await;
         // `stop()` can take the process slot while a start is still in flight.
@@ -303,7 +297,7 @@ impl HappyBridgeManager {
             };
             Arc::clone(&process._stdin)
         };
-        write_supervisor_notification(
+        notify_supervisor(
             &stdin,
             json!({
                 "jsonrpc": "2.0",
@@ -311,25 +305,26 @@ impl HappyBridgeManager {
                 "params": { "roots": roots },
             }),
         )
-        .await;
-        Ok(())
+        .await
     }
 
     /// Tells a running bridge to abandon an in-flight pairing wait, and drops any
     /// payload already minted so it cannot be handed out afterwards.
-    pub async fn cancel_pairing(&self) {
+    pub async fn cancel_pairing(&self) -> Result<(), String> {
         let stdin = {
             let guard = self.process.lock().await;
             guard.as_ref().map(|process| Arc::clone(&process._stdin))
         };
         *self.pairing_payload.lock().await = None;
-        if let Some(stdin) = stdin {
-            write_supervisor_notification(
-                &stdin,
-                json!({ "jsonrpc": "2.0", "method": "cancel_pairing" }),
-            )
-            .await;
-        }
+        // A bridge that never received the cancellation is still willing to
+        // authorize whoever scanned the code, so the caller has to hear about a
+        // failed write rather than see the dialog close on a lie.
+        let Some(stdin) = stdin else { return Ok(()) };
+        notify_supervisor(
+            &stdin,
+            json!({ "jsonrpc": "2.0", "method": "cancel_pairing" }),
+        )
+        .await
     }
 
     pub async fn wait_for_pairing_payload(&self) -> Result<String, String> {
@@ -594,14 +589,8 @@ async fn terminate_child(
     if let Some(stdin) = stdin {
         // Bounded: a wedged bridge that is not draining stdin must not stall the
         // stop path, which is exactly the deadlock the grace period exists for.
-        let _ = tokio::time::timeout(
-            SHUTDOWN_NOTIFY_TIMEOUT,
-            write_supervisor_notification(
-                stdin,
-                json!({ "jsonrpc": "2.0", "method": "shutdown" }),
-            ),
-        )
-        .await;
+        // The signal and kill fallbacks below cover a failed write.
+        let _ = notify_supervisor(stdin, json!({ "jsonrpc": "2.0", "method": "shutdown" })).await;
     }
 
     #[cfg(unix)]
@@ -731,6 +720,26 @@ fn is_advertised_root<R: tauri::Runtime>(app: &AppHandle<R>, cwd: &str) -> bool 
         .iter()
         .filter_map(|root| std::fs::canonicalize(root).ok())
         .any(|root| root == candidate)
+}
+
+/// The distinct project folders behind the user's agent conversations, in the
+/// order they were seen. A failed lookup is reported rather than absorbed: an
+/// empty set is also what a user with no projects has, so absorbing it started a
+/// bridge that reported connected and then refused every remote spawn.
+fn discovered_project_roots(
+    conversations: Result<Vec<crate::commands::chat::UnifiedConversationRow>, String>,
+) -> Result<Vec<String>, String> {
+    let conversations =
+        conversations.map_err(|error| format!("Failed to read Happy project folders: {error}"))?;
+    Ok(conversations
+        .into_iter()
+        .filter_map(|conversation| conversation.project_root.or(conversation.agent_cwd))
+        .fold(Vec::<String>::new(), |mut roots, root| {
+            if !roots.iter().any(|existing| existing == &root) {
+                roots.push(root);
+            }
+            roots
+        }))
 }
 
 fn error_response(id: Value, code: i32, message: &str) -> Value {
@@ -923,19 +932,51 @@ where
     }
 }
 
-async fn write_supervisor_notification(writer: &Arc<Mutex<ChildStdin>>, notification: Value) {
+/// Reports whether the notification actually reached the bridge. A caller that
+/// changes shared state on the strength of a delivery — advertised folders,
+/// an abandoned pairing — must not report success when the write failed.
+async fn write_supervisor_notification<W>(
+    writer: &Arc<Mutex<W>>,
+    notification: Value,
+) -> Result<(), String>
+where
+    W: AsyncWrite + Unpin,
+{
     let Ok(mut encoded) = serde_json::to_vec(&notification) else {
         log::warn!("[HappyBridge] Failed to encode supervisor notification");
-        return;
+        return Err("Failed to encode supervisor notification".to_string());
     };
     encoded.push(b'\n');
     let mut writer = writer.lock().await;
     if let Err(error) = writer.write_all(&encoded).await {
         log::warn!("[HappyBridge] Failed to write supervisor notification: {error}");
-        return;
+        return Err(format!("Failed to write supervisor notification: {error}"));
     }
     if let Err(error) = writer.flush().await {
         log::warn!("[HappyBridge] Failed to flush supervisor notification: {error}");
+        return Err(format!("Failed to flush supervisor notification: {error}"));
+    }
+    Ok(())
+}
+
+/// Bounds a notification write. A bridge that is alive but not draining stdin
+/// blocks the write once the pipe buffer fills, and the caller must fail rather
+/// than hold its lock there forever.
+async fn notify_supervisor<W>(writer: &Arc<Mutex<W>>, notification: Value) -> Result<(), String>
+where
+    W: AsyncWrite + Unpin,
+{
+    match tokio::time::timeout(
+        SUPERVISOR_NOTIFY_TIMEOUT,
+        write_supervisor_notification(writer, notification),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            log::warn!("[HappyBridge] Timed out writing supervisor notification");
+            Err("Happy bridge did not accept the message".to_string())
+        }
     }
 }
 
@@ -1059,15 +1100,16 @@ fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: App
 #[cfg(test)]
 mod tests {
     use super::{
-        BoundedLine, HappyBridgeState, MAX_RESTART_ATTEMPTS, MAX_SUPERVISOR_LINE_BYTES, error_response,
-        is_advertised_root, next_restart_attempt, parse_supervisor_line, read_bounded_line,
-        restart_allowed, restart_delay, report_state, should_rearm,
+        BoundedLine, HappyBridgeState, MAX_RESTART_ATTEMPTS, MAX_SUPERVISOR_LINE_BYTES,
+        discovered_project_roots, error_response, is_advertised_root, next_restart_attempt,
+        notify_supervisor, parse_supervisor_line, read_bounded_line, report_state, restart_allowed,
+        restart_delay, should_rearm,
     };
     use crate::commands::happy_bridge::{ADVERTISED_ROOTS_KEY, SETTINGS_STORE};
     use serde_json::Value;
     use std::time::Duration;
     use tauri_plugin_store::StoreExt;
-    use tokio::io::{AsyncWriteExt, BufReader, duplex};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, duplex};
 
     /// The store persists to the mock runtime's data dir, which sibling tests on
     /// the same host share, so the key is always reset rather than assumed absent.
@@ -1371,5 +1413,117 @@ mod tests {
                 .success()
         );
         assert!(matches!(entry.get_password(), Err(keyring::Error::NoEntry)));
+    }
+
+    fn conversation(project_root: Option<&str>, agent_cwd: Option<&str>) -> Value {
+        serde_json::json!({
+            "id": "conversation-1",
+            "title": "Agent",
+            "created_at": 0,
+            "kind": "agent",
+            "project_root": project_root,
+            "is_archived": false,
+            "selected_provider": null,
+            "selected_model": null,
+            "employee_id": null,
+            "agent_type": "claude-code",
+            "agent_session_id": null,
+            "agent_cwd": agent_cwd,
+            "agent_model_id": null,
+            "agent_permission_mode": null,
+            "agent_metadata": null,
+            "project_id": null,
+        })
+    }
+
+    fn conversations(rows: Vec<Value>) -> Vec<crate::commands::chat::UnifiedConversationRow> {
+        rows.into_iter()
+            .map(|row| serde_json::from_value(row).expect("conversation row deserializes"))
+            .collect()
+    }
+
+    #[test]
+    fn project_root_discovery_reports_a_failed_lookup() {
+        // Regression: the lookup was absorbed with `unwrap_or_default()`. On a
+        // busy database the bridge started, advertised zero folders, reported
+        // itself connected, and then refused every remote spawn silently.
+        let failure = discovered_project_roots(Err("database is locked".to_string()));
+
+        assert!(
+            failure.is_err_and(|error| error.contains("database is locked")),
+            "a failed folder lookup must not be reported as an empty project list"
+        );
+    }
+
+    #[test]
+    fn project_root_discovery_keeps_first_seen_distinct_roots() {
+        let roots = discovered_project_roots(Ok(conversations(vec![
+            conversation(Some("/workspace/alpha"), None),
+            // A conversation with no project falls back to where the agent ran.
+            conversation(None, Some("/workspace/beta")),
+            conversation(Some("/workspace/alpha"), Some("/workspace/gamma")),
+            conversation(None, None),
+        ])));
+
+        assert_eq!(
+            roots.expect("a successful lookup yields roots"),
+            vec![
+                "/workspace/alpha".to_string(),
+                "/workspace/beta".to_string()
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn supervisor_notification_delivers_a_line() {
+        let (writer, mut reader) = duplex(1024);
+        let writer = std::sync::Arc::new(tokio::sync::Mutex::new(writer));
+
+        notify_supervisor(&writer, serde_json::json!({ "method": "cancel_pairing" }))
+            .await
+            .expect("a drained pipe accepts the notification");
+
+        let mut line = String::new();
+        BufReader::new(&mut reader)
+            .read_line(&mut line)
+            .await
+            .expect("the notification is readable");
+        assert_eq!(line.trim_end(), r#"{"method":"cancel_pairing"}"#);
+    }
+
+    #[tokio::test]
+    async fn supervisor_notification_reports_a_closed_pipe() {
+        // Regression: `update_roots` returned `Ok(())` and `cancel_pairing`
+        // returned `()` no matter what the write did, so the checkbox kept a
+        // change the bridge never saw and a dismissed pairing dialog reported
+        // success while the code stayed authorizable.
+        let (writer, reader) = duplex(1024);
+        drop(reader);
+        let writer = std::sync::Arc::new(tokio::sync::Mutex::new(writer));
+
+        let result =
+            notify_supervisor(&writer, serde_json::json!({ "method": "roots_update" })).await;
+
+        assert!(
+            result.is_err(),
+            "a notification that never reached the bridge must not report success"
+        );
+    }
+
+    #[tokio::test]
+    async fn supervisor_notification_gives_up_on_a_pipe_nobody_drains() {
+        // A bridge that is alive but not reading stdin blocks the write once the
+        // pipe buffer fills. `_reader` stays bound so the pipe is open but idle,
+        // which is exactly that state.
+        let (writer, _reader) = duplex(8);
+        let writer = std::sync::Arc::new(tokio::sync::Mutex::new(writer));
+
+        let result =
+            notify_supervisor(&writer, serde_json::json!({ "method": "roots_update" })).await;
+
+        assert!(
+            result.is_err(),
+            "a wedged bridge must fail the caller rather than block it forever"
+        );
     }
 }

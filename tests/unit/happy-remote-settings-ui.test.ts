@@ -32,6 +32,34 @@ describe("Happy Remote Access app discovery (#3127)", () => {
   });
 });
 
+/**
+ * Asserted against the source rather than a mounted component: the Vitest
+ * project runs in a `node` environment with no DOM and no Solid test renderer,
+ * so this section cannot be rendered here. These lock the two statements whose
+ * absence caused the defects.
+ */
+describe("Happy Remote Access unmount teardown (#3151, #3153)", () => {
+  const cleanup = remoteSettings.slice(
+    remoteSettings.indexOf("onCleanup(() => {"),
+    remoteSettings.indexOf("const toggleRemoteAccess"),
+  );
+
+  it("withdraws an in-flight pairing code when the section unmounts", () => {
+    // Switching settings sections unmounts without going through the dismiss
+    // button, and the bridge kept polling for the full 5 minute timeout with a
+    // scanned QR still authorizable.
+    expect(cleanup).toContain("pairingPayload()");
+    expect(cleanup).toContain("cancelPairing()");
+  });
+
+  it("releases a status listener that resolved after the unmount", () => {
+    // `onStatusChange` resolves after a round trip, so a fast unmount dropped
+    // the handle and leaked a listener that kept reporting bridge errors.
+    expect(cleanup).toContain("unmounted = true");
+    expect(remoteSettings).toMatch(/if \(unmounted\) \{\s*unlisten\(\);/);
+  });
+});
+
 describe("Happy advertised-root consent (#3144)", () => {
   it("derives roots from the same conversations the user sees checkboxes for", () => {
     // The UI lists agent conversations. If the bridge discovers roots from a

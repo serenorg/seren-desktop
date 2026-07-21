@@ -148,8 +148,7 @@ pub async fn happy_bridge_start_pairing(
 pub async fn happy_bridge_cancel_pairing(
     state: State<'_, HappyBridgeManager>,
 ) -> Result<(), String> {
-    state.cancel_pairing().await;
-    Ok(())
+    state.cancel_pairing().await
 }
 
 /// Stops the bridge before clearing the credential. The running process holds

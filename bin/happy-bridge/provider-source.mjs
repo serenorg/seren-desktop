@@ -4,6 +4,7 @@
 import WebSocket from "ws";
 
 const RPC_TIMEOUT_MS = 30_000;
+const MAX_QUEUED_NOTIFICATIONS = 32;
 
 const PROVIDER_EVENT_KINDS = new Map([
   ["provider://message-chunk", "assistant-delta"],
@@ -74,6 +75,7 @@ class ProviderRuntimeClient {
     this.nextId = 0;
     this.pending = new Map();
     this.notificationListeners = new Set();
+    this.notificationQueue = [];
     this.onUnexpectedDisconnect = onUnexpectedDisconnect;
     this.intentionalClose = false;
     this.disconnectReported = false;
@@ -109,9 +111,7 @@ class ProviderRuntimeClient {
     }
 
     if (typeof message.method === "string") {
-      for (const listener of this.notificationListeners) {
-        listener(message.method, message.params ?? {});
-      }
+      this.dispatchNotification(message.method, message.params ?? {});
       return;
     }
 
@@ -127,8 +127,26 @@ class ProviderRuntimeClient {
     }
   }
 
+  // Registration attaches its subscriber only after several relay round trips.
+  // Discarding what arrives first lost the `prompt-complete` of a turn that was
+  // already running, leaving the queue for that session marked busy forever.
+  dispatchNotification(method, params) {
+    if (this.notificationListeners.size === 0) {
+      if (this.notificationQueue.length === MAX_QUEUED_NOTIFICATIONS) {
+        this.notificationQueue.shift();
+      }
+      this.notificationQueue.push({ method, params });
+      return;
+    }
+    for (const listener of this.notificationListeners) listener(method, params);
+  }
+
   subscribeNotifications(listener) {
     this.notificationListeners.add(listener);
+    while (this.notificationQueue.length > 0) {
+      const notification = this.notificationQueue.shift();
+      listener(notification.method, notification.params);
+    }
     return () => this.notificationListeners.delete(listener);
   }
 
@@ -156,6 +174,7 @@ class ProviderRuntimeClient {
     }
     this.pending.clear();
     this.notificationListeners.clear();
+    this.notificationQueue.length = 0;
     const socket = this.socket;
     this.socket = null;
     if (!socket || socket.readyState !== WebSocket.OPEN) return Promise.resolve();
