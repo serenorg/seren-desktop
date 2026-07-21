@@ -52,15 +52,25 @@ function startInputReader() {
   return { configPromise, queuedResponses };
 }
 
+// Caps the wait for the closes below so a socket that never completes its
+// handshake still exits well inside the supervisor's STOP_GRACE_PERIOD.
+const CLOSE_TIMEOUT_MS = 2000;
+
 async function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
-  client?.close();
-  happyLayer?.close();
+  // Awaited: exiting while these are still tearing down aborts the process on
+  // Windows with an assertion in uv_async_send. The loop cannot be left to
+  // drain on its own instead, because a child's piped stdout and stderr keep
+  // it alive indefinitely.
+  await Promise.race([
+    Promise.allSettled([client?.close(), happyLayer?.close()]),
+    new Promise((resolve) => setTimeout(resolve, CLOSE_TIMEOUT_MS)),
+  ]);
   supervisorChannel?.close();
   input?.close();
   process.exitCode = exitCode;
-  setImmediate(() => process.exit(exitCode));
+  process.exit(exitCode);
 }
 
 // Signal handlers receive the signal name as their first argument, which is not

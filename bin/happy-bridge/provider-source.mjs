@@ -156,10 +156,16 @@ class ProviderRuntimeClient {
     }
     this.pending.clear();
     this.notificationListeners.clear();
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      this.socket.close(1000, "bridge shutdown");
-    }
+    const socket = this.socket;
     this.socket = null;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return Promise.resolve();
+    // Resolves on the close handshake rather than returning immediately: the
+    // caller exits the process next, and exiting while the socket is still
+    // tearing down aborts on Windows inside uv_async_send.
+    return new Promise((resolve) => {
+      socket.once("close", resolve);
+      socket.close(1000, "bridge shutdown");
+    });
   }
 }
 
