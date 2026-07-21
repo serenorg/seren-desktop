@@ -2,9 +2,9 @@
 // ABOUTME: Preserves promptless in-project work while preventing silent boundary escapes.
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import os from "node:os";
-import path from "node:path";
+import path, { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 // @ts-ignore - browser-local runtime is plain ESM.
@@ -154,6 +154,47 @@ describe("Claude promptless containment (#3091)", () => {
     expect(
       exceptional.hookSpecificOutput.permissionDecision,
     ).toBe("ask");
+  });
+});
+
+describe("Windows shell boundary gap is stated, not faked (#3149)", () => {
+  const settingsPanel = readFileSync(
+    resolve("src/components/settings/SettingsPanel.tsx"),
+    "utf8",
+  );
+  const claudeRuntime = readFileSync(
+    resolve("bin/browser-local/claude-runtime.mjs"),
+    "utf8",
+  );
+
+  it("keeps Bash out of the hook matcher, which cannot bound a shell string", () => {
+    // Claude's sandbox is the only layer that bounds Bash, and upstream does
+    // not run it on native Windows. Matching Bash here would mean parsing
+    // file arguments out of arbitrary shell commands — `cat $(printf ...)`
+    // walks straight past that, so the hook would fail open while reading as
+    // a real boundary. The gap is surfaced in Settings instead.
+    const settings = buildClaudePolicySettings({
+      cwd: tempProject(),
+      sandboxMode: "workspace-write",
+      networkEnabled: false,
+    });
+    expect(settings.hooks.PreToolUse[0].matcher).not.toContain("Bash");
+    if (process.platform === "win32") {
+      expect(settings.sandbox).toBeUndefined();
+    }
+    expect(claudeRuntime).toContain("#3149");
+  });
+
+  it("tells Windows users their shell commands are unbounded", () => {
+    // Without this the feature advertises containment it does not deliver on
+    // Windows. The note must be platform-gated so macOS and Linux, where the
+    // sandbox does bound Bash, are not told otherwise.
+    expect(settingsPanel).toContain("isWindowsPlatform");
+    const noteAt = settingsPanel.indexOf("Shell commands are not bounded");
+    expect(noteAt).toBeGreaterThan(-1);
+    const gateAt = settingsPanel.lastIndexOf("isWindowsPlatform()", noteAt);
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(settingsPanel.slice(gateAt, noteAt)).not.toContain("</Show>");
   });
 });
 

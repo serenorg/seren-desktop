@@ -1121,6 +1121,20 @@ function buildClaudeArgs({
   return args;
 }
 
+// Companion to buildClaudeArgs: clears the Windows temp files it materializes
+// for --mcp-config and --settings. Every launch outcome has to route here.
+// Node emits "error" for a process that never started and may never emit
+// "exit", so binding cleanup to "exit" alone stranded one file per failed
+// launch. #3154
+function removeClaudeArgsTempFiles(args) {
+  for (const tempFile of [args?._mcpTempFile, args?._policyTempFile]) {
+    if (!tempFile) continue;
+    try {
+      unlinkSync(tempFile);
+    } catch {}
+  }
+}
+
 function quoteHookArgument(value) {
   const text = String(value);
   if (process.platform === "win32") {
@@ -1172,6 +1186,15 @@ function buildClaudePolicySettings({ cwd, sandboxMode, networkEnabled }) {
 
   // Claude's native sandbox constrains Bash subprocesses on macOS/Linux.
   // Built-in file tools are independently constrained by the hook above.
+  //
+  // Native Windows gets no Bash boundary at all. The sandbox is built on
+  // Seatbelt (macOS) and bubblewrap (Linux/WSL2); upstream states native
+  // Windows is unsupported, so emitting these keys there configures nothing.
+  // The only Windows-viable alternative is matching file paths out of
+  // arbitrary shell strings in the PreToolUse hook, which any indirection
+  // (`cat $(printf ...)`) defeats — a boundary that reads as real while
+  // failing open is worse than a stated gap, so Settings → Agent says
+  // plainly that shell commands are unbounded on Windows. #3149
   if (process.platform !== "win32") {
     settings.sandbox = {
       enabled: true,
@@ -2619,41 +2642,35 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         writeFileSync(claudeArgs._policyTempFile, policySettingsJson, "utf-8");
       }
 
-      const processHandle = spawn(
-        claudeBin,
-        claudeArgs,
-        {
-          cwd,
-          env: {
-            ...process.env,
-            ...mcpConfig.childEnv,
-            PATH: extendedPath,
-            SEREN_AGENT_PROJECT_ROOT: cwd,
-            SEREN_AGENT_SANDBOX_MODE: sandboxMode ?? "workspace-write",
-            SEREN_AGENT_APPROVAL_POLICY: approvalPolicy ?? "on-request",
-            SEREN_AGENT_AUTO_APPROVE_READS:
-              autoApproveReads === false ? "false" : "true",
-            SEREN_AGENT_NETWORK_ENABLED:
-              networkEnabled === false ? "false" : "true",
+      let processHandle;
+      try {
+        processHandle = spawn(
+          claudeBin,
+          claudeArgs,
+          {
+            cwd,
+            env: {
+              ...process.env,
+              ...mcpConfig.childEnv,
+              PATH: extendedPath,
+              SEREN_AGENT_PROJECT_ROOT: cwd,
+              SEREN_AGENT_SANDBOX_MODE: sandboxMode ?? "workspace-write",
+              SEREN_AGENT_APPROVAL_POLICY: approvalPolicy ?? "on-request",
+              SEREN_AGENT_AUTO_APPROVE_READS:
+                autoApproveReads === false ? "false" : "true",
+              SEREN_AGENT_NETWORK_ENABLED:
+                networkEnabled === false ? "false" : "true",
+            },
+            stdio: ["pipe", "pipe", "pipe"],
+            shell: resolveSpawnShell(claudeBin),
           },
-          stdio: ["pipe", "pipe", "pipe"],
-          shell: resolveSpawnShell(claudeBin),
-        },
-      );
+        );
+      } catch (spawnError) {
+        removeClaudeArgsTempFiles(claudeArgs);
+        throw spawnError;
+      }
 
-      // Clean up MCP config temp file when the process exits
-      if (claudeArgs._mcpTempFile) {
-        const tempFile = claudeArgs._mcpTempFile;
-        processHandle.on("exit", () => {
-          try { unlinkSync(tempFile); } catch {}
-        });
-      }
-      if (claudeArgs._policyTempFile) {
-        const tempFile = claudeArgs._policyTempFile;
-        processHandle.on("exit", () => {
-          try { unlinkSync(tempFile); } catch {}
-        });
-      }
+      processHandle.on("exit", () => removeClaudeArgsTempFiles(claudeArgs));
 
       // Declared before the error listener so the listener can identity-check
       // against this launch's session; assigned below once the record exists.
@@ -2674,6 +2691,10 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         console.error(`${claudeLogPrefix} Spawn error: ${spawnError.message}`);
         sessions.delete(sessionId);
         void serenMcpProxy?.close();
+        // A process that never started may never emit "exit", so this launch's
+        // temp config files are cleared here or not at all. The orphan guard
+        // above keeps a replaced handle from clearing the live launch's. #3154
+        removeClaudeArgsTempFiles(claudeArgs);
         // macOS surfaces a wrong-arch binary as `errno: -86` / "Bad CPU type in
         // executable" (EBADARCH). It hits when a prior install dropped the wrong
         // slice (e.g. x86_64 claude on an arm64 Mac without Rosetta) and our
@@ -3301,6 +3322,7 @@ export {
   comparePickerEntries as _comparePickerEntries,
   resolveSpawnShell as _resolveSpawnShell,
   buildClaudeArgs as _buildClaudeArgs,
+  removeClaudeArgsTempFiles as _removeClaudeArgsTempFiles,
   buildClaudePolicySettings as _buildClaudePolicySettings,
   normalizeModelRecords as _normalizeModelRecords,
   buildSessionStatus as _buildSessionStatus,

@@ -10,6 +10,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+// @ts-ignore - browser-local runtime is plain ESM.
+import { _CLI_INSTALL_INSTRUCTIONS } from "../../bin/browser-local/agent-registry.mjs";
 import { resolveGrokBinary } from "../../bin/browser-local/grok-binary.mjs";
 import { describe, expect, it } from "vitest";
 
@@ -108,6 +110,39 @@ describe("Grok native ACP agent (#3084)", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("publishes official install instructions for the Grok package (#3154)", () => {
+    // emitCliActionRequired reads this map. A missing entry interpolates
+    // `undefined` into the thrown message and leaves the action-required
+    // event with no URL to open.
+    const url = _CLI_INSTALL_INSTRUCTIONS["@xai-official/grok"];
+    expect(url).toBe("https://docs.x.ai/build/overview");
+    expect(() => new URL(url)).not.toThrow();
+    expect(new URL(url).protocol).toBe("https:");
+  });
+
+  it("reports a missing install instead of spawning a bare command (#3154)", () => {
+    // Returning "grok" when nothing resolved produced a spawn ENOENT that
+    // reached the user as "Grok agent stopped before request completed",
+    // which says nothing about a missing install. Mirrors Claude/Codex.
+    const start = registrySource.indexOf("    grok: {");
+    const end = registrySource.indexOf("    lmstudio: {", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const ensureCli = registrySource.slice(
+      registrySource.indexOf("async ensureCli()", start),
+      end,
+    );
+
+    expect(ensureCli).toContain("emitCliActionRequired");
+    expect(ensureCli).toContain('packageName: "@xai-official/grok"');
+    expect(ensureCli).toContain('reason: "installation_required"');
+    expect(ensureCli).toMatch(/throw new Error\(/);
+    expect(ensureCli).toContain("Install it from ${url}");
+    // A user-managed grok on PATH sits outside every path the resolver
+    // knows; it must still spawn rather than hit the throw.
+    expect(ensureCli).toContain('isCommandAvailable("grok")');
   });
 
   it("routes Grok through the registry, runtime dispatcher, and public agent type", () => {
