@@ -2,6 +2,8 @@
 // ABOUTME: Pairing material crosses the supervisor channel only and is never logged.
 
 import { randomUUID } from "node:crypto";
+import http from "node:http";
+import https from "node:https";
 import os from "node:os";
 import { ApiClient, configuration } from "happy/lib";
 import nacl from "tweetnacl";
@@ -108,23 +110,94 @@ function identityFromAuthResponse(token, decrypted) {
   throw new Error("Happy pairing response used an unsupported credential format");
 }
 
-async function postAuthRequest(relayUrl, publicKey) {
-  const response = await fetch(`${relayUrl}/v1/auth/request`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Happy-Client": "seren-desktop/phase-3" },
-    body: JSON.stringify({ publicKey: encodeBase64(publicKey), supportsV2: true }),
+function postPairingRequest(relayUrl, publicKey, signal) {
+  const url = new URL(`${relayUrl.replace(/\/+$/, "")}/v1/auth/request`);
+  const transport = url.protocol === "https:" ? https : url.protocol === "http:" ? http : null;
+  if (!transport) return Promise.reject(new Error("Happy relay must use HTTP or HTTPS"));
+  const body = JSON.stringify({ publicKey: encodeBase64(publicKey), supportsV2: true });
+
+  return new Promise((resolve, reject) => {
+    let responseBody = "";
+    let responseEnded = false;
+    let responseStatus = 0;
+    let failure = null;
+    let aborted = false;
+    const request = transport.request(
+      url,
+      {
+        method: "POST",
+        agent: false,
+        headers: {
+          Connection: "close",
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+          "X-Happy-Client": "seren-desktop/phase-3",
+        },
+      },
+      (response) => {
+        responseStatus = response.statusCode ?? 0;
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          responseBody += chunk;
+        });
+        response.once("aborted", () => {
+          failure = new Error("Happy pairing response ended early");
+        });
+        response.once("error", (error) => {
+          failure = error;
+        });
+        response.once("end", () => {
+          responseEnded = true;
+        });
+      },
+    );
+
+    const onAbort = () => {
+      aborted = true;
+      const error = new Error("Happy pairing request aborted");
+      error.name = "AbortError";
+      request.destroy(error);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    request.once("error", (error) => {
+      if (!aborted) failure = error;
+    });
+    // Resolve only after the request's own socket closes. The bridge exits as
+    // soon as its cleanup promises settle, so response `end` is too early on
+    // Windows: libuv may still be closing the underlying async handle.
+    request.once("close", () => {
+      signal?.removeEventListener("abort", onAbort);
+      if (aborted) {
+        const error = new Error("Happy pairing request aborted");
+        error.name = "AbortError";
+        reject(error);
+      } else if (failure) {
+        reject(failure);
+      } else if (!responseEnded) {
+        reject(new Error("Happy pairing response ended early"));
+      } else {
+        resolve({ status: responseStatus, body: responseBody });
+      }
+    });
+
+    if (signal?.aborted) onAbort();
+    else request.end(body);
   });
-  if (!response.ok) throw new Error(`Happy pairing request rejected (${response.status})`);
 }
 
-async function readAuthRequest(relayUrl, publicKey) {
-  const response = await fetch(`${relayUrl}/v1/auth/request`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Happy-Client": "seren-desktop/phase-3" },
-    body: JSON.stringify({ publicKey: encodeBase64(publicKey), supportsV2: true }),
-  });
-  if (!response.ok) throw new Error(`Happy pairing status rejected (${response.status})`);
-  return response.json();
+async function postAuthRequest(relayUrl, publicKey) {
+  const response = await postPairingRequest(relayUrl, publicKey);
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Happy pairing request rejected (${response.status})`);
+  }
+}
+
+async function readAuthRequest(relayUrl, publicKey, signal) {
+  const response = await postPairingRequest(relayUrl, publicKey, signal);
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Happy pairing status rejected (${response.status})`);
+  }
+  return JSON.parse(response.body);
 }
 
 function machineMetadata(config, capabilities = { agents: [], roots: [] }) {
@@ -286,6 +359,8 @@ export function createHappyLayer({
   let api = null;
   let machineClient = null;
   let pairingPromise = null;
+  let pairingAuthorizationPromise = null;
+  let pairingAbortController = null;
   let latestPairingPayload = null;
   let pairingCancelled = false;
   let sourceSubscription = null;
@@ -690,14 +765,14 @@ export function createHappyLayer({
     return true;
   }
 
-  async function waitForAuthorization(keyPair) {
+  async function waitForAuthorization(keyPair, signal) {
     const deadline = Date.now() + AUTH_TIMEOUT_MS;
     while (Date.now() < deadline) {
       if (pairingCancelled) {
         debug("pairing abandoned before authorization");
         return false;
       }
-      const result = await readAuthRequest(config.relayUrl, keyPair.publicKey);
+      const result = await readAuthRequest(config.relayUrl, keyPair.publicKey, signal);
       // Checked again after the round trip: an authorization that lands while
       // the user is dismissing the dialog must not be accepted.
       if (pairingCancelled) {
@@ -724,6 +799,7 @@ export function createHappyLayer({
   function cancelPairing() {
     if (!pairingPromise && !latestPairingPayload) return;
     pairingCancelled = true;
+    pairingAbortController?.abort();
     pairingPromise = null;
     latestPairingPayload = null;
     debug("pairing cancelled by supervisor");
@@ -743,14 +819,25 @@ export function createHappyLayer({
       const payload = `happy://terminal?${encodeBase64Url(keyPair.publicKey)}`;
       latestPairingPayload = payload;
       supervisorChannel.notify("pairing_payload", { payload });
-      void waitForAuthorization(keyPair)
+      const abortController = new AbortController();
+      pairingAbortController = abortController;
+      pairingAuthorizationPromise = waitForAuthorization(keyPair, abortController.signal)
         .then((authorized) => {
           if (!authorized) pairingPromise = null;
         })
         .catch((error) => {
           pairingPromise = null;
-          debug(`pairing authorization failed: ${error instanceof Error ? error.message : "unknown error"}`);
+          if (error?.name !== "AbortError") {
+            debug(`pairing authorization failed: ${error instanceof Error ? error.message : "unknown error"}`);
+          }
+        })
+        .finally(() => {
+          if (pairingAbortController === abortController) {
+            pairingAbortController = null;
+            pairingAuthorizationPromise = null;
+          }
         });
+      void pairingAuthorizationPromise;
       return payload;
     })();
     return pairingPromise;
@@ -786,6 +873,8 @@ export function createHappyLayer({
     async close() {
       sourceSubscription?.();
       supervisorSubscription?.();
+      cancelPairing();
+      await pairingAuthorizationPromise;
       // Awaited rather than fire-and-forget: the caller exits the process once
       // this resolves, and tearing the event loop down while these closes are
       // still in flight aborts the process on Windows.
