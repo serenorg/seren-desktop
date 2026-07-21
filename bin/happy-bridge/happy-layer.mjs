@@ -347,6 +347,91 @@ export function createStartupStatusGate(notify) {
   };
 }
 
+export function createDeferredPromptQueue({
+  send,
+  onError = () => {},
+  shouldRetry = () => false,
+  maxQueuedPerSession = 32,
+}) {
+  const queues = new Map();
+  const busySessions = new Set();
+  const drainingSessions = new Set();
+  let closed = false;
+
+  async function drain(sessionId) {
+    if (closed || busySessions.has(sessionId) || drainingSessions.has(sessionId)) {
+      return;
+    }
+    const queue = queues.get(sessionId);
+    if (!queue?.length) return;
+
+    drainingSessions.add(sessionId);
+    try {
+      while (!closed && queue.length > 0 && !busySessions.has(sessionId)) {
+        const item = queue[0];
+        try {
+          await send(sessionId, item.value);
+          queue.shift();
+          item.resolve(true);
+        } catch (error) {
+          if (shouldRetry(error)) {
+            busySessions.add(sessionId);
+            onError(error, { deferred: true, sessionId });
+            break;
+          }
+          queue.shift();
+          item.resolve(false);
+          onError(error, { deferred: false, sessionId });
+        }
+      }
+    } finally {
+      drainingSessions.delete(sessionId);
+      if (queue.length === 0) queues.delete(sessionId);
+    }
+  }
+
+  function clear(sessionId) {
+    const queue = queues.get(sessionId) ?? [];
+    queues.delete(sessionId);
+    busySessions.delete(sessionId);
+    for (const item of queue.splice(0)) item.resolve(false);
+  }
+
+  return {
+    enqueue(sessionId, value) {
+      if (closed) return Promise.resolve(false);
+      const queue = queues.get(sessionId) ?? [];
+      // A paired peer must not be able to grow memory without bound while a
+      // long local turn is active. Preserve the oldest accepted prompts.
+      if (queue.length >= maxQueuedPerSession) {
+        onError(new Error("Happy prompt queue is full"), {
+          deferred: false,
+          sessionId,
+        });
+        return Promise.resolve(false);
+      }
+      queues.set(sessionId, queue);
+      const result = new Promise((resolve) => queue.push({ value, resolve }));
+      void drain(sessionId);
+      return result;
+    },
+    setBusy(sessionId, busy) {
+      if (busy) {
+        busySessions.add(sessionId);
+        return;
+      }
+      busySessions.delete(sessionId);
+      void drain(sessionId);
+    },
+    clear,
+    close() {
+      closed = true;
+      for (const sessionId of Array.from(queues.keys())) clear(sessionId);
+      busySessions.clear();
+    },
+  };
+}
+
 function isUsableHappySession(session) {
   return (
     session !== null &&
@@ -416,6 +501,20 @@ export function createHappyLayer({
     debugLog(message);
   }
 
+  const promptQueue = createDeferredPromptQueue({
+    send: async (_sessionId, queued) =>
+      handleUserMessage(queued.entry, queued.message),
+    shouldRetry: (error) =>
+      error instanceof Error &&
+      error.message === "Another prompt is already active for this session.",
+    onError: (_error, outcome) =>
+      debug(
+        outcome.deferred
+          ? "deferred Happy inbound user message until provider is ready"
+          : "ignored Happy inbound user message",
+      ),
+  });
+
   // Listing every session once per streamed event issued one provider RPC per
   // assistant delta. Summaries are stable for the fields consumed here
   // (agentType, cwd), so they are cached and only re-listed for a session the
@@ -452,6 +551,7 @@ export function createHappyLayer({
       if (isSessionInScope(entry.summary)) continue;
       sessions.delete(sessionId);
       liveSessions.delete(sessionId);
+      promptQueue.clear(sessionId);
       delete pendingRequests[sessionId];
       sessionCreationPromises.delete(sessionId);
       await entry.client
@@ -489,7 +589,7 @@ export function createHappyLayer({
   function registerInbound(entry) {
     const { client } = entry;
     client.onUserMessage((message) => {
-      void handleUserMessage(entry, message).catch(() => debug("ignored Happy inbound user message"));
+      void promptQueue.enqueue(entry.sessionId, { entry, message });
     });
     // Decryption failure yields null params rather than throwing, and these two
     // handlers ignore their argument, so without this guard a relay could cancel
@@ -593,6 +693,7 @@ export function createHappyLayer({
     const entry = { sessionId, happySessionId: session.id, summary, session, client };
     sessions.set(sessionId, entry);
     liveSessions.add(sessionId);
+    promptQueue.setBusy(sessionId, ["prompting", "busy", "running"].includes(summary?.status));
     rememberPendingPermissions(sessionId, summary?.pendingPermissions);
     registerInbound(entry);
     client.sendSessionEvent({ type: "switch", mode: "remote" });
@@ -636,8 +737,19 @@ export function createHappyLayer({
     }
     const terminal =
       event.kind === "status" && ["error", "terminated"].includes(event.payload?.status);
+    const providerStatus = event.kind === "status" ? event.payload?.status : null;
+    if (["prompting", "busy", "running"].includes(providerStatus)) {
+      promptQueue.setBusy(event.sessionId, true);
+    } else if (
+      event.kind === "turn-complete" ||
+      event.kind === "error" ||
+      ["ready", "idle", "completed"].includes(providerStatus)
+    ) {
+      promptQueue.setBusy(event.sessionId, false);
+    }
     if (terminal) {
       liveSessions.delete(event.sessionId);
+      promptQueue.clear(event.sessionId);
       delete pendingRequests[event.sessionId];
       terminatedSessions.mark(event.sessionId);
     } else {
@@ -913,6 +1025,7 @@ export function createHappyLayer({
     async close() {
       sourceSubscription?.();
       supervisorSubscription?.();
+      promptQueue.close();
       cancelPairing();
       await pairingAuthorizationPromise;
       // Awaited rather than fire-and-forget: the caller exits the process once
