@@ -125,21 +125,27 @@ function buildSafeDisplayText(
     unverifiedBySentence.set(claim.sentenceIndex, existing);
   }
 
-  const safeSentences = sentences.map((sentence) => {
+  // Splice rewrites into the original text by offset. Everything outside an
+  // unverified sentence is copied byte-for-byte, so markdown structure and all
+  // unrelated content survive verbatim (#3105).
+  let result = "";
+  let cursor = 0;
+  for (const sentence of sentences) {
     const unverifiedClaims = unverifiedBySentence.get(sentence.index);
-    if (!unverifiedClaims || unverifiedClaims.length === 0) {
-      return sentence.text;
-    }
+    if (!unverifiedClaims || unverifiedClaims.length === 0) continue;
     const rewrites = [...unverifiedClaims]
       .sort((a, b) => a.sentenceOffset - b.sentenceOffset)
       .map((claim) => {
         const rule = ruleForClaim(claim.kind);
         return rule.safeRewrite(claim, evidence);
       });
-    return dedupe(rewrites).join(" ");
-  });
+    result +=
+      displayText.slice(cursor, sentence.start) + dedupe(rewrites).join(" ");
+    cursor = sentence.end;
+  }
+  result += displayText.slice(cursor);
 
-  return safeSentences.join(" ").trim();
+  return result.trim();
 }
 
 function ruleForClaim(kind: ClaimKind): FinalizationRule {
