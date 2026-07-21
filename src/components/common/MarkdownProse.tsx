@@ -32,16 +32,19 @@ export const MarkdownProse: Component<MarkdownProseProps> = (props) => {
       const originalText = copyBtn.innerHTML;
 
       if (copyRestoreTimer) clearTimeout(copyRestoreTimer);
-      void navigator.clipboard.writeText(decodedCode).then(() => {
-        copyBtn.classList.add("copied");
-        copyBtn.textContent = "Copied!";
-        copyRestoreTimer = setTimeout(() => {
-          copyBtn.classList.remove("copied");
-          copyBtn.innerHTML = originalText;
-        }, 2000);
-      }).catch(() => {
-        // Clipboard permissions can be denied by the host; keep the control inert.
-      });
+      void navigator.clipboard
+        .writeText(decodedCode)
+        .then(() => {
+          copyBtn.classList.add("copied");
+          copyBtn.textContent = "Copied!";
+          copyRestoreTimer = setTimeout(() => {
+            copyBtn.classList.remove("copied");
+            copyBtn.innerHTML = originalText;
+          }, 2000);
+        })
+        .catch(() => {
+          // Clipboard permissions can be denied by the host; keep the control inert.
+        });
       return;
     }
 
