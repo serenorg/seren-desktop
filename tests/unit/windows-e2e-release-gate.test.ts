@@ -666,4 +666,37 @@ describe("Windows production e2e release gate", () => {
     expect(stage).toContain("if ($LASTEXITCODE) { exit $LASTEXITCODE }");
     expect(stage).not.toContain("if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }");
   });
+
+  it("activates the same pnpm major on the e2e box as the release build", () => {
+    // The box runs `pnpm install --frozen-lockfile`. pnpm 10 moved
+    // patchedDependencies from package.json into pnpm-workspace.yaml, so a
+    // pnpm 9 box reads an empty config, sees the key in the lockfile, and
+    // aborts with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH — failing the gate that
+    // publish-release needs, so the tag never publishes (#3136).
+    const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
+    const lockfile = readFileSync(join(root, "pnpm-lock.yaml"), "utf8");
+    const patchesAreWorkspaceScoped =
+      /^patchedDependencies:/m.test(workspace) &&
+      /^patchedDependencies:/m.test(lockfile);
+
+    const activated = taskUserRunner.match(
+      /"prepare",\s*"pnpm@(\d+)"/,
+    );
+    expect(activated).not.toBeNull();
+    const boxMajor = Number(activated?.[1]);
+
+    const releaseMajor = Number(
+      releaseWorkflow.match(
+        /uses: pnpm\/action-setup@v\d+\s+with:\s+version: (\d+)/,
+      )?.[1],
+    );
+    expect(releaseMajor).toBeGreaterThan(0);
+    expect(boxMajor).toBe(releaseMajor);
+
+    // The mismatch above is only silent-fatal while patches live in the
+    // workspace file; assert the precondition so this test explains itself
+    // if the patch declaration ever moves back.
+    expect(patchesAreWorkspaceScoped).toBe(true);
+    expect(boxMajor).toBeGreaterThanOrEqual(10);
+  });
 });
