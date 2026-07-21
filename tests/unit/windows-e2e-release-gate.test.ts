@@ -459,15 +459,51 @@ describe("Windows production e2e release gate", () => {
     expect(cliSetupAt).toBeLessThan(appHarnessAt);
     expect(taskUserRunner).toContain("@anthropic-ai/claude-code@latest");
     expect(taskUserRunner).toContain("@openai/codex@latest");
-    expect(taskUserRunner).toContain('Join-Path `$npmGlobalPrefix "claude.cmd"');
-    expect(taskUserRunner).toContain('Join-Path `$npmGlobalPrefix "codex.cmd"');
-    expect(taskUserRunner).toContain('Verify Claude Code CLI');
-    expect(taskUserRunner).toContain('Verify Codex CLI');
+    expect(taskUserRunner).toContain("@google/gemini-cli@latest");
+    expect(taskUserRunner).toContain("@xai-official/grok@latest");
+    for (const [label, binary] of [
+      ["Claude Code", "claude.cmd"],
+      ["Codex", "codex.cmd"],
+      ["Gemini", "gemini.cmd"],
+      ["Grok", "grok.cmd"],
+    ]) {
+      expect(taskUserRunner).toContain(
+        `Label = "${label}"; Package =`,
+      );
+      expect(taskUserRunner).toContain(`Binary = "${binary}"`);
+    }
+    expect(taskUserRunner).toContain(
+      'Invoke-LoggedNative "Verify `$(`$agentCli.Label) CLI"',
+    );
 
     expect(probe).toContain("provider_ensure_agent_cli");
     expect(probe).toContain("ensureAgentCli");
     expect(probe).toContain("ensuring provider CLI");
     expect(probe).toContain("provider CLI ready");
+    expect(probe).toContain("CLI_COMPATIBILITY_AGENT_TYPES");
+    expect(probe).toContain("verifyAgentCliCompatibility");
+    expect(probe).toContain("all provider CLI resolution checks passed");
+    for (const agentType of [
+      "codex",
+      "claude-code",
+      "claude-codex",
+      "gemini",
+      "grok",
+    ]) {
+      expect(probe).toContain(`"${agentType}"`);
+    }
+    const runtimeExerciseAt = probe.indexOf("async function exerciseAgentRuntime");
+    const compatibilityCheckAt = probe.indexOf(
+      "await verifyAgentCliCompatibility(ws)",
+      runtimeExerciseAt,
+    );
+    const authenticatedJourneysAt = probe.indexOf(
+      "for (const journey of AGENT_JOURNEYS)",
+      runtimeExerciseAt,
+    );
+    expect(runtimeExerciseAt).toBeGreaterThanOrEqual(0);
+    expect(compatibilityCheckAt).toBeGreaterThan(runtimeExerciseAt);
+    expect(compatibilityCheckAt).toBeLessThan(authenticatedJourneysAt);
 
     const singleJourneyStart = probe.indexOf("async function runSingleAgentJourney");
     const pairedJourneyStart = probe.indexOf("async function runPairedJourney");
