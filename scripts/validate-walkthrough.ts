@@ -6,6 +6,10 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import {
+  acquireValidationSlot,
+  type ValidationSlot,
+} from "./validation-slots";
 
 interface DiscoveryFile {
   port: number;
@@ -57,19 +61,22 @@ const scenarioPath = path.join(
   "scenarios",
   `${scenarioName}.ts`,
 );
-const validationDevPort = 1422;
 const discoveryTimeoutMs = Number(
   process.env.SEREN_VALIDATION_DISCOVERY_TIMEOUT_MS ?? 600_000,
 );
 const execFileAsync = promisify(execFile);
 
 async function main(): Promise<void> {
-  await rm(artifactsDir, { recursive: true, force: true });
-  await mkdir(artifactsDir, { recursive: true });
-
-  const app = launchValidationApp();
+  const slot = await acquireValidationSlot();
+  console.log(
+    `[validate:walkthrough] leased port ${slot.port} with identifier ${slot.identifier}`,
+  );
+  let app: ChildProcess | null = null;
   let discovery: DiscoveryFile | null = null;
   try {
+    await rm(artifactsDir, { recursive: true, force: true });
+    await mkdir(artifactsDir, { recursive: true });
+    app = launchValidationApp(slot);
     discovery = await waitForDiscovery(discoveryPath, discoveryTimeoutMs);
     await waitForFrontendReady(discovery, 60_000);
     const client = createClient(discovery);
@@ -113,8 +120,9 @@ async function main(): Promise<void> {
         headers: { "x-seren-validation-token": discovery.token },
       }).catch(() => undefined);
     }
-    await stopProcess(app);
-    await cleanupValidationDevServer();
+    if (app) await stopProcess(app);
+    await cleanupValidationDevServer(slot.port);
+    await slot.release();
   }
 }
 
@@ -136,7 +144,7 @@ async function waitForFrontendReady(
   throw new Error("Timed out waiting for validation WebView bridge readiness");
 }
 
-function launchValidationApp(): ChildProcess {
+function launchValidationApp(slot: ValidationSlot): ChildProcess {
   const child = spawn(
     "pnpm",
     [
@@ -147,12 +155,15 @@ function launchValidationApp(): ChildProcess {
       "validation",
       "--config",
       "src-tauri/tauri.validation.conf.json",
+      "--config",
+      JSON.stringify(slot.tauriConfig),
     ],
     {
       cwd: root,
       stdio: "inherit",
       env: {
         ...process.env,
+        SEREN_VALIDATION_DEV_PORT: String(slot.port),
         SEREN_VALIDATION_INSTANCE: "1",
         SEREN_VALIDATION_DISCOVERY_PATH: discoveryPath,
       },
@@ -274,7 +285,9 @@ async function stopProcess(child: ChildProcess): Promise<void> {
   ]);
 }
 
-async function cleanupValidationDevServer(): Promise<void> {
+async function cleanupValidationDevServer(
+  validationDevPort: number,
+): Promise<void> {
   if (process.platform === "win32") return;
   try {
     const { stdout } = await execFileAsync("ps", ["-ax", "-o", "pid=,command="]);
