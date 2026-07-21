@@ -2,12 +2,12 @@
 // ABOUTME: Releases the slot after the Tauri process and its dev server exit.
 
 import { spawn } from "node:child_process";
+import { validationDevArgs } from "./validation-dev-args";
 import { acquireValidationSlot } from "./validation-slots";
 
 async function main(): Promise<void> {
   const slot = await acquireValidationSlot();
-  const forwardedArgs = process.argv.slice(2);
-  if (forwardedArgs[0] === "--") forwardedArgs.shift();
+  const forwardedArgs = validationDevArgs(process.argv.slice(2));
   console.log(
     `[validation] leased port ${slot.port} with identifier ${slot.identifier}`,
   );
