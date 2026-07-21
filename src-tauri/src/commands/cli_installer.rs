@@ -1,5 +1,5 @@
-// ABOUTME: CLI installer commands for auto-installing Claude Code, Codex, and Gemini CLIs
-// ABOUTME: Detects missing CLIs and downloads/installs them automatically
+// ABOUTME: CLI availability checks and guarded installation handoffs.
+// ABOUTME: Avoids executing downloaded scripts; unverified tools require official manual setup.
 
 use std::process::Command;
 use tauri::{AppHandle, Emitter};
@@ -44,143 +44,45 @@ pub async fn check_cli_installed(tool: CliTool) -> Result<bool, String> {
     }
 }
 
-/// Install a CLI tool using the official installer
+fn manual_install_url(tool: &CliTool) -> &'static str {
+    match tool {
+        CliTool::Claude => "https://code.claude.com/docs/en/installation",
+        CliTool::Codex => "https://developers.openai.com/codex/cli/",
+        CliTool::Gemini => "https://github.com/google-gemini/gemini-cli",
+    }
+}
+
+/// Fail closed from the legacy Rust installer. Agent CLI installation belongs
+/// to the embedded provider runtime; this bridge must never invoke system npm
+/// or pipe mutable remote scripts into a shell.
 #[tauri::command]
 pub async fn install_cli_tool(app: AppHandle, tool: CliTool) -> Result<bool, String> {
-    let install_script = match tool {
-        CliTool::Claude => get_claude_install_script(),
-        CliTool::Codex => get_codex_install_script(),
-        CliTool::Gemini => get_gemini_install_script(),
-    };
-
-    log::info!(
-        "[CliInstaller] Installing {:?} using: {}",
-        tool,
-        install_script
+    let url = manual_install_url(&tool);
+    let message = format!(
+        "Automatic installation is disabled on this legacy path. Install from {url}, then retry in Seren."
     );
-
-    // Emit status update
     let _ = app.emit(
         "cli-install-status",
         serde_json::json!({
             "tool": tool,
-            "status": "downloading"
+            "status": "action_required",
+            "message": message,
+            "officialInstructionsUrl": url,
         }),
     );
+    Err(message)
+}
 
-    // Run the installation command
-    let result = if cfg!(target_os = "windows") {
-        install_windows(&install_script)
-    } else {
-        install_unix(&install_script)
-    };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    match result {
-        Ok(success) => {
-            if success {
-                let _ = app.emit(
-                    "cli-install-status",
-                    serde_json::json!({
-                        "tool": tool,
-                        "status": "installed"
-                    }),
-                );
-                log::info!("[CliInstaller] {:?} installed successfully", tool);
-            } else {
-                let _ = app.emit(
-                    "cli-install-status",
-                    serde_json::json!({
-                        "tool": tool,
-                        "status": "error",
-                        "message": "Installation failed"
-                    }),
-                );
-                log::error!("[CliInstaller] {:?} installation failed", tool);
-            }
-            Ok(success)
-        }
-        Err(e) => {
-            let _ = app.emit(
-                "cli-install-status",
-                serde_json::json!({
-                    "tool": tool,
-                    "status": "error",
-                    "message": e.clone()
-                }),
-            );
-            log::error!("[CliInstaller] {:?} installation error: {}", tool, e);
-            Err(e)
+    #[test]
+    fn unverified_tools_only_return_https_instructions() {
+        for tool in [CliTool::Claude, CliTool::Codex, CliTool::Gemini] {
+            let url = manual_install_url(&tool);
+            assert!(url.starts_with("https://"));
+            assert!(!url.contains('|'));
         }
     }
-}
-
-/// Get Claude Code installation script for current platform
-fn get_claude_install_script() -> String {
-    if cfg!(target_os = "windows") {
-        // PowerShell one-liner
-        "irm https://claude.ai/install.ps1 | iex".to_string()
-    } else {
-        // macOS/Linux bash one-liner
-        "curl -fsSL https://claude.ai/install.sh | bash".to_string()
-    }
-}
-
-/// Get Codex installation script for current platform
-fn get_codex_install_script() -> String {
-    // TODO: Update with actual Codex installation URLs when available
-    if cfg!(target_os = "windows") {
-        "irm https://codex.example.com/install.ps1 | iex".to_string()
-    } else {
-        "curl -fsSL https://codex.example.com/install.sh | bash".to_string()
-    }
-}
-
-/// Get Gemini CLI installation script for current platform.
-/// Installs `@google/gemini-cli` globally via npm. The provider runtime
-/// also has its own install path via `ensureGlobalNpmPackage` in
-/// agent-registry.mjs — this Tauri command exists for the legacy
-/// cliInstallerStore code path used by Settings panels.
-fn get_gemini_install_script() -> String {
-    if cfg!(target_os = "windows") {
-        "npm install -g @google/gemini-cli".to_string()
-    } else {
-        "npm install -g @google/gemini-cli".to_string()
-    }
-}
-
-/// Install on Windows using PowerShell
-fn install_windows(script: &str) -> Result<bool, String> {
-    let mut cmd = Command::new("powershell");
-    cmd.arg("-NoProfile").arg("-Command").arg(script);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to execute PowerShell: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Installation failed: {}", stderr));
-    }
-
-    Ok(true)
-}
-
-/// Install on Unix-like systems using bash
-fn install_unix(script: &str) -> Result<bool, String> {
-    let output = Command::new("bash")
-        .arg("-c")
-        .arg(script)
-        .output()
-        .map_err(|e| format!("Failed to execute bash: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Installation failed: {}", stderr));
-    }
-
-    Ok(true)
 }

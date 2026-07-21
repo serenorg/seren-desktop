@@ -1,5 +1,5 @@
 // ABOUTME: Focused guard for #2904 — Codex spawn must block on upgrading old CLIs.
-// ABOUTME: Prevents regressing to install-only ensureCli while GPT-5.6 defaults require a newer Codex.
+// ABOUTME: Prevents regressing to unverified ensureCli while GPT-5.6 defaults require a newer Codex.
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -23,18 +23,20 @@ describe("#2904 Codex CLI upgrade gate", () => {
     expect(codexDefinition).not.toContain("return ensureGlobalNpmPackage({");
   });
 
-  it("the Codex updater runs codex update and fails closed if still below baseline", () => {
+  it("the Codex updater uses the verified update path and fails closed", () => {
     const helperStart = agentRegistrySource.indexOf(
       "async function ensureCodexCliViaUpdater",
     );
     const helperEnd = agentRegistrySource.indexOf(
-      "async function ensureClaudeCodeViaNativeInstaller",
+      "async function ensureClaudeCodeCli",
     );
     const helper = agentRegistrySource.slice(helperStart, helperEnd);
 
     expect(helper).toContain("CLI_MIN_VERSION_BASELINE");
     expect(helper).toContain("isBelowBaseline");
-    expect(helper).toContain("runCodexSelfUpdate");
-    expect(helper).toContain('Run "codex update" manually');
+    expect(helper).toContain("backgroundUpdateCli");
+    expect(helper).toContain("force: true");
+    expect(helper).toContain("provider://cli-update-action-required");
+    expect(helper).toContain('outcome.outcome !== "success"');
   });
 });

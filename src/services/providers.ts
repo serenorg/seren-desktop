@@ -720,8 +720,8 @@ export async function getAvailableAgents(): Promise<AgentInfo[]> {
 }
 
 /**
- * Ensure Claude Code CLI is installed, auto-installing via npm if needed.
- * Returns the bin directory path containing the claude binary.
+ * Ensure Claude Code CLI is installed. Missing installs surface an explicit
+ * official-instructions recovery action instead of running a remote script.
  */
 export async function ensureClaudeCli(): Promise<string> {
   return invokeProvider<string>("provider_ensure_agent_cli", {
@@ -731,13 +731,49 @@ export async function ensureClaudeCli(): Promise<string> {
 
 /**
  * Ensure Codex CLI (`@openai/codex`) is installed and meets the minimum version.
- * Installs or upgrades via npm if needed.
- * Returns the bin directory path containing the codex binary.
+ * Missing installs require official manual setup; upgrades are verified before
+ * success is reported.
  */
 export async function ensureCodexCli(): Promise<string> {
   return invokeProvider<string>("provider_ensure_agent_cli", {
     agentType: "codex",
   });
+}
+
+export type CliUpdateOutcome = {
+  outcome: string;
+  packageName: string;
+  bareCommand: string;
+  label: string;
+  from?: string | null;
+  to?: string;
+};
+
+export type CliUpdateActionRequired = {
+  label: string;
+  bareCommand: "claude" | "codex";
+  packageName: string;
+  from?: string | null;
+  to?: string | null;
+  reason: string;
+  officialInstructionsUrl: string;
+  at?: number;
+};
+
+/** Retry one supported CLI update through the verified runtime path. */
+export async function retryCliUpdate(
+  bareCommand: "claude" | "codex",
+): Promise<CliUpdateOutcome> {
+  return invokeProvider<CliUpdateOutcome>("provider_retry_cli_update", {
+    bareCommand,
+  });
+}
+
+/** Read an updater action that may have fired before the UI subscribed. */
+export async function getPendingCliUpdateAction(): Promise<CliUpdateActionRequired | null> {
+  return invokeProvider<CliUpdateActionRequired | null>(
+    "provider_get_pending_cli_update_action",
+  );
 }
 
 /**

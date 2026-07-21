@@ -17,6 +17,7 @@ import {
   backgroundUpdateCli,
   CLI_MIN_VERSION_BASELINE,
   isBelowBaseline,
+  loadState,
   runInstalledVersion,
 } from "./cli-updater.mjs";
 import { resolveGrokBinary } from "./grok-binary.mjs";
@@ -417,40 +418,49 @@ async function ensureGlobalNpmPackage({ emit, command, packageName, label }) {
   return command;
 }
 
-function runCodexSelfUpdate(resolvedPath) {
-  const command =
-    typeof resolvedPath === "string" && resolvedPath.length > 0
-      ? resolvedPath
-      : "codex";
-  const shell =
-    process.platform === "win32" && command.toLowerCase().endsWith(".cmd");
-  return new Promise((resolvePromise, rejectPromise) => {
-    execFile(
-      command,
-      ["update"],
-      { timeout: 180_000, shell },
-      (error, stdout, stderr) => {
-        if (error) {
-          rejectPromise(new Error(stderr || error.message));
-          return;
-        }
-        resolvePromise(stdout.trim());
-      },
-    );
+const CLI_INSTALL_INSTRUCTIONS = {
+  "@anthropic-ai/claude-code":
+    "https://code.claude.com/docs/en/installation",
+  "@openai/codex": "https://developers.openai.com/codex/cli/",
+};
+
+function emitCliActionRequired(
+  emit,
+  { label, bareCommand, packageName, from = null, to = null, reason },
+) {
+  const officialInstructionsUrl = CLI_INSTALL_INSTRUCTIONS[packageName];
+  emit?.("provider://cli-install-progress", {
+    stage: "action_required",
+    message: `${label} needs your attention before Seren can use it.`,
   });
+  emit?.("provider://cli-update-action-required", {
+    label,
+    bareCommand,
+    packageName,
+    from,
+    to,
+    reason,
+    actions: ["retry", "open_official_instructions"],
+    officialInstructionsUrl,
+  });
+  return officialInstructionsUrl;
 }
 
 async function ensureCodexCliViaUpdater(emit) {
-  await ensureGlobalNpmPackage({
-    emit,
-    command: "codex",
-    packageName: "@openai/codex",
-    label: "Codex",
-  });
-
   const baseline = CLI_MIN_VERSION_BASELINE["@openai/codex"];
   let resolved = resolveInstalledCodexBinary();
   const installed = await runInstalledVersion(resolved, "codex");
+  if (!installed) {
+    const url = emitCliActionRequired(emit, {
+      label: "Codex",
+      bareCommand: "codex",
+      packageName: "@openai/codex",
+      reason: "installation_required",
+    });
+    throw new Error(
+      `Codex CLI is not installed in a verifiable location. Install it from ${url}, then retry.`,
+    );
+  }
   if (!isBelowBaseline(installed, baseline)) {
     return resolved;
   }
@@ -460,23 +470,32 @@ async function ensureCodexCliViaUpdater(emit) {
     message: `Updating Codex CLI to ${baseline} or newer...`,
   });
 
-  try {
-    await runCodexSelfUpdate(resolved !== "codex" ? resolved : "codex");
-  } catch (error) {
-    throw new Error(
-      `Codex CLI ${installed ?? "unknown"} is too old for Seren's GPT-5.6 ` +
-        `defaults and auto-update failed. Run "codex update" manually and ` +
-        `restart Seren. ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  const outcome = await backgroundUpdateCli({
+    label: "Codex",
+    bareCommand: "codex",
+    resolvedPath: resolved,
+    packageName: "@openai/codex",
+    npmCliScript: resolveNpmCliScript(),
+    force: true,
+    onUpdated: ({ label, from, to }) =>
+      emit?.("provider://cli-updated", { label, from, to }),
+    onScanRejected: (event) =>
+      emit?.("provider://cli-scan-rejected", event),
+    onActionRequired: (event) =>
+      emit?.("provider://cli-update-action-required", event),
+  });
 
   resolved = resolveInstalledCodexBinary();
   const updated = await runInstalledVersion(resolved, "codex");
-  if (isBelowBaseline(updated, baseline)) {
+  if (
+    outcome.outcome !== "success" ||
+    !updated ||
+    isBelowBaseline(updated, baseline)
+  ) {
     throw new Error(
-      `Codex CLI is still ${updated ?? "unknown"} after update; Seren requires ` +
-        `${baseline} or newer for GPT-5.6 defaults. Run "codex update" manually ` +
-        "and restart Seren.",
+      `Codex CLI is still ${updated ?? "unknown"}; Seren requires ${baseline} ` +
+        `or newer. Update it from ${CLI_INSTALL_INSTRUCTIONS["@openai/codex"]}, ` +
+        `then retry. (${outcome.outcome})`,
     );
   }
 
@@ -488,7 +507,7 @@ async function ensureCodexCliViaUpdater(emit) {
   return resolved;
 }
 
-async function ensureClaudeCodeViaNativeInstaller(emit) {
+async function ensureClaudeCodeCli(emit) {
   // Check well-known install paths first (bare `which`/`where` can find stale wrappers)
   const existing = resolveInstalledClaudeBinary();
   if (existing !== "claude") {
@@ -512,137 +531,19 @@ async function ensureClaudeCodeViaNativeInstaller(emit) {
         return "claude";
       }
     } catch {
-      // which/where failed — fall through to install
+      // which/where failed — fall through to the manual install handoff.
     }
   }
 
-  // Strategy 1: Official native installer (PowerShell on Windows, bash on Unix)
-  emit("provider://cli-install-progress", {
-    stage: "installing",
-    message: "Installing Claude Code CLI via official installer...",
+  const url = emitCliActionRequired(emit, {
+    label: "Claude Code",
+    bareCommand: "claude",
+    packageName: "@anthropic-ai/claude-code",
+    reason: "installation_required",
   });
-
-  let nativeInstallerFailed = false;
-  try {
-    await new Promise((resolvePromise, rejectPromise) => {
-      let cmd;
-      let args;
-
-      if (process.platform === "win32") {
-        cmd = "powershell";
-        args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://claude.ai/install.ps1 | iex"];
-      } else {
-        cmd = "bash";
-        args = ["-c", "curl -fsSL https://claude.ai/install.sh | bash"];
-      }
-
-      execFile(cmd, args, { timeout: 120_000 }, (error, stdout, stderr) => {
-        if (error) {
-          rejectPromise(new Error(stderr || error.message));
-          return;
-        }
-        resolvePromise(stdout.trim());
-      });
-    });
-
-    // Verify the binary actually landed where we expect AND that it's the
-    // right arch for this host. `resolveInstalledClaudeBinary` skips wrong-arch
-    // candidates, so a returned sentinel here means either no install dropped
-    // or install.sh dropped a wrong-arch slice (e.g. uname -m fooled by a
-    // Rosetta'd parent context). Both cases fall through to npm install, which
-    // uses our embedded arm64/x64 node and gets the arch right by construction. #1862
-    const resolved = resolveInstalledClaudeBinary();
-    if (resolved !== "claude") {
-      emit("provider://cli-install-progress", {
-        stage: "complete",
-        message: "Claude Code CLI installed successfully",
-      });
-      return resolved;
-    }
-
-    console.warn(
-      "[agent-registry] Native installer succeeded but no arch-compatible binary " +
-        `was found at expected paths (host=${process.arch}). Falling back to npm install.`,
-    );
-    nativeInstallerFailed = true;
-  } catch (nativeError) {
-    console.warn("[agent-registry] Native installer failed:", nativeError.message);
-    nativeInstallerFailed = true;
-  }
-
-  // Strategy 2: npm install via the embedded runtime's own Node.js and npm.
-  // The Seren Desktop bundle ships node.exe and npm — use them directly so the
-  // install works regardless of system PATH, PowerShell execution policy, or
-  // whether the user has Node.js installed globally.
-  if (nativeInstallerFailed) {
-    emit("provider://cli-install-progress", {
-      stage: "installing",
-      message: "Installing Claude Code CLI via npm (bundled runtime)...",
-    });
-
-    const npmCliScript = resolveNpmCliScript();
-    try {
-      if (npmCliScript) {
-        await new Promise((resolvePromise, rejectPromise) => {
-          execFile(
-            process.execPath,
-            [npmCliScript, "install", "-g", "@anthropic-ai/claude-code"],
-            { timeout: 120_000 },
-            (error, stdout, stderr) => {
-              if (error) {
-                rejectPromise(new Error(stderr || error.message));
-                return;
-              }
-              resolvePromise(stdout.trim());
-            },
-          );
-        });
-      } else if (process.platform === "win32") {
-        // Last resort on Windows: try npm.cmd from PATH
-        await new Promise((resolvePromise, rejectPromise) => {
-          execFile(
-            "npm.cmd",
-            ["install", "-g", "@anthropic-ai/claude-code"],
-            { timeout: 120_000 },
-            (error, stdout, stderr) => {
-              if (error) {
-                rejectPromise(new Error(stderr || error.message));
-                return;
-              }
-              resolvePromise(stdout.trim());
-            },
-          );
-        });
-      } else {
-        throw new Error("npm not available in embedded runtime");
-      }
-
-      const resolved = resolveInstalledClaudeBinary();
-      if (resolved !== "claude") {
-        emit("provider://cli-install-progress", {
-          stage: "complete",
-          message: "Claude Code CLI installed successfully via npm",
-        });
-        return resolved;
-      }
-
-      // npm install returned success but binary not found
-      throw new Error(
-        "Claude Code package installed but binary not found. " +
-        "Try running: npm install -g @anthropic-ai/claude-code"
-      );
-    } catch (npmError) {
-      console.error("[agent-registry] npm install also failed:", npmError.message);
-      throw new Error(
-        `Failed to install Claude Code CLI.\n` +
-        `Native installer: ${nativeInstallerFailed ? "failed (possibly blocked by execution policy)" : "skipped"}\n` +
-        `npm install: ${npmError.message}\n` +
-        `Please install manually: npm install -g @anthropic-ai/claude-code`
-      );
-    }
-  }
-
-  return resolveInstalledClaudeBinary();
+  throw new Error(
+    `Claude Code CLI is not installed. Install it from ${url}, then retry.`,
+  );
 }
 
 /**
@@ -876,7 +777,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
             ? {}
             : {
                 unavailableReason:
-                  "Codex CLI is not installed yet. Seren can install it automatically on first launch.",
+                  "Codex CLI is not installed. Seren will open the official installation instructions when you start this agent.",
               }),
         };
       },
@@ -913,7 +814,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
             ? {}
             : {
                 unavailableReason:
-                  "Claude Code CLI is not installed yet. Seren can install it automatically on first launch.",
+                  "Claude Code CLI is not installed. Seren will open the official installation instructions when you start this agent.",
               }),
         };
       },
@@ -921,7 +822,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         return true;
       },
       async ensureCli() {
-        return ensureClaudeCodeViaNativeInstaller(emit);
+        return ensureClaudeCodeCli(emit);
       },
       launchLogin() {
         // Login MUST target the same binary that claude-runtime resolves
@@ -957,7 +858,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
           ...(missing.length === 0
             ? {}
             : {
-                unavailableReason: `${missing.join(" and ")} CLI${missing.length > 1 ? "s are" : " is"} not installed yet. Seren can install ${missing.length > 1 ? "them" : "it"} automatically on first launch.`,
+                unavailableReason: `${missing.join(" and ")} CLI${missing.length > 1 ? "s are" : " is"} not installed. Seren will provide official installation instructions when you start this agent.`,
               }),
         };
       },
@@ -1140,10 +1041,21 @@ export function createBrowserLocalAgentRegistry({ emit }) {
   }
 
   // Fire-and-forget background update checks for bundled CLIs (#1637).
-  // TTL-gated to 24h inside backgroundUpdateCli, same-channel only, silent
-  // on failure. Do not await — registry init must not block on npm.
+  // TTL-gated to 24h inside backgroundUpdateCli and same-channel only. Any
+  // verification failure emits one deduplicated recovery event. Do not await
+  // here — registry init must not block on npm.
   const npmCliScript = resolveNpmCliScript();
-  const onUpdated = async ({ label, from, to }) => {
+  const persistedUpdaterState = loadState();
+  let pendingCliUpdateAction = [
+    persistedUpdaterState["pendingAction:codex"],
+    persistedUpdaterState["pendingAction:claude"],
+  ]
+    .filter(Boolean)
+    .sort((left, right) => (right.at ?? 0) - (left.at ?? 0))[0] ?? null;
+  const onUpdated = async ({ label, bareCommand, from, to }) => {
+    if (pendingCliUpdateAction?.bareCommand === bareCommand) {
+      pendingCliUpdateAction = null;
+    }
     emit?.("provider://cli-updated", { label, from, to });
     // #1713 §4.7 schema-drift gate: after a Claude CLI auto-update, run
     // the synthetic-transcript builder against a known-good fixture and
@@ -1187,24 +1099,52 @@ export function createBrowserLocalAgentRegistry({ emit }) {
       flags,
     });
   };
-  void backgroundUpdateCli({
-    label: "Codex",
-    bareCommand: "codex",
-    resolvedPath: resolveInstalledCodexBinary(),
-    packageName: "@openai/codex",
-    npmCliScript,
-    onUpdated,
-    onScanRejected,
-  });
-  void backgroundUpdateCli({
-    label: "Claude Code",
-    bareCommand: "claude",
-    resolvedPath: resolveInstalledClaudeBinary(),
-    packageName: "@anthropic-ai/claude-code",
-    npmCliScript,
-    onUpdated,
-    onScanRejected,
-  });
+  const onActionRequired = (event) => {
+    pendingCliUpdateAction = event;
+    emit?.("provider://cli-update-action-required", event);
+  };
+  const cliUpdateConfigs = {
+    codex: {
+      label: "Codex",
+      bareCommand: "codex",
+      packageName: "@openai/codex",
+      resolvePath: resolveInstalledCodexBinary,
+    },
+    claude: {
+      label: "Claude Code",
+      bareCommand: "claude",
+      packageName: "@anthropic-ai/claude-code",
+      resolvePath: resolveInstalledClaudeBinary,
+    },
+  };
+  const runCliUpdate = async (bareCommand, { force = false } = {}) => {
+    const config = cliUpdateConfigs[bareCommand];
+    if (!config) {
+      throw new Error(`Unsupported CLI update target: ${bareCommand}`);
+    }
+    const result = await backgroundUpdateCli({
+      label: config.label,
+      bareCommand: config.bareCommand,
+      resolvedPath: config.resolvePath(),
+      packageName: config.packageName,
+      npmCliScript,
+      force,
+      onUpdated,
+      onScanRejected,
+      onActionRequired,
+    });
+    if (result.actionRequired) {
+      pendingCliUpdateAction = result.actionRequired;
+    } else if (
+      pendingCliUpdateAction?.bareCommand === bareCommand &&
+      (result.outcome === "success" || result.outcome === "skipped:up_to_date")
+    ) {
+      pendingCliUpdateAction = null;
+    }
+    return result;
+  };
+  void runCliUpdate("codex");
+  void runCliUpdate("claude");
 
   return {
     async getAvailableAgents() {
@@ -1229,6 +1169,21 @@ export function createBrowserLocalAgentRegistry({ emit }) {
 
     async ensureAgentCli(agentType) {
       return getDefinition(agentType).ensureCli();
+    },
+
+    async retryCliUpdate(bareCommand) {
+      const result = await runCliUpdate(bareCommand, { force: true });
+      if (
+        result.outcome === "success" ||
+        result.outcome === "skipped:up_to_date"
+      ) {
+        pendingCliUpdateAction = null;
+      }
+      return result;
+    },
+
+    getPendingCliUpdateAction() {
+      return pendingCliUpdateAction;
     },
 
     launchLogin(agentType) {

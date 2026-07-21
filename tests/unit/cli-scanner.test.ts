@@ -1,6 +1,7 @@
 // ABOUTME: Critical tests for #1647 — local diff + static-check scanner.
 // ABOUTME: Locks the gate behavior; no live npm pack / no network in tests.
 
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,7 +14,9 @@ const modulePath = new URL(
 const {
   buildPackageSnapshot,
   diffSnapshots,
+  evaluateFirstBaselinePolicy,
   runStaticChecks,
+  verifyTarballIntegrity,
 } = await import(/* @vite-ignore */ modulePath);
 
 let tempRoot: string;
@@ -38,23 +41,84 @@ function writePackage(files: Record<string, string>) {
 }
 
 describe("buildPackageSnapshot", () => {
-  it("captures install scripts, declared deps, files, and hashes", () => {
+  it("captures install scripts, declared deps, executables, hosts, files, and hashes", () => {
     const pkgDir = writePackage({
       "package.json": JSON.stringify({
         name: "@test/x",
         version: "1.0.0",
         scripts: { postinstall: "node setup.js", build: "tsc" },
         dependencies: { foo: "1.0.0", bar: "^2.0.0" },
+        bin: { x: "bin/x.js" },
       }),
-      "dist/index.js": "module.exports = {};",
+      "bin/x.js": 'fetch("https://api.example.com/v1");',
     });
     const snap = buildPackageSnapshot(pkgDir);
     expect(snap.version).toBe("1.0.0");
     expect(snap.installScripts).toEqual({ postinstall: "node setup.js" });
     expect(snap.declaredDependencies).toEqual(["bar", "foo"]);
+    expect(snap.binEntries).toEqual({ x: "bin/x.js" });
+    expect(snap.executableFiles).toEqual(["bin/x.js"]);
+    expect(snap.networkHosts).toEqual(["api.example.com"]);
     expect(snap.files).toContain("package.json");
-    expect(snap.files).toContain("dist/index.js");
+    expect(snap.files).toContain("bin/x.js");
     expect(typeof snap.fileHashes["package.json"]).toBe("string");
+  });
+});
+
+describe("registry integrity and first-baseline gate (#3092)", () => {
+  it("accepts only the exact sha512 integrity for the downloaded tarball", () => {
+    const tarballPath = path.join(tempRoot, "candidate.tgz");
+    writeFileSync(tarballPath, "verified candidate bytes", "utf8");
+    const expected = `sha512-${createHash("sha512")
+      .update("verified candidate bytes")
+      .digest("base64")}`;
+
+    expect(verifyTarballIntegrity(tarballPath, expected)).toBe(true);
+    expect(verifyTarballIntegrity(tarballPath, "sha512-AAAAAAAA")).toBe(false);
+    expect(verifyTarballIntegrity(tarballPath, "sha1-deadbeef")).toBe(false);
+  });
+
+  it("fails a first baseline closed on unapproved scripts, deps, executables, or hosts", () => {
+    const policy = {
+      installScripts: { postinstall: "node install.cjs" },
+      dependencyPatterns: [/^@vendor\/cli-(darwin|linux|win32)-/],
+      binEntries: { cli: "bin/cli.js" },
+      executableFiles: ["bin/cli.js"],
+      hostnameAllowlist: ["vendor.example"],
+    };
+    const candidate = {
+      installScripts: { postinstall: "node install.cjs" },
+      declaredDependencies: ["@vendor/cli-darwin-arm64"],
+      binEntries: { cli: "bin/cli.js" },
+      executableFiles: ["bin/cli.js"],
+      networkHosts: ["api.vendor.example"],
+    };
+
+    expect(evaluateFirstBaselinePolicy(candidate, policy)).toEqual([]);
+    expect(
+      evaluateFirstBaselinePolicy(
+        { ...candidate, installScripts: { postinstall: "node payload.js" } },
+        policy,
+      ),
+    ).toContain("first_baseline_install_script:postinstall");
+    expect(
+      evaluateFirstBaselinePolicy(
+        { ...candidate, declaredDependencies: ["plain-crypto-js"] },
+        policy,
+      ),
+    ).toContain("first_baseline_dependency:plain-crypto-js");
+    expect(
+      evaluateFirstBaselinePolicy(
+        { ...candidate, executableFiles: ["bin/cli.js", "payload.exe"] },
+        policy,
+      ),
+    ).toContain("first_baseline_executable:payload.exe");
+    expect(
+      evaluateFirstBaselinePolicy(
+        { ...candidate, networkHosts: ["collector.invalid"] },
+        policy,
+      ),
+    ).toContain("first_baseline_host:collector.invalid");
   });
 });
 

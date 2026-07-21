@@ -112,6 +112,11 @@ function registerProviderHandlers() {
     providerHandlers.checkAgentAuthenticated,
   );
   registerHandler("provider_ensure_agent_cli", providerHandlers.ensureAgentCli);
+  registerHandler("provider_retry_cli_update", providerHandlers.retryCliUpdate);
+  registerHandler(
+    "provider_get_pending_cli_update_action",
+    providerHandlers.getPendingCliUpdateAction,
+  );
   registerHandler("provider_launch_login", providerHandlers.launchLogin);
   registerHandler(
     "provider_native_fork_session",
