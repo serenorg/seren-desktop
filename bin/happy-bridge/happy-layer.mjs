@@ -274,6 +274,39 @@ export function createStartupStatusGate(notify) {
   };
 }
 
+function isUsableHappySession(session) {
+  return (
+    session !== null &&
+    typeof session === "object" &&
+    typeof session.metadata?.path === "string" &&
+    session.metadata.path.length > 0
+  );
+}
+
+export async function getOrCreateUsableHappySession({
+  api,
+  tag,
+  metadata,
+  state,
+  debugLog = () => {},
+  replacementTag = () => `seren-recovery-${randomUUID()}`,
+}) {
+  const initial = await api.getOrCreateSession({ tag, metadata, state });
+  if (!initial || isUsableHappySession(initial)) return initial ?? null;
+
+  // Data-key sessions cannot decrypt a relay record created by an earlier
+  // bridge process because Happy 1.2.0 keeps that session key only in memory.
+  // A one-time tag forces a fresh encrypted record instead of passing null
+  // metadata into ApiSessionClient, whose constructor dereferences `.path`.
+  debugLog("replacing Happy session with unreadable metadata");
+  const replacement = await api.getOrCreateSession({
+    tag: replacementTag(),
+    metadata,
+    state,
+  });
+  return isUsableHappySession(replacement) ? replacement : null;
+}
+
 export function createHappyLayer({
   config,
   supervisorChannel,
@@ -468,12 +501,19 @@ export function createHappyLayer({
     if (existing) return existing;
     if (!api || !identity) throw new Error("Happy API is not registered");
     const machineId = identity.machineId ?? "seren-desktop";
-    const session = existingSession ?? await api.getOrCreateSession({
-      tag: `seren-${sessionId}`,
-      metadata: sessionMetadata(config, summary, machineId),
-      state: { controlledByUser: true },
-    });
-    if (!session) throw new Error("Happy relay did not return a session");
+    const metadata = sessionMetadata(config, summary, machineId);
+    const session =
+      existingSession ??
+      (await getOrCreateUsableHappySession({
+        api,
+        tag: `seren-${sessionId}`,
+        metadata,
+        state: { controlledByUser: true },
+        debugLog: debug,
+      }));
+    if (!isUsableHappySession(session)) {
+      throw new Error("Happy relay did not return a usable session");
+    }
     const client = api.sessionSyncClient(session);
     const entry = { sessionId, happySessionId: session.id, summary, session, client };
     sessions.set(sessionId, entry);
