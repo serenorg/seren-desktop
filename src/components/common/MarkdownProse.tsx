@@ -2,7 +2,7 @@
 // ABOUTME: Delegates external links to the system browser instead of the app webview.
 
 /* eslint-disable solid/no-innerhtml */
-import { type Component, createMemo } from "solid-js";
+import { type Component, createMemo, onCleanup } from "solid-js";
 import { openExternalLink } from "@/lib/external-link";
 import { renderMarkdown } from "@/lib/render-markdown";
 
@@ -13,20 +13,55 @@ interface MarkdownProseProps {
 
 export const MarkdownProse: Component<MarkdownProseProps> = (props) => {
   const renderedHtml = createMemo(() => renderMarkdown(props.content));
+  let copyRestoreTimer: ReturnType<typeof setTimeout> | undefined;
 
   const handleClick = (event: MouseEvent) => {
-    const link = (event.target as HTMLElement | null)?.closest(
-      ".external-link",
-    ) as HTMLAnchorElement | null;
+    const target = event.target as HTMLElement | null;
+    const copyBtn = target?.closest(
+      ".code-copy-btn",
+    ) as HTMLButtonElement | null;
+    if (copyBtn) {
+      const code = copyBtn.dataset.code;
+      if (!code || typeof navigator === "undefined" || !navigator.clipboard) {
+        return;
+      }
+
+      const textarea = document.createElement("textarea");
+      textarea.innerHTML = code;
+      const decodedCode = textarea.value;
+      const originalText = copyBtn.innerHTML;
+
+      if (copyRestoreTimer) clearTimeout(copyRestoreTimer);
+      void navigator.clipboard
+        .writeText(decodedCode)
+        .then(() => {
+          copyBtn.classList.add("copied");
+          copyBtn.textContent = "Copied!";
+          copyRestoreTimer = setTimeout(() => {
+            copyBtn.classList.remove("copied");
+            copyBtn.innerHTML = originalText;
+          }, 2000);
+        })
+        .catch(() => {
+          // Clipboard permissions can be denied by the host; keep the control inert.
+        });
+      return;
+    }
+
+    const link = target?.closest(".external-link") as HTMLAnchorElement | null;
     if (!link) return;
 
     event.preventDefault();
     void openExternalLink(link.getAttribute("data-external-url") ?? "");
   };
 
+  onCleanup(() => {
+    if (copyRestoreTimer) clearTimeout(copyRestoreTimer);
+  });
+
   return (
     <div
-      class={`text-[13px] leading-relaxed text-foreground
+      class={`max-w-[72ch] text-[13px] leading-relaxed text-foreground
         [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:leading-tight [&_h1]:border-b [&_h1]:border-border-hover [&_h1]:pb-1
         [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:leading-tight [&_h2]:border-b [&_h2]:border-border-medium [&_h2]:pb-1
         [&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:leading-tight
