@@ -1001,7 +1001,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                       <button
                         type="button"
                         data-testid="employee-runtime-prompt-toggle"
-                        class="mt-2 text-[12px] font-medium text-accent hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 rounded"
+                        class="block mt-2 text-[12px] font-medium text-accent hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 rounded"
                         aria-expanded={runtimePromptExpanded()}
                         onClick={() =>
                           setRuntimePromptExpanded((expanded) => !expanded)
