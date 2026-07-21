@@ -1129,6 +1129,21 @@ function quoteHookArgument(value) {
   return `'${text.replaceAll("'", "'\\''")}'`;
 }
 
+// Credential stores kept out of reach of sandboxed Bash. Mirrors the
+// sensitive directories in bin/browser-local/file-access-policy.mjs, minus the
+// shell/git dotfiles that build tooling legitimately reads.
+const SANDBOX_DENY_READ_PATHS = [
+  "~/.ssh",
+  "~/.aws",
+  "~/.gnupg",
+  "~/.seren",
+  "~/.config/seren",
+  "~/.config/gcloud",
+  "~/.config/autostart",
+  "~/Library/LaunchAgents",
+  "~/.netrc",
+];
+
 function buildClaudePolicySettings({ cwd, sandboxMode, networkEnabled }) {
   const fullAccess =
     sandboxMode === "full-access" || sandboxMode === "danger-full-access";
@@ -1160,11 +1175,20 @@ function buildClaudePolicySettings({ cwd, sandboxMode, networkEnabled }) {
   if (process.platform !== "win32") {
     settings.sandbox = {
       enabled: true,
-      failIfUnavailable: true,
+      // Left at the default (false). The Linux sandbox needs bubblewrap and
+      // socat from the distro, which the .deb and AppImage cannot guarantee;
+      // failing closed there turns a missing OS package into an agent that
+      // never starts. Claude warns and runs unsandboxed instead, and the
+      // PreToolUse hook still bounds the built-in file tools. #3138
+      failIfUnavailable: false,
       autoAllowBashIfSandboxed: true,
       allowUnsandboxedCommands: false,
       filesystem: {
-        denyRead: ["~/"],
+        // Deny the credential stores rather than all of $HOME. A blanket
+        // "~/" also hides ~/.gitconfig and every $HOME-installed toolchain
+        // (nvm, pyenv, rustup), which breaks git commit and most build
+        // commands with no escape hatch. #3139
+        denyRead: SANDBOX_DENY_READ_PATHS,
         allowRead: [cwd],
         allowWrite: [cwd],
       },
