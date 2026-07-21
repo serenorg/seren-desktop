@@ -4,9 +4,42 @@
 import { createEnvelope } from "@slopus/happy-wire";
 
 const AGENT_PROVIDER = "codex";
+const TOOL_OUTPUT_MAX_CHARS = 1_200;
+const TOOL_ERROR_MAX_CHARS = 6_000;
+const FILE_DIFF_MAX_CHARS = 2_000;
+const MOBILE_TRUNCATION_MARKER = "\n… [truncated for Happy Mobile]";
 
 function stringValue(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
+}
+
+function displayText(value) {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "";
+  try {
+    const serialized = JSON.stringify(value, null, 2);
+    return typeof serialized === "string" ? serialized : String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function boundedMobileText(value, maxChars) {
+  const text = displayText(value);
+  if (text.length <= maxChars) return text;
+  const prefixLength = Math.max(0, maxChars - MOBILE_TRUNCATION_MARKER.length);
+  let prefix = text.slice(0, prefixLength);
+  const finalCodeUnit = prefix.charCodeAt(prefix.length - 1);
+  if (finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff) {
+    prefix = prefix.slice(0, -1);
+  }
+  return `${prefix}${MOBILE_TRUNCATION_MARKER}`;
+}
+
+function summarizeFileContent(value) {
+  if (typeof value !== "string") return undefined;
+  const lines = value.length === 0 ? 0 : value.split(/\r\n|\r|\n/).length;
+  return `[${lines} ${lines === 1 ? "line" : "lines"} hidden on Happy Mobile]`;
 }
 
 function eventEnvelope(role, ev, payload, suffix) {
@@ -68,7 +101,10 @@ export function translateNeutralEvent(event, { provider = AGENT_PROVIDER } = {})
       return [{ ...acp({
         type: "tool-result",
         callId: stringValue(payload.toolCallId, "unknown-call"),
-        output: payload.error ?? payload.result ?? "",
+        output: boundedMobileText(
+          payload.error ?? payload.result ?? "",
+          payload.error ? TOOL_ERROR_MAX_CHARS : TOOL_OUTPUT_MAX_CHARS,
+        ),
         id: stringValue(payload.toolCallId, "unknown-call"),
         ...(payload.error ? { isError: true } : {}),
       }), provider }];
@@ -77,9 +113,11 @@ export function translateNeutralEvent(event, { provider = AGENT_PROVIDER } = {})
         type: "file-edit",
         description: "File change",
         filePath: stringValue(payload.path, "unknown file"),
-        diff: typeof payload.newText === "string" ? payload.newText : undefined,
-        oldContent: typeof payload.oldText === "string" ? payload.oldText : undefined,
-        newContent: typeof payload.newText === "string" ? payload.newText : undefined,
+        diff: typeof payload.newText === "string"
+          ? boundedMobileText(payload.newText, FILE_DIFF_MAX_CHARS)
+          : undefined,
+        oldContent: summarizeFileContent(payload.oldText),
+        newContent: summarizeFileContent(payload.newText),
         id: stringValue(payload.toolCallId, "file-change"),
       }), provider }];
     case "diff-proposal":
@@ -87,9 +125,11 @@ export function translateNeutralEvent(event, { provider = AGENT_PROVIDER } = {})
         type: "file-edit",
         description: "File change requires approval",
         filePath: stringValue(payload.path, "unknown file"),
-        diff: typeof payload.newText === "string" ? payload.newText : undefined,
-        oldContent: typeof payload.oldText === "string" ? payload.oldText : undefined,
-        newContent: typeof payload.newText === "string" ? payload.newText : undefined,
+        diff: typeof payload.newText === "string"
+          ? boundedMobileText(payload.newText, FILE_DIFF_MAX_CHARS)
+          : undefined,
+        oldContent: summarizeFileContent(payload.oldText),
+        newContent: summarizeFileContent(payload.newText),
         id: stringValue(payload.proposalId, "file-proposal"),
       }), provider }];
     case "diff-proposal-resolved":

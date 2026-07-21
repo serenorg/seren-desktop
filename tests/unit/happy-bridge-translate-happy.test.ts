@@ -57,6 +57,55 @@ describe("neutral-to-Happy session translation", () => {
     expect(translateNeutralEvent({ kind: "unknown", sessionId: "session-1", payload })).toEqual([]);
   });
 
+  it("bounds tool output for mobile while retaining more error context", () => {
+    const success = translateNeutralEvent({
+      kind: "tool-end",
+      sessionId: "session-1",
+      payload: { toolCallId: "call-success", result: "x".repeat(6_000) },
+    })[0].body;
+    const error = translateNeutralEvent({
+      kind: "tool-end",
+      sessionId: "session-1",
+      payload: { toolCallId: "call-error", error: "e".repeat(3_000) },
+    })[0].body;
+
+    expect(success).toMatchObject({ callId: "call-success", id: "call-success" });
+    expect(success.output).toHaveLength(1_200);
+    expect(success.output).toContain("[truncated for Happy Mobile]");
+    expect(error).toMatchObject({
+      callId: "call-error",
+      id: "call-error",
+      isError: true,
+      output: "e".repeat(3_000),
+    });
+  });
+
+  it.each([
+    ["file-diff", "toolCallId", "file-change-1"],
+    ["diff-proposal", "proposalId", "proposal-1"],
+  ])("summarizes %s snapshots and caps its mobile diff", (kind, idField, id) => {
+    const newText = Array.from({ length: 400 }, (_, index) => `new line ${index}`).join("\n");
+    const [message] = translateNeutralEvent({
+      kind,
+      sessionId: "session-1",
+      payload: {
+        [idField]: id,
+        path: "/workspace/project/file.ts",
+        oldText: "old line 1\nold line 2",
+        newText,
+      },
+    });
+
+    expect(message.body).toMatchObject({
+      id,
+      oldContent: "[2 lines hidden on Happy Mobile]",
+      newContent: "[400 lines hidden on Happy Mobile]",
+    });
+    expect(message.body.diff).toHaveLength(2_000);
+    expect(message.body.diff).toContain("[truncated for Happy Mobile]");
+    expect(message.body.oldContent).not.toContain("old line 1");
+  });
+
   it.each([
     ["prompting", "turn-start"],
     ["ready", "turn-end"],
