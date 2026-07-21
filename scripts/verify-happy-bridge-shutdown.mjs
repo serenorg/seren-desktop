@@ -170,7 +170,10 @@ async function main() {
     return;
   }
   if (code !== 0) {
+    // Every other failure path reports the child's stderr; this one did not, so
+    // a crash on shutdown surfaced as a bare exit code with no cause attached.
     log(`FAIL: expected a clean exit code, got ${code}`);
+    log(stderr.trim() ? `bridge stderr:\n${stderr.trim()}` : "bridge stderr: (empty)");
     process.exitCode = 1;
     return;
   }
