@@ -162,10 +162,33 @@ Before cutting ANY new release tag, you MUST run a full audit:
 2. Audit embedded runtime discovery (platform subdirs, PATH construction in `embedded_runtime.rs`).
 3. Check for resource leaks, race conditions, and silent failures.
 4. **Verify embedded tool invocations actually execute** — don't just check paths exist; run `node --version`, `npm install`, and the agent binary against the embedded runtime end-to-end.
-5. File GitHub tickets in `serenorg/seren-desktop` for any bugs found.
-6. Fix critical/high bugs BEFORE tagging the release.
+5. **Run the live Happy remote walkthrough** (see below). REQUIRED whenever the tag contains any change under `bin/happy-bridge/`, `src-tauri/src/happy_bridge.rs`, `src/components/settings/HappyRemoteSettings.tsx`, or the provider event path they consume.
+6. File GitHub tickets in `serenorg/seren-desktop` for any bugs found.
+7. Fix critical/high bugs BEFORE tagging the release.
 
 NEVER tag a release without completing this audit. No exceptions.
+
+### Live Happy remote walkthrough (REQUIRED)
+
+Reading the bridge code does not surface how a turn actually renders on the phone. #3157 (assistant replies never rendered) and #3159 (one reply split into five bubbles) both reached `main` under a passing unit suite and a completed code audit; both were caught only by driving a real Happy client. Unit tests bound the translator's inputs — they cannot observe the wire.
+
+Run against the REAL app and a REAL paired Happy client. A mocked relay does not satisfy this gate.
+
+1. Launch the real desktop build for the candidate commit and pair a Happy client.
+2. Open a fresh coding-agent thread so the session history is short.
+3. From the Happy client, send a prompt demanding an exact response, e.g.
+   `Reply with exactly TAGCHECK-<version> and nothing else.`
+4. Let the turn complete, then reload the Happy session.
+
+Pass criteria — ALL must hold:
+
+- Desktop shows the prompt exactly once and the reply exactly once.
+- Happy shows the prompt exactly once and the reply exactly once, **after reload as well as live**.
+- The reply is **one** message, not one bubble per streamed delta.
+- Sending a second prompt while the first turn is still running queues it — it is neither dropped nor interleaved.
+- Only folders shown as shared in Settings are reachable from the client.
+
+Record the observed counts in the release notes or the audit ticket. "The relay sequence advanced" is NOT evidence a reply rendered — verify what the client displays.
 
 ## Version Control
 
