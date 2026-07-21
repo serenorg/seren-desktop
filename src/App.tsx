@@ -12,6 +12,7 @@ import {
 import { AboutDialog } from "@/components/common/AboutDialog";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { OrganizationOtpModal } from "@/components/common/OrganizationOtpModal";
+import { FileAccessApproval } from "@/components/files/FileAccessApproval";
 import { GatewayToolApproval } from "@/components/gateway/GatewayToolApproval";
 import { OPEN_INTERVIEW_LANDING_EVENT } from "@/components/interview/interviewLandingEvents";
 import { AppShell } from "@/components/layout/AppShell";
@@ -450,6 +451,7 @@ function App() {
           <ShellApproval />
         </Show>
         <Show when={runtime.mode === "desktop-native"}>
+          <FileAccessApproval />
           <AboutDialog />
         </Show>
       </Show>

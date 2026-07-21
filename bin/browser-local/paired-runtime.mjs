@@ -979,6 +979,9 @@ export function createPairedRuntime({ emit, inner }) {
       apiKey: params.apiKey,
       mcpServers: params.mcpServers,
       timeoutSecs: params.timeoutSecs,
+      sandboxMode: params.sandboxMode,
+      networkEnabled: params.networkEnabled,
+      autoApproveReads: params.autoApproveReads,
     };
 
     if (role === "planner") {
@@ -1033,8 +1036,6 @@ export function createPairedRuntime({ emit, inner }) {
       // Match direct Codex sessions: paired executor work should start in
       // Permission Mode: Auto, not inherit Claude's default on-request policy.
       approvalPolicy: "on-failure",
-      sandboxMode: params.sandboxMode,
-      networkEnabled: params.networkEnabled,
       initialModelId: config.modelId ?? undefined,
       reasoningEffort: config.effort ?? undefined,
       codexDefaultIntent: "paired-executor",

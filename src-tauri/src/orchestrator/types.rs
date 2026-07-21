@@ -126,6 +126,45 @@ pub enum DelegationType {
     FullHandoff,
 }
 
+/// Provider-independent agent filesystem policy compiled from Settings -> Agent.
+///
+/// This is captured with each orchestration request so model-originated file
+/// tools cannot observe a partially-updated set of renderer preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EffectiveAgentPolicy {
+    #[serde(default = "default_agent_sandbox_mode")]
+    pub sandbox_mode: String,
+    #[serde(default = "default_agent_approval_policy")]
+    pub approval_policy: String,
+    #[serde(default = "default_true")]
+    pub auto_approve_reads: bool,
+    #[serde(default = "default_true")]
+    pub network_enabled: bool,
+}
+
+fn default_agent_sandbox_mode() -> String {
+    "workspace-write".to_string()
+}
+
+fn default_agent_approval_policy() -> String {
+    "on-request".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for EffectiveAgentPolicy {
+    fn default() -> Self {
+        Self {
+            sandbox_mode: default_agent_sandbox_mode(),
+            approval_policy: default_agent_approval_policy(),
+            auto_approve_reads: true,
+            network_enabled: true,
+        }
+    }
+}
+
 /// Image attachment passed from the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageAttachment {
@@ -171,6 +210,9 @@ pub struct UserCapabilities {
     /// branch, directory structure) for injection into the system prompt.
     #[serde(default)]
     pub project_root: Option<String>,
+    /// Backend-enforced policy for model-originated local file operations.
+    #[serde(default)]
+    pub effective_agent_policy: EffectiveAgentPolicy,
 }
 
 impl UserCapabilities {
@@ -477,6 +519,7 @@ mod tests {
             model_rankings: vec![],
             reasoning_effort: None,
             project_root: None,
+            effective_agent_policy: EffectiveAgentPolicy::default(),
         };
 
         assert_eq!(
@@ -501,9 +544,9 @@ mod tests {
             model_rankings: vec![],
             reasoning_effort: None,
             project_root: None,
+            effective_agent_policy: EffectiveAgentPolicy::default(),
         };
 
         assert_eq!(caps.configured_private_chat_deployment_id(), None);
     }
 }
-

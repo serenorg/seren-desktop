@@ -491,7 +491,8 @@ async function invokeProvider<T>(
  * @param apiKey - Optional API key to enable Seren MCP tools for the agent
  * @param approvalPolicy - Optional approval policy for command execution
  * @param searchEnabled - Optional flag to enable web search
- * @param networkEnabled - Optional flag to enable direct network access (uses full-access sandbox)
+ * @param networkEnabled - Optional flag to enable direct network access
+ * @param autoApproveReads - Automatically allow reads that stay inside the active project
  * @param timeoutSecs - Optional timeout in seconds for prompts. Undefined means unlimited.
  */
 export async function spawnAgent(
@@ -511,6 +512,7 @@ export async function spawnAgent(
   paired?: PairedSpawnConfig,
   lmStudioBaseUrl?: string,
   lmStudioApiKey?: string,
+  autoApproveReads?: boolean,
 ): Promise<AgentSessionInfo> {
   return invokeProvider<AgentSessionInfo>(
     "provider_spawn",
@@ -531,6 +533,7 @@ export async function spawnAgent(
       paired: paired ?? null,
       lmStudioBaseUrl: lmStudioBaseUrl ?? null,
       lmStudioApiKey: lmStudioApiKey ?? null,
+      autoApproveReads: autoApproveReads ?? null,
     },
     { timeoutMs: 120_000 },
   );

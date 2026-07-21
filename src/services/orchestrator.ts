@@ -127,6 +127,13 @@ interface UserCapabilities {
   /** Active project root, threaded through to RoutingDecision.project_root
    * so the Rust ChatModelWorker can inject live git/repo context. */
   project_root: string | null;
+  /** Snapshot of the existing Settings -> Agent controls for backend enforcement. */
+  effective_agent_policy: {
+    sandbox_mode: "read-only" | "workspace-write" | "full-access";
+    approval_policy: "untrusted" | "on-failure" | "on-request" | "never";
+    auto_approve_reads: boolean;
+    network_enabled: boolean;
+  };
 }
 
 interface SkillRef {
@@ -1339,5 +1346,11 @@ function buildCapabilities(
     })),
     reasoning_effort: chatStore.reasoningEffort ?? null,
     project_root: fileTreeState.rootPath ?? null,
+    effective_agent_policy: {
+      sandbox_mode: settingsStore.settings.agentSandboxMode,
+      approval_policy: settingsStore.settings.agentApprovalPolicy,
+      auto_approve_reads: settingsStore.settings.agentAutoApproveReads,
+      network_enabled: settingsStore.settings.agentNetworkEnabled,
+    },
   };
 }

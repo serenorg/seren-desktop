@@ -264,9 +264,8 @@ function modeFromApprovalPolicy(approvalPolicy) {
   }
 }
 
-function sandboxFromMode(sandboxMode, networkEnabled) {
+function sandboxFromMode(sandboxMode, _networkEnabled) {
   if (
-    networkEnabled ||
     sandboxMode === "danger-full-access" ||
     sandboxMode === "full-access"
   ) {
@@ -276,6 +275,12 @@ function sandboxFromMode(sandboxMode, networkEnabled) {
     return "read-only";
   }
   return "workspace-write";
+}
+
+function codexNetworkConfigOverride(networkEnabled) {
+  return typeof networkEnabled === "boolean"
+    ? `sandbox_workspace_write.network_access=${networkEnabled}`
+    : null;
 }
 
 function codexApprovalPolicy(modeId) {
@@ -364,7 +369,7 @@ function buildInitializeParams() {
 
 function spawnCodexProcess(
   cwd,
-  { apiKey, mcpServers, serenMcpGatewayUrl } = {},
+  { apiKey, mcpServers, serenMcpGatewayUrl, networkEnabled } = {},
 ) {
   const mcpConfig = buildProviderMcpConfig({
     apiKey,
@@ -376,6 +381,8 @@ function spawnCodexProcess(
   if (mcpConfig.codexMcpConfigOverride) {
     args.push("-c", mcpConfig.codexMcpConfigOverride);
   }
+  const networkConfig = codexNetworkConfigOverride(networkEnabled);
+  if (networkConfig) args.push("-c", networkConfig);
 
   // Use the absolute-path resolver instead of bare `"codex"` so GUI-launched
   // instances don't depend on shell PATH — addresses the same class of
@@ -1609,6 +1616,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         apiKey,
         mcpServers,
         serenMcpGatewayUrl: serenMcpProxy?.url,
+        networkEnabled,
       });
     } catch (error) {
       await serenMcpProxy?.close();
@@ -2476,4 +2484,5 @@ export {
   resolveCodexInitialServiceTier as _resolveCodexInitialServiceTier,
   resolveCodexPreferredModelRecord as _resolveCodexPreferredModelRecord,
   sandboxFromMode as _sandboxFromMode,
+  codexNetworkConfigOverride as _codexNetworkConfigOverride,
 };
