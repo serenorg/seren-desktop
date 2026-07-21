@@ -384,7 +384,7 @@ describe("#1987 Verified Agent Output", () => {
       "// updated the file",
       "```",
       "",
-      "Gemini CLI is not available in seren-desktop.",
+      "The Gemini publisher is not available in this session.",
       "",
       "That is the end of the audit.",
     ].join("\n");
@@ -397,7 +397,7 @@ describe("#1987 Verified Agent Output", () => {
     // Only the offending sentence is replaced; every other byte is identical.
     expect(report.safeDisplayText).toBe(
       finalText.replace(
-        "Gemini CLI is not available in seren-desktop.",
+        "The Gemini publisher is not available in this session.",
         `${SUBSTITUTION_MARKER} I could not verify that the service is unavailable.`,
       ),
     );
@@ -412,6 +412,48 @@ describe("#1987 Verified Agent Output", () => {
     expect(report.claims).toMatchObject([
       { kind: "publisher_unavailable", status: "unverified" },
     ]);
+  });
+
+  it("only treats capability claims as publisher_unavailable (#3108)", () => {
+    const fires = (finalText: string) =>
+      validateFinalOutput({
+        finalText,
+        evidence: extractEvidenceFromUnifiedMessages([]),
+      }).claims.some((claim) => claim.kind === "publisher_unavailable");
+
+    // Prose that merely contains an availability word is not a claim about
+    // this agent's capabilities and must reach the user untouched.
+    for (const sentence of [
+      "The conference room was not available on Tuesday.",
+      "Seats in economy are unavailable for that flight.",
+      "This endpoint returns 503 when the upstream is unavailable.",
+      "Their build tool is not available for Windows.",
+    ]) {
+      expect(fires(sentence), sentence).toBe(false);
+    }
+
+    // Real capability claims stay guarded. The first is the phrasing from the
+    // #2910 incident this rule was written for, which never matched before.
+    for (const sentence of [
+      "google-sheets is not exposed in the current publisher list.",
+      "GitHub is unavailable in this session.",
+      "The Slack integration is not configured.",
+      "I don't have a tool for that.",
+    ]) {
+      expect(fires(sentence), sentence).toBe(true);
+    }
+
+    // Unrelated prose is passed through byte-for-byte, with no substitution
+    // marker anywhere in the message.
+    const passage =
+      "The conference room was not available on Tuesday.\n\nWe moved the review to Thursday.";
+    const report = validateFinalOutput({
+      finalText: passage,
+      evidence: extractEvidenceFromUnifiedMessages([]),
+    });
+    expect(report.safeDisplayText).toBe(passage);
+    expect(report.safeDisplayText).not.toContain(SUBSTITUTION_MARKER);
+    expect(report.canStoreMemory).toBe(true);
   });
 
   it("marks substituted sentences without disturbing markdown (#3109)", () => {
