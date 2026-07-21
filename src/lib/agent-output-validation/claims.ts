@@ -6,7 +6,41 @@ import type { ClaimKind, ExtractedClaim, SentenceSpan } from "./types";
 type ClaimMatcher = {
   kind: ClaimKind;
   pattern: RegExp;
+  /** Additional condition on the same sentence. The claim is only extracted
+   * when this also matches, so a matcher can constrain what a sentence is
+   * *about* separately from the phrasing it keys on. Offsets still come from
+   * `pattern`. */
+  requiresContext?: RegExp;
 };
+
+// An availability-negative phrase on its own says nothing about the subject:
+// a conference room, an airline seat and a publisher are all "unavailable" in
+// the same words. Matching the phrase alone made every such sentence a claim
+// about agent capability, and the rewrite replaced it with a hedge (#3108).
+//
+// Capability context is therefore required alongside the trigger, in one of
+// two forms: gateway vocabulary that only appears when discussing what this
+// agent can reach, or framing that scopes the statement to this agent.
+//
+// `tool` and `plugin` are ordinary English and are not gateway vocabulary on
+// their own — "their build tool is not available for Windows" is prose about
+// someone else's product. They count only under agent-scope framing, which is
+// how a real capability claim reads ("I don't have a tool for that").
+// `api`, `endpoint`, `host` and `server` are excluded for the same reason and
+// have no agent-scope form worth admitting.
+const PUBLISHER_ABSENCE_TRIGGER =
+  /\b(unavailable|not available|not exposed|not configured|not enabled|not connected|not supported|could not access|couldn'?t access|cannot access|can'?t access|not found|no access to|do(?: not|n'?t) have)\b|\bno\s+(?:\w+\s+){0,2}(?:publishers?|integrations?|connectors?|gateways?|mcp|tools?|skills?|plugins?)\b/i;
+
+const GATEWAY_VOCABULARY =
+  /\b(?:publishers?|integrations?|connectors?|gateways?|mcp|skills?)\b/i;
+
+const AGENT_SCOPE =
+  /\b(?:in|for|during|from) th(?:is|e current) (?:session|conversation|chat)\b|\bavailable to me\b|\bmy (?:tools?|capabilities|access)\b|\bI (?:can'?t|cannot|could not|couldn'?t|do not|don'?t|have no)\b/i;
+
+const AGENT_CAPABILITY_CONTEXT = new RegExp(
+  `${GATEWAY_VOCABULARY.source}|${AGENT_SCOPE.source}`,
+  "i",
+);
 
 const CLAIM_MATCHERS: ClaimMatcher[] = [
   {
@@ -36,8 +70,8 @@ const CLAIM_MATCHERS: ClaimMatcher[] = [
   },
   {
     kind: "publisher_unavailable",
-    pattern:
-      /\b(unavailable|not available|not configured|could not access|can't access|cannot access|no .*integration|no .*tool|publisher .*not found)\b/i,
+    pattern: PUBLISHER_ABSENCE_TRIGGER,
+    requiresContext: AGENT_CAPABILITY_CONTEXT,
   },
   {
     kind: "browser_action",
@@ -60,6 +94,12 @@ export function extractClaims(finalText: string): ExtractedClaim[] {
     for (const matcher of CLAIM_MATCHERS) {
       const match = matcher.pattern.exec(sentence.text);
       if (!match) continue;
+      if (
+        matcher.requiresContext &&
+        !matcher.requiresContext.test(sentence.text)
+      ) {
+        continue;
+      }
       sentenceClaims.push({
         id: `${sentenceIndex}:${matcher.kind}`,
         kind: matcher.kind,
