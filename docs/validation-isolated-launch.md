@@ -18,9 +18,11 @@ pnpm tauri:validation:dev
 
 Both development commands automatically lease the first available port from
 `1422` through `1431`. The lease also selects a distinct Tauri identifier, so
-up to ten validation apps can run concurrently without sharing a Vite server,
-app-data root, or single-instance service. Set `SEREN_VALIDATION_DEV_PORT` to a
-specific free port when a diagnostic run needs a stable override.
+up to ten validation worktrees can run concurrently without sharing a Vite
+server, app-data root, or single-instance service. Keep each concurrent run in
+its own worktree because generated runtime resources remain checkout-scoped.
+Set `SEREN_VALIDATION_DEV_PORT` to a specific free port when a diagnostic run
+needs a stable override.
 
 Build a validation bundle:
 
