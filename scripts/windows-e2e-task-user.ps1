@@ -501,28 +501,28 @@ try {
   # explicitly as test setup using the vendors' documented npm packages. This
   # must remain outside provider_ensure_agent_cli: production startup should
   # continue to hand a missing CLI to the user for review/manual installation.
-  Invoke-LoggedNative "Install e2e agent CLIs" "npm" @(
-    "install",
-    "--global",
-    "--no-audit",
-    "--no-fund",
-    "@anthropic-ai/claude-code@latest",
-    "@openai/codex@latest"
-  ) 1200
+  `$agentCliPackages = @(
+    @{ Label = "Claude Code"; Package = "@anthropic-ai/claude-code@latest"; Binary = "claude.cmd" },
+    @{ Label = "Codex"; Package = "@openai/codex@latest"; Binary = "codex.cmd" },
+    @{ Label = "Gemini"; Package = "@google/gemini-cli@latest"; Binary = "gemini.cmd" },
+    @{ Label = "Grok"; Package = "@xai-official/grok@latest"; Binary = "grok.cmd" }
+  )
+  `$agentCliInstallArgs = @("install", "--global", "--no-audit", "--no-fund") + @(
+    `$agentCliPackages | ForEach-Object { `$_.Package }
+  )
+  Invoke-LoggedNative "Install e2e agent CLIs" "npm" `$agentCliInstallArgs 1200
   `$npmGlobalPrefix = [string](& npm prefix --global | Select-Object -Last 1)
   `$npmGlobalPrefix = `$npmGlobalPrefix.Trim()
   if ([string]::IsNullOrWhiteSpace(`$npmGlobalPrefix)) {
     throw "npm did not report a global prefix after installing the e2e agent CLIs"
   }
-  `$claudeCliPath = Join-Path `$npmGlobalPrefix "claude.cmd"
-  `$codexCliPath = Join-Path `$npmGlobalPrefix "codex.cmd"
-  foreach (`$cliPath in @(`$claudeCliPath, `$codexCliPath)) {
+  foreach (`$agentCli in `$agentCliPackages) {
+    `$cliPath = Join-Path `$npmGlobalPrefix `$agentCli.Binary
     if (-not (Test-Path -LiteralPath `$cliPath)) {
-      throw "Required e2e agent CLI was not installed at the npm global prefix"
+      throw "Required `$(`$agentCli.Label) e2e agent CLI was not installed at the npm global prefix"
     }
+    Invoke-LoggedNative "Verify `$(`$agentCli.Label) CLI" `$cliPath @("--version") 120
   }
-  Invoke-LoggedNative "Verify Claude Code CLI" `$claudeCliPath @("--version") 120
-  Invoke-LoggedNative "Verify Codex CLI" `$codexCliPath @("--version") 120
   Invoke-LoggedNative "Playwright Chromium install" "pnpm" @("exec", "playwright", "install", "chromium") 600
   `$harnessArgs = @(
     "-NoProfile",

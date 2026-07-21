@@ -28,6 +28,18 @@ const GITHUB_PAT = requiredEnv("SEREN_E2E_GITHUB_PAT");
 // The paired workflow ships as one agent type backed by two CLIs. Declared
 // locally because the e2e payload only bundles this script — never bin/.
 const PAIRED_AGENT_TYPE = "claude-codex";
+// npm-backed CLIs are installed and version-checked by the disposable Windows
+// test-user setup before the app starts. Exercise the production resolver for
+// every corresponding provider here without requiring credentials or turning
+// provider_ensure_agent_cli back into an installer. LM Studio is excluded:
+// its `lms` CLI ships with the separately installed LM Studio application.
+const CLI_COMPATIBILITY_AGENT_TYPES = [
+  "codex",
+  "claude-code",
+  PAIRED_AGENT_TYPE,
+  "gemini",
+  "grok",
+];
 // Every shipped subscription coding-agent journey is certified, not one
 // env-selected type (#2375). Override with a comma list for ad-hoc runs.
 const AGENT_JOURNEYS = (
@@ -891,6 +903,15 @@ async function ensureAgentCli(ws, agentType) {
   }
 }
 
+async function verifyAgentCliCompatibility(ws) {
+  for (const agentType of CLI_COMPATIBILITY_AGENT_TYPES) {
+    await ensureAgentCli(ws, agentType);
+  }
+  logStage(
+    `all provider CLI resolution checks passed: ${CLI_COMPATIBILITY_AGENT_TYPES.join(", ")}`,
+  );
+}
+
 // A raw spawn/prompt failure carries a generic message; the runtime also emits
 // a provider://error with the auth text. Promote either signal to a distinct
 // AgentAuthError so the job names the credential gap, not a timeout (#2375).
@@ -1217,6 +1238,7 @@ async function exerciseAgentRuntime(page) {
   const ws = await connectProviderRuntime(page, config);
   const buffer = createRuntimeBuffer(ws);
   try {
+    await verifyAgentCliCompatibility(ws);
     for (const journey of AGENT_JOURNEYS) {
       if (journey === PAIRED_AGENT_TYPE) {
         await runPairedJourney(ws, buffer);
