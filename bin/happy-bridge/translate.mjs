@@ -87,6 +87,10 @@ export function translateNeutralEvent(event, { provider = AGENT_PROVIDER } = {})
         ...(payload.isThought === true ? { thinking: true } : {}),
       }, payload, "text")];
     case "user-message":
+      // Happy already persisted the remote peer's prompt before the bridge
+      // received it. Republishing the provider's attribution event would add a
+      // second user bubble to the controlling client.
+      if (payload.origin === "remote") return [];
       if (!text) return [];
       return [eventEnvelope("user", { t: "text", text }, payload, "user")];
     case "tool-start":
