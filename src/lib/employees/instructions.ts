@@ -55,9 +55,23 @@ function frontmatterFor(name: string, slug: string): string {
   ].join("\n");
 }
 
+function stripEmbeddedSkillFrontmatter(content: string): string {
+  const match = content.match(
+    /^[ \t]*---[ \t]*\n([\s\S]*?)\n[ \t]*---[ \t]*\n/m,
+  );
+  if (!match || match.index === undefined || match.index === 0) return content;
+
+  const frontmatter = match[1];
+  if (!/^[ \t]*(?:name|description):\s*/m.test(frontmatter)) return content;
+
+  return `${content.slice(0, match.index)}${content.slice(
+    match.index + match[0].length,
+  )}`;
+}
+
 function stripGeneratedSkillWrapper(content: string): string {
   const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n*/);
-  if (!frontmatterMatch) return content.trim();
+  if (!frontmatterMatch) return stripEmbeddedSkillFrontmatter(content).trim();
 
   const frontmatter = frontmatterMatch[1];
   const generatedByDesktop =

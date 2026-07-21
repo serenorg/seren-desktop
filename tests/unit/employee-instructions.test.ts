@@ -91,6 +91,34 @@ describe("employee instruction-file helpers", () => {
     });
   });
 
+  it("strips embedded imported-skill frontmatter after a lead-in", () => {
+    const sections = extractInstructionSections([
+      {
+        kind: "skill",
+        path: "SKILL.md",
+        content:
+          "This skill was imported.\n\nSkill instructions:\n\n---\ndescription: Imported helper\nname: imported-helper\n---\n\n## Steps\n\n- Read the request.",
+      },
+    ]);
+
+    expect(sections.skill).toContain("This skill was imported.");
+    expect(sections.skill).toContain("## Steps");
+    expect(sections.skill).not.toContain("description:");
+    expect(sections.skill).not.toMatch(/^---/);
+  });
+
+  it("keeps a legitimate horizontal rule in a skill body", () => {
+    const sections = extractInstructionSections([
+      {
+        kind: "skill",
+        path: "SKILL.md",
+        content: "Overview\n\n---\n\nContinue here.",
+      },
+    ]);
+
+    expect(sections.skill).toContain("\n---\n");
+  });
+
   it("does not split ordinary skill text that quotes old marker syntax", () => {
     const instructions = buildEmployeeInstructionFiles({
       name: "Writer",

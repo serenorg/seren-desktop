@@ -16,6 +16,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { MarkdownProse } from "@/components/common/MarkdownProse";
 import { EmployeeCheckpointsList } from "@/components/employees/EmployeeCheckpointsList";
 import { EmployeeControlBar } from "@/components/employees/EmployeeControlBar";
 import { EmployeeCostSummary } from "@/components/employees/EmployeeCostSummary";
@@ -186,6 +187,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const [detailRunId, setDetailRunId] = createSignal<string | null>(null);
   const [editingEvalGate, setEditingEvalGate] = createSignal(false);
   const [showCheckpoints, setShowCheckpoints] = createSignal(true);
+  const [skillExpanded, setSkillExpanded] = createSignal(false);
 
   const [organizationId] = createResource(async () =>
     getDefaultOrganizationId(),
@@ -962,9 +964,29 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                   }
                 >
                   {(text) => (
-                    <pre class="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-foreground m-0">
-                      {text()}
-                    </pre>
+                    <>
+                      <div
+                        class={`relative ${
+                          !skillExpanded() && text().length > 1200
+                            ? "max-h-[22rem] overflow-hidden after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-16 after:bg-gradient-to-t after:from-background after:to-transparent"
+                            : ""
+                        }`}
+                      >
+                        <MarkdownProse content={text()} />
+                      </div>
+                      <Show when={text().length > 1200}>
+                        <button
+                          type="button"
+                          class="mt-2 text-[12px] font-medium text-accent hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 rounded"
+                          aria-expanded={skillExpanded()}
+                          onClick={() =>
+                            setSkillExpanded((expanded) => !expanded)
+                          }
+                        >
+                          {skillExpanded() ? "Show less" : "Show more"}
+                        </button>
+                      </Show>
+                    </>
                   )}
                 </Show>
               </div>
