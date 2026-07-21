@@ -12,11 +12,11 @@ param(
 
   [int]$StartupTimeoutSeconds = 120,
 
-  [int]$InstallerTimeoutSeconds = 600,
+  [int]$InstallerTimeoutSeconds = 1200,
 
   [int]$ProbeTimeoutSeconds = 1800,
 
-  [int]$TaskTimeoutSeconds = 3600,
+  [int]$TaskTimeoutSeconds = 4800,
 
   [switch]$AllowUnsignedPrArtifact,
 

@@ -1791,7 +1791,7 @@ jobs:
             "Expand-Archive -LiteralPath (Join-Path $work 'windows-e2e-payload.zip') -DestinationPath $work -Force",
             "Set-Location $work",
             "Write-Host '[windows-e2e:ssm] Running Windows app harness as scheduled task user'",
-            `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows-e2e-task-user.ps1 -InstallerPath (Join-Path $work 'SerenDesktop-setup.exe') -WorkDir $work -SecretParameterPrefix ${psString(env.WINDOWS_E2E_SECRET_PARAMETER_PREFIX)} -ProbeTimeoutSeconds 1800 -TaskTimeoutSeconds 3600${unsignedBudgetArg}`,
+            `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows-e2e-task-user.ps1 -InstallerPath (Join-Path $work 'SerenDesktop-setup.exe') -WorkDir $work -SecretParameterPrefix ${psString(env.WINDOWS_E2E_SECRET_PARAMETER_PREFIX)} -ProbeTimeoutSeconds 1800 -TaskTimeoutSeconds 4800${unsignedBudgetArg}`,
             "$harnessExitCode = $LASTEXITCODE",
             "Write-Host '[windows-e2e:ssm] Bundling Windows app harness logs'",
             "$logPaths = @((Join-Path $work 'windows-e2e-task.log'), (Join-Path $work 'windows-e2e-logs')) | Where-Object { Test-Path -LiteralPath $_ }",
@@ -1810,10 +1810,10 @@ jobs:
             ];
           // executionTimeout bounds the whole on-box command. It must exceed the
           // harness's own budget: the scheduled-task wait (TaskTimeoutSeconds + 60
-          // = 3660s) plus the pre-task per-step timeouts (corepack/pnpm/playwright
-          // ~2100s worst case). The default 3600s killed valid runs before the
-          // harness finished. The harness now fails fast on a dead task (#2431),
-          // so this large value is only a backstop, never the normal bound.
+          // = 4860s) plus wrapper overhead. The task budget includes bounded
+          // corepack/pnpm/playwright setup, the 1200s installer allowance, and the
+          // app probe. The harness fails fast on a dead task (#2431), so this large
+          // value is only a backstop, never the normal bound.
           process.stdout.write(
             JSON.stringify({ commands, executionTimeout: ["6000"] }, null, 2),
           );
