@@ -368,6 +368,51 @@ describe("#1987 Verified Agent Output", () => {
     });
   });
 
+  it("preserves markdown structure and unrelated content when rewriting (#3105)", () => {
+    const finalText = [
+      "## Parity verdicts",
+      "",
+      "| Feature | Status |",
+      "| --- | --- |",
+      "| Unified Context | Exists in `provider-bindings.ts` |",
+      "",
+      "1. Host reliability",
+      "2. Remote host",
+      "",
+      "```ts",
+      "// updated the file",
+      "```",
+      "",
+      "Gemini CLI is not available in seren-desktop.",
+      "",
+      "That is the end of the audit.",
+    ].join("\n");
+
+    const report = validateFinalOutput({
+      finalText,
+      evidence: extractEvidenceFromUnifiedMessages([]),
+    });
+
+    // Only the offending sentence is replaced; every other byte is identical.
+    expect(report.safeDisplayText).toBe(
+      finalText.replace(
+        "Gemini CLI is not available in seren-desktop.",
+        "I could not verify that the service is unavailable.",
+      ),
+    );
+    // The block structure that markdown rendering depends on survives.
+    expect(report.safeDisplayText).toContain("## Parity verdicts\n");
+    expect(report.safeDisplayText).toContain("| --- | --- |\n");
+    // Fenced code is never claim-matched, so a prose rule cannot overwrite it
+    // even though this line matches the file_edit pattern.
+    expect(report.safeDisplayText).toContain("```ts\n// updated the file\n```");
+    // Tokens are never split mid-word by the sentence walker.
+    expect(report.safeDisplayText).toContain("`provider-bindings.ts`");
+    expect(report.claims).toMatchObject([
+      { kind: "publisher_unavailable", status: "unverified" },
+    ]);
+  });
+
   it("wires validation into all required finalization paths", () => {
     const chatSource = readFileSync("src/services/chat.ts", "utf8");
     const orchestratorSource = readFileSync(

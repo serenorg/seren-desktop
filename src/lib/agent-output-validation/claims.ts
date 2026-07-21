@@ -1,7 +1,7 @@
 // ABOUTME: Deterministic claim extraction for Verified Agent Output.
 // ABOUTME: Finds concrete completion claims without relying on model self-reporting.
 
-import type { ClaimKind, ExtractedClaim } from "./types";
+import type { ClaimKind, ExtractedClaim, SentenceSpan } from "./types";
 
 type ClaimMatcher = {
   kind: ClaimKind;
@@ -75,15 +75,40 @@ export function extractClaims(finalText: string): ExtractedClaim[] {
   return claims;
 }
 
-export function splitSentences(
-  text: string,
-): Array<{ index: number; text: string }> {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized) return [];
-  const matches = normalized.match(/[^.!?]+[.!?]?/g);
-  return (matches ?? [normalized])
-    .map((part, index) => ({ index, text: part.trim() }))
-    .filter((part) => part.text.length > 0);
+// Sentence spans carry offsets into the untouched source so callers can splice
+// a rewrite in place instead of rebuilding the message. Two bounds keep a
+// rewrite from destroying markdown (#3105): a sentence never crosses a line
+// break, because ordered-list markers and dotted filenames otherwise open a
+// "sentence" that swallows blank lines and whole blocks before the next
+// terminator; and fenced code is skipped entirely, so prose rules can never
+// overwrite a line of code.
+export function splitSentences(text: string): SentenceSpan[] {
+  const spans: SentenceSpan[] = [];
+  let lineStart = 0;
+  let inFence = false;
+
+  for (const line of text.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+    } else if (!inFence) {
+      for (const match of line.matchAll(/[^.!?]+[.!?]?/g)) {
+        const raw = match[0];
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        const start =
+          lineStart + match.index + (raw.length - raw.trimStart().length);
+        spans.push({
+          index: spans.length,
+          text: trimmed.replace(/\s+/g, " "),
+          start,
+          end: start + trimmed.length,
+        });
+      }
+    }
+    lineStart += line.length + 1;
+  }
+
+  return spans;
 }
 
 function dedupeSentenceClaims(claims: ExtractedClaim[]): ExtractedClaim[] {

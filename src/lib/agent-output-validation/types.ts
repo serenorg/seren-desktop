@@ -20,6 +20,16 @@ export interface EvidenceRequirement {
   anyOf: string[];
 }
 
+export interface SentenceSpan {
+  index: number;
+  /** Whitespace-normalized sentence text, used for claim matching. */
+  text: string;
+  /** Inclusive offset of the sentence in the original, unmodified text. */
+  start: number;
+  /** Exclusive offset of the sentence in the original, unmodified text. */
+  end: number;
+}
+
 export interface ExtractedClaim {
   id: string;
   kind: ClaimKind;
