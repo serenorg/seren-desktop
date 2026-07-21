@@ -75,7 +75,7 @@ jobs:
           version: 11
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: 'pnpm'
       - run: pnpm install
       - run: pnpm lint
@@ -89,7 +89,7 @@ jobs:
           version: 11
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: 'pnpm'
       - run: pnpm install
       - run: pnpm test
@@ -113,7 +113,7 @@ jobs:
           version: 11
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - name: Prepare MCP servers
@@ -135,7 +135,7 @@ jobs:
           version: 11
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - name: Build production bundle
@@ -240,7 +240,7 @@ jobs:
           version: 11
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: 'pnpm'
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
