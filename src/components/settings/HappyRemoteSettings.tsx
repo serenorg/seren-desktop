@@ -9,6 +9,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { openExternalLink } from "@/lib/external-link";
 import { toDataURL } from "@/lib/qrcode-shim";
 import { captureSupportError } from "@/lib/support/hook";
 import { listConversations } from "@/lib/tauri-bridge";
@@ -26,9 +27,52 @@ import {
 } from "@/services/happyRemote";
 
 const DESCRIPTION =
-  "Control your agents from the Happy mobile app. End-to-end encrypted; sessions are only reachable while Seren Desktop is open.";
+  "Use your phone to monitor and control agents running in Seren Desktop. Sessions are end-to-end encrypted and only reachable while this app is open.";
 const RESET_COPY =
   "Unpair all phones? This deletes this machine's remote identity. You'll need to pair again from scratch.";
+const HAPPY_WEBSITE_URL = "https://happy.engineering/";
+const HAPPY_STORES = [
+  {
+    platform: "apple",
+    url: "https://apps.apple.com/us/app/happy-claude-code-client/id6748571505",
+    label: "Download Happy on the App Store",
+    eyebrow: "Download on the",
+    name: "App Store",
+    score: "4.9",
+    count: "970+ ratings",
+  },
+  {
+    platform: "google",
+    url: "https://play.google.com/store/apps/details?id=com.ex3ndr.happy",
+    label: "Get Happy on Google Play",
+    eyebrow: "Get it on",
+    name: "Google Play",
+    score: "4.8",
+    count: "2.9k+ reviews",
+  },
+] as const;
+
+const StoreMark: Component<{ platform: "apple" | "google" }> = (props) => (
+  <Show
+    when={props.platform === "apple"}
+    fallback={
+      <svg class="h-8 w-8 shrink-0" viewBox="0 0 32 36" aria-hidden="true">
+        <path fill="#43c9f4" d="M3 3 19 18 3 33Z" />
+        <path fill="#48d27a" d="M3 3 22 14 19 18Z" />
+        <path fill="#ffd34e" d="m19 18 3-4 7 4-7 4Z" />
+        <path fill="#ff5b5f" d="M3 33 19 18l3 4Z" />
+      </svg>
+    }
+  >
+    <svg
+      class="h-8 w-8 shrink-0 fill-current"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path d="M15.9 2.1c-.2 1.4-1.2 2.7-2.7 3-.2-1.4.8-2.8 2.7-3Zm3.1 11.2c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.6.9-.8 0-1.9-.9-3.1-.9-1.6 0-3.1 1-4 2.4-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3.1 2.4 1.2-.1 1.7-.8 3.3-.8 1.5 0 2 .8 3.3.8 1.4 0 2.3-1.2 3.1-2.4 1-1.4 1.4-2.8 1.4-2.9-.1 0-3.3-1.3-3.3-3.7Z" />
+    </svg>
+  </Show>
+);
 
 function uniqueRoots(
   rows: Awaited<ReturnType<typeof listConversations>>,
@@ -220,6 +264,82 @@ export const HappyRemoteSettings: Component = () => {
             ●
           </button>
         </Show>
+      </div>
+
+      <div class="my-5 rounded-xl border border-border-strong bg-surface-2/70 p-4">
+        <div class="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+          <div class="max-w-[620px]">
+            <p class="m-0 text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-accent">
+              Install the mobile app
+            </p>
+            <h4 class="m-0 mt-1 text-base font-semibold text-foreground">
+              Get Happy on your phone
+            </h4>
+            <p class="m-0 mt-1 text-[0.82rem] leading-normal text-muted-foreground">
+              Happy is the free, open-source mobile remote control for coding
+              agents running in Seren Desktop. Install it, then pair this
+              computer by scanning the QR code below.
+            </p>
+          </div>
+          <a
+            href={HAPPY_WEBSITE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="shrink-0 rounded text-[0.8rem] font-medium text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            aria-label="Learn more about Happy (opens in your browser)"
+            onClick={(event) => {
+              event.preventDefault();
+              void openExternalLink(HAPPY_WEBSITE_URL);
+            }}
+          >
+            Learn more about Happy ↗
+          </a>
+        </div>
+
+        <div class="mt-4 flex flex-wrap gap-x-5 gap-y-4">
+          <For each={HAPPY_STORES}>
+            {(store) => (
+              <div class="flex flex-col gap-1.5">
+                <a
+                  href={store.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="group flex h-[54px] w-[180px] items-center gap-2.5 rounded-xl border border-white/20 bg-black px-3.5 text-white shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+                  aria-label={`${store.label} (opens in your browser)`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void openExternalLink(store.url);
+                  }}
+                >
+                  <StoreMark platform={store.platform} />
+                  <span class="flex min-w-0 flex-col leading-none">
+                    <span class="text-[0.58rem] font-medium uppercase tracking-[0.04em] text-white/90">
+                      {store.eyebrow}
+                    </span>
+                    <span class="mt-1 whitespace-nowrap text-[1.03rem] font-semibold tracking-[-0.02em]">
+                      {store.name}
+                    </span>
+                  </span>
+                </a>
+                <p
+                  class="m-0 flex items-baseline gap-1.5 pl-0.5 text-[0.74rem] text-muted-foreground"
+                  aria-label={`${store.score} out of 5 stars, ${store.count}`}
+                >
+                  <span
+                    class="text-[0.7rem] tracking-[0.03em] text-[#f3b849]"
+                    aria-hidden="true"
+                  >
+                    ★★★★★
+                  </span>
+                  <strong class="text-[0.8rem] font-semibold text-foreground">
+                    {store.score}
+                  </strong>
+                  <span>{store.count}</span>
+                </p>
+              </div>
+            )}
+          </For>
+        </div>
       </div>
 
       <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
