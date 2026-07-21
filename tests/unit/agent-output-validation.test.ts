@@ -8,6 +8,7 @@ import {
   extractEvidenceFromToolLoopMessages,
   extractEvidenceFromUnifiedMessages,
   INITIAL_FINALIZATION_RULES,
+  SUBSTITUTION_MARKER,
   validateFinalOutput,
 } from "@/lib/agent-output-validation";
 import type { UnifiedMessage } from "@/types/conversation";
@@ -116,7 +117,7 @@ describe("#1987 Verified Agent Output", () => {
     });
 
     expect(report.safeDisplayText).toBe(
-      "I could not verify that the file was changed. I could not verify that the email was sent.",
+      `${SUBSTITUTION_MARKER} I could not verify that the file was changed. I could not verify that the email was sent.`,
     );
     expect(report.canStoreMemory).toBe(false);
     expect(report.claims.map((claim) => claim.status)).toEqual([
@@ -150,7 +151,7 @@ describe("#1987 Verified Agent Output", () => {
       { kind: "draft_created", status: "verified" },
     ]);
     expect(report.safeDisplayText).toBe(
-      "I prepared the email draft, but I could not verify that it was sent.",
+      `${SUBSTITUTION_MARKER} I prepared the email draft, but I could not verify that it was sent.`,
     );
   });
 
@@ -184,7 +185,7 @@ describe("#1987 Verified Agent Output", () => {
       evidence: extractEvidenceFromUnifiedMessages([]),
     });
     expect(unavailableWithoutCheck.safeDisplayText).toBe(
-      "I could not verify that the service is unavailable.",
+      `${SUBSTITUTION_MARKER} I could not verify that the service is unavailable.`,
     );
 
     const unavailableWithMalformedCheck = validateFinalOutput({
@@ -308,7 +309,7 @@ describe("#1987 Verified Agent Output", () => {
       ]),
     });
     expect(failedReport.safeDisplayText).toBe(
-      "I could not verify that the browser action completed.",
+      `${SUBSTITUTION_MARKER} I could not verify that the browser action completed.`,
     );
   });
 
@@ -397,7 +398,7 @@ describe("#1987 Verified Agent Output", () => {
     expect(report.safeDisplayText).toBe(
       finalText.replace(
         "Gemini CLI is not available in seren-desktop.",
-        "I could not verify that the service is unavailable.",
+        `${SUBSTITUTION_MARKER} I could not verify that the service is unavailable.`,
       ),
     );
     // The block structure that markdown rendering depends on survives.
@@ -411,6 +412,39 @@ describe("#1987 Verified Agent Output", () => {
     expect(report.claims).toMatchObject([
       { kind: "publisher_unavailable", status: "unverified" },
     ]);
+  });
+
+  it("marks substituted sentences without disturbing markdown (#3109)", () => {
+    const finalText = [
+      "## Findings",
+      "",
+      "| Item | State |",
+      "| --- | --- |",
+      "| Sync | Exists |",
+      "",
+      "The connector is not available here.",
+      "",
+      "Everything else checked out.",
+    ].join("\n");
+
+    const report = validateFinalOutput({
+      finalText,
+      evidence: extractEvidenceFromUnifiedMessages([]),
+    });
+
+    // The substitution is disclosed rather than passed off as agent prose.
+    expect(report.safeDisplayText).toContain(SUBSTITUTION_MARKER);
+    // The marker is inline-level, so it cannot open a block and break the
+    // surrounding structure the way the #3105 rewrite did.
+    expect(SUBSTITUTION_MARKER).not.toContain("\n");
+    expect(report.safeDisplayText).toBe(
+      finalText.replace(
+        "The connector is not available here.",
+        `${SUBSTITUTION_MARKER} I could not verify that the service is unavailable.`,
+      ),
+    );
+    // The unsupported claim itself is not restored alongside the disclosure.
+    expect(report.safeDisplayText).not.toContain("The connector is not");
   });
 
   it("wires validation into all required finalization paths", () => {

@@ -14,6 +14,11 @@ import type {
   ValidateFinalOutputInput,
 } from "./types";
 
+/** Prefixes any sentence the validator replaced, so substituted text is never
+ * mistaken for the agent's own words. Inline-level so it survives being
+ * spliced mid-paragraph. */
+export const SUBSTITUTION_MARKER = "**[unverified]**";
+
 export function validateFinalOutput({
   finalText,
   evidence,
@@ -140,12 +145,24 @@ function buildSafeDisplayText(
         return rule.safeRewrite(claim, evidence);
       });
     result +=
-      displayText.slice(cursor, sentence.start) + dedupe(rewrites).join(" ");
+      displayText.slice(cursor, sentence.start) +
+      markSubstitution(dedupe(rewrites).join(" "));
     cursor = sentence.end;
   }
   result += displayText.slice(cursor);
 
   return result.trim();
+}
+
+// Substituted text is otherwise written in the first person and reads as the
+// agent's own words, so a reader cannot tell which sentences the agent wrote
+// (#3109). The marker is inline-level on purpose: rewrites are spliced
+// mid-paragraph, and a block construct would not render as intended and could
+// break the surrounding markdown (#3105). The unverified original is not
+// reproduced — disclosing the substitution must not restore the claim the
+// evidence failed to support.
+function markSubstitution(rewrite: string): string {
+  return `${SUBSTITUTION_MARKER} ${rewrite}`;
 }
 
 function ruleForClaim(kind: ClaimKind): FinalizationRule {
