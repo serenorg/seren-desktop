@@ -9,7 +9,8 @@ use tauri::{AppHandle, State};
 #[cfg(feature = "validation")]
 mod control_server;
 
-pub const VALIDATION_IDENTIFIER_SUFFIX: &str = ".validation";
+pub const VALIDATION_IDENTIFIER: &str = "com.serendb.desktop.validation";
+const VALIDATION_SLOT_IDENTIFIER_PREFIX: &str = "com.serendb.desktop.validation.slot";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,7 +35,15 @@ pub struct ValidationControlReplyPayload {
 }
 
 pub fn is_validation_identifier(identifier: &str) -> bool {
-    identifier.ends_with(VALIDATION_IDENTIFIER_SUFFIX)
+    if identifier == VALIDATION_IDENTIFIER {
+        return true;
+    }
+
+    identifier
+        .strip_prefix(VALIDATION_SLOT_IDENTIFIER_PREFIX)
+        .is_some_and(|slot| {
+            !slot.is_empty() && slot.chars().all(|character| character.is_ascii_digit())
+        })
 }
 
 #[cfg(feature = "validation")]
@@ -148,15 +157,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validation_identity_requires_suffix() {
+    fn validation_identity_accepts_base_and_numeric_slot() {
         assert!(is_validation_identifier("com.serendb.desktop.validation"));
+        assert!(is_validation_identifier(
+            "com.serendb.desktop.validation.slot1422"
+        ));
         assert!(!is_validation_identifier("com.serendb.desktop"));
+        assert!(!is_validation_identifier("other.desktop.validation"));
+        assert!(!is_validation_identifier(
+            "com.serendb.desktop.validation.slot"
+        ));
+        assert!(!is_validation_identifier(
+            "com.serendb.desktop.validation.slotother"
+        ));
     }
 
     #[cfg(feature = "validation")]
     #[test]
     fn validation_feature_rejects_production_identifier() {
         assert!(assert_feature_identity("com.serendb.desktop.validation").is_ok());
+        assert!(assert_feature_identity("com.serendb.desktop.validation.slot1422").is_ok());
         assert!(assert_feature_identity("com.serendb.desktop").is_err());
     }
 }

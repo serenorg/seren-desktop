@@ -16,6 +16,12 @@ Run the validation app manually:
 pnpm tauri:validation:dev
 ```
 
+Both development commands automatically lease the first available port from
+`1422` through `1431`. The lease also selects a distinct Tauri identifier, so
+up to ten validation apps can run concurrently without sharing a Vite server,
+app-data root, or single-instance service. Set `SEREN_VALIDATION_DEV_PORT` to a
+specific free port when a diagnostic run needs a stable override.
+
 Build a validation bundle:
 
 ```bash
@@ -24,11 +30,11 @@ pnpm tauri:validation:build
 
 ## Isolation Guarantees
 
-The validation Tauri config uses bundle identifier `com.serendb.desktop.validation`, product name `SerenDesktop (Validation)`, dev server port `1422`, and deep-link scheme `seren-validation`.
+The validation Tauri config uses base bundle identifier `com.serendb.desktop.validation`, product name `SerenDesktop (Validation)`, and deep-link scheme `seren-validation`. Development launches extend that identifier with the leased port and pass a matching Vite `beforeDevCommand` and Tauri `devUrl` through a runtime config overlay. Validation builds retain the base identifier because they do not start a dev server.
 
 At runtime the validation build sets isolated roots for app config, Seren skill authoring, and Claude skills under the validation app-data directory. The app-wide OAuth callback server binds an isolated loopback port and frontend OAuth flows ask the running app for the active callback URL.
 
-The validation control channel is compiled only with the `validation` Cargo feature and only starts when the bundle identifier ends with `.validation`. It writes a tokenized loopback discovery file and accepts only typed commands: navigate, click, fill, press, waitFor, dumpText, and screenshot.
+The validation control channel is compiled only with the `validation` Cargo feature and only starts for the base validation identifier or one of its numeric slot identifiers. It writes a tokenized loopback discovery file and accepts only typed commands: navigate, click, fill, press, waitFor, dumpText, and screenshot.
 
 ## Evidence
 
