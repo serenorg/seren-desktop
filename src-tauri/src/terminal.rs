@@ -3656,20 +3656,38 @@ fn compose_cli_command(
     Ok(parts.join(" "))
 }
 
-/// PATH for terminal child processes — the parent process PATH plus
-/// the CLI install dirs (`~/.claude/bin`, `~/.local/bin`, Homebrew,
-/// `%APPDATA%\npm`) a GUI-launched Tauri app typically misses.
+/// PATH for terminal child processes — the embedded runtime directories
+/// plus the parent process PATH plus the CLI install dirs
+/// (`~/.claude/bin`, `~/.local/bin`, Homebrew, `%APPDATA%\npm`) a
+/// GUI-launched Tauri app typically misses.
 ///
 /// Single source of truth for both the PTY spawn and the `claude
 /// --version` probe so a regression in one surface can't desync from
-/// the other.
+/// the other. Both spawn `claude` programmatically, and the agent it
+/// runs shells out to node — so the bundled node has to be on this PATH
+/// too, not just on the one provider workers get (#3152).
 fn augmented_path_for_terminal() -> String {
     #[cfg(target_os = "windows")]
     let path_separator = ";";
     #[cfg(not(target_os = "windows"))]
     let path_separator = ":";
-    let current = env::var("PATH").unwrap_or_default();
-    crate::embedded_runtime::extend_path_with_common_bins(&current, path_separator)
+    terminal_path_from(
+        crate::embedded_runtime::get_embedded_path(),
+        &env::var("PATH").unwrap_or_default(),
+        path_separator,
+    )
+}
+
+/// Prefer the PATH published by `configure_embedded_runtime` — it is
+/// already the process PATH extended with the common bins and led by the
+/// embedded runtime directories. It is empty only before startup
+/// configures it, or when no runtime was staged; extend the process PATH
+/// directly in that case.
+fn terminal_path_from(embedded_path: &str, process_path: &str, separator: &str) -> String {
+    if !embedded_path.is_empty() {
+        return embedded_path.to_string();
+    }
+    crate::embedded_runtime::extend_path_with_common_bins(process_path, separator)
 }
 
 fn default_shell() -> String {
@@ -4160,6 +4178,40 @@ mod tests {
                 "expected {expected} to be in augmented PATH, got: {path}",
             );
         }
+    }
+
+    /// Regression guard for #3152.
+    ///
+    /// `terminal.rs` spawns `claude` programmatically over this PATH, and
+    /// the agent it starts shells out to node. Building the PATH from the
+    /// process env plus the common bins alone left the bundled node off it
+    /// entirely, so a machine with no system node ran the terminal agent
+    /// against nothing.
+    #[test]
+    fn terminal_path_leads_with_the_embedded_runtime_when_configured() {
+        let embedded = "/Apps/Seren.app/Contents/Resources/embedded-runtime/node/bin:/usr/bin";
+
+        let path = terminal_path_from(embedded, "/usr/bin:/bin", ":");
+
+        assert_eq!(
+            path.split(':').next(),
+            Some("/Apps/Seren.app/Contents/Resources/embedded-runtime/node/bin"),
+            "terminal PATH must lead with the embedded runtime, got: {path}"
+        );
+    }
+
+    /// Before startup configures the runtime — and on a checkout with no
+    /// staged runtime — the embedded PATH is empty and the process PATH
+    /// still has to be extended with the CLI install dirs (#2008).
+    #[test]
+    fn terminal_path_extends_process_path_without_an_embedded_runtime() {
+        let path = terminal_path_from("", "/usr/bin:/bin", ":");
+
+        assert!(path.split(':').any(|p| p == "/usr/bin"));
+        assert!(
+            path.split(':').count() > 2,
+            "expected the common bin dirs to be appended, got: {path}"
+        );
     }
 
     fn cell_at(snap: &GridSnapshot, row: u16, col: u16) -> char {
