@@ -8,6 +8,3 @@ allowBuilds:
   happy: false
   keccak: false
   utf-8-validate: false
-
-patchedDependencies:
-  happy@1.2.0: patches/happy@1.2.0.patch
