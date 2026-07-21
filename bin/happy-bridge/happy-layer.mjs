@@ -8,7 +8,11 @@ import os from "node:os";
 import { ApiClient, configuration } from "happy/lib";
 import nacl from "tweetnacl";
 
-import { translateNeutralEvent, composeApprovalNotification } from "./translate.mjs";
+import {
+  composeApprovalNotification,
+  createTurnCorrelator,
+  translateNeutralEvent,
+} from "./translate.mjs";
 import {
   isWithinAdvertisedRoots,
   validatePermissionResponse,
@@ -505,6 +509,7 @@ export function createHappyLayer({
   const terminatedSessions = createTerminatedSessionTracker();
   const pendingRequests = Object.create(null);
   const liveSessions = new Set();
+  const turnCorrelator = createTurnCorrelator();
 
   const sessionSummaries = new Map();
   let summariesFetchedAt = 0;
@@ -562,6 +567,7 @@ export function createHappyLayer({
       sessions.delete(sessionId);
       liveSessions.delete(sessionId);
       promptQueue.clear(sessionId);
+      turnCorrelator.clear(sessionId);
       delete pendingRequests[sessionId];
       sessionCreationPromises.delete(sessionId);
       await entry.client
@@ -771,7 +777,8 @@ export function createHappyLayer({
     const entry = await findOrCreateSession(event.sessionId, summary);
     if (!entry) return;
     const provider = summary?.agentType === "claude-code" ? "claude" : summary?.agentType ?? "codex";
-    for (const message of translateNeutralEvent(event, { provider })) {
+    const correlatedEvent = turnCorrelator.correlate(event);
+    for (const message of translateNeutralEvent(correlatedEvent, { provider })) {
       if (message.transport === "session") entry.client.sendSessionProtocolMessage(message.envelope);
       if (message.transport === "agent") entry.client.sendAgentMessage(message.provider, message.body);
     }
@@ -836,6 +843,7 @@ export function createHappyLayer({
       });
       if (!spawned?.sessionId) throw new Error("provider spawn returned no session");
       sessions.delete(pendingSessionId);
+      turnCorrelator.clear(pendingSessionId);
       pending.sessionId = spawned.sessionId;
       pending.summary = spawned;
       sessions.set(spawned.sessionId, pending);
@@ -887,6 +895,7 @@ export function createHappyLayer({
   async function discardPendingSpawn(pendingSessionId, pending) {
     sessions.delete(pendingSessionId);
     liveSessions.delete(pendingSessionId);
+    turnCorrelator.clear(pendingSessionId);
     delete pendingRequests[pendingSessionId];
     sessionCreationPromises.delete(pendingSessionId);
     await pending.client.close().catch(() => debug("failed to close abandoned Happy session"));
@@ -1036,6 +1045,7 @@ export function createHappyLayer({
       sourceSubscription?.();
       supervisorSubscription?.();
       promptQueue.close();
+      turnCorrelator.close();
       cancelPairing();
       await pairingAuthorizationPromise;
       // Awaited rather than fire-and-forget: the caller exits the process once

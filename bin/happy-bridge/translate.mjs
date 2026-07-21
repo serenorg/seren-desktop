@@ -1,6 +1,8 @@
 // ABOUTME: Translates provider-neutral session events into Happy wire messages.
 // ABOUTME: This module is pure apart from Happy's schema helper and performs no I/O.
 
+import { randomUUID } from "node:crypto";
+
 import { createEnvelope } from "@slopus/happy-wire";
 
 const AGENT_PROVIDER = "codex";
@@ -62,6 +64,77 @@ function acp(body) {
 
 function service(payload, text) {
   return eventEnvelope("agent", { t: "service", text }, payload, "service");
+}
+
+const ACTIVE_STATUSES = new Set(["prompting", "busy", "running"]);
+const TERMINAL_STATUSES = new Set([
+  "ready",
+  "idle",
+  "completed",
+  "error",
+  "terminated",
+]);
+const AGENT_SESSION_EVENTS = new Set([
+  "assistant-delta",
+  "diff-proposal-resolved",
+  "plan-update",
+  "permission-resolved",
+]);
+
+/**
+ * Happy requires every agent-originated session envelope to name its turn, but
+ * provider runtimes do not consistently include their native turn id on
+ * streamed events. Correlate one local id across the prompt attribution,
+ * response chunks, and terminal boundary without changing provider state.
+ *
+ * @param {{createTurnId?: () => string}} options
+ */
+export function createTurnCorrelator({ createTurnId = randomUUID } = {}) {
+  const activeTurns = new Map();
+
+  function correlate(event) {
+    if (!event || typeof event !== "object" || typeof event.sessionId !== "string") {
+      return event;
+    }
+    const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+    const suppliedTurn = stringValue(payload.turnId) || stringValue(payload.turn);
+    let turnId = suppliedTurn || activeTurns.get(event.sessionId);
+    const status = event.kind === "status" ? stringValue(payload.status) : "";
+    const startsTurn = event.kind === "user-message" || ACTIVE_STATUSES.has(status);
+    const needsTurn = startsTurn || AGENT_SESSION_EVENTS.has(event.kind) ||
+      event.kind === "turn-complete" || event.kind === "error";
+
+    if (event.kind === "user-message" && !suppliedTurn) {
+      turnId = createTurnId();
+    } else if (!turnId && needsTurn) {
+      turnId = createTurnId();
+    }
+    if (turnId && (startsTurn || needsTurn)) {
+      activeTurns.set(event.sessionId, turnId);
+    }
+
+    const correlated = turnId
+      ? { ...event, payload: { ...payload, turnId } }
+      : event;
+    if (
+      event.kind === "turn-complete" ||
+      event.kind === "error" ||
+      TERMINAL_STATUSES.has(status)
+    ) {
+      activeTurns.delete(event.sessionId);
+    }
+    return correlated;
+  }
+
+  return {
+    correlate,
+    clear(sessionId) {
+      activeTurns.delete(sessionId);
+    },
+    close() {
+      activeTurns.clear();
+    },
+  };
 }
 
 /**

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error — the bridge seam is plain ESM and has no generated declarations.
 import {
   composeApprovalNotification,
+  createTurnCorrelator,
   translateNeutralEvent,
 } from "../../bin/happy-bridge/translate.mjs";
 
@@ -65,6 +66,38 @@ describe("neutral-to-Happy session translation", () => {
         payload: { text: "remote prompt", origin: "remote" },
       }),
     ).toEqual([]);
+  });
+
+  it("correlates a suppressed Happy prompt with its assistant response", () => {
+    let sequence = 0;
+    const correlator = createTurnCorrelator({
+      createTurnId: () => `turn-remote-${++sequence}`,
+    });
+    const remotePrompt = correlator.correlate({
+      kind: "user-message",
+      sessionId: "session-1",
+      payload: { text: "remote prompt", origin: "remote" },
+    });
+    const [turnStart] = translateNeutralEvent(correlator.correlate({
+      kind: "status",
+      sessionId: "session-1",
+      payload: { status: "prompting" },
+    }));
+    const [assistant] = translateNeutralEvent(correlator.correlate({
+      kind: "assistant-delta",
+      sessionId: "session-1",
+      payload: { text: "assistant response" },
+    }));
+    const [turnEnd] = translateNeutralEvent(correlator.correlate({
+      kind: "turn-complete",
+      sessionId: "session-1",
+      payload: { stopReason: "end_turn" },
+    }));
+
+    expect(translateNeutralEvent(remotePrompt)).toEqual([]);
+    expect(turnStart.envelope.turn).toBe("turn-remote-1");
+    expect(assistant.envelope.turn).toBe("turn-remote-1");
+    expect(turnEnd.envelope.turn).toBe("turn-remote-1");
   });
 
   it("bounds tool output for mobile while retaining more error context", () => {
