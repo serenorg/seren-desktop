@@ -117,6 +117,7 @@ export const HappyRemoteSettings: Component = () => {
   const [pairingQr, setPairingQr] = createSignal<string | null>(null);
   const [pairingError, setPairingError] = createSignal(false);
   let unlistenStatus: (() => void) | undefined;
+  let unmounted = false;
 
   const loadRoots = async () => {
     try {
@@ -154,11 +155,27 @@ export const HappyRemoteSettings: Component = () => {
         });
       }
     }).then((unlisten) => {
+      // The listener resolves after a round trip, so a section switch can land
+      // first. Dropping the handle there leaked one listener per mount, each
+      // still reporting every bridge error.
+      if (unmounted) {
+        unlisten();
+        return;
+      }
       unlistenStatus = unlisten;
     });
   });
 
-  onCleanup(() => unlistenStatus?.());
+  // Switching settings sections unmounts this component without going through
+  // the dismiss button, and the bridge kept the scanned code authorizable for
+  // the rest of its timeout. Unmounting has to withdraw the code too.
+  onCleanup(() => {
+    unmounted = true;
+    unlistenStatus?.();
+    if (pairingPayload() !== null) {
+      void cancelPairing().catch(() => undefined);
+    }
+  });
 
   const toggleRemoteAccess = async (enabled: boolean) => {
     setBusy(true);

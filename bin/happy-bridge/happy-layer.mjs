@@ -871,12 +871,14 @@ export function createHappyLayer({
     }
   }
 
-  // Registered from both the freshly-paired and already-paired startup paths.
-  // A single listener keeps `dispatchNotification`'s queueing behaviour intact —
-  // it stops queueing as soon as any listener exists, so adding a second one
-  // elsewhere would drop notifications this one is waiting for.
+  // Registered once, from `start()`, and torn down in `close()`. A single
+  // listener keeps `dispatchNotification`'s queueing behaviour intact — it stops
+  // queueing as soon as any listener exists, so adding a second one elsewhere
+  // would drop notifications this one is waiting for. It also has to stay
+  // attached across the pairing wait, which is exactly when `cancel_pairing`
+  // arrives. Returns the unsubscribe handle the caller stores.
   function subscribeToSupervisor() {
-    supervisorSubscription = supervisorChannel.onNotification((method, params) => {
+    return supervisorChannel.onNotification((method, params) => {
       if (method === "roots_update") {
         advertisedRoots = Array.isArray(params?.roots) ? params.roots : [];
         void (async () => {
@@ -961,7 +963,6 @@ export function createHappyLayer({
         identity = identityFromAuthResponse(result.token, decryptAuthResponse(result.response, keyPair.secretKey));
         await supervisorChannel.call("identity_store", { identity });
         await registerMachine();
-        supervisorSubscription = subscribeToSupervisor();
         await finishRegistration();
         return true;
       }
@@ -991,7 +992,11 @@ export function createHappyLayer({
       }
       return pairingPromise;
     }
-    pairingPromise = (async () => {
+    // Cancelling and immediately re-pairing leaves the abandoned attempt still
+    // settling. Releasing the slot is gated on this attempt still owning it, so
+    // an aborted attempt cannot clear its successor and let a third keypair be
+    // minted while the second is still polling.
+    const attempt = (async () => {
       const keyPair = nacl.box.keyPair();
       await postAuthRequest(config.relayUrl, keyPair.publicKey);
       const payload = `happy://terminal?${encodeBase64Url(keyPair.publicKey)}`;
@@ -999,12 +1004,15 @@ export function createHappyLayer({
       supervisorChannel.notify("pairing_payload", { payload });
       const abortController = new AbortController();
       pairingAbortController = abortController;
+      const releaseAttempt = () => {
+        if (pairingPromise === attempt) pairingPromise = null;
+      };
       pairingAuthorizationPromise = waitForAuthorization(keyPair, abortController.signal)
         .then((authorized) => {
-          if (!authorized) pairingPromise = null;
+          if (!authorized) releaseAttempt();
         })
         .catch((error) => {
-          pairingPromise = null;
+          releaseAttempt();
           if (error?.name !== "AbortError") {
             debug(`pairing authorization failed: ${error instanceof Error ? error.message : "unknown error"}`);
           }
@@ -1018,7 +1026,8 @@ export function createHappyLayer({
       void pairingAuthorizationPromise;
       return payload;
     })();
-    return pairingPromise;
+    pairingPromise = attempt;
+    return attempt;
   }
 
   async function finishRegistration() {
@@ -1043,8 +1052,6 @@ export function createHappyLayer({
         await finishRegistration();
         return;
       }
-      supervisorSubscription?.();
-      supervisorSubscription = null;
       return startPairing();
     },
     startPairing,

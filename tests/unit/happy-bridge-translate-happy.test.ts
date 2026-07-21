@@ -134,6 +134,31 @@ describe("neutral-to-Happy session translation", () => {
     });
   });
 
+  it("bounds tool input without flattening its shape", () => {
+    // A `Write` call carries the whole file body in its parameters. Left
+    // unbounded it went to the relay and onto the phone in full, while the
+    // diff the same write produces was capped.
+    const [message] = translateNeutralEvent({
+      kind: "tool-start",
+      sessionId: "session-1",
+      payload: {
+        toolCallId: "call-write",
+        name: "Write",
+        parameters: {
+          file_path: "/workspace/project/file.ts",
+          content: "x".repeat(2_000_000),
+          replacements: [{ old: "y".repeat(5_000), count: 3 }],
+        },
+      },
+    });
+
+    expect(message.body.input.file_path).toBe("/workspace/project/file.ts");
+    expect(message.body.input.content).toHaveLength(2_000);
+    expect(message.body.input.content).toContain("[truncated for Happy Mobile]");
+    expect(message.body.input.replacements[0].old).toHaveLength(2_000);
+    expect(message.body.input.replacements[0].count).toBe(3);
+  });
+
   it.each([
     ["file-diff", "toolCallId", "file-change-1"],
     ["diff-proposal", "proposalId", "proposal-1"],

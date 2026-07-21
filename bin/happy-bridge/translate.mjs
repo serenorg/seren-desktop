@@ -9,6 +9,7 @@ const AGENT_PROVIDER = "codex";
 const TOOL_OUTPUT_MAX_CHARS = 1_200;
 const TOOL_ERROR_MAX_CHARS = 6_000;
 const FILE_DIFF_MAX_CHARS = 2_000;
+const TOOL_INPUT_MAX_CHARS = 2_000;
 const MOBILE_TRUNCATION_MARKER = "\n… [truncated for Happy Mobile]";
 
 function stringValue(value, fallback = "") {
@@ -36,6 +37,21 @@ function boundedMobileText(value, maxChars) {
     prefix = prefix.slice(0, -1);
   }
   return `${prefix}${MOBILE_TRUNCATION_MARKER}`;
+}
+
+// Tool parameters carry whole file bodies — a `Write` call's content arrives
+// here in full. Every string is bounded in place so the argument shape the
+// phone renders survives, matching the limit already applied to the diff the
+// same write produces.
+function boundedToolInput(value) {
+  if (typeof value === "string") return boundedMobileText(value, TOOL_INPUT_MAX_CHARS);
+  if (Array.isArray(value)) return value.map(boundedToolInput);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, boundedToolInput(entry)]),
+    );
+  }
+  return value;
 }
 
 function summarizeFileContent(value) {
@@ -244,7 +260,7 @@ export function translateNeutralEvent(event, { provider = AGENT_PROVIDER } = {})
         type: "tool-call",
         callId: stringValue(payload.toolCallId, "unknown-call"),
         name: stringValue(payload.name, stringValue(payload.kind, "tool")),
-        input: payload.parameters ?? {},
+        input: boundedToolInput(payload.parameters ?? {}),
         id: stringValue(payload.toolCallId, "unknown-call"),
       }), provider }];
     case "tool-end":
