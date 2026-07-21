@@ -104,6 +104,29 @@ describe("Claude promptless containment (#3091)", () => {
     }
   });
 
+  it("keeps the agent startable and $HOME toolchains usable", () => {
+    const settings = buildClaudePolicySettings({
+      cwd: tempProject(),
+      sandboxMode: "workspace-write",
+      networkEnabled: false,
+    });
+    if (process.platform === "win32") return;
+
+    // failIfUnavailable turns a missing bubblewrap/socat into a Claude Code
+    // that will not start, and we ship neither. #3138
+    expect(settings.sandbox.failIfUnavailable).toBe(false);
+
+    // Denying all of ~/ also hides ~/.gitconfig and $HOME toolchains, which
+    // breaks git commit and most build commands. #3139
+    const denyRead: string[] = settings.sandbox.filesystem.denyRead;
+    expect(denyRead).not.toContain("~/");
+    expect(denyRead).toContain("~/.aws");
+    expect(denyRead).toContain("~/.ssh");
+    for (const readable of ["~/.gitconfig", "~/.nvm", "~/.cargo", "~/.pyenv"]) {
+      expect(denyRead).not.toContain(readable);
+    }
+  });
+
   it("stays silent in-project and asks only for exceptional external access", () => {
     const root = tempProject();
     const outside = tempProject();

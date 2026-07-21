@@ -82,14 +82,18 @@ impl FileAccessPolicy {
             return FileAccessDecision::Allow(access);
         }
 
-        if sensitive {
-            return self.approval_or_deny(access);
-        }
-
+        // Read Only precedes the sensitive check, matching
+        // bin/browser-local/file-access-policy.mjs. Reversed, a write to a
+        // credential path resolved to an approval prompt while an ordinary
+        // path was denied outright. #3140
         if kind == FileAccessKind::Write && self.settings.sandbox_mode == "read-only" {
             return FileAccessDecision::Deny(
                 "File write denied: Agent Sandbox Mode is Read Only.".to_string(),
             );
+        }
+
+        if sensitive {
+            return self.approval_or_deny(access);
         }
 
         let in_project = self
@@ -320,6 +324,21 @@ mod tests {
             policy(root.path(), "full-access", "never")
                 .evaluate(outside.path().to_str().unwrap(), FileAccessKind::Read),
             FileAccessDecision::Allow(_)
+        ));
+    }
+
+    #[test]
+    fn read_only_denies_sensitive_writes_instead_of_prompting() {
+        // Read Only must not become approvable just because the target is a
+        // credential path — the JS twin denies both. #3140
+        let root = tempfile::tempdir().expect("root");
+        let home = dirs::home_dir().expect("home");
+        let credentials = home.join(".aws").join("credentials");
+
+        assert!(matches!(
+            policy(root.path(), "read-only", "on-request")
+                .evaluate(credentials.to_str().unwrap(), FileAccessKind::Write),
+            FileAccessDecision::Deny(_)
         ));
     }
 
