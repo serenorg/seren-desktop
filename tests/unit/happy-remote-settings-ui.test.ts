@@ -31,3 +31,19 @@ describe("Happy Remote Access app discovery (#3127)", () => {
     expect(remoteSettings).toContain("void openExternalLink(store.url)");
   });
 });
+
+describe("Happy advertised-root consent (#3144)", () => {
+  it("derives roots from the same conversations the user sees checkboxes for", () => {
+    // The UI lists agent conversations. If the bridge discovers roots from a
+    // wider set, it advertises folders the user was never shown and cannot
+    // withdraw — a remote spawn into them still passes is_advertised_root.
+    expect(remoteSettings).toContain('listConversations({ kind: "agent" })');
+
+    const bridge = readFileSync(resolve("src-tauri/src/happy_bridge.rs"), "utf-8");
+    const call = bridge.match(
+      /list_conversations\(\s*app\.clone\(\),\s*([^,]+),/,
+    );
+    expect(call).not.toBeNull();
+    expect(call?.[1].trim()).toBe('Some("agent".to_string())');
+  });
+});

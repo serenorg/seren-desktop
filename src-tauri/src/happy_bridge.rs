@@ -129,8 +129,15 @@ impl HappyBridgeManager {
         });
         // Reuse the existing conversation reader as the source of recent project roots.
         // There is no separate Rust recent-project registry in this repository.
-        let discovered_roots =
-            crate::commands::chat::list_conversations(app.clone(), None, None, None)
+        // Agent conversations only, matching the set HappyRemoteSettings renders
+        // checkboxes for. Including chat conversations advertised roots the user
+        // was never shown and could not withdraw. #3144
+        let discovered_roots = crate::commands::chat::list_conversations(
+            app.clone(),
+            Some("agent".to_string()),
+            None,
+            None,
+        )
                 .await
                 .unwrap_or_default()
                 .into_iter()

@@ -347,6 +347,18 @@ export function createStartupStatusGate(notify) {
   };
 }
 
+// Matched on shape rather than the exact sentence. Runtimes name the session
+// in their own words — LM Studio says "...for this LM Studio session." — and an
+// exact compare silently discarded the queued prompt for those sessions. #3145
+export function isPromptBusyError(error) {
+  return (
+    error instanceof Error &&
+    /^Another prompt is already active for this .*session\.$/.test(
+      error.message,
+    )
+  );
+}
+
 export function createDeferredPromptQueue({
   send,
   onError = () => {},
@@ -504,9 +516,7 @@ export function createHappyLayer({
   const promptQueue = createDeferredPromptQueue({
     send: async (_sessionId, queued) =>
       handleUserMessage(queued.entry, queued.message),
-    shouldRetry: (error) =>
-      error instanceof Error &&
-      error.message === "Another prompt is already active for this session.",
+    shouldRetry: isPromptBusyError,
     onError: (_error, outcome) =>
       debug(
         outcome.deferred
