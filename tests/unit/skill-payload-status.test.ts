@@ -104,7 +104,11 @@ function installedSkill(slug: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("skill-install race fix (#1917)", () => {
+// Each case re-imports the store and parser after resetModules(), so the work
+// is a full module-graph load rather than the assertion. On a loaded machine
+// that exceeded the 5s default and failed the suite for a reason unrelated to
+// what is being tested.
+describe("skill-install race fix (#1917)", { timeout: 30_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
