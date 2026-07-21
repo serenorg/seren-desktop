@@ -494,7 +494,7 @@ try {
   Set-Location `$work
   Write-TaskLog "Using install directory `$installDir"
   Invoke-LoggedNative "Corepack enable" "corepack" @("enable") 120
-  Invoke-LoggedNative "Corepack prepare pnpm" "corepack" @("prepare", "pnpm@9", "--activate") 180
+  Invoke-LoggedNative "Corepack prepare pnpm" "corepack" @("prepare", "pnpm@11", "--activate") 180
   Invoke-LoggedNative "pnpm install" "pnpm" @("install", "--frozen-lockfile") 1200
   # #3096 intentionally removed provider-startup installation. The release
   # user is disposable and starts empty, so provision its real CLI prerequisites
