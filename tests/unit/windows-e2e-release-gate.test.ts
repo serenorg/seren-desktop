@@ -699,4 +699,38 @@ describe("Windows production e2e release gate", () => {
     expect(patchesAreWorkspaceScoped).toBe(true);
     expect(boxMajor).toBeGreaterThanOrEqual(10);
   });
+
+  it("provisions a Node the box's pnpm can actually run on", () => {
+    // pnpm 11 imports node:sqlite and refuses to run on Node < 22.13. #3136
+    // moved the box to pnpm 11 but left it on the baked Node 20, so the frozen
+    // install crashed with ERR_UNKNOWN_BUILTIN_MODULE and the gate failed the
+    // publish. The harness must provision its own Node, first on PATH, before
+    // the corepack/pnpm steps — and it has to be recent enough for pnpm 11.
+    const provisioned = taskUserRunner.match(
+      /\$nodeVersion\s*=\s*"v(\d+)\.\d+\.\d+"/,
+    );
+    expect(provisioned).not.toBeNull();
+    const nodeMajor = Number(provisioned?.[1]);
+
+    // pnpm 11's floor is Node 22.13; require the major that ships node:sqlite.
+    expect(nodeMajor).toBeGreaterThanOrEqual(22);
+
+    // The provision must precede the corepack/pnpm activation, or the box's
+    // baked Node is still what runs the install.
+    const provisionAt = taskUserRunner.indexOf("$nodeVersion");
+    const corepackAt = taskUserRunner.indexOf('"Corepack enable"');
+    expect(provisionAt).toBeGreaterThanOrEqual(0);
+    expect(corepackAt).toBeGreaterThan(provisionAt);
+
+    // And it must actually lead PATH, not just be downloaded. The task body is
+    // a here-string, so `$` is backtick-escaped in the raw file.
+    expect(taskUserRunner).toContain('"`$nodeDir;`$env:PATH"');
+
+    // Keep the harness Node major aligned with the pipeline's.
+    const releaseNodeMajor = Number(
+      releaseWorkflow.match(/node-version:\s*(\d+)/)?.[1],
+    );
+    expect(releaseNodeMajor).toBeGreaterThan(0);
+    expect(nodeMajor).toBe(releaseNodeMajor);
+  });
 });

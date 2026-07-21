@@ -492,6 +492,40 @@ try {
   Import-AgentCredentialArchive
 
   Set-Location `$work
+
+  # The box's baked Node is too old for the toolchain the pipeline uses. pnpm 11
+  # requires Node >= 22.13 (it imports node:sqlite); #3136 moved the box to
+  # pnpm 11 but left it on the baked Node 20, so the frozen install crashed with
+  # ERR_UNKNOWN_BUILTIN_MODULE. Provision the pipeline's Node major here and put
+  # it first on PATH, so the harness no longer depends on whatever Node is baked
+  # into the box — the same reason it no longer depends on a baked pnpm. Keep
+  # this major aligned with node-version in .github/workflows/release.yml.
+  `$nodeVersion = "v24.18.0"
+  `$nodeDirName = "node-`$nodeVersion-win-x64"
+  `$nodeZip = Join-Path `$work "`$nodeDirName.zip"
+  `$nodeUrl = "https://nodejs.org/dist/`$nodeVersion/`$nodeDirName.zip"
+  Write-TaskLog "Provisioning Node `$nodeVersion for the harness toolchain"
+  `$previousProgress = `$ProgressPreference
+  `$ProgressPreference = "SilentlyContinue"
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  try {
+    Invoke-WebRequest -Uri `$nodeUrl -OutFile `$nodeZip -UseBasicParsing -TimeoutSec 120
+    Expand-Archive -LiteralPath `$nodeZip -DestinationPath `$work -Force
+  } finally {
+    `$ProgressPreference = `$previousProgress
+  }
+  `$nodeDir = Join-Path `$work `$nodeDirName
+  if (-not (Test-Path -LiteralPath (Join-Path `$nodeDir "node.exe"))) {
+    throw "Node `$nodeVersion did not extract to `$nodeDir"
+  }
+  `$env:PATH = "`$nodeDir;`$env:PATH"
+  `$activeNode = [string](& (Join-Path `$nodeDir "node.exe") --version).Trim()
+  Write-TaskLog "Harness Node is now `$activeNode"
+  `$expectedNodePrefix = "`$((`$nodeVersion -split '\.')[0])."
+  if (-not `$activeNode.StartsWith(`$expectedNodePrefix)) {
+    throw "Expected Node `$expectedNodePrefix* on PATH for the harness, got `$activeNode"
+  }
+
   Write-TaskLog "Using install directory `$installDir"
   Invoke-LoggedNative "Corepack enable" "corepack" @("enable") 120
   Invoke-LoggedNative "Corepack prepare pnpm" "corepack" @("prepare", "pnpm@11", "--activate") 180
