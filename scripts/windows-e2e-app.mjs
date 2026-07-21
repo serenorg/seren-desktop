@@ -811,9 +811,9 @@ function authError(journey, detail) {
 
 function provisioningError(journey, detail) {
   return new AgentProvisioningError(
-    `${journey} CLI could not be installed, launched, or kept alive long ` +
-      `enough to complete the Windows e2e prompt. Verify the scheduled-task ` +
-      `user can resolve the CLI binary and received agent credentials via ` +
+    `${journey} CLI could not be resolved, launched, or kept alive long enough ` +
+      `to complete the Windows e2e prompt. Verify the scheduled-task user ` +
+      `received the explicit e2e CLI prerequisites and agent credentials via ` +
       `SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_S3_URI or ` +
       `SEREN_E2E_AGENT_CREDENTIAL_ARCHIVE_B64, and check provider-runtime logs ` +
       `for a real process crash. Detail: ${detail}`,
@@ -882,7 +882,7 @@ async function ensureAgentCli(ws, agentType) {
       "provider_ensure_agent_cli",
       { agentType },
       PROVIDER_ENSURE_CLI_TIMEOUT_MS,
-      `${agentType} CLI install`,
+      `${agentType} CLI resolution`,
     );
     logStage(`${agentType} provider CLI ready: ${String(resolved || "<unknown>")}`);
   } catch (error) {

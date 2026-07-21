@@ -496,6 +496,33 @@ try {
   Invoke-LoggedNative "Corepack enable" "corepack" @("enable") 120
   Invoke-LoggedNative "Corepack prepare pnpm" "corepack" @("prepare", "pnpm@9", "--activate") 180
   Invoke-LoggedNative "pnpm install" "pnpm" @("install", "--frozen-lockfile") 1200
+  # #3096 intentionally removed provider-startup installation. The release
+  # user is disposable and starts empty, so provision its real CLI prerequisites
+  # explicitly as test setup using the vendors' documented npm packages. This
+  # must remain outside provider_ensure_agent_cli: production startup should
+  # continue to hand a missing CLI to the user for review/manual installation.
+  Invoke-LoggedNative "Install e2e agent CLIs" "npm" @(
+    "install",
+    "--global",
+    "--no-audit",
+    "--no-fund",
+    "@anthropic-ai/claude-code@latest",
+    "@openai/codex@latest"
+  ) 1200
+  `$npmGlobalPrefix = [string](& npm prefix --global | Select-Object -Last 1)
+  `$npmGlobalPrefix = `$npmGlobalPrefix.Trim()
+  if ([string]::IsNullOrWhiteSpace(`$npmGlobalPrefix)) {
+    throw "npm did not report a global prefix after installing the e2e agent CLIs"
+  }
+  `$claudeCliPath = Join-Path `$npmGlobalPrefix "claude.cmd"
+  `$codexCliPath = Join-Path `$npmGlobalPrefix "codex.cmd"
+  foreach (`$cliPath in @(`$claudeCliPath, `$codexCliPath)) {
+    if (-not (Test-Path -LiteralPath `$cliPath)) {
+      throw "Required e2e agent CLI was not installed at the npm global prefix"
+    }
+  }
+  Invoke-LoggedNative "Verify Claude Code CLI" `$claudeCliPath @("--version") 120
+  Invoke-LoggedNative "Verify Codex CLI" `$codexCliPath @("--version") 120
   Invoke-LoggedNative "Playwright Chromium install" "pnpm" @("exec", "playwright", "install", "chromium") 600
   `$harnessArgs = @(
     "-NoProfile",

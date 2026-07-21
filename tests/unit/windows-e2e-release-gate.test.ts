@@ -444,10 +444,26 @@ describe("Windows production e2e release gate", () => {
     expect(releaseWorkflow).toContain("windows-app-e2e-logs");
   });
 
-  it("provisions agent CLIs before checking release-gate availability (#2481)", () => {
-    // A Bedrock-backed Claude run still needs a launchable local Claude Code
-    // binary. The release probe must use the same install contract as the
-    // desktop spawn path before it asks whether the provider can launch.
+  it("preprovisions real agent CLIs outside provider startup before checking release-gate availability (#2481, #3100)", () => {
+    // #3096 removed automatic provider-startup installers. The disposable
+    // Windows release user must install its explicit test prerequisites before
+    // app launch, while the production RPC only verifies resolution.
+    const cliSetupAt = taskUserRunner.indexOf(
+      'Invoke-LoggedNative "Install e2e agent CLIs"',
+    );
+    const appHarnessAt = taskUserRunner.indexOf(
+      'Invoke-LoggedNative "Windows app harness"',
+    );
+    expect(cliSetupAt).toBeGreaterThanOrEqual(0);
+    expect(appHarnessAt).toBeGreaterThanOrEqual(0);
+    expect(cliSetupAt).toBeLessThan(appHarnessAt);
+    expect(taskUserRunner).toContain("@anthropic-ai/claude-code@latest");
+    expect(taskUserRunner).toContain("@openai/codex@latest");
+    expect(taskUserRunner).toContain('Join-Path `$npmGlobalPrefix "claude.cmd"');
+    expect(taskUserRunner).toContain('Join-Path `$npmGlobalPrefix "codex.cmd"');
+    expect(taskUserRunner).toContain('Verify Claude Code CLI');
+    expect(taskUserRunner).toContain('Verify Codex CLI');
+
     expect(probe).toContain("provider_ensure_agent_cli");
     expect(probe).toContain("ensureAgentCli");
     expect(probe).toContain("ensuring provider CLI");
