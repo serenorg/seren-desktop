@@ -18,4 +18,7 @@ export type {
   ToolEvidence,
   ValidatedClaim,
 } from "./types";
-export { validateFinalOutput } from "./validateFinalOutput";
+export {
+  SUBSTITUTION_MARKER,
+  validateFinalOutput,
+} from "./validateFinalOutput";
