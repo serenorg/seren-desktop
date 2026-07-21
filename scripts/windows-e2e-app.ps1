@@ -12,7 +12,7 @@ param(
 
   [int]$StartupTimeoutSeconds = 120,
 
-  [int]$InstallerTimeoutSeconds = 180,
+  [int]$InstallerTimeoutSeconds = 1200,
 
   [int]$ProbeTimeoutSeconds = 1800
 )

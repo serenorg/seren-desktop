@@ -73,7 +73,7 @@ describe("Windows production e2e release gate", () => {
     expect(sendAt).toBeGreaterThanOrEqual(0);
     expect(preflightAt).toBeLessThan(sendAt);
     // The SSM doc and the runner poll deadline must both exceed the on-box wait
-    // budget (TaskTimeoutSeconds + 60 = 3660s) plus pre-task overhead, so a valid
+    // budget (TaskTimeoutSeconds + 60 = 4860s) plus wrapper overhead, so a valid
     // slow run is not killed by the harness before it finishes.
     expect(job).toContain('executionTimeout: ["6000"]');
     expect(job).toContain("SECONDS + 6300");
@@ -275,7 +275,10 @@ describe("Windows production e2e release gate", () => {
     expect(taskUserRunner).toContain("SEREN_E2E_UNSIGNED_PR_RUN");
     expect(taskUserRunner).toContain("SerenDesktopE2E");
     expect(taskUserRunner).toContain("-InstallDir");
-    expect(taskUserRunner).toContain("InstallerTimeoutSeconds = 600");
+    expect(runner).toContain("InstallerTimeoutSeconds = 1200");
+    expect(taskUserRunner).toContain("InstallerTimeoutSeconds = 1200");
+    expect(taskUserRunner).toContain("TaskTimeoutSeconds = 4800");
+    expect(releaseWorkflow).toContain("-TaskTimeoutSeconds 4800");
     expect(taskUserRunner).toContain("windows-e2e-app.ps1");
     expect(taskUserRunner).toContain("Windows app scheduled-task harness failed");
     expect(taskUserRunner).toContain("Stop-E2EProcessTree");
