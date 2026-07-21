@@ -57,6 +57,16 @@ describe("neutral-to-Happy session translation", () => {
     expect(translateNeutralEvent({ kind: "unknown", sessionId: "session-1", payload })).toEqual([]);
   });
 
+  it("does not republish a Happy-originated user message back to Happy", () => {
+    expect(
+      translateNeutralEvent({
+        kind: "user-message",
+        sessionId: "session-1",
+        payload: { text: "remote prompt", origin: "remote" },
+      }),
+    ).toEqual([]);
+  });
+
   it("bounds tool output for mobile while retaining more error context", () => {
     const success = translateNeutralEvent({
       kind: "tool-end",
