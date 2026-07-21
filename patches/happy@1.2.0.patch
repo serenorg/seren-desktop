@@ -1,11 +1,47 @@
 diff --git a/dist/types-CV0guBiJ.mjs b/dist/types-CV0guBiJ.mjs
-index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..665154ffa9d89d56d4fcf61d4ff830a5e7a49a58 100644
+index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..e222a76faae481cbfc2814568349c10e6bc11c91 100644
 --- a/dist/types-CV0guBiJ.mjs
 +++ b/dist/types-CV0guBiJ.mjs
-@@ -2458,8 +2458,17 @@ class ApiSessionClient extends EventEmitter {
-         if (message.content?.t !== "encrypted") {
-           continue;
+@@ -2142,6 +2142,7 @@ class ApiSessionClient extends EventEmitter {
+   };
+   lastSeq = 0;
+   pendingOutbox = [];
++  outboundMessageLocalIds = /* @__PURE__ */ new Set();
+   sendSync;
+   receiveSync;
+   constructor(token, session) {
+@@ -2206,18 +2207,22 @@ class ApiSessionClient extends EventEmitter {
+           return;
          }
+         if (data.body.t === "new-message") {
+-          const messageSeq = data.body.message?.seq;
+-          if (typeof messageSeq !== "number" || messageSeq !== this.lastSeq + 1 || data.body.message.content.t !== "encrypted") {
++          const message = data.body.message;
++          const messageSeq = message?.seq;
++          if (typeof messageSeq !== "number" || messageSeq !== this.lastSeq + 1 || message?.content?.t !== "encrypted") {
+             this.receiveSync.invalidate();
+             return;
+           }
+-          const body = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(data.body.message.content.c));
++          this.lastSeq = messageSeq;
++          if (this.outboundMessageLocalIds.delete(message.localId)) {
++            return;
++          }
++          const body = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(message.content.c));
+           logger.debug("[SOCKET] [UPDATE] Decrypted message", {
+             role: typeof body?.role === "string" ? body.role : "unknown",
+             contentType: typeof body?.content?.type === "string" ? body.content.type : "unknown"
+           });
+           this.routeIncomingMessage(body);
+-          this.lastSeq = messageSeq;
+         } else if (data.body.t === "update-session") {
+           if (data.body.metadata && data.body.metadata.version > this.metadataVersion) {
+             this.metadata = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(data.body.metadata.value));
+@@ -2454,7 +2459,17 @@ class ApiSessionClient extends EventEmitter {
+         if (message.seq > maxSeq) {
+           maxSeq = message.seq;
+         }
+-        if (skipRouting) continue;
 +        // The socket handler routes live messages and advances lastSeq while
 +        // this fetch is parked on its await. Without this guard the page that
 +        // comes back re-routes anything the socket already delivered, and a
@@ -14,13 +50,13 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..665154ffa9d89d56d4fcf61d4ff830a5
 +        if (message.seq <= this.lastSeq) {
 +          continue;
 +        }
-         try {
-           const body = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(message.content.c));
-+          this.lastSeq = message.seq;
-           this.routeIncomingMessage(body);
-         } catch (error) {
-           logger.debug("[API] Failed to decrypt fetched message", {
-@@ -2487,9 +2496,12 @@ class ApiSessionClient extends EventEmitter {
++        this.lastSeq = message.seq;
++        const isOutboundEcho = this.outboundMessageLocalIds.delete(message.localId);
++        if (skipRouting || isOutboundEcho) continue;
+         if (message.content?.t !== "encrypted") {
+           continue;
+         }
+@@ -2487,10 +2502,13 @@ class ApiSessionClient extends EventEmitter {
    static MAX_OUTBOX_BATCH_SIZE = 50;
    async flushOutbox() {
      while (this.pendingOutbox.length > 0) {
@@ -30,12 +66,35 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..665154ffa9d89d56d4fcf61d4ff830a5
        const batchSize = Math.min(this.pendingOutbox.length, ApiSessionClient.MAX_OUTBOX_BATCH_SIZE);
 -      const batchStart = this.pendingOutbox.length - batchSize;
 -      const batch = this.pendingOutbox.slice(batchStart);
+-      const response = await axios.post(
 +      const batchStart = 0;
 +      const batch = this.pendingOutbox.slice(batchStart, batchSize);
-       const response = await axios.post(
++      await axios.post(
          `${configuration.serverUrl}/v3/sessions/${encodeURIComponent(this.sessionId)}/messages`,
          {
-@@ -2777,6 +2789,15 @@ class ApiSessionClient extends EventEmitter {
+           messages: batch
+@@ -2500,17 +2518,16 @@ class ApiSessionClient extends EventEmitter {
+           timeout: 6e4
+         }
+       );
+-      const messages = Array.isArray(response.data.messages) ? response.data.messages : [];
+-      const maxSeq = messages.reduce((acc, message) => message.seq > acc ? message.seq : acc, this.lastSeq);
+-      this.lastSeq = maxSeq;
+       this.pendingOutbox.splice(batchStart, batch.length);
+     }
+   }
+   enqueueMessage(content, invalidate = true) {
+     const encrypted = encodeBase64(encrypt(this.encryptionKey, this.encryptionVariant, content));
++    const localId = randomUUID();
++    this.outboundMessageLocalIds.add(localId);
+     this.pendingOutbox.push({
+       content: encrypted,
+-      localId: randomUUID()
++      localId
+     });
+     if (invalidate) {
+       this.sendSync.invalidate();
+@@ -2777,6 +2794,15 @@ class ApiSessionClient extends EventEmitter {
    }
    async close() {
      logger.debug("[API] socket.close() called");

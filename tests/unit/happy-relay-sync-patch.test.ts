@@ -34,10 +34,45 @@ describe("happy relay sync patch", () => {
   });
 
   it("advances lastSeq before routing so fetch and socket cannot overlap", () => {
-    const routeIndex = source.indexOf("this.lastSeq = message.seq;");
-    expect(routeIndex).toBeGreaterThan(-1);
-    const tail = source.slice(routeIndex, routeIndex + 200);
-    expect(tail).toContain("this.routeIncomingMessage(body)");
+    const fetchIndex = source.indexOf("async fetchMessages()");
+    const sequenceIndex = source.indexOf("this.lastSeq = message.seq;", fetchIndex);
+    const routeIndex = source.indexOf("this.routeIncomingMessage(body);", fetchIndex);
+    expect(sequenceIndex).toBeGreaterThan(fetchIndex);
+    expect(routeIndex).toBeGreaterThan(sequenceIndex);
+  });
+
+  it("does not advance the inbound cursor from outbound POST responses", () => {
+    // POST responses may leapfrog an unfetched phone prompt in the shared relay
+    // sequence. Only socket/GET observation is allowed to advance lastSeq.
+    const flushIndex = source.indexOf("async flushOutbox()");
+    const enqueueIndex = source.indexOf("enqueueMessage(content", flushIndex);
+    const flushBody = source.slice(flushIndex, enqueueIndex);
+    expect(flushBody).not.toContain("this.lastSeq");
+    expect(flushBody).not.toContain("response.data.messages");
+  });
+
+  it("filters this client's echoed outbound messages from socket and fetch routing", () => {
+    expect(source).toContain("this.outboundMessageLocalIds.add(localId);");
+
+    const socketStart = source.indexOf('if (data.body.t === "new-message")');
+    const socketEnd = source.indexOf('data.body.t === "update-session"', socketStart);
+    const socketBody = source.slice(socketStart, socketEnd);
+    const socketAdvance = socketBody.indexOf("this.lastSeq = messageSeq;");
+    const socketFilter = socketBody.indexOf(
+      "this.outboundMessageLocalIds.delete(message.localId)",
+    );
+    expect(socketAdvance).toBeGreaterThan(-1);
+    expect(socketFilter).toBeGreaterThan(socketAdvance);
+
+    const fetchStart = source.indexOf("async fetchMessages()");
+    const fetchEnd = source.indexOf("async flushOutbox()", fetchStart);
+    const fetchBody = source.slice(fetchStart, fetchEnd);
+    const fetchAdvance = fetchBody.indexOf("this.lastSeq = message.seq;");
+    const fetchFilter = fetchBody.indexOf(
+      "this.outboundMessageLocalIds.delete(message.localId)",
+    );
+    expect(fetchAdvance).toBeGreaterThan(-1);
+    expect(fetchFilter).toBeGreaterThan(fetchAdvance);
   });
 
   it("flushes the outbox before stopping the send sync on close", () => {
