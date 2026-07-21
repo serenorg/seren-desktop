@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildEmployeeInstructionFiles,
   extractInstructionSections,
+  splitSkillDocument,
 } from "@/lib/employees/instructions";
 
 const EMPTY = {
@@ -117,6 +118,60 @@ describe("employee instruction-file helpers", () => {
     ]);
 
     expect(sections.skill).toContain("\n---\n");
+  });
+
+  it("splits the runtime prompt from the display document", () => {
+    const content =
+      "Use the following runtime behavior.\n\nSkill instructions:\n\n---\ndescription: Imported helper\nname: imported-helper\n---\n\n# Imported Skill\n\n## Steps\n\n- Read the request.";
+
+    const result = splitSkillDocument(content);
+
+    expect(result.runtimePrompt).toBe("Use the following runtime behavior.");
+    expect(result.document).toMatch(/^# Imported Skill/);
+    expect(result.document).toContain("## Steps");
+    expect(result.document).not.toContain("Skill instructions:");
+    expect(result.document).not.toContain("description:");
+    expect(result.document).not.toContain("name:");
+    expect(result.document).not.toMatch(/^---/);
+  });
+
+  it("returns the complete document when no marker line exists", () => {
+    const content = "# Plain Skill\n\nUse short sentences.";
+
+    expect(splitSkillDocument(content)).toEqual({
+      runtimePrompt: "",
+      document: content,
+    });
+  });
+
+  it("matches the marker case-insensitively with trailing whitespace", () => {
+    const result = splitSkillDocument(
+      "Runtime guidance.\n\nSKILL INSTRUCTIONS:   \n\n# Human documentation",
+    );
+
+    expect(result.runtimePrompt).toBe("Runtime guidance.");
+    expect(result.document).toBe("# Human documentation");
+  });
+
+  it("does not split a mid-sentence marker phrase", () => {
+    const content =
+      "Explain why the phrase Skill instructions: is not a section marker.";
+
+    expect(splitSkillDocument(content)).toEqual({
+      runtimePrompt: "",
+      document: content,
+    });
+  });
+
+  it("keeps extractInstructionSections unsplit for edit round-trips", () => {
+    const content =
+      "Runtime behavior.\n\nSkill instructions:\n\n# Human documentation\n\nKeep this body.";
+
+    expect(
+      extractInstructionSections([
+        { kind: "skill", path: "SKILL.md", content },
+      ]).skill,
+    ).toBe(content);
   });
 
   it("does not split ordinary skill text that quotes old marker syntax", () => {

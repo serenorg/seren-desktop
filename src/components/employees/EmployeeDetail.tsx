@@ -33,7 +33,10 @@ import {
   healthDotClass,
   healthLabel,
 } from "@/lib/employees/health";
-import { extractInstructionSections } from "@/lib/employees/instructions";
+import {
+  extractInstructionSections,
+  splitSkillDocument,
+} from "@/lib/employees/instructions";
 import type { EmployeeMode, EmployeeSummary } from "@/lib/employees/types";
 import { getDefaultOrganizationId } from "@/lib/tauri-bridge";
 import { employees as svc } from "@/services/employees";
@@ -188,6 +191,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
   const [editingEvalGate, setEditingEvalGate] = createSignal(false);
   const [showCheckpoints, setShowCheckpoints] = createSignal(true);
   const [skillExpanded, setSkillExpanded] = createSignal(false);
+  const [runtimePromptExpanded, setRuntimePromptExpanded] = createSignal(false);
 
   const [organizationId] = createResource(async () =>
     getDefaultOrganizationId(),
@@ -518,11 +522,13 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
 
   const detailRecord = () => employeeStore.detail(props.employeeId);
 
-  const description = () => {
+  const skillContent = createMemo(() => {
     const instructions = detailRecord()?.instructions;
-    if (!instructions) return null;
-    return extractInstructionSections(instructions).skill.trim();
-  };
+    if (!instructions) return { runtimePrompt: "", document: "" };
+    return splitSkillDocument(extractInstructionSections(instructions).skill);
+  });
+  const skillDocument = () => skillContent().document;
+  const runtimePrompt = () => skillContent().runtimePrompt;
 
   const copyEndpoint = async () => {
     const url = summary()?.endpointUrl;
@@ -947,7 +953,7 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                   SKILL.md
                 </div>
                 <Show
-                  when={description()}
+                  when={skillDocument()}
                   fallback={
                     <Show
                       when={!detail.loading}
@@ -985,6 +991,31 @@ export const EmployeeDetail: Component<EmployeeDetailProps> = (props) => {
                         >
                           {skillExpanded() ? "Show less" : "Show more"}
                         </button>
+                      </Show>
+                    </>
+                  )}
+                </Show>
+                <Show when={runtimePrompt()}>
+                  {(prompt) => (
+                    <>
+                      <button
+                        type="button"
+                        data-testid="employee-runtime-prompt-toggle"
+                        class="mt-2 text-[12px] font-medium text-accent hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 rounded"
+                        aria-expanded={runtimePromptExpanded()}
+                        onClick={() =>
+                          setRuntimePromptExpanded((expanded) => !expanded)
+                        }
+                      >
+                        Runtime prompt
+                      </button>
+                      <Show when={runtimePromptExpanded()}>
+                        <div
+                          data-testid="employee-runtime-prompt"
+                          class="mt-3 rounded-md border border-border bg-surface-2/40 p-3"
+                        >
+                          <MarkdownProse content={prompt()} />
+                        </div>
                       </Show>
                     </>
                   )}

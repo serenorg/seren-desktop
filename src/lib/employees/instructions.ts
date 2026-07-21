@@ -82,6 +82,27 @@ function stripGeneratedSkillWrapper(content: string): string {
   return withoutFrontmatter.replace(/^# .*(?:\n+|$)/, "").trim();
 }
 
+export function splitSkillDocument(content: string): {
+  runtimePrompt: string;
+  document: string;
+} {
+  const normalizedContent = stripEmbeddedSkillFrontmatter(content);
+  const marker = normalizedContent.match(/^[ \t]*skill instructions:[ \t]*$/im);
+  const documentStart =
+    marker?.index === undefined
+      ? normalizedContent.trim()
+      : normalizedContent.slice(marker.index + marker[0].length).trim();
+  const runtimePrompt =
+    marker?.index === undefined
+      ? ""
+      : normalizedContent.slice(0, marker.index).trim();
+
+  return {
+    runtimePrompt,
+    document: stripEmbeddedSkillFrontmatter(documentStart).trim(),
+  };
+}
+
 export function extractInstructionSections(
   instructions: AgentInstructionFile[] | null | undefined,
 ): InstructionSections {
