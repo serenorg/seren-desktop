@@ -158,9 +158,18 @@ pub fn platform_subdir() -> String {
     format!("{}-{}", platform, arch)
 }
 
+/// The two directories the embedded runtime is spread across: the
+/// platform-specific subdirectory holding node/git, and the root that
+/// holds the platform-agnostic pieces (`provider-runtime/`, `bin/`).
+#[derive(Debug, Clone)]
+struct EmbeddedRuntimeDirs {
+    platform_dir: PathBuf,
+    root_dir: PathBuf,
+}
+
 /// Gets the path to the embedded runtime directory based on the application location.
 /// The embedded runtime is stored in the resources folder of the application.
-fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
+fn get_embedded_runtime_dir(app: &AppHandle) -> Option<EmbeddedRuntimeDirs> {
     let subdir = platform_subdir();
 
     // Use Tauri's resource resolver to find the embedded-runtime directory
@@ -171,10 +180,26 @@ fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
         // Check for platform-specific subdirectory first
         let platform_dir = runtime_dir.join(&subdir);
         if platform_dir.exists() {
-            return Some(platform_dir);
+            return Some(EmbeddedRuntimeDirs {
+                platform_dir,
+                root_dir: runtime_dir,
+            });
         }
-        // Fall back to flat layout (node/bin directly in embedded-runtime)
-        return Some(runtime_dir);
+        // Fall back to flat layout (node/bin directly in embedded-runtime).
+        // A cross-arch or half-staged build lands here and then degrades to
+        // whatever node the user happens to have, so say so loudly (#3152).
+        log::warn!(
+            "[EmbeddedRuntime] No {} subdirectory under {:?}; falling back to the flat \
+             layout. If node/git are not there either, child processes will run on the \
+             user's system node. Fix: run `pnpm prepare:runtime:{}`.",
+            subdir,
+            runtime_dir,
+            subdir
+        );
+        return Some(EmbeddedRuntimeDirs {
+            platform_dir: runtime_dir.clone(),
+            root_dir: runtime_dir,
+        });
     }
 
     // In development mode, check src-tauri/embedded-runtime
@@ -182,7 +207,10 @@ fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
         let dev_runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("embedded-runtime");
         let platform_runtime = dev_runtime.join(&subdir);
         if platform_runtime.exists() {
-            return Some(platform_runtime);
+            return Some(EmbeddedRuntimeDirs {
+                platform_dir: platform_runtime,
+                root_dir: dev_runtime,
+            });
         }
         log::info!(
             "[EmbeddedRuntime] Dev runtime not found at {:?}. \
@@ -195,10 +223,27 @@ fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
     None
 }
 
+/// Locate the bundled CLI wrapper directory.
+///
+/// `scripts/build-provider-runtime.ts` writes the wrappers next to the
+/// platform-agnostic `provider-runtime/` bundle — that is, into the runtime
+/// *root* — while node and git live under the platform subdirectory. Probing
+/// only the platform subdirectory never found them, so the PATH entry was
+/// dead (#3152). Check the platform subdirectory first so a future
+/// per-platform staging wins, then fall back to the root.
+fn embedded_bin_dir(platform_dir: &std::path::Path, root_dir: &std::path::Path) -> Option<PathBuf> {
+    for candidate in [platform_dir.join("bin"), root_dir.join("bin")] {
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 /// Discovers the paths to embedded Node.js and Git installations.
 pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
-    let runtime_dir = match get_embedded_runtime_dir(app) {
-        Some(dir) => dir,
+    let dirs = match get_embedded_runtime_dir(app) {
+        Some(dirs) => dirs,
         None => {
             let subdir = platform_subdir();
             if cfg!(debug_assertions) {
@@ -224,6 +269,8 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
             };
         }
     };
+
+    let runtime_dir = dirs.platform_dir;
 
     let mut node_dir: Option<PathBuf> = None;
     let mut git_dir: Option<PathBuf> = None;
@@ -287,12 +334,7 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
     }
 
     // Check for bundled helper binaries in bin/ directory (all platforms).
-    let bin_dir = runtime_dir.join("bin");
-    let bin_dir = if bin_dir.exists() {
-        Some(bin_dir)
-    } else {
-        None
-    };
+    let bin_dir = embedded_bin_dir(&runtime_dir, &dirs.root_dir);
 
     EmbeddedRuntimePaths {
         node_dir,
@@ -300,6 +342,32 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
         bin_dir,
         python_dir,
     }
+}
+
+fn node_executable_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "node.exe"
+    } else {
+        "node"
+    }
+}
+
+/// Absolute path to the bundled node binary, or `None` when the embedded
+/// runtime was not staged for this platform.
+///
+/// Callers that fall back to a bare `node` must log the fallback: the bare
+/// name is resolved against the *parent's* PATH at spawn time, so a later
+/// `.env("PATH", get_embedded_path())` cannot redirect it, and the app
+/// silently ends up on whatever node the user happens to have (#3152).
+pub fn embedded_node_binary(paths: &EmbeddedRuntimePaths) -> Option<PathBuf> {
+    let candidate = paths.node_dir.as_ref()?.join(node_executable_name());
+    candidate.exists().then_some(candidate)
+}
+
+/// The bare `node` name, used only when [`embedded_node_binary`] comes back
+/// empty and the caller has logged that fallback.
+pub fn system_node_fallback() -> PathBuf {
+    PathBuf::from(node_executable_name())
 }
 
 /// Configures the embedded runtime paths.
@@ -662,6 +730,78 @@ mod tests {
             .expect("write python.exe stub");
         let found = embedded_python_dir(runtime_dir).expect("python_dir discovered");
         assert_eq!(found, runtime_dir.join("python"));
+    }
+
+    /// Regression guard for #3152.
+    ///
+    /// `scripts/build-provider-runtime.ts` writes the CLI wrappers to the
+    /// runtime root, next to the platform-agnostic `provider-runtime/`
+    /// bundle, while node and git live under the platform subdirectory.
+    /// Probing only the platform subdirectory meant `bin_dir` was always
+    /// `None` and the PATH entry never existed.
+    #[test]
+    fn embedded_bin_dir_finds_the_wrappers_in_the_runtime_root() {
+        use std::fs;
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let root = tmp.path().join("embedded-runtime");
+        let platform_dir = root.join("darwin-arm64");
+        fs::create_dir_all(&platform_dir).expect("create platform dir");
+
+        // No bin/ anywhere yet.
+        assert_eq!(embedded_bin_dir(&platform_dir, &root), None);
+
+        // The wrappers land in the runtime root, as the build script writes them.
+        fs::create_dir_all(root.join("bin")).expect("create root bin");
+        assert_eq!(
+            embedded_bin_dir(&platform_dir, &root),
+            Some(root.join("bin")),
+            "wrappers staged in the runtime root must be discovered"
+        );
+
+        // A per-platform staging, should one ever exist, wins.
+        fs::create_dir_all(platform_dir.join("bin")).expect("create platform bin");
+        assert_eq!(
+            embedded_bin_dir(&platform_dir, &root),
+            Some(platform_dir.join("bin"))
+        );
+    }
+
+    /// Regression guard for #3152.
+    ///
+    /// Spawn sites fall back to a bare `node` when the bundled binary is
+    /// missing. `Command::new` resolves that against the *parent's* PATH, so
+    /// a later `.env("PATH", ...)` cannot redirect it and the app silently
+    /// runs on the user's own node. The fallback has to be detectable — and
+    /// therefore loggable — rather than a path that merely looks valid.
+    #[test]
+    fn embedded_node_binary_is_none_when_the_bundled_binary_is_missing() {
+        use std::fs;
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let node_dir = tmp.path().join("node").join("bin");
+        fs::create_dir_all(&node_dir).expect("create node bin dir");
+
+        let mut paths = EmbeddedRuntimePaths {
+            node_dir: None,
+            git_dir: None,
+            bin_dir: None,
+            python_dir: None,
+        };
+
+        // Runtime not staged at all.
+        assert_eq!(embedded_node_binary(&paths), None);
+
+        // Directory staged but the binary never landed in it.
+        paths.node_dir = Some(node_dir.clone());
+        assert_eq!(
+            embedded_node_binary(&paths),
+            None,
+            "an empty node dir must not be reported as a usable bundled node"
+        );
+
+        // Fully staged.
+        let node_path = node_dir.join(node_executable_name());
+        fs::write(&node_path, b"stub").expect("write node stub");
+        assert_eq!(embedded_node_binary(&paths), Some(node_path));
     }
 
     #[test]

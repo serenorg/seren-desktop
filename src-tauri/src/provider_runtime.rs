@@ -36,15 +36,27 @@ const STARTUP_ATTEMPT_BUDGETS: &[Duration] = &[
     Duration::from_secs(45),
 ];
 
+/// A restart only re-arms the budget once the runtime has proved it can stay
+/// up this long. Shorter than that and a crash loop just keeps buying itself
+/// fresh attempts.
+const RESTART_REARM_UPTIME: Duration = Duration::from_secs(60);
+
 struct ProviderRuntimeProcess {
     child: Child,
     config: ProviderRuntimeConfig,
+    spawned_at: Instant,
+    restart_budget_rearmed: bool,
 }
 
 pub struct ProviderRuntimeState {
     process: Mutex<Option<ProviderRuntimeProcess>>,
     monitor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     last_config: Mutex<Option<ProviderRuntimeConfig>>,
+    /// Crash-restart budget. Owned by the state, not by the monitor task:
+    /// a successful restart goes through `ensure_started`, which aborts the
+    /// monitor and spawns a fresh one, so a task-local counter reset itself
+    /// on every restart and the give-up check could never fire (#3156).
+    restart_attempts: Mutex<u32>,
 }
 
 impl ProviderRuntimeState {
@@ -53,7 +65,21 @@ impl ProviderRuntimeState {
             process: Mutex::new(None),
             monitor_handle: Mutex::new(None),
             last_config: Mutex::new(None),
+            restart_attempts: Mutex::new(0),
         }
+    }
+
+    /// Claims the next restart from the shared budget, or `None` once it is
+    /// exhausted.
+    async fn claim_restart_attempt(&self) -> Option<u32> {
+        let mut attempts = self.restart_attempts.lock().await;
+        let next = next_restart_attempt(*attempts)?;
+        *attempts = next;
+        Some(next)
+    }
+
+    async fn rearm_restart_budget(&self) {
+        *self.restart_attempts.lock().await = 0;
     }
 
     pub(crate) async fn ensure_started(
@@ -140,6 +166,8 @@ impl ProviderRuntimeState {
                     *guard = Some(ProviderRuntimeProcess {
                         child,
                         config: config.clone(),
+                        spawned_at: Instant::now(),
+                        restart_budget_rearmed: false,
                     });
                     drop(guard);
                     *self.last_config.lock().await = Some(config.clone());
@@ -344,23 +372,18 @@ fn generate_auth_token() -> String {
 
 fn resolve_node_binary(app: &AppHandle) -> PathBuf {
     let paths = crate::embedded_runtime::discover_embedded_runtime(app);
-    if let Some(node_dir) = paths.node_dir {
-        let candidate = if cfg!(target_os = "windows") {
-            node_dir.join("node.exe")
-        } else {
-            node_dir.join("node")
-        };
-
-        if candidate.exists() {
-            return candidate;
-        }
+    if let Some(node) = crate::embedded_runtime::embedded_node_binary(&paths) {
+        return node;
     }
 
-    if cfg!(target_os = "windows") {
-        PathBuf::from("node.exe")
-    } else {
-        PathBuf::from("node")
-    }
+    log::warn!(
+        "[ProviderRuntime] Bundled node not found under {:?}; falling back to the user's \
+         system node. The runtime will run on an unmanaged node version, or fail to spawn \
+         at all if the machine has none. Fix: run `pnpm prepare:runtime:{}`.",
+        paths.node_dir,
+        crate::embedded_runtime::platform_subdir()
+    );
+    crate::embedded_runtime::system_node_fallback()
 }
 
 fn find_provider_runtime_mjs() -> Result<PathBuf, String> {
@@ -557,58 +580,91 @@ async fn check_provider_runtime_health_once(config: &ProviderRuntimeConfig) -> b
     }
 }
 
+/// Whether another restart fits in the budget.
+fn restart_allowed(attempts: u32) -> bool {
+    attempts < MAX_RESTART_ATTEMPTS
+}
+
+fn next_restart_attempt(attempts: u32) -> Option<u32> {
+    restart_allowed(attempts).then_some(attempts + 1)
+}
+
+/// Whether a run that has lasted `spawned_at..now` has earned a fresh restart
+/// budget. Once per process, so a runtime that is up for hours cannot bank
+/// re-arms.
+fn should_rearm(spawned_at: Instant, already_rearmed: bool, now: Instant) -> bool {
+    !already_rearmed && now.duration_since(spawned_at) >= RESTART_REARM_UPTIME
+}
+
 /// Watches for provider runtime process death and attempts bounded auto-restart.
 fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut restart_attempts: u32 = 0;
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
 
             let state = app.state::<ProviderRuntimeState>();
-            let exited = {
+            let (exited, should_rearm_budget) = {
                 let mut guard = state.process.lock().await;
                 match guard.as_mut() {
                     None => break, // Process was intentionally stopped
                     Some(proc) => match proc.child.try_wait() {
-                        Ok(None) => false, // Still running
+                        Ok(None) => {
+                            // Still running.
+                            let rearm = should_rearm(
+                                proc.spawned_at,
+                                proc.restart_budget_rearmed,
+                                Instant::now(),
+                            );
+                            if rearm {
+                                proc.restart_budget_rearmed = true;
+                            }
+                            (false, rearm)
+                        }
                         Ok(Some(status)) => {
                             log::warn!("[ProviderRuntime] Process exited unexpectedly: {}", status);
                             *guard = None;
-                            true
+                            (true, false)
                         }
                         Err(err) => {
                             log::warn!("[ProviderRuntime] Failed to check process status: {}", err);
-                            false
+                            (false, false)
                         }
                     },
                 }
             };
 
+            if should_rearm_budget {
+                log::info!(
+                    "[ProviderRuntime] Stable for {}s; re-arming the restart budget",
+                    RESTART_REARM_UPTIME.as_secs()
+                );
+                state.rearm_restart_budget().await;
+            }
+
             if exited {
-                restart_attempts += 1;
-                if restart_attempts > MAX_RESTART_ATTEMPTS {
+                let Some(attempt) = state.claim_restart_attempt().await else {
                     log::error!(
                         "[ProviderRuntime] Crashed {} times, giving up",
-                        restart_attempts - 1
+                        MAX_RESTART_ATTEMPTS
                     );
                     crate::support::report_runtime_error(
                         &app,
                         "provider_runtime.crash_loop",
                         &format!(
                             "provider runtime crashed {} times; giving up",
-                            restart_attempts - 1
+                            MAX_RESTART_ATTEMPTS
                         ),
                     );
                     let _ = app.emit(
                         "provider-runtime://failed",
-                        serde_json::json!({ "attempts": restart_attempts - 1 }),
+                        serde_json::json!({ "attempts": MAX_RESTART_ATTEMPTS }),
                     );
                     return;
-                }
+                };
 
                 log::info!(
                     "[ProviderRuntime] Restarting (attempt {}/{})",
-                    restart_attempts,
+                    attempt,
                     MAX_RESTART_ATTEMPTS
                 );
                 tokio::time::sleep(Duration::from_secs(2)).await;
@@ -618,7 +674,9 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
                     Ok(_) => {
                         log::info!("[ProviderRuntime] Restarted successfully");
                         let _ = app.emit("provider-runtime://restarted", serde_json::json!({}));
-                        return; // ensure_started spawns a new monitor
+                        // `ensure_started` aborted this task and stored a fresh
+                        // monitor; that one inherits the budget from the state.
+                        return;
                     }
                     Err(err) => {
                         // #2563: `ensure_started` has already exhausted its
@@ -635,7 +693,7 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
                         );
                         let _ = app.emit(
                             "provider-runtime://failed",
-                            serde_json::json!({ "attempts": restart_attempts, "error": err }),
+                            serde_json::json!({ "attempts": attempt, "error": err }),
                         );
                         return;
                     }
@@ -661,6 +719,10 @@ pub async fn provider_runtime_stop(state: State<'_, ProviderRuntimeState>) -> Re
     if let Some(handle) = state.monitor_handle.lock().await.take() {
         handle.abort();
     }
+
+    // An intentional stop is not a crash — the next start begins with a full
+    // budget rather than inheriting whatever the last session spent.
+    state.rearm_restart_budget().await;
 
     let mut guard = state.process.lock().await;
     let Some(mut process) = guard.take() else {
@@ -835,6 +897,78 @@ pub async fn provider_force_kill_session(
 mod tests {
     use super::*;
     use tokio::process::Command as TokioCommand;
+
+    /// Regression guard for #3156.
+    ///
+    /// Every successful restart goes through `ensure_started`, which aborts
+    /// the current monitor and spawns a fresh one. While the counter lived in
+    /// the monitor task, each new monitor started from zero, so the give-up
+    /// check could never fire and a runtime that died every few seconds
+    /// respawned node forever with nothing logged and no `failed` event.
+    ///
+    /// Drive the budget the way successive monitor generations do — one claim
+    /// per generation — and assert it runs out.
+    #[tokio::test]
+    async fn restart_budget_survives_monitor_respawn() {
+        let state = ProviderRuntimeState::new();
+
+        let mut restarts = 0_u32;
+        while state.claim_restart_attempt().await.is_some() {
+            restarts += 1;
+            assert!(
+                restarts <= MAX_RESTART_ATTEMPTS,
+                "restart budget is unbounded: granted {restarts} restarts across monitor \
+                 generations with MAX_RESTART_ATTEMPTS={MAX_RESTART_ATTEMPTS} (#3156)"
+            );
+        }
+
+        assert_eq!(restarts, MAX_RESTART_ATTEMPTS);
+        assert!(state.claim_restart_attempt().await.is_none());
+    }
+
+    /// A runtime that proves it can stay up earns its budget back, so a
+    /// crash weeks into a session is not judged against restarts from
+    /// startup. Once per process — a long-lived runtime cannot bank re-arms.
+    #[tokio::test]
+    async fn stable_uptime_rearms_the_restart_budget() {
+        let state = ProviderRuntimeState::new();
+        assert!(state.claim_restart_attempt().await.is_some());
+        assert!(state.claim_restart_attempt().await.is_some());
+
+        state.rearm_restart_budget().await;
+
+        let mut restarts = 0_u32;
+        while state.claim_restart_attempt().await.is_some() {
+            restarts += 1;
+            assert!(
+                restarts <= MAX_RESTART_ATTEMPTS,
+                "re-arming must restore the budget, not remove it: granted {restarts} \
+                 restarts with MAX_RESTART_ATTEMPTS={MAX_RESTART_ATTEMPTS}"
+            );
+        }
+        assert_eq!(restarts, MAX_RESTART_ATTEMPTS);
+    }
+
+    #[test]
+    fn rearm_needs_sustained_uptime_and_happens_once() {
+        let spawned_at = Instant::now();
+
+        assert!(!should_rearm(
+            spawned_at,
+            false,
+            spawned_at + Duration::from_secs(59)
+        ));
+        assert!(should_rearm(
+            spawned_at,
+            false,
+            spawned_at + RESTART_REARM_UPTIME
+        ));
+        assert!(!should_rearm(
+            spawned_at,
+            true,
+            spawned_at + Duration::from_secs(3600)
+        ));
+    }
 
     #[test]
     fn config_with_port_rebinds_without_rotating_token() {

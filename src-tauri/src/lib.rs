@@ -707,34 +707,11 @@ pub fn run() {
             // detect that it's running under Seren Desktop.
             // Spec: serenorg/seren-desktop#1496
             //
-            // SEREN_PLAYWRIGHT_MCP_COMMAND lets skill subprocesses
-            // (prophet-arb-bot's automated browser flows) spawn the bundled
-            // playwright-stealth MCP server without hardcoding the macOS
-            // path. Resolved once here from the resource_dir so Windows and
-            // Linux inherit a working absolute command too. #1945.
-            //
             // SAFETY: set_var is unsafe in Rust 2024. Called exactly once
             // during app setup before any threads spawn child processes.
             unsafe {
                 std::env::set_var("SEREN_HOST", "seren-desktop");
                 std::env::set_var("SEREN_DESKTOP", "1");
-
-                let resource_dir = app.path().resource_dir().ok();
-                if let Some(script) =
-                    mcp::resolve_playwright_mcp_script_path_from(resource_dir.as_deref())
-                {
-                    let node = mcp::resolve_command_in_embedded_path("node");
-                    let cmd = mcp::format_playwright_mcp_command(&node, &script);
-                    log::info!("[MCP] SEREN_PLAYWRIGHT_MCP_COMMAND={}", cmd);
-                    std::env::set_var("SEREN_PLAYWRIGHT_MCP_COMMAND", cmd);
-                } else {
-                    log::warn!(
-                        "[MCP] playwright-stealth script not found on disk; \
-                         SEREN_PLAYWRIGHT_MCP_COMMAND not exported. Skill \
-                         subprocesses that need it will fail with a clear \
-                         setup error."
-                    );
-                }
             }
 
             // Build native menu bar for all platforms
@@ -828,8 +805,46 @@ pub fn run() {
                 );
             }
 
+            // SEREN_PLAYWRIGHT_MCP_COMMAND lets skill subprocesses
+            // (prophet-arb-bot's automated browser flows) spawn the bundled
+            // playwright-stealth MCP server without hardcoding the macOS
+            // path. Resolved once here from the resource_dir so Windows and
+            // Linux inherit a working absolute command too. #1945.
+            //
+            // Must run after `configure_embedded_runtime` — the node lookup
+            // reads the PATH that call publishes, and resolving before it
+            // silently yields a bare `node` (#3147).
+            //
+            // SAFETY: set_var is unsafe in Rust 2024. Called exactly once
+            // during app setup before any threads spawn child processes.
+            unsafe {
+                let resource_dir = app.path().resource_dir().ok();
+                if let Some(script) =
+                    mcp::resolve_playwright_mcp_script_path_from(resource_dir.as_deref())
+                {
+                    let node = mcp::resolve_command_in_embedded_path("node");
+                    if std::path::Path::new(&node).is_relative() {
+                        log::warn!(
+                            "[MCP] node did not resolve to an absolute path in the embedded \
+                             PATH; SEREN_PLAYWRIGHT_MCP_COMMAND will depend on the consumer's \
+                             own PATH to find node."
+                        );
+                    }
+                    let cmd = mcp::format_playwright_mcp_command(&node, &script);
+                    log::info!("[MCP] SEREN_PLAYWRIGHT_MCP_COMMAND={}", cmd);
+                    std::env::set_var("SEREN_PLAYWRIGHT_MCP_COMMAND", cmd);
+                } else {
+                    log::warn!(
+                        "[MCP] playwright-stealth script not found on disk; \
+                         SEREN_PLAYWRIGHT_MCP_COMMAND not exported. Skill \
+                         subprocesses that need it will fail with a clear \
+                         setup error."
+                    );
+                }
+            }
+
             // Configure Claude Code environment (adds cargo to PATH if needed)
-            claude_setup::configure_claude_code_environment();
+            claude_setup::configure_claude_code_environment(paths.node_dir.as_deref());
 
             // Install panic sidecar capture for desktop support reports.
             support::init(app.handle());
@@ -1333,6 +1348,36 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{InterviewLaunchPayload, parse_interview_launch_url};
+
+    /// Regression guard for #3147.
+    ///
+    /// `resolve_command_in_embedded_path` reads the PATH published by
+    /// `configure_embedded_runtime`. When the playwright export ran first
+    /// that PATH was still empty, so the lookup fell through to a bare
+    /// `node` and every consumer that does not inherit the embedded PATH
+    /// got a command it could not run — with no error, just a wrong value
+    /// in the info log.
+    ///
+    /// The ordering lives inside the Tauri `setup` closure, which needs a
+    /// real `AppHandle` and so cannot be driven from a unit test. Assert on
+    /// the source order instead: it is the exact invariant that broke.
+    #[test]
+    fn embedded_runtime_is_configured_before_node_is_resolved() {
+        let source = include_str!("lib.rs");
+        let configure = source
+            .find("embedded_runtime::configure_embedded_runtime(app.handle())")
+            .expect("setup must configure the embedded runtime");
+        let resolve = source
+            .find(r#"mcp::resolve_command_in_embedded_path("node")"#)
+            .expect("setup must resolve node for SEREN_PLAYWRIGHT_MCP_COMMAND");
+
+        assert!(
+            configure < resolve,
+            "configure_embedded_runtime must run before node is resolved from the \
+             embedded PATH, otherwise SEREN_PLAYWRIGHT_MCP_COMMAND exports a bare \
+             `node` (#3147)"
+        );
+    }
 
     #[test]
     fn parses_interview_launch_host_url() {

@@ -645,21 +645,19 @@ fn happy_home_dir(app: &AppHandle) -> Option<PathBuf> {
 }
 
 fn resolve_node_binary(app: &AppHandle) -> PathBuf {
-    if let Some(node_dir) = crate::embedded_runtime::discover_embedded_runtime(app).node_dir {
-        let candidate = if cfg!(target_os = "windows") {
-            node_dir.join("node.exe")
-        } else {
-            node_dir.join("node")
-        };
-        if candidate.exists() {
-            return candidate;
-        }
+    let paths = crate::embedded_runtime::discover_embedded_runtime(app);
+    if let Some(node) = crate::embedded_runtime::embedded_node_binary(&paths) {
+        return node;
     }
-    if cfg!(target_os = "windows") {
-        PathBuf::from("node.exe")
-    } else {
-        PathBuf::from("node")
-    }
+
+    log::warn!(
+        "[HappyBridge] Bundled node not found under {:?}; falling back to the user's system \
+         node. The bridge will run on an unmanaged node version, or fail to spawn at all if \
+         the machine has none. Fix: run `pnpm prepare:runtime:{}`.",
+        paths.node_dir,
+        crate::embedded_runtime::platform_subdir()
+    );
+    crate::embedded_runtime::system_node_fallback()
 }
 
 fn find_happy_bridge_mjs() -> Result<PathBuf, String> {
