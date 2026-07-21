@@ -6,6 +6,8 @@ import { acquireValidationSlot } from "./validation-slots";
 
 async function main(): Promise<void> {
   const slot = await acquireValidationSlot();
+  const forwardedArgs = process.argv.slice(2);
+  if (forwardedArgs[0] === "--") forwardedArgs.shift();
   console.log(
     `[validation] leased port ${slot.port} with identifier ${slot.identifier}`,
   );
@@ -22,7 +24,7 @@ async function main(): Promise<void> {
         "src-tauri/tauri.validation.conf.json",
         "--config",
         JSON.stringify(slot.tauriConfig),
-        ...process.argv.slice(2),
+        ...forwardedArgs,
       ],
       {
         cwd: process.cwd(),
