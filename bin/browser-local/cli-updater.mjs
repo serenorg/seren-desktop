@@ -1,5 +1,5 @@
 // ABOUTME: Background updates for bundled agent CLIs (Codex, Claude Code) per #1637.
-// ABOUTME: Fire-and-forget at startup, TTL-gated, same-channel only, silent on failure.
+// ABOUTME: Verifies candidate bytes and post-update health before reporting success.
 
 import { execFile } from "node:child_process";
 import {
@@ -15,7 +15,12 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { npmPackToDirectory, scanTarball } from "./cli-scanner.mjs";
+import {
+  evaluateFirstBaselinePolicy,
+  npmPackToDirectory,
+  scanTarball,
+  verifyTarballIntegrity,
+} from "./cli-scanner.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -297,32 +302,31 @@ const HOSTNAME_ALLOWLIST = {
   ],
 };
 
-/**
- * Run the Claude Code native installer script. Matches the original install
- * path in agent-registry.mjs so we stay on the same channel rather than
- * silently writing a parallel npm install.
- */
-async function runClaudeNativeInstaller() {
-  if (process.platform === "win32") {
-    await execFileAsync(
-      "powershell",
-      [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        "irm https://claude.ai/install.ps1 | iex",
-      ],
-      { timeout: NPM_INSTALL_TIMEOUT_MS },
-    );
-    return;
-  }
-  await execFileAsync(
-    "bash",
-    ["-c", "curl -fsSL https://claude.ai/install.sh | bash"],
-    { timeout: NPM_INSTALL_TIMEOUT_MS },
-  );
-}
+const FIRST_BASELINE_POLICIES = {
+  "@anthropic-ai/claude-code": {
+    installScripts: { postinstall: "node install.cjs" },
+    dependencyPatterns: [
+      /^@anthropic-ai\/claude-code-(darwin|linux|win32)-(arm64|x64)(-musl)?$/,
+    ],
+    binEntries: { claude: "bin/claude.exe" },
+    executableFiles: ["bin/claude.exe"],
+    hostnameAllowlist: HOSTNAME_ALLOWLIST["@anthropic-ai/claude-code"],
+  },
+  "@openai/codex": {
+    installScripts: {},
+    dependencyPatterns: [
+      /^@openai\/codex-(darwin|linux|win32)-(arm64|x64)$/,
+    ],
+    binEntries: { codex: "bin/codex.js" },
+    executableFiles: ["bin/codex.js"],
+    hostnameAllowlist: HOSTNAME_ALLOWLIST["@openai/codex"],
+  },
+};
+
+const OFFICIAL_INSTRUCTIONS_URLS = {
+  "@anthropic-ai/claude-code": "https://code.claude.com/docs/en/installation",
+  "@openai/codex": "https://developers.openai.com/codex/cli/",
+};
 
 /**
  * Attempt the CLI's own self-update first (native-channel binaries that
@@ -341,6 +345,67 @@ async function tryCliSelfUpdate(resolvedPath) {
   } catch {
     return false;
   }
+}
+
+/** Basic post-update spawn check that does not require authentication. */
+async function runCliHealthCheck(resolvedPath) {
+  try {
+    const onWindowsCmd =
+      process.platform === "win32" && resolvedPath.toLowerCase().endsWith(".cmd");
+    await execFileAsync(resolvedPath, ["--help"], {
+      timeout: VERSION_CMD_TIMEOUT_MS,
+      shell: onWindowsCmd,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Fetch the exact registry SRI for a version before accepting packed bytes. */
+export async function runNpmViewIntegrity(
+  packageName,
+  version,
+  { npmCliScript } = {},
+) {
+  try {
+    const args = [
+      ...(npmCliScript ? [npmCliScript] : []),
+      "view",
+      `${packageName}@${version}`,
+      "dist.integrity",
+      "--json",
+    ];
+    const command = npmCliScript
+      ? process.execPath
+      : process.platform === "win32"
+        ? "npm.cmd"
+        : "npm";
+    const { stdout } = await execFileAsync(command, args, {
+      timeout: NPM_VIEW_TIMEOUT_MS,
+    });
+    const trimmed = stdout.trim();
+    if (!trimmed) return null;
+    const parsed = JSON.parse(trimmed);
+    return typeof parsed === "string" && parsed.startsWith("sha512-")
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isVersionAtLeast(installed, expected) {
+  if (typeof installed !== "string" || typeof expected !== "string") return false;
+  const a = installed.match(SEMVER_EXACT_RE);
+  const b = expected.match(SEMVER_EXACT_RE);
+  if (!a || !b) return false;
+  for (let i = 1; i <= 3; i++) {
+    const ai = Number(a[i]);
+    const bi = Number(b[i]);
+    if (ai !== bi) return ai > bi;
+  }
+  return true;
 }
 
 /**
@@ -374,6 +439,9 @@ function emitOutcomeLog({ packageName, outcome, details, logger }) {
   const level =
     outcome === "skipped:scan_rejected" ||
     outcome === "skipped:scan_error" ||
+    outcome === "skipped:integrity_failed" ||
+    outcome === "skipped:self_update_failed" ||
+    outcome === "skipped:verification_required" ||
     outcome === "skipped:install_failed"
       ? "warn"
       : "info";
@@ -391,9 +459,9 @@ function emitOutcomeLog({ packageName, outcome, details, logger }) {
 }
 
 /**
- * Fire-and-forget update check for a single CLI. TTL-gated; same-channel
- * only; silent on failure. Called once per app launch — two launches within
- * 24h make zero additional npm calls for this CLI.
+ * Fire-and-forget update check for a single CLI. TTL-gated and same-channel
+ * only. Verification failures emit a deduplicated recovery event. Called once
+ * per app launch — two launches within 24h make zero additional npm calls.
  *
  * Returns a normalized outcome object: `{ outcome, packageName, ...details }`.
  * Every invocation emits exactly one log line + (for success or scan_rejected)
@@ -407,8 +475,10 @@ export async function backgroundUpdateCli({
   npmCliScript,
   now = Date.now(),
   state,
+  force = false,
   onUpdated,
   onScanRejected,
+  onActionRequired,
   logger,
   // Test seams — production callers leave these undefined and the real
   // scanner + version commands run against npm/disk.
@@ -419,10 +489,18 @@ export async function backgroundUpdateCli({
   const scanFn = _scannerOverrides?.scanTarball ?? scanTarball;
   const installFromTarballFn =
     _scannerOverrides?.runNpmInstallFromTarball ?? runNpmInstallFromTarball;
+  const verifyIntegrityFn =
+    _scannerOverrides?.verifyTarballIntegrity ?? verifyTarballIntegrity;
+  const firstBaselinePolicyFn =
+    _scannerOverrides?.evaluateFirstBaselinePolicy ?? evaluateFirstBaselinePolicy;
   const installedVersionFn =
     _versionOverrides?.runInstalledVersion ?? runInstalledVersion;
   const npmViewFn = _versionOverrides?.runNpmView ?? runNpmView;
+  const npmViewIntegrityFn =
+    _versionOverrides?.runNpmViewIntegrity ?? runNpmViewIntegrity;
   const selfUpdateFn = _versionOverrides?.tryCliSelfUpdate ?? tryCliSelfUpdate;
+  const healthCheckFn =
+    _versionOverrides?.runCliHealthCheck ?? runCliHealthCheck;
 
   // Compatibility: production runs may not pass `state` (callers were
   // written before the test seam). When state is omitted we manage
@@ -448,6 +526,7 @@ export async function backgroundUpdateCli({
   try {
     const persisted = state ?? loadState();
     const key = `lastUpdateCheck:${bareCommand}`;
+    const pendingActionKey = `pendingAction:${bareCommand}`;
     const lastCheck = persisted[key];
 
     const channel = classifyInstallChannel(resolvedPath, bareCommand);
@@ -465,6 +544,7 @@ export async function backgroundUpdateCli({
       typeof baseline === "string" && isBelowBaseline(installed, baseline);
 
     if (
+      !force &&
       !belowBaseline &&
       typeof lastCheck === "number" &&
       now - lastCheck < UPDATE_CHECK_TTL_MS
@@ -486,48 +566,74 @@ export async function backgroundUpdateCli({
       return report("skipped:network", { installed });
     }
 
-    if (installed && latest && isNewer(installed, latest)) {
-      if (packageName === "@openai/codex") {
-        const selfOk = await selfUpdateFn(resolvedPath);
-        if (selfOk) {
-          saveState(persisted);
-          onUpdated?.({
-            label,
-            bareCommand,
-            from: installed,
-            to: latest,
-            channel: "self",
-          });
-          return report("success", { from: installed, to: latest, channel: "self" });
-        }
+    function requireAction(reason, details = {}) {
+      const actionKey = `lastActionRequired:${bareCommand}:${latest}`;
+      const lastAction = persisted[actionKey];
+      const actionRequired = {
+        label,
+        bareCommand,
+        packageName,
+        from: installed,
+        to: latest,
+        reason,
+        actions: ["retry", "open_official_instructions"],
+        officialInstructionsUrl: OFFICIAL_INSTRUCTIONS_URLS[packageName] ?? null,
+        at: now,
+        ...details,
+      };
+      persisted[pendingActionKey] = actionRequired;
+      if (
+        typeof lastAction !== "number" ||
+        now - lastAction >= UPDATE_CHECK_TTL_MS
+      ) {
+        persisted[actionKey] = now;
+        onActionRequired?.(actionRequired);
       }
+      if (ownsPersistence) saveState(persisted);
+      return report(`skipped:${reason}`, {
+        from: installed,
+        to: latest,
+        actionRequired,
+        ...details,
+      });
+    }
 
-      // Native installs are gated by the upstream's signed installer + their
-      // own self-update mechanism; we don't have a tarball to scan. Keep
-      // existing flow. npm channel updates are scanned per #1647.
-      if (channel === "native") {
-        try {
-          const selfOk = await selfUpdateFn(resolvedPath);
-          if (!selfOk) {
-            await runClaudeNativeInstaller();
-          }
-          saveState(persisted);
-          onUpdated?.({
-            label,
-            bareCommand,
-            from: installed,
-            to: latest,
+    if (installed && latest && isNewer(installed, latest)) {
+      // Native-channel binaries and Codex's package-manager-aware updater must
+      // verify the resulting bytes before success is surfaced. Never fall back
+      // to a downloaded installer script when self-update fails.
+      if (channel === "native" || packageName === "@openai/codex") {
+        const selfOk = await selfUpdateFn(resolvedPath);
+        if (!selfOk) {
+          return requireAction("self_update_failed", { channel });
+        }
+        const verifiedVersion = await installedVersionFn(
+          resolvedPath,
+          bareCommand,
+        );
+        const healthy = await healthCheckFn(resolvedPath);
+        if (!isVersionAtLeast(verifiedVersion, latest) || !healthy) {
+          return requireAction("verification_required", {
             channel,
-          });
-          return report("success", { from: installed, to: latest, channel });
-        } catch {
-          saveState(persisted);
-          return report("skipped:install_failed", {
-            from: installed,
-            to: latest,
-            channel,
+            verifiedVersion,
           });
         }
+        persisted[pendingActionKey] = null;
+        if (ownsPersistence) saveState(persisted);
+        onUpdated?.({
+          label,
+          bareCommand,
+          from: installed,
+          to: latest,
+          channel: "self",
+          verifiedVersion,
+        });
+        return report("success", {
+          from: installed,
+          to: latest,
+          channel: "self",
+          verifiedVersion,
+        });
       }
 
       // npm channel: pack-extract-scan-install-baseline.
@@ -543,20 +649,50 @@ export async function backgroundUpdateCli({
       } catch {
         // Silent.
       }
+      const cleanupStaging = () => {
+        try {
+          rmSync(stagingDir, { recursive: true, force: true });
+        } catch {
+          // Silent.
+        }
+      };
       try {
+        const expectedIntegrity = await npmViewIntegrityFn(
+          packageName,
+          latest,
+          { npmCliScript },
+        );
+        if (!expectedIntegrity) {
+          cleanupStaging();
+          return requireAction("integrity_failed", { channel });
+        }
         const tarballPath = await packFn({
           packageName,
           version: latest,
           destinationDir: stagingDir,
           npmCliScript,
         });
+        if (!verifyIntegrityFn(tarballPath, expectedIntegrity)) {
+          cleanupStaging();
+          return requireAction("integrity_failed", { channel });
+        }
         const baseline = persisted[`baseline:${packageName}`];
-        const scan = await scanFn({
+        let scan = await scanFn({
           tarballPath,
           baseline,
           workDir: path.join(stagingDir, "extracted"),
           hostnameAllowlist: HOSTNAME_ALLOWLIST[packageName] ?? [],
         });
+
+        if (scan.verdict === "no_baseline") {
+          const policyFlags = firstBaselinePolicyFn(
+            scan.candidate,
+            FIRST_BASELINE_POLICIES[packageName],
+          );
+          if (policyFlags.length > 0) {
+            scan = { ...scan, verdict: "reject", flags: policyFlags };
+          }
+        }
 
         if (scan.verdict === "reject") {
           // Quarantine: leave the rejected tarball + flag list on disk under
@@ -584,11 +720,7 @@ export async function backgroundUpdateCli({
           };
           saveState(persisted);
           // Cleanup staging now that we've recorded the rejection.
-          try {
-            rmSync(stagingDir, { recursive: true, force: true });
-          } catch {
-            // Silent.
-          }
+          cleanupStaging();
           // UI surfacing: notify the registry / TS layer so a banner or
           // notification can fire. Default-on per #1646 — silent scan
           // rejections are worse UX than no scanner at all.
@@ -607,23 +739,30 @@ export async function backgroundUpdateCli({
           });
         }
 
-        // verdict is "pass" or "no_baseline" — install. First install of a
-        // CLI is unguarded by design (no baseline to diff against); the
-        // candidate snapshot becomes the seed baseline so subsequent
-        // updates ARE scanned.
+        // verdict is "pass" or a policy-approved "no_baseline" — install the
+        // exact integrity-verified tarball and seed the next diff baseline.
         try {
           await installFromTarballFn(tarballPath, { npmCliScript });
         } catch {
           saveState(persisted);
-          try {
-            rmSync(stagingDir, { recursive: true, force: true });
-          } catch {
-            // Silent.
-          }
+          cleanupStaging();
           return report("skipped:install_failed", {
             from: installed,
             to: latest,
             channel,
+          });
+        }
+
+        const verifiedVersion = await installedVersionFn(
+          resolvedPath,
+          bareCommand,
+        );
+        const healthy = await healthCheckFn(resolvedPath);
+        if (!isVersionAtLeast(verifiedVersion, latest) || !healthy) {
+          cleanupStaging();
+          return requireAction("verification_required", {
+            channel,
+            verifiedVersion,
           });
         }
 
@@ -632,9 +771,13 @@ export async function backgroundUpdateCli({
           tarballSha512: scan.candidate.tarballSha512,
           installScripts: scan.candidate.installScripts,
           declaredDependencies: scan.candidate.declaredDependencies,
+          binEntries: scan.candidate.binEntries,
+          executableFiles: scan.candidate.executableFiles,
+          networkHosts: scan.candidate.networkHosts,
           files: scan.candidate.files,
           fileHashes: scan.candidate.fileHashes,
         };
+        persisted[pendingActionKey] = null;
         saveState(persisted);
         onUpdated?.({
           label,
@@ -643,31 +786,26 @@ export async function backgroundUpdateCli({
           to: latest,
           channel,
           tarballSha512: scan.candidate.tarballSha512,
+          verifiedVersion,
         });
-        try {
-          rmSync(stagingDir, { recursive: true, force: true });
-        } catch {
-          // Silent.
-        }
+        cleanupStaging();
         return report("success", {
           from: installed,
           to: latest,
           channel,
           tarballSha512: scan.candidate.tarballSha512,
           firstInstall: scan.verdict === "no_baseline",
+          verifiedVersion,
         });
       } catch {
         // Pack/scan failure — fail closed. Don't update.
         saveState(persisted);
-        try {
-          rmSync(stagingDir, { recursive: true, force: true });
-        } catch {
-          // Silent.
-        }
+        cleanupStaging();
         return report("skipped:scan_error", { from: installed, to: latest });
       }
     }
 
+    persisted[pendingActionKey] = null;
     saveState(persisted);
     return report("skipped:up_to_date", { installed, latest });
   } catch {

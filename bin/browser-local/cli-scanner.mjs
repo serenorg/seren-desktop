@@ -2,7 +2,7 @@
 // ABOUTME: Diffs an npm pack against the last-known-good baseline + runs static heuristics.
 
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -40,11 +40,31 @@ const EVAL_INVOCATION_RE = /\beval\s*\(/g;
 const NEW_FUNCTION_RE = /\bnew\s+Function\s*\(/g;
 const DYNAMIC_REQUIRE_RE = /\brequire\s*\(\s*[^"'`)\s][^)]*\)/g;
 const HOSTNAME_RE = /(https?:\/\/|[a-z0-9.-]+\.[a-z]{2,})/gi;
+const NETWORK_URL_RE = /https?:\/\/[^\s"'`<>\\]+/gi;
+const EXECUTABLE_FILE_RE = /\.(exe|dll|so|dylib|bin)$/i;
 
 export function computeSha512(absPath) {
   const hash = createHash("sha512");
   hash.update(readFileSync(absPath));
   return hash.digest("hex");
+}
+
+/** Verify downloaded bytes against the registry's exact sha512 SRI value. */
+export function verifyTarballIntegrity(absPath, integrity) {
+  if (typeof integrity !== "string") return false;
+  const sha512Token = integrity
+    .trim()
+    .split(/\s+/)
+    .find((token) => token.startsWith("sha512-"));
+  if (!sha512Token) return false;
+
+  try {
+    const expected = Buffer.from(sha512Token.slice("sha512-".length), "base64");
+    const actual = createHash("sha512").update(readFileSync(absPath)).digest();
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
 }
 
 function packageRelativePath(root, absPath) {
@@ -166,19 +186,106 @@ export function buildPackageSnapshot(extractedRoot) {
     ...(pkg.optionalDependencies ?? {}),
   }).sort();
 
+  const binEntries = {};
+  if (typeof pkg.bin === "string") {
+    const command =
+      typeof pkg.name === "string" ? pkg.name.split("/").at(-1) : null;
+    if (command) binEntries[command] = pkg.bin;
+  } else if (pkg.bin && typeof pkg.bin === "object") {
+    for (const [command, target] of Object.entries(pkg.bin)) {
+      if (typeof target === "string") binEntries[command] = target;
+    }
+  }
+
   const files = walkFiles(extractedRoot);
   const fileHashes = {};
+  const executableFiles = new Set(Object.values(binEntries));
+  const networkHosts = new Set();
   for (const rel of files) {
-    fileHashes[rel] = computeSha512(path.join(extractedRoot, rel));
+    const absPath = path.join(extractedRoot, rel);
+    fileHashes[rel] = computeSha512(absPath);
+    if (EXECUTABLE_FILE_RE.test(rel)) executableFiles.add(rel);
+    if (/\.(c?js|mjs)$/.test(rel)) {
+      let content = "";
+      try {
+        content = readFileSync(absPath, "utf8");
+      } catch {
+        // The file hash still protects unreadable files; no host can be extracted.
+      }
+      NETWORK_URL_RE.lastIndex = 0;
+      for (const match of content.matchAll(NETWORK_URL_RE)) {
+        try {
+          networkHosts.add(new URL(match[0]).hostname.toLowerCase());
+        } catch {
+          // Ignore malformed URL-looking text.
+        }
+      }
+    }
   }
 
   return {
     version: typeof pkg.version === "string" ? pkg.version : null,
     installScripts,
     declaredDependencies,
+    binEntries,
+    executableFiles: [...executableFiles].sort(),
+    networkHosts: [...networkHosts].sort(),
     files,
     fileHashes,
   };
+}
+
+/**
+ * Conservative allowlist used when no prior known-good package snapshot exists.
+ * Any unexpected install hook, dependency, executable, or network host rejects
+ * the candidate instead of treating the first observed release as trusted.
+ */
+export function evaluateFirstBaselinePolicy(candidate, policy) {
+  if (!candidate || !policy) return ["first_baseline_policy_missing"];
+  const flags = [];
+  const allowedScripts = policy.installScripts ?? {};
+  for (const [hook, script] of Object.entries(candidate.installScripts ?? {})) {
+    if (allowedScripts[hook] !== script) {
+      flags.push(`first_baseline_install_script:${hook}`);
+    }
+  }
+
+  const dependencyPatterns = policy.dependencyPatterns ?? [];
+  for (const dependency of candidate.declaredDependencies ?? []) {
+    if (!dependencyPatterns.some((pattern) => pattern.test(dependency))) {
+      flags.push(`first_baseline_dependency:${dependency}`);
+    }
+  }
+
+  const allowedBins = policy.binEntries ?? {};
+  const candidateBins = candidate.binEntries ?? {};
+  for (const command of new Set([
+    ...Object.keys(allowedBins),
+    ...Object.keys(candidateBins),
+  ])) {
+    if (candidateBins[command] !== allowedBins[command]) {
+      flags.push(
+        `first_baseline_executable:${command}:${candidateBins[command] ?? "missing"}`,
+      );
+    }
+  }
+
+  const allowedExecutableFiles = new Set(policy.executableFiles ?? []);
+  for (const executable of candidate.executableFiles ?? []) {
+    if (!allowedExecutableFiles.has(executable)) {
+      flags.push(`first_baseline_executable:${executable}`);
+    }
+  }
+
+  const allowedHosts = new Set(
+    (policy.hostnameAllowlist ?? []).map((host) => host.toLowerCase()),
+  );
+  for (const host of candidate.networkHosts ?? []) {
+    if (!isHostAllowed(host.toLowerCase(), allowedHosts)) {
+      flags.push(`first_baseline_host:${host}`);
+    }
+  }
+  return flags;
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { CliUpdateActionCard } from "@/components/agents/CliUpdateActionCard";
 import { providerGlyph } from "@/components/chat/ProviderIcon";
 import {
   allowsClaudeAgent,
@@ -230,6 +231,7 @@ export const ThreadTabBar: Component = () => {
 
         <Show when={showNewMenu()}>
           <div class="absolute top-full right-0 min-w-[300px] max-h-[70vh] overflow-y-auto bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
+            <CliUpdateActionCard />
             <Show when={agentStore.error}>
               <div
                 data-testid="agent-launch-error"

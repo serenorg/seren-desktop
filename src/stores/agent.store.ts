@@ -38,6 +38,7 @@ import {
   type CompactionWindowItem,
   selectCompactionWindow,
 } from "@/lib/compaction/window";
+import { openExternalLink } from "@/lib/external-link";
 import { runtimeHasCapability } from "@/lib/runtime";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import { estimateTokens } from "@/lib/token-counter";
@@ -596,6 +597,9 @@ let providerRuntimeRestartedListener: Promise<UnlistenFn> | null = null;
  *  initialize() calls don't stack listeners. #1646. */
 let cliScanRejectedUnsub: (() => void) | null = null;
 
+/** Set once we've subscribed to actionable CLI update/install failures. */
+let cliUpdateActionRequiredUnsub: (() => void) | null = null;
+
 /** Set once we've subscribed to `provider://synthetic-transcript-schema-drift`
  *  so a Claude CLI auto-update that breaks the splice invariants forces
  *  `compactSyntheticTranscript=false` at runtime. The per-call try/catch
@@ -638,6 +642,9 @@ function disposeAgentStoreSideChannelListeners(): void {
   cliScanRejectedUnsub?.();
   cliScanRejectedUnsub = null;
 
+  cliUpdateActionRequiredUnsub?.();
+  cliUpdateActionRequiredUnsub = null;
+
   syntheticSchemaDriftUnsub?.();
   syntheticSchemaDriftUnsub = null;
 
@@ -675,6 +682,7 @@ function subscribeToProviderRuntimeReady(): void {
         if (agents.length > 0) {
           applyAgents(agents);
         }
+        await hydratePendingCliUpdateAction();
       } catch (error) {
         console.error(
           "Failed to load agents on provider-runtime ready event:",
@@ -874,6 +882,87 @@ function subscribeToCliScanRejections(): void {
         // Silent — best-effort surface, never fail the subscriber.
       }
     },
+  );
+}
+
+/**
+ * Surface verified-updater failures with a recoverable in-app action. Runtime
+ * persistence deduplicates these events to one CLI/version per update TTL.
+ */
+function applyCliUpdateAction(payload: unknown, notify = true): void {
+  const event = payload as Partial<providerService.CliUpdateActionRequired>;
+  if (event.bareCommand !== "claude" && event.bareCommand !== "codex") {
+    return;
+  }
+  const bareCommand = event.bareCommand;
+  const expectedPackage =
+    bareCommand === "claude" ? "@anthropic-ai/claude-code" : "@openai/codex";
+  const expectedInstructionsOrigin =
+    bareCommand === "claude"
+      ? "https://code.claude.com/"
+      : "https://developers.openai.com/";
+  const officialInstructionsUrl = event.officialInstructionsUrl;
+  if (
+    event.packageName !== expectedPackage ||
+    typeof officialInstructionsUrl !== "string" ||
+    !officialInstructionsUrl.startsWith(expectedInstructionsOrigin)
+  ) {
+    return;
+  }
+  if (
+    state.cliUpdateActionRequired?.bareCommand === event.bareCommand &&
+    state.cliUpdateActionRequired?.to === (event.to ?? null) &&
+    state.cliUpdateActionRequired?.reason === event.reason
+  ) {
+    return;
+  }
+  const action = {
+    label: event.label ?? event.packageName,
+    bareCommand,
+    packageName: event.packageName,
+    from: event.from ?? null,
+    to: event.to ?? null,
+    reason: event.reason ?? "verification_required",
+    officialInstructionsUrl,
+    retrying: false,
+    at: event.at ?? Date.now(),
+  };
+  setState("cliUpdateActionRequired", action);
+  console.warn(
+    `[cli-updater] action required for ${action.packageName}; reason=${action.reason}`,
+  );
+  try {
+    if (
+      notify &&
+      typeof Notification !== "undefined" &&
+      Notification.permission === "granted"
+    ) {
+      const notification = new Notification(`${action.label} needs attention`, {
+        body: "Seren kept the previous verified version. Retry or review the official installation instructions in Seren.",
+      });
+      notification.onclick = () => {
+        void openExternalLink(action.officialInstructionsUrl);
+      };
+    }
+  } catch {
+    // Best-effort OS notification; the in-app recovery card remains.
+  }
+}
+
+async function hydratePendingCliUpdateAction(): Promise<void> {
+  try {
+    const action = await providerService.getPendingCliUpdateAction();
+    if (action) applyCliUpdateAction(action, false);
+  } catch {
+    // Runtime startup retries will call this again after the ready event.
+  }
+}
+
+function subscribeToCliUpdateActions(): void {
+  if (cliUpdateActionRequiredUnsub) return;
+  cliUpdateActionRequiredUnsub = onRuntimeEvent(
+    "provider://cli-update-action-required",
+    applyCliUpdateAction,
   );
 }
 
@@ -1714,6 +1803,18 @@ interface AgentState {
     flags: string[];
     at: number;
   } | null;
+  /** Pending manual recovery for a failed or unverifiable CLI update. */
+  cliUpdateActionRequired: {
+    label: string;
+    bareCommand: "claude" | "codex";
+    packageName: string;
+    from: string | null;
+    to: string | null;
+    reason: string;
+    officialInstructionsUrl: string;
+    retrying: boolean;
+    at: number;
+  } | null;
   /** Pending permission requests awaiting user response */
   pendingPermissions: PermissionRequestEvent[];
   /** Pending diff proposals awaiting user accept/reject */
@@ -1761,6 +1862,7 @@ const [state, setState] = createStore<AgentState>({
   error: null,
   installStatus: null,
   cliScanRejection: null,
+  cliUpdateActionRequired: null,
   pendingPermissions: [],
   pendingDiffProposals: [],
   agentModeEnabled: false,
@@ -2188,6 +2290,10 @@ export const agentStore = {
 
   get installStatus() {
     return state.installStatus;
+  },
+
+  get cliUpdateActionRequired() {
+    return state.cliUpdateActionRequired;
   },
 
   get pendingPermissions() {
@@ -2844,6 +2950,8 @@ export const agentStore = {
     // per launch per CLI). System notification + state record so the user
     // can review what was rejected and why.
     subscribeToCliScanRejections();
+    subscribeToCliUpdateActions();
+    void hydratePendingCliUpdateAction();
     // #1829: consume the synthetic-transcript schema-drift event so a
     // breaking Claude CLI auto-update forces compactSyntheticTranscript=false
     // at runtime. Pre-#1829 the runtime emitted this event but no consumer
@@ -6576,6 +6684,53 @@ export const agentStore = {
     setState("error", null);
   },
 
+  async retryCliUpdate() {
+    const action = state.cliUpdateActionRequired;
+    if (!action || action.retrying) return;
+    setState("cliUpdateActionRequired", "retrying", true);
+    try {
+      const result = await providerService.retryCliUpdate(action.bareCommand);
+      if (
+        result.outcome === "success" ||
+        result.outcome === "skipped:up_to_date"
+      ) {
+        setState("cliUpdateActionRequired", null);
+        return;
+      }
+      setState("cliUpdateActionRequired", (current) =>
+        current
+          ? {
+              ...current,
+              reason: result.outcome.replace(/^skipped:/, ""),
+              from: result.from ?? current.from,
+              to: result.to ?? current.to,
+              retrying: false,
+            }
+          : null,
+      );
+    } catch (error) {
+      setState("cliUpdateActionRequired", "retrying", false);
+      setState(
+        "error",
+        error instanceof Error ? error.message : "CLI update retry failed.",
+      );
+    }
+  },
+
+  openCliUpdateInstructions() {
+    const url = state.cliUpdateActionRequired?.officialInstructionsUrl;
+    if (
+      url &&
+      /^https:\/\/(code\.claude\.com|developers\.openai\.com)\//.test(url)
+    ) {
+      void openExternalLink(url);
+    }
+  },
+
+  dismissCliUpdateActionRequired() {
+    setState("cliUpdateActionRequired", null);
+  },
+
   resetSessionState() {
     sessionResetGeneration += 1;
     disposeAgentStoreRuntimeBindings();
@@ -6600,6 +6755,7 @@ export const agentStore = {
       error: null,
       installStatus: null,
       cliScanRejection: null,
+      cliUpdateActionRequired: null,
       pendingPermissions: [],
       pendingDiffProposals: [],
       agentModeEnabled: false,

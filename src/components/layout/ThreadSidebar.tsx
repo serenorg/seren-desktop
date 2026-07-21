@@ -12,6 +12,7 @@ import {
   Show,
   Switch,
 } from "solid-js";
+import { CliUpdateActionCard } from "@/components/agents/CliUpdateActionCard";
 import { providerGlyph } from "@/components/chat/ProviderIcon";
 import { BountiesSection } from "@/components/sidebar/BountiesSection";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
@@ -622,6 +623,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             </Show>
             {spawning() ? (agentStore.installStatus ?? "Starting...") : "New"}
           </button>
+
+          <CliUpdateActionCard />
 
           <Show when={showLauncher()}>
             <div class="absolute top-[calc(100%+4px)] left-3 right-3 max-h-[60vh] overflow-y-auto bg-surface-2 border border-border rounded-lg z-20 shadow-lg animate-[slideDown_150ms_ease] py-1">

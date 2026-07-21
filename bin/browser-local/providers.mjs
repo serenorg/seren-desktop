@@ -2163,6 +2163,14 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     return agentRegistry.ensureAgentCli(agentType);
   }
 
+  async function retryCliUpdate({ bareCommand }) {
+    return agentRegistry.retryCliUpdate(bareCommand);
+  }
+
+  async function getPendingCliUpdateAction() {
+    return agentRegistry.getPendingCliUpdateAction();
+  }
+
   async function launchLogin({ agentType }) {
     agentRegistry.launchLogin(agentType);
   }
@@ -2451,6 +2459,8 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     checkAgentAvailable,
     checkAgentAuthenticated,
     ensureAgentCli,
+    retryCliUpdate,
+    getPendingCliUpdateAction,
     launchLogin,
     listRemoteSessions,
     nativeForkSession,

@@ -1,7 +1,13 @@
 // ABOUTME: Critical tests for #1637 — background CLI updater pure logic.
 // ABOUTME: Guards TTL gate, semver compare, and same-channel classification.
 
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -240,6 +246,7 @@ describe("isBelowBaseline (#1761)", () => {
   it("uses Codex self-update before npm tarball scanning (#2904)", async () => {
     let selfUpdateCalls = 0;
     let scanCalled = false;
+    const versions = ["0.143.0", "0.144.1"];
     const result = await backgroundUpdateCli({
       label: "Codex",
       bareCommand: "codex",
@@ -248,12 +255,13 @@ describe("isBelowBaseline (#1761)", () => {
       state: {},
       now: Date.now(),
       _versionOverrides: {
-        runInstalledVersion: async () => "0.143.0",
+        runInstalledVersion: async () => versions.shift() ?? null,
         runNpmView: async () => "0.144.1",
         tryCliSelfUpdate: async () => {
           selfUpdateCalls++;
           return true;
         },
+        runCliHealthCheck: async () => true,
       },
       _scannerOverrides: {
         npmPackToDirectory: async () => {
@@ -413,10 +421,10 @@ describe("failure paths (#1645)", () => {
   // every subsequent run short-circuits on TTL).
   function freshInvocation() {
     return {
-      label: "Codex",
-      bareCommand: "codex",
-      resolvedPath: "/usr/local/bin/codex",
-      packageName: "@openai/codex",
+      label: "Claude Code",
+      bareCommand: "claude",
+      resolvedPath: "/usr/local/bin/claude",
+      packageName: "@anthropic-ai/claude-code",
       state: {} as Record<string, unknown>,
       now: Date.now(),
     };
@@ -471,9 +479,11 @@ describe("failure paths (#1645)", () => {
       _versionOverrides: {
         runInstalledVersion: async () => "1.5.0",
         runNpmView: async () => "1.5.3",
+        runNpmViewIntegrity: async () => "sha512-test",
       },
       _scannerOverrides: {
         npmPackToDirectory: async () => "/tmp/fake.tgz",
+        verifyTarballIntegrity: () => true,
         scanTarball: async () => ({
           verdict: "pass",
           flags: [],
@@ -505,9 +515,11 @@ describe("failure paths (#1645)", () => {
       _versionOverrides: {
         runInstalledVersion: async () => "1.5.3",
         runNpmView: async () => "1.5.4",
+        runNpmViewIntegrity: async () => "sha512-test",
       },
       _scannerOverrides: {
         npmPackToDirectory: async () => "/tmp/fake.tgz",
+        verifyTarballIntegrity: () => true,
         scanTarball: async () => ({ verdict: "reject", flags, candidate: null }),
         runNpmInstallFromTarball: async () => {
           throw new Error("must NOT install when scan rejects");
@@ -529,9 +541,11 @@ describe("failure paths (#1645)", () => {
       _versionOverrides: {
         runInstalledVersion: async () => "1.5.0",
         runNpmView: async () => "1.5.3",
+        runNpmViewIntegrity: async () => "sha512-test",
       },
       _scannerOverrides: {
         npmPackToDirectory: async () => "/tmp/fake.tgz",
+        verifyTarballIntegrity: () => true,
         scanTarball: async () => {
           throw new Error("scanner exploded");
         },
@@ -548,20 +562,27 @@ describe("failure paths (#1645)", () => {
     const candidate = {
       version: "1.5.3",
       tarballSha512: "abc",
-      installScripts: {},
-      declaredDependencies: ["foo"],
-      files: ["package.json"],
-      fileHashes: { "package.json": "h" },
+      installScripts: { postinstall: "node install.cjs" },
+      declaredDependencies: ["@anthropic-ai/claude-code-darwin-arm64"],
+      binEntries: { claude: "bin/claude.exe" },
+      executableFiles: ["bin/claude.exe"],
+      networkHosts: ["api.anthropic.com"],
+      files: ["package.json", "bin/claude.exe"],
+      fileHashes: { "package.json": "h", "bin/claude.exe": "b" },
     };
     let installCalled = false;
+    const versions = ["1.5.0", "1.5.3"];
     const result = await backgroundUpdateCli({
       ...freshInvocation(),
       _versionOverrides: {
-        runInstalledVersion: async () => "1.5.0",
+        runInstalledVersion: async () => versions.shift() ?? null,
         runNpmView: async () => "1.5.3",
+        runNpmViewIntegrity: async () => "sha512-test",
+        runCliHealthCheck: async () => true,
       },
       _scannerOverrides: {
         npmPackToDirectory: async () => "/tmp/fake.tgz",
+        verifyTarballIntegrity: () => true,
         scanTarball: async () => ({
           verdict: "no_baseline",
           flags: [],
@@ -593,5 +614,154 @@ describe("failure paths (#1645)", () => {
     process.env.SEREN_CLI_UPDATER_STATE_PATH = path.join(blockedFile, "child.json");
     // Should not throw.
     expect(() => saveState({ a: 1 })).not.toThrow();
+  });
+});
+
+describe("verified fail-closed updates (#3092)", () => {
+  it("emits success only after native self-update version and health verification", async () => {
+    const versions = ["2.1.200", "2.1.216"];
+    const updated: unknown[] = [];
+    const actions: unknown[] = [];
+    const result = await backgroundUpdateCli({
+      label: "Claude Code",
+      bareCommand: "claude",
+      resolvedPath: "/Users/u/.local/bin/claude",
+      packageName: "@anthropic-ai/claude-code",
+      state: {},
+      now: Date.now(),
+      onUpdated: (event: unknown) => updated.push(event),
+      onActionRequired: (event: unknown) => actions.push(event),
+      _versionOverrides: {
+        runInstalledVersion: async () => versions.shift() ?? null,
+        runNpmView: async () => "2.1.216",
+        tryCliSelfUpdate: async () => true,
+        runCliHealthCheck: async () => true,
+      },
+    });
+
+    expect(result).toMatchObject({
+      outcome: "success",
+      from: "2.1.200",
+      to: "2.1.216",
+      verifiedVersion: "2.1.216",
+    });
+    expect(updated).toHaveLength(1);
+    expect(actions).toHaveLength(0);
+  });
+
+  it("fails closed and deduplicates action-required when native verification fails", async () => {
+    const state: Record<string, unknown> = {};
+    const updated: unknown[] = [];
+    const actions: Array<Record<string, unknown>> = [];
+    const invoke = () => {
+      const versions = ["2.1.200", "2.1.200"];
+      return backgroundUpdateCli({
+        label: "Claude Code",
+        bareCommand: "claude",
+        resolvedPath: "/Users/u/.local/bin/claude",
+        packageName: "@anthropic-ai/claude-code",
+        state,
+        now: 1_000,
+        force: true,
+        onUpdated: (event: unknown) => updated.push(event),
+        onActionRequired: (event: Record<string, unknown>) => actions.push(event),
+        _versionOverrides: {
+          runInstalledVersion: async () => versions.shift() ?? null,
+          runNpmView: async () => "2.1.216",
+          tryCliSelfUpdate: async () => true,
+          runCliHealthCheck: async () => true,
+        },
+      });
+    };
+
+    const first = await invoke();
+    const second = await invoke();
+
+    expect(first.outcome).toBe("skipped:verification_required");
+    expect(second.outcome).toBe("skipped:verification_required");
+    expect(updated).toHaveLength(0);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      reason: "verification_required",
+      actions: ["retry", "open_official_instructions"],
+    });
+    expect(state["pendingAction:claude"]).toMatchObject({
+      reason: "verification_required",
+      to: "2.1.216",
+    });
+  });
+
+  it("rejects an npm tarball whose bytes do not match registry dist.integrity", async () => {
+    let installCalled = false;
+    const actions: unknown[] = [];
+    const result = await backgroundUpdateCli({
+      label: "Claude Code",
+      bareCommand: "claude",
+      resolvedPath: "/opt/homebrew/bin/claude",
+      packageName: "@anthropic-ai/claude-code",
+      state: {},
+      now: Date.now(),
+      onActionRequired: (event: unknown) => actions.push(event),
+      _versionOverrides: {
+        runInstalledVersion: async () => "2.1.200",
+        runNpmView: async () => "2.1.216",
+        runNpmViewIntegrity: async () => "sha512-expected",
+      },
+      _scannerOverrides: {
+        npmPackToDirectory: async () => "/tmp/candidate.tgz",
+        verifyTarballIntegrity: () => false,
+        scanTarball: async () => {
+          throw new Error("must not scan unverified bytes");
+        },
+        runNpmInstallFromTarball: async () => {
+          installCalled = true;
+        },
+      },
+    });
+
+    expect(installCalled).toBe(false);
+    expect(result.outcome).toBe("skipped:integrity_failed");
+    expect(actions).toHaveLength(1);
+  });
+
+  it("contains no automatic downloaded-script execution in production CLI paths", () => {
+    const repoRoot = path.resolve(import.meta.dirname, "../..");
+    const sources = [
+      "bin/browser-local/agent-registry.mjs",
+      "bin/browser-local/cli-updater.mjs",
+      "src-tauri/src/commands/cli_installer.rs",
+    ].map((relative) => readFileSync(path.join(repoRoot, relative), "utf8"));
+    const productionSource = sources.join("\n");
+
+    expect(productionSource).not.toContain("install.sh | bash");
+    expect(productionSource).not.toContain("install.ps1 | iex");
+    expect(productionSource).not.toContain("codex.example.com");
+  });
+
+  it("wires each action-required event to retry and official-instructions controls", () => {
+    const repoRoot = path.resolve(import.meta.dirname, "../..");
+    const registry = readFileSync(
+      path.join(repoRoot, "bin/browser-local/agent-registry.mjs"),
+      "utf8",
+    );
+    const runtime = readFileSync(
+      path.join(repoRoot, "bin/provider-runtime.mjs"),
+      "utf8",
+    );
+    const card = readFileSync(
+      path.join(repoRoot, "src/components/agents/CliUpdateActionCard.tsx"),
+      "utf8",
+    );
+    const store = readFileSync(
+      path.join(repoRoot, "src/stores/agent.store.ts"),
+      "utf8",
+    );
+
+    expect(registry).toContain("provider://cli-update-action-required");
+    expect(runtime).toContain("provider_retry_cli_update");
+    expect(card).toContain("agentStore.retryCliUpdate()");
+    expect(card).toContain("agentStore.openCliUpdateInstructions()");
+    expect(store).toContain("https://code.claude.com/");
+    expect(store).toContain("https://developers.openai.com/");
   });
 });
