@@ -10,6 +10,7 @@ import nacl from "tweetnacl";
 
 import {
   composeApprovalNotification,
+  createAssistantMessageCoalescer,
   createTurnCorrelator,
   translateNeutralEvent,
 } from "./translate.mjs";
@@ -510,6 +511,7 @@ export function createHappyLayer({
   const pendingRequests = Object.create(null);
   const liveSessions = new Set();
   const turnCorrelator = createTurnCorrelator();
+  const assistantMessageCoalescer = createAssistantMessageCoalescer();
 
   const sessionSummaries = new Map();
   let summariesFetchedAt = 0;
@@ -568,6 +570,7 @@ export function createHappyLayer({
       liveSessions.delete(sessionId);
       promptQueue.clear(sessionId);
       turnCorrelator.clear(sessionId);
+      assistantMessageCoalescer.clear(sessionId);
       delete pendingRequests[sessionId];
       sessionCreationPromises.delete(sessionId);
       await entry.client
@@ -778,9 +781,11 @@ export function createHappyLayer({
     if (!entry) return;
     const provider = summary?.agentType === "claude-code" ? "claude" : summary?.agentType ?? "codex";
     const correlatedEvent = turnCorrelator.correlate(event);
-    for (const message of translateNeutralEvent(correlatedEvent, { provider })) {
-      if (message.transport === "session") entry.client.sendSessionProtocolMessage(message.envelope);
-      if (message.transport === "agent") entry.client.sendAgentMessage(message.provider, message.body);
+    for (const publishableEvent of assistantMessageCoalescer.consume(correlatedEvent)) {
+      for (const message of translateNeutralEvent(publishableEvent, { provider })) {
+        if (message.transport === "session") entry.client.sendSessionProtocolMessage(message.envelope);
+        if (message.transport === "agent") entry.client.sendAgentMessage(message.provider, message.body);
+      }
     }
     if (terminal) {
       await completeTerminalSession({
@@ -844,6 +849,7 @@ export function createHappyLayer({
       if (!spawned?.sessionId) throw new Error("provider spawn returned no session");
       sessions.delete(pendingSessionId);
       turnCorrelator.clear(pendingSessionId);
+      assistantMessageCoalescer.clear(pendingSessionId);
       pending.sessionId = spawned.sessionId;
       pending.summary = spawned;
       sessions.set(spawned.sessionId, pending);
@@ -896,6 +902,7 @@ export function createHappyLayer({
     sessions.delete(pendingSessionId);
     liveSessions.delete(pendingSessionId);
     turnCorrelator.clear(pendingSessionId);
+    assistantMessageCoalescer.clear(pendingSessionId);
     delete pendingRequests[pendingSessionId];
     sessionCreationPromises.delete(pendingSessionId);
     await pending.client.close().catch(() => debug("failed to close abandoned Happy session"));
@@ -1046,6 +1053,7 @@ export function createHappyLayer({
       supervisorSubscription?.();
       promptQueue.close();
       turnCorrelator.close();
+      assistantMessageCoalescer.close();
       cancelPairing();
       await pairingAuthorizationPromise;
       // Awaited rather than fire-and-forget: the caller exits the process once
