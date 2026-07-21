@@ -9,6 +9,7 @@ const modulePath = new URL(
 ).href;
 const {
   _codexApprovalPolicy: codexApprovalPolicy,
+  _codexNetworkConfigOverride: codexNetworkConfigOverride,
   _modeFromApprovalPolicy: modeFromApprovalPolicy,
   _sandboxFromMode: sandboxFromMode,
 } = await import(/* @vite-ignore */ modulePath);
@@ -31,10 +32,19 @@ describe("Codex sandbox mapping (#2886)", () => {
     expect(sandboxFromMode("full-access", false)).toBe("danger-full-access");
   });
 
-  it("keeps legacy runtime full-access and network-enabled sessions full access", () => {
+  it("keeps legacy runtime full-access while separating network from filesystem scope", () => {
     expect(sandboxFromMode("danger-full-access", false)).toBe(
       "danger-full-access",
     );
-    expect(sandboxFromMode("workspace-write", true)).toBe("danger-full-access");
+    expect(sandboxFromMode("workspace-write", true)).toBe("workspace-write");
+  });
+
+  it("applies network access as a workspace sandbox option", () => {
+    expect(codexNetworkConfigOverride(true)).toBe(
+      "sandbox_workspace_write.network_access=true",
+    );
+    expect(codexNetworkConfigOverride(false)).toBe(
+      "sandbox_workspace_write.network_access=false",
+    );
   });
 });

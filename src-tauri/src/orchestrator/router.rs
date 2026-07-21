@@ -539,6 +539,7 @@ fn humanize_task_type(task_type: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestrator::types::EffectiveAgentPolicy;
 
     fn make_capabilities(has_agent: bool, models: &[&str], tools: &[&str]) -> UserCapabilities {
         UserCapabilities {
@@ -563,6 +564,7 @@ mod tests {
             model_rankings: vec![],
             reasoning_effort: None,
             project_root: None,
+            effective_agent_policy: EffectiveAgentPolicy::default(),
         }
     }
 
@@ -593,6 +595,7 @@ mod tests {
             model_rankings: vec![],
             reasoning_effort: None,
             project_root: None,
+            effective_agent_policy: EffectiveAgentPolicy::default(),
         }
     }
 

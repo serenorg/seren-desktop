@@ -3432,6 +3432,7 @@ export const agentStore = {
           opts?.paired,
           settingsStore.settings.lmStudioBaseUrl,
           settingsStore.settings.lmStudioApiKey,
+          settingsStore.settings.agentAutoApproveReads,
         );
         console.log("[AgentStore] Spawn result:", info);
         await refreshAgentOAuthRouting(info.id, localSessionId ?? info.id);

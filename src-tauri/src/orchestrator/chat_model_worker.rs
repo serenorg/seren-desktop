@@ -7,17 +7,20 @@ use futures::StreamExt;
 use log;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
-use tauri::{Emitter, Manager};
-use tokio::sync::{Mutex, mpsc};
+use tauri::{Emitter, Listener, Manager};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
+use super::file_access_policy::{
+    path_is_within, FileAccessDecision, FileAccessKind, FileAccessPolicy, ResolvedFileAccess,
+};
 use super::gateway_envelope::{
     publisher_cost, publisher_status, unwrap_data_response, unwrap_publisher_body,
 };
 use super::tool_bridge::ToolResultBridge;
 use super::tool_relevance;
-use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
+use super::types::{EffectiveAgentPolicy, ImageAttachment, RoutingDecision, WorkerEvent};
 use super::worker::Worker;
 
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
@@ -43,6 +46,23 @@ const CONNECT_TIMEOUT_SECS: u64 = 30;
 /// Overall request timeout for Gateway API calls (10 minutes).
 /// Allows for long-running agent requests with multiple tool execution rounds.
 const REQUEST_TIMEOUT_SECS: u64 = 600;
+const FILE_APPROVAL_TIMEOUT_SECS: u64 = 300;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileAccessApprovalRequest {
+    approval_id: String,
+    conversation_id: String,
+    operation: String,
+    path: String,
+    can_trust_directory: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileAccessApprovalResponse {
+    id: String,
+    decision: String,
+}
 
 /// Maximum size (in bytes) of a single tool result when appended to the LLM
 /// conversation context.  Results larger than this are truncated to prevent the
@@ -253,6 +273,8 @@ pub struct ChatModelWorker {
     publisher_slug: String,
     /// OpenAI-format tool definitions passed to the LLM for function calling.
     tool_definitions: Vec<serde_json::Value>,
+    /// Snapshot of Settings -> Agent captured with the request.
+    effective_agent_policy: EffectiveAgentPolicy,
 }
 
 impl ChatModelWorker {
@@ -267,11 +289,16 @@ impl ChatModelWorker {
             cancelled: Arc::new(Mutex::new(false)),
             publisher_slug: DEFAULT_PUBLISHER_SLUG.to_string(),
             tool_definitions: Vec::new(),
+            effective_agent_policy: EffectiveAgentPolicy::default(),
         }
     }
 
     /// Create a worker with tool definitions for function calling.
-    pub fn with_tools(tools: Vec<serde_json::Value>, publisher_slug: Option<String>) -> Self {
+    pub fn with_tools(
+        tools: Vec<serde_json::Value>,
+        publisher_slug: Option<String>,
+        effective_agent_policy: EffectiveAgentPolicy,
+    ) -> Self {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
@@ -283,6 +310,7 @@ impl ChatModelWorker {
             publisher_slug: publisher_slug
                 .unwrap_or_else(|| DEFAULT_PUBLISHER_SLUG.to_string()),
             tool_definitions: Self::inject_local_tool_definitions(tools),
+            effective_agent_policy,
         }
     }
 
@@ -1191,6 +1219,128 @@ created if missing.",
             .and_then(|v| v.get("path").and_then(|p| p.as_str()).map(String::from))
     }
 
+    fn file_access_kind(name: &str) -> Option<FileAccessKind> {
+        match name {
+            "read_file" | "read_file_base64" | "list_directory" | "path_exists" => {
+                Some(FileAccessKind::Read)
+            }
+            "write_file" | "write_pdf_from_html" | "create_directory" => {
+                Some(FileAccessKind::Write)
+            }
+            _ => None,
+        }
+    }
+
+    async fn request_file_access_approval(
+        app: &tauri::AppHandle,
+        conversation_id: &str,
+        access: &ResolvedFileAccess,
+    ) -> Option<String> {
+        let approval_id = format!("file-{}", uuid::Uuid::new_v4());
+        let (tx, rx) = oneshot::channel::<String>();
+        let sender = Arc::new(StdMutex::new(Some(tx)));
+        let sender_for_listener = Arc::clone(&sender);
+        let expected_id = approval_id.clone();
+
+        // Register before emitting so an immediate renderer response cannot race
+        // the listener. The sender is single-use and unrelated responses are ignored.
+        let listener = app.listen("file-access-approval-response", move |event| {
+            let Ok(response) = serde_json::from_str::<FileAccessApprovalResponse>(event.payload())
+            else {
+                return;
+            };
+            if response.id != expected_id {
+                return;
+            }
+            if let Ok(mut guard) = sender_for_listener.lock() {
+                if let Some(tx) = guard.take() {
+                    let _ = tx.send(response.decision);
+                }
+            }
+        });
+
+        let request = FileAccessApprovalRequest {
+            approval_id,
+            conversation_id: conversation_id.to_string(),
+            operation: access.kind.label().to_string(),
+            path: access.path.to_string_lossy().to_string(),
+            can_trust_directory: !access.sensitive,
+        };
+        if app.emit("file-access-approval-request", request).is_err() {
+            app.unlisten(listener);
+            return None;
+        }
+
+        let decision = tokio::time::timeout(Duration::from_secs(FILE_APPROVAL_TIMEOUT_SECS), rx)
+            .await
+            .ok()
+            .and_then(Result::ok);
+        app.unlisten(listener);
+        decision
+    }
+
+    async fn execute_model_file_tool(
+        app: &tauri::AppHandle,
+        conversation_id: &str,
+        policy: &FileAccessPolicy,
+        grants: &mut HashSet<(FileAccessKind, std::path::PathBuf)>,
+        name: &str,
+        arguments: &str,
+    ) -> (String, bool) {
+        let Some(kind) = Self::file_access_kind(name) else {
+            return ("Unsupported file operation".to_string(), true);
+        };
+        let mut args: serde_json::Value = match serde_json::from_str(arguments) {
+            Ok(value) => value,
+            Err(error) => {
+                return (format!("Failed to parse tool arguments: {}", error), true);
+            }
+        };
+        let Some(requested) = args.get("path").and_then(serde_json::Value::as_str) else {
+            return ("Missing required parameter: path".to_string(), true);
+        };
+
+        let access = match policy.evaluate(requested, kind) {
+            FileAccessDecision::Allow(access) => access,
+            FileAccessDecision::Deny(message) => return (message, true),
+            FileAccessDecision::RequireApproval(access) => {
+                let already_granted = !access.sensitive
+                    && grants.iter().any(|(grant_kind, directory)| {
+                        *grant_kind == access.kind && path_is_within(&access.path, directory)
+                    });
+                if already_granted {
+                    access
+                } else {
+                    match Self::request_file_access_approval(app, conversation_id, &access)
+                        .await
+                        .as_deref()
+                    {
+                        Some("approve_once") => access,
+                        Some("trust_directory") if !access.sensitive => {
+                            grants.insert((access.kind, access.grant_directory.clone()));
+                            access
+                        }
+                        _ => {
+                            return (
+                                "File access denied or approval timed out.".to_string(),
+                                true,
+                            );
+                        }
+                    }
+                }
+            }
+        };
+
+        let Some(resolved) = access.path.to_str() else {
+            return ("File access denied: path encoding is unsupported.".to_string(), true);
+        };
+        args["path"] = serde_json::Value::String(resolved.to_string());
+        let Ok(arguments) = serde_json::to_string(&args) else {
+            return ("Failed to serialize authorized file operation.".to_string(), true);
+        };
+        Self::execute_tool_with_app(Some(app), name, &arguments).await
+    }
+
     /// Track repeated identical parse-error tool calls within a single
     /// `execute()` invocation. Returns true when the loop must abort because
     /// the model has retried the same `(tool_name, arguments)` parse failure
@@ -1626,6 +1776,13 @@ impl Worker for ChatModelWorker {
         // Track file paths already read in this execution to avoid re-inlining
         // the same content. On duplicate reads, return a short reference instead.
         let mut read_file_paths: HashSet<String> = HashSet::new();
+        let file_access_policy = FileAccessPolicy::new(
+            self.effective_agent_policy.clone(),
+            routing.project_root.as_deref(),
+        );
+        // Directory grants are scoped to this conversation turn and separated
+        // by read/write kind. They are never persisted or model-controlled.
+        let mut file_access_grants: HashSet<(FileAccessKind, std::path::PathBuf)> = HashSet::new();
 
         let mut total_cost: f64 = 0.0;
 
@@ -1874,7 +2031,23 @@ impl Worker for ChatModelWorker {
                             tc.id
                         );
 
-                        let (result_content, is_error) = if Self::is_local_tool(&tc.name) {
+                        let (result_content, is_error) = if Self::file_access_kind(&tc.name).is_some()
+                        {
+                            match &file_access_policy {
+                                Ok(policy) => {
+                                    Self::execute_model_file_tool(
+                                        app,
+                                        conversation_id,
+                                        policy,
+                                        &mut file_access_grants,
+                                        &tc.name,
+                                        &tc.arguments,
+                                    )
+                                    .await
+                                }
+                                Err(message) => (message.clone(), true),
+                            }
+                        } else if Self::is_local_tool(&tc.name) {
                             Self::execute_tool_with_app(Some(app), &tc.name, &tc.arguments).await
                         } else {
                             // Route non-local tools (gateway__, mcp__)
@@ -3007,7 +3180,11 @@ mod tests {
                 "parameters": {"type": "object", "properties": {}}
             }
         })];
-        let worker = ChatModelWorker::with_tools(tools.clone(), None);
+        let worker = ChatModelWorker::with_tools(
+            tools.clone(),
+            None,
+            EffectiveAgentPolicy::default(),
+        );
         // `with_tools` injects `write_pdf_from_html` (GH #1585) at the front
         // of the list, so the caller's tools follow. Assert both are present
         // and read_file is preserved.

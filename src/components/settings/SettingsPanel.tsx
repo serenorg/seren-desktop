@@ -339,6 +339,12 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     settingsStore.set(key, value as Settings[typeof key]);
   };
 
+  const confirmFullAgentAccess = () =>
+    settingsState.app.agentSandboxMode === "full-access" ||
+    window.confirm(
+      "Full Access lets agents read and write outside the selected project. Continue?",
+    );
+
   const handleDefaultModelChange = (modelId: string) => {
     // Update settings store
     settingsStore.set("chatDefaultModel", modelId);
@@ -1266,17 +1272,17 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                       {
                         value: "read-only",
                         label: "Read Only",
-                        desc: "Read files only, no writes or network",
+                        desc: "Read project files; block file writes",
                       },
                       {
                         value: "workspace-write",
                         label: "Workspace Write",
-                        desc: "Write workspace, network, secrets blocked",
+                        desc: "Read and write inside the selected project",
                       },
                       {
                         value: "full-access",
                         label: "Full Access",
-                        desc: "No restrictions at all",
+                        desc: "Allow access outside the selected project",
                       },
                     ] as const
                   }
@@ -1289,9 +1295,14 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                           ? "border-accent bg-primary/10"
                           : "border-border-hover hover:border-muted-foreground/40"
                       }`}
-                      onClick={() =>
-                        handleStringChange("agentSandboxMode", mode.value)
-                      }
+                      onClick={() => {
+                        if (
+                          mode.value !== "full-access" ||
+                          confirmFullAgentAccess()
+                        ) {
+                          handleStringChange("agentSandboxMode", mode.value);
+                        }
+                      }}
                     >
                       <span class="text-2xl">
                         {mode.value === "read-only"
@@ -1320,8 +1331,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   Approval Policy
                 </span>
                 <span class="text-[0.8rem] text-muted-foreground">
-                  When the agent requires human approval before executing
-                  commands
+                  How exceptional operations outside the selected project are
+                  handled. Normal project work stays automatic.
                 </span>
               </label>
               <div class="flex gap-3">
@@ -1422,6 +1433,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                       : "border-red-500/30 bg-surface-3/60 text-red-400/70 hover:border-red-500/60"
                   }`}
                   onClick={() => {
+                    if (!confirmFullAgentAccess()) return;
                     handleStringChange("agentSandboxMode", "full-access");
                     handleStringChange("agentApprovalPolicy", "never");
                   }}
@@ -1498,7 +1510,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                     Auto-approve read operations
                   </span>
                   <span class="text-[0.8rem] text-muted-foreground">
-                    Automatically approve file read requests without prompting
+                    Automatically approve reads inside the selected project
                   </span>
                 </div>
               </label>

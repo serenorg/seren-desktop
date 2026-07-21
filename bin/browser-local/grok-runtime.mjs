@@ -21,7 +21,9 @@ const GROK_DEFAULT_MODEL_ID = "grok-4.5";
 
 function resolveGrokMode({ approvalPolicy, sandboxMode }) {
   if (sandboxMode === "read-only") return "plan";
-  if (sandboxMode === "danger-full-access") return "bypassPermissions";
+  if (sandboxMode === "danger-full-access" || sandboxMode === "full-access") {
+    return "bypassPermissions";
+  }
   if (approvalPolicy === "on-request" || approvalPolicy === "untrusted") {
     return "default";
   }
@@ -30,7 +32,9 @@ function resolveGrokMode({ approvalPolicy, sandboxMode }) {
 
 function resolveGrokSandbox({ sandboxMode, networkEnabled }) {
   if (sandboxMode === "read-only") return "read-only";
-  if (sandboxMode === "danger-full-access") return "off";
+  if (sandboxMode === "danger-full-access" || sandboxMode === "full-access") {
+    return "off";
+  }
   if (networkEnabled === false) return "strict";
   return "workspace";
 }

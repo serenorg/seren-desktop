@@ -78,7 +78,9 @@ function isGeminiAuthError(message) {
 
 function resolveGeminiMode({ approvalPolicy, sandboxMode }) {
   if (sandboxMode === "read-only") return "plan";
-  if (sandboxMode === "danger-full-access") return "yolo";
+  if (sandboxMode === "danger-full-access" || sandboxMode === "full-access") {
+    return "yolo";
+  }
   if (approvalPolicy === "on-request" || approvalPolicy === "untrusted") {
     return "default";
   }
@@ -113,13 +115,30 @@ function buildGeminiModes(session) {
   };
 }
 
-function spawnGeminiProcess(cwd, { extraEnv = {} } = {}) {
+function geminiSandboxEnv({ sandboxMode, networkEnabled } = {}) {
+  const fullAccess =
+    sandboxMode === "full-access" || sandboxMode === "danger-full-access";
+  if (fullAccess) return { GEMINI_SANDBOX: "false" };
+
+  return {
+    GEMINI_SANDBOX: "true",
+    ...(process.platform === "darwin"
+      ? {
+          SEATBELT_PROFILE:
+            networkEnabled === false ? "strict-proxied" : "strict-open",
+        }
+      : {}),
+  };
+}
+
+function spawnGeminiProcess(cwd, { extraEnv = {}, params = {} } = {}) {
   return spawn(resolveGeminiBinary(), ["--acp"], {
     cwd,
     env: {
       ...process.env,
       NODE_NO_READLINE: "1",
       ...extraEnv,
+      ...geminiSandboxEnv(params),
     },
     stdio: ["pipe", "pipe", "pipe"],
     shell: process.platform === "win32",
@@ -160,3 +179,5 @@ const GEMINI_ADAPTER = {
 export function createGeminiRuntime(options) {
   return createAcpRuntime({ ...options, adapter: GEMINI_ADAPTER });
 }
+
+export { geminiSandboxEnv as _geminiSandboxEnv };

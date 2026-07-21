@@ -16,6 +16,11 @@ import {
   readFileBase64,
   writeFile,
 } from "./fs.mjs";
+import {
+  evaluateFileAccess,
+  fileAccessKind,
+  pathIsWithin,
+} from "./file-access-policy.mjs";
 import { providerLogPrefix } from "./logging.mjs";
 import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
 
@@ -1232,27 +1237,36 @@ async function runChatCompletion({ session, tools, signal, onContent }) {
   }
 }
 
-function buildPermissionOptions() {
-  return [
+function buildPermissionOptions({ canTrustDirectory = true } = {}) {
+  const options = [
     {
       optionId: "accept",
       label: "Approve once",
       description: "Run this tool call one time.",
     },
-    {
+  ];
+  if (canTrustDirectory) {
+    options.push({
       optionId: "acceptForSession",
-      label: "Approve session",
-      description: "Allow this tool for the rest of the session.",
-    },
-    {
+      label: "Trust folder this turn",
+      description: "Allow this operation in the same folder for this agent turn.",
+    });
+  }
+  options.push({
       optionId: "decline",
       label: "Deny",
       description: "Return a denial to the model.",
-    },
-  ];
+  });
+  return options;
 }
 
-function buildPermissionRequestEvent(session, requestId, toolCall, args) {
+function buildPermissionRequestEvent(
+  session,
+  requestId,
+  toolCall,
+  args,
+  fileAccess,
+) {
   return {
     sessionId: session.id,
     requestId,
@@ -1261,7 +1275,9 @@ function buildPermissionRequestEvent(session, requestId, toolCall, args) {
       title: toolCall.function.name,
       input: args,
     },
-    options: buildPermissionOptions(),
+    options: buildPermissionOptions({
+      canTrustDirectory: !fileAccess?.sensitive,
+    }),
   };
 }
 
@@ -1271,9 +1287,24 @@ function listPendingPermissions(session) {
   );
 }
 
-async function requestPermission(session, toolCall, args) {
+async function requestPermission(session, toolCall, args, fileAccess) {
+  if (fileAccess?.decision === "allow") return "accept";
   if (
-    session.currentModeId === "auto" ||
+    fileAccess?.decision === "require_approval" &&
+    !fileAccess.sensitive &&
+    session.fileAccessGrants.some(
+      (grant) =>
+        grant.kind === fileAccess.kind &&
+        pathIsWithin(fileAccess.resolvedPath, grant.directory),
+    )
+  ) {
+    return "accept";
+  }
+
+  // Auto mode still cannot cross the project boundary silently. It remains
+  // automatic for every in-project file operation and for non-file tools.
+  if (
+    (!fileAccess && session.currentModeId === "auto") ||
     session.approvedForSession.has(toolCall.function.name)
   ) {
     return "accept";
@@ -1285,6 +1316,7 @@ async function requestPermission(session, toolCall, args) {
     requestId,
     toolCall,
     args,
+    fileAccess,
   );
   const permission = new Promise((resolve) => {
     session.pendingPermissions.set(requestId, {
@@ -1303,6 +1335,18 @@ async function executeToolCall(session, toolCall, handlers) {
   const args = safeJsonParse(toolCall.function.arguments, {});
   const handler = handlers.get(toolCall.function.name);
   const title = handler?.displayName ?? toolCall.function.name;
+  const kind =
+    handler?.kind === "local" ? fileAccessKind(toolCall.function.name) : null;
+  const fileAccess = kind
+    ? evaluateFileAccess({
+        requestedPath: args.path,
+        projectRoot: session.cwd,
+        kind,
+        sandboxMode: session.sandboxMode,
+        approvalPolicy: session.approvalPolicy,
+        autoApproveReads: session.autoApproveReads,
+      })
+    : null;
 
   session.emit("provider://tool-call", {
     sessionId: session.id,
@@ -1314,7 +1358,19 @@ async function executeToolCall(session, toolCall, handlers) {
     parameters: args,
   });
 
-  const decision = await requestPermission(session, toolCall, args);
+  if (fileAccess?.decision === "deny") {
+    const denial = fileAccess.reason ?? "File access denied by project scope.";
+    session.emit("provider://tool-result", {
+      sessionId: session.id,
+      toolCallId: toolCall.id,
+      status: "denied",
+      error: denial,
+    });
+    return { role: "tool", tool_call_id: toolCall.id, content: denial };
+  }
+  if (fileAccess?.resolvedPath) args.path = fileAccess.resolvedPath;
+
+  const decision = await requestPermission(session, toolCall, args, fileAccess);
   if (decision === "decline" || decision === "cancel" || decision === "deny") {
     const denial = "Tool call denied by the user.";
     session.emit("provider://tool-result", {
@@ -1326,7 +1382,14 @@ async function executeToolCall(session, toolCall, handlers) {
     return { role: "tool", tool_call_id: toolCall.id, content: denial };
   }
   if (decision === "acceptForSession") {
-    session.approvedForSession.add(toolCall.function.name);
+    if (fileAccess && !fileAccess.sensitive) {
+      session.fileAccessGrants.push({
+        kind: fileAccess.kind,
+        directory: fileAccess.grantDirectory,
+      });
+    } else {
+      session.approvedForSession.add(toolCall.function.name);
+    }
   }
 
   session.emit("provider://tool-call", {
@@ -1562,9 +1625,13 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
         availableModelRecords,
         currentModelId: initialModel.modelId,
         currentModeId: params.approvalPolicy === "never" ? "auto" : "ask",
+        sandboxMode: params.sandboxMode ?? "workspace-write",
+        approvalPolicy: params.approvalPolicy ?? "on-request",
+        autoApproveReads: params.autoApproveReads !== false,
         currentPrompt: null,
         pendingPermissions: new Map(),
         approvedForSession: new Set(),
+        fileAccessGrants: [],
         messages: [],
         toolIncompatibleModelIds: new Set(),
         loadedModelKey: null,

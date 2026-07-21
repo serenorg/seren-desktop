@@ -8,6 +8,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
 import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
 import {
@@ -1062,6 +1063,7 @@ function buildClaudeArgs({
   resumeSessionId,
   preferredModel,
   mcpConfigJson,
+  policySettingsJson,
   effort,
 }) {
   const args = [
@@ -1095,6 +1097,17 @@ function buildClaudeArgs({
     }
   }
 
+  if (policySettingsJson) {
+    if (process.platform === "win32") {
+      const tempPath = path.join(os.tmpdir(), `seren-policy-${sessionId}.json`);
+      writeFileSync(tempPath, policySettingsJson, "utf-8");
+      args.push("--settings", tempPath);
+      args._policyTempFile = tempPath;
+    } else {
+      args.push("--settings", policySettingsJson);
+    }
+  }
+
   if (resumeSessionId) {
     args.push("--resume", resumeSessionId);
   } else {
@@ -1106,6 +1119,61 @@ function buildClaudeArgs({
   }
 
   return args;
+}
+
+function quoteHookArgument(value) {
+  const text = String(value);
+  if (process.platform === "win32") {
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
+function buildClaudePolicySettings({ cwd, sandboxMode, networkEnabled }) {
+  const fullAccess =
+    sandboxMode === "full-access" || sandboxMode === "danger-full-access";
+  if (fullAccess) return {};
+
+  const hookPath = fileURLToPath(
+    new URL("./claude-file-policy-hook.mjs", import.meta.url),
+  );
+  const settings = {
+    disableAllHooks: false,
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: "Read|Edit|Write|Glob|Grep|NotebookEdit|WebFetch|WebSearch",
+          hooks: [
+            {
+              type: "command",
+              command: `${quoteHookArgument(process.execPath)} ${quoteHookArgument(hookPath)}`,
+              timeout: 10,
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  // Claude's native sandbox constrains Bash subprocesses on macOS/Linux.
+  // Built-in file tools are independently constrained by the hook above.
+  if (process.platform !== "win32") {
+    settings.sandbox = {
+      enabled: true,
+      failIfUnavailable: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      filesystem: {
+        denyRead: ["~/"],
+        allowRead: [cwd],
+        allowWrite: [cwd],
+      },
+      ...(networkEnabled === false
+        ? { network: { deniedDomains: ["*"] } }
+        : {}),
+    };
+  }
+  return settings;
 }
 
 // Mirror of CLAUDE_1M_TIER_CAPABLE_MODELS in src/stores/agent.store.ts. Set
@@ -2422,6 +2490,9 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       apiKey,
       mcpServers,
       approvalPolicy,
+      sandboxMode,
+      networkEnabled,
+      autoApproveReads,
       timeoutSecs,
       reasoningEffort,
       initialModelId,
@@ -2464,6 +2535,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     let serenMcpProxy = null;
     let mcpConfig;
     let claudeArgs;
+    let policySettingsJson;
     try {
       if (apiKey) serenMcpProxy = await createSerenMcpOAuthProxy();
       mcpConfig = buildProviderMcpConfig({
@@ -2471,11 +2543,15 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         mcpServers,
         serenMcpGatewayUrl: serenMcpProxy?.url,
       });
+      policySettingsJson = JSON.stringify(
+        buildClaudePolicySettings({ cwd, sandboxMode, networkEnabled }),
+      );
       claudeArgs = buildClaudeArgs({
         sessionId: remoteSessionId,
         resumeSessionId: resumeAgentSessionId ?? null,
         preferredModel,
         mcpConfigJson: mcpConfig.claudeMcpConfigJson,
+        policySettingsJson,
         effort: effectiveEffort,
       });
     } catch (error) {
@@ -2515,6 +2591,9 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
           "utf-8",
         );
       }
+      if (claudeArgs._policyTempFile && policySettingsJson) {
+        writeFileSync(claudeArgs._policyTempFile, policySettingsJson, "utf-8");
+      }
 
       const processHandle = spawn(
         claudeBin,
@@ -2525,6 +2604,13 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
             ...process.env,
             ...mcpConfig.childEnv,
             PATH: extendedPath,
+            SEREN_AGENT_PROJECT_ROOT: cwd,
+            SEREN_AGENT_SANDBOX_MODE: sandboxMode ?? "workspace-write",
+            SEREN_AGENT_APPROVAL_POLICY: approvalPolicy ?? "on-request",
+            SEREN_AGENT_AUTO_APPROVE_READS:
+              autoApproveReads === false ? "false" : "true",
+            SEREN_AGENT_NETWORK_ENABLED:
+              networkEnabled === false ? "false" : "true",
           },
           stdio: ["pipe", "pipe", "pipe"],
           shell: resolveSpawnShell(claudeBin),
@@ -2534,6 +2620,12 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       // Clean up MCP config temp file when the process exits
       if (claudeArgs._mcpTempFile) {
         const tempFile = claudeArgs._mcpTempFile;
+        processHandle.on("exit", () => {
+          try { unlinkSync(tempFile); } catch {}
+        });
+      }
+      if (claudeArgs._policyTempFile) {
+        const tempFile = claudeArgs._policyTempFile;
         processHandle.on("exit", () => {
           try { unlinkSync(tempFile); } catch {}
         });
@@ -3185,6 +3277,7 @@ export {
   comparePickerEntries as _comparePickerEntries,
   resolveSpawnShell as _resolveSpawnShell,
   buildClaudeArgs as _buildClaudeArgs,
+  buildClaudePolicySettings as _buildClaudePolicySettings,
   normalizeModelRecords as _normalizeModelRecords,
   buildSessionStatus as _buildSessionStatus,
   buildFastModeFlagSettings as _buildFastModeFlagSettings,

@@ -1448,6 +1448,7 @@ fn create_worker(
         WorkerType::ChatModel => Ok(Arc::new(ChatModelWorker::with_tools(
             capabilities.tool_definitions.clone(),
             routing.publisher_slug.clone(),
+            capabilities.effective_agent_policy.clone(),
         ))),
         WorkerType::CloudAgent => {
             let deployment_id = capabilities
