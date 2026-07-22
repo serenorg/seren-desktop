@@ -104,6 +104,14 @@ export interface AgentInfo {
   unavailableReason?: string;
 }
 
+export type SandboxLaunchSpec =
+  | { kind: "seatbelt"; profile: string }
+  | {
+      kind: "linux-launcher";
+      launcherPath: string;
+      policyBase64: string;
+    };
+
 // Remote sessions (provider runtime listSessions capability)
 export interface RemoteSessionInfo {
   sessionId: string;
@@ -519,12 +527,14 @@ export async function spawnAgent(
   const isMacOsDesktop =
     typeof navigator !== "undefined" &&
     /Macintosh|Mac OS X/i.test(navigator.userAgent);
+  const isLinuxDesktop =
+    typeof navigator !== "undefined" && /Linux/i.test(navigator.userAgent);
   const sandboxProfile =
     agentType === "claude-code" &&
     isTauriRuntime() &&
-    isMacOsDesktop &&
+    (isMacOsDesktop || isLinuxDesktop) &&
     !fullAccess
-      ? await invoke<string>("agent_sandbox_profile", {
+      ? await invoke<SandboxLaunchSpec>("agent_sandbox_profile", {
           mode: sandboxMode ?? "workspace-write",
           projectRoot: cwd,
           networkEnabled: networkEnabled !== false,

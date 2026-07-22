@@ -4,6 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use super::policy::{SandboxError, SandboxMode, SandboxPolicy};
+#[cfg(target_os = "linux")]
+use super::policy::encode_policy;
 
 const SEATBELT_EXECUTABLE: &str = "/usr/bin/sandbox-exec";
 
@@ -75,7 +77,21 @@ pub fn wrap_spawn(
         Ok((SEATBELT_EXECUTABLE.to_string(), wrapped_args))
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        let launcher = std::env::current_exe()
+            .map_err(|error| SandboxError::Landlock(format!("cannot resolve launcher: {error}")))?;
+        let policy_base64 = encode_policy(policy)?;
+        let mut wrapped_args = Vec::with_capacity(args.len() + 4);
+        wrapped_args.push("__seren-sandbox-run".to_string());
+        wrapped_args.push(policy_base64);
+        wrapped_args.push("--".to_string());
+        wrapped_args.push(command.to_string());
+        wrapped_args.extend(args.iter().cloned());
+        Ok((launcher.to_string_lossy().into_owned(), wrapped_args))
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
     {
         let _ = (args, policy);
         Err(SandboxError::BackendUnavailable)

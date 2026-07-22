@@ -110,6 +110,9 @@ tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = "2"
 xcap = "0.9.6"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4.5"
+
 # System-audio ("Them") loopback capture for Meeting Mode.
 [target.'cfg(target_os = "windows")'.dependencies]
 cpal = "0.18.1"
