@@ -135,7 +135,11 @@ impl MemoryState {
             body
         };
         let rpc_response: Value = serde_json::from_str(&json_body).map_err(|e| e.to_string())?;
-        parse_mcp_tool_result(rpc_response)
+        let parsed = parse_mcp_tool_result(rpc_response);
+        if let Err(error) = &parsed {
+            log::warn!("memory tool {tool_name} failed: {error}");
+        }
+        parsed
     }
 }
 
@@ -181,14 +185,23 @@ fn parse_mcp_tool_result(rpc_response: Value) -> Result<Value, String> {
     if let Some(error) = rpc_response.get("error") {
         return Err(error.to_string());
     }
-    let text = rpc_response
+    let result = rpc_response
         .get("result")
-        .and_then(|r| r.get("content"))
+        .ok_or_else(|| "unexpected MCP response format".to_string())?;
+    let text = result
+        .get("content")
         .and_then(|c| c.as_array())
         .and_then(|items| items.first())
         .and_then(|item| item.get("text"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| "unexpected MCP response format".to_string())?;
+        .and_then(Value::as_str);
+
+    if result.get("isError").and_then(Value::as_bool) == Some(true) {
+        return Err(text
+            .map(ToString::to_string)
+            .unwrap_or_else(|| result.to_string()));
+    }
+
+    let text = text.ok_or_else(|| "unexpected MCP response format".to_string())?;
 
     match serde_json::from_str(text) {
         Ok(value) => Ok(value),
@@ -750,6 +763,20 @@ mod tests {
         });
         let parsed = parse_mcp_tool_result(response).unwrap();
         assert_eq!(parsed["created_count"], 2);
+    }
+
+    #[test]
+    fn tool_error_result_is_err() {
+        let response = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "isError": true,
+                "content": [{ "type": "text", "text": "internal error" }]
+            }
+        });
+        let error = parse_mcp_tool_result(response).unwrap_err();
+        assert!(error.contains("internal error"));
     }
 
     #[test]
