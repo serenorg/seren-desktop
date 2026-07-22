@@ -14,6 +14,7 @@ pub mod commands {
     pub mod cli_installer;
     pub mod context_intelligence;
     pub mod conversation_search;
+    pub mod credential_lease;
     pub mod employees_archive;
     pub mod gateway_http;
     pub mod happy_bridge;
@@ -46,6 +47,7 @@ pub mod sandbox;
 
 pub mod audio;
 mod auth;
+pub mod credential_lease;
 // Public so the headless `claude_memory_sync` example can drive the
 // AppHandle-free sync core (#2639) without launching the app.
 pub mod claude_memory;
@@ -627,6 +629,7 @@ pub fn run() {
             .manage(orchestrator::eval::EvalState::new())
             .manage(orchestrator::tool_bridge::ToolResultBridge::new())
             .manage(provider_runtime::ProviderRuntimeState::new())
+            .manage(credential_lease::CredentialLeaseManager::new())
             .manage(happy_bridge::HappyBridgeManager::new())
             .manage(std::sync::Arc::new(
                 commands::updater::ShutdownGuard::default(),
@@ -644,6 +647,24 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // A prior crash or force-quit can leave a session key alive at the
+            // Gateway. Reap every non-secret ledger record before the app
+            // accepts a new spawn; failures stay queued for later retries.
+            let credential_lease_manager = app
+                .state::<credential_lease::CredentialLeaseManager>()
+                .inner()
+                .clone();
+            credential_lease_manager.begin_startup_reaper();
+            let credential_lease_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = credential_lease_manager
+                    .startup_reaper(&credential_lease_app)
+                    .await
+                {
+                    log::warn!("[credential-lease] Startup reaper deferred: {error}");
+                }
+            });
+
             // Create the configured windows here rather than letting Tauri
             // auto-create them (the window is marked "create": false in
             // tauri.conf.json) so the Windows e2e release gate can enable
@@ -1040,6 +1061,9 @@ pub fn run() {
             commands::history_sync::history_sync_run_now,
             commands::history_sync::history_sync_wipe_remote,
             commands::sandbox::agent_sandbox_profile,
+            commands::credential_lease::credential_lease_create,
+            commands::credential_lease::credential_lease_revoke,
+            commands::credential_lease::credential_lease_revoke_all,
             // Meeting Mode persistence commands
             commands::audio::create_meeting,
             commands::audio::get_meeting,
@@ -1318,6 +1342,15 @@ pub fn run() {
                 services::database::checkpoint_managed_db(app, "window blur");
             }
             RunEvent::Exit => {
+                if let Some(lease_manager) = app.try_state::<credential_lease::CredentialLeaseManager>() {
+                    let lease_manager = lease_manager.inner().clone();
+                    let lease_app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(error) = lease_manager.revoke_all(&lease_app).await {
+                            log::warn!("[credential-lease] Exit revocation deferred: {error}");
+                        }
+                    });
+                }
                 if let Some(task) = app.try_state::<services::database::WalCheckpointTask>() {
                     task.abort();
                 }

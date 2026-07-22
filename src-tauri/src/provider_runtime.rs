@@ -492,7 +492,10 @@ fn pipe_child_output(child: &mut Child) {
             let mut lines = BufReader::new(stdout).lines();
             loop {
                 match lines.next_line().await {
-                    Ok(Some(line)) => log::info!("[ProviderRuntime stdout] {}", line),
+                    Ok(Some(line)) => log::info!(
+                        "[ProviderRuntime stdout] {}",
+                        redact_provider_child_output(&line)
+                    ),
                     Ok(None) => break,
                     Err(err) => {
                         log::warn!("[ProviderRuntime stdout] Read error: {}", err);
@@ -508,7 +511,10 @@ fn pipe_child_output(child: &mut Child) {
             let mut lines = BufReader::new(stderr).lines();
             loop {
                 match lines.next_line().await {
-                    Ok(Some(line)) => log::warn!("[ProviderRuntime stderr] {}", line),
+                    Ok(Some(line)) => log::warn!(
+                        "[ProviderRuntime stderr] {}",
+                        redact_provider_child_output(&line)
+                    ),
                     Ok(None) => break,
                     Err(err) => {
                         log::warn!("[ProviderRuntime stderr] Read error: {}", err);
@@ -518,6 +524,40 @@ fn pipe_child_output(child: &mut Child) {
             }
         });
     }
+}
+
+/// Child-process output reaches the desktop log verbatim unless it is scrubbed
+/// here. Resolve the current runtime environment at capture time so newly
+/// issued session leases and future Seren secret variables are covered too.
+fn redact_provider_child_output(line: &str) -> String {
+    let runtime_secret_values = std::env::vars()
+        .filter_map(|(name, value)| is_seren_secret_env_name(&name).then_some(value));
+    redact_provider_child_output_with_values(line, runtime_secret_values)
+}
+
+fn is_seren_secret_env_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    upper.starts_with("SEREN_")
+        && (upper.ends_with("KEY") || upper.ends_with("TOKEN") || upper.ends_with("SECRET"))
+}
+
+fn redact_provider_child_output_with_values(
+    line: &str,
+    runtime_secret_values: impl IntoIterator<Item = String>,
+) -> String {
+    let mut redacted = line.to_string();
+    for secret in runtime_secret_values {
+        if !secret.is_empty() {
+            redacted = redacted.replace(&secret, "[REDACTED]");
+        }
+    }
+    // API-key values are only shown once by the Gateway but may still be
+    // echoed by a misbehaving child. This format catches the active lease even
+    // when it never appears in the provider-runtime parent environment.
+    regex::Regex::new(r"seren_[A-Za-z0-9_-]+_[A-Za-z0-9_-]+")
+        .expect("static Seren API-key pattern compiles")
+        .replace_all(&redacted, "[REDACTED]")
+        .into_owned()
 }
 
 async fn wait_for_provider_runtime_with_deadline(
@@ -897,6 +937,18 @@ pub async fn provider_force_kill_session(
 mod tests {
     use super::*;
     use tokio::process::Command as TokioCommand;
+
+    #[test]
+    fn child_output_redacts_runtime_secret_values_and_lease_shape() {
+        let lease_shape = ["seren", "shape", "value"].join("_");
+        let redacted = redact_provider_child_output_with_values(
+            &format!("env=canary-session-secret lease={lease_shape}"),
+            vec!["canary-session-secret".to_string()],
+        );
+        assert!(!redacted.contains("canary-session-secret"));
+        assert!(!redacted.contains(&lease_shape));
+        assert_eq!(redacted.matches("[REDACTED]").count(), 2);
+    }
 
     /// Regression guard for #3156.
     ///

@@ -529,7 +529,6 @@ import {
   type AgentConversation as DbAgentConversation,
   getAgentConversation,
   getMessages,
-  getSerenApiKey,
   listConversations,
   saveMessage,
   setAgentConversationMetadata as setAgentConversationMetadataDb,
@@ -545,6 +544,10 @@ import {
   claudeSessionExists,
   renderClaudeMemoryMd,
 } from "@/services/claudeMemory";
+import {
+  createCredentialLease,
+  revokeCredentialLease,
+} from "@/services/credential-lease";
 import {
   bootstrapMemoryContext,
   processAssistantResponseMemory,
@@ -576,11 +579,7 @@ import type {
 } from "@/services/providers";
 import * as providerService from "@/services/providers";
 import { computeAgentOAuthRouting } from "@/services/publisher-oauth";
-import {
-  authStore,
-  ensureApiKey,
-  requestSignInModal,
-} from "@/stores/auth.store";
+import { authStore, requestSignInModal } from "@/stores/auth.store";
 import {
   oauthConnectionsRevision,
   oauthSelectionsRevision,
@@ -727,9 +726,17 @@ function subscribeToProviderRuntimeRestarted(): void {
       setState("activeSessionId", null);
 
       for (const snap of snapshot) {
-        const ts = state.threadStates[snap.conversationId];
-        if (!ts?.turnInFlight || !ts.lastPromptText) continue;
         void (async () => {
+          // The provider runtime died, so its child can no longer use this
+          // key. Revoke before a restart creates a fresh, per-session lease.
+          await revokeCredentialLease(snap.id).catch((error) => {
+            console.warn(
+              "[AgentStore] Failed to revoke runtime-restart credential lease:",
+              error,
+            );
+          });
+          const ts = state.threadStates[snap.conversationId];
+          if (!ts?.turnInFlight || !ts.lastPromptText) return;
           if (restartGeneration !== sessionResetGeneration) return;
           agentStore.armRestartTimer(
             snap.conversationId,
@@ -747,6 +754,12 @@ function subscribeToProviderRuntimeRestarted(): void {
           );
           if (restartGeneration !== sessionResetGeneration) {
             if (newId) {
+              await revokeCredentialLease(newId).catch((revokeError) => {
+                console.warn(
+                  "[AgentStore] Failed to revoke stale restart credential lease:",
+                  revokeError,
+                );
+              });
               await providerService.terminateSession(newId).catch((error) => {
                 console.warn(
                   "[AgentStore] Failed to terminate stale restart session:",
@@ -3138,7 +3151,10 @@ export const agentStore = {
     },
   ): Promise<string | null> {
     const resolvedAgentType = agentType ?? state.selectedAgentType;
-    const localSessionId = opts?.localSessionId;
+    // Every agent process receives a stable session id before its credential
+    // lease is created. Providers echo this id back as their session handle,
+    // which lets one teardown path revoke the exact key used by the child.
+    const localSessionId = opts?.localSessionId ?? crypto.randomUUID();
     const resumeAgentSessionId = opts?.resumeAgentSessionId;
     const initRetryAttempt = opts?.initRetryAttempt ?? 0;
     const reclaimedIdleClaude = opts?.reclaimedIdleClaude ?? false;
@@ -3159,7 +3175,7 @@ export const agentStore = {
     // Prevent concurrent spawns for the same conversation. Internal retries
     // (initRetryAttempt > 0) are allowed through because they are sequential
     // continuations of the same spawn attempt, not independent races.
-    const spawnKey = localSessionId ?? `anon-${Date.now()}`;
+    const spawnKey = localSessionId;
     if (initRetryAttempt === 0 && spawningConversations.has(spawnKey)) {
       console.log(
         "[AgentStore] spawnSession: spawn already in progress for",
@@ -3171,6 +3187,9 @@ export const agentStore = {
     if (initRetryAttempt === 0) {
       spawningConversations.add(spawnKey);
     }
+
+    let credentialLeaseCreated = false;
+    let spawnedSessionId: string | null = null;
 
     try {
       setState("isLoading", true);
@@ -3358,17 +3377,15 @@ export const agentStore = {
           setState("installStatus", null);
         }
 
-        // Get the Seren API key that authorizes the agent's Seren MCP server.
-        // Without it the MCP config silently omits Seren entirely, so the agent
-        // launches with no publisher tools for the whole session.
-        // getSerenApiKey() only READS storage — if the key isn't there yet
-        // (cold start, or a transient provisioning failure that kept the
-        // session alive without a key, #2497), force-provision it now rather
-        // than spawning without publisher access. See #2655.
-        let apiKey = await getSerenApiKey();
-        if (!apiKey && authStore.isAuthenticated) {
-          await ensureApiKey();
-          apiKey = await getSerenApiKey();
+        // A child process receives a unique, expiring lease instead of the
+        // persistent desktop-wide publisher key. Rust owns the remote key id,
+        // retry ledger, and revocation; this value is used only for immediate
+        // MCP configuration during this spawn. #3194.
+        let apiKey: string | undefined;
+        if (authStore.isAuthenticated) {
+          const lease = await createCredentialLease(localSessionId);
+          apiKey = lease.apiKey;
+          credentialLeaseCreated = true;
         }
         const enabledMcpServers = getEnabledMcpServers();
 
@@ -3388,13 +3405,11 @@ export const agentStore = {
         // early events that arrive before the session is in state.sessions.
         // Also clear the terminated flag — this session ID is being reborn;
         // events from the new process must NOT be dropped by the stale filter.
-        if (localSessionId) {
-          spawnContextMap.set(localSessionId, {
-            agentType: resolvedAgentType,
-            conversationId: localSessionId,
-          });
-          terminatedSessionIds.delete(localSessionId);
-        }
+        spawnContextMap.set(localSessionId, {
+          agentType: resolvedAgentType,
+          conversationId: localSessionId,
+        });
+        terminatedSessionIds.delete(localSessionId);
 
         // Paired threads seed the Claude planner with the same default effort
         // a direct Claude Code thread would get; per-role overrides ride in
@@ -3435,6 +3450,19 @@ export const agentStore = {
           settingsStore.settings.lmStudioApiKey,
           settingsStore.settings.agentAutoApproveReads,
         );
+        spawnedSessionId = info.id;
+        if (info.id !== localSessionId) {
+          await revokeCredentialLease(localSessionId).catch((error) => {
+            console.warn(
+              "[AgentStore] Failed to revoke mismatched credential lease:",
+              error,
+            );
+          });
+          credentialLeaseCreated = false;
+          throw new Error(
+            "Agent spawn returned a session id that does not match its credential lease.",
+          );
+        }
         console.log("[AgentStore] Spawn result:", info);
         await refreshAgentOAuthRouting(info.id, localSessionId ?? info.id);
         expectedReadySessionId = info.id;
@@ -3807,6 +3835,25 @@ export const agentStore = {
         // late-arriving events from this dead session. Without this,
         // stale errors leak into retried sessions that reuse the same ID.
         terminatedSessionIds.add(spawnKey);
+        if (credentialLeaseCreated) {
+          await revokeCredentialLease(localSessionId).catch((revokeError) => {
+            console.warn(
+              "[AgentStore] Failed to revoke failed spawn credential lease:",
+              revokeError,
+            );
+          });
+          credentialLeaseCreated = false;
+        }
+        if (spawnedSessionId) {
+          await providerService
+            .terminateSession(spawnedSessionId)
+            .catch((terminateError) => {
+              console.warn(
+                "[AgentStore] Failed to terminate failed spawn session:",
+                terminateError,
+              );
+            });
+        }
         tempUnsubscribe();
         setState("error", message);
         setState("isLoading", false);
@@ -4154,6 +4201,12 @@ export const agentStore = {
     // the backend may still hold it, causing "Session already exists" on re-spawn.
     // Mark as terminated so late-arriving events from the old session are dropped.
     terminatedSessionIds.add(conversationId);
+    await revokeCredentialLease(conversationId).catch((error) => {
+      console.warn(
+        "[AgentStore] Failed to revoke stale-session credential lease:",
+        error,
+      );
+    });
     try {
       await providerService.terminateSession(conversationId);
     } catch {
@@ -4656,6 +4709,18 @@ export const agentStore = {
       setState(
         "pendingDiffProposals",
         state.pendingDiffProposals.filter((p) => p.sessionId !== sessionId),
+      );
+    }
+
+    // Drop the session's local credential authority before asking the provider
+    // runtime to kill its child. Rust retains only a non-secret retry ledger
+    // if the remote API key revocation cannot complete immediately. #3194.
+    try {
+      await revokeCredentialLease(sessionId);
+    } catch (error) {
+      console.warn(
+        "[AgentStore] Failed to revoke session credential lease:",
+        error,
       );
     }
 

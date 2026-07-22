@@ -15,6 +15,13 @@ describe("scrubSensitive", () => {
     expect(scrubSensitive(input)).toBe("API key: [REDACTED_API_KEY]");
   });
 
+  it("scrubs a Seren lease whose key id uses URL-safe separators", () => {
+    const lease = ["seren", "key-id", "secret_value"].join("_");
+    expect(scrubSensitive(`API key: ${lease}`)).toBe(
+      "API key: [REDACTED_SEREN_KEY]",
+    );
+  });
+
   it("scrubs email addresses", () => {
     const input = "User email: test@example.com failed";
     expect(scrubSensitive(input)).toBe("User email: [REDACTED_EMAIL] failed");
