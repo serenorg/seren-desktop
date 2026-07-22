@@ -29,7 +29,7 @@ import { shortcuts } from "@/lib/shortcuts";
 import { captureUnknownError, reportError } from "@/lib/support/hook";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
-import { syncMemories } from "@/services/memory";
+import { consolidateMemories, syncMemories } from "@/services/memory";
 import { resetUserSessionState } from "@/services/session-state";
 import { telemetry } from "@/services/telemetry";
 import { agentStore } from "@/stores/agent.store";
@@ -220,7 +220,11 @@ function App() {
         checkDailyClaim();
         startDailyClaimPolling();
         // Push any locally-cached memories that failed to reach cloud (e.g. cold start)
-        void syncMemories();
+        void syncMemories()
+          .then(() => consolidateMemories({}))
+          .catch((err) =>
+            console.warn("[App] memory consolidation skipped:", err),
+          );
         void threadStore.refresh();
         // Re-initialize the agent runtime side-channel listeners after a
         // re-login: `resetUserSessionState()` disposes them on logout so

@@ -26,6 +26,7 @@ import {
 import {
   bootstrapMemoryContextDetails,
   processAssistantResponseMemory,
+  recallMemoryContext,
 } from "@/services/memory";
 import { serializeHistory } from "@/services/orchestrator-history";
 import {
@@ -243,6 +244,21 @@ export async function orchestrate(
           ...history,
         ];
         answerMemory = memoryContext.messageMemory;
+      }
+      const recall = await recallMemoryContext(prompt);
+      if (recall) {
+        history = [{ role: "system", content: recall.prompt }, ...history];
+        const existingUsed = answerMemory?.used ?? [];
+        const seenIds = new Set(
+          existingUsed.flatMap((detail) => (detail.id ? [detail.id] : [])),
+        );
+        const newDetails = recall.details.filter(
+          (detail) => !detail.id || !seenIds.has(detail.id),
+        );
+        answerMemory = {
+          ...(answerMemory ?? {}),
+          used: [...existingUsed, ...newDetails],
+        };
       }
     } catch (error) {
       console.warn("[orchestrator] Failed to retrieve memory context:", error);

@@ -548,6 +548,7 @@ import {
 import {
   bootstrapMemoryContext,
   processAssistantResponseMemory,
+  recallMemoryContext,
 } from "@/services/memory";
 import {
   getCachedModelContextWindow,
@@ -4451,6 +4452,20 @@ export const agentStore = {
         { type: "text", text: session.bootstrapPromptContext },
         ...mergedContext,
       ];
+    }
+
+    if (settingsStore.settings.memoryEnabled && promptForBudget?.trim()) {
+      try {
+        const recall = await recallMemoryContext(promptForBudget);
+        if (recall) {
+          mergedContext = [
+            { type: "text", text: recall.prompt },
+            ...mergedContext,
+          ];
+        }
+      } catch (error) {
+        console.warn("[AgentStore] Memory recall failed (non-fatal):", error);
+      }
     }
 
     if (!alreadyPrimed) {

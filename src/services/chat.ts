@@ -33,7 +33,9 @@ import {
 } from "@/services/mcp-gateway";
 import {
   bootstrapMemoryContext,
+  learnFromErrorMemory,
   processAssistantResponseMemory,
+  recallMemoryContext,
 } from "@/services/memory";
 import { authStore } from "@/stores/auth.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -542,6 +544,10 @@ export async function* streamMessageWithTools(
       if (memoryContext) {
         systemContent += memoryContext;
       }
+      const recall = await recallMemoryContext(content);
+      if (recall) {
+        systemContent += `\n\n${recall.prompt}`;
+      }
     } catch (error) {
       console.warn("[Chat] Failed to retrieve memory context:", error);
     }
@@ -571,6 +577,7 @@ export async function* streamMessageWithTools(
   let yieldedContent = "";
   let hasExecutedTools = false;
   let hasNudged = false;
+  let firstToolError: string | null = null;
 
   for (
     let iteration = 0;
@@ -628,6 +635,17 @@ export async function* streamMessageWithTools(
 
       // Store conversation to memory if enabled
       if (finalOutputValidation.canStoreMemory) {
+        if (firstToolError) {
+          learnFromErrorMemory({
+            errorContent: firstToolError,
+            fixContent: fullContent.slice(0, 2000),
+          }).catch((err) => {
+            console.warn(
+              "[streamMessageWithTools] Failed to learn from tool error:",
+              err,
+            );
+          });
+        }
         processAssistantResponseMemory(fullContent, {
           model,
           userQuery: content,
@@ -687,6 +705,13 @@ export async function* streamMessageWithTools(
     // Log tool execution results
     for (const result of results) {
       if (result.is_error) {
+        if (!firstToolError) {
+          const toolName =
+            response.tool_calls.find(
+              (toolCall) => toolCall.id === result.tool_call_id,
+            )?.function.name ?? result.tool_call_id;
+          firstToolError = `${toolName}: ${result.content.slice(0, 2000)}`;
+        }
         console.warn(
           `[streamMessageWithTools] Tool error: ${result.tool_call_id}`,
           result.content.substring(0, 200),

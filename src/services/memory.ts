@@ -378,6 +378,56 @@ export async function recallMemories(
   }
 }
 
+export async function recallMemoryContext(
+  query: string,
+  limit = 5,
+  deadlineMs = 2500,
+): Promise<{ prompt: string; details: MessageMemoryDetail[] } | null> {
+  if (!isMemoryAvailable() || !query.trim()) {
+    return null;
+  }
+
+  const startedAt = performance.now();
+  const results = await raceWithDeadline(
+    recallMemories(query, limit),
+    deadlineMs,
+  );
+  if (results === null) {
+    console.warn(
+      `[Memory] recall deadline ${deadlineMs}ms exceeded — proceeding without recalled context`,
+    );
+    return null;
+  }
+
+  const details = results
+    .map((record) =>
+      detailFromRecord(
+        {
+          id: record.id,
+          content: record.content,
+          memory_type: record.memory_type,
+        },
+        record.memory_type,
+      ),
+    )
+    .filter((detail): detail is MessageMemoryDetail => detail !== null);
+  if (details.length === 0) {
+    console.info(
+      `[Memory] recall injected 0 memories in ${Math.round(performance.now() - startedAt)}ms`,
+    );
+    return null;
+  }
+
+  const prompt = [
+    "## Relevant memories for this request",
+    ...details.map((detail) => `- [${detail.type}] ${detail.summary}`),
+  ].join("\n");
+  console.info(
+    `[Memory] recall injected ${details.length} memories in ${Math.round(performance.now() - startedAt)}ms`,
+  );
+  return { prompt, details };
+}
+
 export async function listMemories(
   input: {
     memoryType?: string;
