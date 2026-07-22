@@ -493,24 +493,70 @@ export async function syncMemories(): Promise<SyncResult | null> {
   }
 }
 
+export function raceWithDeadline<T>(
+  promise: Promise<T>,
+  deadlineMs: number,
+): Promise<T | null> {
+  return new Promise<T | null>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(
+      () => {
+        settled = true;
+        resolve(null);
+      },
+      Math.max(0, deadlineMs),
+    );
+
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export async function bootstrapMemoryContextDetails(
   input: {
     tokenBudget?: number;
     orgId?: string;
     projectId?: string | null;
+    deadlineMs?: number;
   } = {},
 ): Promise<MemorySessionBootstrapResult | null> {
   if (!isMemoryAvailable()) {
     return null;
   }
 
+  const deadlineMs = input.deadlineMs ?? 2500;
+  const startedAt = performance.now();
   try {
-    const raw = await invoke("memory_session_bootstrap", {
-      projectId: getProjectId(input.projectId),
-      orgId: input.orgId,
-      tokenBudget: input.tokenBudget,
-    });
+    const raw = await raceWithDeadline(
+      invoke("memory_session_bootstrap", {
+        projectId: getProjectId(input.projectId),
+        orgId: input.orgId,
+        tokenBudget: input.tokenBudget,
+      }),
+      deadlineMs,
+    );
+    if (raw === null) {
+      console.warn(
+        `[Memory] bootstrap deadline ${deadlineMs}ms exceeded — proceeding without memory context`,
+      );
+      return null;
+    }
     const result = normalizeBootstrapResult(raw);
+    console.info(
+      `[Memory] bootstrap served from ${result.source} in ${Math.round(performance.now() - startedAt)}ms`,
+    );
     return result.prompt || result.totalMemories > 0 ? result : null;
   } catch (error) {
     console.warn("[Memory] Failed to bootstrap memory context:", error);
