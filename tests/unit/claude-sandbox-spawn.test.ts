@@ -114,6 +114,62 @@ describe("Claude bounded spawn boundary (#3192)", () => {
     });
   });
 
+  const withWindows = (callback: () => void) => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", {
+      value: "win32",
+      configurable: true,
+    });
+    try {
+      callback();
+    } finally {
+      Object.defineProperty(process, "platform", {
+        value: originalPlatform,
+        configurable: true,
+      });
+    }
+  };
+
+  it("wraps Windows bounded sessions with the app-binary launcher", () => {
+    withWindows(() => {
+      expect(
+        buildClaudeSpawnInvocation({
+          claudeBin: "C:\\Program Files\\Claude\\claude.exe",
+          claudeArgs: ["--version"],
+          sandboxMode: "workspace-write",
+          sandboxProfile: {
+            kind: "windows-launcher",
+            launcherPath: "C:\\Program Files\\Seren\\Seren.exe",
+            policyBase64: "encoded-policy",
+          },
+        }),
+      ).toEqual({
+        command: "C:\\Program Files\\Seren\\Seren.exe",
+        args: [
+          "__seren-sandbox-run",
+          "encoded-policy",
+          "--",
+          "C:\\Program Files\\Claude\\claude.exe",
+          "--version",
+        ],
+        shell: false,
+      });
+    });
+  });
+
+  it("throws before spawning when a Windows bounded session has no launcher", () => {
+    withWindows(() => {
+      expect(() =>
+        buildClaudeSpawnInvocation({
+          claudeBin: "C:\\Program Files\\Claude\\claude.exe",
+          claudeArgs: [],
+          sandboxMode: "read-only",
+          sandboxProfile: null,
+        }),
+      ).toThrow(/verified Windows sandbox launcher is missing/);
+    });
+  });
+
   it("leaves full-access sessions unwrapped", () => {
     withDarwin(() => {
       expect(
