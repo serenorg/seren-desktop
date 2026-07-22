@@ -76,22 +76,32 @@ jobs:
       - name: Generate release notes
         id: release_notes
         run: |
-          # Get previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          # A curated changelog at .github/release-notes/<tag>.md is used verbatim
+          # as the "What's New" body when present; otherwise fall back to the
+          # commit list. Either way the Installation/Note footer below is always
+          # appended, so the boilerplate stays single-sourced and cannot drift.
+          # This replaces hand-editing the release body after publish.
+          CURATED=".github/release-notes/${GITHUB_REF_NAME}.md"
 
-          if [ -z "$PREV_TAG" ]; then
-            # First release - get all commits
-            COMMITS=$(git log --pretty=format:"- %s" --no-merges | head -20)
-          else
-            # Get commits since previous tag
-            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges)
-          fi
-
-          # Create release body by writing commits directly (avoid sed issues with special chars)
+          # Create release body (avoid sed issues with special chars)
           {
-            echo "## What's New"
-            echo ""
-            echo "$COMMITS"
+            if [ -f "$CURATED" ]; then
+              echo "Using curated release notes from $CURATED" >&2
+              cat "$CURATED"
+            else
+              echo "No curated notes at $CURATED; using the commit list" >&2
+              # Get previous tag
+              PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+              echo "## What's New"
+              echo ""
+              if [ -z "$PREV_TAG" ]; then
+                # First release - get all commits
+                git log --pretty=format:"- %s" --no-merges | head -20
+              else
+                # Get commits since previous tag
+                git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges
+              fi
+            fi
             echo ""
             echo "## Installation"
             echo ""
