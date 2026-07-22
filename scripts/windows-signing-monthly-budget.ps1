@@ -191,7 +191,7 @@ if ($Mode -eq "Adjust") {
       }
       $adjustments = @()
       if ($null -ne $ledger.adjustments) { $adjustments = @($ledger.adjustments) }
-      $ledger.adjustments = $adjustments + [PSCustomObject]$adjustment
+      $ledger | Add-Member -NotePropertyName adjustments -NotePropertyValue ($adjustments + [PSCustomObject]$adjustment) -Force
       $committedOperations = $AdjustedBaselineOperations + $entriesSum
       $cost = Project-Cost $committedOperations $base $included $overage $fixed
       $ledger.committed_or_reserved_operations = $committedOperations

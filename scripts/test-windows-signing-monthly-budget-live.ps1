@@ -68,5 +68,8 @@ if ($LASTEXITCODE -ne 0) { throw "The audited baseline adjustment should have su
 & $barrier -Mode Reserve -Source "adjusted-baseline-block" -Invocation 1 -Operations 7
 if ($LASTEXITCODE -ne 2) { throw "The reservation above the adjusted baseline was not blocked." }
 
+& $barrier -Mode Adjust -AdjustedBaselineOperations 95 -BillingReference "synthetic adjust reference second" -AdjustApprovedBy $env:GITHUB_ACTOR
+if ($LASTEXITCODE -ne 0) { throw "The repeated audited baseline adjustment should have succeeded." }
+
 Write-Host "Live R2 monthly signing ledger validation passed without mocks."
 exit 0
