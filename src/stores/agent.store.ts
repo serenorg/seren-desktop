@@ -64,6 +64,53 @@ const reattachingConversations = new Map<string, Promise<boolean>>();
  *  into new/live sessions. Cleared when the global subscriber is torn down. */
 const terminatedSessionIds = new Set<string>();
 
+/**
+ * Monotonic fence for Happy-origin archives. Async list/spawn/reattach work
+ * captures an epoch before it starts and may only commit while that epoch is
+ * still current and the conversation is not tombstoned.
+ */
+export class HappyArchiveFence {
+  private readonly entries = new Map<
+    string,
+    { generation: number; archived: boolean }
+  >();
+
+  capture(conversationId: string): number {
+    return this.entries.get(conversationId)?.generation ?? 0;
+  }
+
+  archive(conversationId: string): number {
+    const current = this.entries.get(conversationId);
+    if (current?.archived) return current.generation;
+    const generation = (current?.generation ?? 0) + 1;
+    this.entries.set(conversationId, { generation, archived: true });
+    return generation;
+  }
+
+  isArchived(conversationId: string): boolean {
+    return this.entries.get(conversationId)?.archived === true;
+  }
+
+  allows(conversationId: string, capturedGeneration: number): boolean {
+    const current = this.entries.get(conversationId);
+    return (
+      (current?.generation ?? 0) === capturedGeneration &&
+      current?.archived !== true
+    );
+  }
+
+  filterVisible<T extends { id: string }>(rows: T[]): T[] {
+    return rows.filter((row) => !this.isArchived(row.id));
+  }
+}
+
+const happyArchiveFence = new HappyArchiveFence();
+
+/** Exact provider sessions archived before a conversation owner was durable.
+ * Kept separate from conversation fences so an unowned standby cannot evict
+ * its healthy serving sibling. */
+const happyProviderArchiveTombstones = new Set<string>();
+
 /** Session IDs that the agent store just terminated programmatically. The
  *  runtime emits "Session terminated before request completed." (and other
  *  death-string `provider://error` events) when in-flight control requests
@@ -134,12 +181,51 @@ const SUMMARY_PRIMARY_MODEL = "anthropic/claude-sonnet-4";
 // deterministic local summary. #2111.
 const SUMMARY_FALLBACK_MODELS = ["anthropic/claude-haiku-4.5"];
 
+/** Owner-aware global cap for predictive compaction. An archived run can
+ * release its own slot immediately, but a stale completion from that run must
+ * never release a newer thread's slot. */
+export class PredictiveCompactMutex {
+  private owner: { sessionId: string; generation: number } | null = null;
+  private nextGeneration = 0;
+
+  tryAcquire(
+    sessionId: string,
+  ): Readonly<{ sessionId: string; generation: number }> | null {
+    if (this.owner !== null) return null;
+    this.nextGeneration += 1;
+    this.owner = { sessionId, generation: this.nextGeneration };
+    return this.owner;
+  }
+
+  release(lease: Readonly<{ sessionId: string; generation: number }>): boolean {
+    if (
+      this.owner?.sessionId !== lease.sessionId ||
+      this.owner.generation !== lease.generation
+    ) {
+      return false;
+    }
+    this.owner = null;
+    return true;
+  }
+
+  releaseCurrentForAny(sessionIds: Iterable<string>): boolean {
+    if (!this.owner) return false;
+    for (const sessionId of sessionIds) {
+      if (this.owner.sessionId === sessionId) {
+        this.owner = null;
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
 /**
  * Global cap = 1 simultaneous predictive compaction across the whole app.
  * Prevents 3x Sonnet 4 calls and 3x Node subprocesses when multiple threads
  * cross the threshold in the same promptComplete tick. #1631.
  */
-let predictiveCompactBusy = false;
+const predictiveCompactMutex = new PredictiveCompactMutex();
 
 /**
  * Per-thread restart-timer handles. Cleared when the turn produces its
@@ -524,9 +610,11 @@ import {
   reportError,
 } from "@/lib/support/hook";
 import {
+  claimHappyProviderSessionOwner,
   clearConversationHistory,
   createAgentConversation,
   type AgentConversation as DbAgentConversation,
+  fenceHappyProviderSessionArchive,
   getAgentConversation,
   getMessages,
   getSerenApiKey,
@@ -594,6 +682,10 @@ let providerRuntimeReadyListener: Promise<UnlistenFn> | null = null;
  *  initialize() calls don't stack listeners. #1631. */
 let providerRuntimeRestartedListener: Promise<UnlistenFn> | null = null;
 
+/** Set once we've subscribed to remote Happy archive notifications so the
+ *  sidebar and serving pointers cannot outlive the archived DB row. */
+let agentConversationArchivedListener: Promise<UnlistenFn> | null = null;
+
 /** Set once we've subscribed to `provider://cli-scan-rejected` so repeated
  *  initialize() calls don't stack listeners. #1646. */
 let cliScanRejectedUnsub: (() => void) | null = null;
@@ -639,6 +731,10 @@ function disposeAgentStoreSideChannelListeners(): void {
   const restartedListener = providerRuntimeRestartedListener;
   providerRuntimeRestartedListener = null;
   disposeTauriListener(restartedListener, "provider-runtime restarted");
+
+  const archivedListener = agentConversationArchivedListener;
+  agentConversationArchivedListener = null;
+  disposeTauriListener(archivedListener, "agent-conversation archived");
 
   cliScanRejectedUnsub?.();
   cliScanRejectedUnsub = null;
@@ -782,6 +878,322 @@ function subscribeToProviderRuntimeRestarted(): void {
       }
     },
   );
+}
+
+/**
+ * Invalidate the frontend immediately after Rust archives an agent
+ * conversation. A conversation may own more than one runtime session while a
+ * predictive-compaction standby is warming, so every matching session must be
+ * removed and tombstoned before a late runtime event can reach the UI.
+ */
+export function planHappyArchiveInvalidation(
+  sessions: Record<
+    string,
+    {
+      conversationId: string;
+      role: "serving" | "standby";
+      archiveOwnerConversationId?: string;
+      standbySessionId?: string | null;
+    }
+  >,
+  activeSessionId: string | null,
+  conversationId: string,
+): { archivedSessionIds: string[]; nextActiveSessionId: string | null } {
+  const archivedSessionIdSet = new Set(
+    Object.entries(sessions)
+      .filter(
+        ([, session]) =>
+          session.conversationId === conversationId ||
+          session.archiveOwnerConversationId === conversationId,
+      )
+      .map(([sessionId]) => sessionId),
+  );
+  // Include a registered warm standby even if it predates the explicit owner
+  // field. The serving pointer is the durable sibling relationship until
+  // promotion copies the persisted conversation id onto the standby.
+  for (const sessionId of [...archivedSessionIdSet]) {
+    const standbySessionId = sessions[sessionId]?.standbySessionId;
+    if (standbySessionId && sessions[standbySessionId]) {
+      archivedSessionIdSet.add(standbySessionId);
+    }
+  }
+  const archivedSessionIds = [...archivedSessionIdSet];
+  const nextActiveSessionId =
+    activeSessionId && archivedSessionIdSet.has(activeSessionId)
+      ? (Object.entries(sessions).find(
+          ([sessionId, session]) =>
+            !archivedSessionIdSet.has(sessionId) && session.role === "serving",
+        )?.[0] ?? null)
+      : activeSessionId;
+  return { archivedSessionIds, nextActiveSessionId };
+}
+
+/**
+ * Release the app-wide predictive-compaction mutex only when the archived
+ * conversation owns the in-flight warmup. Clearing it for an unrelated
+ * archive could allow a second compaction to start concurrently.
+ */
+export interface HappyArchivedSiblingRetirementResult {
+  fenced: boolean;
+  retired: boolean;
+  forceKilled: boolean;
+  lastError?: unknown;
+}
+
+/**
+ * Retire a sibling of the Happy row archived on mobile. The durable local
+ * fence is attempted before process teardown, and the PID-guarded Rust kill is
+ * the immediate fallback when the provider runtime cannot service termination.
+ */
+export async function retireHappyArchivedSiblingProvider(
+  sessionId: string,
+  pid: number | null | undefined,
+  operations: {
+    fence: (sessionId: string) => Promise<void>;
+    terminate: (sessionId: string) => Promise<void>;
+    forceKill: (pid: number) => Promise<boolean>;
+  },
+): Promise<HappyArchivedSiblingRetirementResult> {
+  let fenced = false;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2 && !fenced; attempt += 1) {
+    try {
+      await operations.fence(sessionId);
+      fenced = true;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  try {
+    await operations.terminate(sessionId);
+    return { fenced, retired: true, forceKilled: false, lastError };
+  } catch (error) {
+    lastError = error;
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("not found")) {
+      return { fenced, retired: true, forceKilled: false, lastError };
+    }
+  }
+
+  if (pid != null) {
+    try {
+      const forceKilled = await operations.forceKill(pid);
+      if (forceKilled) {
+        return { fenced, retired: true, forceKilled: true, lastError };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  return { fenced, retired: false, forceKilled: false, lastError };
+}
+
+export function planHappyProviderArchiveInvalidation(
+  sessions: Record<
+    string,
+    {
+      role: "serving" | "standby";
+      standbySessionId?: string | null;
+    }
+  >,
+  activeSessionId: string | null,
+  targetProviderSessionId: string,
+): {
+  archivedSessionIds: string[];
+  linkedServingSessionIds: string[];
+  nextActiveSessionId: string | null;
+} {
+  const linkedServingSessionIds = Object.entries(sessions)
+    .filter(
+      ([sessionId, session]) =>
+        sessionId !== targetProviderSessionId &&
+        session.role === "serving" &&
+        session.standbySessionId === targetProviderSessionId,
+    )
+    .map(([sessionId]) => sessionId);
+  const nextActiveSessionId =
+    activeSessionId === targetProviderSessionId
+      ? (Object.entries(sessions).find(
+          ([sessionId, session]) =>
+            sessionId !== targetProviderSessionId && session.role === "serving",
+        )?.[0] ?? null)
+      : activeSessionId;
+  return {
+    archivedSessionIds: [targetProviderSessionId],
+    linkedServingSessionIds,
+    nextActiveSessionId,
+  };
+}
+
+function subscribeToAgentConversationArchived(): void {
+  if (agentConversationArchivedListener) return;
+  agentConversationArchivedListener = listen<
+    | string
+    | {
+        conversationId: string | null;
+        targetProviderSessionId: string;
+      }
+  >("happy-bridge://conversation-archived", (event) => {
+    const payload = event.payload;
+    const conversationId =
+      typeof payload === "string" ? payload : payload?.conversationId;
+    const targetProviderSessionId =
+      typeof payload === "object" &&
+      payload !== null &&
+      typeof payload.targetProviderSessionId === "string"
+        ? payload.targetProviderSessionId
+        : null;
+    if (targetProviderSessionId) {
+      happyProviderArchiveTombstones.add(targetProviderSessionId);
+    }
+    if (
+      (typeof conversationId !== "string" || conversationId.length === 0) &&
+      targetProviderSessionId
+    ) {
+      const {
+        archivedSessionIds,
+        linkedServingSessionIds,
+        nextActiveSessionId,
+      } = planHappyProviderArchiveInvalidation(
+        state.sessions,
+        state.activeSessionId,
+        targetProviderSessionId,
+      );
+      terminatedSessionIds.add(targetProviderSessionId);
+      sessionReadyPromises.get(targetProviderSessionId)?.resolve();
+      sessionReadyPromises.delete(targetProviderSessionId);
+      pendingSessionEvents.delete(targetProviderSessionId);
+      spawnContextMap.delete(targetProviderSessionId);
+      recoveryInFlightMap.delete(targetProviderSessionId);
+      clearChunkBuf(targetProviderSessionId);
+      clearToolEventBuf(targetProviderSessionId);
+
+      setState("pendingPermissions", (items) =>
+        items.filter((item) => item.sessionId !== targetProviderSessionId),
+      );
+      setState("pendingDiffProposals", (items) =>
+        items.filter((item) => item.sessionId !== targetProviderSessionId),
+      );
+      setState(
+        produce((draft) => {
+          for (const sessionId of archivedSessionIds) {
+            delete draft.sessions[sessionId];
+          }
+          for (const sessionId of linkedServingSessionIds) {
+            const serving = draft.sessions[sessionId];
+            if (!serving) continue;
+            serving.standbySessionId = null;
+            serving.predictiveCompactInFlight = false;
+          }
+        }),
+      );
+      if (linkedServingSessionIds.length > 0) {
+        predictiveCompactMutex.releaseCurrentForAny(linkedServingSessionIds);
+        for (const servingSessionId of linkedServingSessionIds) {
+          agentStore.drainAfterPredictiveAbort(servingSessionId);
+        }
+      }
+      if (state.activeSessionId !== nextActiveSessionId) {
+        setState("activeSessionId", nextActiveSessionId);
+      }
+      return;
+    }
+    if (typeof conversationId !== "string" || conversationId.length === 0) {
+      return;
+    }
+
+    // Fence first: async refresh/resume work that started before this event
+    // must observe the tombstone before it can commit any late result.
+    happyArchiveFence.archive(conversationId);
+
+    setState("recentAgentConversations", (rows) =>
+      rows.filter((row) => row.id !== conversationId),
+    );
+
+    const { archivedSessionIds, nextActiveSessionId } =
+      planHappyArchiveInvalidation(
+        state.sessions,
+        state.activeSessionId,
+        conversationId,
+      );
+    const archivedSessionIdSet = new Set(archivedSessionIds);
+    for (const sessionId of archivedSessionIds) {
+      const archivedSession = state.sessions[sessionId];
+      terminatedSessionIds.add(sessionId);
+      sessionReadyPromises.get(sessionId)?.resolve();
+      sessionReadyPromises.delete(sessionId);
+      pendingSessionEvents.delete(sessionId);
+      spawnContextMap.delete(sessionId);
+      recoveryInFlightMap.delete(sessionId);
+      clearChunkBuf(sessionId);
+      clearToolEventBuf(sessionId);
+      // Happy retires the provider that originated this archive. Reap every
+      // other planned sibling explicitly, including a standby that was
+      // promoted to serving while the old provider was winding down. Keep
+      // the legacy-string fallback narrow for rolling upgrades.
+      const shouldTerminateSibling = targetProviderSessionId
+        ? sessionId !== targetProviderSessionId
+        : archivedSession?.role === "standby";
+      if (shouldTerminateSibling) {
+        expectedTerminateSessionIds.add(sessionId);
+        void retireHappyArchivedSiblingProvider(
+          sessionId,
+          archivedSession?.info.pid,
+          {
+            fence: fenceHappyProviderSessionArchive,
+            terminate: (providerSessionId) =>
+              providerService.terminateSession(providerSessionId, {
+                timeoutMs: 5_000,
+              }),
+            forceKill: providerService.forceKillSession,
+          },
+        )
+          .then((result) => {
+            if (!result.fenced) {
+              console.error(
+                "[AgentStore] Failed to persist archived Happy sibling fence:",
+                result.lastError,
+              );
+            }
+            if (!result.retired) {
+              console.error(
+                "[AgentStore] Failed to retire archived Happy sibling:",
+                result.lastError,
+              );
+            }
+          })
+          .finally(() => expectedTerminateSessionIds.delete(sessionId));
+      }
+    }
+    const restartTimer = restartTimers.get(conversationId);
+    if (restartTimer) clearTimeout(restartTimer);
+    restartTimers.delete(conversationId);
+    pairedConfigPersisted.delete(conversationId);
+
+    setState("pendingPermissions", (items) =>
+      items.filter((item) => !archivedSessionIdSet.has(item.sessionId)),
+    );
+    setState("pendingDiffProposals", (items) =>
+      items.filter((item) => !archivedSessionIdSet.has(item.sessionId)),
+    );
+
+    setState(
+      produce((draft) => {
+        for (const sessionId of archivedSessionIds) {
+          delete draft.sessions[sessionId];
+        }
+        delete draft.threadStates[conversationId];
+        delete draft.persistedMessages[conversationId];
+      }),
+    );
+
+    predictiveCompactMutex.releaseCurrentForAny(archivedSessionIds);
+
+    if (state.activeSessionId !== nextActiveSessionId) {
+      setState("activeSessionId", nextActiveSessionId);
+    }
+  });
 }
 
 function subscribeToClaudeMemoryIntercepts(): void {
@@ -1090,6 +1502,9 @@ export interface ActiveSession {
   cwd: string;
   /** Local persisted conversation id (SQLite). */
   conversationId: string;
+  /** Persisted owner used to fence an invisible predictive standby before
+   * promotion copies that owner's conversationId onto the standby. */
+  archiveOwnerConversationId?: string;
   /** Remote agent runtime session id (e.g., Codex thread id). */
   agentSessionId?: string;
   /** Session configuration options reported by the agent runtime. */
@@ -1869,6 +2284,78 @@ const [state, setState] = createStore<AgentState>({
   agentModeEnabled: false,
 });
 
+/** Kill a provider that completed after its owning Happy conversation was
+ * archived. This path can run before the session was ever registered in the
+ * Solid store, so it must call the provider directly rather than delegate to
+ * terminateSession (which intentionally no-ops for unknown session IDs). */
+async function discardLateArchivedProviderSession(
+  sessionId: string,
+  conversationId: string,
+): Promise<void> {
+  const { archivedSessionIds, nextActiveSessionId } =
+    planHappyArchiveInvalidation(
+      state.sessions,
+      state.activeSessionId,
+      conversationId,
+    );
+  const allArchivedSessionIds = new Set([...archivedSessionIds, sessionId]);
+
+  terminatedSessionIds.add(sessionId);
+  terminatedSessionIds.add(conversationId);
+  for (const archivedSessionId of allArchivedSessionIds) {
+    terminatedSessionIds.add(archivedSessionId);
+    sessionReadyPromises.get(archivedSessionId)?.resolve();
+    sessionReadyPromises.delete(archivedSessionId);
+    pendingSessionEvents.delete(archivedSessionId);
+    spawnContextMap.delete(archivedSessionId);
+    recoveryInFlightMap.delete(archivedSessionId);
+    clearChunkBuf(archivedSessionId);
+    clearToolEventBuf(archivedSessionId);
+  }
+  spawnContextMap.delete(conversationId);
+
+  setState("recentAgentConversations", (rows) =>
+    rows.filter((row) => row.id !== conversationId),
+  );
+  setState("pendingPermissions", (items) =>
+    items.filter((item) => !allArchivedSessionIds.has(item.sessionId)),
+  );
+  setState("pendingDiffProposals", (items) =>
+    items.filter((item) => !allArchivedSessionIds.has(item.sessionId)),
+  );
+  setState(
+    produce((draft) => {
+      for (const archivedSessionId of allArchivedSessionIds) {
+        delete draft.sessions[archivedSessionId];
+      }
+      delete draft.threadStates[conversationId];
+      delete draft.persistedMessages[conversationId];
+    }),
+  );
+  if (state.activeSessionId !== nextActiveSessionId) {
+    setState("activeSessionId", nextActiveSessionId);
+  }
+
+  await Promise.all(
+    [...allArchivedSessionIds].map(async (archivedSessionId) => {
+      expectedTerminateSessionIds.add(archivedSessionId);
+      try {
+        await providerService.terminateSession(archivedSessionId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.includes("not found")) {
+          console.warn(
+            "[AgentStore] Failed to terminate provider after Happy archive:",
+            error,
+          );
+        }
+      } finally {
+        expectedTerminateSessionIds.delete(archivedSessionId);
+      }
+    }),
+  );
+}
+
 const agentOAuthRoutingRefreshes = new Map<string, Promise<boolean>>();
 const agentOAuthRoutingAvailability = new Map<string, boolean>();
 const agentOAuthRoutingDelivery = new Map<string, boolean>();
@@ -2106,6 +2593,7 @@ function disposeAgentStoreRuntimeBindings(): void {
   sessionReadyPromises.clear();
   recoveryInFlightMap.clear();
   terminatedSessionIds.clear();
+  happyProviderArchiveTombstones.clear();
   spawnContextMap.clear();
   for (const timer of chunkFlushTimers.values()) {
     clearTimeout(timer);
@@ -2946,6 +3434,7 @@ export const agentStore = {
     // to applyAgents just overwrite availableAgents with the same data.
     subscribeToProviderRuntimeReady();
     subscribeToProviderRuntimeRestarted();
+    subscribeToAgentConversationArchived();
     // Surface CLI-updater scan rejections per #1646. Default-on, runs once
     // at app init, idempotent (the runtime emits the event at most once
     // per launch per CLI). System notification + state record so the user
@@ -2992,7 +3481,10 @@ export const agentStore = {
         projectRoot: cwd,
         limit,
       });
-      setState("recentAgentConversations", rows.map(unifiedRowToAgent));
+      setState(
+        "recentAgentConversations",
+        happyArchiveFence.filterVisible(rows.map(unifiedRowToAgent)),
+      );
     } catch (error) {
       console.error("Failed to load agent conversation history:", error);
     }
@@ -3017,6 +3509,7 @@ export const agentStore = {
    * agent-kind on a cross-category switch.
    */
   upsertAgentConversationFromDb(row: DbAgentConversation) {
+    if (happyArchiveFence.isArchived(row.id)) return;
     setState("recentAgentConversations", (rows) => {
       const without = rows.filter((r) => r.id !== row.id);
       return [row, ...without];
@@ -3037,7 +3530,9 @@ export const agentStore = {
         providerService.listRemoteSessions(resolvedAgentType, cwd),
         listConversations({ kind: "agent", limit: 200 }),
       ]);
-      const localRows = rawLocalRows.map(unifiedRowToAgent);
+      const localRows = happyArchiveFence.filterVisible(
+        rawLocalRows.map(unifiedRowToAgent),
+      );
 
       setState("recentAgentConversations", localRows);
       const titleOverrides = new Map(
@@ -3135,11 +3630,27 @@ export const agentStore = {
       /** Warm-standby spawns are invisible to the UI — no session-selector
        *  entry, events buffered not rendered, does not steal active focus. */
       role?: "serving" | "standby";
+      /** Persisted serving conversation that owns a predictive standby. */
+      archiveOwnerConversationId?: string;
     },
   ): Promise<string | null> {
     const resolvedAgentType = agentType ?? state.selectedAgentType;
     const localSessionId = opts?.localSessionId;
     const resumeAgentSessionId = opts?.resumeAgentSessionId;
+    const happyArchiveOwnerConversationId =
+      opts?.archiveOwnerConversationId ?? localSessionId;
+    const happyArchiveGeneration = happyArchiveOwnerConversationId
+      ? happyArchiveFence.capture(happyArchiveOwnerConversationId)
+      : null;
+    if (
+      happyArchiveOwnerConversationId &&
+      !happyArchiveFence.allows(
+        happyArchiveOwnerConversationId,
+        happyArchiveGeneration ?? 0,
+      )
+    ) {
+      return null;
+    }
     const initRetryAttempt = opts?.initRetryAttempt ?? 0;
     const reclaimedIdleClaude = opts?.reclaimedIdleClaude ?? false;
     const conversationTitle =
@@ -3436,8 +3947,68 @@ export const agentStore = {
           settingsStore.settings.agentAutoApproveReads,
         );
         console.log("[AgentStore] Spawn result:", info);
-        await refreshAgentOAuthRouting(info.id, localSessionId ?? info.id);
         expectedReadySessionId = info.id;
+        const guardedConversationId =
+          happyArchiveOwnerConversationId ?? info.id;
+        const happyArchiveAllowsCommit = () =>
+          !happyProviderArchiveTombstones.has(info.id) &&
+          !happyArchiveFence.isArchived(info.id) &&
+          (!happyArchiveOwnerConversationId ||
+            happyArchiveFence.allows(
+              happyArchiveOwnerConversationId,
+              happyArchiveGeneration ?? 0,
+            ));
+        const abortArchivedSpawn = async (): Promise<null> => {
+          await discardLateArchivedProviderSession(
+            info.id,
+            guardedConversationId,
+          );
+          setState("isLoading", false);
+          tempUnsubscribe();
+          return null;
+        };
+        const abortProviderArchivedSpawn = async (): Promise<null> => {
+          terminatedSessionIds.add(info.id);
+          sessionReadyPromises.get(info.id)?.resolve();
+          sessionReadyPromises.delete(info.id);
+          pendingSessionEvents.delete(info.id);
+          spawnContextMap.delete(info.id);
+          recoveryInFlightMap.delete(info.id);
+          clearChunkBuf(info.id);
+          clearToolEventBuf(info.id);
+          await providerService.terminateSession(info.id).catch((error) => {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            if (!message.includes("not found")) {
+              console.warn(
+                "[AgentStore] Failed to terminate provider-only archived spawn:",
+                error,
+              );
+            }
+          });
+          if (state.sessions[info.id]) {
+            setState(
+              produce((draft) => {
+                delete draft.sessions[info.id];
+              }),
+            );
+          }
+          setState("isLoading", false);
+          tempUnsubscribe();
+          return null;
+        };
+        const abortHappyArchivedSpawn = () =>
+          happyProviderArchiveTombstones.has(info.id)
+            ? abortProviderArchivedSpawn()
+            : abortArchivedSpawn();
+
+        if (!happyArchiveAllowsCommit()) {
+          return abortHappyArchivedSpawn();
+        }
+        await refreshAgentOAuthRouting(info.id, guardedConversationId);
+        if (!happyArchiveAllowsCommit()) {
+          return abortHappyArchivedSpawn();
+        }
 
         // The new session is alive — immediately clear the terminated flag so
         // early events (configOptionsUpdate, sessionStatus with models/modes)
@@ -3454,9 +4025,10 @@ export const agentStore = {
         // abort/cancel the standby is terminated and nothing is persisted.
         // Without this guard, every warm-up left an orphaned thread row that
         // re-surfaced as an idle agent thread in the sidebar after restart.
+        let persistedConversation: DbAgentConversation | null = null;
         if (opts?.role !== "standby") {
           try {
-            await createAgentConversation(
+            persistedConversation = await createAgentConversation(
               info.id,
               conversationTitle,
               resolvedAgentType,
@@ -3475,6 +4047,14 @@ export const agentStore = {
             console.warn("Failed to persist agent conversation", error);
           }
         }
+        if (persistedConversation?.is_archived) {
+          happyArchiveFence.archive(info.id);
+          happyArchiveFence.archive(guardedConversationId);
+          return abortHappyArchivedSpawn();
+        }
+        if (!happyArchiveAllowsCommit()) {
+          return abortHappyArchivedSpawn();
+        }
 
         // Create session state
         const hasRestoredMessages =
@@ -3489,6 +4069,9 @@ export const agentStore = {
               opts.initialModelId,
             )
           : null;
+        if (!happyArchiveAllowsCommit()) {
+          return abortHappyArchivedSpawn();
+        }
         const session: ActiveSession = {
           info,
           // Only explicit titles belong in live state. Fresh conversations omit
@@ -3502,6 +4085,7 @@ export const agentStore = {
           pendingUserMessage: "",
           cwd,
           conversationId: info.id,
+          archiveOwnerConversationId: opts?.archiveOwnerConversationId,
           // When we already have a pending local bootstrap snapshot, skip the
           // provider's replay to avoid duplicates until that bootstrap state is
           // cleared and provider history becomes authoritative.
@@ -3625,6 +4209,9 @@ export const agentStore = {
         }
 
         if (initFailure) {
+          if (!happyArchiveAllowsCommit()) {
+            return abortHappyArchivedSpawn();
+          }
           if (
             resolvedAgentType === "claude-code" &&
             initRetryAttempt < MAX_CLAUDE_INIT_RETRIES &&
@@ -3687,6 +4274,9 @@ export const agentStore = {
         // Worker can fail fast and remove the session before timeout handling.
         // Treat that as an initialization failure instead of returning a dead id.
         if (!state.sessions[info.id]) {
+          if (!happyArchiveAllowsCommit()) {
+            return abortHappyArchivedSpawn();
+          }
           const exitedMsg = "Agent session exited during initialization.";
           if (
             resolvedAgentType === "claude-code" &&
@@ -3783,6 +4373,9 @@ export const agentStore = {
           }
         }
 
+        if (!happyArchiveAllowsCommit()) {
+          return abortHappyArchivedSpawn();
+        }
         return info.id;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -3924,6 +4517,10 @@ export const agentStore = {
     if (inFlight) {
       return inFlight;
     }
+    const happyArchiveGeneration = happyArchiveFence.capture(conversationId);
+    if (!happyArchiveFence.allows(conversationId, happyArchiveGeneration)) {
+      return false;
+    }
 
     const attempt = (async () => {
       let liveInfo: AgentSessionInfo | undefined;
@@ -3985,6 +4582,15 @@ export const agentStore = {
       // global event subscription. Re-install it so events from the live
       // session (incl. background task completions) are routed again.
       await this.ensureAgentEventSubscription();
+      await refreshAgentOAuthRouting(liveInfo.id, conversationId);
+
+      if (convo?.is_archived) {
+        happyArchiveFence.archive(conversationId);
+      }
+      if (!happyArchiveFence.allows(conversationId, happyArchiveGeneration)) {
+        await discardLateArchivedProviderSession(liveInfo.id, conversationId);
+        return false;
+      }
 
       // This id is alive again — clear any stale terminated marker so the global
       // subscriber does not drop its events.
@@ -4031,7 +4637,6 @@ export const agentStore = {
       };
       setState("sessions", conversationId, session);
       setState("activeSessionId", conversationId);
-      await refreshAgentOAuthRouting(liveInfo.id, conversationId);
 
       if (rehydratedPendingPermissions.length > 0) {
         const seenRequestIds = new Set(
@@ -4102,6 +4707,9 @@ export const agentStore = {
     conversationId: string,
     cwd?: string,
   ): Promise<string | null> {
+    if (happyArchiveFence.isArchived(conversationId)) {
+      return null;
+    }
     // If already running, just focus it. Use the conversationId-aware helper
     // — state.sessions is keyed by sessionId, and after a predictive-compaction
     // promotion the running session id no longer matches the conversation. #1682.
@@ -4148,6 +4756,9 @@ export const agentStore = {
         err,
       );
     }
+    if (happyArchiveFence.isArchived(conversationId)) {
+      return null;
+    }
 
     // Pre-emptively clean up any stale backend session with this conversation id.
     // If the frontend lost track of a session (e.g. after a crash or auth error),
@@ -4165,6 +4776,10 @@ export const agentStore = {
       convo = await getAgentConversation(conversationId);
     } catch (error) {
       console.error("Failed to read agent conversation:", error);
+    }
+    if (convo?.is_archived) {
+      happyArchiveFence.archive(conversationId);
+      return null;
     }
     if (!convo) {
       setState("error", "Agent conversation not found");
@@ -4965,7 +5580,7 @@ export const agentStore = {
     // (#1631); flipping isCompacting on the serving session there makes
     // the drain block at the bottom of promptComplete skip indefinitely
     // and queued prompts get stuck (#1673). Predictive mode has its own
-    // gates (`predictiveCompactInFlight` per-session, `predictiveCompactBusy`
+    // gates (`predictiveCompactInFlight` per-session, owner-aware global mutex
     // module-level) — only the reactive branch should set isCompacting.
     if (mode === "reactive") {
       setState("sessions", sessionId, "isCompacting", true);
@@ -5149,7 +5764,7 @@ export const agentStore = {
         // No teardown, no UI side-effects — the next user submit promotes it.
         // isCompacting is intentionally NOT set on the serving session here
         // (#1673); concurrency is gated by `predictiveCompactInFlight` and
-        // the module-level `predictiveCompactBusy` mutex.
+        // the module-level predictive-compaction mutex.
 
         // #1713 / #1829: synthetic-transcript pre-warm. When enabled, build
         // a synthetic JSONL on disk that splices the structured summary in
@@ -5166,6 +5781,7 @@ export const agentStore = {
               );
             const syntheticStandbyId = await this.spawnSession(cwd, agentType, {
               role: "standby",
+              archiveOwnerConversationId: conversationId,
               resumeAgentSessionId: syntheticAgentSessionId,
               initialModelId: session.currentModelId,
             });
@@ -5189,8 +5805,6 @@ export const agentStore = {
             // The synthetic JSONL already contains the real prior turn pair.
             // Mark seed-complete immediately so promotion does not stall.
             setState("sessions", syntheticStandbyId, "seedCompleted", true);
-            predictiveCompactBusy = false;
-            setState("sessions", sessionId, "predictiveCompactInFlight", false);
             // No promptComplete event fires for this standby (no seed turn),
             // so the drain that previously lived in the promptComplete
             // handler must be triggered explicitly. #1749 / #1829.
@@ -5220,6 +5834,7 @@ export const agentStore = {
         // user's actual prompt. #1829.
         const standbyId = await this.spawnSession(cwd, agentType, {
           role: "standby",
+          archiveOwnerConversationId: conversationId,
           initialModelId: session.currentModelId,
         });
         if (!standbyId) {
@@ -5246,8 +5861,6 @@ export const agentStore = {
         // No seed turn — mark seed-complete directly so promotion's gate
         // (waitForStandbySeed) clears immediately on the next user submit.
         setState("sessions", standbyId, "seedCompleted", true);
-        predictiveCompactBusy = false;
-        setState("sessions", sessionId, "predictiveCompactInFlight", false);
         // Drain the #1749 race-guard queue explicitly — no promptComplete
         // fires for this standby because we never sent a seed turn. #1829.
         drainStandbyQueueIfPending(standbyId, this.sendPrompt.bind(this));
@@ -5590,10 +6203,9 @@ export const agentStore = {
    * Warm a standby session in the background. Serving session keeps running;
    * the standby is seeded with the compaction summary so the next submit can
    * swap invisibly. Idempotent per-session and globally bounded via
-   * `predictiveCompactBusy`. #1631.
+   * owner-aware global mutex. #1631.
    */
   async kickPredictiveCompact(sessionId: string): Promise<void> {
-    if (predictiveCompactBusy) return;
     const session = state.sessions[sessionId];
     if (!session || session.predictiveCompactInFlight) return;
 
@@ -5607,8 +6219,10 @@ export const agentStore = {
       return;
     }
 
-    predictiveCompactBusy = true;
+    const predictiveCompactLease = predictiveCompactMutex.tryAcquire(sessionId);
+    if (!predictiveCompactLease) return;
     setState("sessions", sessionId, "predictiveCompactInFlight", true);
+    let shouldDrainAfterAbort = false;
     try {
       const result = await this.compactAgentConversation(
         sessionId,
@@ -5621,19 +6235,24 @@ export const agentStore = {
           "[AgentStore] kickPredictiveCompact: non-success outcome",
           result.outcome,
         );
-        predictiveCompactBusy = false;
-        setState("sessions", sessionId, "predictiveCompactInFlight", false);
-        this.drainAfterPredictiveAbort(sessionId);
+        shouldDrainAfterAbort = true;
       }
-      // On success, the standby's promptComplete handler clears both flags.
     } catch (err) {
       console.warn(
         "[AgentStore] kickPredictiveCompact failed (non-fatal):",
         err,
       );
-      predictiveCompactBusy = false;
-      setState("sessions", sessionId, "predictiveCompactInFlight", false);
-      this.drainAfterPredictiveAbort(sessionId);
+      shouldDrainAfterAbort = true;
+    } finally {
+      // Only the current generation may clear the per-session flag or drain
+      // its queue. An archived generation may finish after the same serving
+      // id has already acquired a newer lease.
+      if (predictiveCompactMutex.release(predictiveCompactLease)) {
+        if (state.sessions[sessionId]) {
+          setState("sessions", sessionId, "predictiveCompactInFlight", false);
+        }
+        if (shouldDrainAfterAbort) this.drainAfterPredictiveAbort(sessionId);
+      }
     }
   },
 
@@ -5671,18 +6290,59 @@ export const agentStore = {
     prompt: string,
     context?: Array<Record<string, string>>,
     options?: { displayContent?: string; docNames?: string[] },
-  ): Promise<void> {
+  ): Promise<boolean> {
     const serving = state.sessions[servingSessionId];
     const standbyId = serving?.standbySessionId;
     if (!serving || !standbyId) {
       // Fall through — caller will dispatch to serving.
-      return;
+      return false;
     }
     const standby = state.sessions[standbyId];
     if (!standby) {
-      return;
+      return false;
     }
     const conversationId = serving.conversationId;
+
+    // Make the provider-to-conversation ownership durable before exposing the
+    // standby as serving. If mobile archive won the race, Rust atomically
+    // archives the conversation and reports that result instead of allowing a
+    // promoted provider to resurrect it on the next refresh.
+    try {
+      const claim = await claimHappyProviderSessionOwner(
+        conversationId,
+        standbyId,
+        standby.agentSessionId,
+      );
+      if (claim.archived) {
+        happyProviderArchiveTombstones.add(standbyId);
+        happyArchiveFence.archive(conversationId);
+        return false;
+      }
+    } catch (error) {
+      console.warn(
+        "[AgentStore] Failed to persist standby ownership; keeping the serving session:",
+        error,
+      );
+      await this.terminateSession(standbyId).catch(() => {});
+      if (state.sessions[servingSessionId]) {
+        setState("sessions", servingSessionId, "standbySessionId", null);
+        setState(
+          "sessions",
+          servingSessionId,
+          "predictiveCompactInFlight",
+          false,
+        );
+      }
+      return false;
+    }
+    if (
+      happyProviderArchiveTombstones.has(standbyId) ||
+      happyArchiveFence.isArchived(conversationId) ||
+      !state.sessions[standbyId] ||
+      state.sessions[servingSessionId]?.standbySessionId !== standbyId
+    ) {
+      return false;
+    }
 
     // Transfer the UI transcript to the promoted session so scroll-up is
     // preserved across the swap. The standby session was invisible until now.
@@ -5696,6 +6356,7 @@ export const agentStore = {
     );
     // Inherit persisted conversationId so SQLite keeps a single thread.
     setState("sessions", standbyId, "conversationId", conversationId);
+    setState("sessions", standbyId, "archiveOwnerConversationId", undefined);
     setState("sessions", standbyId, "role", "serving");
     setState("sessions", standbyId, "seedCompleted", undefined);
     // Transfer queued prompts. The #1749 enqueue-during-spawn-race guard in
@@ -5735,6 +6396,7 @@ export const agentStore = {
         console.warn("[AgentStore] Deferred provider terminate failed:", error);
       }
     }
+    return true;
   },
 
   /**
@@ -5922,13 +6584,19 @@ export const agentStore = {
         console.info(
           `[AgentStore] Promoting standby ${session.standbySessionId} for serving ${sessionId}`,
         );
-        await this.promoteStandbyAndDispatch(
+        const promoted = await this.promoteStandbyAndDispatch(
           sessionId,
           prompt,
           context,
           options,
         );
-        return;
+        if (
+          promoted ||
+          happyProviderArchiveTombstones.has(standby.info.id) ||
+          happyArchiveFence.isArchived(session.conversationId)
+        ) {
+          return;
+        }
       }
       if (standby) {
         // Standby not ready yet. When the serving session is at or above the
@@ -5959,13 +6627,19 @@ export const agentStore = {
             console.info(
               `[AgentStore] Promoting just-seeded standby ${session.standbySessionId}`,
             );
-            await this.promoteStandbyAndDispatch(
+            const promoted = await this.promoteStandbyAndDispatch(
               sessionId,
               prompt,
               context,
               options,
             );
-            return;
+            if (
+              promoted ||
+              happyProviderArchiveTombstones.has(standby.info.id) ||
+              happyArchiveFence.isArchived(session.conversationId)
+            ) {
+              return;
+            }
           }
           console.info(
             `[AgentStore] Standby did not seed within ${STANDBY_SEED_WAIT_MS}ms — falling through to serving`,
@@ -5974,10 +6648,14 @@ export const agentStore = {
         console.info(
           "[AgentStore] Standby not ready at submit; cancelling warm-up",
         );
-        await this.terminateSession(session.standbySessionId).catch(() => {});
+        const cancelledStandbyId = session.standbySessionId;
+        // Relinquish this predictive generation before the termination await.
+        // Releasing by session id afterward could clear a newer generation if
+        // archive/restart work reacquired the mutex while termination waited.
         setState("sessions", sessionId, "standbySessionId", null);
-        predictiveCompactBusy = false;
+        predictiveCompactMutex.releaseCurrentForAny([sessionId]);
         setState("sessions", sessionId, "predictiveCompactInFlight", false);
+        await this.terminateSession(cancelledStandbyId).catch(() => {});
       }
     }
 
@@ -6866,7 +7544,6 @@ export const agentStore = {
             "status",
             "ready" as SessionStatus,
           );
-          predictiveCompactBusy = false;
           // Find the serving session via its standbySessionId backref. The
           // serving's conversationId is the persisted thread id (e.g.
           // 3fa906a4…), but the standby is spawned with conversationId =
@@ -7115,7 +7792,7 @@ export const agentStore = {
                 //
                 // #1716: route through `kickPredictiveCompact` rather than
                 // calling `compactAgentConversation` directly. The helper
-                // flips `predictiveCompactBusy` and `predictiveCompactInFlight`
+                // acquires the global mutex and flips `predictiveCompactInFlight`
                 // synchronously before the first await, so the 70% predictive
                 // block below short-circuits on the same `promptComplete`.
                 // Calling `compactAgentConversation` directly bypassed both

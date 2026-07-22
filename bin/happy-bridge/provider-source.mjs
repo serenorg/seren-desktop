@@ -121,7 +121,12 @@ class ProviderRuntimeClient {
     this.pending.delete(message.id);
     clearTimeout(pending.timer);
     if (message.error) {
-      pending.reject(new Error(message.error.message ?? "provider runtime RPC failed"));
+      const error = new Error(message.error.message ?? "provider runtime RPC failed");
+      // The local runtime only returns an RPC error after its spawn handler has
+      // cleaned up the failed session. Keep this distinct from a socket loss or
+      // timeout, where creation may have succeeded and must be reconciled.
+      error.providerRequestRejected = true;
+      pending.reject(error);
     } else {
       pending.resolve(message.result);
     }

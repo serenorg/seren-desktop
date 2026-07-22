@@ -1,16 +1,72 @@
+diff --git a/dist/lib.d.cts b/dist/lib.d.cts
+index 53beeafa77133ba937b0159185d32458a84ad6d1..06adc11d7bd9dc85887b25139eaefed55f6cd1a4 100644
+--- a/dist/lib.d.cts
++++ b/dist/lib.d.cts
+@@ -772,6 +772,7 @@ declare class ApiClient {
+         tag: string;
+         metadata: Metadata;
+         state: AgentState | null;
++        encryptionKey?: Uint8Array;
+     }): Promise<Session | null>;
+     /**
+      * Register or update machine with the server
+@@ -782,7 +783,9 @@ declare class ApiClient {
+         metadata: MachineMetadata;
+         daemonState?: DaemonState;
+     }): Promise<Machine>;
+-    sessionSyncClient(session: Session): ApiSessionClient;
++    sessionSyncClient(session: Session, options?: {
++        resumeFromSeq?: number;
++    }): ApiSessionClient;
+     machineSyncClient(machine: Machine): ApiMachineClient;
+     push(): PushNotificationClient;
+     /**
+diff --git a/dist/lib.d.mts b/dist/lib.d.mts
+index 53beeafa77133ba937b0159185d32458a84ad6d1..06adc11d7bd9dc85887b25139eaefed55f6cd1a4 100644
+--- a/dist/lib.d.mts
++++ b/dist/lib.d.mts
+@@ -772,6 +772,7 @@ declare class ApiClient {
+         tag: string;
+         metadata: Metadata;
+         state: AgentState | null;
++        encryptionKey?: Uint8Array;
+     }): Promise<Session | null>;
+     /**
+      * Register or update machine with the server
+@@ -782,7 +783,9 @@ declare class ApiClient {
+         metadata: MachineMetadata;
+         daemonState?: DaemonState;
+     }): Promise<Machine>;
+-    sessionSyncClient(session: Session): ApiSessionClient;
++    sessionSyncClient(session: Session, options?: {
++        resumeFromSeq?: number;
++    }): ApiSessionClient;
+     machineSyncClient(machine: Machine): ApiMachineClient;
+     push(): PushNotificationClient;
+     /**
 diff --git a/dist/types-CV0guBiJ.mjs b/dist/types-CV0guBiJ.mjs
-index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..e222a76faae481cbfc2814568349c10e6bc11c91 100644
+index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..c6fc8bed186aa1f3d76973f14d4752d5a76443b7 100644
 --- a/dist/types-CV0guBiJ.mjs
 +++ b/dist/types-CV0guBiJ.mjs
-@@ -2142,6 +2142,7 @@ class ApiSessionClient extends EventEmitter {
+@@ -2142,10 +2142,16 @@ class ApiSessionClient extends EventEmitter {
    };
    lastSeq = 0;
    pendingOutbox = [];
 +  outboundMessageLocalIds = /* @__PURE__ */ new Set();
    sendSync;
    receiveSync;
-   constructor(token, session) {
-@@ -2206,18 +2207,22 @@ class ApiSessionClient extends EventEmitter {
+-  constructor(token, session) {
++  constructor(token, session, options = {}) {
+     super();
++    const resumeFromSeq = options.resumeFromSeq ?? 0;
++    if (!Number.isSafeInteger(resumeFromSeq) || resumeFromSeq < 0) {
++      throw new Error("Session resume sequence must be a non-negative safe integer");
++    }
++    this.lastSeq = resumeFromSeq;
+     this.token = token;
+     this.sessionId = session.id;
+     this.metadata = session.metadata;
+@@ -2206,18 +2212,22 @@ class ApiSessionClient extends EventEmitter {
            return;
          }
          if (data.body.t === "new-message") {
@@ -37,7 +93,7 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..e222a76faae481cbfc2814568349c10e
          } else if (data.body.t === "update-session") {
            if (data.body.metadata && data.body.metadata.version > this.metadataVersion) {
              this.metadata = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(data.body.metadata.value));
-@@ -2454,7 +2459,17 @@ class ApiSessionClient extends EventEmitter {
+@@ -2454,7 +2464,17 @@ class ApiSessionClient extends EventEmitter {
          if (message.seq > maxSeq) {
            maxSeq = message.seq;
          }
@@ -56,7 +112,7 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..e222a76faae481cbfc2814568349c10e
          if (message.content?.t !== "encrypted") {
            continue;
          }
-@@ -2487,10 +2502,13 @@ class ApiSessionClient extends EventEmitter {
+@@ -2487,10 +2507,13 @@ class ApiSessionClient extends EventEmitter {
    static MAX_OUTBOX_BATCH_SIZE = 50;
    async flushOutbox() {
      while (this.pendingOutbox.length > 0) {
@@ -73,7 +129,7 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..e222a76faae481cbfc2814568349c10e
          `${configuration.serverUrl}/v3/sessions/${encodeURIComponent(this.sessionId)}/messages`,
          {
            messages: batch
-@@ -2500,17 +2518,16 @@ class ApiSessionClient extends EventEmitter {
+@@ -2500,17 +2523,16 @@ class ApiSessionClient extends EventEmitter {
            timeout: 6e4
          }
        );
@@ -94,35 +150,67 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..e222a76faae481cbfc2814568349c10e
      });
      if (invalidate) {
        this.sendSync.invalidate();
-@@ -2777,6 +2794,15 @@ class ApiSessionClient extends EventEmitter {
+@@ -2777,6 +2799,14 @@ class ApiSessionClient extends EventEmitter {
    }
    async close() {
      logger.debug("[API] socket.close() called");
-+    // Drain anything still queued before stopping the sync. stop() latches a
-+    // flag that makes the pending flush return without running, so closing
-+    // first discarded the tail of every turn — the final assistant text never
-+    // reached the relay.
++    // Join the existing single-flight sender before stopping it. Calling
++    // flushOutbox() directly here can overlap an in-flight drain, causing both
++    // callers to POST and splice the same batch while the relay is delayed.
 +    try {
-+      await this.flushOutbox();
++      await this.sendSync.invalidateAndAwait();
 +    } catch (error) {
 +      logger.debug("[API] Failed to flush outbox during close", { error });
 +    }
      this.sendSync.stop();
      this.receiveSync.stop();
      if (this.reconnectInterval) {
+@@ -5229,7 +5259,10 @@ class ApiClient {
+     let encryptionKey;
+     let encryptionVariant;
+     if (this.credential.encryption.type === "dataKey") {
+-      encryptionKey = getRandomBytes(32);
++      encryptionKey = opts.encryptionKey ? new Uint8Array(opts.encryptionKey) : getRandomBytes(32);
++      if (encryptionKey.length !== 32) {
++        throw new Error("Session encryption key must be 32 bytes");
++      }
+       encryptionVariant = "dataKey";
+       let encryptedDataKey = libsodiumEncryptForPublicKey(encryptionKey, this.credential.encryption.publicKey);
+       dataEncryptionKey = new Uint8Array(encryptedDataKey.length + 1);
+@@ -5419,8 +5452,8 @@ class ApiClient {
+       throw error;
+     }
+   }
+-  sessionSyncClient(session) {
+-    return new ApiSessionClient(this.credential.token, session);
++  sessionSyncClient(session, options) {
++    return new ApiSessionClient(this.credential.token, session, options);
+   }
+   machineSyncClient(machine) {
+     return new ApiMachineClient(this.credential.token, machine);
 diff --git a/dist/types-D0KwHfY9.cjs b/dist/types-D0KwHfY9.cjs
-index 4aebb1233520dbe47c2069294ff3664300e99177..577cd7e5d4985c746db1f3867f8559c53fb7ac7d 100644
+index 4aebb1233520dbe47c2069294ff3664300e99177..c08a2a3c7a733a8c2947e7044f73ac111682af27 100644
 --- a/dist/types-D0KwHfY9.cjs
 +++ b/dist/types-D0KwHfY9.cjs
-@@ -2145,6 +2145,7 @@ class ApiSessionClient extends node_events.EventEmitter {
+@@ -2145,10 +2145,16 @@ class ApiSessionClient extends node_events.EventEmitter {
    };
    lastSeq = 0;
    pendingOutbox = [];
 +  outboundMessageLocalIds = /* @__PURE__ */ new Set();
    sendSync;
    receiveSync;
-   constructor(token, session) {
-@@ -2209,18 +2210,22 @@ class ApiSessionClient extends node_events.EventEmitter {
+-  constructor(token, session) {
++  constructor(token, session, options = {}) {
+     super();
++    const resumeFromSeq = options.resumeFromSeq ?? 0;
++    if (!Number.isSafeInteger(resumeFromSeq) || resumeFromSeq < 0) {
++      throw new Error("Session resume sequence must be a non-negative safe integer");
++    }
++    this.lastSeq = resumeFromSeq;
+     this.token = token;
+     this.sessionId = session.id;
+     this.metadata = session.metadata;
+@@ -2209,18 +2215,22 @@ class ApiSessionClient extends node_events.EventEmitter {
            return;
          }
          if (data.body.t === "new-message") {
@@ -149,7 +237,7 @@ index 4aebb1233520dbe47c2069294ff3664300e99177..577cd7e5d4985c746db1f3867f8559c5
          } else if (data.body.t === "update-session") {
            if (data.body.metadata && data.body.metadata.version > this.metadataVersion) {
              this.metadata = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(data.body.metadata.value));
-@@ -2457,7 +2462,17 @@ class ApiSessionClient extends node_events.EventEmitter {
+@@ -2457,7 +2467,17 @@ class ApiSessionClient extends node_events.EventEmitter {
          if (message.seq > maxSeq) {
            maxSeq = message.seq;
          }
@@ -168,7 +256,7 @@ index 4aebb1233520dbe47c2069294ff3664300e99177..577cd7e5d4985c746db1f3867f8559c5
          if (message.content?.t !== "encrypted") {
            continue;
          }
-@@ -2490,10 +2505,13 @@ class ApiSessionClient extends node_events.EventEmitter {
+@@ -2490,10 +2510,13 @@ class ApiSessionClient extends node_events.EventEmitter {
    static MAX_OUTBOX_BATCH_SIZE = 50;
    async flushOutbox() {
      while (this.pendingOutbox.length > 0) {
@@ -185,7 +273,7 @@ index 4aebb1233520dbe47c2069294ff3664300e99177..577cd7e5d4985c746db1f3867f8559c5
          `${configuration.serverUrl}/v3/sessions/${encodeURIComponent(this.sessionId)}/messages`,
          {
            messages: batch
-@@ -2503,17 +2521,16 @@ class ApiSessionClient extends node_events.EventEmitter {
+@@ -2503,17 +2526,16 @@ class ApiSessionClient extends node_events.EventEmitter {
            timeout: 6e4
          }
        );
@@ -206,19 +294,41 @@ index 4aebb1233520dbe47c2069294ff3664300e99177..577cd7e5d4985c746db1f3867f8559c5
      });
      if (invalidate) {
        this.sendSync.invalidate();
-@@ -2780,6 +2797,15 @@ class ApiSessionClient extends node_events.EventEmitter {
+@@ -2780,6 +2802,14 @@ class ApiSessionClient extends node_events.EventEmitter {
    }
    async close() {
      logger.debug("[API] socket.close() called");
-+    // Drain anything still queued before stopping the sync. stop() latches a
-+    // flag that makes the pending flush return without running, so closing
-+    // first discarded the tail of every turn — the final assistant text never
-+    // reached the relay.
++    // Join the existing single-flight sender before stopping it. Calling
++    // flushOutbox() directly here can overlap an in-flight drain, causing both
++    // callers to POST and splice the same batch while the relay is delayed.
 +    try {
-+      await this.flushOutbox();
++      await this.sendSync.invalidateAndAwait();
 +    } catch (error) {
 +      logger.debug("[API] Failed to flush outbox during close", { error });
 +    }
      this.sendSync.stop();
      this.receiveSync.stop();
      if (this.reconnectInterval) {
+@@ -5232,7 +5262,10 @@ class ApiClient {
+     let encryptionKey;
+     let encryptionVariant;
+     if (this.credential.encryption.type === "dataKey") {
+-      encryptionKey = getRandomBytes(32);
++      encryptionKey = opts.encryptionKey ? new Uint8Array(opts.encryptionKey) : getRandomBytes(32);
++      if (encryptionKey.length !== 32) {
++        throw new Error("Session encryption key must be 32 bytes");
++      }
+       encryptionVariant = "dataKey";
+       let encryptedDataKey = libsodiumEncryptForPublicKey(encryptionKey, this.credential.encryption.publicKey);
+       dataEncryptionKey = new Uint8Array(encryptedDataKey.length + 1);
+@@ -5422,8 +5455,8 @@ class ApiClient {
+       throw error;
+     }
+   }
+-  sessionSyncClient(session) {
+-    return new ApiSessionClient(this.credential.token, session);
++  sessionSyncClient(session, options) {
++    return new ApiSessionClient(this.credential.token, session, options);
+   }
+   machineSyncClient(machine) {
+     return new ApiMachineClient(this.credential.token, machine);

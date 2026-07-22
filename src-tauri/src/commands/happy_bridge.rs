@@ -151,16 +151,14 @@ pub async fn happy_bridge_cancel_pairing(
     state.cancel_pairing().await
 }
 
-/// Stops the bridge before clearing the credential. The running process holds
-/// the identity in memory, so deleting only the keychain entry would leave a
-/// live, still-paired bridge behind.
+/// Retires every relay session using the old identity, then clears its encrypted
+/// bindings and pairing credential as one serialized reset operation.
 #[tauri::command]
 pub async fn happy_bridge_reset_identity(
     app: AppHandle,
     state: State<'_, HappyBridgeManager>,
 ) -> Result<(), String> {
-    state.stop(&app).await?;
-    state.delete_pairing_credential(&app)
+    state.reset_identity(&app).await
 }
 
 pub async fn auto_start_if_enabled(app: AppHandle) {

@@ -1713,6 +1713,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
       currentModelId: session.currentModelId,
       currentModeId: session.currentModeId,
       pendingPermissions: listPendingPermissions(session),
+      pid: null,
     }));
   }
 

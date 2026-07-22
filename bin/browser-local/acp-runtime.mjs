@@ -866,6 +866,7 @@ export function createAcpRuntime({
       currentModelId: session.currentModelId,
       currentModeId: session.currentModeId,
       pendingPermissions: listPendingPermissions(session),
+      pid: session.process?.pid ?? null,
     }));
   }
 

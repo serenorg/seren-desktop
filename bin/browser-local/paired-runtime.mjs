@@ -1516,6 +1516,7 @@ export function createPairedRuntime({ emit, inner }) {
       createdAt: paired.createdAt,
       agentSessionId: compositeAgentSessionId(paired),
       timeoutSecs: paired.timeoutSecs,
+      pid: null,
     }));
   }
 

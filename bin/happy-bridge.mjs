@@ -54,7 +54,7 @@ function startInputReader() {
 
 // Caps the wait for the closes below so a socket that never completes its
 // handshake still exits well inside the supervisor's STOP_GRACE_PERIOD.
-const CLOSE_TIMEOUT_MS = 2000;
+const CLOSE_TIMEOUT_MS = 4000;
 
 async function shutdown(exitCode = 0) {
   if (shuttingDown) return;
@@ -63,8 +63,14 @@ async function shutdown(exitCode = 0) {
   // Windows with an assertion in uv_async_send. The loop cannot be left to
   // drain on its own instead, because a child's piped stdout and stderr keep
   // it alive indefinitely.
+  const closeBridgeComponents = (async () => {
+    // Keep the provider RPC socket open until Happy has unwound any in-flight
+    // remote spawn; that cleanup may still need provider terminate/list calls.
+    await Promise.allSettled([happyLayer?.close()]);
+    await Promise.allSettled([client?.close()]);
+  })();
   await Promise.race([
-    Promise.allSettled([client?.close(), happyLayer?.close()]),
+    closeBridgeComponents,
     new Promise((resolve) => setTimeout(resolve, CLOSE_TIMEOUT_MS)),
   ]);
   supervisorChannel?.close();
