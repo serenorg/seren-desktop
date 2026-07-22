@@ -121,6 +121,7 @@ import {
   COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES,
   COMPOSER_TOOLBAR_ROOT_CLASSES,
 } from "./composerToolbarClasses";
+import { DataDestinationsPanel } from "./DataDestinationsPanel";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
@@ -179,6 +180,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   // Message queue for sending messages while streaming
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
   const [showSignInPrompt, setShowSignInPrompt] = createSignal(false);
+  const [showDataDestinations, setShowDataDestinations] = createSignal(false);
   const [showDepositFromError, setShowDepositFromError] = createSignal(false);
   const [memoryPanelMessageId, setMemoryPanelMessageId] = createSignal<
     string | null
@@ -1496,6 +1498,21 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
             >
               Clear
             </button>
+            <div class="relative">
+              <button
+                type="button"
+                class="bg-transparent border border-[#3a5650] text-[#9ce3c3] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#172b25]"
+                aria-expanded={showDataDestinations()}
+                onClick={() => setShowDataDestinations((open) => !open)}
+              >
+                Destinations
+              </button>
+              <Show when={showDataDestinations()}>
+                <div class="absolute right-0 top-full z-40 mt-2 w-[min(560px,calc(100vw-2rem))]">
+                  <DataDestinationsPanel conversationId={conversationId()} />
+                </div>
+              </Show>
+            </div>
           </div>
         </header>
 
@@ -1529,6 +1546,9 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                   "Create the skill to identify new business leads and introduce
                   our company using Seren's Publishers"
                 </p>
+                <div class="mt-8 w-full max-w-[560px]">
+                  <DataDestinationsPanel conversationId={conversationId()} />
+                </div>
               </div>
             }
           >

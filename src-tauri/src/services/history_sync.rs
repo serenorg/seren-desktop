@@ -2,14 +2,15 @@
 // ABOUTME: Keeps local SQLite as the fast path and mirrors durable text rows to Postgres.
 
 use postgres::{Client as PgClient, Row as PgRow};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
+use std::collections::HashSet;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 
 use crate::auth;
-use crate::services::database::{DbPool, HISTORY_SYNC_TABLES, now_ms};
+use crate::services::database::{now_ms, DbPool, HISTORY_SYNC_TABLES};
 
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com/publishers/seren-db";
 const HISTORY_SYNC_STORE: &str = "history_sync.json";
@@ -35,6 +36,7 @@ pub struct HistorySyncConfig {
     pub project_id: String,
     pub branch_id: String,
     pub database_name: String,
+    pub excluded_conversation_ids: Vec<String>,
 }
 
 /// Serializes a history sync run against a remote wipe so the two never
@@ -196,11 +198,14 @@ pub async fn run_history_sync_once(
     let lock = HistorySyncLock::handle(&app);
     let _guard = lock.lock().await;
     let sync_scope = history_sync_scope(&config);
+    let excluded_conversation_ids = config.excluded_conversation_ids.clone();
     with_remote_client(&app, &config, move |app, mut client| {
         ensure_remote_schema(&mut client)?;
 
-        let backfilled = with_local_db(&app, |conn| enqueue_initial_backfill(conn, &sync_scope))?;
-        let pushed = push_outbox(&app, &mut client)?;
+        let backfilled = with_local_db(&app, |conn| {
+            enqueue_initial_backfill(conn, &sync_scope, &excluded_conversation_ids)
+        })?;
+        let pushed = push_outbox(&app, &mut client, &excluded_conversation_ids)?;
         let pulled = pull_remote(&app, &mut client, &sync_scope)?;
         let (queued, conflicts) = with_local_db(&app, |conn| {
             Ok((
@@ -452,7 +457,11 @@ fn with_local_db<T>(
     pool.with_connection(task)
 }
 
-fn enqueue_initial_backfill(conn: &Connection, sync_scope: &str) -> rusqlite::Result<usize> {
+fn enqueue_initial_backfill(
+    conn: &Connection,
+    sync_scope: &str,
+    excluded_conversation_ids: &[String],
+) -> rusqlite::Result<usize> {
     let completed: i64 = conn
         .query_row(
             "SELECT MAX(first_backfill_completed)
@@ -472,10 +481,11 @@ fn enqueue_initial_backfill(conn: &Connection, sync_scope: &str) -> rusqlite::Re
     for table in HISTORY_SYNC_TABLES {
         match *table {
             "thread_drafts" => {
-                count += enqueue_rows(
+                count += enqueue_rows_excluding(
                     conn,
                     table,
                     "SELECT id FROM conversations WHERE draft IS NOT NULL AND draft <> ''",
+                    excluded_conversation_ids,
                 )?;
             }
             _ => {
@@ -509,7 +519,37 @@ fn enqueue_rows(conn: &Connection, table_name: &str, query: &str) -> rusqlite::R
     Ok(ids.len())
 }
 
-fn push_outbox(app: &AppHandle, client: &mut PgClient) -> Result<usize, String> {
+fn enqueue_rows_excluding(
+    conn: &Connection,
+    table_name: &str,
+    query: &str,
+    excluded_conversation_ids: &[String],
+) -> rusqlite::Result<usize> {
+    let mut stmt = conn.prepare(query)?;
+    let ids = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+    let mut count = 0;
+    for id in ids {
+        if excluded_conversation_ids
+            .iter()
+            .any(|excluded| excluded == &id)
+        {
+            continue;
+        }
+        crate::services::database::enqueue_sync_outbox(conn, table_name, &id, "upsert")?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+fn push_outbox(
+    app: &AppHandle,
+    client: &mut PgClient,
+    excluded_conversation_ids: &[String],
+) -> Result<usize, String> {
+    let excluded: HashSet<String> = excluded_conversation_ids.iter().cloned().collect();
     let mut pushed = 0usize;
     loop {
         let batch = with_local_db(app, read_outbox_batch)?;
@@ -518,7 +558,7 @@ fn push_outbox(app: &AppHandle, client: &mut PgClient) -> Result<usize, String> 
         }
         let mut left_active_set = 0usize;
         for item in batch {
-            match push_outbox_item(app, client, &item) {
+            match push_outbox_item(app, client, &item, &excluded) {
                 Ok(PushItemOutcome::Pushed) => {
                     clear_outbox_item(app, item.id)?;
                     mark_synced(app, &item.table_name, &item.row_id)?;
@@ -534,6 +574,7 @@ fn push_outbox(app: &AppHandle, client: &mut PgClient) -> Result<usize, String> 
                     clear_outbox_item(app, item.id)?;
                     left_active_set += 1;
                 }
+                Ok(PushItemOutcome::Excluded) => {}
                 Err(err) => {
                     let quarantined = record_push_failure(app, item.id, &err)?;
                     if quarantined {
@@ -553,13 +594,20 @@ enum PushItemOutcome {
     Pushed,
     Tombstoned,
     Skipped,
+    Excluded,
 }
 
 fn push_outbox_item(
     app: &AppHandle,
     client: &mut PgClient,
     item: &OutboxItem,
+    excluded_conversation_ids: &HashSet<String>,
 ) -> Result<PushItemOutcome, String> {
+    if let Some(conversation_id) = outbox_item_conversation_id(app, item)? {
+        if excluded_conversation_ids.contains(&conversation_id) {
+            return Ok(PushItemOutcome::Excluded);
+        }
+    }
     if item.op == "tombstone" {
         push_tombstone(client, item)?;
         return Ok(PushItemOutcome::Tombstoned);
@@ -633,6 +681,22 @@ fn push_outbox_item(
     } else {
         PushItemOutcome::Skipped
     })
+}
+
+fn outbox_item_conversation_id(
+    app: &AppHandle,
+    item: &OutboxItem,
+) -> Result<Option<String>, String> {
+    match item.table_name.as_str() {
+        "conversations" | "thread_drafts" => Ok(Some(item.row_id.clone())),
+        "messages" => Ok(with_local_db(app, |conn| {
+            Ok(load_message(conn, &item.row_id)?.map(|row| row.conversation_id))
+        })?),
+        "message_events" => Ok(with_local_db(app, |conn| {
+            Ok(load_message_event(conn, &item.row_id)?.map(|row| row.conversation_id))
+        })?),
+        _ => Ok(None),
+    }
 }
 
 fn record_push_failure(app: &AppHandle, item_id: i64, error: &str) -> Result<bool, String> {
@@ -1907,7 +1971,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::database::{PersistedMessage, save_message_record, setup_schema};
+    use crate::services::database::{save_message_record, setup_schema, PersistedMessage};
     use std::cell::RefCell;
 
     const SCOPE_A: &str = "scope-a";
@@ -2038,8 +2102,8 @@ mod tests {
         .unwrap();
 
         conn.execute("DELETE FROM sync_outbox", []).unwrap();
-        let first = enqueue_initial_backfill(&conn, SCOPE_A).unwrap();
-        let second = enqueue_initial_backfill(&conn, SCOPE_A).unwrap();
+        let first = enqueue_initial_backfill(&conn, SCOPE_A, &[]).unwrap();
+        let second = enqueue_initial_backfill(&conn, SCOPE_A, &[]).unwrap();
         let queued: i64 = conn
             .query_row("SELECT COUNT(*) FROM sync_outbox", [], |row| row.get(0))
             .unwrap();
@@ -2047,6 +2111,39 @@ mod tests {
         assert!(first >= 3);
         assert_eq!(second, 0);
         assert_eq!(queued, first as i64);
+    }
+
+    #[test]
+    fn excluded_conversation_drafts_are_not_enqueued() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, draft)
+             VALUES ('included', 'Included', 1000, 'chat', 'keep this')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, draft)
+             VALUES ('excluded', 'Excluded', 1000, 'chat', 'do not sync this')",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM sync_outbox", []).unwrap();
+
+        enqueue_initial_backfill(&conn, SCOPE_A, &["excluded".to_string()]).unwrap();
+
+        let draft_ids: Vec<String> = conn
+            .prepare(
+                "SELECT row_id FROM sync_outbox
+                 WHERE table_name = 'thread_drafts' ORDER BY row_id",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(draft_ids, vec!["included"]);
     }
 
     #[test]
@@ -2061,13 +2158,13 @@ mod tests {
         .unwrap();
 
         conn.execute("DELETE FROM sync_outbox", []).unwrap();
-        let first_scope_a = enqueue_initial_backfill(&conn, SCOPE_A).unwrap();
+        let first_scope_a = enqueue_initial_backfill(&conn, SCOPE_A, &[]).unwrap();
         assert!(first_scope_a > 0);
         conn.execute("DELETE FROM sync_outbox", []).unwrap();
 
-        assert_eq!(enqueue_initial_backfill(&conn, SCOPE_A).unwrap(), 0);
+        assert_eq!(enqueue_initial_backfill(&conn, SCOPE_A, &[]).unwrap(), 0);
 
-        let first_scope_b = enqueue_initial_backfill(&conn, SCOPE_B).unwrap();
+        let first_scope_b = enqueue_initial_backfill(&conn, SCOPE_B, &[]).unwrap();
         assert_eq!(
             first_scope_b, first_scope_a,
             "a new destination must receive its own initial backfill"
@@ -2080,11 +2177,13 @@ mod tests {
             project_id: "project-a".to_string(),
             branch_id: "branch-a".to_string(),
             database_name: "seren_desktop_history".to_string(),
+            excluded_conversation_ids: Vec::new(),
         };
         let config_b = HistorySyncConfig {
             project_id: "project-b".to_string(),
             branch_id: "branch-a".to_string(),
             database_name: "seren_desktop_history".to_string(),
+            excluded_conversation_ids: Vec::new(),
         };
 
         let scope_a = history_sync_scope(&config_a);
@@ -2250,7 +2349,7 @@ mod tests {
 
         // First sync: backfill everything, then simulate a successful push that
         // drains the outbox and stamps rows as synced.
-        let first = enqueue_initial_backfill(&conn, SCOPE_A).unwrap();
+        let first = enqueue_initial_backfill(&conn, SCOPE_A, &[]).unwrap();
         assert!(first >= 2);
         conn.execute("DELETE FROM sync_outbox", []).unwrap();
         conn.execute("UPDATE conversations SET synced_at = 123", [])
@@ -2259,7 +2358,7 @@ mod tests {
             .unwrap();
 
         // Without a reset, a re-sync short-circuits and uploads nothing — the bug.
-        assert_eq!(enqueue_initial_backfill(&conn, SCOPE_A).unwrap(), 0);
+        assert_eq!(enqueue_initial_backfill(&conn, SCOPE_A, &[]).unwrap(), 0);
 
         // Wiping the remote must reset local state so the next sync re-uploads.
         reset_local_sync_state(&conn, SCOPE_A).unwrap();
@@ -2291,6 +2390,9 @@ mod tests {
         assert_eq!(outbox, 0, "stale outbox rows must be cleared");
 
         // The next backfill re-enqueues the full history.
-        assert_eq!(enqueue_initial_backfill(&conn, SCOPE_A).unwrap(), first);
+        assert_eq!(
+            enqueue_initial_backfill(&conn, SCOPE_A, &[]).unwrap(),
+            first
+        );
     }
 }

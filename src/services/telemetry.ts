@@ -68,7 +68,7 @@ export function buildEmployeeInterestTelemetryPayload(
   };
 }
 
-class TelemetryService {
+export class TelemetryService {
   private config: TelemetryConfig;
   private rateLimiter: RateLimiter;
   private errorQueue: ErrorReport[] = [];
@@ -182,7 +182,7 @@ class TelemetryService {
    * Send queued errors to the server.
    */
   async flush(): Promise<void> {
-    if (this.errorQueue.length === 0) return;
+    if (!this.config.enabled || this.errorQueue.length === 0) return;
 
     const batch = this.errorQueue.splice(0, this.config.maxBatchSize);
 
@@ -221,7 +221,11 @@ class TelemetryService {
     if (!enabled) {
       this.stopBatchTimer();
       this.errorQueue = [];
-    } else if (this.initialized) {
+      return;
+    }
+    if (!this.initialized) {
+      this.init();
+    } else {
       this.startBatchTimer();
     }
   }

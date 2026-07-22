@@ -3,6 +3,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { authStore } from "@/stores/auth.store";
+import { privacyStore } from "@/stores/privacy.store";
 import { projectStore } from "@/stores/project.store";
 import { settingsStore } from "@/stores/settings.store";
 import type {
@@ -76,6 +77,7 @@ export interface MemorySessionBootstrapResult {
 
 export interface ProcessConversationInput {
   transcript: string;
+  conversationId?: string;
   projectContext?: string;
   projectId?: string | null;
   sessionId?: string;
@@ -102,6 +104,7 @@ export interface RememberMemoryOptions {
 }
 
 export interface AssistantMemoryContext {
+  conversationId?: string;
   model?: string;
   userQuery?: string;
   sessionId?: string;
@@ -699,6 +702,12 @@ export async function bootstrapMemoryContext(): Promise<string | null> {
 export async function processConversationMemory(
   input: ProcessConversationInput,
 ): Promise<ProcessConversationResult | null> {
+  if (
+    input.conversationId &&
+    privacyStore.isMemoryExcluded(input.conversationId)
+  ) {
+    return null;
+  }
   if (!isMemoryAvailable()) {
     return null;
   }
@@ -740,6 +749,7 @@ export async function processConversationTurn(
   const sourceExternalId = context?.sourceExternalId;
   return processConversationMemory({
     transcript: `User: ${userMessage}\n\nAssistant: ${assistantMessage}${metadata}`,
+    conversationId: context?.conversationId,
     sessionId: context?.sessionId,
     projectContext: context?.projectContext,
     retainSource: sourceExternalId !== undefined,
@@ -765,6 +775,7 @@ export async function processAssistantResponseMemory(
   const sourceExternalId = context?.sourceExternalId;
   return processConversationMemory({
     transcript: `${content}${metadata}`,
+    conversationId: context?.conversationId,
     sessionId: context?.sessionId,
     projectContext: context?.projectContext,
     retainSource: sourceExternalId !== undefined,

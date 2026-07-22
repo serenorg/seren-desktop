@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import { waitForDatabaseReady } from "@/services/claudeMemory";
 import { type Branch, databases } from "@/services/databases";
+import { privacyStore } from "@/stores/privacy.store";
 import { settingsStore } from "@/stores/settings.store";
 
 const HISTORY_SYNC_PROJECT_NAME = "speech-text";
@@ -180,6 +181,7 @@ export async function runHistorySyncNow(): Promise<HistorySyncSummary> {
       projectId: provisioning.projectId,
       branchId: provisioning.branchId,
       databaseName: provisioning.databaseName,
+      excludedConversationIds: privacyStore.excludedHistorySyncIds(),
     });
     settingsStore.set("historySyncLastSyncedAt", Date.now());
     return summary;

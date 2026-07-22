@@ -44,6 +44,7 @@ import { autocompleteStore } from "@/stores/autocomplete.store";
 import { chatStore } from "@/stores/chat.store";
 import { fileTreeState, initDefaultRootIfNeeded } from "@/stores/fileTree";
 import { loadKeybindings } from "@/stores/keybindings.store";
+import { loadPrivacySettings } from "@/stores/privacy.store";
 import { providerStore } from "@/stores/provider.store";
 import { loadAllSettings, settingsState } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
@@ -58,9 +59,6 @@ import "./styles.css";
 
 const FIRST_AUTH_INTERVIEW_LANDING_KEY =
   "seren:employee_intake_first_authenticated_launch";
-
-// Initialize telemetry early to capture startup errors
-telemetry.init();
 
 function claimFirstAuthenticatedInterviewLaunch(): boolean {
   try {
@@ -89,6 +87,11 @@ function App() {
 
   const runtime = getRuntimeConfig();
 
+  createEffect(() => {
+    if (settingsState.isLoading) return;
+    telemetry.setEnabled(settingsState.app.telemetryEnabled);
+  });
+
   onMount(async () => {
     await initAuthRuntimeBindings();
     await checkAuth();
@@ -116,6 +119,7 @@ function App() {
 
     // Load all settings including app settings (chatDefaultModel, etc.) and MCP settings
     await loadAllSettings();
+    await loadPrivacySettings();
     await loadKeybindings();
 
     // Load provider settings - this restores the last used model from previous session
