@@ -110,6 +110,11 @@ export type SandboxLaunchSpec =
       kind: "linux-launcher";
       launcherPath: string;
       policyBase64: string;
+    }
+  | {
+      kind: "windows-launcher";
+      launcherPath: string;
+      policyBase64: string;
     };
 
 // Remote sessions (provider runtime listSessions capability)
@@ -529,10 +534,12 @@ export async function spawnAgent(
     /Macintosh|Mac OS X/i.test(navigator.userAgent);
   const isLinuxDesktop =
     typeof navigator !== "undefined" && /Linux/i.test(navigator.userAgent);
+  const isWindowsDesktop =
+    typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
   const sandboxProfile =
     agentType === "claude-code" &&
     isTauriRuntime() &&
-    (isMacOsDesktop || isLinuxDesktop) &&
+    (isMacOsDesktop || isLinuxDesktop || isWindowsDesktop) &&
     !fullAccess
       ? await invoke<SandboxLaunchSpec>("agent_sandbox_profile", {
           mode: sandboxMode ?? "workspace-write",

@@ -151,10 +151,9 @@ function resolveSpawnShell(claudeBin) {
 }
 
 /**
- * Build the actual child invocation for the local Claude CLI. On macOS and
- * Linux every bounded session must carry the verified Rust-authored launcher
- * spec; missing proof is a hard launch failure rather than an unsandboxed
- * fallback. #3192.
+ * Build the actual child invocation for the local Claude CLI. Every bounded
+ * desktop session must carry the verified Rust-authored launcher spec; missing
+ * proof is a hard launch failure rather than an unsandboxed fallback. #3192.
  */
 function buildClaudeSpawnInvocation({
   claudeBin,
@@ -196,6 +195,33 @@ function buildClaudeSpawnInvocation({
     ) {
       throw new Error(
         "Claude Code launch blocked: the verified Linux sandbox launcher is missing.",
+      );
+    }
+    return {
+      command: sandboxProfile.launcherPath,
+      args: [
+        "__seren-sandbox-run",
+        sandboxProfile.policyBase64,
+        "--",
+        claudeBin,
+        ...claudeArgs,
+      ],
+      shell: false,
+    };
+  }
+
+  if (process.platform === "win32" && !fullAccess) {
+    if (
+      !sandboxProfile ||
+      typeof sandboxProfile !== "object" ||
+      sandboxProfile.kind !== "windows-launcher" ||
+      typeof sandboxProfile.launcherPath !== "string" ||
+      sandboxProfile.launcherPath.trim().length === 0 ||
+      typeof sandboxProfile.policyBase64 !== "string" ||
+      sandboxProfile.policyBase64.trim().length === 0
+    ) {
+      throw new Error(
+        "Claude Code launch blocked: the verified Windows sandbox launcher is missing.",
       );
     }
     return {
@@ -1229,7 +1255,12 @@ const SANDBOX_DENY_READ_PATHS = [
   "~/.netrc",
 ];
 
-function buildClaudePolicySettings({ cwd, sandboxMode, networkEnabled }) {
+function buildClaudePolicySettings({
+  cwd,
+  sandboxMode,
+  networkEnabled,
+  sandboxProfile,
+}) {
   const fullAccess =
     sandboxMode === "full-access" || sandboxMode === "danger-full-access";
   if (fullAccess) return {};
@@ -1257,11 +1288,19 @@ function buildClaudePolicySettings({ cwd, sandboxMode, networkEnabled }) {
 
   // Claude's native sandbox constrains Bash subprocesses on macOS/Linux.
   // Built-in file tools are independently constrained by the hook above.
-  // Native Windows has no supported OS-level Bash boundary, so immediate
-  // containment denies the Bash tool entirely in every bounded mode. Full
-  // Access remains an explicit user-selected escape hatch. #3192
+  // Native Windows permits Bash only after the verified restricted-token/job
+  // launcher spec is present. Missing backend proof keeps the stage-1 deny in
+  // place; Full Access remains an explicit user-selected escape hatch. #3192
   if (process.platform === "win32") {
-    settings.permissions = { deny: ["Bash"] };
+    const windowsLauncherReady =
+      sandboxProfile?.kind === "windows-launcher" &&
+      typeof sandboxProfile.launcherPath === "string" &&
+      sandboxProfile.launcherPath.trim().length > 0 &&
+      typeof sandboxProfile.policyBase64 === "string" &&
+      sandboxProfile.policyBase64.trim().length > 0;
+    if (!windowsLauncherReady) {
+      settings.permissions = { deny: ["Bash"] };
+    }
   }
 
   if (process.platform !== "win32") {
@@ -2659,7 +2698,12 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         serenMcpGatewayUrl: serenMcpProxy?.url,
       });
       policySettingsJson = JSON.stringify(
-        buildClaudePolicySettings({ cwd, sandboxMode, networkEnabled }),
+        buildClaudePolicySettings({
+          cwd,
+          sandboxMode,
+          networkEnabled,
+          sandboxProfile,
+        }),
       );
       claudeArgs = buildClaudeArgs({
         sessionId: remoteSessionId,
@@ -2734,7 +2778,9 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
                   ? sandboxProfile.profile
                   : sandboxProfile?.kind === "linux-launcher"
                     ? sandboxProfile.policyBase64
-                    : "",
+                    : sandboxProfile?.kind === "windows-launcher"
+                      ? sandboxProfile.policyBase64
+                      : "",
               SEREN_AGENT_APPROVAL_POLICY: approvalPolicy ?? "on-request",
               SEREN_AGENT_AUTO_APPROVE_READS:
                 autoApproveReads === false ? "false" : "true",

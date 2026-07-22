@@ -52,6 +52,8 @@ pub enum SandboxError {
     PolicyDecode(String),
     #[error("Landlock backend error: {0}")]
     Landlock(String),
+    #[error("Windows sandbox backend error: {0}")]
+    Windows(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

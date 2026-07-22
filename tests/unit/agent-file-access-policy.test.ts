@@ -157,7 +157,7 @@ describe("Claude promptless containment (#3091)", () => {
   });
 });
 
-describe("Windows shell boundary is denied until Full Access (#3149, #3192)", () => {
+describe("Windows shell boundary requires the verified launcher (#3149, #3192)", () => {
   const settingsPanel = readFileSync(
     resolve("src/components/settings/SettingsPanel.tsx"),
     "utf8",
@@ -180,7 +180,7 @@ describe("Windows shell boundary is denied until Full Access (#3149, #3192)", ()
     expect(claudeRuntime).toContain("#3192");
   });
 
-  it("denies Bash for bounded native-Windows modes but not Full Access", () => {
+  it("keeps Bash denied without a launcher and permits it only with one", () => {
     const originalPlatform = process.platform;
     Object.defineProperty(process, "platform", {
       value: "win32",
@@ -195,6 +195,19 @@ describe("Windows shell boundary is denied until Full Access (#3149, #3192)", ()
         });
         expect(settings.permissions.deny).toContain("Bash");
         expect(settings.sandbox).toBeUndefined();
+
+        const containedSettings = buildClaudePolicySettings({
+          cwd: tempProject(),
+          sandboxMode,
+          networkEnabled: true,
+          sandboxProfile: {
+            kind: "windows-launcher",
+            launcherPath: "C:\\Seren\\Seren.exe",
+            policyBase64: "encoded-policy",
+          },
+        });
+        expect(containedSettings.permissions).toBeUndefined();
+        expect(containedSettings.sandbox).toBeUndefined();
       }
 
       expect(

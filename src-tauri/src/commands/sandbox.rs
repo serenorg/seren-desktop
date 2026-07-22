@@ -6,11 +6,13 @@ use std::str::FromStr;
 
 use serde::Serialize;
 
-use crate::sandbox::{SandboxMode, SandboxPolicy};
 #[cfg(target_os = "linux")]
+use crate::sandbox::encode_policy;
+#[cfg(target_os = "windows")]
 use crate::sandbox::encode_policy;
 #[cfg(target_os = "macos")]
 use crate::sandbox::seatbelt_profile;
+use crate::sandbox::{SandboxMode, SandboxPolicy};
 
 const CREDENTIAL_STORE_SUFFIXES: &[&str] = &[
     ".ssh",
@@ -31,6 +33,13 @@ pub enum AgentSandboxLaunchSpec {
     Seatbelt { profile: String },
     #[serde(rename = "linux-launcher")]
     LinuxLauncher {
+        #[serde(rename = "launcherPath")]
+        launcher_path: String,
+        #[serde(rename = "policyBase64")]
+        policy_base64: String,
+    },
+    #[serde(rename = "windows-launcher")]
+    WindowsLauncher {
         #[serde(rename = "launcherPath")]
         launcher_path: String,
         #[serde(rename = "policyBase64")]
@@ -90,7 +99,20 @@ pub fn agent_sandbox_profile(
         });
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
+    {
+        let launcher_path = std::env::current_exe()
+            .map_err(|error| format!("Could not resolve the sandbox launcher: {error}"))?
+            .to_string_lossy()
+            .into_owned();
+        let policy_base64 = encode_policy(&policy).map_err(|error| error.to_string())?;
+        return Ok(AgentSandboxLaunchSpec::WindowsLauncher {
+            launcher_path,
+            policy_base64,
+        });
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         let _ = policy;
         Err("The provider sandbox backend is unavailable on this platform.".to_string())
