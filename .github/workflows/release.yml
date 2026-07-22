@@ -1684,9 +1684,17 @@ jobs:
           fi
           signing_blocked="$(jq -r 'if .blocked == true then "true" else "false" end' "$budget_state")"
           payload="$RUNNER_TEMP/windows-e2e-payload.zip"
+          # pnpm-workspace.yaml and patches/ are required for the box's frozen
+          # install: pnpm 11 reads patchedDependencies from the workspace file,
+          # and the lockfile references patches/happy@1.2.0.patch. Without them
+          # the install aborts with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH (config
+          # empty) or ENOENT (patch missing), failing the gate that
+          # publish-release needs. #3136
           zip -q -r "$payload" \
             package.json \
             pnpm-lock.yaml \
+            pnpm-workspace.yaml \
+            patches \
             scripts/windows-e2e-task-user.ps1 \
             scripts/windows-e2e-app.ps1 \
             scripts/windows-e2e-app.mjs
