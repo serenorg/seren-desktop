@@ -71,5 +71,20 @@ if ($LASTEXITCODE -ne 2) { throw "The reservation above the adjusted baseline wa
 & $barrier -Mode Adjust -AdjustedBaselineOperations 95 -BillingReference "synthetic adjust reference second" -AdjustApprovedBy $env:GITHUB_ACTOR
 if ($LASTEXITCODE -ne 0) { throw "The repeated audited baseline adjustment should have succeeded." }
 
+$env:SSL_SIGNING_CERTIFICATE = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-dupes"
+& $barrier -Mode Bootstrap -BootstrapOperations 0 -BootstrapSource "live workflow duplicate-pass test" -BootstrapApprovedBy $env:GITHUB_ACTOR -BillingReference "synthetic duplicate-pass cycle" -ConfirmZeroUsage
+if ($LASTEXITCODE -ne 0) { throw "Could not bootstrap the isolated duplicate-pass live-test ledger." }
+
+$firstDuplicateOutput = (& $barrier -Mode Reserve -Source "nsis-double-pass" -Invocation 1 -Operations 1 *>&1 | Out-String)
+$firstDuplicateExit = $LASTEXITCODE
+if ($firstDuplicateExit -ne 0) { throw "The first duplicate-pass reservation should have succeeded." }
+
+$secondDuplicateOutput = (& $barrier -Mode Reserve -Source "nsis-double-pass" -Invocation 1 -Operations 1 *>&1 | Out-String)
+$secondDuplicateExit = $LASTEXITCODE
+if ($secondDuplicateExit -ne 0) { throw "The second duplicate-pass reservation should have succeeded." }
+if ($secondDuplicateOutput -notmatch "total=2" -or $secondDuplicateOutput -match "already committed") {
+  throw "The second duplicate-pass reservation did not count as a new operation."
+}
+
 Write-Host "Live R2 monthly signing ledger validation passed without mocks."
 exit 0

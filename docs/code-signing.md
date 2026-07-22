@@ -243,9 +243,11 @@ preserves all existing reservations, records the previous and new baselines in
 the ledger's `adjustments` array, and keeps future reservations fail-closed when
 the corrected projection is over budget.
 
-Reconcile `committed_or_reserved_operations` and each run/source/invocation
-entry against the SSL.com invoice. Reservations may conservatively exceed the
-invoice after ambiguous failures, but the projected charge must never exceed
+Reconcile `committed_or_reserved_operations` and each run/attempt/source/invocation
+entry against the SSL.com invoice. Each entry also carries a per-reservation
+nonce in its idempotency key, so repeated signer passes over the same filename
+count as separate billable operations. Reservations may conservatively exceed
+the invoice after ambiguous failures, but the projected charge must never exceed
 the repository budget. Before changing pricing, fixed charges, account,
 certificate, anchor, or timezone, reconcile the current object and bootstrap
 the new identity/cycle rather than editing those configuration fields in place.

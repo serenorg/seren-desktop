@@ -217,7 +217,10 @@ if ($Mode -eq "Adjust") {
 if ($Operations -lt 1 -or [string]::IsNullOrWhiteSpace($Source) -or $Invocation -lt 1) { Fail "Reserve requires Source, Invocation >= 1, and Operations >= 1." }
 $runId = Require-Text "GITHUB_RUN_ID"
 $runAttempt = Require-Text "GITHUB_RUN_ATTEMPT"
-$idempotencyKey = "$runId/$runAttempt/$Source/$Invocation"
+$reservationNonce = [guid]::NewGuid().ToString("N")
+# The nonce scopes idempotency to ambiguous conditional-write retries within one
+# reservation process; each signer pass over the same filename is a distinct billable operation.
+$idempotencyKey = "$runId/$runAttempt/$Source/$Invocation/$reservationNonce"
 
 for ($attempt = 1; $attempt -le $MaxCasAttempts; $attempt++) {
   $read = Read-LedgerWithETag
