@@ -16,6 +16,7 @@ const {
   resetGatewayMock,
   runtimeHasCapabilityMock,
   getPolicyMock,
+  getCurrentUserMock,
   storedKeyRef,
   listenMock,
   eventListeners,
@@ -40,6 +41,15 @@ const {
     resetGatewayMock: vi.fn(async () => {}),
     runtimeHasCapabilityMock: vi.fn(() => false),
     getPolicyMock: vi.fn(async () => null),
+    getCurrentUserMock: vi.fn(async () => ({
+      data: {
+        data: {
+          id: "u-restored",
+          email: "restored@example.com",
+          name: "Restored User",
+        },
+      },
+    })),
     eventListeners: listeners,
     listenMock: vi.fn(async (event: string, handler: (event?: unknown) => unknown) => {
       listeners.set(event, handler);
@@ -60,6 +70,10 @@ vi.mock("@/services/auth", () => ({
   hasStoredToken: hasStoredTokenMock,
   createApiKey: createApiKeyMock,
   logout: authLogoutMock,
+}));
+
+vi.mock("@/api", () => ({
+  getCurrentUser: getCurrentUserMock,
 }));
 
 vi.mock("@/services/mcp-gateway", () => ({
@@ -169,6 +183,11 @@ describe("auth.store #1613 — API key before isAuthenticated flips", () => {
     expect(authAtStoreTime).toBe(false);
     expect(storedKeyRef.value).toBeTruthy();
     expect(authStore.isAuthenticated).toBe(true);
+    expect(authStore.user).toEqual({
+      id: "u-restored",
+      email: "restored@example.com",
+      name: "Restored User",
+    });
   });
 
   it("setAuthenticated: existing stored key — no create call, still no premature flip", async () => {
