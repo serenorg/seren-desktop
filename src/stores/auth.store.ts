@@ -2,6 +2,7 @@
 // ABOUTME: Tracks user session and installs runtime-specific auth bindings lazily.
 
 import { createStore } from "solid-js/store";
+import { getCurrentUser } from "@/api";
 import { runtimeHasCapability } from "@/lib/runtime";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import {
@@ -180,6 +181,25 @@ function authEpochChanged(expectedEpoch: number | undefined): boolean {
   return expectedEpoch !== undefined && expectedEpoch !== authEpoch;
 }
 
+async function loadCurrentUser(): Promise<User | undefined> {
+  try {
+    const { data } = await getCurrentUser({ throwOnError: false });
+    if (!data?.data) {
+      return undefined;
+    }
+
+    return {
+      id: data.data.id,
+      email: data.data.email,
+      name: data.data.name,
+    };
+  } catch {
+    // Preserve the existing offline session behavior. Downstream services
+    // remain guarded until a later auth refresh hydrates the user.
+    return undefined;
+  }
+}
+
 async function activateAuthenticatedSession(
   user?: User,
   expectedEpoch?: number,
@@ -239,7 +259,7 @@ export async function restoreAuthenticatedSession(
     return false;
   }
 
-  return activateAuthenticatedSession(undefined, expectedEpoch);
+  return activateAuthenticatedSession(await loadCurrentUser(), expectedEpoch);
 }
 
 async function resetSkillsCatalog(): Promise<void> {
@@ -267,7 +287,7 @@ export async function checkAuth(): Promise<void> {
       return;
     }
 
-    await activateAuthenticatedSession();
+    await activateAuthenticatedSession(await loadCurrentUser());
   } finally {
     setState("isLoading", false);
   }
