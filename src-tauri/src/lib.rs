@@ -24,6 +24,7 @@ pub mod commands {
     pub mod orchestrator;
     pub mod provider_runtime;
     pub mod recording;
+    pub mod sandbox;
     pub mod session;
     pub mod transcript_search;
     pub mod updater;
@@ -40,6 +41,8 @@ pub mod services {
     pub mod transcript_vectors;
     pub mod vector_store;
 }
+
+pub mod sandbox;
 
 pub mod audio;
 mod auth;
@@ -1036,6 +1039,7 @@ pub fn run() {
             commands::recording::recording_reveal_local,
             commands::history_sync::history_sync_run_now,
             commands::history_sync::history_sync_wipe_remote,
+            commands::sandbox::agent_sandbox_profile,
             // Meeting Mode persistence commands
             commands::audio::create_meeting,
             commands::audio::get_meeting,
