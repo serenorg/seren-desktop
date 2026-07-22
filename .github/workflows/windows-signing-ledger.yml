@@ -12,20 +12,29 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: "live-test or bootstrap-active-cycle"
+        description: "live-test, bootstrap-active-cycle, or adjust-active-cycle"
         required: true
         type: choice
-        options: [live-test, bootstrap-active-cycle]
+        options: [live-test, bootstrap-active-cycle, adjust-active-cycle]
       authoritative_operations:
-        description: "SSL.com operations already billed in the active cycle (bootstrap only)"
+        description: "operations billed in the active cycle per the billing record (bootstrap/adjust)"
         required: false
         default: ""
       authoritative_source:
         description: "Invoice/dashboard evidence and timestamp (bootstrap only)"
         required: false
         default: ""
+      billing_reference:
+        description: "Billing-record reference and portal timestamp (bootstrap/adjust)"
+        required: false
+        default: ""
+      confirm_zero_usage:
+        description: "Confirm that an authoritative billing record proves zero usage"
+        required: false
+        default: false
+        type: boolean
       approval:
-        description: "Type BOOTSTRAP MONTHLY SSL LEDGER (bootstrap only)"
+        description: "Type the exact audited approval phrase for the selected operation"
         required: false
         default: ""
 
@@ -60,12 +69,32 @@ jobs:
         env:
           BOOTSTRAP_OPERATIONS: ${{ inputs.authoritative_operations }}
           BOOTSTRAP_SOURCE: ${{ inputs.authoritative_source }}
+          BILLING_REFERENCE: ${{ inputs.billing_reference }}
+          CONFIRM_ZERO_USAGE: ${{ inputs.confirm_zero_usage }}
           BOOTSTRAP_APPROVAL: ${{ inputs.approval }}
         run: |
           if ($env:BOOTSTRAP_APPROVAL -cne "BOOTSTRAP MONTHLY SSL LEDGER") { throw "Exact audited approval phrase is required." }
           [int]$operations = -1
           if (-not [int]::TryParse($env:BOOTSTRAP_OPERATIONS, [ref]$operations) -or $operations -lt 0) { throw "authoritative_operations must be a non-negative integer." }
-          ./scripts/windows-signing-monthly-budget.ps1 -Mode Bootstrap -BootstrapOperations $operations -BootstrapSource $env:BOOTSTRAP_SOURCE -BootstrapApprovedBy '${{ github.actor }}'
+          $bootstrapArgs = @('-Mode', 'Bootstrap', '-BootstrapOperations', $operations, '-BootstrapSource', $env:BOOTSTRAP_SOURCE, '-BootstrapApprovedBy', '${{ github.actor }}', '-BillingReference', $env:BILLING_REFERENCE)
+          if ($env:CONFIRM_ZERO_USAGE -eq 'true') { $bootstrapArgs += '-ConfirmZeroUsage' }
+          ./scripts/windows-signing-monthly-budget.ps1 @bootstrapArgs
+
+      - name: Adjust active billing cycle baseline
+        if: inputs.operation == 'adjust-active-cycle'
+        shell: pwsh
+        env:
+          ADJUSTED_BASELINE_OPERATIONS: ${{ inputs.authoritative_operations }}
+          BILLING_REFERENCE: ${{ inputs.billing_reference }}
+          CONFIRM_ZERO_USAGE: ${{ inputs.confirm_zero_usage }}
+          ADJUST_APPROVAL: ${{ inputs.approval }}
+        run: |
+          if ($env:ADJUST_APPROVAL -cne "ADJUST MONTHLY SSL LEDGER") { throw "Exact audited adjustment approval phrase is required." }
+          [int64]$operations = -1
+          if (-not [int64]::TryParse($env:ADJUSTED_BASELINE_OPERATIONS, [ref]$operations) -or $operations -lt 0) { throw "authoritative_operations must be a non-negative integer." }
+          $adjustArgs = @('-Mode', 'Adjust', '-AdjustedBaselineOperations', $operations, '-BillingReference', $env:BILLING_REFERENCE, '-AdjustApprovedBy', '${{ github.actor }}')
+          if ($env:CONFIRM_ZERO_USAGE -eq 'true') { $adjustArgs += '-ConfirmZeroUsage' }
+          ./scripts/windows-signing-monthly-budget.ps1 @adjustArgs
 
       - name: Live R2 CAS and persistence test
         if: github.event_name == 'pull_request' || inputs.operation == 'live-test'

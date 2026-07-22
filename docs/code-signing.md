@@ -224,22 +224,31 @@ and 100%; the workflow summary exposes the authoritative values.
 
 #### Bootstrap, rollover, and reconciliation
 
-The first release in an active invoice cycle must never create a zero ledger.
-Run the manual **Windows signing monthly ledger** workflow with
-`bootstrap-active-cycle`, the authoritative operation count from SSL.com's
-dashboard/invoice, its evidence timestamp/source, and the exact approval
-phrase. The object is created with `If-None-Match: *`, records the approving
-GitHub actor, and cannot overwrite an existing cycle. If authoritative usage is
-unknown, leave signing blocked and bootstrap at the next configured boundary
-with a verified zero. A new cycle also requires this explicit bootstrap; prior
-cycle objects remain under `windows-signing-ledgers/v1/` for audit.
+The first release in an active invoice cycle must not create a zero ledger
+without an explicit confirmation. Run the manual **Windows signing monthly
+ledger** workflow with `bootstrap-active-cycle`, the authoritative operation
+count from SSL.com's dashboard/invoice, its evidence timestamp/source, a
+structured billing-record reference, and the exact approval phrase. The object
+is created with `If-None-Match: *`, records the approving GitHub actor, and
+cannot overwrite an existing cycle. A zero count additionally requires the
+explicit zero-usage confirmation. If authoritative usage is unknown, leave
+signing blocked and bootstrap at the next configured boundary with a verified
+zero. A new cycle also requires this explicit bootstrap; prior cycle objects
+remain under `windows-signing-ledgers/v1/` for audit.
+
+If the active cycle was bootstrapped from an incomplete baseline, use
+`adjust-active-cycle` with the authoritative billing-record reference and the
+exact adjustment approval phrase. The adjustment uses the same R2 CAS barrier,
+preserves all existing reservations, records the previous and new baselines in
+the ledger's `adjustments` array, and keeps future reservations fail-closed when
+the corrected projection is over budget.
 
 Reconcile `committed_or_reserved_operations` and each run/source/invocation
 entry against the SSL.com invoice. Reservations may conservatively exceed the
 invoice after ambiguous failures, but the projected charge must never exceed
 the repository budget. Before changing pricing, fixed charges, account,
 certificate, anchor, or timezone, reconcile the current object and bootstrap
-the new identity/cycle rather than editing a ledger in place.
+the new identity/cycle rather than editing those configuration fields in place.
 
 For a live backend check, dispatch the same workflow with `live-test`. It uses
 real R2 conditional writes, launches two simultaneous near-limit reservations,
