@@ -2,17 +2,38 @@
 // ABOUTME: Releases the slot after the Tauri process and its dev server exit.
 
 import { spawn } from "node:child_process";
+import os from "node:os";
 import { validationDevArgs } from "./validation-dev-args";
+import {
+  ensureValidationHome,
+  resolvePnpmStoreDir,
+  validationChildEnv,
+} from "./validation-env";
 import { acquireValidationSlot } from "./validation-slots";
 
 async function main(): Promise<void> {
   const slot = await acquireValidationSlot();
   const forwardedArgs = validationDevArgs(process.argv.slice(2));
-  console.log(
-    `[validation] leased port ${slot.port} with identifier ${slot.identifier}`,
-  );
 
   try {
+    const validationHome = await ensureValidationHome(process.cwd(), slot.port);
+    const pnpmStoreDir = await resolvePnpmStoreDir();
+    const childEnv = {
+      ...validationChildEnv({
+        baseEnv: process.env,
+        port: slot.port,
+        repoRoot: process.cwd(),
+        realHome: os.homedir(),
+        pnpmStoreDir,
+      }),
+      SEREN_VALIDATION_DEV_PORT: String(slot.port),
+      SEREN_VALIDATION_INSTANCE: "1",
+    };
+
+    console.log(
+      `[validation] leased port ${slot.port} with identifier ${slot.identifier}; scratch home ${validationHome}`,
+    );
+
     const child = spawn(
       "pnpm",
       [
@@ -29,11 +50,7 @@ async function main(): Promise<void> {
       {
         cwd: process.cwd(),
         stdio: "inherit",
-        env: {
-          ...process.env,
-          SEREN_VALIDATION_DEV_PORT: String(slot.port),
-          SEREN_VALIDATION_INSTANCE: "1",
-        },
+        env: childEnv,
       },
     );
 
