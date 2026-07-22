@@ -639,13 +639,16 @@ const DEFAULT_PREFERRED_MODEL = "claude-opus-4-8[1m]";
 const DEFAULT_PREFERRED_MODE = "bypassPermissions";
 
 // Maps the persisted agent approval policy to the permission mode a fresh
-// Claude thread spawns in. The default and on-request policies land on the
-// out-of-box DEFAULT_PREFERRED_MODE; only an explicitly stricter policy
-// (untrusted / on-failure) downgrades to acceptEdits. Runs against the stored
-// setting at every spawn, so it governs the composer default without mutating
-// the saved value. #2810.
+// Claude thread spawns in. On-request must stay the normal prompt-producing
+// default rather than inheriting the bypassPermissions seed; only the
+// explicitly permissive never policy uses DEFAULT_PREFERRED_MODE, while an
+// explicitly stricter policy (untrusted / on-failure) downgrades to
+// acceptEdits. Runs against the stored setting at every spawn, so it governs
+// the composer default without mutating the saved value. #2810, #3192.
 function claudeModeFromApprovalPolicy(approvalPolicy) {
   switch (approvalPolicy) {
+    case "on-request":
+      return "default";
     case "untrusted":
     case "on-failure":
       return "acceptEdits";
@@ -1186,24 +1189,20 @@ function buildClaudePolicySettings({ cwd, sandboxMode, networkEnabled }) {
 
   // Claude's native sandbox constrains Bash subprocesses on macOS/Linux.
   // Built-in file tools are independently constrained by the hook above.
-  //
-  // Native Windows gets no Bash boundary at all. The sandbox is built on
-  // Seatbelt (macOS) and bubblewrap (Linux/WSL2); upstream states native
-  // Windows is unsupported, so emitting these keys there configures nothing.
-  // The only Windows-viable alternative is matching file paths out of
-  // arbitrary shell strings in the PreToolUse hook, which any indirection
-  // (`cat $(printf ...)`) defeats — a boundary that reads as real while
-  // failing open is worse than a stated gap, so Settings → Agent says
-  // plainly that shell commands are unbounded on Windows. #3149
+  // Native Windows has no supported OS-level Bash boundary, so immediate
+  // containment denies the Bash tool entirely in every bounded mode. Full
+  // Access remains an explicit user-selected escape hatch. #3192
+  if (process.platform === "win32") {
+    settings.permissions = { deny: ["Bash"] };
+  }
+
   if (process.platform !== "win32") {
     settings.sandbox = {
       enabled: true,
-      // Left at the default (false). The Linux sandbox needs bubblewrap and
-      // socat from the distro, which the .deb and AppImage cannot guarantee;
-      // failing closed there turns a missing OS package into an agent that
-      // never starts. Claude warns and runs unsandboxed instead, and the
-      // PreToolUse hook still bounds the built-in file tools. #3138
-      failIfUnavailable: false,
+      // The Linux sandbox needs bubblewrap and socat from the distro. If the
+      // required boundary cannot initialize, Claude must block rather than
+      // warn and continue unsandboxed. #3138, #3192
+      failIfUnavailable: true,
       autoAllowBashIfSandboxed: true,
       allowUnsandboxedCommands: false,
       filesystem: {

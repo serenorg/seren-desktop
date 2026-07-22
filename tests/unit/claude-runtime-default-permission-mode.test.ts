@@ -19,11 +19,11 @@ describe("DEFAULT_PREFERRED_MODE — fresh-session out-of-box permission mode (#
 });
 
 describe("claudeModeFromApprovalPolicy — fresh-session seed (#2810)", () => {
-  it("lands the default 'on-request' policy on bypassPermissions", () => {
-    // 'on-request' is the shipped default agentApprovalPolicy; running the
-    // stored value through the mapping at spawn is what fixes existing installs
-    // without mutating the saved setting.
-    expect(claudeModeFromApprovalPolicy("on-request")).toBe("bypassPermissions");
+  it("keeps the default 'on-request' policy in the normal prompt mode (#3192)", () => {
+    // 'on-request' is the shipped default agentApprovalPolicy. It must not
+    // inherit the bypassPermissions seed, because that silently removes the
+    // approval boundary from fresh sessions.
+    expect(claudeModeFromApprovalPolicy("on-request")).toBe("default");
   });
 
   it("keeps 'never' on bypassPermissions", () => {
