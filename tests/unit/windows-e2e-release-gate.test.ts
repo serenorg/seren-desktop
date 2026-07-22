@@ -668,17 +668,8 @@ describe("Windows production e2e release gate", () => {
   });
 
   it("activates the same pnpm major on the e2e box as the release build", () => {
-    // The box runs `pnpm install --frozen-lockfile`. pnpm 10 moved
-    // patchedDependencies from package.json into pnpm-workspace.yaml, so a
-    // pnpm 9 box reads an empty config, sees the key in the lockfile, and
-    // aborts with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH — failing the gate that
-    // publish-release needs, so the tag never publishes (#3136).
-    const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
-    const lockfile = readFileSync(join(root, "pnpm-lock.yaml"), "utf8");
-    const patchesAreWorkspaceScoped =
-      /^patchedDependencies:/m.test(workspace) &&
-      /^patchedDependencies:/m.test(lockfile);
-
+    // The box and the release build should use the same pnpm major so the
+    // frozen install behaves identically. #3136 moved the box off pnpm 9.
     const activated = taskUserRunner.match(
       /"prepare",\s*"pnpm@(\d+)"/,
     );
@@ -692,35 +683,46 @@ describe("Windows production e2e release gate", () => {
     );
     expect(releaseMajor).toBeGreaterThan(0);
     expect(boxMajor).toBe(releaseMajor);
-
-    // The mismatch above is only silent-fatal while patches live in the
-    // workspace file; assert the precondition so this test explains itself
-    // if the patch declaration ever moves back.
-    expect(patchesAreWorkspaceScoped).toBe(true);
     expect(boxMajor).toBeGreaterThanOrEqual(10);
   });
 
-  it("ships every file the box's frozen install needs", () => {
-    // The box runs `pnpm install --frozen-lockfile` against the payload zip.
-    // pnpm 11 reads patchedDependencies from pnpm-workspace.yaml and the
-    // lockfile references patches/happy@1.2.0.patch. A payload with only
-    // package.json + pnpm-lock.yaml aborts with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH
-    // (no workspace config) or ENOENT (no patch), failing the gate that
-    // publish-release needs. #3136
-    const stageJob = workflowJob("windows-app-e2e");
-    const zipCmd = stageJob.slice(
-      stageJob.indexOf('zip -q -r "$payload"'),
+  it("ships the minimal driver manifest, not the app's full tree", () => {
+    // The box drives the installed app over CDP; it needs only the driver's
+    // two deps (@playwright/test + ws). Shipping the app's ~1100-package tree
+    // timed out the box's frozen install at 1200s, failing the gate that
+    // publish-release needs. The payload must carry the driver manifest from
+    // scripts/windows-e2e-driver, and must NOT carry the app's package.json,
+    // workspace file, or patches. #3136
+    const payloadAt = releaseWorkflow.indexOf(
+      'payload="$RUNNER_TEMP/windows-e2e-payload.zip"',
     );
-    const line = zipCmd.slice(0, zipCmd.indexOf("prefix="));
+    expect(payloadAt).toBeGreaterThanOrEqual(0);
+    const zipSection = releaseWorkflow.slice(
+      payloadAt,
+      releaseWorkflow.indexOf("prefix=", payloadAt),
+    );
 
-    for (const required of [
-      "package.json",
-      "pnpm-lock.yaml",
-      "pnpm-workspace.yaml",
-      "patches",
-    ]) {
-      expect(line).toContain(required);
-    }
+    // Manifest sourced from the driver directory.
+    expect(zipSection).toMatch(
+      /cd scripts\/windows-e2e-driver && zip[^\n]*package\.json pnpm-lock\.yaml/,
+    );
+    // The app's full tree must not be shipped.
+    expect(zipSection).not.toContain("pnpm-workspace.yaml");
+    expect(zipSection).not.toMatch(/^\s*patches\b/m);
+
+    // The driver manifest exists, is minimal, and carries no patchedDependencies.
+    const manifest = JSON.parse(
+      readFileSync(join(root, "scripts/windows-e2e-driver/package.json"), "utf8"),
+    );
+    expect(Object.keys(manifest.dependencies).sort()).toEqual([
+      "@playwright/test",
+      "ws",
+    ]);
+    const driverLock = readFileSync(
+      join(root, "scripts/windows-e2e-driver/pnpm-lock.yaml"),
+      "utf8",
+    );
+    expect(driverLock).not.toContain("patchedDependencies");
   });
 
   it("provisions a Node the box's pnpm can actually run on", () => {

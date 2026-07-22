@@ -1,0 +1,10 @@
+{
+  "name": "seren-windows-e2e-driver",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Minimal dependency set the Windows e2e box installs to drive the installed app over CDP. The app under test ships its own runtime; this is only the test driver.",
+  "dependencies": {
+    "@playwright/test": "1.61.1",
+    "ws": "8.18.3"
+  }
+}
