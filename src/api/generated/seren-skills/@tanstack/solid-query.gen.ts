@@ -4,7 +4,7 @@ import { type DefaultError, type InfiniteData, infiniteQueryOptions, type Mutati
 
 import { client } from '../client.gen';
 import { acceptUpdateRequest, createOrgFolder, createSkill, createUpdateRequest, createUpdateRequestComment, createVersion, deleteCollaborator, deleteFile, deleteSkill, downloadSkill, downloadSkillFile, downloadSkillManifest, getAuthorIdentity, getDraft, getFile, getMergeState, getOrgFolder, getSkill, getSkillEditDocument, getUpdateRequest, getUpdateRequestDiff, getVersionManifest, githubStatus, listCollaborators, listFiles, listOrphanFolders, listSkills, listUpdateRequestComments, listUpdateRequests, listUsageEvents, listVersions, type Options, publisherRoot, purchaseSkill, putFile, reconcileOrphans, rejectUpdateRequest, replaceOrgFolder, resolveConflict, retryGithubPublish, skillMd, syncFromMain, transferOrgFolder, updateOrgFolder, updateSkill, updateSponsor, upsertAuthorIdentity, upsertCollaborator, usageSummary } from '../sdk.gen';
-import type { AcceptUpdateRequestData, AcceptUpdateRequestResponse, CreateOrgFolderData, CreateOrgFolderResponse, CreateSkillData, CreateSkillResponse, CreateUpdateRequestCommentData, CreateUpdateRequestCommentResponse, CreateUpdateRequestData, CreateUpdateRequestResponse, CreateVersionData, CreateVersionResponse2, DeleteCollaboratorData, DeleteCollaboratorResponse, DeleteFileData, DeleteFileResponse, DeleteSkillData, DeleteSkillResponse, DownloadSkillData, DownloadSkillFileData, DownloadSkillFileResponse, DownloadSkillManifestData, DownloadSkillManifestResponse, DownloadSkillResponse, GetAuthorIdentityData, GetAuthorIdentityResponse, GetDraftData, GetDraftResponse, GetFileData, GetFileResponse2, GetMergeStateData, GetMergeStateResponse, GetOrgFolderData, GetOrgFolderResponse, GetSkillData, GetSkillEditDocumentData, GetSkillEditDocumentResponse, GetSkillResponse, GetUpdateRequestData, GetUpdateRequestDiffData, GetUpdateRequestDiffResponse, GetUpdateRequestResponse, GetVersionManifestData, GetVersionManifestResponse, GithubStatusData, GithubStatusResponse, ListCollaboratorsData, ListCollaboratorsResponse2, ListFilesData, ListFilesResponse2, ListOrphanFoldersData, ListOrphanFoldersResponse, ListSkillsData, ListSkillsResponse2, ListUpdateRequestCommentsData, ListUpdateRequestCommentsResponse2, ListUpdateRequestsData, ListUpdateRequestsResponse2, ListUsageEventsData, ListUsageEventsResponse2, ListVersionsData, ListVersionsResponse2, PublisherRootData, PublisherRootResponse, PurchaseSkillData, PurchaseSkillResponse, PutFileData, PutFileResponse, ReconcileOrphansData, ReconcileOrphansError, ReconcileOrphansResponse, RejectUpdateRequestData, RejectUpdateRequestResponse, ReplaceOrgFolderData, ReplaceOrgFolderResponse, ResolveConflictData, ResolveConflictResponse, RetryGithubPublishData, RetryGithubPublishResponse, SkillMdData, SyncFromMainData, SyncFromMainResponse, TransferOrgFolderData, TransferOrgFolderResponse, UpdateOrgFolderData, UpdateOrgFolderResponse, UpdateSkillData, UpdateSkillResponse, UpdateSponsorData, UpdateSponsorResponse, UpsertAuthorIdentityData, UpsertAuthorIdentityResponse, UpsertCollaboratorData, UpsertCollaboratorResponse, UsageSummaryData, UsageSummaryResponse2 } from '../types.gen';
+import type { AcceptUpdateRequestData, AcceptUpdateRequestResponse, CreateOrgFolderData, CreateOrgFolderResponse, CreateSkillData, CreateSkillResponse, CreateUpdateRequestCommentData, CreateUpdateRequestCommentResponse, CreateUpdateRequestData, CreateUpdateRequestResponse, CreateVersionData, CreateVersionResponse2, DeleteCollaboratorData, DeleteCollaboratorResponse, DeleteFileData, DeleteFileResponse, DeleteSkillData, DeleteSkillResponse, DownloadSkillData, DownloadSkillFileData, DownloadSkillFileResponse, DownloadSkillManifestData, DownloadSkillManifestResponse, DownloadSkillResponse, GetAuthorIdentityData, GetAuthorIdentityResponse, GetDraftData, GetDraftResponse, GetFileData, GetFileResponse2, GetMergeStateData, GetMergeStateResponse, GetOrgFolderData, GetOrgFolderResponse, GetSkillData, GetSkillEditDocumentData, GetSkillEditDocumentResponse, GetSkillResponse, GetUpdateRequestData, GetUpdateRequestDiffData, GetUpdateRequestDiffResponse, GetUpdateRequestResponse, GetVersionManifestData, GetVersionManifestResponse, GithubStatusData, GithubStatusResponse, ListCollaboratorsData, ListCollaboratorsResponse, ListFilesData, ListFilesResponse, ListOrphanFoldersData, ListOrphanFoldersResponse, ListSkillsData, ListSkillsResponse, ListUpdateRequestCommentsData, ListUpdateRequestCommentsResponse, ListUpdateRequestsData, ListUpdateRequestsResponse, ListUsageEventsData, ListUsageEventsResponse, ListVersionsData, ListVersionsResponse, PublisherRootData, PublisherRootResponse, PurchaseSkillData, PurchaseSkillResponse, PutFileData, PutFileResponse, ReconcileOrphansData, ReconcileOrphansError, ReconcileOrphansResponse, RejectUpdateRequestData, RejectUpdateRequestResponse, ReplaceOrgFolderData, ReplaceOrgFolderResponse, ResolveConflictData, ResolveConflictResponse, RetryGithubPublishData, RetryGithubPublishResponse, SkillMdData, SyncFromMainData, SyncFromMainResponse, TransferOrgFolderData, TransferOrgFolderResponse, UpdateOrgFolderData, UpdateOrgFolderResponse, UpdateSkillData, UpdateSkillResponse, UpdateSponsorData, UpdateSponsorResponse, UpsertAuthorIdentityData, UpsertAuthorIdentityResponse, UpsertCollaboratorData, UpsertCollaboratorResponse, UsageSummaryData, UsageSummaryResponse2 } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -221,7 +221,7 @@ export const skillMdOptions = (options?: Options<SkillMdData>) => queryOptions<u
 
 export const listSkillsQueryKey = (options?: Options<ListSkillsData>) => createQueryKey('listSkills', options);
 
-export const listSkillsOptions = (options?: Options<ListSkillsData>) => queryOptions<ListSkillsResponse2, DefaultError, ListSkillsResponse2, ReturnType<typeof listSkillsQueryKey>>({
+export const listSkillsOptions = (options?: Options<ListSkillsData>) => queryOptions<ListSkillsResponse, DefaultError, ListSkillsResponse, ReturnType<typeof listSkillsQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
         const { data } = await listSkills({
             ...options,
@@ -266,7 +266,7 @@ const createInfiniteParams = <K extends Pick<QueryKey<Options>[0], 'body' | 'hea
 export const listSkillsInfiniteQueryKey = (options?: Options<ListSkillsData>): QueryKey<Options<ListSkillsData>> => createQueryKey('listSkills', options, true);
 
 export const listSkillsInfiniteOptions = (options?: Options<ListSkillsData>) => {
-    const opts = infiniteQueryOptions<ListSkillsResponse2, DefaultError, InfiniteData<ListSkillsResponse2>, QueryKey<Options<ListSkillsData>>, number | null | Pick<QueryKey<Options<ListSkillsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    const opts = infiniteQueryOptions<ListSkillsResponse, DefaultError, InfiniteData<ListSkillsResponse>, QueryKey<Options<ListSkillsData>>, number | null | Pick<QueryKey<Options<ListSkillsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
     // @ts-ignore
     {
         queryFn: async ({ pageParam, queryKey, signal }) => {
@@ -349,7 +349,7 @@ export const updateSkillMutation = (options?: Partial<Options<UpdateSkillData>>)
 
 export const listCollaboratorsQueryKey = (options: Options<ListCollaboratorsData>) => createQueryKey('listCollaborators', options);
 
-export const listCollaboratorsOptions = (options: Options<ListCollaboratorsData>) => queryOptions<ListCollaboratorsResponse2, DefaultError, ListCollaboratorsResponse2, ReturnType<typeof listCollaboratorsQueryKey>>({
+export const listCollaboratorsOptions = (options: Options<ListCollaboratorsData>) => queryOptions<ListCollaboratorsResponse, DefaultError, ListCollaboratorsResponse, ReturnType<typeof listCollaboratorsQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
         const { data } = await listCollaborators({
             ...options,
@@ -500,7 +500,7 @@ export const listFilesQueryKey = (options: Options<ListFilesData>) => createQuer
  * `GET /skills/{slug}/files` -- list every file in the current
  * version's bundle, plus a synthetic `SKILL.md` entry.
  */
-export const listFilesOptions = (options: Options<ListFilesData>) => queryOptions<ListFilesResponse2, DefaultError, ListFilesResponse2, ReturnType<typeof listFilesQueryKey>>({
+export const listFilesOptions = (options: Options<ListFilesData>) => queryOptions<ListFilesResponse, DefaultError, ListFilesResponse, ReturnType<typeof listFilesQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
         const { data } = await listFiles({
             ...options,
@@ -682,7 +682,7 @@ export const updateSponsorMutation = (options?: Partial<Options<UpdateSponsorDat
 
 export const listUpdateRequestsQueryKey = (options: Options<ListUpdateRequestsData>) => createQueryKey('listUpdateRequests', options);
 
-export const listUpdateRequestsOptions = (options: Options<ListUpdateRequestsData>) => queryOptions<ListUpdateRequestsResponse2, DefaultError, ListUpdateRequestsResponse2, ReturnType<typeof listUpdateRequestsQueryKey>>({
+export const listUpdateRequestsOptions = (options: Options<ListUpdateRequestsData>) => queryOptions<ListUpdateRequestsResponse, DefaultError, ListUpdateRequestsResponse, ReturnType<typeof listUpdateRequestsQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
         const { data } = await listUpdateRequests({
             ...options,
@@ -711,7 +711,7 @@ export const createUpdateRequestMutation = (options?: Partial<Options<CreateUpda
 
 export const listVersionsQueryKey = (options: Options<ListVersionsData>) => createQueryKey('listVersions', options);
 
-export const listVersionsOptions = (options: Options<ListVersionsData>) => queryOptions<ListVersionsResponse2, DefaultError, ListVersionsResponse2, ReturnType<typeof listVersionsQueryKey>>({
+export const listVersionsOptions = (options: Options<ListVersionsData>) => queryOptions<ListVersionsResponse, DefaultError, ListVersionsResponse, ReturnType<typeof listVersionsQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
         const { data } = await listVersions({
             ...options,
@@ -784,7 +784,7 @@ export const acceptUpdateRequestMutation = (options?: Partial<Options<AcceptUpda
 
 export const listUpdateRequestCommentsQueryKey = (options: Options<ListUpdateRequestCommentsData>) => createQueryKey('listUpdateRequestComments', options);
 
-export const listUpdateRequestCommentsOptions = (options: Options<ListUpdateRequestCommentsData>) => queryOptions<ListUpdateRequestCommentsResponse2, DefaultError, ListUpdateRequestCommentsResponse2, ReturnType<typeof listUpdateRequestCommentsQueryKey>>({
+export const listUpdateRequestCommentsOptions = (options: Options<ListUpdateRequestCommentsData>) => queryOptions<ListUpdateRequestCommentsResponse, DefaultError, ListUpdateRequestCommentsResponse, ReturnType<typeof listUpdateRequestCommentsQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
         const { data } = await listUpdateRequestComments({
             ...options,
@@ -842,7 +842,7 @@ export const rejectUpdateRequestMutation = (options?: Partial<Options<RejectUpda
 
 export const listUsageEventsQueryKey = (options?: Options<ListUsageEventsData>) => createQueryKey('listUsageEvents', options);
 
-export const listUsageEventsOptions = (options?: Options<ListUsageEventsData>) => queryOptions<ListUsageEventsResponse2, DefaultError, ListUsageEventsResponse2, ReturnType<typeof listUsageEventsQueryKey>>({
+export const listUsageEventsOptions = (options?: Options<ListUsageEventsData>) => queryOptions<ListUsageEventsResponse, DefaultError, ListUsageEventsResponse, ReturnType<typeof listUsageEventsQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
         const { data } = await listUsageEvents({
             ...options,
@@ -858,7 +858,7 @@ export const listUsageEventsOptions = (options?: Options<ListUsageEventsData>) =
 export const listUsageEventsInfiniteQueryKey = (options?: Options<ListUsageEventsData>): QueryKey<Options<ListUsageEventsData>> => createQueryKey('listUsageEvents', options, true);
 
 export const listUsageEventsInfiniteOptions = (options?: Options<ListUsageEventsData>) => {
-    const opts = infiniteQueryOptions<ListUsageEventsResponse2, DefaultError, InfiniteData<ListUsageEventsResponse2>, QueryKey<Options<ListUsageEventsData>>, number | null | Pick<QueryKey<Options<ListUsageEventsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    const opts = infiniteQueryOptions<ListUsageEventsResponse, DefaultError, InfiniteData<ListUsageEventsResponse>, QueryKey<Options<ListUsageEventsData>>, number | null | Pick<QueryKey<Options<ListUsageEventsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
     // @ts-ignore
     {
         queryFn: async ({ pageParam, queryKey, signal }) => {

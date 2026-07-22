@@ -78,6 +78,16 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Deployment could not be initialized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1067,6 +1077,16 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Draft runtime could not be initialized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1456,6 +1476,7 @@
         "type": "string",
         "enum": [
           "env",
+          "reference_env",
           "header",
           "body",
           "proxy_inject"
@@ -2476,6 +2497,10 @@
         "properties": {
           "enabled": {
             "type": "boolean"
+          },
+          "execute_scripts": {
+            "type": "boolean",
+            "description": "Allow the runtime to execute scripts attached to the agent bundle."
           },
           "max_injected_chars": {
             "type": [
@@ -4185,6 +4210,12 @@
                   }
                 ]
               },
+              "external_databases": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ManagedExternalDatabaseAttachment"
+                }
+              },
               "fallback_models": {
                 "type": [
                   "array",
@@ -4414,16 +4445,6 @@
               "status": {
                 "$ref": "#/components/schemas/ManagedAgentHealthStatus"
               },
-              "storage": {
-                "oneOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "$ref": "#/components/schemas/ManagedAgentStorageHealth"
-                  }
-                ]
-              },
               "summary": {
                 "$ref": "#/components/schemas/ManagedAgentHealthSummary"
               }
@@ -4457,7 +4478,6 @@
               "generated_at",
               "deployment",
               "runtime",
-              "storage",
               "connectors",
               "schedule",
               "tools",
@@ -4497,9 +4517,6 @@
               },
               "schedule": {
                 "$ref": "#/components/schemas/ManagedAgentScheduleResources"
-              },
-              "storage": {
-                "$ref": "#/components/schemas/ManagedAgentObjectStorageResources"
               },
               "tools": {
                 "$ref": "#/components/schemas/ManagedAgentToolResources"
@@ -4653,7 +4670,6 @@
               "generated_at",
               "status",
               "summary",
-              "storage",
               "deployments",
               "findings"
             ],
@@ -4680,9 +4696,6 @@
               },
               "status": {
                 "$ref": "#/components/schemas/ManagedAgentHealthStatus"
-              },
-              "storage": {
-                "$ref": "#/components/schemas/ManagedAgentStorageHealth"
               },
               "summary": {
                 "$ref": "#/components/schemas/ManagedAgentHealthSummary"
@@ -5330,6 +5343,21 @@
           }
         }
       },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error",
+          "message"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
       "EvalGate": {
         "type": "object",
         "description": "Eval gate configuration that must pass with a fresh verdict before runs proceed.\n\n`block_on_failure` controls what happens at update or rollback apply time:\nwhen `Some(true)`, the control plane rejects the apply if the latest eval\nverdict has failed or has expired beyond `max_age_seconds`. The default\n(`None`/`false`) preserves the original freshness-only behavior for\nback-compat.\n\n`schedule` is an operator-supplied cron expression that asks the control\nplane to run the gated eval set on a fixed cadence so freshness stays\ncurrent without manual triggering. The actual scheduling-loop dispatch is\nowned by the eval-set scheduler today (see `CloudEvalSetSchedule`); this\nfield records the operator intent on the deployment side.\n\n`drift_baseline` is captured by the apply path when an update or rollback\ncommits with a passing gate. Subsequent eval runs compare against the\nbaseline so operators see regressions explicitly.",
@@ -5895,6 +5923,12 @@
               }
             ]
           },
+          "external_databases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedExternalDatabaseAttachment"
+            }
+          },
           "fallback_models": {
             "type": [
               "array",
@@ -6199,16 +6233,6 @@
           "status": {
             "$ref": "#/components/schemas/ManagedAgentHealthStatus"
           },
-          "storage": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ManagedAgentStorageHealth"
-              }
-            ]
-          },
           "summary": {
             "$ref": "#/components/schemas/ManagedAgentHealthSummary"
           }
@@ -6268,7 +6292,6 @@
           "generated_at",
           "deployment",
           "runtime",
-          "storage",
           "connectors",
           "schedule",
           "tools",
@@ -6308,9 +6331,6 @@
           },
           "schedule": {
             "$ref": "#/components/schemas/ManagedAgentScheduleResources"
-          },
-          "storage": {
-            "$ref": "#/components/schemas/ManagedAgentObjectStorageResources"
           },
           "tools": {
             "$ref": "#/components/schemas/ManagedAgentToolResources"
@@ -6547,7 +6567,6 @@
           "generated_at",
           "status",
           "summary",
-          "storage",
           "deployments",
           "findings"
         ],
@@ -6574,9 +6593,6 @@
           },
           "status": {
             "$ref": "#/components/schemas/ManagedAgentHealthStatus"
-          },
-          "storage": {
-            "$ref": "#/components/schemas/ManagedAgentStorageHealth"
           },
           "summary": {
             "$ref": "#/components/schemas/ManagedAgentHealthSummary"
@@ -6721,61 +6737,11 @@
           "deep"
         ]
       },
-      "ManagedAgentObjectStorageResources": {
-        "type": "object",
-        "required": [
-          "scope",
-          "configured",
-          "available",
-          "bucket_count",
-          "uploaded_object_count",
-          "pending_upload_count",
-          "delete_failed_count",
-          "uploaded_bytes"
-        ],
-        "properties": {
-          "available": {
-            "type": "boolean"
-          },
-          "bucket_count": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "configured": {
-            "type": "boolean"
-          },
-          "delete_failed_count": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "pending_upload_count": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "scope": {
-            "$ref": "#/components/schemas/ManagedAgentResourceScope"
-          },
-          "uploaded_bytes": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "uploaded_object_count": {
-            "type": "integer",
-            "format": "int64"
-          }
-        }
-      },
       "ManagedAgentPrivateOutputPolicy": {
         "type": "string",
         "enum": [
           "control_plane",
           "private_session_database"
-        ]
-      },
-      "ManagedAgentResourceScope": {
-        "type": "string",
-        "enum": [
-          "organization"
         ]
       },
       "ManagedAgentRevisionChangeKind": {
@@ -7078,90 +7044,6 @@
           },
           "url_secret_key_configured": {
             "type": "boolean"
-          }
-        }
-      },
-      "ManagedAgentStorageBucketHealth": {
-        "type": "object",
-        "required": [
-          "id",
-          "slug",
-          "uploaded_object_count",
-          "uploaded_bytes",
-          "updated_at"
-        ],
-        "properties": {
-          "display_name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "uploaded_bytes": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "uploaded_object_count": {
-            "type": "integer",
-            "format": "int64"
-          }
-        }
-      },
-      "ManagedAgentStorageHealth": {
-        "type": "object",
-        "required": [
-          "configured",
-          "available",
-          "bucket_count",
-          "uploaded_object_count",
-          "pending_upload_count",
-          "delete_failed_count",
-          "uploaded_bytes",
-          "buckets"
-        ],
-        "properties": {
-          "available": {
-            "type": "boolean"
-          },
-          "bucket_count": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "buckets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ManagedAgentStorageBucketHealth"
-            }
-          },
-          "configured": {
-            "type": "boolean"
-          },
-          "delete_failed_count": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "pending_upload_count": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "uploaded_bytes": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "uploaded_object_count": {
-            "type": "integer",
-            "format": "int64"
           }
         }
       },
@@ -7613,6 +7495,38 @@
           "Expired",
           "Failed"
         ]
+      },
+      "ManagedExternalDatabaseAccess": {
+        "type": "string",
+        "enum": [
+          "read_only",
+          "read_write"
+        ]
+      },
+      "ManagedExternalDatabaseAttachment": {
+        "type": "object",
+        "required": [
+          "project_id",
+          "branch_id",
+          "database"
+        ],
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/ManagedExternalDatabaseAccess"
+          },
+          "branch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "database": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
       },
       "OrchestrationMode": {
         "type": "string",
@@ -8296,11 +8210,18 @@
             ]
           },
           "config": {
-            "description": "Arbitrary operator-supplied configuration passed to the runtime."
+            "description": "Non-secret operator-supplied configuration passed to the workload runtime."
           },
           "execution": {
             "$ref": "#/components/schemas/WorkloadExecution",
             "description": "Execution strategy -- either LLM-orchestrated or artifact-bundle backed."
+          },
+          "external_databases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedExternalDatabaseAttachment"
+            },
+            "description": "Explicit existing SerenDB targets attached to this workload. Skill-declared\norganization and user databases do not require physical target configuration."
           },
           "limits": {
             "$ref": "#/components/schemas/WorkloadLimits",

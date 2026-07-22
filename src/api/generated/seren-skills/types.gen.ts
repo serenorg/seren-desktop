@@ -123,6 +123,398 @@ export type CreateVersionResponse = {
     version?: null | SkillVersion;
 };
 
+export type DataResponseAuthorIdentity = {
+    data: {
+        display_name: string;
+        git_email: string;
+        updated_at: string;
+        user_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseChatDraftResponse = {
+    data: {
+        base_version_id: string;
+        created_at: string;
+        editor_user_id: string;
+        id: string;
+        session_id: string;
+        skill_id: string;
+        status: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseCollaborator = {
+    data: {
+        granted_at: string;
+        granted_by_user_id: string;
+        role: string;
+        skill_id: string;
+        user_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseCreateVersionResponse = {
+    data: {
+        draft?: null | ChatDraftResponse;
+        merge_state?: null | MergeStateResponse;
+        status: string;
+        version?: null | SkillVersion;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseFileEditResponse = {
+    /**
+     * Per-file edit response. `unchanged: true` means the resulting
+     * bundle hash matches the current version's `content_hash_bundle`
+     * and no new version was written; `version` then carries the
+     * existing current version. On conflict, `status = "conflict"` and
+     * `draft` + `merge_state` come from the standard chat-conflict
+     * pipeline reused from `create_version`.
+     */
+    data: {
+        draft?: null | ChatDraftResponse;
+        merge_state?: null | MergeStateResponse;
+        status: string;
+        unchanged: boolean;
+        version?: null | SkillVersion;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseGetFileResponse = {
+    /**
+     * `GET /skills/{slug}/files/{path...}` response: one file's bytes.
+     */
+    data: {
+        content_b64: string;
+        content_hash: string;
+        is_binary: boolean;
+        mode: number;
+        path: string;
+        version?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseMergeStateResponse = {
+    data: {
+        base_version_id: string;
+        chat_draft_id?: string | null;
+        conflict_count: number;
+        created_at: string;
+        editor_user_id: string;
+        id: string;
+        incoming_version_id: string;
+        merged_content_doc: unknown;
+        merged_skill_md: string;
+        resolved_at?: string | null;
+        skill_id: string;
+        update_request_id?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseOrphanFoldersResponse = {
+    data: {
+        head_commit_sha: string;
+        head_tree_sha: string;
+        orphan_folders: Array<OrphanFolderEntry>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponsePurchaseResponse = {
+    data: {
+        access_granted: boolean;
+        charge_id?: string | null;
+        purchase_id?: string | null;
+        skill_id: string;
+        source: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseSkillBundle = {
+    data: {
+        content_hash: string;
+        /**
+         * Full-bundle freshness token (issue #57): hex of the version's
+         * `content_hash_bundle`, the SHA-256 fingerprint over SKILL.md **and
+         * every file's bytes** ([`crate::content::compute_content_hash_bundle`]).
+         * Unlike `content_hash` (SKILL.md + manifest only), this moves on any
+         * file-body change, so installs must key their sync-revision compare on
+         * this field — not `content_hash` — to detect code-only updates.
+         * Empty only for the impossible case of a version predating migration
+         * 010, which made the column `NOT NULL`.
+         */
+        content_hash_bundle?: string;
+        /**
+         * Non-SKILL.md files attached to the version. Empty for versions that
+         * predate bundle persistence.
+         */
+        files?: Array<SkillBundleFile>;
+        manifest: unknown;
+        skill: SkillSummary;
+        skill_md: string;
+        version: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseSkillBundleFileDownload = {
+    /**
+     * Single-file body returned by `GET /skills/{slug}/download/file`.
+     * Shares the [`SkillBundleFile`] field shape (path + base64 body +
+     * per-file hash + mode + is_binary) and adds the bundle `version` so a
+     * client can detect a publish that landed between its manifest fetch
+     * and this body fetch (version mismatch -> restart from the manifest).
+     */
+    data: {
+        content_b64: string;
+        content_hash: string;
+        is_binary: boolean;
+        mode: number;
+        path: string;
+        version: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseSkillBundleManifest = {
+    /**
+     * Split-download manifest (issue #53): the same envelope as
+     * [`SkillBundle`] but every entry in `files` carries *metadata only* —
+     * no `content_b64` body. Clients fetch each body separately via
+     * `GET /skills/{slug}/download/file?path=...`, keeping every response
+     * under the gateway's per-response byte cap even for bundles whose
+     * single-shot `/download` JSON would exceed it.
+     */
+    data: {
+        content_hash: string;
+        /**
+         * Full-bundle freshness token (issue #57): hex of the version's
+         * `content_hash_bundle`. Identical semantics to [`SkillBundle::content_hash_bundle`]
+         * — the split-download client keys its sync-revision compare on this
+         * field so a code-only publish (SKILL.md/manifest unchanged) is detected.
+         */
+        content_hash_bundle?: string;
+        /**
+         * Per-file metadata with no bodies. Empty for versions that predate
+         * bundle persistence.
+         */
+        files?: Array<SkillBundleManifestFile>;
+        manifest: unknown;
+        skill: SkillSummary;
+        skill_md: string;
+        version: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseSkillDetail = {
+    data: SkillSummary & {
+        access: SkillAccess;
+        latest_version?: null | SkillVersion;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseSkillEditDocument = {
+    /**
+     * Editor-facing payload: ProseMirror document tree for the rich-text editor
+     * plus the parsed frontmatter as JSON. Returned by GET /skills/{slug}/edit
+     * and accepted by POST /skills/{slug}/versions when a client wants to write
+     * the document directly instead of round-tripping through markdown.
+     */
+    data: {
+        content_doc: unknown;
+        content_hash?: string | null;
+        current_version_id?: string | null;
+        frontmatter: unknown;
+        skill: SkillSummary;
+        version?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseUpdateRequest = {
+    data: {
+        base_version_id?: string | null;
+        body: string;
+        created_at: string;
+        id: string;
+        proposed_content_hash?: string | null;
+        proposer_user_id: string;
+        skill_id: string;
+        status: string;
+        title: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseUpdateRequestDetail = {
+    data: UpdateRequest & {
+        base_version?: null | SkillVersion;
+        proposed_content_doc?: unknown;
+        proposed_frontmatter?: unknown;
+        proposed_skill_md?: string | null;
+        skill: SkillSummary;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseUpdateRequestDiff = {
+    data: {
+        base_skill_md?: string | null;
+        base_version_id?: string | null;
+        current_version_id?: string | null;
+        is_outdated: boolean;
+        proposed_skill_md?: string | null;
+        request_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseUsageSummaryResponse = {
+    data: {
+        month: string;
+        note: string;
+        rows: Array<UsageSummaryRow>;
+        total_amount_atomic: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseValue = {
+    data: unknown;
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseVecCollaborator = {
+    data: Array<{
+        granted_at: string;
+        granted_by_user_id: string;
+        role: string;
+        skill_id: string;
+        user_id: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseVecFileListing = {
+    data: Array<{
+        content_hash: string;
+        is_binary: boolean;
+        mode: number;
+        path: string;
+        preview?: string | null;
+        size_bytes: number;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseVecSkillSummary = {
+    data: Array<{
+        created_at: string;
+        created_by_user_id: string;
+        current_version?: string | null;
+        current_version_id?: string | null;
+        deleted_at?: string | null;
+        description: string;
+        discoverability: SkillDiscoverability;
+        /**
+         * Per-skill override for the GitHub mirror folder. When set, takes
+         * precedence over `skill_org_folders.folder_slug`. `None` means
+         * fall through to the org default. See migration 009 + issue #17.
+         */
+        folder_slug?: string | null;
+        github_mirror_health: GithubMirrorHealth;
+        id: string;
+        install_count: number;
+        name: string;
+        owner_kind: SkillOwnerKind;
+        owner_organization_id: string;
+        owner_user_id?: string | null;
+        price_cents: number;
+        seren_bounty_campaign_id?: string | null;
+        skill_folder_name: string;
+        slug: string;
+        sponsor_mode: SkillSponsorMode;
+        sponsor_referral_code?: string | null;
+        sponsor_static?: unknown;
+        status: SkillStatus;
+        tags?: Array<string>;
+        updated_at: string;
+        visibility: SkillVisibility;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseVecSkillVersion = {
+    data: Array<{
+        changelog?: string | null;
+        content_hash: string;
+        created_at: string;
+        created_by_user_id: string;
+        id: string;
+        manifest: unknown;
+        review_status: string;
+        skill_id: string;
+        version: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseVecUpdateRequest = {
+    data: Array<{
+        base_version_id?: string | null;
+        body: string;
+        created_at: string;
+        id: string;
+        proposed_content_hash?: string | null;
+        proposer_user_id: string;
+        skill_id: string;
+        status: string;
+        title: string;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseVecUpdateRequestComment = {
+    data: Array<{
+        author_user_id: string;
+        body: string;
+        created_at: string;
+        id: string;
+        request_id: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseVecUsageEvent = {
+    data: Array<{
+        amount_atomic: number;
+        billing_charge_id?: string | null;
+        billing_status: string;
+        created_at: string;
+        event_type: string;
+        id: string;
+        organization_id: string;
+        skill_id?: string | null;
+        units: number;
+        user_id: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
 /**
  * `DELETE /skills/{slug}/files/{path...}` body.
  */
@@ -148,8 +540,8 @@ export type FileEditResponse = {
 };
 
 /**
- * One row in the [`ListFilesResponse`]. `preview` is the first 200
- * chars of the file when it is text; `null` for binaries.
+ * One row in the file listing. `preview` is the first 200 chars of the
+ * file when it is text; `null` for binaries.
  */
 export type FileListing = {
     content_hash: string;
@@ -207,18 +599,6 @@ export type GithubPublishStatusResponse = {
     version_id: string;
 };
 
-export type ListCollaboratorsResponse = {
-    collaborators: Array<Collaborator>;
-};
-
-/**
- * `GET /skills/{slug}/files` response: every path in the current
- * bundle including a synthetic `SKILL.md` entry for completeness.
- */
-export type ListFilesResponse = {
-    files: Array<FileListing>;
-};
-
 export type ListSkillsQuery = {
     limit?: number | null;
     mine?: boolean | null;
@@ -228,40 +608,7 @@ export type ListSkillsQuery = {
     visibility?: null | SkillVisibility;
 };
 
-export type ListSkillsResponse = {
-    /**
-     * True when more pages remain after this one. Equivalent to
-     * `offset + skills.len() < total`, exposed so callers (and LLM
-     * agents reading SKILL.md) don't have to compute the loop
-     * condition themselves.
-     */
-    has_more: boolean;
-    /**
-     * The `offset` value to pass on the next request to continue
-     * paging, or `None` when the catalog is exhausted.
-     */
-    next_offset?: number | null;
-    skills: Array<SkillSummary>;
-    total: number;
-};
-
 export type ListSkillsSort = 'updated' | 'installs';
-
-export type ListUpdateRequestCommentsResponse = {
-    comments: Array<UpdateRequestComment>;
-};
-
-export type ListUpdateRequestsResponse = {
-    update_requests: Array<UpdateRequest>;
-};
-
-export type ListUsageEventsResponse = {
-    events: Array<UsageEvent>;
-};
-
-export type ListVersionsResponse = {
-    versions: Array<SkillVersion>;
-};
 
 export type MergeStateResponse = {
     base_version_id: string;
@@ -293,6 +640,14 @@ export type OrphanFoldersResponse = {
     head_commit_sha: string;
     head_tree_sha: string;
     orphan_folders: Array<OrphanFolderEntry>;
+};
+
+export type PaginationMeta = {
+    count: number;
+    has_more: boolean;
+    limit: number;
+    offset: number;
+    total: number;
 };
 
 export type PurchaseResponse = {
@@ -371,6 +726,17 @@ export type SkillAccess = {
 export type SkillBundle = {
     content_hash: string;
     /**
+     * Full-bundle freshness token (issue #57): hex of the version's
+     * `content_hash_bundle`, the SHA-256 fingerprint over SKILL.md **and
+     * every file's bytes** ([`crate::content::compute_content_hash_bundle`]).
+     * Unlike `content_hash` (SKILL.md + manifest only), this moves on any
+     * file-body change, so installs must key their sync-revision compare on
+     * this field — not `content_hash` — to detect code-only updates.
+     * Empty only for the impossible case of a version predating migration
+     * 010, which made the column `NOT NULL`.
+     */
+    content_hash_bundle?: string;
+    /**
      * Non-SKILL.md files attached to the version. Empty for versions that
      * predate bundle persistence.
      */
@@ -415,6 +781,13 @@ export type SkillBundleFileDownload = {
  */
 export type SkillBundleManifest = {
     content_hash: string;
+    /**
+     * Full-bundle freshness token (issue #57): hex of the version's
+     * `content_hash_bundle`. Identical semantics to [`SkillBundle::content_hash_bundle`]
+     * — the split-download client keys its sync-revision compare on this
+     * field so a code-only publish (SKILL.md/manifest unchanged) is detected.
+     */
+    content_hash_bundle?: string;
     /**
      * Per-file metadata with no bodies. Empty for versions that predate
      * bundle persistence.
@@ -642,9 +1015,7 @@ export type PublisherRootResponses = {
     /**
      * Publisher metadata
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type PublisherRootResponse = PublisherRootResponses[keyof PublisherRootResponses];
@@ -667,7 +1038,7 @@ export type ListOrphanFoldersResponses = {
     /**
      * Operator orphan-folders inventory
      */
-    200: OrphanFoldersResponse;
+    200: DataResponseOrphanFoldersResponse;
 };
 
 export type ListOrphanFoldersResponse = ListOrphanFoldersResponses[keyof ListOrphanFoldersResponses];
@@ -683,7 +1054,7 @@ export type GetAuthorIdentityResponses = {
     /**
      * Git author identity
      */
-    200: AuthorIdentity;
+    200: DataResponseAuthorIdentity;
 };
 
 export type GetAuthorIdentityResponse = GetAuthorIdentityResponses[keyof GetAuthorIdentityResponses];
@@ -699,7 +1070,7 @@ export type UpsertAuthorIdentityResponses = {
     /**
      * Upserted Git author identity
      */
-    200: AuthorIdentity;
+    200: DataResponseAuthorIdentity;
 };
 
 export type UpsertAuthorIdentityResponse = UpsertAuthorIdentityResponses[keyof UpsertAuthorIdentityResponses];
@@ -720,9 +1091,7 @@ export type GetOrgFolderResponses = {
     /**
      * Organization folder
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type GetOrgFolderResponse = GetOrgFolderResponses[keyof GetOrgFolderResponses];
@@ -743,9 +1112,7 @@ export type UpdateOrgFolderResponses = {
     /**
      * Organization folder
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type UpdateOrgFolderResponse = UpdateOrgFolderResponses[keyof UpdateOrgFolderResponses];
@@ -766,9 +1133,7 @@ export type CreateOrgFolderResponses = {
     /**
      * Organization folder
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type CreateOrgFolderResponse = CreateOrgFolderResponses[keyof CreateOrgFolderResponses];
@@ -789,9 +1154,7 @@ export type ReplaceOrgFolderResponses = {
     /**
      * Organization folder
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type ReplaceOrgFolderResponse = ReplaceOrgFolderResponses[keyof ReplaceOrgFolderResponses];
@@ -827,9 +1190,7 @@ export type TransferOrgFolderResponses = {
     /**
      * Organization folder
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type TransferOrgFolderResponse = TransferOrgFolderResponses[keyof TransferOrgFolderResponses];
@@ -866,10 +1227,10 @@ export type ListSkillsResponses = {
     /**
      * Skills
      */
-    200: ListSkillsResponse;
+    200: DataResponseVecSkillSummary;
 };
 
-export type ListSkillsResponse2 = ListSkillsResponses[keyof ListSkillsResponses];
+export type ListSkillsResponse = ListSkillsResponses[keyof ListSkillsResponses];
 
 export type CreateSkillData = {
     body: CreateSkillRequest;
@@ -882,7 +1243,7 @@ export type CreateSkillResponses = {
     /**
      * Created skill
      */
-    200: SkillDetail;
+    200: DataResponseSkillDetail;
 };
 
 export type CreateSkillResponse = CreateSkillResponses[keyof CreateSkillResponses];
@@ -903,9 +1264,7 @@ export type DeleteSkillResponses = {
     /**
      * Soft-deleted skill
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type DeleteSkillResponse = DeleteSkillResponses[keyof DeleteSkillResponses];
@@ -926,7 +1285,7 @@ export type GetSkillResponses = {
     /**
      * Skill detail
      */
-    200: SkillDetail;
+    200: DataResponseSkillDetail;
 };
 
 export type GetSkillResponse = GetSkillResponses[keyof GetSkillResponses];
@@ -947,7 +1306,7 @@ export type UpdateSkillResponses = {
     /**
      * Updated skill
      */
-    200: SkillDetail;
+    200: DataResponseSkillDetail;
 };
 
 export type UpdateSkillResponse = UpdateSkillResponses[keyof UpdateSkillResponses];
@@ -968,10 +1327,10 @@ export type ListCollaboratorsResponses = {
     /**
      * Skill collaborators
      */
-    200: ListCollaboratorsResponse;
+    200: DataResponseVecCollaborator;
 };
 
-export type ListCollaboratorsResponse2 = ListCollaboratorsResponses[keyof ListCollaboratorsResponses];
+export type ListCollaboratorsResponse = ListCollaboratorsResponses[keyof ListCollaboratorsResponses];
 
 export type DeleteCollaboratorData = {
     body?: never;
@@ -993,9 +1352,7 @@ export type DeleteCollaboratorResponses = {
     /**
      * Deleted collaborator
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type DeleteCollaboratorResponse = DeleteCollaboratorResponses[keyof DeleteCollaboratorResponses];
@@ -1020,7 +1377,7 @@ export type UpsertCollaboratorResponses = {
     /**
      * Upserted collaborator
      */
-    200: Collaborator;
+    200: DataResponseCollaborator;
 };
 
 export type UpsertCollaboratorResponse = UpsertCollaboratorResponses[keyof UpsertCollaboratorResponses];
@@ -1041,7 +1398,7 @@ export type DownloadSkillResponses = {
     /**
      * Downloadable skill bundle
      */
-    200: SkillBundle;
+    200: DataResponseSkillBundle;
 };
 
 export type DownloadSkillResponse = DownloadSkillResponses[keyof DownloadSkillResponses];
@@ -1067,7 +1424,7 @@ export type DownloadSkillFileResponses = {
     /**
      * One bundle file body
      */
-    200: SkillBundleFileDownload;
+    200: DataResponseSkillBundleFileDownload;
 };
 
 export type DownloadSkillFileResponse = DownloadSkillFileResponses[keyof DownloadSkillFileResponses];
@@ -1088,7 +1445,7 @@ export type DownloadSkillManifestResponses = {
     /**
      * Bundle manifest without file bodies
      */
-    200: SkillBundleManifest;
+    200: DataResponseSkillBundleManifest;
 };
 
 export type DownloadSkillManifestResponse = DownloadSkillManifestResponses[keyof DownloadSkillManifestResponses];
@@ -1113,7 +1470,7 @@ export type GetDraftResponses = {
     /**
      * Chat conflict draft
      */
-    200: ChatDraftResponse;
+    200: DataResponseChatDraftResponse;
 };
 
 export type GetDraftResponse = GetDraftResponses[keyof GetDraftResponses];
@@ -1138,7 +1495,7 @@ export type GetMergeStateResponses = {
     /**
      * Merge state
      */
-    200: MergeStateResponse;
+    200: DataResponseMergeStateResponse;
 };
 
 export type GetMergeStateResponse = GetMergeStateResponses[keyof GetMergeStateResponses];
@@ -1163,7 +1520,7 @@ export type ResolveConflictResponses = {
     /**
      * Resolved conflict version
      */
-    200: CreateVersionResponse;
+    200: DataResponseCreateVersionResponse;
 };
 
 export type ResolveConflictResponse = ResolveConflictResponses[keyof ResolveConflictResponses];
@@ -1191,7 +1548,7 @@ export type GetSkillEditDocumentResponses = {
     /**
      * Editor-facing document
      */
-    200: SkillEditDocument;
+    200: DataResponseSkillEditDocument;
 };
 
 export type GetSkillEditDocumentResponse = GetSkillEditDocumentResponses[keyof GetSkillEditDocumentResponses];
@@ -1212,10 +1569,10 @@ export type ListFilesResponses = {
     /**
      * Bundle file listing
      */
-    200: ListFilesResponse;
+    200: DataResponseVecFileListing;
 };
 
-export type ListFilesResponse2 = ListFilesResponses[keyof ListFilesResponses];
+export type ListFilesResponse = ListFilesResponses[keyof ListFilesResponses];
 
 export type DeleteFileData = {
     body: DeleteFileRequest;
@@ -1237,7 +1594,7 @@ export type DeleteFileResponses = {
     /**
      * Per-file delete result
      */
-    200: FileEditResponse;
+    200: DataResponseFileEditResponse;
 };
 
 export type DeleteFileResponse = DeleteFileResponses[keyof DeleteFileResponses];
@@ -1262,7 +1619,7 @@ export type GetFileResponses = {
     /**
      * Single bundle file
      */
-    200: GetFileResponse;
+    200: DataResponseGetFileResponse;
 };
 
 export type GetFileResponse2 = GetFileResponses[keyof GetFileResponses];
@@ -1287,7 +1644,7 @@ export type PutFileResponses = {
     /**
      * Per-file edit result
      */
-    200: FileEditResponse;
+    200: DataResponseFileEditResponse;
 };
 
 export type PutFileResponse = PutFileResponses[keyof PutFileResponses];
@@ -1308,9 +1665,7 @@ export type GithubStatusResponses = {
     /**
      * GitHub publish ledger
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type GithubStatusResponse = GithubStatusResponses[keyof GithubStatusResponses];
@@ -1342,9 +1697,7 @@ export type ReconcileOrphansResponses = {
     /**
      * Reconcile result
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type ReconcileOrphansResponse = ReconcileOrphansResponses[keyof ReconcileOrphansResponses];
@@ -1365,9 +1718,7 @@ export type RetryGithubPublishResponses = {
     /**
      * GitHub publish retry queued
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type RetryGithubPublishResponse = RetryGithubPublishResponses[keyof RetryGithubPublishResponses];
@@ -1388,9 +1739,7 @@ export type SyncFromMainResponses = {
     /**
      * GitHub sync-from-main result
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type SyncFromMainResponse = SyncFromMainResponses[keyof SyncFromMainResponses];
@@ -1418,7 +1767,7 @@ export type PurchaseSkillResponses = {
     /**
      * Purchase result
      */
-    200: PurchaseResponse;
+    200: DataResponsePurchaseResponse;
 };
 
 export type PurchaseSkillResponse = PurchaseSkillResponses[keyof PurchaseSkillResponses];
@@ -1439,7 +1788,7 @@ export type UpdateSponsorResponses = {
     /**
      * Updated sponsor settings
      */
-    200: SkillDetail;
+    200: DataResponseSkillDetail;
 };
 
 export type UpdateSponsorResponse = UpdateSponsorResponses[keyof UpdateSponsorResponses];
@@ -1460,10 +1809,10 @@ export type ListUpdateRequestsResponses = {
     /**
      * Update requests
      */
-    200: ListUpdateRequestsResponse;
+    200: DataResponseVecUpdateRequest;
 };
 
-export type ListUpdateRequestsResponse2 = ListUpdateRequestsResponses[keyof ListUpdateRequestsResponses];
+export type ListUpdateRequestsResponse = ListUpdateRequestsResponses[keyof ListUpdateRequestsResponses];
 
 export type CreateUpdateRequestData = {
     body: CreateUpdateRequest;
@@ -1481,7 +1830,7 @@ export type CreateUpdateRequestResponses = {
     /**
      * Created update request
      */
-    200: UpdateRequest;
+    200: DataResponseUpdateRequest;
 };
 
 export type CreateUpdateRequestResponse = CreateUpdateRequestResponses[keyof CreateUpdateRequestResponses];
@@ -1502,10 +1851,10 @@ export type ListVersionsResponses = {
     /**
      * Skill versions
      */
-    200: ListVersionsResponse;
+    200: DataResponseVecSkillVersion;
 };
 
-export type ListVersionsResponse2 = ListVersionsResponses[keyof ListVersionsResponses];
+export type ListVersionsResponse = ListVersionsResponses[keyof ListVersionsResponses];
 
 export type CreateVersionData = {
     body: CreateVersionRequest;
@@ -1523,7 +1872,7 @@ export type CreateVersionResponses = {
     /**
      * Created skill version or conflict draft
      */
-    200: CreateVersionResponse;
+    200: DataResponseCreateVersionResponse;
 };
 
 export type CreateVersionResponse2 = CreateVersionResponses[keyof CreateVersionResponses];
@@ -1548,9 +1897,7 @@ export type GetVersionManifestResponses = {
     /**
      * Version manifest
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type GetVersionManifestResponse = GetVersionManifestResponses[keyof GetVersionManifestResponses];
@@ -1571,7 +1918,7 @@ export type GetUpdateRequestResponses = {
     /**
      * Update request detail
      */
-    200: UpdateRequestDetail;
+    200: DataResponseUpdateRequestDetail;
 };
 
 export type GetUpdateRequestResponse = GetUpdateRequestResponses[keyof GetUpdateRequestResponses];
@@ -1592,7 +1939,7 @@ export type AcceptUpdateRequestResponses = {
     /**
      * Accepted update request
      */
-    200: UpdateRequest;
+    200: DataResponseUpdateRequest;
 };
 
 export type AcceptUpdateRequestResponse = AcceptUpdateRequestResponses[keyof AcceptUpdateRequestResponses];
@@ -1613,10 +1960,10 @@ export type ListUpdateRequestCommentsResponses = {
     /**
      * Update request comments
      */
-    200: ListUpdateRequestCommentsResponse;
+    200: DataResponseVecUpdateRequestComment;
 };
 
-export type ListUpdateRequestCommentsResponse2 = ListUpdateRequestCommentsResponses[keyof ListUpdateRequestCommentsResponses];
+export type ListUpdateRequestCommentsResponse = ListUpdateRequestCommentsResponses[keyof ListUpdateRequestCommentsResponses];
 
 export type CreateUpdateRequestCommentData = {
     body: CreateCommentRequest;
@@ -1634,9 +1981,7 @@ export type CreateUpdateRequestCommentResponses = {
     /**
      * Created comment
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: DataResponseValue;
 };
 
 export type CreateUpdateRequestCommentResponse = CreateUpdateRequestCommentResponses[keyof CreateUpdateRequestCommentResponses];
@@ -1657,7 +2002,7 @@ export type GetUpdateRequestDiffResponses = {
     /**
      * Update request diff payload
      */
-    200: UpdateRequestDiff;
+    200: DataResponseUpdateRequestDiff;
 };
 
 export type GetUpdateRequestDiffResponse = GetUpdateRequestDiffResponses[keyof GetUpdateRequestDiffResponses];
@@ -1678,7 +2023,7 @@ export type RejectUpdateRequestResponses = {
     /**
      * Rejected update request
      */
-    200: UpdateRequest;
+    200: DataResponseUpdateRequest;
 };
 
 export type RejectUpdateRequestResponse = RejectUpdateRequestResponses[keyof RejectUpdateRequestResponses];
@@ -1697,10 +2042,10 @@ export type ListUsageEventsResponses = {
     /**
      * Usage events
      */
-    200: ListUsageEventsResponse;
+    200: DataResponseVecUsageEvent;
 };
 
-export type ListUsageEventsResponse2 = ListUsageEventsResponses[keyof ListUsageEventsResponses];
+export type ListUsageEventsResponse = ListUsageEventsResponses[keyof ListUsageEventsResponses];
 
 export type UsageSummaryData = {
     body?: never;
@@ -1713,7 +2058,7 @@ export type UsageSummaryResponses = {
     /**
      * Current-month usage totals
      */
-    200: UsageSummaryResponse;
+    200: DataResponseUsageSummaryResponse;
 };
 
 export type UsageSummaryResponse2 = UsageSummaryResponses[keyof UsageSummaryResponses];

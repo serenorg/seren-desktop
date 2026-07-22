@@ -3563,6 +3563,8 @@ export type LsnByTimestamp = {
     lsn: string;
 };
 
+export type ManagedSkillDatabaseScope = 'organization' | 'user';
+
 /**
  * Pagination metadata included in responses.
  */
@@ -3724,13 +3726,17 @@ export type QueryRequest = {
      */
     branch_id?: string | null;
     /**
-     * Target database name (defaults to "serendb")
+     * Explicit target database name for user access or an attached existing database.
      */
-    database?: string;
+    database?: string | null;
     /**
-     * Project ID (required)
+     * Database identifier declared by the skill.
      */
-    project_id: string;
+    database_identifier?: string | null;
+    /**
+     * Explicit target project ID for user access or an attached existing database.
+     */
+    project_id?: string | null;
     /**
      * SQL query to execute
      */
@@ -3740,6 +3746,11 @@ export type QueryRequest = {
      * run read-only and all other statements run read-write.
      */
     read_only?: boolean | null;
+    scope?: null | ManagedSkillDatabaseScope;
+    /**
+     * Canonical skill slug that owns a platform-managed skill database.
+     */
+    skill_slug?: string | null;
 };
 
 /**

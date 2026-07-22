@@ -52,6 +52,8 @@ Define a cloud employee once - with its own identity, instructions, skills, and 
 - Build custom employees for research, writing, operations, finance, support, security, or product work
 - Import employee bundles with files like `SKILL.md`, `IDENTITY.md`, `SOUL.md`, and supporting resources
 - Keep each employee's instructions and tools together so demos, handoffs, and recurring workflows are easy to reproduce
+- Give skills automatic organization- or user-scoped database storage without configuring physical database credentials
+- Add third-party credentials through scoped connector and Passwords flows without copying a personal Seren API key into an employee script
 - Run employees in Seren Cloud for longer-running work that should continue outside the desktop app
 
 ### Join bounties

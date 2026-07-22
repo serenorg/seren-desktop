@@ -57,6 +57,23 @@ function skillSummary(slug: string, tags: string[] = []) {
   };
 }
 
+function catalogResponse(
+  skills: object[],
+  total: number,
+  offset = 0,
+) {
+  return {
+    data: skills,
+    pagination: {
+      count: skills.length,
+      has_more: offset + skills.length < total,
+      limit: 100,
+      offset,
+      total,
+    },
+  };
+}
+
 describe("skills.fetchIndex via Seren Skills API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -79,10 +96,10 @@ describe("skills.fetchIndex via Seren Skills API", () => {
   it("stops when a paginated catalog response returns an empty page before total", async () => {
     mockListSkills
       .mockResolvedValueOnce({
-        data: { skills: [skillSummary("skill-a")], total: 3 },
+        data: catalogResponse([skillSummary("skill-a")], 3),
       })
       .mockResolvedValueOnce({
-        data: { skills: [], total: 3 },
+        data: catalogResponse([], 3, 1),
       });
 
     const { skills } = await import("@/services/skills");
@@ -103,10 +120,10 @@ describe("skills.fetchIndex via Seren Skills API", () => {
 
   it("preserves frontmatter tags from catalog summaries", async () => {
     mockListSkills.mockResolvedValueOnce({
-      data: {
-        skills: [skillSummary("recorded-workflow", ["recorded", "unverified"])],
-        total: 1,
-      },
+      data: catalogResponse(
+        [skillSummary("recorded-workflow", ["recorded", "unverified"])],
+        1,
+      ),
     });
 
     const { skills } = await import("@/services/skills");
@@ -127,8 +144,8 @@ describe("skills.fetchIndex via Seren Skills API", () => {
     // The desktop reconciles installed ↔ catalog by either signal, so the
     // adapter must keep them distinct.
     mockListSkills.mockResolvedValueOnce({
-      data: {
-        skills: [
+      data: catalogResponse(
+        [
           {
             ...skillSummary("pk-lead-intelligence"),
             folder_slug: "autumn",
@@ -136,8 +153,8 @@ describe("skills.fetchIndex via Seren Skills API", () => {
             skill_folder_name: "pk-lead-intelligence",
           },
         ],
-        total: 1,
-      },
+        1,
+      ),
     });
 
     const { skills } = await import("@/services/skills");
@@ -160,7 +177,7 @@ describe("skills.fetchIndex via Seren Skills API", () => {
       }),
     );
     mockListSkills.mockResolvedValueOnce({
-      data: { skills: [skillSummary("skill-a")], total: 1 },
+      data: catalogResponse([skillSummary("skill-a")], 1),
     });
 
     const { skills } = await import("@/services/skills");
@@ -184,17 +201,9 @@ describe("skills.fetchIndex via Seren Skills API", () => {
     );
   });
 
-  it("handles catalog responses wrapped in a data object", async () => {
+  it("reads catalog records and totals from DataResponse", async () => {
     mockListSkills.mockResolvedValueOnce({
-      data: {
-        data: {
-          data: {
-            data: {
-              data: { skills: [skillSummary("skill-a")], total: 1 },
-            },
-          },
-        },
-      },
+      data: catalogResponse([skillSummary("skill-a")], 1),
     });
 
     const { skills } = await import("@/services/skills");
@@ -206,13 +215,21 @@ describe("skills.fetchIndex via Seren Skills API", () => {
 
   it("throws a clear error for malformed catalog responses", async () => {
     mockListSkills.mockResolvedValueOnce({
-      data: { total: 1 },
+      data: {
+        pagination: {
+          count: 0,
+          has_more: true,
+          limit: 100,
+          offset: 0,
+          total: 1,
+        },
+      },
     });
 
     const { skills } = await import("@/services/skills");
 
     await expect(skills.fetchIndex(true)).rejects.toThrow(
-      "Unexpected seren-skills catalog response: total",
+      "Unexpected seren-skills catalog response: pagination",
     );
   });
 });

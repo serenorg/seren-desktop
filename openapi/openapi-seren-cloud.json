@@ -13691,6 +13691,38 @@
           }
         }
       },
+      "ManagedExternalDatabaseAccess": {
+        "type": "string",
+        "enum": [
+          "read_only",
+          "read_write"
+        ]
+      },
+      "ManagedExternalDatabaseAttachment": {
+        "type": "object",
+        "required": [
+          "project_id",
+          "branch_id",
+          "database"
+        ],
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/ManagedExternalDatabaseAccess"
+          },
+          "branch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "database": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
       "ManagedStorageAttachment": {
         "type": "object",
         "required": [
@@ -14565,11 +14597,18 @@
             ]
           },
           "config": {
-            "description": "Arbitrary operator-supplied configuration passed to the runtime."
+            "description": "Non-secret operator-supplied configuration passed to the workload runtime."
           },
           "execution": {
             "$ref": "#/components/schemas/WorkloadExecution",
             "description": "Execution strategy -- either LLM-orchestrated or artifact-bundle backed."
+          },
+          "external_databases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedExternalDatabaseAttachment"
+            },
+            "description": "Explicit existing SerenDB targets attached to this workload. Skill-declared\norganization and user databases do not require physical target configuration."
           },
           "limits": {
             "$ref": "#/components/schemas/WorkloadLimits",

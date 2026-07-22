@@ -551,14 +551,17 @@ function findApiResultFailure(
 function normalizeSkillsCatalogPage(
   value: unknown,
 ): SkillsCatalogResponsePage | null {
-  return findInResponseEnvelopes(value, (candidate) => {
-    const page = candidate as { skills?: unknown; total?: unknown };
-    if (!Array.isArray(page.skills)) return null;
-    return {
-      skills: page.skills as SkillSummary[],
-      total: typeof page.total === "number" ? page.total : page.skills.length,
-    };
-  });
+  if (!value || typeof value !== "object") return null;
+  const response = value as { data?: unknown; pagination?: unknown };
+  if (!Array.isArray(response.data)) return null;
+  const pagination = response.pagination as { total?: unknown } | null;
+  return {
+    skills: response.data as SkillSummary[],
+    total:
+      pagination && typeof pagination.total === "number"
+        ? pagination.total
+        : response.data.length,
+  };
 }
 
 function normalizeSkillBundle(value: unknown): SkillBundle | null {
@@ -2364,7 +2367,7 @@ export const skills = {
       const status = response ? `: ${response.status}` : "";
       throw new Error(`Failed to publish skill ${skill.slug}${status}`);
     }
-    return data;
+    return data.data;
   },
 
   /**

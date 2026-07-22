@@ -73,22 +73,31 @@ const installedSkill: InstalledSkill = {
 function publishResponse() {
   return {
     data: {
-      slug: "recorded-payroll",
-      name: "Recorded Payroll",
-      description: "Submit payroll.",
-      visibility: "private",
-      discoverability: "listed",
-      status: "published",
-      created_at: "2026-06-22T00:00:00Z",
-      created_by_user_id: "user-1",
-      github_mirror_health: "pending",
-      id: "skill-1",
-      install_count: 0,
-      owner_kind: "organization",
-      owner_organization_id: "org-1",
-      price_cents: 0,
-      skill_folder_name: "recorded-payroll",
-      updated_at: "2026-06-22T00:00:00Z",
+      data: {
+        access: {
+          can_download: true,
+          can_edit: true,
+          can_manage: true,
+          can_view: true,
+          reason: "owner",
+        },
+        slug: "recorded-payroll",
+        name: "Recorded Payroll",
+        description: "Submit payroll.",
+        visibility: "private",
+        discoverability: "listed",
+        status: "published",
+        created_at: "2026-06-22T00:00:00Z",
+        created_by_user_id: "user-1",
+        github_mirror_health: "pending",
+        id: "skill-1",
+        install_count: 0,
+        owner_kind: "organization",
+        owner_organization_id: "org-1",
+        price_cents: 0,
+        skill_folder_name: "recorded-payroll",
+        updated_at: "2026-06-22T00:00:00Z",
+      },
     },
     error: null,
     response: { status: 200 },
@@ -184,7 +193,7 @@ describe("skills publish org folder preflight", () => {
   it("does not preflight private skill publishing", async () => {
     const { skills } = await import("@/services/skills");
 
-    await skills.publishLocalSkill(installedSkill, {
+    const published = await skills.publishLocalSkill(installedSkill, {
       visibility: "private",
       version: "0.1.0",
     });
@@ -194,6 +203,10 @@ describe("skills publish org folder preflight", () => {
     expect(mockGetAuthorIdentity).not.toHaveBeenCalled();
     expect(mockUpsertAuthorIdentity).not.toHaveBeenCalled();
     expect(mockCreateSkill).toHaveBeenCalledOnce();
+    expect(published).toMatchObject({
+      id: "skill-1",
+      slug: "recorded-payroll",
+    });
   });
 
   it("preflights public skill publishing against the default organization", async () => {

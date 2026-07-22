@@ -6230,6 +6230,15 @@ export type ManagedEmployeeSecretRefsPreview = {
     secret_refs: Array<string>;
 };
 
+export type ManagedExternalDatabaseAccess = 'read_only' | 'read_write';
+
+export type ManagedExternalDatabaseAttachment = {
+    access?: ManagedExternalDatabaseAccess;
+    branch_id: string;
+    database: string;
+    project_id: string;
+};
+
 export type ManagedStorageAttachment = {
     agent_identity_id: string;
     bucket_slug: string;
@@ -6580,13 +6589,18 @@ export type WorkloadLimits = {
 export type WorkloadSpec = {
     compute_backend?: null | CloudDeploymentComputeBackend;
     /**
-     * Arbitrary operator-supplied configuration passed to the runtime.
+     * Non-secret operator-supplied configuration passed to the workload runtime.
      */
     config?: unknown;
     /**
      * Execution strategy -- either LLM-orchestrated or artifact-bundle backed.
      */
     execution: WorkloadExecution;
+    /**
+     * Explicit existing SerenDB targets attached to this workload. Skill-declared
+     * organization and user databases do not require physical target configuration.
+     */
+    external_databases?: Array<ManagedExternalDatabaseAttachment>;
     /**
      * Resource and iteration limits for the workload.
      */

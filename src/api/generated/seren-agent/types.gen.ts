@@ -164,7 +164,7 @@ export type AgentCodeExecutionCapabilityPolicy = {
 
 export type AgentCodeExecutionSandbox = 'disabled' | 'managed' | 'external';
 
-export type AgentCredentialBinding = 'env' | 'header' | 'body' | 'proxy_inject';
+export type AgentCredentialBinding = 'env' | 'reference_env' | 'header' | 'body' | 'proxy_inject';
 
 export type AgentCredentialKind = 'api_key' | 'oauth2_token' | 'basic' | 'mtls' | 'aws_sig_v4' | 'gcp_service_account';
 
@@ -515,6 +515,10 @@ export type AgentSkillSelectionPolicy = {
 
 export type AgentSkillsCapabilityPolicy = {
     enabled: boolean;
+    /**
+     * Allow the runtime to execute scripts attached to the agent bundle.
+     */
+    execute_scripts?: boolean;
     max_injected_chars?: number | null;
     selection?: AgentSkillSelectionPolicy;
 };
@@ -1394,6 +1398,7 @@ export type DataResponseManagedAgentDeploymentDetail = {
         dashboard_config?: unknown;
         deployment_id: string;
         eval_gate?: null | EvalGate;
+        external_databases?: Array<ManagedExternalDatabaseAttachment>;
         fallback_models?: Array<string> | null;
         /**
          * Guardrails attached to this deployment, when any.
@@ -1515,7 +1520,6 @@ export type DataResponseManagedAgentDeploymentHealthReport = {
         generated_at: string;
         organization_id: string;
         status: ManagedAgentHealthStatus;
-        storage?: null | ManagedAgentStorageHealth;
         summary: ManagedAgentHealthSummary;
     };
     pagination?: null | PaginationMeta;
@@ -1602,7 +1606,6 @@ export type DataResponseManagedAgentDeploymentResources = {
         organization_id: string;
         runtime: ManagedAgentRuntimeResources;
         schedule: ManagedAgentScheduleResources;
-        storage: ManagedAgentObjectStorageResources;
         tools: ManagedAgentToolResources;
     };
     pagination?: null | PaginationMeta;
@@ -1848,7 +1851,6 @@ export type DataResponseManagedAgentHealthReport = {
         generated_at: string;
         organization_id: string;
         status: ManagedAgentHealthStatus;
-        storage: ManagedAgentStorageHealth;
         summary: ManagedAgentHealthSummary;
     };
     pagination?: null | PaginationMeta;
@@ -2494,6 +2496,11 @@ export type DataResponseVecManagedAgentDeploymentRevisionSummary = {
     pagination?: null | PaginationMeta;
 };
 
+export type ErrorResponse = {
+    error: string;
+    message: string;
+};
+
 /**
  * Eval gate configuration that must pass with a fresh verdict before runs proceed.
  *
@@ -2674,6 +2681,7 @@ export type ManagedAgentDeploymentDetail = {
     dashboard_config?: unknown;
     deployment_id: string;
     eval_gate?: null | EvalGate;
+    external_databases?: Array<ManagedExternalDatabaseAttachment>;
     fallback_models?: Array<string> | null;
     /**
      * Guardrails attached to this deployment, when any.
@@ -2740,7 +2748,6 @@ export type ManagedAgentDeploymentHealthReport = {
     generated_at: string;
     organization_id: string;
     status: ManagedAgentHealthStatus;
-    storage?: null | ManagedAgentStorageHealth;
     summary: ManagedAgentHealthSummary;
 };
 
@@ -2766,7 +2773,6 @@ export type ManagedAgentDeploymentResources = {
     organization_id: string;
     runtime: ManagedAgentRuntimeResources;
     schedule: ManagedAgentScheduleResources;
-    storage: ManagedAgentObjectStorageResources;
     tools: ManagedAgentToolResources;
 };
 
@@ -2830,7 +2836,6 @@ export type ManagedAgentHealthReport = {
     generated_at: string;
     organization_id: string;
     status: ManagedAgentHealthStatus;
-    storage: ManagedAgentStorageHealth;
     summary: ManagedAgentHealthSummary;
 };
 
@@ -2865,20 +2870,7 @@ export type ManagedAgentMemoryResources = {
 
 export type ManagedAgentModelPolicy = 'fast' | 'balanced' | 'deep';
 
-export type ManagedAgentObjectStorageResources = {
-    available: boolean;
-    bucket_count: number;
-    configured: boolean;
-    delete_failed_count: number;
-    pending_upload_count: number;
-    scope: ManagedAgentResourceScope;
-    uploaded_bytes: number;
-    uploaded_object_count: number;
-};
-
 export type ManagedAgentPrivateOutputPolicy = 'control_plane' | 'private_session_database';
-
-export type ManagedAgentResourceScope = 'organization';
 
 export type ManagedAgentRevisionChangeKind = 'create' | 'update' | 'rollback';
 
@@ -2959,26 +2951,6 @@ export type ManagedAgentSessionDatabaseResource = {
     engine: ManagedAgentSessionDatabaseEngine;
     provider: ManagedAgentSessionDatabaseProvider;
     url_secret_key_configured: boolean;
-};
-
-export type ManagedAgentStorageBucketHealth = {
-    display_name?: string | null;
-    id: string;
-    slug: string;
-    updated_at: string;
-    uploaded_bytes: number;
-    uploaded_object_count: number;
-};
-
-export type ManagedAgentStorageHealth = {
-    available: boolean;
-    bucket_count: number;
-    buckets: Array<ManagedAgentStorageBucketHealth>;
-    configured: boolean;
-    delete_failed_count: number;
-    pending_upload_count: number;
-    uploaded_bytes: number;
-    uploaded_object_count: number;
 };
 
 export type ManagedAgentSummary = {
@@ -3127,6 +3099,15 @@ export type ManagedDeploymentConditionState = 'True' | 'False' | 'Unknown';
  * here only when there is a clear semantic, not for ad-hoc operator messages.
  */
 export type ManagedDeploymentConditionType = 'Accepted' | 'Ready' | 'AwaitingApproval' | 'PolicyDenied' | 'ImagePullFailed' | 'ConfigFetchFailed' | 'ReadinessProbeFailed' | 'Suspended' | 'Expired' | 'Failed';
+
+export type ManagedExternalDatabaseAccess = 'read_only' | 'read_write';
+
+export type ManagedExternalDatabaseAttachment = {
+    access?: ManagedExternalDatabaseAccess;
+    branch_id: string;
+    database: string;
+    project_id: string;
+};
 
 /**
  * Cloud deployment orchestration mode.
@@ -3382,13 +3363,18 @@ export type WorkloadLimits = {
 export type WorkloadSpec = {
     compute_backend?: null | CloudDeploymentComputeBackend;
     /**
-     * Arbitrary operator-supplied configuration passed to the runtime.
+     * Non-secret operator-supplied configuration passed to the workload runtime.
      */
     config?: unknown;
     /**
      * Execution strategy -- either LLM-orchestrated or artifact-bundle backed.
      */
     execution: WorkloadExecution;
+    /**
+     * Explicit existing SerenDB targets attached to this workload. Skill-declared
+     * organization and user databases do not require physical target configuration.
+     */
+    external_databases?: Array<ManagedExternalDatabaseAttachment>;
     /**
      * Resource and iteration limits for the workload.
      */
@@ -3441,7 +3427,13 @@ export type SerenAgentDeployErrors = {
      * Unauthorized
      */
     401: unknown;
+    /**
+     * Deployment could not be initialized
+     */
+    500: ErrorResponse;
 };
+
+export type SerenAgentDeployError = SerenAgentDeployErrors[keyof SerenAgentDeployErrors];
 
 export type SerenAgentDeployResponses = {
     /**
@@ -4137,7 +4129,13 @@ export type SerenAgentTestRunErrors = {
      * Unauthorized
      */
     401: unknown;
+    /**
+     * Draft runtime could not be initialized
+     */
+    500: ErrorResponse;
 };
+
+export type SerenAgentTestRunError = SerenAgentTestRunErrors[keyof SerenAgentTestRunErrors];
 
 export type SerenAgentTestRunResponses = {
     /**
