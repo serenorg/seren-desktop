@@ -3,7 +3,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -21,6 +22,14 @@ const AUTH_STORE: &str = "auth.json";
 // cloud call to return HTTP 401, silently falling back to local-only cache.
 // Same credential used by claude_memory.rs (fixed in #1511). Resolves #1540.
 const TOKEN_KEY: &str = "seren_api_key";
+
+static MEMORY_HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+});
 
 pub const MEMORY_MCP_TOOLS: &[&str] = &[
     "session_bootstrap",
@@ -104,7 +113,7 @@ impl MemoryState {
             }
         });
 
-        let response = reqwest::Client::new()
+        let response = MEMORY_HTTP
             .post(&url)
             .bearer_auth(client.api_key())
             .header("Accept", "application/json, text/event-stream")
