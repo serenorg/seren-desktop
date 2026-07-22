@@ -31,6 +31,13 @@ const DEFAULT_PUBLISHER_SLUG: &str = "seren-models";
 /// user gets a checkpoint message and must explicitly ask the agent to continue.
 const MAX_TOOL_ROUNDS: usize = 20;
 
+/// Conversation-history messages carried into tool-call follow-up rounds.
+/// Round 0 always sends the full history; later rounds send only this many of
+/// the most recent history messages so the prompt stays small (#1433) while the
+/// model can still resolve what the user is referring to (#3176). Roughly four
+/// exchanges — enough to hold the referent of a short follow-up prompt.
+const TOOL_ROUND_HISTORY_TAIL: usize = 8;
+
 /// Maximum number of tool calls allowed in one chat turn before checkpointing.
 const MAX_TOOL_CALLS_PER_TURN: usize = 60;
 
@@ -1191,6 +1198,47 @@ created if missing.",
         truncated
     }
 
+    /// Build the message list for a tool-call follow-up round.
+    ///
+    /// `messages` is laid out as `[system] + history.. + [current user prompt] +
+    /// live tool chain..`, with `current_prompt_start` indexing the current user
+    /// prompt. Rounds after the first keep the system prompt, the most recent
+    /// `TOOL_ROUND_HISTORY_TAIL` history messages, and the whole current chain.
+    ///
+    /// Dropping history entirely is not an option: a follow-up round is usually
+    /// the round that writes the user-facing answer, and with no history the
+    /// model answers as though the thread had just started (#3176). Keeping only
+    /// a tail preserves most of the token saving from #1433.
+    ///
+    /// The tail may not begin on a `role: "tool"` message — history carries
+    /// assistant `tool_calls` paired with their `tool` replies, and providers
+    /// reject a `tool` reply whose assistant call was cut away.
+    fn trim_history_for_tool_round(
+        messages: &[serde_json::Value],
+        current_prompt_start: usize,
+    ) -> Vec<serde_json::Value> {
+        // Nothing to trim: no system prompt, or no history between it and the
+        // current prompt.
+        if messages.is_empty() || current_prompt_start <= 1 {
+            return messages.to_vec();
+        }
+
+        let mut tail_start = current_prompt_start
+            .saturating_sub(TOOL_ROUND_HISTORY_TAIL)
+            .max(1);
+        // Skip forward over tool replies orphaned by the cut.
+        while tail_start < current_prompt_start
+            && messages[tail_start].get("role").and_then(|v| v.as_str()) == Some("tool")
+        {
+            tail_start += 1;
+        }
+
+        let mut trimmed = Vec::with_capacity(1 + messages.len() - tail_start);
+        trimmed.push(messages[0].clone()); // system prompt
+        trimmed.extend_from_slice(&messages[tail_start..]);
+        trimmed
+    }
+
     /// Check if a tool name refers to a locally-executable tool.
     /// Non-local tools (gateway__, mcp__) are routed to the frontend.
     fn is_local_tool(name: &str) -> bool {
@@ -1797,9 +1845,8 @@ impl Worker for ChatModelWorker {
         let mut tool_failure_count: usize = 0;
 
         // Track where the current prompt's messages start (after system + history).
-        // On tool-call rounds (1+), we trim old conversation history and keep only
-        // the system prompt + the current prompt's message chain. This cuts prompt
-        // tokens by ~60% on multi-round tool calls without affecting tool selection.
+        // On tool-call rounds (1+), history is trimmed down to a recent tail to cut
+        // prompt tokens (#1433) — see `trim_history_for_tool_round`.
         let current_prompt_start = messages.len().saturating_sub(1); // user message index
 
         for round in 0..=MAX_TOOL_ROUNDS {
@@ -1808,18 +1855,23 @@ impl Worker for ChatModelWorker {
                 return Ok(());
             }
 
-            // On tool-call follow-up rounds, trim old conversation history.
-            // Keep: system prompt (index 0) + messages from the current prompt onward.
-            // The model already has the tool calls and results in the message chain —
-            // it doesn't need 30K tokens of old history to process tool results.
-            let round_messages = if round > 0 && messages.len() > current_prompt_start + 1 {
-                let mut trimmed = Vec::with_capacity(1 + messages.len() - current_prompt_start);
-                trimmed.push(messages[0].clone()); // system prompt
-                trimmed.extend_from_slice(&messages[current_prompt_start..]);
-                trimmed
+            // On tool-call follow-up rounds, drop all but a recent tail of history.
+            let round_messages = if round > 0 {
+                Self::trim_history_for_tool_round(&messages, current_prompt_start)
             } else {
                 messages.clone()
             };
+            if round > 0 {
+                log::info!(
+                    "[ChatModelWorker] Round {} sending {} of {} messages ({} history retained)",
+                    round,
+                    round_messages.len(),
+                    messages.len(),
+                    round_messages
+                        .len()
+                        .saturating_sub(1 + (messages.len() - current_prompt_start)),
+                );
+            }
 
             // Build request body
             let mut body = serde_json::json!({
@@ -2284,6 +2336,81 @@ struct ChatCompletionRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `[system] + history.. + [current user prompt] + [assistant tool_calls] + [tool reply]`
+    fn tool_round_messages(history: Vec<serde_json::Value>) -> (Vec<serde_json::Value>, usize) {
+        let mut messages = vec![serde_json::json!({"role": "system", "content": "sys"})];
+        messages.extend(history);
+        messages.push(serde_json::json!({"role": "user", "content": "print the draft"}));
+        let current_prompt_start = messages.len() - 1;
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "tool_calls": [{"id": "call_live", "type": "function",
+                            "function": {"name": "gateway__gmail__get_draft", "arguments": "{}"}}]
+        }));
+        messages.push(serde_json::json!({
+            "role": "tool", "tool_call_id": "call_live", "content": "404"
+        }));
+        (messages, current_prompt_start)
+    }
+
+    #[test]
+    fn tool_round_keeps_recent_history() {
+        let history: Vec<serde_json::Value> = (0..40)
+            .map(|i| {
+                serde_json::json!({
+                    "role": if i % 2 == 0 { "user" } else { "assistant" },
+                    "content": format!("turn {i}")
+                })
+            })
+            .collect();
+        let (messages, current_prompt_start) = tool_round_messages(history);
+
+        let trimmed = ChatModelWorker::trim_history_for_tool_round(&messages, current_prompt_start);
+
+        // system + TOOL_ROUND_HISTORY_TAIL history + user prompt + assistant + tool
+        assert_eq!(trimmed.len(), 1 + TOOL_ROUND_HISTORY_TAIL + 3);
+        assert_eq!(trimmed[0]["role"], "system");
+        // The tail must be the most recent history, ending just before the prompt.
+        assert_eq!(trimmed[1]["content"], "turn 32");
+        assert_eq!(trimmed[TOOL_ROUND_HISTORY_TAIL]["content"], "turn 39");
+        assert_eq!(
+            trimmed[TOOL_ROUND_HISTORY_TAIL + 1]["content"],
+            "print the draft"
+        );
+        assert_eq!(trimmed.last().unwrap()["role"], "tool");
+    }
+
+    #[test]
+    fn tool_round_never_starts_history_on_an_orphan_tool_reply() {
+        // A cut landing mid tool-call pair would orphan the `tool` rows: the
+        // provider rejects a tool reply whose assistant call was trimmed away.
+        let mut history: Vec<serde_json::Value> = (0..40)
+            .map(|i| serde_json::json!({"role": "user", "content": format!("turn {i}")}))
+            .collect();
+        history[32] = serde_json::json!({
+            "role": "tool", "tool_call_id": "call_old", "content": "old result"
+        });
+        history[33] = serde_json::json!({
+            "role": "tool", "tool_call_id": "call_old2", "content": "old result 2"
+        });
+        let (messages, current_prompt_start) = tool_round_messages(history);
+
+        let trimmed = ChatModelWorker::trim_history_for_tool_round(&messages, current_prompt_start);
+
+        assert_eq!(trimmed[0]["role"], "system");
+        assert_eq!(trimmed[1]["role"], "user");
+        assert_eq!(trimmed[1]["content"], "turn 34");
+    }
+
+    #[test]
+    fn tool_round_with_no_history_is_unchanged() {
+        let (messages, current_prompt_start) = tool_round_messages(Vec::new());
+
+        let trimmed = ChatModelWorker::trim_history_for_tool_round(&messages, current_prompt_start);
+
+        assert_eq!(trimmed, messages);
+    }
 
     #[test]
     fn builds_correct_request_body() {
