@@ -514,6 +514,23 @@ export async function spawnAgent(
   lmStudioApiKey?: string,
   autoApproveReads?: boolean,
 ): Promise<AgentSessionInfo> {
+  const fullAccess =
+    sandboxMode === "full-access" || sandboxMode === "danger-full-access";
+  const isMacOsDesktop =
+    typeof navigator !== "undefined" &&
+    /Macintosh|Mac OS X/i.test(navigator.userAgent);
+  const sandboxProfile =
+    agentType === "claude-code" &&
+    isTauriRuntime() &&
+    isMacOsDesktop &&
+    !fullAccess
+      ? await invoke<string>("agent_sandbox_profile", {
+          mode: sandboxMode ?? "workspace-write",
+          projectRoot: cwd,
+          networkEnabled: networkEnabled !== false,
+        })
+      : null;
+
   return invokeProvider<AgentSessionInfo>(
     "provider_spawn",
     {
@@ -522,6 +539,7 @@ export async function spawnAgent(
       localSessionId: localSessionId ?? null,
       resumeAgentSessionId: resumeAgentSessionId ?? null,
       sandboxMode: sandboxMode ?? null,
+      sandboxProfile,
       apiKey: apiKey ?? null,
       approvalPolicy: approvalPolicy ?? null,
       searchEnabled: searchEnabled ?? null,

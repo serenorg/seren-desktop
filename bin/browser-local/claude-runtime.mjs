@@ -151,6 +151,41 @@ function resolveSpawnShell(claudeBin) {
 }
 
 /**
+ * Build the actual child invocation for the local Claude CLI. On macOS every
+ * bounded session must carry the verified Rust-authored Seatbelt profile;
+ * missing proof is a hard launch failure rather than an unsandboxed fallback.
+ * #3192.
+ */
+function buildClaudeSpawnInvocation({
+  claudeBin,
+  claudeArgs,
+  sandboxMode,
+  sandboxProfile,
+}) {
+  const fullAccess =
+    sandboxMode === "full-access" || sandboxMode === "danger-full-access";
+
+  if (process.platform === "darwin" && !fullAccess) {
+    if (typeof sandboxProfile !== "string" || sandboxProfile.trim().length === 0) {
+      throw new Error(
+        "Claude Code launch blocked: the verified macOS sandbox profile is missing.",
+      );
+    }
+    return {
+      command: "/usr/bin/sandbox-exec",
+      args: ["-p", sandboxProfile, claudeBin, ...claudeArgs],
+      shell: false,
+    };
+  }
+
+  return {
+    command: claudeBin,
+    args: claudeArgs,
+    shell: resolveSpawnShell(claudeBin),
+  };
+}
+
+/**
  * Build a PATH string that includes well-known CLI install locations.
  * GUI apps don't inherit the user's shell profile, so tools installed via
  * native installers or npm global aren't on PATH. Without this, spawned
@@ -2537,6 +2572,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       mcpServers,
       approvalPolicy,
       sandboxMode,
+      sandboxProfile,
       networkEnabled,
       autoApproveReads,
       timeoutSecs,
@@ -2643,9 +2679,15 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
 
       let processHandle;
       try {
-        processHandle = spawn(
+        const spawnInvocation = buildClaudeSpawnInvocation({
           claudeBin,
           claudeArgs,
+          sandboxMode,
+          sandboxProfile,
+        });
+        processHandle = spawn(
+          spawnInvocation.command,
+          spawnInvocation.args,
           {
             cwd,
             env: {
@@ -2654,6 +2696,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
               PATH: extendedPath,
               SEREN_AGENT_PROJECT_ROOT: cwd,
               SEREN_AGENT_SANDBOX_MODE: sandboxMode ?? "workspace-write",
+              SEREN_AGENT_SANDBOX_PROFILE: sandboxProfile ?? "",
               SEREN_AGENT_APPROVAL_POLICY: approvalPolicy ?? "on-request",
               SEREN_AGENT_AUTO_APPROVE_READS:
                 autoApproveReads === false ? "false" : "true",
@@ -2661,7 +2704,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
                 networkEnabled === false ? "false" : "true",
             },
             stdio: ["pipe", "pipe", "pipe"],
-            shell: resolveSpawnShell(claudeBin),
+            shell: spawnInvocation.shell,
           },
         );
       } catch (spawnError) {
@@ -3320,6 +3363,7 @@ export {
   claudeModeFromApprovalPolicy as _claudeModeFromApprovalPolicy,
   comparePickerEntries as _comparePickerEntries,
   resolveSpawnShell as _resolveSpawnShell,
+  buildClaudeSpawnInvocation as _buildClaudeSpawnInvocation,
   buildClaudeArgs as _buildClaudeArgs,
   removeClaudeArgsTempFiles as _removeClaudeArgsTempFiles,
   buildClaudePolicySettings as _buildClaudePolicySettings,
