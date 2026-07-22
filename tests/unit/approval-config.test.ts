@@ -2,7 +2,9 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  classifyGatewayOperation,
   getApprovalRequirement,
+  isHighRiskVerb,
   requiresApproval,
 } from "@/lib/tools/approval-config";
 
@@ -39,10 +41,38 @@ describe("approval-config", () => {
       expect(requiresApproval("gmail", "labels/list")).toBe(false);
     });
 
-    it("should NOT require approval for non-Gmail publishers", () => {
+    it("requires approval for destructive-looking operations on non-Gmail publishers", () => {
       expect(requiresApproval("other-publisher", "messages/123/delete")).toBe(
-        false,
+        true,
       );
+    });
+  });
+
+  describe("classifyGatewayOperation", () => {
+    it("classifies explicitly configured Gmail mutations as high-risk", () => {
+      expect(classifyGatewayOperation("gmail", "messages/123/delete")).toBe(
+        "high-risk",
+      );
+    });
+
+    it("classifies only explicit known reads as trusted", () => {
+      expect(classifyGatewayOperation("gmail", "get_messages")).toBe(
+        "trusted-read",
+      );
+      expect(classifyGatewayOperation("seren", "list_projects")).toBe(
+        "trusted-read",
+      );
+    });
+
+    it("leaves a never-seen publisher and tool unclassified", () => {
+      expect(classifyGatewayOperation("new-publisher", "inspect_records")).toBe(
+        "unclassified",
+      );
+    });
+
+    it("escalates high-risk verbs without using them as an allowlist", () => {
+      expect(isHighRiskVerb("delete_record")).toBe(true);
+      expect(isHighRiskVerb("inspect_records")).toBe(false);
     });
   });
 
