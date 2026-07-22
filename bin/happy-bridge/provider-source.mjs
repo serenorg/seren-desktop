@@ -280,6 +280,10 @@ export function createProviderSource({ client, config, debugLog = () => {} }) {
       await client.call("provider_cancel", { sessionId });
     },
 
+    async terminate(sessionId) {
+      await client.call("provider_terminate", { sessionId });
+    },
+
     async respondToPermission(sessionId, requestId, optionId) {
       await client.call("provider_respond_to_permission", {
         sessionId,
