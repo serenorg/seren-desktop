@@ -3,6 +3,7 @@
 
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -10,6 +11,11 @@ import {
   acquireValidationSlot,
   type ValidationSlot,
 } from "./validation-slots";
+import {
+  ensureValidationHome,
+  resolvePnpmStoreDir,
+  validationChildEnv,
+} from "./validation-env";
 
 interface DiscoveryFile {
   port: number;
@@ -74,9 +80,24 @@ async function main(): Promise<void> {
   let app: ChildProcess | null = null;
   let discovery: DiscoveryFile | null = null;
   try {
+    const validationHome = await ensureValidationHome(process.cwd(), slot.port);
+    const pnpmStoreDir = await resolvePnpmStoreDir();
+    const childEnv = {
+      ...validationChildEnv({
+        baseEnv: process.env,
+        port: slot.port,
+        repoRoot: process.cwd(),
+        realHome: os.homedir(),
+        pnpmStoreDir,
+      }),
+      SEREN_VALIDATION_DEV_PORT: String(slot.port),
+      SEREN_VALIDATION_INSTANCE: "1",
+    };
+    console.log(`[validate:walkthrough] scratch home ${validationHome}`);
+
     await rm(artifactsDir, { recursive: true, force: true });
     await mkdir(artifactsDir, { recursive: true });
-    app = launchValidationApp(slot);
+    app = launchValidationApp(slot, childEnv);
     discovery = await waitForDiscovery(discoveryPath, discoveryTimeoutMs);
     await waitForFrontendReady(discovery, 60_000);
     const client = createClient(discovery);
@@ -144,7 +165,10 @@ async function waitForFrontendReady(
   throw new Error("Timed out waiting for validation WebView bridge readiness");
 }
 
-function launchValidationApp(slot: ValidationSlot): ChildProcess {
+function launchValidationApp(
+  slot: ValidationSlot,
+  childEnv: NodeJS.ProcessEnv,
+): ChildProcess {
   const child = spawn(
     "pnpm",
     [
@@ -162,7 +186,7 @@ function launchValidationApp(slot: ValidationSlot): ChildProcess {
       cwd: root,
       stdio: "inherit",
       env: {
-        ...process.env,
+        ...childEnv,
         SEREN_VALIDATION_DEV_PORT: String(slot.port),
         SEREN_VALIDATION_INSTANCE: "1",
         SEREN_VALIDATION_DISCOVERY_PATH: discoveryPath,
