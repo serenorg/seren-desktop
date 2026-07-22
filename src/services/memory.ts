@@ -559,7 +559,12 @@ export async function syncMemories(): Promise<SyncResult | null> {
     return null;
   }
 
-  const userId = authStore.user?.id ?? null;
+  const userId = authStore.user?.id;
+  if (!userId) {
+    console.warn("[Memory] Skipping sync: no authenticated user id");
+    return null;
+  }
+
   const projectId = getProjectId();
 
   try {
@@ -571,6 +576,48 @@ export async function syncMemories(): Promise<SyncResult | null> {
     console.warn("[Memory] Failed to sync memories:", error);
     return null;
   }
+}
+
+const MEMORY_SYNC_INTERVAL_MS = 15 * 60 * 1000;
+let syncTimer: number | null = null;
+let syncInFlight = false;
+
+async function drainMemorySync(): Promise<void> {
+  if (syncInFlight) {
+    return;
+  }
+
+  syncInFlight = true;
+  try {
+    const result = await syncMemories();
+    if (result) {
+      await consolidateMemories({});
+    }
+  } catch (error) {
+    console.warn("[Memory] Memory consolidation skipped:", error);
+  } finally {
+    syncInFlight = false;
+  }
+}
+
+export function startMemorySyncLoop(): void {
+  if (syncTimer !== null) {
+    return;
+  }
+
+  void drainMemorySync();
+  syncTimer = window.setInterval(() => {
+    void drainMemorySync();
+  }, MEMORY_SYNC_INTERVAL_MS);
+}
+
+export function stopMemorySyncLoop(): void {
+  if (syncTimer === null) {
+    return;
+  }
+
+  window.clearInterval(syncTimer);
+  syncTimer = null;
 }
 
 export function raceWithDeadline<T>(

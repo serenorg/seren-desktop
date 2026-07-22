@@ -58,6 +58,7 @@ import {
   recallMemories,
   rememberMemory,
   storeAssistantResponse,
+  syncMemories,
 } from "@/services/memory";
 
 describe("memory service integration path", () => {
@@ -65,7 +66,21 @@ describe("memory service integration path", () => {
     vi.clearAllMocks();
     memoryEnabledState.enabled = true;
     authStoreMock.isAuthenticated = true;
+    authStoreMock.user = { id: "user-1", email: "user@example.com", name: "User" };
     projectStoreMock.activeProject = { id: "project-1" };
+  });
+
+  it("skips sync when the authenticated state has no user id", async () => {
+    authStoreMock.user = { id: "", email: "user@example.com", name: "User" };
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(syncMemories()).resolves.toBeNull();
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(
+      "[Memory] Skipping sync: no authenticated user id",
+    );
+
+    warning.mockRestore();
   });
 
   it("writes then reads memory with project context", async () => {

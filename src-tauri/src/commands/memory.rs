@@ -7,7 +7,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tauri::State;
 
 use seren_memory_sdk::bootstrap::BootstrapOrchestrator;
@@ -238,6 +238,15 @@ fn insert_optional<T: Serialize>(args: &mut Value, key: &str, value: Option<T>) 
     }
 }
 
+fn parse_sync_user_id(user_id: Option<&str>) -> Result<uuid::Uuid, String> {
+    let user_id = user_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "memory sync requires an authenticated user id".to_string())?;
+
+    uuid::Uuid::parse_str(user_id.trim())
+        .map_err(|_| "memory sync user id is not a valid UUID".to_string())
+}
+
 /// Output type for bootstrap (serializable to frontend).
 #[derive(Serialize)]
 pub struct BootstrapResult {
@@ -399,6 +408,12 @@ pub async fn memory_remember(
     // Write to local cache first (synced=false) so memory survives cloud failures
     // such as scale-to-zero cold starts. The sync engine will push pending entries later.
     let local_id = uuid::Uuid::new_v4();
+    let project_uuid = project_id
+        .as_deref()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok());
+    let org_uuid = org_id
+        .as_deref()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok());
     state.ensure_cache()?;
     let cached = CachedMemory {
         id: local_id,
@@ -411,12 +426,14 @@ pub async fn memory_remember(
         synced: false,
         cloud_id: None,
         feedback_signal: None,
-        pinned: false,
+        pinned: pin.unwrap_or(false),
     };
     {
         let guard = state.cache.lock().map_err(|e| e.to_string())?;
         if let Some(cache) = guard.as_ref() {
-            cache.insert_memory(&cached).ok();
+            cache
+                .insert_memory_scoped(&cached, project_uuid, org_uuid)
+                .ok();
         }
     }
 
@@ -711,10 +728,7 @@ pub async fn memory_sync(
     user_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<SyncOutput, String> {
-    let user_uuid = user_id
-        .as_deref()
-        .and_then(|s| uuid::Uuid::parse_str(s).ok())
-        .unwrap_or_else(uuid::Uuid::new_v4);
+    let user_uuid = parse_sync_user_id(user_id.as_deref())?;
     let project_uuid = project_id
         .as_deref()
         .and_then(|s| uuid::Uuid::parse_str(s).ok());
@@ -783,6 +797,24 @@ mod tests {
         assert!(ensure_delete_confirmed(true).is_ok());
         let err = ensure_delete_confirmed(false).unwrap_err();
         assert!(err.contains("requires confirmation"));
+    }
+
+    #[test]
+    fn parse_sync_user_id_rejects_missing_id() {
+        let error = parse_sync_user_id(None).unwrap_err();
+        assert_eq!(error, "memory sync requires an authenticated user id");
+    }
+
+    #[test]
+    fn parse_sync_user_id_rejects_non_uuid() {
+        let error = parse_sync_user_id(Some("not-a-user-id")).unwrap_err();
+        assert_eq!(error, "memory sync user id is not a valid UUID");
+    }
+
+    #[test]
+    fn parse_sync_user_id_accepts_uuid() {
+        let user_id = uuid::Uuid::new_v4();
+        assert_eq!(parse_sync_user_id(Some(&user_id.to_string())), Ok(user_id));
     }
 
     #[test]

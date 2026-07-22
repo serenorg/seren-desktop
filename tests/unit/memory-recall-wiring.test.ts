@@ -27,6 +27,8 @@ describe("memory recall wiring", () => {
   });
 
   it("consolidates memories after authenticated sync", () => {
-    expect(readSource("src/App.tsx")).toContain("consolidateMemories");
+    const memorySource = readSource("src/services/memory.ts");
+    expect(memorySource).toContain("startMemorySyncLoop");
+    expect(memorySource).toContain("consolidateMemories({})");
   });
 });
