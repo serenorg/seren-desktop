@@ -1683,11 +1683,12 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                                 );
                               }}
                             >
-                              Used {(message.memory?.used ?? []).length}{" "}
-                              remembered detail
+                              {(message.memory?.used ?? []).length} remembered
+                              detail
                               {(message.memory?.used ?? []).length === 1
                                 ? ""
-                                : "s"}
+                                : "s"}{" "}
+                              available
                             </button>
                             <button
                               type="button"
@@ -2240,11 +2241,12 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       >
         <div class="px-5 pb-6 pt-12">
           <h2 class="m-0 text-base font-semibold text-foreground">
-            Memory used in this answer
+            Memory available to this answer
           </h2>
           <p class="mt-2 mb-4 text-[12px] leading-relaxed text-muted-foreground">
-            These are the remembered details attached to this answer. This panel
-            only covers the current response.
+            These memories were retrieved and made available (injected into
+            context) for this answer. The model may or may not have drawn on
+            them.
           </p>
           <Show when={memoryPanelMessage()}>
             {(panelMessage) => (
@@ -2253,7 +2255,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                   when={(panelMessage().memory?.used ?? []).length > 0}
                   fallback={
                     <div class="rounded border border-border bg-card px-3 py-2 text-[12px] text-muted-foreground">
-                      No remembered details are attached to this answer.
+                      No remembered details are available for this answer.
                     </div>
                   }
                 >

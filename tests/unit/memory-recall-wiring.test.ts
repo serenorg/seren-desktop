@@ -1,3 +1,6 @@
+// ABOUTME: Source-level guards for memory recall, error learning, and consolidation wiring.
+// ABOUTME: Verifies all authenticated prompt and startup integration points remain connected.
+
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
