@@ -1336,14 +1336,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             >
               <p class="m-0 py-3 border-b border-border text-[0.8rem] text-muted-foreground leading-normal">
                 <span class="font-medium text-foreground">
-                  On Windows this bounds the agent's file, search, and web tools
-                  only.
+                  On native Windows, shell commands are disabled unless Full
+                  Access is explicitly selected.
                 </span>{" "}
-                Shell commands are not bounded. Claude Code's operating-system
-                sandbox does not support native Windows, so a shell command the
-                agent runs can read and write anywhere your account can. Set
-                Approval Policy to Untrusted or On Failure to review each
-                command before it runs.
+                File, search, and web tools remain bounded by the selected
+                workspace.
               </p>
             </Show>
 

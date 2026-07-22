@@ -112,9 +112,9 @@ describe("Claude promptless containment (#3091)", () => {
     });
     if (process.platform === "win32") return;
 
-    // failIfUnavailable turns a missing bubblewrap/socat into a Claude Code
-    // that will not start, and we ship neither. #3138
-    expect(settings.sandbox.failIfUnavailable).toBe(false);
+    // A missing bubblewrap/socat must block the Claude Code launch instead of
+    // warning and continuing without an OS boundary. #3138, #3192
+    expect(settings.sandbox.failIfUnavailable).toBe(true);
 
     // Denying all of ~/ also hides ~/.gitconfig and $HOME toolchains, which
     // breaks git commit and most build commands. #3139
@@ -157,7 +157,7 @@ describe("Claude promptless containment (#3091)", () => {
   });
 });
 
-describe("Windows shell boundary gap is stated, not faked (#3149)", () => {
+describe("Windows shell boundary is denied until Full Access (#3149, #3192)", () => {
   const settingsPanel = readFileSync(
     resolve("src/components/settings/SettingsPanel.tsx"),
     "utf8",
@@ -168,29 +168,53 @@ describe("Windows shell boundary gap is stated, not faked (#3149)", () => {
   );
 
   it("keeps Bash out of the hook matcher, which cannot bound a shell string", () => {
-    // Claude's sandbox is the only layer that bounds Bash, and upstream does
-    // not run it on native Windows. Matching Bash here would mean parsing
-    // file arguments out of arbitrary shell commands — `cat $(printf ...)`
-    // walks straight past that, so the hook would fail open while reading as
-    // a real boundary. The gap is surfaced in Settings instead.
+    // The hook intentionally covers built-in file tools only. Native Windows
+    // uses the policy deny rule below rather than pretending to parse paths
+    // out of arbitrary shell strings.
     const settings = buildClaudePolicySettings({
       cwd: tempProject(),
       sandboxMode: "workspace-write",
       networkEnabled: false,
     });
     expect(settings.hooks.PreToolUse[0].matcher).not.toContain("Bash");
-    if (process.platform === "win32") {
-      expect(settings.sandbox).toBeUndefined();
-    }
-    expect(claudeRuntime).toContain("#3149");
+    expect(claudeRuntime).toContain("#3192");
   });
 
-  it("tells Windows users their shell commands are unbounded", () => {
-    // Without this the feature advertises containment it does not deliver on
-    // Windows. The note must be platform-gated so macOS and Linux, where the
-    // sandbox does bound Bash, are not told otherwise.
+  it("denies Bash for bounded native-Windows modes but not Full Access", () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", {
+      value: "win32",
+      configurable: true,
+    });
+    try {
+      for (const sandboxMode of ["read-only", "workspace-write"] as const) {
+        const settings = buildClaudePolicySettings({
+          cwd: tempProject(),
+          sandboxMode,
+          networkEnabled: false,
+        });
+        expect(settings.permissions.deny).toContain("Bash");
+        expect(settings.sandbox).toBeUndefined();
+      }
+
+      expect(
+        buildClaudePolicySettings({
+          cwd: tempProject(),
+          sandboxMode: "full-access",
+          networkEnabled: false,
+        }),
+      ).toEqual({});
+    } finally {
+      Object.defineProperty(process, "platform", {
+        value: originalPlatform,
+        configurable: true,
+      });
+    }
+  });
+
+  it("tells Windows users shell commands are disabled unless Full Access", () => {
     expect(settingsPanel).toContain("isWindowsPlatform");
-    const noteAt = settingsPanel.indexOf("Shell commands are not bounded");
+    const noteAt = settingsPanel.indexOf("shell commands are disabled unless Full");
     expect(noteAt).toBeGreaterThan(-1);
     const gateAt = settingsPanel.lastIndexOf("isWindowsPlatform()", noteAt);
     expect(gateAt).toBeGreaterThan(-1);
