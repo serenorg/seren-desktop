@@ -44,6 +44,7 @@ pub const MEMORY_MCP_TOOLS: &[&str] = &[
     "forget",
     "delete_memory",
     "get_memory_graph",
+    "memory_timeline",
     "consolidate",
     "configure_publishers",
 ];
@@ -526,12 +527,20 @@ pub async fn memory_process_conversation(
     project_id: Option<String>,
     session_id: Option<String>,
     org_id: Option<String>,
+    retain_source: Option<bool>,
+    source_external_id: Option<String>,
+    source_revision: Option<String>,
+    source_uri: Option<String>,
 ) -> Result<Value, String> {
     let mut args = json!({ "transcript": transcript });
     insert_optional(&mut args, "project_context", project_context);
     insert_optional(&mut args, "project_id", project_id);
     insert_optional(&mut args, "session_id", session_id);
     insert_optional(&mut args, "org_id", org_id);
+    insert_optional(&mut args, "retain_source", retain_source);
+    insert_optional(&mut args, "source_external_id", source_external_id);
+    insert_optional(&mut args, "source_revision", source_revision);
+    insert_optional(&mut args, "source_uri", source_uri);
     state
         .call_memory_tool(&app, "process_conversation", args)
         .await
@@ -641,10 +650,24 @@ pub async fn memory_get_memory_graph(
     state: State<'_, MemoryState>,
     memory_id: String,
     depth: Option<usize>,
+    as_of: Option<String>,
 ) -> Result<Value, String> {
     let mut args = json!({ "memory_id": memory_id });
     insert_optional(&mut args, "depth", depth);
+    insert_optional(&mut args, "as_of", as_of);
     state.call_memory_tool(&app, "get_memory_graph", args).await
+}
+
+#[tauri::command]
+pub async fn memory_timeline(
+    app: tauri::AppHandle,
+    state: State<'_, MemoryState>,
+    memory_id: String,
+    as_of: Option<String>,
+) -> Result<Value, String> {
+    let mut args = json!({ "memory_id": memory_id });
+    insert_optional(&mut args, "as_of", as_of);
+    state.call_memory_tool(&app, "memory_timeline", args).await
 }
 
 #[tauri::command]
@@ -742,6 +765,7 @@ mod tests {
                 "forget",
                 "delete_memory",
                 "get_memory_graph",
+                "memory_timeline",
                 "consolidate",
                 "configure_publishers",
             ]

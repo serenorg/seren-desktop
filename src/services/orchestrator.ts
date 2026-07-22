@@ -714,6 +714,8 @@ function handleComplete(
       userQuery: stream.prompt,
       sessionId: conversationId,
       projectContext: fileTreeState.rootPath || undefined,
+      sourceExternalId: `desktop:orchestrator:${assistantMessage.id}`,
+      sourceUri: `seren://desktop/conversations/${conversationId}/messages/${assistantMessage.id}`,
     })
       .then((result) => {
         if (!result?.messageMemory) return;

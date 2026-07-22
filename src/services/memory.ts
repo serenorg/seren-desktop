@@ -23,6 +23,7 @@ export const MEMORY_TOOL_NAMES = [
   "forget",
   "delete_memory",
   "get_memory_graph",
+  "memory_timeline",
   "consolidate",
   "configure_publishers",
 ] as const;
@@ -79,6 +80,10 @@ export interface ProcessConversationInput {
   projectId?: string | null;
   sessionId?: string;
   orgId?: string;
+  retainSource?: boolean;
+  sourceExternalId?: string;
+  sourceRevision?: string;
+  sourceUri?: string;
 }
 
 export interface ProcessConversationResult {
@@ -101,6 +106,9 @@ export interface AssistantMemoryContext {
   userQuery?: string;
   sessionId?: string;
   projectContext?: string;
+  sourceExternalId?: string;
+  sourceRevision?: string;
+  sourceUri?: string;
 }
 
 export interface DeleteMemoryOptions {
@@ -227,8 +235,21 @@ function collectProcessRecords(raw: unknown): Record<string, unknown>[] {
     return [];
   });
 
+  const grouped = [
+    ["episodic", "episodic"],
+    ["semantic", "semantic"],
+    ["procedural", "procedural"],
+    ["error_fixes", "error_fix"],
+    ["preferences", "preference"],
+  ].flatMap(([key, memoryType]) =>
+    collectRecordArray(raw[key]).map((record) => ({
+      ...record,
+      memory_type: memoryType,
+    })),
+  );
+
   const single = isObject(raw.memory) ? [raw.memory] : [];
-  return [...records, ...single];
+  return [...records, ...grouped, ...single];
 }
 
 function extractionCount(
@@ -481,9 +502,18 @@ export async function deleteMemory(
 export async function getMemoryGraph(
   memoryId: string,
   depth?: number,
+  asOf?: string,
 ): Promise<unknown> {
   requireMemoryAvailable();
-  return invoke("memory_get_memory_graph", { memoryId, depth });
+  return invoke("memory_get_memory_graph", { memoryId, depth, asOf });
+}
+
+export async function getMemoryTimeline(
+  memoryId: string,
+  asOf?: string,
+): Promise<unknown> {
+  requireMemoryAvailable();
+  return invoke("memory_timeline", { memoryId, asOf });
 }
 
 export async function consolidateMemories(
@@ -635,6 +665,10 @@ export async function processConversationMemory(
     sessionId: input.sessionId,
     orgId: input.orgId,
     projectContext: input.projectContext,
+    retainSource: input.retainSource,
+    sourceExternalId: input.sourceExternalId,
+    sourceRevision: input.sourceRevision,
+    sourceUri: input.sourceUri,
   });
   const messageMemory = messageMemoryFromProcessResult(raw);
   const captured = messageMemory?.captured ?? [];
@@ -656,10 +690,15 @@ export async function processConversationTurn(
   const metadata = context?.model
     ? `\n\nMetadata:\nModel: ${context.model}`
     : "";
+  const sourceExternalId = context?.sourceExternalId;
   return processConversationMemory({
     transcript: `User: ${userMessage}\n\nAssistant: ${assistantMessage}${metadata}`,
     sessionId: context?.sessionId,
     projectContext: context?.projectContext,
+    retainSource: sourceExternalId !== undefined,
+    sourceExternalId,
+    sourceRevision: context?.sourceRevision,
+    sourceUri: context?.sourceUri,
   });
 }
 
@@ -676,10 +715,15 @@ export async function processAssistantResponseMemory(
   const metadata = context?.model
     ? `\n\nMetadata:\nModel: ${context.model}`
     : "";
+  const sourceExternalId = context?.sourceExternalId;
   return processConversationMemory({
     transcript: `${content}${metadata}`,
     sessionId: context?.sessionId,
     projectContext: context?.projectContext,
+    retainSource: sourceExternalId !== undefined,
+    sourceExternalId,
+    sourceRevision: context?.sourceRevision,
+    sourceUri: context?.sourceUri,
   });
 }
 

@@ -253,6 +253,17 @@ export interface ToolIterationState {
   tools: ReturnType<typeof getAllTools> | undefined;
   fullContent: string;
   iteration: number;
+  memorySource?: ToolMemorySource;
+  userQuery?: string;
+}
+
+/** Stable source identity used to make memory capture idempotent across retries. */
+export interface ToolMemorySource {
+  sourceExternalId: string;
+  sourceRevision?: string;
+  sourceUri?: string;
+  sessionId?: string;
+  projectContext?: string;
 }
 
 /**
@@ -383,6 +394,7 @@ function buildUserContent(
  * @param enableTools - Whether to enable tools (default true)
  * @param history - Previous messages in the conversation
  * @param images - Optional image attachments
+ * @param memorySource - Stable identity for idempotent memory capture. Memory capture is skipped when absent.
  */
 export async function* streamMessageWithTools(
   content: string,
@@ -391,6 +403,7 @@ export async function* streamMessageWithTools(
   enableTools = true,
   history: Message[] = [],
   images?: Attachment[],
+  memorySource?: ToolMemorySource,
 ): AsyncGenerator<ToolStreamEvent> {
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];
@@ -646,7 +659,10 @@ export async function* streamMessageWithTools(
             );
           });
         }
+      }
+      if (finalOutputValidation.canStoreMemory && memorySource) {
         processAssistantResponseMemory(fullContent, {
+          ...memorySource,
           model,
           userQuery: content,
         }).catch((err) => {
@@ -750,6 +766,8 @@ export async function* streamMessageWithTools(
       tools,
       fullContent,
       iteration: maxIterations,
+      memorySource,
+      userQuery: content,
     },
   };
 }
@@ -765,7 +783,14 @@ export async function* continueToolIteration(
   state: ToolIterationState,
   additionalIterations = 10,
 ): AsyncGenerator<ToolStreamEvent> {
-  const { messages, model, tools, fullContent: existingContent } = state;
+  const {
+    messages,
+    model,
+    tools,
+    fullContent: existingContent,
+    memorySource,
+    userQuery,
+  } = state;
   let fullContent = existingContent;
   let yieldedContent = existingContent;
   let hasExecutedTools = false;
@@ -811,9 +836,11 @@ export async function* continueToolIteration(
         evidence: extractEvidenceFromToolLoopMessages(messages),
       });
       fullContent = finalOutputValidation.safeDisplayText;
-      if (finalOutputValidation.canStoreMemory) {
+      if (finalOutputValidation.canStoreMemory && memorySource) {
         processAssistantResponseMemory(fullContent, {
+          ...memorySource,
           model,
+          userQuery,
         }).catch((err) => {
           console.warn("[continueToolIteration] Failed to store memory:", err);
         });
@@ -871,6 +898,8 @@ export async function* continueToolIteration(
       tools,
       fullContent,
       iteration: state.iteration + additionalIterations,
+      memorySource,
+      userQuery,
     },
   };
 }

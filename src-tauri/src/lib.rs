@@ -1270,6 +1270,7 @@ pub fn run() {
             commands::memory::memory_forget,
             commands::memory::memory_delete_memory,
             commands::memory::memory_get_memory_graph,
+            commands::memory::memory_timeline,
             commands::memory::memory_consolidate,
             commands::memory::memory_configure_publishers,
             commands::memory::memory_sync,

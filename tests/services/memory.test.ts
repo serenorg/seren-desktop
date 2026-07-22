@@ -119,6 +119,7 @@ describe("memory service integration path", () => {
       "forget",
       "delete_memory",
       "get_memory_graph",
+      "memory_timeline",
       "consolidate",
       "configure_publishers",
     ]);
@@ -139,6 +140,9 @@ describe("memory service integration path", () => {
     await storeAssistantResponse("Answer", {
       model: "anthropic/claude-sonnet-4",
       userQuery: "Question",
+      sourceExternalId: "desktop:test:message-1",
+      sourceRevision: "1",
+      sourceUri: "seren://desktop/conversations/test/messages/message-1",
     });
 
     expect(invokeMock).toHaveBeenCalledWith("memory_process_conversation", {
@@ -148,7 +152,28 @@ describe("memory service integration path", () => {
       sessionId: undefined,
       orgId: undefined,
       projectContext: undefined,
+      retainSource: true,
+      sourceExternalId: "desktop:test:message-1",
+      sourceRevision: "1",
+      sourceUri: "seren://desktop/conversations/test/messages/message-1",
     });
+  });
+
+  it("extracts without retaining a source when no stable ID is available", async () => {
+    invokeMock.mockResolvedValue({ extracted_count: 0 });
+
+    await storeAssistantResponse("Answer", {
+      model: "anthropic/claude-sonnet-4",
+      userQuery: "Question",
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "memory_process_conversation",
+      expect.objectContaining({
+        retainSource: false,
+        sourceExternalId: undefined,
+      }),
+    );
   });
 
   it("does not write empty assistant responses", async () => {

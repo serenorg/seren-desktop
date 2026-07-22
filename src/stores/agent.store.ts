@@ -8420,6 +8420,11 @@ export const agentStore = {
         processAssistantResponseMemory(safeContent, {
           model: `agent:${session.info.agentType}`,
           userQuery: session.lastUserPrompt,
+          sessionId: session.conversationId,
+          sourceExternalId: `desktop:agent:${message.id}`,
+          sourceUri: session.conversationId
+            ? `seren://desktop/conversations/${session.conversationId}/messages/${message.id}`
+            : undefined,
         }).catch((err) => {
           console.warn("[AgentStore] process memory failed:", err);
         });
