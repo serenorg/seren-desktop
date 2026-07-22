@@ -3,13 +3,17 @@
 
 [CmdletBinding()]
 param(
-  [ValidateSet("Reserve", "Bootstrap")][string]$Mode = "Reserve",
+  [ValidateSet("Reserve", "Bootstrap", "Adjust")][string]$Mode = "Reserve",
   [string]$Source = "",
   [int]$Invocation = 0,
   [int]$Operations = 0,
   [int]$BootstrapOperations = -1,
   [string]$BootstrapSource = "",
   [string]$BootstrapApprovedBy = "",
+  [string]$BillingReference = "",
+  [switch]$ConfirmZeroUsage,
+  [int64]$AdjustedBaselineOperations = -1,
+  [string]$AdjustApprovedBy = "",
   [string]$OutputFile = "",
   [int]$MaxCasAttempts = 8
 )
@@ -106,17 +110,40 @@ $key = "$($prefix.Trim('/'))/$safeAccount/$safeCertificate/$($cycle.id).json"
 $uri = "s3://$bucket/$key"
 $configuration = [ordered]@{ budget_cents=$budget; base_cents=$base; included_operations=$included; overage_cents=$overage; other_fixed_monthly_cents=$fixed }
 
+function Read-LedgerWithETag {
+  $head = Invoke-Aws @("s3api","head-object","--bucket",$bucket,"--key",$key,"--endpoint-url",$endpoint,"--output","json") -AllowFailure
+  if ($head.code -ne 0) { Fail "Monthly ledger $uri is missing or unreachable. Bootstrap authoritative active-cycle usage before signing. $($head.output)" }
+  try { $etag = ([string](($head.output | ConvertFrom-Json).ETag)).Trim('"') } catch { Fail "Could not parse the R2 ETag for $uri." }
+  if ([string]::IsNullOrWhiteSpace($etag)) { Fail "R2 returned no ETag for $uri; atomicity cannot be proven." }
+
+  $current = Join-Path ([IO.Path]::GetTempPath()) "ssl-ledger-current-$([guid]::NewGuid()).json"
+  $get = Invoke-Aws @("s3api","get-object","--bucket",$bucket,"--key",$key,"--if-match",$etag,"--endpoint-url",$endpoint,$current,"--output","json") -AllowFailure
+  if ($get.code -ne 0) {
+    Remove-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+    return [ordered]@{ retry=$true }
+  }
+
+  try { $ledger = Get-Content -Raw -LiteralPath $current | ConvertFrom-Json } catch { Fail "Monthly ledger $uri is corrupt: $($_.Exception.Message)" }
+  if ($ledger.schema_version -ne 1 -or $ledger.account -ne $account -or $ledger.certificate -ne $certificate -or $ledger.billing_cycle -ne $cycle.id) { Fail "Monthly ledger identity/schema does not match the configured account, certificate, and billing cycle." }
+  if ($ledger.cycle_starts_at -ne $cycle.starts_at -or $ledger.cycle_ends_at -ne $cycle.ends_at -or $ledger.billing_timezone -ne $timezone -or [int]$ledger.billing_anchor_day -ne $anchor) { Fail "Monthly ledger billing boundary is stale or conflicts with repository configuration." }
+  foreach ($name in $configuration.Keys) { if ([int64]$ledger.configuration.$name -ne [int64]$configuration[$name]) { Fail "Monthly ledger configuration '$name' conflicts with repository configuration." } }
+  if ($null -eq $ledger.bootstrap -or [string]::IsNullOrWhiteSpace([string]$ledger.bootstrap.source) -or [string]::IsNullOrWhiteSpace([string]$ledger.bootstrap.approved_by)) { Fail "Monthly ledger has no authoritative audited bootstrap." }
+  return [ordered]@{ ledger=$ledger; etag=$etag; path=$current; retry=$false }
+}
+
 if ($Mode -eq "Bootstrap") {
   if ($BootstrapOperations -lt 0) { Fail "BootstrapOperations must be supplied from authoritative current-cycle SSL.com usage." }
+  if ([string]::IsNullOrWhiteSpace($BillingReference)) { Fail "BillingReference is required and must identify the authoritative billing record and its portal timestamp." }
+  if ($BootstrapOperations -eq 0 -and -not $ConfirmZeroUsage) { Fail "Zero mid-cycle usage is almost never true; pass -ConfirmZeroUsage only after verifying the billing record." }
   if ([string]::IsNullOrWhiteSpace($BootstrapSource) -or [string]::IsNullOrWhiteSpace($BootstrapApprovedBy)) { Fail "BootstrapSource and BootstrapApprovedBy are required for an audited bootstrap." }
   $cost = Project-Cost $BootstrapOperations $base $included $overage $fixed
-  if ($cost -gt $budget) { Fail "Bootstrap usage projects $cost cents, above the $budget-cent monthly budget." }
+  if ($cost -gt $budget) { Write-Host "::warning::Bootstrap usage projects $cost cents, above the $budget-cent monthly budget; recording the truthful baseline so future reservations remain blocked." }
   $now = [DateTimeOffset]::UtcNow.ToString("o")
   $ledger = [ordered]@{
     schema_version=1; account=$account; certificate=$certificate; billing_cycle=$cycle.id
     cycle_starts_at=$cycle.starts_at; cycle_ends_at=$cycle.ends_at; billing_timezone=$cycle.timezone; billing_anchor_day=$cycle.anchor_day
     configuration=$configuration; committed_or_reserved_operations=$BootstrapOperations; projected_cost_cents=$cost
-    bootstrap=[ordered]@{ operations=$BootstrapOperations; source=$BootstrapSource; recorded_at=$now; approved_by=$BootstrapApprovedBy }
+    bootstrap=[ordered]@{ operations=$BootstrapOperations; source=$BootstrapSource; billing_reference=$BillingReference; recorded_at=$now; approved_by=$BootstrapApprovedBy }
     updated_at=$now; version=1; entries=@()
   }
   $temp = Join-Path ([IO.Path]::GetTempPath()) "ssl-ledger-bootstrap-$([guid]::NewGuid()).json"
@@ -129,26 +156,80 @@ if ($Mode -eq "Bootstrap") {
   exit 0
 }
 
-if ($Mode -eq "Reserve" -and ($Operations -lt 1 -or [string]::IsNullOrWhiteSpace($Source) -or $Invocation -lt 1)) { Fail "Reserve requires Source, Invocation >= 1, and Operations >= 1." }
+if ($Mode -eq "Adjust") {
+  if ($AdjustedBaselineOperations -lt 0) { Fail "AdjustedBaselineOperations must be a non-negative integer." }
+  if ($AdjustedBaselineOperations -eq 0 -and -not $ConfirmZeroUsage) { Fail "Zero adjusted usage requires -ConfirmZeroUsage after verifying the billing record." }
+  if ([string]::IsNullOrWhiteSpace($BillingReference)) { Fail "BillingReference is required and must identify the authoritative billing record and its portal timestamp." }
+  if ([string]::IsNullOrWhiteSpace($AdjustApprovedBy)) { Fail "AdjustApprovedBy is required for an audited baseline adjustment." }
+
+  for ($attempt = 1; $attempt -le $MaxCasAttempts; $attempt++) {
+    $read = Read-LedgerWithETag
+    if ($read.retry) {
+      Start-Sleep -Milliseconds ([Math]::Min(1000, 50 * [Math]::Pow(2, $attempt - 1)))
+      continue
+    }
+    $ledger = $read.ledger
+    $etag = $read.etag
+    $current = $read.path
+    $next = Join-Path ([IO.Path]::GetTempPath()) "ssl-ledger-next-$([guid]::NewGuid()).json"
+    try {
+      $previousBaselineOperations = [int64]$ledger.bootstrap.operations
+      [int64]$entriesSum = 0
+      foreach ($entry in @($ledger.entries)) { $entriesSum += [int64]$entry.operations }
+      $now = [DateTimeOffset]::UtcNow.ToString("o")
+      $bootstrap = [ordered]@{}
+      foreach ($property in $ledger.bootstrap.PSObject.Properties) { $bootstrap[$property.Name] = $property.Value }
+      $bootstrap.operations = $AdjustedBaselineOperations
+      $bootstrap.billing_reference = $BillingReference
+      $ledger.bootstrap = $bootstrap
+      $adjustment = [ordered]@{
+        previous_baseline_operations=$previousBaselineOperations
+        new_baseline_operations=$AdjustedBaselineOperations
+        billing_reference=$BillingReference
+        recorded_at=$now
+        approved_by=$AdjustApprovedBy
+      }
+      $adjustments = @()
+      if ($null -ne $ledger.adjustments) { $adjustments = @($ledger.adjustments) }
+      $ledger.adjustments = $adjustments + [PSCustomObject]$adjustment
+      $committedOperations = $AdjustedBaselineOperations + $entriesSum
+      $cost = Project-Cost $committedOperations $base $included $overage $fixed
+      $ledger.committed_or_reserved_operations = $committedOperations
+      $ledger.projected_cost_cents = $cost
+      $ledger.updated_at = $now
+      $ledger.version = [int64]$ledger.version + 1
+      if ($cost -gt $budget) { Write-Host "::warning::Adjusted baseline projects $cost cents, above the $budget-cent monthly budget; future reservations remain blocked until the cycle changes." }
+      ($ledger | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $next -Encoding utf8
+      $put = Invoke-Aws @("s3api","put-object","--bucket",$bucket,"--key",$key,"--body",$next,"--if-match",$etag,"--endpoint-url",$endpoint,"--output","json") -AllowFailure
+      if ($put.code -eq 0) {
+        Write-Host "Adjusted SSL.com ledger baseline: previous=$previousBaselineOperations new=$AdjustedBaselineOperations committed=$committedOperations ledger_version=$($ledger.version)."
+        exit 0
+      }
+      if ($put.output -notmatch "PreconditionFailed|412|ConditionalRequestConflict|409") { Fail "R2 conditional ledger adjustment failed: $($put.output)" }
+    } finally {
+      Remove-Item -LiteralPath $current,$next -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds ([Math]::Min(1000, 50 * [Math]::Pow(2, $attempt - 1)))
+  }
+  Fail "Monthly ledger adjustment CAS conflicted $MaxCasAttempts times; the baseline was not changed because atomicity could not be proven."
+}
+
+if ($Operations -lt 1 -or [string]::IsNullOrWhiteSpace($Source) -or $Invocation -lt 1) { Fail "Reserve requires Source, Invocation >= 1, and Operations >= 1." }
 $runId = Require-Text "GITHUB_RUN_ID"
 $runAttempt = Require-Text "GITHUB_RUN_ATTEMPT"
 $idempotencyKey = "$runId/$runAttempt/$Source/$Invocation"
 
 for ($attempt = 1; $attempt -le $MaxCasAttempts; $attempt++) {
-  $head = Invoke-Aws @("s3api","head-object","--bucket",$bucket,"--key",$key,"--endpoint-url",$endpoint,"--output","json") -AllowFailure
-  if ($head.code -ne 0) { Fail "Monthly ledger $uri is missing or unreachable. Bootstrap authoritative active-cycle usage before signing. $($head.output)" }
-  try { $etag = ([string](($head.output | ConvertFrom-Json).ETag)).Trim('"') } catch { Fail "Could not parse the R2 ETag for $uri." }
-  if ([string]::IsNullOrWhiteSpace($etag)) { Fail "R2 returned no ETag for $uri; atomicity cannot be proven." }
-  $current = Join-Path ([IO.Path]::GetTempPath()) "ssl-ledger-current-$([guid]::NewGuid()).json"
+  $read = Read-LedgerWithETag
+  if ($read.retry) {
+    Start-Sleep -Milliseconds ([Math]::Min(1000, 50 * [Math]::Pow(2, $attempt - 1)))
+    continue
+  }
+  $ledger = $read.ledger
+  $etag = $read.etag
+  $current = $read.path
   $next = Join-Path ([IO.Path]::GetTempPath()) "ssl-ledger-next-$([guid]::NewGuid()).json"
   try {
-    $get = Invoke-Aws @("s3api","get-object","--bucket",$bucket,"--key",$key,"--if-match",$etag,"--endpoint-url",$endpoint,$current,"--output","json") -AllowFailure
-    if ($get.code -ne 0) { continue }
-    try { $ledger = Get-Content -Raw -LiteralPath $current | ConvertFrom-Json } catch { Fail "Monthly ledger $uri is corrupt: $($_.Exception.Message)" }
-    if ($ledger.schema_version -ne 1 -or $ledger.account -ne $account -or $ledger.certificate -ne $certificate -or $ledger.billing_cycle -ne $cycle.id) { Fail "Monthly ledger identity/schema does not match the configured account, certificate, and billing cycle." }
-    if ($ledger.cycle_starts_at -ne $cycle.starts_at -or $ledger.cycle_ends_at -ne $cycle.ends_at -or $ledger.billing_timezone -ne $timezone -or [int]$ledger.billing_anchor_day -ne $anchor) { Fail "Monthly ledger billing boundary is stale or conflicts with repository configuration." }
-    foreach ($name in $configuration.Keys) { if ([int64]$ledger.configuration.$name -ne [int64]$configuration[$name]) { Fail "Monthly ledger configuration '$name' conflicts with repository configuration." } }
-    if ($null -eq $ledger.bootstrap -or [string]::IsNullOrWhiteSpace([string]$ledger.bootstrap.source) -or [string]::IsNullOrWhiteSpace([string]$ledger.bootstrap.approved_by)) { Fail "Monthly ledger has no authoritative audited bootstrap." }
     $existing = @($ledger.entries | Where-Object { $_.idempotency_key -eq $idempotencyKey })
     if ($existing.Count -gt 0) {
       if ([int]$existing[0].operations -ne $Operations) { Fail "Idempotency key $idempotencyKey was already reserved with a different operation count." }
