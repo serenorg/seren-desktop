@@ -108,11 +108,6 @@ export interface ConnectorSetupApi {
     agentIdentityId: string;
     secretRefs: string[];
   }): Promise<{ secretResolutionDelegation?: string; error?: string }>;
-  authorizeEmployeeDelegation(request: {
-    deploymentId: string;
-    agentIdentityId: string;
-    secretResolutionDelegation: string;
-  }): Promise<{ error?: string }>;
 }
 
 export function connectorSetupSelect(
@@ -343,15 +338,6 @@ async function connectorSetupAttachInner(
         delegation.error ??
         "The employee secret access could not be authorized.",
     };
-  }
-
-  const authorized = await api.authorizeEmployeeDelegation({
-    deploymentId: deployment.deploymentId,
-    agentIdentityId: identity.agentIdentityId,
-    secretResolutionDelegation: delegation.secretResolutionDelegation,
-  });
-  if (authorized.error) {
-    return { ...busyState, busy: false, error: authorized.error };
   }
 
   const bound = await api.bindConnectorSecrets({

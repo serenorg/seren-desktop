@@ -166,26 +166,6 @@ const setupApi: ConnectorSetupApi = {
       };
     }
   },
-  async authorizeEmployeeDelegation(request) {
-    const result = await serenAgentUpdateManagedDeployment({
-      path: { id: request.deploymentId },
-      body: {
-        agent_identity_id: request.agentIdentityId,
-        secret_resolution_delegation: request.secretResolutionDelegation,
-      },
-      throwOnError: false,
-    });
-    if (result.error) {
-      return {
-        error: formatApiError(
-          result.error,
-          result.response,
-          "The employee secret authorization could not be installed.",
-        ),
-      };
-    }
-    return {};
-  },
 };
 
 export function ConnectorSettings() {

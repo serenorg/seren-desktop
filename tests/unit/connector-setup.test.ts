@@ -66,7 +66,6 @@ function testApi(overrides: Partial<ConnectorSetupApi>): ConnectorSetupApi {
     previewEmployeeSecretRefs: unexpected,
     bindConnectorSecrets: unexpected,
     createEmployeeDelegation: unexpected,
-    authorizeEmployeeDelegation: unexpected,
     attachConnector: unexpected,
     ...overrides,
   };
@@ -186,11 +185,6 @@ describe("connector setup controller", () => {
         expect(request.secretRefs).toHaveLength(1);
         return { secretResolutionDelegation: "signed-delegation" };
       },
-      authorizeEmployeeDelegation: async (request) => {
-        calls.push("authorize");
-        expect(request.secretResolutionDelegation).toBe("signed-delegation");
-        return {};
-      },
       bindConnectorSecrets: async (request) => {
         calls.push("bind");
         expect(request.connectorRef).toBe("slack");
@@ -213,7 +207,6 @@ describe("connector setup controller", () => {
       "store",
       "preview",
       "delegate",
-      "authorize",
       "bind",
       "attach",
     ]);
@@ -248,7 +241,6 @@ describe("connector setup controller", () => {
       createEmployeeDelegation: async () => ({
         secretResolutionDelegation: "signed-delegation",
       }),
-      authorizeEmployeeDelegation: async () => ({}),
       bindConnectorSecrets: async () => ({
         secretRefs: ["seren-secrets://vault/item/field"],
       }),
@@ -277,7 +269,6 @@ describe("connector setup controller", () => {
       createEmployeeDelegation: async () => ({
         secretResolutionDelegation: "signed-delegation",
       }),
-      authorizeEmployeeDelegation: async () => ({}),
       bindConnectorSecrets: async () => ({ secretRefs: [newReference] }),
       attachConnector: async () => ({}),
     });
@@ -306,7 +297,6 @@ describe("connector setup controller", () => {
       createEmployeeDelegation: async () => ({
         secretResolutionDelegation: "signed-delegation",
       }),
-      authorizeEmployeeDelegation: async () => ({}),
       bindConnectorSecrets: async () => ({ secretRefs: [unauthorizedReference] }),
     });
     let state = connectorSetupSelect(CONNECTOR_SETUP_INITIAL_STATE, SLACK);
