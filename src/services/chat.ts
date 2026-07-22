@@ -717,7 +717,10 @@ export async function* streamMessageWithTools(
     });
 
     // Execute tools
-    const results = await executeTools(response.tool_calls);
+    const results = await executeTools(
+      response.tool_calls,
+      memorySource?.conversationId ?? null,
+    );
     hasExecutedTools = true;
 
     // Log tool execution results
@@ -877,7 +880,10 @@ export async function* continueToolIteration(
       tool_calls: response.tool_calls,
     });
 
-    const results = await executeTools(response.tool_calls);
+    const results = await executeTools(
+      response.tool_calls,
+      memorySource?.conversationId ?? null,
+    );
     hasExecutedTools = true;
     yield { type: "tool_results", results };
 

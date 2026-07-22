@@ -16,7 +16,18 @@ import { computeAgentOAuthRouting } from "@/services/publisher-oauth";
 import { startShellProgressListener } from "@/services/shell-progress";
 import { x402Service } from "@/services/x402";
 import { conversationStore } from "@/stores/conversation.store";
-import { getApprovalRequirement, requiresApproval } from "./approval-config";
+import type { OperationClass } from "./approval-config";
+import {
+  classifyGatewayOperation,
+  getApprovalRequirement,
+  isHighRiskVerb,
+} from "./approval-config";
+import {
+  hasSessionDenial,
+  hasSessionGrant,
+  recordSessionDenial,
+  recordSessionGrant,
+} from "./approval-session";
 import { parseGatewayToolName, parseMcpToolName } from "./definitions";
 
 const GATEWAY_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -32,6 +43,15 @@ interface GatewayApprovalResult {
 interface GatewayConnectionArgsResult {
   args: Record<string, unknown>;
   error?: string;
+}
+
+interface GatewayApprovalPrompt {
+  description?: string;
+  isDestructive?: boolean;
+}
+
+interface ToolAuthorizationOptions {
+  operationClass?: OperationClass;
 }
 
 /**
@@ -125,6 +145,7 @@ async function requestGatewayApproval(
   toolName: string,
   args: Record<string, unknown>,
   conversationId: string | null,
+  prompt?: GatewayApprovalPrompt,
 ): Promise<GatewayApprovalResult> {
   const approvalId = `gateway-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const requirement = getApprovalRequirement(publisherSlug, toolName);
@@ -141,8 +162,10 @@ async function requestGatewayApproval(
       toolName,
       args,
       threadId: conversationId ?? conversationStore.activeConversationId,
-      description: requirement?.description || "Execute operation",
-      isDestructive: requirement?.isDestructive || false,
+      description:
+        requirement?.description ?? prompt?.description ?? "Execute operation",
+      isDestructive:
+        requirement?.isDestructive ?? prompt?.isDestructive ?? false,
     });
   } catch (err) {
     console.error("[Tool Executor] Failed to emit approval request:", err);
@@ -182,6 +205,87 @@ async function requestGatewayApproval(
         resolve({ approved: false });
       });
   });
+}
+
+function sessionConversationId(conversationId: string | null): string {
+  return (
+    conversationId ??
+    conversationStore.activeConversationId ??
+    "session-without-conversation"
+  );
+}
+
+/**
+ * Apply the temporary, renderer-side containment policy at every currently
+ * reachable publisher route. The future Rust gate will become the trusted
+ * boundary; until then this keeps unknown operations from failing open.
+ */
+async function authorizeToolOperation(
+  publisherSlug: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  conversationId: string | null,
+  options?: ToolAuthorizationOptions,
+): Promise<GatewayApprovalResult> {
+  const operationClass =
+    options?.operationClass ??
+    classifyGatewayOperation(publisherSlug, toolName);
+  const highRisk = operationClass === "high-risk" || isHighRiskVerb(toolName);
+
+  if (operationClass === "trusted-read" && !highRisk) {
+    return { approved: true };
+  }
+
+  const sessionId = sessionConversationId(conversationId);
+  if (!highRisk) {
+    if (hasSessionDenial(sessionId, publisherSlug, toolName)) {
+      console.log(
+        `[Tool Executor] Reusing denied session decision for ${publisherSlug}/${toolName}`,
+      );
+      return { approved: false };
+    }
+
+    if (hasSessionGrant(sessionId, publisherSlug, toolName)) {
+      console.log(
+        `[Tool Executor] Reusing granted session decision for ${publisherSlug}/${toolName}`,
+      );
+      return { approved: true };
+    }
+  }
+
+  const approval = await requestGatewayApproval(
+    publisherSlug,
+    toolName,
+    args,
+    conversationId,
+    highRisk
+      ? {
+          description: `High-risk operation on ${publisherSlug}/${toolName}`,
+        }
+      : {
+          description: `Unclassified operation on ${publisherSlug} — first use this session`,
+        },
+  );
+
+  // High-risk calls are exact one-shot approvals. Only unclassified calls may
+  // receive a temporary, in-memory session decision.
+  if (!highRisk) {
+    if (approval.approved) {
+      recordSessionGrant(sessionId, publisherSlug, toolName);
+    } else {
+      recordSessionDenial(sessionId, publisherSlug, toolName);
+    }
+  }
+
+  return approval;
+}
+
+function deniedToolResult(toolCallId: string): ToolResult {
+  return {
+    tool_call_id: toolCallId,
+    content: "Operation was not approved by user",
+    is_error: true,
+  };
 }
 
 async function resolveGatewayOAuthConnectionArgs(
@@ -297,6 +401,15 @@ export async function executeTool(
     // Check if this is a built-in Seren tool (seren__toolName)
     if (name.startsWith("seren__")) {
       const serenToolName = name.slice("seren__".length);
+      const approval = await authorizeToolOperation(
+        "seren",
+        serenToolName,
+        args,
+        conversationId,
+      );
+      if (!approval.approved) {
+        return deniedToolResult(toolCall.id);
+      }
       const response = await callSerenTool(serenToolName, args);
       const content =
         typeof response.result === "string"
@@ -329,6 +442,7 @@ export async function executeTool(
         mcpInfo.serverName,
         mcpInfo.toolName,
         args,
+        conversationId,
       );
     }
 
@@ -527,8 +641,22 @@ async function executeMcpTool(
   serverName: string,
   toolName: string,
   args: Record<string, unknown>,
+  conversationId: string | null,
 ): Promise<ToolResult> {
   try {
+    const approval = await authorizeToolOperation(
+      serverName,
+      toolName,
+      args,
+      conversationId,
+      // Local stdio server names are user-controlled and have no trusted
+      // metadata yet, even when a name happens to resemble a publisher slug.
+      { operationClass: "unclassified" },
+    );
+    if (!approval.approved) {
+      return deniedToolResult(toolCallId);
+    }
+
     const result = await mcpClient.callTool(serverName, {
       name: toolName,
       arguments: args,
@@ -611,32 +739,19 @@ async function executeGatewayTool(
   try {
     let callArgs = args;
 
-    // Check if this operation requires user approval
-    if (requiresApproval(publisherSlug, toolName)) {
-      console.log(
-        `[Tool Executor] Operation requires approval: ${publisherSlug}/${toolName}`,
-      );
-      const approval = await requestGatewayApproval(
-        publisherSlug,
-        toolName,
-        args,
-        conversationId,
-      );
+    const approval = await authorizeToolOperation(
+      publisherSlug,
+      toolName,
+      args,
+      conversationId,
+    );
+    if (!approval.approved) {
+      console.log("[Tool Executor] Operation denied by user");
+      return deniedToolResult(toolCallId);
+    }
 
-      if (!approval.approved) {
-        console.log("[Tool Executor] Operation denied by user");
-        return {
-          tool_call_id: toolCallId,
-          content: "Operation was not approved by user",
-          is_error: true,
-        };
-      }
-
-      console.log("[Tool Executor] Operation approved by user");
-
-      if (approval.connectionId) {
-        callArgs = { ...args, connection_id: approval.connectionId };
-      }
+    if (approval.connectionId) {
+      callArgs = { ...args, connection_id: approval.connectionId };
     }
 
     const resolvedArgs = await resolveGatewayOAuthConnectionArgs(
@@ -788,6 +903,9 @@ async function executeGatewayTool(
  */
 export async function executeTools(
   toolCalls: ToolCall[],
+  conversationId: string | null = null,
 ): Promise<ToolResult[]> {
-  return Promise.all(toolCalls.map(executeTool));
+  return Promise.all(
+    toolCalls.map((toolCall) => executeTool(toolCall, conversationId)),
+  );
 }
