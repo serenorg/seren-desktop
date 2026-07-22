@@ -109,6 +109,7 @@ import {
   COMPOSER_TOOLBAR_RIGHT_GROUP_CLASSES,
   COMPOSER_TOOLBAR_ROOT_CLASSES,
 } from "./composerToolbarClasses";
+import { DataDestinationsPanel } from "./DataDestinationsPanel";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { OAuthAccountSwitcher } from "./OAuthAccountSwitcher";
@@ -154,6 +155,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const [savedInput, setSavedInput] = createSignal("");
   const [isAttaching, setIsAttaching] = createSignal(false);
   const [isProcessingDocs, setIsProcessingDocs] = createSignal(false);
+  const [showDataDestinations, setShowDataDestinations] = createSignal(false);
   const [awaitingLogin, setAwaitingLogin] = createSignal<AgentType | null>(
     null,
   );
@@ -1773,6 +1775,23 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           >
             Clear
           </button>
+          <div class="relative">
+            <button
+              type="button"
+              class="bg-transparent border border-[#3a5650] text-[#9ce3c3] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#172b25]"
+              aria-expanded={showDataDestinations()}
+              onClick={() => setShowDataDestinations((open) => !open)}
+            >
+              Destinations
+            </button>
+            <Show when={showDataDestinations()}>
+              <div class="absolute right-0 top-full z-40 mt-2 w-[min(560px,calc(100vw-2rem))]">
+                <DataDestinationsPanel
+                  conversationId={activeAgentThread()?.id}
+                />
+              </div>
+            </Show>
+          </div>
         </Show>
         <OAuthAccountSwitcher threadId={props.threadId} />
       </div>
@@ -1853,6 +1872,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 Describe what you'd like the agent to do. It can read files,
                 make edits, run commands, and more.
               </p>
+              <div class="mt-8 w-full max-w-[560px]">
+                <DataDestinationsPanel
+                  conversationId={activeAgentThread()?.id}
+                />
+              </div>
             </div>
           }
         >

@@ -27,6 +27,7 @@ import {
   wipeHistorySyncRemote,
 } from "@/services/historySync";
 import { allowsSerenPublicModels } from "@/services/organization-policy";
+import { telemetry } from "@/services/telemetry";
 import {
   appearanceState,
   appearanceStore,
@@ -466,6 +467,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             {(section) => (
               <button
                 type="button"
+                data-testid={`settings-section-${section.id}`}
                 class={`flex items-center gap-2.5 px-3 py-2.5 border-none rounded-md cursor-pointer text-[0.9rem] text-left transition-all duration-150 ${
                   activeSection() === section.id
                     ? "bg-accent text-white"
@@ -2130,6 +2132,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
+                  data-testid="history-sync-enabled"
                   checked={settingsState.app.historySyncEnabled}
                   disabled={historySyncBusy()}
                   onChange={(e) =>
@@ -2274,13 +2277,13 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
+                  data-testid="telemetry-enabled"
                   checked={settingsState.app.telemetryEnabled}
-                  onChange={(e) =>
-                    handleBooleanChange(
-                      "telemetryEnabled",
-                      e.currentTarget.checked,
-                    )
-                  }
+                  onChange={(e) => {
+                    const enabled = e.currentTarget.checked;
+                    handleBooleanChange("telemetryEnabled", enabled);
+                    telemetry.setEnabled(enabled);
+                  }}
                   class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
                 <span class="flex flex-col gap-0.5">

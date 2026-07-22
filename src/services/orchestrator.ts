@@ -710,6 +710,7 @@ function handleComplete(
   const model = stream.modelId || providerStore.activeModel || "unknown";
   if (finalOutputValidation.canStoreMemory) {
     processAssistantResponseMemory(safeContent, {
+      conversationId,
       model,
       userQuery: stream.prompt,
       sessionId: conversationId,

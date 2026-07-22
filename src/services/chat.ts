@@ -260,6 +260,7 @@ export interface ToolIterationState {
 /** Stable source identity used to make memory capture idempotent across retries. */
 export interface ToolMemorySource {
   sourceExternalId: string;
+  conversationId?: string;
   sourceRevision?: string;
   sourceUri?: string;
   sessionId?: string;
@@ -663,6 +664,7 @@ export async function* streamMessageWithTools(
       if (finalOutputValidation.canStoreMemory && memorySource) {
         processAssistantResponseMemory(fullContent, {
           ...memorySource,
+          conversationId: memorySource.conversationId,
           model,
           userQuery: content,
         }).catch((err) => {
@@ -839,6 +841,7 @@ export async function* continueToolIteration(
       if (finalOutputValidation.canStoreMemory && memorySource) {
         processAssistantResponseMemory(fullContent, {
           ...memorySource,
+          conversationId: memorySource.conversationId,
           model,
           userQuery,
         }).catch((err) => {

@@ -8418,6 +8418,7 @@ export const agentStore = {
         finalOutputValidation.canStoreMemory
       ) {
         processAssistantResponseMemory(safeContent, {
+          conversationId: session.conversationId,
           model: `agent:${session.info.agentType}`,
           userQuery: session.lastUserPrompt,
           sessionId: session.conversationId,
