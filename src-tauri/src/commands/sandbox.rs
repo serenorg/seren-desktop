@@ -1,10 +1,16 @@
-// ABOUTME: Tauri command that returns the verified macOS provider sandbox profile.
-// ABOUTME: Credential-store paths are denied before the profile crosses into the child runtime.
+// ABOUTME: Tauri command that returns the verified OS provider sandbox launch spec.
+// ABOUTME: Credential-store paths are denied before the policy crosses into the child runtime.
 
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use crate::sandbox::{SandboxMode, SandboxPolicy, seatbelt_profile};
+use serde::Serialize;
+
+use crate::sandbox::{SandboxMode, SandboxPolicy};
+#[cfg(target_os = "linux")]
+use crate::sandbox::encode_policy;
+#[cfg(target_os = "macos")]
+use crate::sandbox::seatbelt_profile;
 
 const CREDENTIAL_STORE_SUFFIXES: &[&str] = &[
     ".ssh",
@@ -18,12 +24,26 @@ const CREDENTIAL_STORE_SUFFIXES: &[&str] = &[
     ".netrc",
 ];
 
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind")]
+pub enum AgentSandboxLaunchSpec {
+    #[serde(rename = "seatbelt")]
+    Seatbelt { profile: String },
+    #[serde(rename = "linux-launcher")]
+    LinuxLauncher {
+        #[serde(rename = "launcherPath")]
+        launcher_path: String,
+        #[serde(rename = "policyBase64")]
+        policy_base64: String,
+    },
+}
+
 #[tauri::command]
 pub fn agent_sandbox_profile(
     mode: String,
     project_root: String,
     network_enabled: Option<bool>,
-) -> Result<String, String> {
+) -> Result<AgentSandboxLaunchSpec, String> {
     let mode = SandboxMode::from_str(&mode).map_err(|error| error.to_string())?;
     if mode == SandboxMode::FullAccess {
         return Err("No sandbox profile is generated for full-access mode.".to_string());
@@ -50,5 +70,29 @@ pub fn agent_sandbox_profile(
     )
     .map_err(|error| error.to_string())?;
 
-    seatbelt_profile(&policy).map_err(|error| error.to_string())
+    #[cfg(target_os = "macos")]
+    {
+        return seatbelt_profile(&policy)
+            .map(|profile| AgentSandboxLaunchSpec::Seatbelt { profile })
+            .map_err(|error| error.to_string());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let launcher_path = std::env::current_exe()
+            .map_err(|error| format!("Could not resolve the sandbox launcher: {error}"))?
+            .to_string_lossy()
+            .into_owned();
+        let policy_base64 = encode_policy(&policy).map_err(|error| error.to_string())?;
+        return Ok(AgentSandboxLaunchSpec::LinuxLauncher {
+            launcher_path,
+            policy_base64,
+        });
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = policy;
+        Err("The provider sandbox backend is unavailable on this platform.".to_string())
+    }
 }

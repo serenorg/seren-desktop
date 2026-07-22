@@ -151,10 +151,10 @@ function resolveSpawnShell(claudeBin) {
 }
 
 /**
- * Build the actual child invocation for the local Claude CLI. On macOS every
- * bounded session must carry the verified Rust-authored Seatbelt profile;
- * missing proof is a hard launch failure rather than an unsandboxed fallback.
- * #3192.
+ * Build the actual child invocation for the local Claude CLI. On macOS and
+ * Linux every bounded session must carry the verified Rust-authored launcher
+ * spec; missing proof is a hard launch failure rather than an unsandboxed
+ * fallback. #3192.
  */
 function buildClaudeSpawnInvocation({
   claudeBin,
@@ -166,14 +166,47 @@ function buildClaudeSpawnInvocation({
     sandboxMode === "full-access" || sandboxMode === "danger-full-access";
 
   if (process.platform === "darwin" && !fullAccess) {
-    if (typeof sandboxProfile !== "string" || sandboxProfile.trim().length === 0) {
+    if (
+      !sandboxProfile ||
+      typeof sandboxProfile !== "object" ||
+      sandboxProfile.kind !== "seatbelt" ||
+      typeof sandboxProfile.profile !== "string" ||
+      sandboxProfile.profile.trim().length === 0
+    ) {
       throw new Error(
         "Claude Code launch blocked: the verified macOS sandbox profile is missing.",
       );
     }
     return {
       command: "/usr/bin/sandbox-exec",
-      args: ["-p", sandboxProfile, claudeBin, ...claudeArgs],
+      args: ["-p", sandboxProfile.profile, claudeBin, ...claudeArgs],
+      shell: false,
+    };
+  }
+
+  if (process.platform === "linux" && !fullAccess) {
+    if (
+      !sandboxProfile ||
+      typeof sandboxProfile !== "object" ||
+      sandboxProfile.kind !== "linux-launcher" ||
+      typeof sandboxProfile.launcherPath !== "string" ||
+      sandboxProfile.launcherPath.trim().length === 0 ||
+      typeof sandboxProfile.policyBase64 !== "string" ||
+      sandboxProfile.policyBase64.trim().length === 0
+    ) {
+      throw new Error(
+        "Claude Code launch blocked: the verified Linux sandbox launcher is missing.",
+      );
+    }
+    return {
+      command: sandboxProfile.launcherPath,
+      args: [
+        "__seren-sandbox-run",
+        sandboxProfile.policyBase64,
+        "--",
+        claudeBin,
+        ...claudeArgs,
+      ],
       shell: false,
     };
   }
@@ -2696,7 +2729,12 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
               PATH: extendedPath,
               SEREN_AGENT_PROJECT_ROOT: cwd,
               SEREN_AGENT_SANDBOX_MODE: sandboxMode ?? "workspace-write",
-              SEREN_AGENT_SANDBOX_PROFILE: sandboxProfile ?? "",
+              SEREN_AGENT_SANDBOX_PROFILE:
+                sandboxProfile?.kind === "seatbelt"
+                  ? sandboxProfile.profile
+                  : sandboxProfile?.kind === "linux-launcher"
+                    ? sandboxProfile.policyBase64
+                    : "",
               SEREN_AGENT_APPROVAL_POLICY: approvalPolicy ?? "on-request",
               SEREN_AGENT_AUTO_APPROVE_READS:
                 autoApproveReads === false ? "false" : "true",
