@@ -15,9 +15,13 @@ describe("#2083 chat memory affordance", () => {
     expect(chatContentSource).toContain(
       'import { SlidePanel } from "@/components/layout/SlidePanel"',
     );
-    expect(chatContentSource).toContain("Used ");
+    expect(chatContentSource).toContain("available");
     expect(chatContentSource).toContain(" remembered detail");
-    expect(chatContentSource).toContain("Memory used in this answer");
+    expect(chatContentSource).toContain("Memory available to this answer");
+    expect(chatContentSource).toContain("retrieved and made available");
+    expect(chatContentSource).toContain("may or may not have drawn on");
+    expect(chatContentSource).not.toContain("Memory used in this answer");
+    expect(chatContentSource).not.toContain("Used {");
     expect(chatContentSource).toContain("Something is wrong");
     expect(chatContentSource).toContain("Undo remember");
     expect(chatContentSource).toContain("Do not use here");
