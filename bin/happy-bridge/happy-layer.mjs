@@ -23,7 +23,9 @@ import {
 const AUTH_POLL_MS = 1000;
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 const SUMMARY_CACHE_TTL_MS = 1000;
+const SESSION_KEEP_ALIVE_MS = 2000;
 const DEFAULT_CODEX_APPROVAL_POLICY = "on-failure";
+const BUSY_SESSION_STATUSES = new Set(["prompting", "busy", "running"]);
 const DENY_OPTION_IDS = new Set([
   "deny",
   "decline",
@@ -337,6 +339,29 @@ export function createTerminatedSessionTracker(maxSize = 256) {
   };
 }
 
+function createSessionLiveness(client, initialThinking = false) {
+  let thinking = initialThinking;
+  let stopped = false;
+  const pulse = () => {
+    if (!stopped) client.keepAlive(thinking, "remote");
+  };
+  pulse();
+  const interval = setInterval(pulse, SESSION_KEEP_ALIVE_MS);
+
+  return {
+    setThinking(value) {
+      if (stopped || thinking === value) return;
+      thinking = value;
+      pulse();
+    },
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(interval);
+    },
+  };
+}
+
 export function createStartupStatusGate(notify) {
   return {
     async complete(startupWork) {
@@ -498,6 +523,7 @@ export function createHappyLayer({
   let pairingAbortController = null;
   let latestPairingPayload = null;
   let pairingCancelled = false;
+  let closing = false;
   let sourceSubscription = null;
   let supervisorSubscription = null;
   let advertisedRoots = [];
@@ -507,6 +533,8 @@ export function createHappyLayer({
   });
   const sessions = new Map();
   const sessionCreationPromises = new Map();
+  const sessionDisposals = new Set();
+  const remotelyArchivedSessions = new Set();
   const terminatedSessions = createTerminatedSessionTracker();
   const pendingRequests = Object.create(null);
   const liveSessions = new Set();
@@ -518,6 +546,11 @@ export function createHappyLayer({
 
   function debug(message) {
     debugLog(message);
+  }
+
+  function trackSessionDisposal(disposal) {
+    sessionDisposals.add(disposal);
+    void disposal.finally(() => sessionDisposals.delete(disposal));
   }
 
   const promptQueue = createDeferredPromptQueue({
@@ -573,6 +606,7 @@ export function createHappyLayer({
       assistantMessageCoalescer.clear(sessionId);
       delete pendingRequests[sessionId];
       sessionCreationPromises.delete(sessionId);
+      entry.liveness.stop();
       await entry.client
         .close()
         .catch(() => debug("failed to close Happy session leaving scope"));
@@ -607,6 +641,30 @@ export function createHappyLayer({
 
   function registerInbound(entry) {
     const { client } = entry;
+    client.on("archived", () => {
+      const sessionId = entry.sessionId;
+      if (sessions.get(sessionId) !== entry) return;
+
+      // Happy's native runners treat a mobile archive as termination. Mirror
+      // that contract without letting the next pulse reactivate the relay row.
+      sessions.delete(sessionId);
+      liveSessions.delete(sessionId);
+      promptQueue.clear(sessionId);
+      turnCorrelator.clear(sessionId);
+      assistantMessageCoalescer.clear(sessionId);
+      delete pendingRequests[sessionId];
+      sessionCreationPromises.delete(sessionId);
+      terminatedSessions.mark(sessionId);
+      remotelyArchivedSessions.add(sessionId);
+      entry.liveness.stop();
+      const disposal = (async () => {
+        await source
+          .terminate(sessionId)
+          .catch(() => debug("failed to terminate Happy session archived remotely"));
+        await client.close().catch(() => debug("failed to close archived Happy session"));
+      })();
+      trackSessionDisposal(disposal);
+    });
     client.onUserMessage((message) => {
       void promptQueue.enqueue(entry.sessionId, { entry, message });
     });
@@ -691,6 +749,7 @@ export function createHappyLayer({
   }
 
   async function createSessionEntry(sessionId, summary, existingSession = null) {
+    if (closing) throw new Error("Happy layer is closing");
     const existing = sessions.get(sessionId);
     if (existing) return existing;
     if (!api || !identity) throw new Error("Happy API is not registered");
@@ -705,14 +764,25 @@ export function createHappyLayer({
         state: { controlledByUser: true },
         debugLog: debug,
       }));
+    // The relay lookup can outlive bridge shutdown. Do not create a socket or
+    // heartbeat after close() has already drained the tracked entries.
+    if (closing) throw new Error("Happy layer is closing");
     if (!isUsableHappySession(session)) {
       throw new Error("Happy relay did not return a usable session");
     }
     const client = api.sessionSyncClient(session);
-    const entry = { sessionId, happySessionId: session.id, summary, session, client };
+    const thinking = BUSY_SESSION_STATUSES.has(summary?.status);
+    const entry = {
+      sessionId,
+      happySessionId: session.id,
+      summary,
+      session,
+      client,
+      liveness: createSessionLiveness(client, thinking),
+    };
     sessions.set(sessionId, entry);
     liveSessions.add(sessionId);
-    promptQueue.setBusy(sessionId, ["prompting", "busy", "running"].includes(summary?.status));
+    promptQueue.setBusy(sessionId, thinking);
     rememberPendingPermissions(sessionId, summary?.pendingPermissions);
     registerInbound(entry);
     client.sendSessionEvent({ type: "switch", mode: "remote" });
@@ -720,6 +790,8 @@ export function createHappyLayer({
   }
 
   async function findOrCreateSession(sessionId, summary = null) {
+    if (closing) return null;
+    if (remotelyArchivedSessions.has(sessionId)) return null;
     const tracked = resolveTrackedSession({ sessions, terminatedSessions, sessionId });
     if (tracked.entry) return tracked.entry;
     if (tracked.blocked) return null;
@@ -757,13 +829,14 @@ export function createHappyLayer({
     const terminal =
       event.kind === "status" && ["error", "terminated"].includes(event.payload?.status);
     const providerStatus = event.kind === "status" ? event.payload?.status : null;
-    if (["prompting", "busy", "running"].includes(providerStatus)) {
-      promptQueue.setBusy(event.sessionId, true);
-    } else if (
+    const providerThinking = BUSY_SESSION_STATUSES.has(providerStatus);
+    const providerReady =
       event.kind === "turn-complete" ||
       event.kind === "error" ||
-      ["ready", "idle", "completed"].includes(providerStatus)
-    ) {
+      ["ready", "idle", "completed"].includes(providerStatus);
+    if (providerThinking) {
+      promptQueue.setBusy(event.sessionId, true);
+    } else if (providerReady) {
       promptQueue.setBusy(event.sessionId, false);
     }
     if (terminal) {
@@ -779,6 +852,11 @@ export function createHappyLayer({
     if (terminal && !sessions.has(event.sessionId)) return;
     const entry = await findOrCreateSession(event.sessionId, summary);
     if (!entry) return;
+    if (providerThinking) {
+      entry.liveness.setThinking(true);
+    } else if (providerReady) {
+      entry.liveness.setThinking(false);
+    }
     const provider = summary?.agentType === "claude-code" ? "claude" : summary?.agentType ?? "codex";
     const correlatedEvent = turnCorrelator.correlate(event);
     for (const publishableEvent of assistantMessageCoalescer.consume(correlatedEvent)) {
@@ -840,6 +918,9 @@ export function createHappyLayer({
         title: `${agentType} Agent`,
         happySessionId: pending.happySessionId,
       });
+      if (closing || sessions.get(pendingSessionId) !== pending) {
+        return { type: "error", errorMessage: "Happy session closed before provider spawn" };
+      }
       const spawned = await source.spawn({
         agentType,
         cwd: validation.root,
@@ -847,6 +928,12 @@ export function createHappyLayer({
         approvalPolicy: defaultApprovalPolicy(agentType),
       });
       if (!spawned?.sessionId) throw new Error("provider spawn returned no session");
+      if (closing || sessions.get(pendingSessionId) !== pending) {
+        await source
+          .terminate(spawned.sessionId)
+          .catch(() => debug("failed to terminate provider spawned after Happy session closed"));
+        return { type: "error", errorMessage: "Happy session closed during provider spawn" };
+      }
       sessions.delete(pendingSessionId);
       turnCorrelator.clear(pendingSessionId);
       assistantMessageCoalescer.clear(pendingSessionId);
@@ -901,12 +988,14 @@ export function createHappyLayer({
   }
 
   async function discardPendingSpawn(pendingSessionId, pending) {
+    if (sessions.get(pendingSessionId) !== pending) return;
     sessions.delete(pendingSessionId);
     liveSessions.delete(pendingSessionId);
     turnCorrelator.clear(pendingSessionId);
     assistantMessageCoalescer.clear(pendingSessionId);
     delete pendingRequests[pendingSessionId];
     sessionCreationPromises.delete(pendingSessionId);
+    pending.liveness.stop();
     await pending.client.close().catch(() => debug("failed to close abandoned Happy session"));
   }
 
@@ -1056,6 +1145,7 @@ export function createHappyLayer({
     },
     startPairing,
     async close() {
+      closing = true;
       sourceSubscription?.();
       supervisorSubscription?.();
       promptQueue.close();
@@ -1067,11 +1157,15 @@ export function createHappyLayer({
       // this resolves, and tearing the event loop down while these closes are
       // still in flight aborts the process on Windows.
       await Promise.allSettled(
-        [...sessions.values()].map((entry) =>
-          entry.client.close().catch(() => debug("failed to close Happy session")),
-        ),
+        [...sessions.values()].map((entry) => {
+          entry.liveness.stop();
+          return entry.client.close().catch(() => debug("failed to close Happy session"));
+        }),
       );
       sessions.clear();
+      await Promise.allSettled([...sessionDisposals]);
+      sessionDisposals.clear();
+      remotelyArchivedSessions.clear();
       terminatedSessions.clear();
       machineClient?.shutdown();
       machineClient = null;
@@ -1083,5 +1177,6 @@ export function createHappyLayer({
 export async function completeTerminalSession({ sessions, sessionId, entry, send }) {
   await send(entry);
   sessions.delete(sessionId);
+  entry.liveness?.stop();
   await entry.client.close();
 }

@@ -85,10 +85,12 @@ describe("provider-to-neutral session event translation", () => {
     });
 
     await source.sendPrompt("session-1", "hello");
+    await source.terminate("session-1");
     await source.respondToPermission("session-1", "request-1", "allow_once");
 
     expect(calls).toEqual([
       ["provider_prompt", { sessionId: "session-1", prompt: "hello", origin: "remote" }],
+      ["provider_terminate", { sessionId: "session-1" }],
       [
         "provider_respond_to_permission",
         {
