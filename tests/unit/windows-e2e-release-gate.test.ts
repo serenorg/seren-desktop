@@ -700,6 +700,29 @@ describe("Windows production e2e release gate", () => {
     expect(boxMajor).toBeGreaterThanOrEqual(10);
   });
 
+  it("ships every file the box's frozen install needs", () => {
+    // The box runs `pnpm install --frozen-lockfile` against the payload zip.
+    // pnpm 11 reads patchedDependencies from pnpm-workspace.yaml and the
+    // lockfile references patches/happy@1.2.0.patch. A payload with only
+    // package.json + pnpm-lock.yaml aborts with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH
+    // (no workspace config) or ENOENT (no patch), failing the gate that
+    // publish-release needs. #3136
+    const stageJob = workflowJob("windows-app-e2e");
+    const zipCmd = stageJob.slice(
+      stageJob.indexOf('zip -q -r "$payload"'),
+    );
+    const line = zipCmd.slice(0, zipCmd.indexOf("prefix="));
+
+    for (const required of [
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "patches",
+    ]) {
+      expect(line).toContain(required);
+    }
+  });
+
   it("provisions a Node the box's pnpm can actually run on", () => {
     // pnpm 11 imports node:sqlite and refuses to run on Node < 22.13. #3136
     // moved the box to pnpm 11 but left it on the baked Node 20, so the frozen
