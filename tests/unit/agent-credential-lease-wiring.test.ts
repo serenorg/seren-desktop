@@ -18,7 +18,7 @@ function bodyAfter(marker: string, width = 12_000): string {
 
 function directTerminationContext(sessionExpression: string): string {
   const matcher = new RegExp(
-    `providerService\\s*\\.\\s*terminateSession\\(${sessionExpression}\\)`,
+    `providerService\\s*\\.\\s*terminateSession\\(${sessionExpression}\\s*(?:,|\\))`,
   );
   const match = matcher.exec(agentStoreSource);
   expect(match, `missing provider termination for ${sessionExpression}`).toBeTruthy();
@@ -44,9 +44,18 @@ describe("agent session credential leases (#3194)", () => {
   it("covers every direct provider-runtime termination escape hatch", () => {
     expect(
       [...agentStoreSource.matchAll(/providerService\s*\.\s*terminateSession\(/g)],
-    ).toHaveLength(5);
+    ).toHaveLength(8);
     expect(directTerminationContext("newId")).toContain(
       "await revokeCredentialLease(newId)",
+    );
+    expect(directTerminationContext("providerSessionId")).toContain(
+      "await revokeCredentialLease(providerSessionId)",
+    );
+    expect(directTerminationContext("archivedSessionId")).toContain(
+      "await revokeCredentialLease(archivedSessionId)",
+    );
+    expect(directTerminationContext("info\\.id")).toContain(
+      "await revokeCredentialLease(info.id)",
     );
     expect(directTerminationContext("spawnedSessionId")).toContain(
       "await revokeCredentialLease(localSessionId)",

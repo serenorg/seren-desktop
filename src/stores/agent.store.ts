@@ -1155,10 +1155,17 @@ function subscribeToAgentConversationArchived(): void {
           archivedSession?.info.pid,
           {
             fence: fenceHappyProviderSessionArchive,
-            terminate: (providerSessionId) =>
-              providerService.terminateSession(providerSessionId, {
+            terminate: async (providerSessionId) => {
+              await revokeCredentialLease(providerSessionId).catch((error) => {
+                console.warn(
+                  "[AgentStore] Failed to revoke archived Happy sibling credential lease:",
+                  error,
+                );
+              });
+              return providerService.terminateSession(providerSessionId, {
                 timeoutMs: 5_000,
-              }),
+              });
+            },
             forceKill: providerService.forceKillSession,
           },
         )
@@ -2353,6 +2360,12 @@ async function discardLateArchivedProviderSession(
     [...allArchivedSessionIds].map(async (archivedSessionId) => {
       expectedTerminateSessionIds.add(archivedSessionId);
       try {
+        await revokeCredentialLease(archivedSessionId).catch((error) => {
+          console.warn(
+            "[AgentStore] Failed to revoke credential lease after Happy archive:",
+            error,
+          );
+        });
         await providerService.terminateSession(archivedSessionId);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -4004,6 +4017,12 @@ export const agentStore = {
           recoveryInFlightMap.delete(info.id);
           clearChunkBuf(info.id);
           clearToolEventBuf(info.id);
+          await revokeCredentialLease(info.id).catch((error) => {
+            console.warn(
+              "[AgentStore] Failed to revoke provider-only archived spawn credential lease:",
+              error,
+            );
+          });
           await providerService.terminateSession(info.id).catch((error) => {
             const message =
               error instanceof Error ? error.message : String(error);
