@@ -42,7 +42,21 @@ fn workspace_policy(mode: SandboxMode, workspace: &TempDir) -> SandboxPolicy {
 }
 
 fn redirect(path: &Path) -> String {
-    format!("\"{}\"", path.display())
+    format!("\"{}\"", cmd_compatible_path(path))
+}
+
+fn cmd_compatible_path(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    // tempfile paths can carry Windows' extended-length prefix. cmd.exe does
+    // not accept that spelling in redirections, even though the sandbox policy
+    // intentionally retains the canonical form for enforcement.
+    if let Some(unc) = raw.strip_prefix("\\\\?\\UNC\\") {
+        format!("\\\\{unc}")
+    } else if let Some(local) = raw.strip_prefix("\\\\?\\") {
+        local.to_owned()
+    } else {
+        raw.into_owned()
+    }
 }
 
 fn denied_write_script(path: &Path, started_marker: &str, denied_marker: &str) -> String {

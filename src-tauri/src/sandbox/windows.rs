@@ -168,11 +168,12 @@ mod platform {
         let job = create_job()?;
         let (application_name, mut command_line) = command_line(command, args);
         let application_wide = wide(&application_name);
-        let current_directory_value = policy
+        let current_directory_path = policy
             .workspace_roots
             .first()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|| ".".to_string());
+            .map(|path| child_current_directory(path))
+            .unwrap_or_else(|| PathBuf::from("."));
+        let current_directory_value = current_directory_path.to_string_lossy().into_owned();
         let current_directory = wide(&current_directory_value);
         let mut startup = startup_info();
         let inherit_handles = configure_stdio(&mut startup);
@@ -252,10 +253,11 @@ mod platform {
             Ok(policy) => policy,
             Err(error) => exit_with(BAD_POLICY_EXIT, error),
         };
-        if let Some(workspace_root) = policy.workspace_roots.first()
-            && let Err(error) = std::env::set_current_dir(workspace_root)
-        {
-            exit_with(ENFORCEMENT_FAILURE_EXIT, error);
+        if let Some(workspace_root) = policy.workspace_roots.first() {
+            let current_directory = child_current_directory(workspace_root);
+            if let Err(error) = std::env::set_current_dir(&current_directory) {
+                exit_with(ENFORCEMENT_FAILURE_EXIT, error);
+            }
         }
 
         match apply_and_spawn_contained(&policy, &rest[3], &rest[4..]) {
@@ -284,6 +286,23 @@ mod platform {
             ));
         }
         Ok(())
+    }
+
+    fn child_current_directory(path: &Path) -> PathBuf {
+        let raw = path.to_string_lossy();
+        // std::fs::canonicalize produces extended-length paths on Windows.
+        // CreateProcess accepts them, but cmd.exe rejects `\\?\C:\...` as its
+        // current directory and defaults away from the workspace. Keep the
+        // canonical path for policy/ACL enforcement and convert only the child
+        // process's working-directory spelling. #3219.
+        let compatible = if let Some(unc) = raw.strip_prefix("\\\\?\\UNC\\") {
+            format!("\\\\{unc}")
+        } else if let Some(local) = raw.strip_prefix("\\\\?\\") {
+            local.to_owned()
+        } else {
+            raw.into_owned()
+        };
+        PathBuf::from(compatible)
     }
 
     fn capability_sid(policy: &SandboxPolicy) -> Result<OwnedSid, SandboxError> {
