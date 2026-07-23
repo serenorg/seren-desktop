@@ -365,8 +365,10 @@ export type ApiKeyCreated = {
     expires_at?: string | null;
     id: string;
     key_id: string;
+    key_type: ApiKeyType;
     name: string;
     organization_id: string;
+    scopes?: Array<string> | null;
 };
 
 /**
@@ -378,10 +380,12 @@ export type ApiKeyInfo = {
     id: string;
     key_id: string;
     key_prefix: string;
+    key_type: ApiKeyType;
     last_used_at?: string | null;
     name: string;
     organization_id: string;
     revoked_at?: string | null;
+    scopes?: Array<string> | null;
 };
 
 /**
@@ -609,11 +613,14 @@ export type CreateApiKeyRequest = {
      * Required when `key_type` is `"agent"`. The Seren Secrets identity the agent acts as.
      */
     agent_identity_id?: string | null;
+    /**
+     * Optional lifetime in days. Values must be between 1 and 3650; omit for no expiration.
+     */
     expires_in_days?: number | null;
     key_type?: null | ApiKeyType;
     name: string;
     /**
-     * Granular permission scopes for publisher and operation access.
+     * Optional publisher capability scopes. Omit for a legacy unrestricted user key. Supported values are `publisher:*`, `publisher:<slug>`, and `publisher:<slug>:operation:<operation_id>`.
      */
     scopes?: Array<string> | null;
 };
@@ -734,11 +741,11 @@ export type CreatePublisherRequest = {
      */
     api_key_query_param?: string | null;
     /**
-     * External API URL (required for integration_type = api)
+     * External API URL. When present, enables REST proxying.
      */
     api_url?: string | null;
     /**
-     * Upstream auth mode ("static", "jwt", or "oauth2_cc") (default: static)
+     * Upstream auth mode ("static", "jwt", "oauth2_cc", or "passthrough") (default: static)
      */
     auth_type?: string | null;
     base_price_per_1000_rows?: string | null;
@@ -805,7 +812,7 @@ export type CreatePublisherRequest = {
     low_balance_threshold?: string | null;
     markup_multiplier?: string | null;
     /**
-     * MCP server endpoint URL (required for integration_type = mcp)
+     * MCP server endpoint URL. When present, enables native MCP proxying.
      */
     mcp_endpoint?: string | null;
     minimum_balance?: string | null;
@@ -837,7 +844,7 @@ export type CreatePublisherRequest = {
      */
     ownership_tracking_enabled?: boolean | null;
     /**
-     * Map of client-side header name to upstream header name for passthrough auth.
+     * Map of allowed client-side header names to upstream names. Authorization is target-only.
      */
     passthrough_header_rewrite?: unknown;
     price_per_call?: string | null;
@@ -1895,8 +1902,10 @@ export type DataResponseApiKeyCreated = {
         expires_at?: string | null;
         id: string;
         key_id: string;
+        key_type: ApiKeyType;
         name: string;
         organization_id: string;
+        scopes?: Array<string> | null;
     };
     pagination?: null | PaginationMeta;
 };
@@ -4827,6 +4836,10 @@ export type DataResponseOrganizationPrivateModelsPolicy = {
         allow_codex_agent?: boolean;
         allow_seren_agent?: boolean;
         allow_seren_private_agent?: boolean;
+        /**
+         * Machine-readable training and retention declaration for organization private-model inference. Clients requiring confidentiality must deny access unless the status and terms are affirmative.
+         */
+        data_handling_attestation: PrivateModelsDataHandlingAttestation;
         deployment_id?: string | null;
         deployment_name?: string | null;
         disable_external_model_providers?: boolean;
@@ -6159,9 +6172,13 @@ export type DataResponsePublisherResponse = {
          */
         api_key_query_param?: string | null;
         /**
-         * External API URL (for integration_type = api)
+         * External API URL. When present, enables REST proxying.
          */
         api_url?: string | null;
+        /**
+         * Upstream authentication mode.
+         */
+        auth_type: string;
         billing_model: string;
         /**
          * SerenDB branch ID (for database_type = serendb)
@@ -6204,7 +6221,7 @@ export type DataResponsePublisherResponse = {
         mcp_capabilities?: unknown;
         mcp_discovery?: null | McpDiscoveryStatus;
         /**
-         * MCP server endpoint URL (for integration_type = mcp)
+         * MCP server endpoint URL. When present, enables native MCP proxying.
          */
         mcp_endpoint?: string | null;
         name: string;
@@ -6214,7 +6231,7 @@ export type DataResponsePublisherResponse = {
         oauth_provider_id?: string | null;
         ownership_tracking_enabled: boolean;
         /**
-         * Map of client-side header name to upstream header name for passthrough auth.
+         * Map of allowed client-side header names to upstream names. Authorization is target-only.
          */
         passthrough_header_rewrite: unknown;
         /**
@@ -7738,10 +7755,12 @@ export type DataResponseVecApiKeyInfo = {
         id: string;
         key_id: string;
         key_prefix: string;
+        key_type: ApiKeyType;
         last_used_at?: string | null;
         name: string;
         organization_id: string;
         revoked_at?: string | null;
+        scopes?: Array<string> | null;
     }>;
     pagination?: null | PaginationMeta;
 };
@@ -9200,9 +9219,13 @@ export type DataResponseVecPublisherResponse = {
          */
         api_key_query_param?: string | null;
         /**
-         * External API URL (for integration_type = api)
+         * External API URL. When present, enables REST proxying.
          */
         api_url?: string | null;
+        /**
+         * Upstream authentication mode.
+         */
+        auth_type: string;
         billing_model: string;
         /**
          * SerenDB branch ID (for database_type = serendb)
@@ -9245,7 +9268,7 @@ export type DataResponseVecPublisherResponse = {
         mcp_capabilities?: unknown;
         mcp_discovery?: null | McpDiscoveryStatus;
         /**
-         * MCP server endpoint URL (for integration_type = mcp)
+         * MCP server endpoint URL. When present, enables native MCP proxying.
          */
         mcp_endpoint?: string | null;
         name: string;
@@ -9255,7 +9278,7 @@ export type DataResponseVecPublisherResponse = {
         oauth_provider_id?: string | null;
         ownership_tracking_enabled: boolean;
         /**
-         * Map of client-side header name to upstream header name for passthrough auth.
+         * Map of allowed client-side header names to upstream names. Authorization is target-only.
          */
         passthrough_header_rewrite: unknown;
         /**
@@ -11600,7 +11623,9 @@ export type GeoRoutingMode = 'always' | 'opt_in';
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
 /**
- * Integration type - specific integration when publisher_category = Integration
+ * Primary interface for an integration publisher.
+ *
+ * REST and native MCP interfaces are enabled independently by `api_url` and `mcp_endpoint`, so an integration publisher may expose both.
  */
 export type IntegrationType = 'api' | 'mcp';
 
@@ -12154,6 +12179,10 @@ export type OrganizationPrivateModelsPolicy = {
     allow_codex_agent?: boolean;
     allow_seren_agent?: boolean;
     allow_seren_private_agent?: boolean;
+    /**
+     * Machine-readable training and retention declaration for organization private-model inference. Clients requiring confidentiality must deny access unless the status and terms are affirmative.
+     */
+    data_handling_attestation: PrivateModelsDataHandlingAttestation;
     deployment_id?: string | null;
     deployment_name?: string | null;
     disable_external_model_providers?: boolean;
@@ -12215,9 +12244,13 @@ export type PaginatedResponseVecPublisherResponse = {
          */
         api_key_query_param?: string | null;
         /**
-         * External API URL (for integration_type = api)
+         * External API URL. When present, enables REST proxying.
          */
         api_url?: string | null;
+        /**
+         * Upstream authentication mode.
+         */
+        auth_type: string;
         billing_model: string;
         /**
          * SerenDB branch ID (for database_type = serendb)
@@ -12260,7 +12293,7 @@ export type PaginatedResponseVecPublisherResponse = {
         mcp_capabilities?: unknown;
         mcp_discovery?: null | McpDiscoveryStatus;
         /**
-         * MCP server endpoint URL (for integration_type = mcp)
+         * MCP server endpoint URL. When present, enables native MCP proxying.
          */
         mcp_endpoint?: string | null;
         name: string;
@@ -12270,7 +12303,7 @@ export type PaginatedResponseVecPublisherResponse = {
         oauth_provider_id?: string | null;
         ownership_tracking_enabled: boolean;
         /**
-         * Map of client-side header name to upstream header name for passthrough auth.
+         * Map of allowed client-side header names to upstream names. Authorization is target-only.
          */
         passthrough_header_rewrite: unknown;
         /**
@@ -12689,6 +12722,76 @@ export type PricingSummary = {
     base_price_per_1000_rows?: string | null;
 };
 
+/**
+ * Machine-readable private-model data-handling declaration.
+ */
+export type PrivateModelsDataHandlingAttestation = {
+    /**
+     * Time the affirmative declaration was recorded. Absent when status is `unknown`.
+     */
+    attested_at?: string | null;
+    /**
+     * User who recorded the declaration, when that user still exists.
+     */
+    attested_by_user_id?: string | null;
+    basis?: null | PrivateModelsDataHandlingAttestationBasis;
+    /**
+     * Retention treatment for content-derived logs, caches, embeddings, fine-tuning artifacts, and similar records.
+     */
+    derived_data_retention: PrivateModelsDataRetention;
+    /**
+     * Retention treatment for generated inference outputs.
+     */
+    output_retention: PrivateModelsDataRetention;
+    /**
+     * Retention treatment for prompts submitted to inference.
+     */
+    prompt_retention: PrivateModelsDataRetention;
+    /**
+     * Operations to which this declaration applies.
+     */
+    scope: PrivateModelsDataHandlingScope;
+    /**
+     * `unknown` provides no confidentiality guarantee. `no_training_no_retention` is the affirmative declaration defined by the remaining fields.
+     */
+    status: PrivateModelsDataHandlingAttestationStatus;
+    terms?: null | PrivateModelsDataHandlingTerms;
+    /**
+     * Whether covered data may be used for training or model improvement.
+     */
+    training_use: PrivateModelsTrainingUse;
+};
+
+/**
+ * Authority that recorded the data-handling declaration.
+ */
+export type PrivateModelsDataHandlingAttestationBasis = 'policy_administrator';
+
+/**
+ * Organization declaration for private-model inference data handling.
+ */
+export type PrivateModelsDataHandlingAttestationStatus = 'unknown' | 'no_training_no_retention';
+
+/**
+ * Operations covered by the data-handling declaration.
+ */
+export type PrivateModelsDataHandlingScope = 'organization_private_model_inference';
+
+/**
+ * Terms represented by an affirmative declaration.
+ */
+export type PrivateModelsDataHandlingTerms = 'no_training_no_retention';
+
+/**
+ * Retention treatment for a covered data category.
+ */
+export type PrivateModelsDataRetention = 'unknown' | 'none_after_response';
+
+/**
+ * Permitted training use for covered data.
+ */
+export type PrivateModelsTrainingUse = 'unknown' | 'prohibited';
+
 export type ProvidersResponse = {
     providers: Array<PublisherOAuthProviderResponse>;
 };
@@ -12831,9 +12934,13 @@ export type PublisherResponse = {
      */
     api_key_query_param?: string | null;
     /**
-     * External API URL (for integration_type = api)
+     * External API URL. When present, enables REST proxying.
      */
     api_url?: string | null;
+    /**
+     * Upstream authentication mode.
+     */
+    auth_type: string;
     billing_model: string;
     /**
      * SerenDB branch ID (for database_type = serendb)
@@ -12876,7 +12983,7 @@ export type PublisherResponse = {
     mcp_capabilities?: unknown;
     mcp_discovery?: null | McpDiscoveryStatus;
     /**
-     * MCP server endpoint URL (for integration_type = mcp)
+     * MCP server endpoint URL. When present, enables native MCP proxying.
      */
     mcp_endpoint?: string | null;
     name: string;
@@ -12886,7 +12993,7 @@ export type PublisherResponse = {
     oauth_provider_id?: string | null;
     ownership_tracking_enabled: boolean;
     /**
-     * Map of client-side header name to upstream header name for passthrough auth.
+     * Map of allowed client-side header names to upstream names. Authorization is target-only.
      */
     passthrough_header_rewrite: unknown;
     /**
@@ -13688,6 +13795,7 @@ export type UpdateOrganizationPrivateModelsPolicyRequest = {
     allow_seren_agent?: boolean;
     allow_seren_private_agent?: boolean;
     clear_session_database?: boolean;
+    data_handling_attestation?: null | PrivateModelsDataHandlingAttestationStatus;
     deployment_id?: string | null;
     disable_external_model_providers?: boolean;
     disable_local_agents?: boolean;
@@ -13803,11 +13911,11 @@ export type UpdatePublisherRequest = {
      */
     api_key_query_param?: string | null;
     /**
-     * External API URL (for integration_type = api)
+     * External API URL. When present, enables REST proxying.
      */
     api_url?: string | null;
     /**
-     * Upstream auth mode ("static" or "jwt")
+     * Upstream auth mode ("static", "jwt", "oauth2_cc", or "passthrough")
      */
     auth_type?: string | null;
     base_price_per_1000_rows?: string | null;
@@ -13874,7 +13982,7 @@ export type UpdatePublisherRequest = {
     low_balance_threshold?: string | null;
     markup_multiplier?: string | null;
     /**
-     * MCP server endpoint URL (for integration_type = mcp)
+     * MCP server endpoint URL. When present, enables native MCP proxying.
      */
     mcp_endpoint?: string | null;
     minimum_balance?: string | null;
@@ -13905,7 +14013,7 @@ export type UpdatePublisherRequest = {
      */
     ownership_tracking_enabled?: boolean | null;
     /**
-     * Map of client-side header name to upstream header name for passthrough auth.
+     * Map of allowed client-side header names to upstream names. Authorization is target-only.
      */
     passthrough_header_rewrite?: unknown;
     price_per_call?: string | null;
@@ -16081,6 +16189,10 @@ export type ListDefaultOrgApiKeysErrors = {
      * Unauthorized
      */
     401: unknown;
+    /**
+     * A signed-in user session is required
+     */
+    403: unknown;
 };
 
 export type ListDefaultOrgApiKeysResponses = {
@@ -16108,6 +16220,10 @@ export type CreateDefaultOrgApiKeyErrors = {
      * Unauthorized
      */
     401: unknown;
+    /**
+     * A signed-in user session is required
+     */
+    403: unknown;
 };
 
 export type CreateDefaultOrgApiKeyResponses = {
@@ -16140,6 +16256,10 @@ export type RevokeDefaultOrgApiKeyErrors = {
      * Unauthorized
      */
     401: unknown;
+    /**
+     * A signed-in user session is required
+     */
+    403: unknown;
     /**
      * API key not found
      */
@@ -16451,6 +16571,10 @@ export type ListOrgApiKeysErrors = {
      */
     401: unknown;
     /**
+     * A signed-in user session is required
+     */
+    403: unknown;
+    /**
      * Organization not found
      */
     404: unknown;
@@ -16482,6 +16606,10 @@ export type CreateOrgApiKeyErrors = {
      * Unauthorized
      */
     401: unknown;
+    /**
+     * A signed-in user session is required
+     */
+    403: unknown;
     /**
      * Organization not found
      */
@@ -16518,6 +16646,10 @@ export type RevokeOrgApiKeyErrors = {
      * Unauthorized
      */
     401: unknown;
+    /**
+     * A signed-in user session is required
+     */
+    403: unknown;
     /**
      * API key not found
      */

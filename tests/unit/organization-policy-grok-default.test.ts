@@ -13,6 +13,14 @@ function policy(
   return {
     organization_id: "org_test",
     mode: "standard",
+    data_handling_attestation: {
+      status: "unknown",
+      scope: "organization_private_model_inference",
+      training_use: "unknown",
+      prompt_retention: "unknown",
+      output_retention: "unknown",
+      derived_data_retention: "unknown",
+    },
     deployment_id: null,
     disable_seren_models: false,
     disable_local_agents: false,

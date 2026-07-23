@@ -1090,6 +1090,8 @@ export const listDefaultOrgApiKeysQueryKey = (options?: Options<ListDefaultOrgAp
 
 /**
  * List API keys for the user's default organization
+ *
+ * Requires a signed-in user access token. API keys cannot manage API keys.
  */
 export const listDefaultOrgApiKeysOptions = (options?: Options<ListDefaultOrgApiKeysData>) => queryOptions<ListDefaultOrgApiKeysResponse, DefaultError, ListDefaultOrgApiKeysResponse, ReturnType<typeof listDefaultOrgApiKeysQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
@@ -1107,8 +1109,7 @@ export const listDefaultOrgApiKeysOptions = (options?: Options<ListDefaultOrgApi
 /**
  * Create a new API key for the user's default organization
  *
- * This is a convenience endpoint that resolves "default" to the user's
- * first organization, avoiding an extra round-trip to /auth/me.
+ * This convenience endpoint resolves "default" to the user's first organization. It requires a signed-in user access token; API keys cannot manage API keys.
  */
 export const createDefaultOrgApiKeyMutation = (options?: Partial<Options<CreateDefaultOrgApiKeyData>>): MutationOptions<CreateDefaultOrgApiKeyResponse, DefaultError, Options<CreateDefaultOrgApiKeyData>> => {
     const mutationOptions: MutationOptions<CreateDefaultOrgApiKeyResponse, DefaultError, Options<CreateDefaultOrgApiKeyData>> = {
@@ -1126,6 +1127,8 @@ export const createDefaultOrgApiKeyMutation = (options?: Partial<Options<CreateD
 
 /**
  * Revoke an API key from the user's default organization
+ *
+ * Requires a signed-in user access token. API keys cannot manage API keys.
  */
 export const revokeDefaultOrgApiKeyMutation = (options?: Partial<Options<RevokeDefaultOrgApiKeyData>>): MutationOptions<unknown, DefaultError, Options<RevokeDefaultOrgApiKeyData>> => {
     const mutationOptions: MutationOptions<unknown, DefaultError, Options<RevokeDefaultOrgApiKeyData>> = {
@@ -1333,6 +1336,8 @@ export const listOrgApiKeysQueryKey = (options: Options<ListOrgApiKeysData>) => 
 
 /**
  * List API keys for a specific organization
+ *
+ * Requires a signed-in user access token. API keys cannot manage API keys.
  */
 export const listOrgApiKeysOptions = (options: Options<ListOrgApiKeysData>) => queryOptions<ListOrgApiKeysResponse, DefaultError, ListOrgApiKeysResponse, ReturnType<typeof listOrgApiKeysQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
@@ -1349,6 +1354,8 @@ export const listOrgApiKeysOptions = (options: Options<ListOrgApiKeysData>) => q
 
 /**
  * Create a new API key for a specific organization
+ *
+ * Requires a signed-in user access token. API keys cannot manage API keys.
  */
 export const createOrgApiKeyMutation = (options?: Partial<Options<CreateOrgApiKeyData>>): MutationOptions<CreateOrgApiKeyResponse, DefaultError, Options<CreateOrgApiKeyData>> => {
     const mutationOptions: MutationOptions<CreateOrgApiKeyResponse, DefaultError, Options<CreateOrgApiKeyData>> = {
@@ -1366,6 +1373,8 @@ export const createOrgApiKeyMutation = (options?: Partial<Options<CreateOrgApiKe
 
 /**
  * Revoke an organization API key
+ *
+ * Requires a signed-in user access token. API keys cannot manage API keys.
  */
 export const revokeOrgApiKeyMutation = (options?: Partial<Options<RevokeOrgApiKeyData>>): MutationOptions<unknown, DefaultError, Options<RevokeOrgApiKeyData>> => {
     const mutationOptions: MutationOptions<unknown, DefaultError, Options<RevokeOrgApiKeyData>> = {

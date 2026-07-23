@@ -561,6 +561,8 @@ export const listOrganizations = <ThrowOnError extends boolean = false>(options?
 
 /**
  * List API keys for the user's default organization
+ *
+ * Requires a signed-in user access token. API keys cannot manage API keys.
  */
 export const listDefaultOrgApiKeys = <ThrowOnError extends boolean = false>(options?: Options<ListDefaultOrgApiKeysData, ThrowOnError>): RequestResult<ListDefaultOrgApiKeysResponses, ListDefaultOrgApiKeysErrors, ThrowOnError> => (options?.client ?? client).get<ListDefaultOrgApiKeysResponses, ListDefaultOrgApiKeysErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -571,8 +573,7 @@ export const listDefaultOrgApiKeys = <ThrowOnError extends boolean = false>(opti
 /**
  * Create a new API key for the user's default organization
  *
- * This is a convenience endpoint that resolves "default" to the user's
- * first organization, avoiding an extra round-trip to /auth/me.
+ * This convenience endpoint resolves "default" to the user's first organization. It requires a signed-in user access token; API keys cannot manage API keys.
  */
 export const createDefaultOrgApiKey = <ThrowOnError extends boolean = false>(options: Options<CreateDefaultOrgApiKeyData, ThrowOnError>): RequestResult<CreateDefaultOrgApiKeyResponses, CreateDefaultOrgApiKeyErrors, ThrowOnError> => (options.client ?? client).post<CreateDefaultOrgApiKeyResponses, CreateDefaultOrgApiKeyErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -586,6 +587,8 @@ export const createDefaultOrgApiKey = <ThrowOnError extends boolean = false>(opt
 
 /**
  * Revoke an API key from the user's default organization
+ *
+ * Requires a signed-in user access token. API keys cannot manage API keys.
  */
 export const revokeDefaultOrgApiKey = <ThrowOnError extends boolean = false>(options: Options<RevokeDefaultOrgApiKeyData, ThrowOnError>): RequestResult<RevokeDefaultOrgApiKeyResponses, RevokeDefaultOrgApiKeyErrors, ThrowOnError> => (options.client ?? client).delete<RevokeDefaultOrgApiKeyResponses, RevokeDefaultOrgApiKeyErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -663,6 +666,8 @@ export const streamTask = <ThrowOnError extends boolean = false>(options: Option
 
 /**
  * List API keys for a specific organization
+ *
+ * Requires a signed-in user access token. API keys cannot manage API keys.
  */
 export const listOrgApiKeys = <ThrowOnError extends boolean = false>(options: Options<ListOrgApiKeysData, ThrowOnError>): RequestResult<ListOrgApiKeysResponses, ListOrgApiKeysErrors, ThrowOnError> => (options.client ?? client).get<ListOrgApiKeysResponses, ListOrgApiKeysErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -672,6 +677,8 @@ export const listOrgApiKeys = <ThrowOnError extends boolean = false>(options: Op
 
 /**
  * Create a new API key for a specific organization
+ *
+ * Requires a signed-in user access token. API keys cannot manage API keys.
  */
 export const createOrgApiKey = <ThrowOnError extends boolean = false>(options: Options<CreateOrgApiKeyData, ThrowOnError>): RequestResult<CreateOrgApiKeyResponses, CreateOrgApiKeyErrors, ThrowOnError> => (options.client ?? client).post<CreateOrgApiKeyResponses, CreateOrgApiKeyErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -685,6 +692,8 @@ export const createOrgApiKey = <ThrowOnError extends boolean = false>(options: O
 
 /**
  * Revoke an organization API key
+ *
+ * Requires a signed-in user access token. API keys cannot manage API keys.
  */
 export const revokeOrgApiKey = <ThrowOnError extends boolean = false>(options: Options<RevokeOrgApiKeyData, ThrowOnError>): RequestResult<RevokeOrgApiKeyResponses, RevokeOrgApiKeyErrors, ThrowOnError> => (options.client ?? client).delete<RevokeOrgApiKeyResponses, RevokeOrgApiKeyErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],

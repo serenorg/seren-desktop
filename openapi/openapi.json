@@ -2227,6 +2227,7 @@
           "Auth"
         ],
         "summary": "List API keys for the user's default organization",
+        "description": "Requires a signed-in user access token. API keys cannot manage API keys.",
         "operationId": "list_default_org_api_keys",
         "responses": {
           "200": {
@@ -2244,6 +2245,9 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "A signed-in user session is required"
           }
         },
         "security": [
@@ -2257,7 +2261,7 @@
           "Auth"
         ],
         "summary": "Create a new API key for the user's default organization",
-        "description": "This is a convenience endpoint that resolves \"default\" to the user's\nfirst organization, avoiding an extra round-trip to /auth/me.",
+        "description": "This convenience endpoint resolves \"default\" to the user's first organization. It requires a signed-in user access token; API keys cannot manage API keys.",
         "operationId": "create_default_org_api_key",
         "requestBody": {
           "content": {
@@ -2285,6 +2289,9 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "A signed-in user session is required"
           }
         },
         "security": [
@@ -2300,6 +2307,7 @@
           "Auth"
         ],
         "summary": "Revoke an API key from the user's default organization",
+        "description": "Requires a signed-in user access token. API keys cannot manage API keys.",
         "operationId": "revoke_default_org_api_key",
         "parameters": [
           {
@@ -2322,6 +2330,9 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "A signed-in user session is required"
           },
           "404": {
             "description": "API key not found"
@@ -2788,6 +2799,7 @@
           "Auth"
         ],
         "summary": "List API keys for a specific organization",
+        "description": "Requires a signed-in user access token. API keys cannot manage API keys.",
         "operationId": "list_org_api_keys",
         "parameters": [
           {
@@ -2815,6 +2827,9 @@
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "A signed-in user session is required"
+          },
           "404": {
             "description": "Organization not found"
           }
@@ -2830,6 +2845,7 @@
           "Auth"
         ],
         "summary": "Create a new API key for a specific organization",
+        "description": "Requires a signed-in user access token. API keys cannot manage API keys.",
         "operationId": "create_org_api_key",
         "parameters": [
           {
@@ -2867,6 +2883,9 @@
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "A signed-in user session is required"
+          },
           "404": {
             "description": "Organization not found"
           }
@@ -2884,6 +2903,7 @@
           "Auth"
         ],
         "summary": "Revoke an organization API key",
+        "description": "Requires a signed-in user access token. API keys cannot manage API keys.",
         "operationId": "revoke_org_api_key",
         "parameters": [
           {
@@ -2913,6 +2933,9 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "A signed-in user session is required"
           },
           "404": {
             "description": "API key not found"
@@ -10250,6 +10273,7 @@
           "name",
           "api_key",
           "organization_id",
+          "key_type",
           "created_at"
         ],
         "properties": {
@@ -10275,12 +10299,24 @@
           "key_id": {
             "type": "string"
           },
+          "key_type": {
+            "$ref": "#/components/schemas/ApiKeyType"
+          },
           "name": {
             "type": "string"
           },
           "organization_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "scopes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -10293,6 +10329,7 @@
           "name",
           "key_prefix",
           "organization_id",
+          "key_type",
           "created_at"
         ],
         "properties": {
@@ -10317,6 +10354,9 @@
           "key_prefix": {
             "type": "string"
           },
+          "key_type": {
+            "$ref": "#/components/schemas/ApiKeyType"
+          },
           "last_used_at": {
             "type": [
               "string",
@@ -10337,6 +10377,15 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "scopes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -10881,7 +10930,8 @@
               "integer",
               "null"
             ],
-            "format": "int64"
+            "format": "int64",
+            "description": "Optional lifetime in days. Values must be between 1 and 3650; omit for no expiration."
           },
           "key_type": {
             "oneOf": [
@@ -10905,7 +10955,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Granular permission scopes for publisher and operation access."
+            "description": "Optional publisher capability scopes. Omit for a legacy unrestricted user key. Supported values are `publisher:*`, `publisher:<slug>`, and `publisher:<slug>:operation:<operation_id>`."
           }
         }
       },
@@ -11210,14 +11260,14 @@
               "string",
               "null"
             ],
-            "description": "External API URL (required for integration_type = api)"
+            "description": "External API URL. When present, enables REST proxying."
           },
           "auth_type": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Upstream auth mode (\"static\", \"jwt\", or \"oauth2_cc\") (default: static)"
+            "description": "Upstream auth mode (\"static\", \"jwt\", \"oauth2_cc\", or \"passthrough\") (default: static)"
           },
           "base_price_per_1000_rows": {
             "type": [
@@ -11335,7 +11385,7 @@
               },
               {
                 "$ref": "#/components/schemas/IntegrationType",
-                "description": "Integration type when publisher_category = integration"
+                "description": "Primary integration interface when publisher_category = integration"
               }
             ]
           },
@@ -11392,7 +11442,7 @@
               "string",
               "null"
             ],
-            "description": "MCP server endpoint URL (required for integration_type = mcp)"
+            "description": "MCP server endpoint URL. When present, enables native MCP proxying."
           },
           "minimum_balance": {
             "type": [
@@ -11446,7 +11496,7 @@
             "description": "Enable resource ownership tracking (legacy gateway parity)"
           },
           "passthrough_header_rewrite": {
-            "description": "Map of client-side header name to upstream header name for passthrough auth."
+            "description": "Map of allowed client-side header names to upstream names. Authorization is target-only."
           },
           "price_per_call": {
             "type": [
@@ -12492,6 +12542,7 @@
               "name",
               "api_key",
               "organization_id",
+              "key_type",
               "created_at"
             ],
             "properties": {
@@ -12517,12 +12568,24 @@
               "key_id": {
                 "type": "string"
               },
+              "key_type": {
+                "$ref": "#/components/schemas/ApiKeyType"
+              },
               "name": {
                 "type": "string"
               },
               "organization_id": {
                 "type": "string",
                 "format": "uuid"
+              },
+              "scopes": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -14560,6 +14623,7 @@
             "required": [
               "organization_id",
               "mode",
+              "data_handling_attestation",
               "updated_at"
             ],
             "properties": {
@@ -14577,6 +14641,10 @@
               },
               "allow_seren_private_agent": {
                 "type": "boolean"
+              },
+              "data_handling_attestation": {
+                "$ref": "#/components/schemas/PrivateModelsDataHandlingAttestation",
+                "description": "Machine-readable training and retention declaration for organization private-model inference. Clients requiring confidentiality must deny access unless the status and terms are affirmative."
               },
               "deployment_id": {
                 "type": [
@@ -15621,6 +15689,7 @@
               "publisher_category",
               "billing_model",
               "gateway_fee_percent",
+              "auth_type",
               "allowed_passthrough_headers",
               "passthrough_header_rewrite",
               "request_content_type",
@@ -15689,7 +15758,11 @@
                   "string",
                   "null"
                 ],
-                "description": "External API URL (for integration_type = api)"
+                "description": "External API URL. When present, enables REST proxying."
+              },
+              "auth_type": {
+                "type": "string",
+                "description": "Upstream authentication mode."
               },
               "billing_model": {
                 "type": "string"
@@ -15788,7 +15861,7 @@
                   },
                   {
                     "$ref": "#/components/schemas/IntegrationType",
-                    "description": "Integration type when publisher_category = integration"
+                    "description": "Primary integration interface when publisher_category = integration"
                   }
                 ]
               },
@@ -15823,7 +15896,7 @@
                   "string",
                   "null"
                 ],
-                "description": "MCP server endpoint URL (for integration_type = mcp)"
+                "description": "MCP server endpoint URL. When present, enables native MCP proxying."
               },
               "name": {
                 "type": "string"
@@ -15840,7 +15913,7 @@
                 "type": "boolean"
               },
               "passthrough_header_rewrite": {
-                "description": "Map of client-side header name to upstream header name for passthrough auth."
+                "description": "Map of allowed client-side header names to upstream names. Authorization is target-only."
               },
               "pricing": {
                 "type": [
@@ -17066,6 +17139,7 @@
                 "name",
                 "key_prefix",
                 "organization_id",
+                "key_type",
                 "created_at"
               ],
               "properties": {
@@ -17090,6 +17164,9 @@
                 "key_prefix": {
                   "type": "string"
                 },
+                "key_type": {
+                  "$ref": "#/components/schemas/ApiKeyType"
+                },
                 "last_used_at": {
                   "type": [
                     "string",
@@ -17110,6 +17187,15 @@
                     "null"
                   ],
                   "format": "date-time"
+                },
+                "scopes": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
                 }
               }
             }
@@ -18561,6 +18647,7 @@
                 "publisher_category",
                 "billing_model",
                 "gateway_fee_percent",
+                "auth_type",
                 "allowed_passthrough_headers",
                 "passthrough_header_rewrite",
                 "request_content_type",
@@ -18629,7 +18716,11 @@
                     "string",
                     "null"
                   ],
-                  "description": "External API URL (for integration_type = api)"
+                  "description": "External API URL. When present, enables REST proxying."
+                },
+                "auth_type": {
+                  "type": "string",
+                  "description": "Upstream authentication mode."
                 },
                 "billing_model": {
                   "type": "string"
@@ -18728,7 +18819,7 @@
                     },
                     {
                       "$ref": "#/components/schemas/IntegrationType",
-                      "description": "Integration type when publisher_category = integration"
+                      "description": "Primary integration interface when publisher_category = integration"
                     }
                   ]
                 },
@@ -18763,7 +18854,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "MCP server endpoint URL (for integration_type = mcp)"
+                  "description": "MCP server endpoint URL. When present, enables native MCP proxying."
                 },
                 "name": {
                   "type": "string"
@@ -18780,7 +18871,7 @@
                   "type": "boolean"
                 },
                 "passthrough_header_rewrite": {
-                  "description": "Map of client-side header name to upstream header name for passthrough auth."
+                  "description": "Map of allowed client-side header names to upstream names. Authorization is target-only."
                 },
                 "pricing": {
                   "type": [
@@ -21278,7 +21369,7 @@
       },
       "IntegrationType": {
         "type": "string",
-        "description": "Integration type - specific integration when publisher_category = Integration",
+        "description": "Primary interface for an integration publisher.\n\nREST and native MCP interfaces are enabled independently by `api_url` and `mcp_endpoint`, so an integration publisher may expose both.",
         "enum": [
           "api",
           "mcp"
@@ -22835,6 +22926,7 @@
         "required": [
           "organization_id",
           "mode",
+          "data_handling_attestation",
           "updated_at"
         ],
         "properties": {
@@ -22852,6 +22944,10 @@
           },
           "allow_seren_private_agent": {
             "type": "boolean"
+          },
+          "data_handling_attestation": {
+            "$ref": "#/components/schemas/PrivateModelsDataHandlingAttestation",
+            "description": "Machine-readable training and retention declaration for organization private-model inference. Clients requiring confidentiality must deny access unless the status and terms are affirmative."
           },
           "deployment_id": {
             "type": [
@@ -23008,6 +23104,7 @@
                 "publisher_category",
                 "billing_model",
                 "gateway_fee_percent",
+                "auth_type",
                 "allowed_passthrough_headers",
                 "passthrough_header_rewrite",
                 "request_content_type",
@@ -23076,7 +23173,11 @@
                     "string",
                     "null"
                   ],
-                  "description": "External API URL (for integration_type = api)"
+                  "description": "External API URL. When present, enables REST proxying."
+                },
+                "auth_type": {
+                  "type": "string",
+                  "description": "Upstream authentication mode."
                 },
                 "billing_model": {
                   "type": "string"
@@ -23175,7 +23276,7 @@
                     },
                     {
                       "$ref": "#/components/schemas/IntegrationType",
-                      "description": "Integration type when publisher_category = integration"
+                      "description": "Primary integration interface when publisher_category = integration"
                     }
                   ]
                 },
@@ -23210,7 +23311,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "MCP server endpoint URL (for integration_type = mcp)"
+                  "description": "MCP server endpoint URL. When present, enables native MCP proxying."
                 },
                 "name": {
                   "type": "string"
@@ -23227,7 +23328,7 @@
                   "type": "boolean"
                 },
                 "passthrough_header_rewrite": {
-                  "description": "Map of client-side header name to upstream header name for passthrough auth."
+                  "description": "Map of allowed client-side header names to upstream names. Authorization is target-only."
                 },
                 "pricing": {
                   "type": [
@@ -24229,6 +24330,127 @@
           }
         }
       },
+      "PrivateModelsDataHandlingAttestation": {
+        "type": "object",
+        "description": "Machine-readable private-model data-handling declaration.",
+        "required": [
+          "status",
+          "scope",
+          "training_use",
+          "prompt_retention",
+          "output_retention",
+          "derived_data_retention"
+        ],
+        "properties": {
+          "attested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Time the affirmative declaration was recorded. Absent when status is `unknown`."
+          },
+          "attested_by_user_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "User who recorded the declaration, when that user still exists."
+          },
+          "basis": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PrivateModelsDataHandlingAttestationBasis",
+                "description": "Authority that recorded the declaration. Absent when status is `unknown`."
+              }
+            ]
+          },
+          "derived_data_retention": {
+            "$ref": "#/components/schemas/PrivateModelsDataRetention",
+            "description": "Retention treatment for content-derived logs, caches, embeddings, fine-tuning artifacts, and similar records."
+          },
+          "output_retention": {
+            "$ref": "#/components/schemas/PrivateModelsDataRetention",
+            "description": "Retention treatment for generated inference outputs."
+          },
+          "prompt_retention": {
+            "$ref": "#/components/schemas/PrivateModelsDataRetention",
+            "description": "Retention treatment for prompts submitted to inference."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/PrivateModelsDataHandlingScope",
+            "description": "Operations to which this declaration applies."
+          },
+          "status": {
+            "$ref": "#/components/schemas/PrivateModelsDataHandlingAttestationStatus",
+            "description": "`unknown` provides no confidentiality guarantee. `no_training_no_retention` is the affirmative declaration defined by the remaining fields."
+          },
+          "terms": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PrivateModelsDataHandlingTerms",
+                "description": "Definition of the affirmative declaration. Absent when status is `unknown`."
+              }
+            ]
+          },
+          "training_use": {
+            "$ref": "#/components/schemas/PrivateModelsTrainingUse",
+            "description": "Whether covered data may be used for training or model improvement."
+          }
+        }
+      },
+      "PrivateModelsDataHandlingAttestationBasis": {
+        "type": "string",
+        "description": "Authority that recorded the data-handling declaration.",
+        "enum": [
+          "policy_administrator"
+        ]
+      },
+      "PrivateModelsDataHandlingAttestationStatus": {
+        "type": "string",
+        "description": "Organization declaration for private-model inference data handling.",
+        "enum": [
+          "unknown",
+          "no_training_no_retention"
+        ]
+      },
+      "PrivateModelsDataHandlingScope": {
+        "type": "string",
+        "description": "Operations covered by the data-handling declaration.",
+        "enum": [
+          "organization_private_model_inference"
+        ]
+      },
+      "PrivateModelsDataHandlingTerms": {
+        "type": "string",
+        "description": "Terms represented by an affirmative declaration.",
+        "enum": [
+          "no_training_no_retention"
+        ]
+      },
+      "PrivateModelsDataRetention": {
+        "type": "string",
+        "description": "Retention treatment for a covered data category.",
+        "enum": [
+          "unknown",
+          "none_after_response"
+        ]
+      },
+      "PrivateModelsTrainingUse": {
+        "type": "string",
+        "description": "Permitted training use for covered data.",
+        "enum": [
+          "unknown",
+          "prohibited"
+        ]
+      },
       "ProvidersResponse": {
         "type": "object",
         "required": [
@@ -24616,6 +24838,7 @@
           "publisher_category",
           "billing_model",
           "gateway_fee_percent",
+          "auth_type",
           "allowed_passthrough_headers",
           "passthrough_header_rewrite",
           "request_content_type",
@@ -24684,7 +24907,11 @@
               "string",
               "null"
             ],
-            "description": "External API URL (for integration_type = api)"
+            "description": "External API URL. When present, enables REST proxying."
+          },
+          "auth_type": {
+            "type": "string",
+            "description": "Upstream authentication mode."
           },
           "billing_model": {
             "type": "string"
@@ -24783,7 +25010,7 @@
               },
               {
                 "$ref": "#/components/schemas/IntegrationType",
-                "description": "Integration type when publisher_category = integration"
+                "description": "Primary integration interface when publisher_category = integration"
               }
             ]
           },
@@ -24818,7 +25045,7 @@
               "string",
               "null"
             ],
-            "description": "MCP server endpoint URL (for integration_type = mcp)"
+            "description": "MCP server endpoint URL. When present, enables native MCP proxying."
           },
           "name": {
             "type": "string"
@@ -24835,7 +25062,7 @@
             "type": "boolean"
           },
           "passthrough_header_rewrite": {
-            "description": "Map of client-side header name to upstream header name for passthrough auth."
+            "description": "Map of allowed client-side header names to upstream names. Authorization is target-only."
           },
           "pricing": {
             "type": [
@@ -26440,6 +26667,17 @@
           "clear_session_database": {
             "type": "boolean"
           },
+          "data_handling_attestation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PrivateModelsDataHandlingAttestationStatus",
+                "description": "Authorized policy administrator declaration for private-model inference data handling. Omit or set `null` to preserve the current declaration; set `unknown` to withdraw it."
+              }
+            ]
+          },
           "deployment_id": {
             "type": [
               "string",
@@ -26782,14 +27020,14 @@
               "string",
               "null"
             ],
-            "description": "External API URL (for integration_type = api)"
+            "description": "External API URL. When present, enables REST proxying."
           },
           "auth_type": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Upstream auth mode (\"static\" or \"jwt\")"
+            "description": "Upstream auth mode (\"static\", \"jwt\", \"oauth2_cc\", or \"passthrough\")"
           },
           "base_price_per_1000_rows": {
             "type": [
@@ -26913,7 +27151,7 @@
               },
               {
                 "$ref": "#/components/schemas/IntegrationType",
-                "description": "Integration type when publisher_category = integration"
+                "description": "Primary integration interface when publisher_category = integration"
               }
             ]
           },
@@ -26976,7 +27214,7 @@
               "string",
               "null"
             ],
-            "description": "MCP server endpoint URL (for integration_type = mcp)"
+            "description": "MCP server endpoint URL. When present, enables native MCP proxying."
           },
           "minimum_balance": {
             "type": [
@@ -27037,7 +27275,7 @@
             "description": "Enable resource ownership tracking (legacy gateway parity)"
           },
           "passthrough_header_rewrite": {
-            "description": "Map of client-side header name to upstream header name for passthrough auth."
+            "description": "Map of allowed client-side header names to upstream names. Authorization is target-only."
           },
           "price_per_call": {
             "type": [

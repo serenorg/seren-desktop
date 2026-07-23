@@ -1,4 +1,9 @@
-import { getPrivateModelsPolicy } from "@/api";
+import {
+  getPrivateModelsPolicy,
+  type PrivateModelsDataHandlingAttestation,
+} from "@/api";
+
+export type { PrivateModelsDataHandlingAttestation } from "@/api";
 
 export type OrganizationPrivateModelsMode = "standard" | "private_org_agent";
 export type ManagedAgentSessionDatabaseEngine = "postgres" | "aurora_postgres";
@@ -22,6 +27,7 @@ export interface ManagedAgentSessionDatabase {
 export interface OrganizationPrivateModelsPolicy {
   organization_id: string;
   mode: OrganizationPrivateModelsMode;
+  data_handling_attestation: PrivateModelsDataHandlingAttestation;
   deployment_id: string | null;
   deployment_name?: string | null;
   allow_seren_agent?: boolean;
@@ -47,6 +53,23 @@ export interface OrganizationPrivateModelsPolicy {
 
 export type OrganizationPrivateChatMode = OrganizationPrivateModelsMode;
 export type OrganizationPrivateChatPolicy = OrganizationPrivateModelsPolicy;
+
+export function hasNoTrainingNoRetentionAttestation(
+  policy: OrganizationPrivateModelsPolicy | null | undefined,
+): boolean {
+  const attestation = policy?.data_handling_attestation;
+  return (
+    attestation?.status === "no_training_no_retention" &&
+    attestation.scope === "organization_private_model_inference" &&
+    attestation.training_use === "prohibited" &&
+    attestation.prompt_retention === "none_after_response" &&
+    attestation.output_retention === "none_after_response" &&
+    attestation.derived_data_retention === "none_after_response" &&
+    attestation.terms === "no_training_no_retention" &&
+    attestation.basis === "policy_administrator" &&
+    Boolean(attestation.attested_at)
+  );
+}
 
 export function allowsSerenAgent(
   policy: OrganizationPrivateModelsPolicy | null | undefined,
