@@ -76,21 +76,37 @@ describe("Happy advertised-root consent (#3144)", () => {
   });
 });
 
-describe("Happy identity reset confirmation (#3223)", () => {
-  it("awaits the supported Tauri dialog before invoking the reset", () => {
+describe("Happy identity reset confirmation (#3223, #3225)", () => {
+  it("requires a second explicit app-owned action before invoking the reset", () => {
     const unpair = remoteSettings.slice(
       remoteSettings.indexOf("const unpair = async () => {"),
       remoteSettings.indexOf("\n  return ("),
     );
+    const startButton = remoteSettings.slice(
+      remoteSettings.indexOf('data-testid="happy-unpair-start"'),
+      remoteSettings.indexOf(
+        "</button>",
+        remoteSettings.indexOf('data-testid="happy-unpair-start"'),
+      ),
+    );
 
+    expect(remoteSettings).not.toContain("window.confirm");
+    expect(remoteSettings).not.toContain("@tauri-apps/plugin-dialog");
     expect(remoteSettings).toContain(
-      'import { confirm } from "@tauri-apps/plugin-dialog";',
+      'data-testid="happy-unpair-confirmation"',
     );
-    expect(unpair).toContain("const confirmed = await confirm(RESET_COPY");
-    expect(unpair).toContain("if (!confirmed) return;");
-    expect(unpair).not.toContain("window.confirm");
-    expect(unpair.indexOf("await confirm")).toBeLessThan(
-      unpair.indexOf("resetRemoteIdentity()"),
+    expect(remoteSettings).toContain(
+      "onClick={() => setConfirmingReset(true)}",
     );
+    expect(remoteSettings).toContain(
+      "onClick={() => setConfirmingReset(false)}",
+    );
+    expect(startButton).toContain("onClick={() => setConfirmingReset(true)}");
+    expect(startButton).not.toContain("unpair()");
+    expect(remoteSettings).toMatch(
+      /data-testid="happy-unpair-confirm"[\s\S]*onClick=\{\(\) => void unpair\(\)\}/,
+    );
+    expect(unpair).toContain("setConfirmingReset(false);");
+    expect(unpair).toContain("await resetRemoteIdentity();");
   });
 });
