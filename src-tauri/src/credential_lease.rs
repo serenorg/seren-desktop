@@ -18,9 +18,14 @@ const DEFAULT_ORG_API_KEYS_PATH: &str = "/organizations/default/api-keys";
 const LEASE_STORE: &str = "credential-leases.json";
 const LEASE_LEDGER_KEY: &str = "orphaned_leases";
 const LEASE_EXPIRY_DAYS: u8 = 1;
-// The public OpenAPI schema accepts scopes but does not publish a narrower
-// accepted grammar. Keep this to the only live-verified scope until the API
-// exposes per-publisher scope syntax. See #3194.
+// Core now publishes and enforces a per-publisher scope grammar
+// (`publisher:*`, `publisher:<slug>`, `publisher:<slug>:operation:<id>`; see
+// seren-core#222). The lease stays `publisher:*` because a general agent
+// session does not know its publisher set at spawn — the Seren MCP catalog is
+// dynamic — so narrowing needs a per-publisher capability minted at first use,
+// not a scope-string change. One residual on the wildcard is tracked in
+// seren-core#224: for a user key it still authorizes destructive
+// seren-passwords operations. See #3194.
 const VERIFIED_LEASE_SCOPES: &[&str] = &["publisher:*"];
 
 /// What the renderer and provider runtime are allowed to see. The real key is
