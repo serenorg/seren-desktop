@@ -47,6 +47,10 @@ pub struct IndexableMessage {
     pub agent_type: Option<String>,
     pub project_root: Option<String>,
     pub is_archived: bool,
+    /// Privileged conversations must never create local search chunks. The
+    /// write path deletes any stale chunks before returning so a later edit or
+    /// backfill cannot resurrect searchable content.
+    pub is_privileged: bool,
     pub timestamp: i64,
     pub content: String,
 }
@@ -247,6 +251,10 @@ fn delete_message_chunks_tx(tx: &Connection, message_id: &str) -> Result<()> {
 pub fn reindex_message(conn: &Connection, msg: &IndexableMessage) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     delete_message_chunks_tx(&tx, &msg.message_id)?;
+    if msg.is_privileged {
+        tx.commit()?;
+        return Ok(());
+    }
     let chunks = chunk_message(&msg.content);
     let now = now_ms();
     for chunk in &chunks {
@@ -560,6 +568,7 @@ mod tests {
             },
             project_root: Some("/repo".into()),
             is_archived: false,
+            is_privileged: false,
             timestamp: 1000,
             content: content.to_string(),
         }
@@ -619,6 +628,26 @@ mod tests {
         let hits = search_fts(&conn, "release", &SearchFilters::default(), 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].message_id, "m1");
+    }
+
+    #[test]
+    fn privileged_conversation_does_not_create_conv_chunks() {
+        let conn = test_conn();
+        let mut privileged = msg(
+            "privileged-message",
+            "privileged-conversation",
+            "chat",
+            "user",
+            "privileged work product",
+        );
+        privileged.is_privileged = true;
+
+        reindex_message(&conn, &privileged).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM conv_chunks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]

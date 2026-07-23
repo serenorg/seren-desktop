@@ -98,6 +98,8 @@ export interface Conversation {
   selectedModel: string;
   selectedProvider: ProviderId | AgentType | null;
   isArchived: boolean;
+  privileged?: boolean;
+  counselDirection?: string | null;
   compactedSummary?: CompactedSummary;
   /** Reasoning effort level: "minimal" | "low" | "medium" | "high" | "xhigh". */
   reasoningEffort?: string;
@@ -155,6 +157,8 @@ function unifiedRowToConversation(row: UnifiedConversationRow): Conversation {
     selectedModel: row.selected_model ?? DEFAULT_MODEL,
     selectedProvider: (row.selected_provider as ProviderId | AgentType) ?? null,
     isArchived: row.is_archived,
+    privileged: row.privileged,
+    counselDirection: row.counsel_direction,
   };
 }
 

@@ -29,6 +29,15 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
 
   const destinationState = createMemo<Destination[]>(() => [
     {
+      label: "Privileged Matter Mode",
+      detail: () =>
+        privacyStore.isPrivileged(props.conversationId)
+          ? "Memory, history sync, cloud Notes export, and non-local providers are blocked"
+          : "Off — turn it on only for counsel-directed work product",
+      control: "Conversation controls",
+      enabled: () => privacyStore.isPrivileged(props.conversationId),
+    },
+    {
       label: "Inference provider",
       detail: () => {
         const provider = conversation()?.provider ?? "selected provider";
@@ -111,6 +120,20 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
     privacyStore.setConversationPrivacy(id, { [key]: checked });
   };
 
+  const updatePrivileged = (checked: boolean) => {
+    const id = props.conversationId;
+    if (!id) return;
+    privacyStore.setConversationPrivacy(id, { privileged: checked });
+  };
+
+  const updateCounselDirection = (value: string) => {
+    const id = props.conversationId;
+    if (!id) return;
+    privacyStore.setConversationPrivacy(id, {
+      counselDirection: value.trim() || undefined,
+    });
+  };
+
   return (
     <section
       class="w-full max-w-[560px] overflow-hidden rounded-xl border border-[#293438] bg-[#101719] text-[#e8f0ef] shadow-[0_18px_50px_rgba(0,0,0,0.24)]"
@@ -178,11 +201,57 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
             Conversation controls
           </p>
           <div class="mt-2 grid gap-2 sm:grid-cols-2">
+            <div class="sm:col-span-2 rounded-lg border border-[#805f35] bg-[linear-gradient(110deg,rgba(171,117,49,0.17),rgba(28,23,18,0.5))] px-3 py-2.5 shadow-[inset_3px_0_0_rgba(220,171,95,0.8)]">
+              <label class="flex cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  class="mt-0.5 accent-[#dcae66]"
+                  checked={privacyStore.isPrivileged(props.conversationId)}
+                  onChange={(event) =>
+                    updatePrivileged(event.currentTarget.checked)
+                  }
+                  aria-label="Enable Privileged Matter Mode"
+                />
+                <span class="min-w-0">
+                  <span class="block text-xs font-semibold text-[#f3d6a1]">
+                    Privileged Matter Mode
+                  </span>
+                  <span class="mt-0.5 block text-[11px] leading-relaxed text-[#cbb89a]">
+                    Applies a privileged-and-confidential stamp and blocks
+                    memory, history sync, cloud Notes export, local search
+                    indexing, and providers that are not explicitly
+                    confidential-safe.
+                  </span>
+                </span>
+              </label>
+              <Show when={privacyStore.isPrivileged(props.conversationId)}>
+                <label class="mt-2 block">
+                  <span class="block text-[10px] font-semibold uppercase tracking-[0.12em] text-[#cbb89a]">
+                    Counsel direction (optional)
+                  </span>
+                  <input
+                    type="text"
+                    class="mt-1 w-full rounded border border-[#805f35] bg-[#15110d] px-2.5 py-1.5 text-xs text-[#f3e7d4] outline-none placeholder:text-[#8a7963] focus:border-[#dcae66]"
+                    value={
+                      privacyStore.getConversationPrivacy(
+                        props.conversationId ?? "",
+                      ).counselDirection ?? ""
+                    }
+                    placeholder="e.g. Counsel-directed review"
+                    onChange={(event) =>
+                      updateCounselDirection(event.currentTarget.value)
+                    }
+                    aria-label="Counsel direction"
+                  />
+                </label>
+              </Show>
+            </div>
             <label class="flex cursor-pointer items-start gap-2 rounded-lg border border-[#293438] px-3 py-2 transition-colors hover:border-[#4a6a5e]">
               <input
                 type="checkbox"
-                class="mt-0.5 accent-[#76ddb0]"
+                class="mt-0.5 accent-[#76ddb0] disabled:cursor-not-allowed"
                 checked={privacyStore.isMemoryExcluded(props.conversationId)}
+                disabled={privacyStore.isPrivileged(props.conversationId)}
                 onChange={(event) =>
                   updatePrivacy("excludeMemory", event.currentTarget.checked)
                 }
@@ -195,10 +264,11 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
             <label class="flex cursor-pointer items-start gap-2 rounded-lg border border-[#293438] px-3 py-2 transition-colors hover:border-[#4a6a5e]">
               <input
                 type="checkbox"
-                class="mt-0.5 accent-[#76ddb0]"
+                class="mt-0.5 accent-[#76ddb0] disabled:cursor-not-allowed"
                 checked={privacyStore.isHistorySyncExcluded(
                   props.conversationId,
                 )}
+                disabled={privacyStore.isPrivileged(props.conversationId)}
                 onChange={(event) =>
                   updatePrivacy(
                     "excludeHistorySync",
@@ -214,7 +284,8 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
           </div>
           <p class="m-0 mt-2 text-[10px] leading-relaxed text-[#71817e]">
             Exclusion takes effect before the next capture or sync drain; queued
-            history remains local until you include it again.
+            history remains local until you include it again. Privileged Matter
+            Mode locks both exclusions on for this conversation.
           </p>
         </div>
       </Show>

@@ -2,7 +2,7 @@
 // ABOUTME: Persists exclusion choices through the same Tauri/browser settings boundary as app settings.
 
 import { createStore } from "solid-js/store";
-import { isTauriRuntime } from "@/lib/tauri-bridge";
+import { isTauriRuntime, setConversationPrivileged } from "@/lib/tauri-bridge";
 
 const PRIVACY_STORE = "privacy.json";
 const CONVERSATIONS_KEY = "conversations";
@@ -11,6 +11,10 @@ const BROWSER_PRIVACY_KEY = "seren_conversation_privacy";
 export interface ConversationPrivacy {
   excludeMemory: boolean;
   excludeHistorySync: boolean;
+  /** Privileged conversations deny memory, history sync, notes export, and unsafe providers. */
+  privileged: boolean;
+  /** Optional direction supplied by counsel and mirrored into the local chat DB. */
+  counselDirection?: string;
 }
 
 interface PrivacyState {
@@ -43,6 +47,12 @@ function normalizeConversations(
     normalized[id] = {
       excludeMemory: candidate.excludeMemory === true,
       excludeHistorySync: candidate.excludeHistorySync === true,
+      privileged: candidate.privileged === true,
+      counselDirection:
+        typeof candidate.counselDirection === "string" &&
+        candidate.counselDirection.trim().length > 0
+          ? candidate.counselDirection.trim()
+          : undefined,
     };
   }
   return normalized;
@@ -102,6 +112,7 @@ function flagsFor(id: string): ConversationPrivacy {
     privacyState.conversations[id] ?? {
       excludeMemory: false,
       excludeHistorySync: false,
+      privileged: false,
     }
   );
 }
@@ -112,11 +123,37 @@ export const privacyStore = {
   },
 
   isMemoryExcluded(id: string | null | undefined): boolean {
-    return id ? flagsFor(id).excludeMemory : false;
+    return id ? flagsFor(id).privileged || flagsFor(id).excludeMemory : false;
   },
 
   isHistorySyncExcluded(id: string | null | undefined): boolean {
-    return id ? flagsFor(id).excludeHistorySync : false;
+    return id
+      ? flagsFor(id).privileged || flagsFor(id).excludeHistorySync
+      : false;
+  },
+
+  isPrivileged(id: string | null | undefined): boolean {
+    return id ? flagsFor(id).privileged : false;
+  },
+
+  /**
+   * Merge the durable SQLite flag into renderer state without writing it back.
+   * A stale or unavailable privacy.json must never make a persisted privileged
+   * conversation eligible for egress after an app restart.
+   */
+  hydrateConversationPrivilege(
+    id: string,
+    privileged: boolean,
+    counselDirection?: string | null,
+  ): void {
+    if (!id || !privileged) return;
+    const current = flagsFor(id);
+    setPrivacyState("conversations", id, {
+      ...current,
+      privileged: true,
+      counselDirection:
+        counselDirection?.trim() || current.counselDirection || undefined,
+    });
   },
 
   setConversationPrivacy(
@@ -130,11 +167,23 @@ export const privacyStore = {
     };
     setPrivacyState("conversations", id, next);
     void saveStoredPrivacy();
+    if ("privileged" in updates || "counselDirection" in updates) {
+      void setConversationPrivileged(
+        id,
+        next.privileged,
+        next.counselDirection ?? null,
+      ).catch((error) => {
+        console.warn(
+          "[Privacy] Failed to persist Privileged Matter Mode to the chat DB:",
+          error,
+        );
+      });
+    }
   },
 
   excludedHistorySyncIds(): string[] {
     return Object.entries(privacyState.conversations)
-      .filter(([, flags]) => flags.excludeHistorySync)
+      .filter(([, flags]) => flags.privileged || flags.excludeHistorySync)
       .map(([id]) => id);
   },
 };

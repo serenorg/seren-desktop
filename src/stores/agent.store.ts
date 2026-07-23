@@ -672,6 +672,7 @@ import {
   oauthConnectionsRevision,
   oauthSelectionsRevision,
 } from "@/stores/oauth-account.store";
+import { privacyStore } from "@/stores/privacy.store";
 
 /** Set once we've subscribed to `provider-runtime://ready` so repeated
  *  initialize() calls don't stack listeners. */
@@ -2279,6 +2280,8 @@ function unifiedRowToAgent(row: UnifiedConversationRow): DbAgentConversation {
     project_id: row.project_id,
     project_root: row.project_root,
     is_archived: row.is_archived,
+    privileged: row.privileged,
+    counsel_direction: row.counsel_direction,
   };
 }
 
@@ -3507,9 +3510,17 @@ export const agentStore = {
         projectRoot: cwd,
         limit,
       });
+      const agentConversations = rows.map(unifiedRowToAgent);
+      for (const conversation of agentConversations) {
+        privacyStore.hydrateConversationPrivilege(
+          conversation.id,
+          conversation.privileged,
+          conversation.counsel_direction,
+        );
+      }
       setState(
         "recentAgentConversations",
-        happyArchiveFence.filterVisible(rows.map(unifiedRowToAgent)),
+        happyArchiveFence.filterVisible(agentConversations),
       );
     } catch (error) {
       console.error("Failed to load agent conversation history:", error);
@@ -3536,6 +3547,11 @@ export const agentStore = {
    */
   upsertAgentConversationFromDb(row: DbAgentConversation) {
     if (happyArchiveFence.isArchived(row.id)) return;
+    privacyStore.hydrateConversationPrivilege(
+      row.id,
+      row.privileged,
+      row.counsel_direction,
+    );
     setState("recentAgentConversations", (rows) => {
       const without = rows.filter((r) => r.id !== row.id);
       return [row, ...without];
@@ -3559,6 +3575,14 @@ export const agentStore = {
       const localRows = happyArchiveFence.filterVisible(
         rawLocalRows.map(unifiedRowToAgent),
       );
+
+      for (const conversation of localRows) {
+        privacyStore.hydrateConversationPrivilege(
+          conversation.id,
+          conversation.privileged,
+          conversation.counsel_direction,
+        );
+      }
 
       setState("recentAgentConversations", localRows);
       const titleOverrides = new Map(
@@ -3665,6 +3689,17 @@ export const agentStore = {
     // lease is created. Providers echo this id back as their session handle,
     // which lets one teardown path revoke the exact key used by the child.
     const localSessionId = opts?.localSessionId ?? crypto.randomUUID();
+    try {
+      providerService.assertPrivilegedConversationProvider(
+        localSessionId,
+        privacyStore.isPrivileged(localSessionId),
+        resolvedAgentType,
+        { lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl") },
+      );
+    } catch (error) {
+      setState("error", error instanceof Error ? error.message : String(error));
+      return null;
+    }
     const resumeAgentSessionId = opts?.resumeAgentSessionId;
     const happyArchiveOwnerConversationId =
       opts?.archiveOwnerConversationId ?? localSessionId;
@@ -3732,7 +3767,10 @@ export const agentStore = {
       // spawns including post-compaction spawns. Best-effort; a failure here
       // must not block the spawn (#1625).
       let memoryContext: string | undefined;
-      if (settingsStore.settings.memoryEnabled) {
+      if (
+        settingsStore.settings.memoryEnabled &&
+        !privacyStore.isMemoryExcluded(localSessionId)
+      ) {
         try {
           const bootstrapped = await bootstrapMemoryContext();
           if (bootstrapped && bootstrapped.trim().length > 0) {
@@ -4635,6 +4673,27 @@ export const agentStore = {
       } catch {
         // Non-fatal — the runtime is the source of truth for the live session.
       }
+      if (convo?.privileged) {
+        privacyStore.hydrateConversationPrivilege(
+          convo.id,
+          true,
+          convo.counsel_direction,
+        );
+        try {
+          providerService.assertPrivilegedConversationProvider(
+            conversationId,
+            true,
+            liveInfo.agentType,
+            { lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl") },
+          );
+        } catch (error) {
+          setState(
+            "error",
+            error instanceof Error ? error.message : String(error),
+          );
+          return false;
+        }
+      }
       const agentType = liveInfo.agentType;
       const runtimeModelId =
         liveInfo.currentModelId ?? convo?.agent_model_id ?? undefined;
@@ -4862,6 +4921,11 @@ export const agentStore = {
       setState("error", "Agent conversation not found");
       return null;
     }
+    privacyStore.hydrateConversationPrivilege(
+      convo.id,
+      convo.privileged,
+      convo.counsel_direction,
+    );
     const agentType: AgentType =
       convo.agent_type === "codex" ||
       convo.agent_type === "claude-code" ||
@@ -5146,7 +5210,11 @@ export const agentStore = {
       ];
     }
 
-    if (settingsStore.settings.memoryEnabled && promptForBudget?.trim()) {
+    if (
+      settingsStore.settings.memoryEnabled &&
+      !privacyStore.isMemoryExcluded(session.conversationId) &&
+      promptForBudget?.trim()
+    ) {
       try {
         const recall = await recallMemoryContext(promptForBudget);
         if (recall) {
@@ -6612,6 +6680,24 @@ export const agentStore = {
     // Derive the thread id early so turnInFlight / turnError operate on the
     // right key across cold-start, promotion, and crash-recovery paths. #1631.
     const threadId = session?.conversationId;
+
+    if (threadId && session) {
+      try {
+        providerService.assertPrivilegedConversationProvider(
+          threadId,
+          privacyStore.isPrivileged(threadId),
+          session.info.agentType,
+          { lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl") },
+        );
+      } catch (error) {
+        this.setTurnError(
+          threadId,
+          "privileged_provider_blocked",
+          error instanceof Error ? error.message : String(error),
+        );
+        return;
+      }
+    }
 
     if (threadId) {
       this.setTurnInFlight(threadId, true);

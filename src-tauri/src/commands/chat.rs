@@ -6,7 +6,7 @@ use crate::happy_bridge::HappyBridgeManager;
 use crate::services::conversation_index::{self, IndexableMessage, open_index_db};
 use crate::services::database::{
     DbPool, PersistedMessage, WalCheckpointMode, checkpoint_wal, enqueue_sync_tombstone, init_db,
-    mark_sync_upsert, save_message_record,
+    mark_sync_upsert, save_message_record, stamp_existing_privileged_messages,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,9 @@ use tauri::{AppHandle, Emitter, Manager};
 fn load_indexable_message_meta(
     conn: &Connection,
     conversation_id: &str,
-) -> rusqlite::Result<Option<(String, Option<String>, Option<String>, Option<String>, bool)>> {
+) -> rusqlite::Result<
+    Option<(String, Option<String>, Option<String>, Option<String>, bool, bool)>,
+> {
     let sql = format!(
         "SELECT {case} AS derived_kind,
                 c.title,
@@ -24,7 +26,8 @@ fn load_indexable_message_meta(
                      THEN COALESCE(c.agent_type, psr.provider)
                      ELSE c.agent_type END AS agent_type,
                 COALESCE(c.project_root, c.agent_cwd, c.project_id) AS project_root,
-                c.is_archived
+                c.is_archived,
+                c.privileged
          FROM conversations c
          LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
          WHERE c.id = ?1",
@@ -37,6 +40,7 @@ fn load_indexable_message_meta(
             row.get(2)?,
             row.get(3)?,
             row.get::<_, i32>(4)? != 0,
+            row.get::<_, i32>(5)? != 0,
         ))
     })
     .optional()
@@ -222,6 +226,9 @@ pub struct Conversation {
     pub project_root: Option<String>,
     pub is_archived: bool,
     pub employee_id: Option<String>,
+    #[serde(default)]
+    pub privileged: bool,
+    pub counsel_direction: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -238,6 +245,9 @@ pub struct AgentConversation {
     pub project_id: Option<String>,
     pub project_root: Option<String>,
     pub is_archived: bool,
+    #[serde(default)]
+    pub privileged: bool,
+    pub counsel_direction: Option<String>,
 }
 
 /// Exact desktop record required to restore a provider process for a persisted
@@ -298,6 +308,12 @@ pub struct UnifiedConversationRow {
     pub agent_permission_mode: Option<String>,
     pub agent_metadata: Option<String>,
     pub project_id: Option<String>,
+    // Older bridge/cache payloads predate Privileged Matter Mode. Treat an
+    // omitted value as non-privileged so rolling updates keep deserializing;
+    // the durable SQLite value is hydrated immediately after the read.
+    #[serde(default)]
+    pub privileged: bool,
+    pub counsel_direction: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -342,6 +358,8 @@ pub async fn create_conversation(
         project_root: normalized_project_root.clone(),
         is_archived: false,
         employee_id: employee_id.clone(),
+        privileged: false,
+        counsel_direction: None,
     };
 
     run_db(app, move |conn| {
@@ -409,7 +427,8 @@ pub async fn list_conversations(
                        c.project_root, c.selected_provider, c.selected_model,
                        c.employee_id, c.agent_type, c.agent_session_id,
                        c.agent_cwd, c.agent_model_id, c.agent_permission_mode,
-                       c.agent_metadata, c.project_id, psr.provider AS runtime_provider,
+                       c.agent_metadata, c.project_id, c.privileged,
+                       c.counsel_direction, psr.provider AS runtime_provider,
                        {case} AS derived_kind
                 FROM conversations c
                 LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
@@ -423,7 +442,8 @@ pub async fn list_conversations(
                         THEN COALESCE(agent_type, runtime_provider)
                         ELSE agent_type END AS agent_type,
                    agent_session_id, agent_cwd, agent_model_id,
-                   agent_permission_mode, agent_metadata, project_id
+                   agent_permission_mode, agent_metadata, project_id,
+                   privileged, counsel_direction
             FROM derived
             WHERE is_archived = 0
               AND (?1 IS NULL OR derived_kind = ?1)
@@ -458,6 +478,8 @@ pub async fn list_conversations(
                     agent_permission_mode: row.get(13)?,
                     agent_metadata: row.get(14)?,
                     project_id: row.get(15)?,
+                    privileged: row.get::<_, i32>(16)? != 0,
+                    counsel_direction: row.get(17)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -478,7 +500,8 @@ pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conve
                     CASE WHEN ({case}) = 'chat'
                          THEN COALESCE(c.selected_provider, psr.provider)
                          ELSE c.selected_provider END AS selected_provider,
-                    c.project_root, c.is_archived, c.employee_id
+                    c.project_root, c.is_archived, c.employee_id,
+                    c.privileged, c.counsel_direction
              FROM conversations c
              LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
              WHERE c.id = ?1
@@ -498,6 +521,8 @@ pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conve
                     project_root: row.get(5)?,
                     is_archived: row.get::<_, i32>(6)? != 0,
                     employee_id: row.get(7)?,
+                    privileged: row.get::<_, i32>(8)? != 0,
+                    counsel_direction: row.get(9)?,
                 })
             })
             .optional()?;
@@ -543,6 +568,45 @@ pub async fn update_conversation(
     })
     .await?;
     refresh_conversation_index_meta_best_effort(app, index_id, index_title, None).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_conversation_privileged(
+    app: AppHandle,
+    id: String,
+    privileged: bool,
+    counsel_direction: Option<String>,
+) -> Result<(), String> {
+    let index_id = id.clone();
+    let normalized_direction = counsel_direction
+        .as_deref()
+        .map(str::trim)
+        .filter(|direction| !direction.is_empty())
+        .map(str::to_string);
+    run_db(app.clone(), move |conn| {
+        let changed = conn.execute(
+            "UPDATE conversations
+             SET privileged = ?1, counsel_direction = ?2
+             WHERE id = ?3",
+            params![i32::from(privileged), normalized_direction, id],
+        )?;
+        if changed == 0 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+        if privileged {
+            stamp_existing_privileged_messages(conn, &id)?;
+        }
+        mark_sync_upsert(conn, "conversations", &id)?;
+        Ok(())
+    })
+    .await?;
+
+    // Remove chunks created before the flag was enabled. Subsequent message
+    // writes are also blocked by `IndexableMessage::is_privileged`.
+    if privileged {
+        delete_conversation_index_best_effort(&app, &index_id);
+    }
     Ok(())
 }
 
@@ -661,6 +725,8 @@ pub(crate) async fn create_agent_conversation_record(
         project_id: project_id.clone(),
         project_root: normalized_project_root.clone(),
         is_archived: false,
+        privileged: false,
+        counsel_direction: None,
     };
 
     let persisted_convo = convo.clone();
@@ -1416,7 +1482,8 @@ pub async fn get_agent_conversation(
                          ELSE c.agent_type END AS agent_type,
                     c.agent_session_id,
                     c.agent_cwd, c.agent_model_id, c.agent_permission_mode,
-                    c.agent_metadata, c.project_id, c.project_root, c.is_archived
+                    c.agent_metadata, c.project_id, c.project_root, c.is_archived,
+                    c.privileged, c.counsel_direction
              FROM conversations c
              LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
              WHERE c.id = ?1
@@ -1440,6 +1507,8 @@ pub async fn get_agent_conversation(
                     project_id: row.get(9)?,
                     project_root: row.get(10)?,
                     is_archived: row.get::<_, i32>(11)? != 0,
+                    privileged: row.get::<_, i32>(12)? != 0,
+                    counsel_direction: row.get(13)?,
                 })
             })
             .optional()?;
@@ -1920,7 +1989,7 @@ pub async fn save_message(
         save_message_record(conn, &message)?;
         let meta = load_indexable_message_meta(conn, &message.conversation_id)?;
         Ok(meta.map(
-            |(kind, title, agent_type, project_root, is_archived)| IndexableMessage {
+            |(kind, title, agent_type, project_root, is_archived, is_privileged)| IndexableMessage {
                 message_id: message.id,
                 conversation_id: message.conversation_id,
                 kind,
@@ -1929,6 +1998,7 @@ pub async fn save_message(
                 agent_type,
                 project_root,
                 is_archived,
+                is_privileged,
                 timestamp: message.timestamp,
                 content: message.content,
             },
@@ -2694,6 +2764,8 @@ mod tests {
             project_id: None,
             project_root: None,
             is_archived: false,
+            privileged: false,
+            counsel_direction: None,
         };
         assert!(upsert_agent_conversation_in_db(&conn, &late).unwrap());
 
@@ -2833,6 +2905,8 @@ mod tests {
             project_id: Some("/synthetic/project".to_string()),
             project_root: Some("/synthetic/project".to_string()),
             is_archived: false,
+            privileged: false,
+            counsel_direction: None,
         };
 
         assert!(!upsert_agent_conversation_in_db(&conn, &conversation).unwrap());

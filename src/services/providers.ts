@@ -33,6 +33,70 @@ export type AgentType =
   | "lmstudio";
 export type UnlistenFn = () => void;
 
+/**
+ * Explicit P0 allowlist for Privileged Matter Mode. Unknown providers are
+ * denied rather than inferred safe from a display name or marketing claim.
+ */
+export const CONFIDENTIAL_SAFE_PROVIDERS = [
+  // LM Studio is a local process only when its configured endpoint resolves to
+  // loopback. The settings UI also permits remote URLs, so the runtime check in
+  // `isConfidentialSafeProvider` is required in addition to this static entry.
+  "lmstudio",
+] as const;
+
+type ConfidentialSafeProvider = (typeof CONFIDENTIAL_SAFE_PROVIDERS)[number];
+
+export interface ConfidentialProviderOptions {
+  lmStudioBaseUrl?: string | null;
+}
+
+function isLoopbackUrl(rawUrl: string): boolean {
+  try {
+    const hostname = new URL(rawUrl.trim()).hostname.toLowerCase();
+    return ["localhost", "localhost.", "127.0.0.1", "::1", "[::1]"].includes(
+      hostname,
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns true only for an explicitly reviewed provider in a configuration
+ * that keeps inference on the user's device. This remains intentionally
+ * static until a registry can provide verifiable retention and training terms.
+ */
+export function isConfidentialSafeProvider(
+  providerId: string | null | undefined,
+  options: ConfidentialProviderOptions = {},
+): providerId is ConfidentialSafeProvider {
+  if (
+    !providerId ||
+    !CONFIDENTIAL_SAFE_PROVIDERS.includes(
+      providerId as ConfidentialSafeProvider,
+    )
+  ) {
+    return false;
+  }
+  if (providerId === "lmstudio") {
+    return isLoopbackUrl(options.lmStudioBaseUrl ?? "http://localhost:1234");
+  }
+  return false;
+}
+
+/** Throw before a privileged conversation crosses a provider boundary. */
+export function assertPrivilegedConversationProvider(
+  conversationId: string,
+  privileged: boolean,
+  providerId: string | null | undefined,
+  options: ConfidentialProviderOptions = {},
+): void {
+  if (!privileged || isConfidentialSafeProvider(providerId, options)) return;
+  throw new Error(
+    `Privileged Matter Mode blocks ${providerId ?? "this provider"} for conversation ${conversationId}. Choose a local LM Studio endpoint instead.`,
+  );
+}
+
 export type ProviderOrigin = "desktop" | "remote";
 
 /** Roles inside a paired `claude-codex` thread (#2368). */

@@ -1119,6 +1119,7 @@ pub fn run() {
             commands::chat::list_conversations,
             commands::chat::get_conversation,
             commands::chat::update_conversation,
+            commands::chat::set_conversation_privileged,
             commands::chat::archive_conversation,
             commands::chat::delete_conversation,
             commands::chat::delete_conversations_by_employee,
