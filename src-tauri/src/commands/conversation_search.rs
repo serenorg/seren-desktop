@@ -132,10 +132,11 @@ pub async fn backfill_conversation_fts(app: AppHandle) -> Result<usize, String> 
                          THEN COALESCE(c.agent_type, psr.provider)
                          ELSE c.agent_type END AS agent_type,
                     COALESCE(c.project_root, c.agent_cwd, c.project_id) AS project_root,
-                    c.is_archived, m.timestamp, m.content
+                    c.is_archived, c.privileged, m.timestamp, m.content
              FROM messages m
              JOIN conversations c ON c.id = m.conversation_id
              LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+             WHERE c.privileged = 0
              ORDER BY m.timestamp ASC",
             case = DERIVED_KIND_CASE_SQL,
         );
@@ -150,8 +151,9 @@ pub async fn backfill_conversation_fts(app: AppHandle) -> Result<usize, String> 
                 agent_type: row.get(5)?,
                 project_root: row.get(6)?,
                 is_archived: row.get::<_, i32>(7)? != 0,
-                timestamp: row.get(8)?,
-                content: row.get(9)?,
+                is_privileged: row.get::<_, i32>(8)? != 0,
+                timestamp: row.get(9)?,
+                content: row.get(10)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()

@@ -33,6 +33,12 @@ pub struct PersistedMessage {
     pub provider: Option<String>,
 }
 
+/// Durable designation applied to every message persisted for a Privileged
+/// Matter conversation. Keeping this at the database persistence chokepoint
+/// covers renderer, agent-runtime, and orchestrator writes alike.
+pub const PRIVILEGED_MATTER_STAMP: &str =
+    "Privileged & Confidential — Prepared in Anticipation of Litigation";
+
 pub const WAL_AUTOCHECKPOINT_PAGES: u32 = 200;
 const WAL_CHECKPOINT_INTERVAL_SECS: u64 = 10;
 
@@ -270,7 +276,63 @@ pub fn start_wal_checkpoint_task(app: &AppHandle) {
     }
 }
 
+fn stamp_privileged_message_metadata(
+    conn: &Connection,
+    conversation_id: &str,
+    metadata: &Option<String>,
+) -> Result<Option<String>> {
+    let privileged = conn
+        .query_row(
+            "SELECT privileged, counsel_direction FROM conversations WHERE id = ?1",
+            rusqlite::params![conversation_id],
+            |row| Ok((row.get::<_, i32>(0)? != 0, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?;
+    let Some((true, counsel_direction)) = privileged else {
+        return Ok(metadata.clone());
+    };
+
+    let mut object = match metadata.as_deref() {
+        Some(raw) => match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(serde_json::Value::Object(object)) => object,
+            Ok(value) => {
+                let mut object = serde_json::Map::new();
+                object.insert("legacy_metadata".to_string(), value);
+                object
+            }
+            Err(_) => {
+                let mut object = serde_json::Map::new();
+                object.insert(
+                    "legacy_metadata_raw".to_string(),
+                    serde_json::Value::String(raw.to_string()),
+                );
+                object
+            }
+        },
+        None => serde_json::Map::new(),
+    };
+    object.insert(
+        "privileged_matter_stamp".to_string(),
+        serde_json::Value::String(PRIVILEGED_MATTER_STAMP.to_string()),
+    );
+    if let Some(direction) = counsel_direction
+        .as_deref()
+        .map(str::trim)
+        .filter(|direction| !direction.is_empty())
+    {
+        object.insert(
+            "counsel_direction".to_string(),
+            serde_json::Value::String(direction.to_string()),
+        );
+    }
+    serde_json::to_string(&serde_json::Value::Object(object))
+        .map(Some)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
+}
+
 pub fn save_message_record(conn: &Connection, message: &PersistedMessage) -> Result<()> {
+    let metadata =
+        stamp_privileged_message_metadata(conn, &message.conversation_id, &message.metadata)?;
     if let Err(err) = conn.execute(
         "INSERT INTO messages (
             id, conversation_id, role, content, model, timestamp, metadata,
@@ -295,7 +357,7 @@ pub fn save_message_record(conn: &Connection, message: &PersistedMessage) -> Res
             message.content,
             message.model,
             message.timestamp,
-            message.metadata,
+            metadata.as_deref(),
             message.provider
         ],
     ) {
@@ -327,7 +389,7 @@ pub fn save_message_record(conn: &Connection, message: &PersistedMessage) -> Res
             event_id,
             message.conversation_id,
             message.id,
-            message.metadata,
+            metadata.as_deref(),
             message.timestamp
         ],
     )?;
@@ -378,6 +440,38 @@ pub fn save_message_record(conn: &Connection, message: &PersistedMessage) -> Res
         )?;
     }
 
+    Ok(())
+}
+
+/// Stamp messages that were already present when a conversation is switched
+/// into Privileged Matter Mode. Future writes flow through `save_message_record`;
+/// this closes the retroactive gap without duplicating stamp logic in callers.
+pub fn stamp_existing_privileged_messages(
+    conn: &Connection,
+    conversation_id: &str,
+) -> Result<()> {
+    let messages = {
+        let mut stmt = conn.prepare(
+            "SELECT id, metadata FROM messages
+             WHERE conversation_id = ?1 AND deleted_at IS NULL",
+        )?;
+        stmt.query_map(rusqlite::params![conversation_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?
+        .collect::<Result<Vec<_>>>()?
+    };
+
+    for (message_id, previous_metadata) in messages {
+        let metadata =
+            stamp_privileged_message_metadata(conn, conversation_id, &previous_metadata)?;
+        if metadata != previous_metadata {
+            conn.execute(
+                "UPDATE messages SET metadata = ?1 WHERE id = ?2",
+                rusqlite::params![metadata, message_id],
+            )?;
+            mark_sync_upsert(conn, "messages", &message_id)?;
+        }
+    }
     Ok(())
 }
 
@@ -657,7 +751,9 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             agent_metadata TEXT,
             project_id TEXT,
             project_root TEXT,
-            employee_id TEXT
+            employee_id TEXT,
+            privileged INTEGER NOT NULL DEFAULT 0,
+            counsel_direction TEXT
         )",
         [],
     )?;
@@ -971,6 +1067,29 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         .is_ok();
     if !has_employee_id {
         conn.execute("ALTER TABLE conversations ADD COLUMN employee_id TEXT", [])?;
+    }
+
+    // Privileged Matter Mode is persisted with the conversation so Rust-side
+    // index and message-stamping gates do not depend on renderer state. Each
+    // probe keeps this migration safe for both fresh and pre-existing DBs.
+    let has_privileged: bool = conn
+        .prepare("SELECT privileged FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_privileged {
+        conn.execute(
+            "ALTER TABLE conversations ADD COLUMN privileged INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+
+    let has_counsel_direction: bool = conn
+        .prepare("SELECT counsel_direction FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_counsel_direction {
+        conn.execute(
+            "ALTER TABLE conversations ADD COLUMN counsel_direction TEXT",
+            [],
+        )?;
     }
 
     // Backfill project context for existing agent conversations.
@@ -1442,6 +1561,100 @@ mod tests {
             )
             .unwrap();
         assert_eq!(event_count, 2);
+    }
+
+    #[test]
+    fn save_message_record_stamps_all_privileged_persistence_paths() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, privileged, counsel_direction)
+             VALUES ('privileged', 'Matter', 1000, 1, 'Counsel-directed review')",
+            [],
+        )
+        .unwrap();
+
+        save_message_record(
+            &conn,
+            &PersistedMessage {
+                id: "m-privileged".to_string(),
+                conversation_id: "privileged".to_string(),
+                role: "assistant".to_string(),
+                content: "work product".to_string(),
+                model: None,
+                timestamp: 2000,
+                metadata: Some(r#"{"origin":"orchestrator"}"#.to_string()),
+                provider: None,
+            },
+        )
+        .unwrap();
+
+        for table in ["messages", "message_events"] {
+            let metadata: String = conn
+                .query_row(
+                    &format!("SELECT metadata FROM {table} WHERE conversation_id = 'privileged'"),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+            assert_eq!(
+                metadata["privileged_matter_stamp"],
+                PRIVILEGED_MATTER_STAMP
+            );
+            assert_eq!(metadata["counsel_direction"], "Counsel-directed review");
+            assert_eq!(metadata["origin"], "orchestrator");
+        }
+    }
+
+    #[test]
+    fn marking_a_conversation_privileged_stamps_existing_messages() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at)
+             VALUES ('retroactive', 'Matter', 1000)",
+            [],
+        )
+        .unwrap();
+        save_message_record(
+            &conn,
+            &PersistedMessage {
+                id: "m-retroactive".to_string(),
+                conversation_id: "retroactive".to_string(),
+                role: "assistant".to_string(),
+                content: "existing work product".to_string(),
+                model: None,
+                timestamp: 2000,
+                metadata: Some(r#"{"origin":"before-toggle"}"#.to_string()),
+                provider: None,
+            },
+        )
+        .unwrap();
+
+        conn.execute(
+            "UPDATE conversations
+             SET privileged = 1, counsel_direction = 'Counsel-directed review'
+             WHERE id = 'retroactive'",
+            [],
+        )
+        .unwrap();
+        stamp_existing_privileged_messages(&conn, "retroactive").unwrap();
+
+        let metadata: String = conn
+            .query_row(
+                "SELECT metadata FROM messages WHERE id = 'm-retroactive'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        assert_eq!(
+            metadata["privileged_matter_stamp"],
+            PRIVILEGED_MATTER_STAMP
+        );
+        assert_eq!(metadata["counsel_direction"], "Counsel-directed review");
+        assert_eq!(metadata["origin"], "before-toggle");
     }
 
     #[test]
@@ -2386,6 +2599,64 @@ mod tests {
             )
             .unwrap();
         assert_eq!(mode, Some("plan".to_string()));
+    }
+
+    #[test]
+    fn migration_adds_privileged_matter_columns_to_pre_existing_db() {
+        // Start from the legacy schema shape before Privileged Matter Mode.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                selected_model TEXT,
+                selected_provider TEXT,
+                is_archived INTEGER DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'chat',
+                agent_type TEXT,
+                agent_session_id TEXT,
+                agent_cwd TEXT,
+                agent_model_id TEXT,
+                agent_metadata TEXT,
+                project_id TEXT,
+                project_root TEXT
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                model TEXT,
+                timestamp INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        setup_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, privileged, counsel_direction)
+             VALUES ('p1', 'Privileged', 1000, 1, 'Counsel-directed review')",
+            [],
+        )
+        .unwrap();
+        let values: (i64, Option<String>) = conn
+            .query_row(
+                "SELECT privileged, counsel_direction FROM conversations WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(values, (1, Some("Counsel-directed review".to_string())));
+
+        // Re-running setup remains idempotent once both columns exist.
+        setup_schema(&conn).unwrap();
     }
 
     #[test]

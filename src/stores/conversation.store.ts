@@ -17,6 +17,7 @@ import {
   updateConversation as updateConversationDb,
 } from "@/lib/tauri-bridge";
 import type { AgentType } from "@/services/providers";
+import { privacyStore } from "@/stores/privacy.store";
 import type { UnifiedMessage } from "@/types/conversation";
 import { deserializeMetadata, serializeMetadata } from "@/types/conversation";
 
@@ -32,6 +33,8 @@ export interface Conversation {
   projectRoot: string | null;
   isArchived: boolean;
   employeeId: string | null;
+  privileged?: boolean;
+  counselDirection?: string | null;
 }
 
 interface ConversationState {
@@ -98,6 +101,8 @@ function dbToConversation(db: DbConversation): Conversation {
     projectRoot: db.project_root ?? null,
     isArchived: db.is_archived,
     employeeId: db.employee_id ?? null,
+    privileged: db.privileged,
+    counselDirection: db.counsel_direction,
   };
 }
 
@@ -111,6 +116,8 @@ function unifiedRowToConversation(row: UnifiedConversationRow): Conversation {
     projectRoot: row.project_root,
     isArchived: row.is_archived,
     employeeId: row.employee_id,
+    privileged: row.privileged,
+    counselDirection: row.counsel_direction,
   };
 }
 
@@ -663,6 +670,14 @@ export const conversationStore = {
     try {
       const rows = await listConversations({ kind: "chat" });
       const conversations = rows.map(unifiedRowToConversation);
+
+      for (const conversation of conversations) {
+        privacyStore.hydrateConversationPrivilege(
+          conversation.id,
+          conversation.privileged === true,
+          conversation.counselDirection,
+        );
+      }
 
       setState("conversations", conversations);
 

@@ -675,6 +675,8 @@ export interface Conversation {
   project_root: string | null;
   is_archived: boolean;
   employee_id: string | null;
+  privileged: boolean;
+  counsel_direction: string | null;
 }
 
 /**
@@ -699,6 +701,8 @@ export interface AgentConversation {
   project_id: string | null;
   project_root: string | null;
   is_archived: boolean;
+  privileged: boolean;
+  counsel_direction: string | null;
 }
 
 /**
@@ -724,6 +728,8 @@ export interface UnifiedConversationRow {
   agent_permission_mode: string | null;
   agent_metadata: string | null;
   project_id: string | null;
+  privileged: boolean;
+  counsel_direction: string | null;
 }
 
 /**
@@ -823,6 +829,26 @@ export async function updateConversation(
     title,
     selectedModel,
     selectedProvider,
+  });
+}
+
+/**
+ * Persist Privileged Matter Mode so Rust-side indexing and metadata gates
+ * remain active even if renderer state is restarted.
+ */
+export async function setConversationPrivileged(
+  id: string,
+  privileged: boolean,
+  counselDirection?: string | null,
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("set_conversation_privileged", {
+    id,
+    privileged,
+    counselDirection: counselDirection ?? null,
   });
 }
 

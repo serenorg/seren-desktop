@@ -29,14 +29,19 @@ import {
   type SwitchBlockedReason,
   switchChatProvider,
 } from "@/services/provider-bindings";
-import type { AgentType } from "@/services/providers";
+import {
+  type AgentType,
+  isConfidentialSafeProvider,
+} from "@/services/providers";
 import { agentDisplayName, agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import type { Conversation as ChatConversation } from "@/stores/chat.store";
 import { chatStore } from "@/stores/chat.store";
 import type { Conversation as StoreConversation } from "@/stores/conversation.store";
 import { conversationStore } from "@/stores/conversation.store";
+import { privacyStore } from "@/stores/privacy.store";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
+import { settingsStore } from "@/stores/settings.store";
 
 interface ModelSelectorProps {
   threadId?: string | null;
@@ -69,6 +74,29 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
     props.threadId ??
     conversationStore.activeConversationId ??
     chatStore.activeConversationId;
+  const isPrivilegedConversation = () => {
+    const id = activeThreadId();
+    return (
+      privacyStore.isPrivileged(id) ||
+      conversationStore.conversations.find(
+        (conversation) => conversation.id === id,
+      )?.privileged === true ||
+      chatStore.conversations.find((conversation) => conversation.id === id)
+        ?.privileged === true
+    );
+  };
+  const isProviderAllowedForConversation = (providerId: string) =>
+    !isPrivilegedConversation() ||
+    isConfidentialSafeProvider(providerId, {
+      lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl"),
+    });
+  const privilegedProviderMessage =
+    "Privileged Matter Mode only permits LM Studio on a local loopback endpoint.";
+  const rejectUnsafeProvider = (providerId: string): boolean => {
+    if (isProviderAllowedForConversation(providerId)) return false;
+    conversationStore.setError(privilegedProviderMessage);
+    return true;
+  };
   const activeConversation = (): PickerConversation | null => {
     const id = activeThreadId();
     if (!id) return null;
@@ -297,6 +325,10 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
   const selectModel = (modelId: string) => {
     const conversationId = activeThreadId();
     const targetProvider = currentProvider();
+    if (rejectUnsafeProvider(targetProvider)) {
+      setIsOpen(false);
+      return;
+    }
     if (!conversationId) {
       providerStore.setActiveProvider(targetProvider);
       providerStore.setActiveModel(modelId);
@@ -330,6 +362,7 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
    * fetched asynchronously (clicking the chip triggers the load).
    */
   const selectProvider = (providerId: ProviderId) => {
+    if (rejectUnsafeProvider(providerId)) return;
     setDraftProvider(providerId);
     setSearchQuery("");
   };
@@ -350,6 +383,7 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
       );
       return;
     }
+    if (rejectUnsafeProvider(agentType)) return;
 
     const blocked = evaluateChatSwitchGuard(conversationId);
     if (blocked) {
@@ -469,7 +503,8 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
                   <button
                     type="button"
                     aria-pressed={providerId === currentProvider()}
-                    class="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs cursor-pointer transition-colors no-underline border"
+                    disabled={!isProviderAllowedForConversation(providerId)}
+                    class="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs cursor-pointer transition-colors no-underline border disabled:cursor-not-allowed disabled:opacity-45"
                     classList={{
                       "bg-primary text-primary-foreground border-primary font-medium":
                         providerId === currentProvider(),
@@ -477,7 +512,11 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
                         providerId !== currentProvider(),
                     }}
                     onClick={() => selectProvider(providerId)}
-                    title={PROVIDER_CONFIGS[providerId].name}
+                    title={
+                      isProviderAllowedForConversation(providerId)
+                        ? PROVIDER_CONFIGS[providerId].name
+                        : privilegedProviderMessage
+                    }
                   >
                     <ProviderIcon provider={providerId} size={14} />
                     <span class="whitespace-nowrap">
@@ -488,6 +527,13 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
               )}
             </For>
           </div>
+
+          <Show when={isPrivilegedConversation()}>
+            <p class="m-0 border-b border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] leading-relaxed text-amber-200/80">
+              Privileged Matter Mode restricts this conversation to local LM
+              Studio. Remote chat providers are intentionally unavailable.
+            </p>
+          </Show>
 
           {/* External-agent rail: clicking switches the active thread to a
               native-agent provider. The cross-category machinery in
@@ -512,9 +558,14 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
                   <Show when={agent.available}>
                     <button
                       type="button"
-                      class="flex items-center gap-1 px-2.5 py-1.5 bg-transparent border border-transparent rounded text-xs text-muted-foreground cursor-pointer transition-all no-underline hover:bg-border hover:text-foreground"
+                      disabled={!isProviderAllowedForConversation(agent.type)}
+                      class="flex items-center gap-1 px-2.5 py-1.5 bg-transparent border border-transparent rounded text-xs text-muted-foreground cursor-pointer transition-all no-underline hover:bg-border hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
                       onClick={() => selectAgentProvider(agent.type)}
-                      title={`Switch to ${agentDisplayName(agent.type)} — opens an external agent session for this thread`}
+                      title={
+                        isProviderAllowedForConversation(agent.type)
+                          ? `Switch to ${agentDisplayName(agent.type)} — opens an external agent session for this thread`
+                          : privilegedProviderMessage
+                      }
                     >
                       <ProviderIcon provider={agent.type} size={14} />
                       <span class="max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">
@@ -533,7 +584,8 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
             <Show when={!isPrivateChat() && !searchQuery()}>
               <button
                 type="button"
-                class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-border border-b border-b-surface-3 ${committedAutoModel() ? "bg-success/15" : ""}`}
+                disabled={!isProviderAllowedForConversation(currentProvider())}
+                class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-border border-b border-b-surface-3 disabled:cursor-not-allowed disabled:opacity-45 ${committedAutoModel() ? "bg-success/15" : ""}`}
                 onClick={() => selectModel(AUTO_MODEL_ID)}
               >
                 <div class="flex flex-col gap-0.5 min-w-0 flex-1">
@@ -567,7 +619,10 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
                 {(model) => (
                   <button
                     type="button"
-                    class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-border ${model.id === committedModel() ? "bg-primary/[0.12]" : ""}`}
+                    disabled={
+                      !isProviderAllowedForConversation(currentProvider())
+                    }
+                    class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-border disabled:cursor-not-allowed disabled:opacity-45 ${model.id === committedModel() ? "bg-primary/[0.12]" : ""}`}
                     onClick={() => selectModel(model.id)}
                   >
                     <div class="flex flex-col gap-0.5 min-w-0 flex-1">

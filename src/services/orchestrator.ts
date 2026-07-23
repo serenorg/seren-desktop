@@ -40,11 +40,13 @@ import {
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
 } from "@/services/organization-policy";
+import { assertPrivilegedConversationProvider } from "@/services/providers";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { privacyStore } from "@/stores/privacy.store";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
@@ -192,6 +194,32 @@ export async function orchestrate(
   prompt: string,
   images?: Attachment[],
 ): Promise<void> {
+  const conv = conversationStore.conversations.find(
+    (c) => c.id === conversationId,
+  );
+  const isPrivilegedConversation =
+    conv?.privileged === true || privacyStore.isPrivileged(conversationId);
+  // Privileged Matter Mode must be checked before either the employee-cloud
+  // escape hatch or the normal provider route has a chance to receive prompt
+  // content. Unknown and remote providers fail closed here.
+  const selectedProvider = conv?.employeeId
+    ? "organization-cloud-run"
+    : ((conv?.selectedProvider as string | undefined) ??
+      providerStore.activeProvider);
+  try {
+    assertPrivilegedConversationProvider(
+      conversationId,
+      isPrivilegedConversation,
+      selectedProvider,
+      { lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl") },
+    );
+  } catch (error) {
+    conversationStore.setError(
+      error instanceof Error ? error.message : String(error),
+    );
+    return;
+  }
+
   // Show loading indicator immediately so the user sees feedback right
   // after hitting Enter — before history, memory, and skill context load.
   conversationStore.setLoading(true, conversationId);
@@ -208,9 +236,6 @@ export async function orchestrate(
   // agent owns its own system_prompt, model_policy, tool_presets, and
   // approval policy - we just hand it the user message and surface the
   // reply.
-  const conv = conversationStore.conversations.find(
-    (c) => c.id === conversationId,
-  );
   if (conv?.employeeId) {
     await runEmployeeTurn(conversationId, conv.employeeId, prompt);
     return;
@@ -235,7 +260,12 @@ export async function orchestrate(
 
   let answerMemory: UnifiedMessage["memory"] | undefined;
   // Inject typed memory context for the default orchestrator path.
-  if (settingsStore.get("memoryEnabled") && authStore.isAuthenticated) {
+  if (
+    !isPrivilegedConversation &&
+    !privacyStore.isMemoryExcluded(conversationId) &&
+    settingsStore.get("memoryEnabled") &&
+    authStore.isAuthenticated
+  ) {
     try {
       const memoryContext = await bootstrapMemoryContextDetails();
       if (memoryContext?.prompt) {
@@ -271,8 +301,7 @@ export async function orchestrate(
   // on another. Threads with no recorded selection fall back to the
   // user's globally-active default.
   await skillsStore.ensureContextLoaded(fileTreeState.rootPath, conversationId);
-  const threadProvider = ((conv?.selectedProvider as ProviderId | undefined) ??
-    providerStore.activeProvider) as ProviderId;
+  const threadProvider = selectedProvider as ProviderId;
   const threadModel = conv?.selectedModel ?? providerStore.activeModel;
   const capabilities = buildCapabilities(
     conversationId,

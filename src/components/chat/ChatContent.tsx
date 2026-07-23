@@ -51,6 +51,10 @@ import { pickAndReadAttachments } from "@/lib/images/attachments";
 import { scrollMessageIntoView } from "@/lib/message-scroll";
 import { isPaymentError } from "@/lib/payment-errors";
 import {
+  formatPrivilegedMatterStamp,
+  prependPrivilegedMatterStamp,
+} from "@/lib/privileged-matter";
+import {
   computeProviderBoundaries,
   providerDisplayName,
 } from "@/lib/provider-boundaries";
@@ -98,12 +102,14 @@ import {
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
 } from "@/services/organization-policy";
+import { assertPrivilegedConversationProvider } from "@/services/providers";
 import { skills } from "@/services/skills";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { editorStore } from "@/stores/editor.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { privacyStore } from "@/stores/privacy.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
@@ -225,6 +231,21 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   );
   const conversationId = () =>
     props.threadId ?? conversationStore.activeConversationId;
+  const isPrivilegedConversation = () => {
+    const id = conversationId();
+    return (
+      privacyStore.isPrivileged(id) ||
+      conversationStore.conversations.find(
+        (conversation) => conversation.id === id,
+      )?.privileged === true
+    );
+  };
+  const counselDirection = () => {
+    const id = conversationId();
+    return id
+      ? privacyStore.getConversationPrivacy(id).counselDirection
+      : undefined;
+  };
   const clearRecordedSession = () => {
     releaseRecordedSessionArtifacts?.();
     releaseRecordedSessionArtifacts = undefined;
@@ -1143,6 +1164,20 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       return;
     }
 
+    try {
+      assertPrivilegedConversationProvider(
+        id,
+        isPrivilegedConversation(),
+        activeThreadProvider(),
+        { lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl") },
+      );
+    } catch (error) {
+      conversationStore.setError(
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
     // Set loading synchronously before any await. orchestrate() also sets
     // this, but only after we yield on persistMessage — a window wide
     // enough for a fast user submission to slip past `conversationIsLoading()`
@@ -1244,6 +1279,12 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       const retryProvider =
         (activeConvo?.selectedProvider as ProviderId | undefined) ??
         providerStore.activeProvider;
+      assertPrivilegedConversationProvider(
+        id,
+        isPrivilegedConversation(),
+        retryProvider,
+        { lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl") },
+      );
       const content = await sendMessageWithRetry(
         message.request.prompt,
         message.modelId ?? chatStore.selectedModel,
@@ -1312,7 +1353,12 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       return;
     }
 
-    const markdown = formatChatHistoryMarkdown(messages);
+    const markdown = isPrivilegedConversation()
+      ? prependPrivilegedMatterStamp(
+          formatChatHistoryMarkdown(messages),
+          counselDirection(),
+        )
+      : formatChatHistoryMarkdown(messages);
 
     try {
       await navigator.clipboard.writeText(markdown);
@@ -1327,6 +1373,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
 
   const downloadChatHistory = async () => {
     if (isSaving()) return;
+    if (isPrivilegedConversation()) {
+      alert("Cloud Notes export is disabled for Privileged Matter Mode.");
+      return;
+    }
     const messages = conversationMessages();
     if (!hasExportableMessages(messages)) return;
 
@@ -1470,8 +1520,12 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 type="button"
                 class="bg-transparent border border-border text-muted-foreground p-1.5 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={downloadChatHistory}
-                disabled={isSaving()}
-                title="Download chat history"
+                disabled={isSaving() || isPrivilegedConversation()}
+                title={
+                  isPrivilegedConversation()
+                    ? "Cloud Notes export is disabled for Privileged Matter Mode"
+                    : "Download chat history"
+                }
               >
                 <svg
                   class="w-3.5 h-3.5"
@@ -1515,6 +1569,22 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
             </div>
           </div>
         </header>
+
+        <Show when={isPrivilegedConversation()}>
+          <aside
+            class="shrink-0 border-b border-amber-400/30 bg-[linear-gradient(110deg,rgba(180,116,27,0.18),rgba(45,29,12,0.42))] px-4 py-2.5 text-amber-100"
+            data-testid="privileged-matter-banner"
+            aria-label="Privileged Matter Mode enabled"
+          >
+            <p class="m-0 text-xs font-semibold tracking-wide">
+              {formatPrivilegedMatterStamp(counselDirection())}
+            </p>
+            <p class="m-0 mt-1 text-[11px] leading-relaxed text-amber-100/75">
+              Memory, history sync, cloud Notes export, local search indexing,
+              and non-local providers are blocked for this conversation.
+            </p>
+          </aside>
+        </Show>
 
         <div
           class="flex-1 min-h-0 overflow-y-auto pb-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-surface-2 [&::-webkit-scrollbar-thumb]:rounded"

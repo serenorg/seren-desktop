@@ -50,6 +50,10 @@ import {
   pickAndReadAttachments,
 } from "@/lib/images/attachments";
 import { scrollMessageIntoView } from "@/lib/message-scroll";
+import {
+  formatPrivilegedMatterStamp,
+  prependPrivilegedMatterStamp,
+} from "@/lib/privileged-matter";
 import type { Attachment } from "@/lib/providers/types";
 import {
   getModelDisplayName,
@@ -87,6 +91,7 @@ import {
 import { readDocument } from "@/services/docreader";
 import {
   type AgentType,
+  assertPrivilegedConversationProvider,
   type DiffEvent,
   launchLogin,
   supportsConversationFork,
@@ -95,6 +100,7 @@ import {
 import { skills } from "@/services/skills";
 import { type AgentMessage, agentStore } from "@/stores/agent.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { privacyStore } from "@/stores/privacy.store";
 import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
@@ -249,6 +255,24 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     if (thread?.kind !== "agent") return null;
     return thread;
   });
+  const isPrivilegedConversation = () =>
+    privacyStore.isPrivileged(activeAgentThread()?.id);
+  const counselDirection = () => {
+    const id = activeAgentThread()?.id;
+    return id
+      ? privacyStore.getConversationPrivacy(id).counselDirection
+      : undefined;
+  };
+  const assertPrivilegedThreadProvider = () => {
+    const thread = activeAgentThread();
+    if (!thread) return;
+    assertPrivilegedConversationProvider(
+      thread.id,
+      privacyStore.isPrivileged(thread.id),
+      thread.agentType,
+      { lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl") },
+    );
+  };
 
   // Per-thread composer draft (#1631) — persisted to SQLite so an app crash
   // before submit doesn't lose the user's typed text. Write is debounced to
@@ -706,6 +730,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       return;
     }
     try {
+      assertPrivilegedThreadProvider();
+    } catch (error) {
+      setCommandStatus(error instanceof Error ? error.message : String(error));
+      setTimeout(() => setCommandStatus(null), 5000);
+      return;
+    }
+    try {
       const sessionId = await agentStore.resumeAgentConversation(thread.id);
       verboseRuntimeConsole.debug("[AgentChat] Session resumed:", sessionId);
     } catch (error) {
@@ -780,9 +811,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       return;
     }
 
-    const markdown = formatChatHistoryMarkdown(messages, {
-      header: "# Agent Chat History",
-    });
+    const markdown = isPrivilegedConversation()
+      ? prependPrivilegedMatterStamp(
+          formatChatHistoryMarkdown(messages, {
+            header: "# Agent Chat History",
+          }),
+          counselDirection(),
+        )
+      : formatChatHistoryMarkdown(messages, {
+          header: "# Agent Chat History",
+        });
 
     try {
       await navigator.clipboard.writeText(markdown);
@@ -797,6 +835,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const downloadChatHistory = async () => {
     if (isSaving()) return;
+    if (isPrivilegedConversation()) {
+      alert("Cloud Notes export is disabled for Privileged Matter Mode.");
+      return;
+    }
     const messages = threadMessages();
     if (!hasExportableMessages(messages)) return;
 
@@ -894,6 +936,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     // bubble + dots appear before the first stream chunk arrives. Resuming
     // preserves persisted history and provider context after Login → Dismiss.
     const thread = activeAgentThread();
+    try {
+      assertPrivilegedThreadProvider();
+    } catch (error) {
+      setCommandStatus(error instanceof Error ? error.message : String(error));
+      setTimeout(() => setCommandStatus(null), 5000);
+      return;
+    }
     if (!hasSession()) {
       if (!trimmed) {
         console.warn(
@@ -1681,6 +1730,22 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       {/* Plan Header */}
       <PlanHeader />
 
+      <Show when={isPrivilegedConversation()}>
+        <aside
+          class="shrink-0 border-b border-amber-400/30 bg-[linear-gradient(110deg,rgba(180,116,27,0.18),rgba(45,29,12,0.42))] px-4 py-2.5 text-amber-100"
+          data-testid="privileged-matter-banner"
+          aria-label="Privileged Matter Mode enabled"
+        >
+          <p class="m-0 text-xs font-semibold tracking-wide">
+            {formatPrivilegedMatterStamp(counselDirection())}
+          </p>
+          <p class="m-0 mt-1 text-[11px] leading-relaxed text-amber-100/75">
+            Memory, history sync, cloud Notes export, local search indexing, and
+            non-local providers are blocked for this conversation.
+          </p>
+        </aside>
+      </Show>
+
       {/* Paired workflow header — thread title + compact active stage (#2368) */}
       <Show when={isPairedThread()}>
         <div
@@ -1748,8 +1813,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             type="button"
             class="bg-transparent border border-border text-muted-foreground p-1.5 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={downloadChatHistory}
-            disabled={isSaving()}
-            title="Download chat history"
+            disabled={isSaving() || isPrivilegedConversation()}
+            title={
+              isPrivilegedConversation()
+                ? "Cloud Notes export is disabled for Privileged Matter Mode"
+                : "Download chat history"
+            }
           >
             <svg
               class="w-3.5 h-3.5"
