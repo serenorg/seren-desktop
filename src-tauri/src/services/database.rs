@@ -1564,6 +1564,94 @@ mod tests {
     }
 
     #[test]
+    fn full_claude_turn_persists_tool_and_diff_blocks_in_order() {
+        // #3247: a claude-code turn now persists its whole transcript. Tool and
+        // diff blocks ride as role="assistant" rows with a `block_type`
+        // discriminator in metadata; they must coexist with prose rows and read
+        // back in chronological order through the real get_messages query so the
+        // frontend can reconstruct the turn on reload.
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('turn', 'Agent', 1000)",
+            [],
+        )
+        .unwrap();
+
+        let rows: [(&str, &str, &str, Option<&str>, i64); 6] = [
+            ("u1", "user", "read the file then edit it", None, 100),
+            ("a1", "assistant", "Reading the file.", None, 101),
+            (
+                "t1",
+                "assistant",
+                "Read src/main.rs",
+                Some(
+                    r#"{"v":1,"block_type":"tool","tool_call":{"toolCallId":"tc1","title":"Read src/main.rs","kind":"read","status":"completed"}}"#,
+                ),
+                102,
+            ),
+            ("a2", "assistant", "Now editing.", None, 103),
+            (
+                "d1",
+                "assistant",
+                "Modified: src/main.rs",
+                Some(
+                    r#"{"v":1,"block_type":"diff","diff":{"toolCallId":"tc2","path":"src/main.rs","oldText":"a","newText":"b"}}"#,
+                ),
+                104,
+            ),
+            ("f1", "assistant", "Done.", None, 105),
+        ];
+        for (id, role, content, metadata, ts) in rows {
+            save_message_record(
+                &conn,
+                &PersistedMessage {
+                    id: id.to_string(),
+                    conversation_id: "turn".to_string(),
+                    role: role.to_string(),
+                    content: content.to_string(),
+                    model: None,
+                    timestamp: ts,
+                    metadata: metadata.map(str::to_string),
+                    provider: Some("claude-code".to_string()),
+                },
+            )
+            .unwrap();
+        }
+
+        // Mirror the get_messages read: newest-first window, then chronological.
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, metadata FROM messages
+                 WHERE conversation_id = 'turn'
+                 ORDER BY timestamp DESC LIMIT 1000",
+            )
+            .unwrap();
+        let mut ordered: Vec<(String, Option<String>)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        ordered.reverse();
+
+        let ids: Vec<&str> = ordered.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, ["u1", "a1", "t1", "a2", "d1", "f1"]);
+
+        // Block discriminators and payloads survive the write/read round-trip.
+        let tool_meta: serde_json::Value =
+            serde_json::from_str(ordered[2].1.as_deref().unwrap()).unwrap();
+        assert_eq!(tool_meta["block_type"], "tool");
+        assert_eq!(tool_meta["tool_call"]["toolCallId"], "tc1");
+        let diff_meta: serde_json::Value =
+            serde_json::from_str(ordered[4].1.as_deref().unwrap()).unwrap();
+        assert_eq!(diff_meta["block_type"], "diff");
+        assert_eq!(diff_meta["diff"]["path"], "src/main.rs");
+
+        // Prose rows keep null metadata so they are never misread as blocks.
+        assert!(ordered[1].1.is_none());
+    }
+
+    #[test]
     fn save_message_record_stamps_all_privileged_persistence_paths() {
         let conn = Connection::open_in_memory().unwrap();
         setup_schema(&conn).unwrap();
