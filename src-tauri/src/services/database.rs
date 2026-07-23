@@ -108,7 +108,8 @@ impl WalCheckpointTask {
 pub fn configure_connection(conn: &Connection) -> Result<()> {
     conn.busy_timeout(Duration::from_millis(5000))?;
     conn.execute_batch(&format!(
-        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA wal_autocheckpoint={};",
+        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON; \
+         PRAGMA wal_autocheckpoint={};",
         WAL_AUTOCHECKPOINT_PAGES
     ))?;
     Ok(())
@@ -1539,6 +1540,17 @@ mod tests {
             .query_row("PRAGMA wal_autocheckpoint", [], |row| row.get(0))
             .unwrap();
         assert_eq!(autocheckpoint_pages, WAL_AUTOCHECKPOINT_PAGES as i64);
+    }
+
+    #[test]
+    fn true_deletion_configure_connection_enables_secure_delete() {
+        let conn = Connection::open_in_memory().unwrap();
+        configure_connection(&conn).unwrap();
+
+        let secure_delete: i64 = conn
+            .query_row("PRAGMA secure_delete", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(secure_delete, 1);
     }
 
     #[test]
