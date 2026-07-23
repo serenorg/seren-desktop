@@ -27,6 +27,10 @@ import {
   wipeHistorySyncRemote,
 } from "@/services/historySync";
 import { allowsSerenPublicModels } from "@/services/organization-policy";
+import {
+  type AgentSandboxStatus,
+  getAgentSandboxStatus,
+} from "@/services/providers";
 import { telemetry } from "@/services/telemetry";
 import {
   appearanceState,
@@ -42,6 +46,7 @@ import {
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
+import { fileTreeState } from "@/stores/fileTree";
 import { resetAllKeybindings } from "@/stores/keybindings.store";
 import { providerStore } from "@/stores/provider.store";
 import {
@@ -117,6 +122,12 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   const [historySyncSummary, setHistorySyncSummary] =
     createSignal<HistorySyncSummary | null>(null);
   const [historySyncWipeConfirm, setHistorySyncWipeConfirm] = createSignal("");
+  const [agentSandboxStatus, setAgentSandboxStatus] =
+    createSignal<AgentSandboxStatus | null>(null);
+  const [agentSandboxStatusError, setAgentSandboxStatusError] = createSignal<
+    string | null
+  >(null);
+  let agentSandboxStatusRequest = 0;
 
   const refreshClaudeMemoryStatus = async () => {
     try {
@@ -125,6 +136,32 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
       setClaudeMemoryWatchingRoot(status.watching_root);
     } catch (err) {
       console.warn("[ClaudeMemory] status read failed", err);
+    }
+  };
+
+  const refreshAgentSandboxStatus = async (
+    mode: string,
+    projectRoot: string,
+    networkEnabled: boolean,
+  ) => {
+    const request = ++agentSandboxStatusRequest;
+    setAgentSandboxStatusError(null);
+    try {
+      const status = await getAgentSandboxStatus(
+        mode,
+        projectRoot,
+        networkEnabled,
+      );
+      if (request === agentSandboxStatusRequest) {
+        setAgentSandboxStatus(status);
+      }
+    } catch (error) {
+      if (request === agentSandboxStatusRequest) {
+        setAgentSandboxStatus(null);
+        setAgentSandboxStatusError(
+          `Could not verify the effective sandbox: ${String(error)}`,
+        );
+      }
     }
   };
 
@@ -430,6 +467,13 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     if (visible.some((section) => section.id === activeSection())) return;
     const firstVisible = visible[0];
     if (firstVisible) selectSection(firstVisible.id);
+  });
+
+  createEffect(() => {
+    const mode = settingsState.app.agentSandboxMode;
+    const networkEnabled = settingsState.app.agentNetworkEnabled;
+    const projectRoot = fileTreeState.rootPath ?? "";
+    void refreshAgentSandboxStatus(mode, projectRoot, networkEnabled);
   });
 
   const handleOpenSection = (event: Event) => {
@@ -1326,6 +1370,117 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   )}
                 </For>
               </div>
+            </div>
+
+            <div class="py-3 border-b border-border">
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Verified effective sandbox
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Reported by the trusted Rust sandbox module for the current
+                    project and network settings.
+                  </span>
+                </div>
+                <Show
+                  when={agentSandboxStatus()}
+                  fallback={
+                    <span class="text-[0.75rem] text-muted-foreground">
+                      Checking…
+                    </span>
+                  }
+                >
+                  {(status) => (
+                    <span
+                      class={`shrink-0 rounded-full border px-2 py-1 text-[0.72rem] font-medium ${
+                        status().effective_mode === "full-access"
+                          ? "border-destructive/40 bg-destructive/10 text-destructive"
+                          : status().enforced_at_launch
+                            ? "border-accent/40 bg-primary/10 text-foreground"
+                            : "border-warning/40 bg-warning/10 text-warning"
+                      }`}
+                    >
+                      {status().effective_mode === "full-access"
+                        ? "Unconfined"
+                        : status().enforced_at_launch
+                          ? "Enforced at launch"
+                          : "Unavailable"}
+                    </span>
+                  )}
+                </Show>
+              </div>
+
+              <Show when={agentSandboxStatus()}>
+                {(status) => (
+                  <div class="mt-3 flex flex-col gap-2 text-[0.8rem]">
+                    <Show when={status().effective_mode === "full-access"}>
+                      <div
+                        class="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive"
+                        role="alert"
+                      >
+                        <span class="font-medium">
+                          Unconfined — no OS sandbox
+                        </span>
+                        <span class="ml-1">
+                          The agent runs outside the trusted sandbox boundary.
+                        </span>
+                      </div>
+                    </Show>
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md bg-surface-3/50 px-3 py-2 text-muted-foreground">
+                      <span>
+                        Backend:{" "}
+                        <strong class="font-medium text-foreground">
+                          {status().backend}
+                        </strong>
+                      </span>
+                      <span>
+                        Effective mode:{" "}
+                        <strong class="font-medium text-foreground">
+                          {status().effective_mode}
+                        </strong>
+                      </span>
+                      <span>
+                        Network:{" "}
+                        <strong class="font-medium text-foreground">
+                          {status().network_enabled ? "Enabled" : "Disabled"}
+                        </strong>
+                      </span>
+                      <span>
+                        Launch state:{" "}
+                        <strong class="font-medium text-foreground">
+                          {status().enforced_at_launch
+                            ? "Enforced"
+                            : "Not enforced"}
+                        </strong>
+                      </span>
+                    </div>
+                    <p class="m-0 text-muted-foreground leading-normal">
+                      {status().detail}
+                    </p>
+                    <Show when={!status().spec_available}>
+                      <p
+                        class="m-0 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-warning"
+                        role="alert"
+                      >
+                        A bounded agent session would be blocked until this
+                        sandbox specification can be prepared.
+                      </p>
+                    </Show>
+                  </div>
+                )}
+              </Show>
+
+              <Show when={agentSandboxStatusError()}>
+                {(error) => (
+                  <p
+                    class="m-0 mt-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[0.8rem] text-warning"
+                    role="alert"
+                  >
+                    {error()}
+                  </p>
+                )}
+              </Show>
             </div>
 
             <Show

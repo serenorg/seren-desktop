@@ -1073,6 +1073,7 @@ pub fn run() {
             commands::history_sync::history_sync_run_now,
             commands::history_sync::history_sync_wipe_remote,
             commands::sandbox::agent_sandbox_profile,
+            commands::sandbox::agent_sandbox_status,
             commands::credential_lease::credential_lease_create,
             commands::credential_lease::credential_lease_revoke,
             commands::credential_lease::credential_lease_revoke_all,
