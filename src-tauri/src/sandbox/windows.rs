@@ -5,7 +5,7 @@
 mod platform {
     use std::ffi::c_void;
     use std::iter::once;
-    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use std::path::{Path, PathBuf};
     use std::process;
     use std::slice;
@@ -41,6 +41,7 @@ mod platform {
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
         SetInformationJobObject,
     };
+    use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
     use windows::Win32::System::Threading::{
         CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, GetCurrentProcess,
         GetExitCodeProcess, INFINITE, OpenProcessToken, PROCESS_CREATION_FLAGS,
@@ -166,7 +167,7 @@ mod platform {
 
         let token = create_restricted_token(capability.as_psid())?;
         let job = create_job()?;
-        let (application_name, mut command_line) = command_line(command, args);
+        let (application_name, mut command_line) = command_line(command, args)?;
         let application_wide = wide(&application_name);
         let current_directory_path = policy
             .workspace_roots
@@ -763,7 +764,7 @@ mod platform {
         }
     }
 
-    fn command_line(command: &str, args: &[String]) -> (String, Vec<u16>) {
+    fn command_line(command: &str, args: &[String]) -> Result<(String, Vec<u16>), SandboxError> {
         let direct = once(command.to_string())
             .chain(args.iter().cloned())
             .map(|argument| quote_windows_arg(&argument))
@@ -772,12 +773,41 @@ mod platform {
         if command.to_ascii_lowercase().ends_with(".cmd")
             || command.to_ascii_lowercase().ends_with(".bat")
         {
-            let shell = std::env::var("ComSpec")
-                .unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".to_string());
-            let command_line = format!("/d /s /c {}", quote_windows_arg(&direct));
-            return (shell, wide(&command_line));
+            let shell = system_command_shell()?;
+            // cmd.exe does not use CommandLineToArgvW for its /C command text.
+            // Include argv[0], then give /S /C exactly one raw outer quote pair
+            // so inner quotes around batch paths and arguments survive. #3219.
+            let command_line = format!(
+                "{} /d /v:off /s /c \"{}\"",
+                quote_windows_arg(&shell),
+                direct
+            );
+            return Ok((shell, wide(&command_line)));
         }
-        (command.to_string(), wide(&direct))
+        Ok((command.to_string(), wide(&direct)))
+    }
+
+    fn system_command_shell() -> Result<String, SandboxError> {
+        // Resolve the OS-owned command interpreter without trusting ComSpec or
+        // the workspace/PATH, either of which could redirect a bounded launch.
+        let mut buffer = vec![0u16; 32_768];
+        let length = unsafe { GetSystemDirectoryW(Some(&mut buffer)) } as usize;
+        if length == 0 {
+            return Err(SandboxError::Windows(format!(
+                "GetSystemDirectoryW failed: {:?}",
+                unsafe { GetLastError() }
+            )));
+        }
+        if length >= buffer.len() {
+            return Err(SandboxError::Windows(
+                "GetSystemDirectoryW returned an oversized path".to_string(),
+            ));
+        }
+        let directory = std::ffi::OsString::from_wide(&buffer[..length]);
+        Ok(PathBuf::from(directory)
+            .join("cmd.exe")
+            .to_string_lossy()
+            .into_owned())
     }
 
     fn quote_windows_arg(argument: &str) -> String {

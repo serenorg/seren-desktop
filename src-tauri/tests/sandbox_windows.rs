@@ -1,228 +1,275 @@
 #![cfg(target_os = "windows")]
 
-// Real Windows restricted-token and Job Object canaries. These run on the
+// Real Windows restricted-token launcher canaries. These run on the
 // windows-latest matrix runner; no policy or process behavior is mocked.
 
 use std::env;
-use std::path::Path;
-use std::process::{Command, Output};
+use std::fs::{self, OpenOptions};
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::process::{self, Command, Output};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use seren_desktop_lib::sandbox::{SandboxMode, SandboxPolicy};
 use tempfile::TempDir;
 
 const CANARY_DENIED_EXIT: i32 = 23;
-const CANARY_UNEXPECTED_WRITE_EXIT: i32 = 41;
+const CANARY_PROBE_FAILURE_EXIT: i32 = 42;
+const CANARY_TARGET_ENV: &str = "SEREN_WINDOWS_SANDBOX_CANARY_TARGET";
+const CANARY_GRANDCHILD_ENV: &str = "SEREN_WINDOWS_SANDBOX_CANARY_GRANDCHILD";
+const CANARY_WRITE_MARKER: &str = "SEREN_CANARY_WRITE_SUCCEEDED";
+const CANARY_DENIED_MARKER: &str = "SEREN_CANARY_WRITE_ACCESS_DENIED";
+const CANARY_GRANDCHILD_DENIED_MARKER: &str = "SEREN_CANARY_GRANDCHILD_ACCESS_DENIED";
 
 fn policy_payload(policy: &SandboxPolicy) -> String {
     STANDARD.encode(serde_json::to_vec(policy).expect("policy serializes"))
 }
 
-fn command_shell() -> String {
-    env::var("ComSpec").unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".to_string())
-}
-
-fn run_command(policy: &SandboxPolicy, cwd: &Path, command: &str, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_Seren"))
-        .args([
-            "__seren-sandbox-run",
-            &policy_payload(policy),
-            "--",
-            command,
-        ])
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .expect("sandbox launcher starts")
-}
-
-fn workspace_policy(mode: SandboxMode, workspace: &TempDir) -> SandboxPolicy {
-    SandboxPolicy::new(mode, vec![workspace.path().to_path_buf()], Vec::new(), true)
+fn workspace_policy(mode: SandboxMode, workspace: &Path) -> SandboxPolicy {
+    SandboxPolicy::new(mode, vec![workspace.to_path_buf()], Vec::new(), true)
         .expect("test workspace policy is valid")
 }
 
-fn redirect(path: &Path) -> String {
-    format!("\"{}\"", cmd_compatible_path(path))
+fn workspace_fixture() -> (TempDir, PathBuf) {
+    let root = tempfile::tempdir().expect("sandbox fixture tempdir");
+    let workspace = root.path().join("workspace with spaces");
+    fs::create_dir(&workspace).expect("sandbox fixture workspace exists");
+    (root, workspace)
 }
 
-fn cmd_compatible_path(path: &Path) -> String {
-    let raw = path.to_string_lossy();
-    // tempfile paths can carry Windows' extended-length prefix. cmd.exe does
-    // not accept that spelling in redirections, even though the sandbox policy
-    // intentionally retains the canonical form for enforcement.
-    if let Some(unc) = raw.strip_prefix("\\\\?\\UNC\\") {
-        format!("\\\\{unc}")
-    } else if let Some(local) = raw.strip_prefix("\\\\?\\") {
-        local.to_owned()
+fn prove_target_is_writable(target: &Path) {
+    fs::write(target, b"preflight").expect("canary target is writable before sandboxing");
+    fs::remove_file(target).expect("canary preflight target is removed");
+}
+
+fn sandbox_launcher_command(policy: &SandboxPolicy, cwd: &Path, program: &Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_Seren"));
+    command
+        .arg("__seren-sandbox-run")
+        .arg(policy_payload(policy))
+        .arg("--")
+        .arg(program)
+        .current_dir(cwd);
+    command
+}
+
+fn run_native_write_probe(
+    policy: &SandboxPolicy,
+    cwd: &Path,
+    target: &Path,
+    spawn_grandchild: bool,
+) -> Output {
+    let source_executable = env::current_exe().expect("integration test executable is available");
+    let probe_executable = cwd.join("seren-sandbox-native-probe.exe");
+    fs::copy(source_executable, &probe_executable)
+        .expect("native probe is copied into the sandbox workspace");
+    let mut command = sandbox_launcher_command(policy, cwd, &probe_executable);
+    command
+        .args([
+            "--ignored",
+            "--exact",
+            "sandbox_windows_native_write_probe",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CANARY_TARGET_ENV, target);
+    if spawn_grandchild {
+        command.env(CANARY_GRANDCHILD_ENV, "1");
     } else {
-        raw.into_owned()
+        command.env_remove(CANARY_GRANDCHILD_ENV);
     }
+    command.output().expect("sandbox launcher starts")
 }
 
-fn denied_write_script(path: &Path, started_marker: &str, denied_marker: &str) -> String {
-    let target = redirect(path);
-    format!(
-        "echo {started_marker} & echo denied>{target} & if exist {target} (echo SEREN_CANARY_UNEXPECTED_WRITE & exit /b {CANARY_UNEXPECTED_WRITE_EXIT}) else (echo {denied_marker} & exit /b {CANARY_DENIED_EXIT})"
-    )
-}
-
-fn assert_contained_denial(output: &Output, denied_marker: &str) {
-    let status = output.status.code();
-    // A launcher parse, policy, or enforcement failure must never satisfy a
-    // denial canary. The child command itself returns CANARY_DENIED_EXIT only
-    // after it observes that its write did not land. #3219.
-    assert_ne!(status, Some(64), "launcher rejected arguments: {output:?}");
-    assert_ne!(status, Some(65), "launcher rejected policy: {output:?}");
-    assert_ne!(
-        status,
-        Some(69),
-        "launcher failed before the canary ran: {output:?}"
-    );
+fn assert_access_denied(output: &Output, marker: &str) {
     assert_eq!(
-        status,
+        output.status.code(),
         Some(CANARY_DENIED_EXIT),
-        "canary did not report its contained denial: stdout={} stderr={}",
+        "native canary did not report Win32 access denied: status={:?} stdout={} stderr={}",
+        output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&output.stdout).contains(denied_marker),
-        "canary denial marker missing: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout).contains(marker),
+        "native access-denied marker missing: stdout={} stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn exit_probe(code: i32, marker: &str) -> ! {
+    println!("{marker}");
+    let _ = std::io::stdout().flush();
+    process::exit(code);
+}
+
+fn fail_probe(error: &std::io::Error) -> ! {
+    eprintln!(
+        "SEREN_CANARY_UNEXPECTED_IO_ERROR kind={:?} os_code={:?}",
+        error.kind(),
+        error.raw_os_error()
+    );
+    let _ = std::io::stderr().flush();
+    process::exit(CANARY_PROBE_FAILURE_EXIT);
+}
+
+#[test]
+#[ignore = "child-only native write probe invoked through the sandbox launcher"]
+fn sandbox_windows_native_write_probe() {
+    let Some(target) = env::var_os(CANARY_TARGET_ENV) else {
+        eprintln!("SEREN_CANARY_TARGET_MISSING");
+        process::exit(CANARY_PROBE_FAILURE_EXIT);
+    };
+
+    if env::var_os(CANARY_GRANDCHILD_ENV).is_some() {
+        let probe_executable = env::current_exe().expect("probe executable is available");
+        let output = Command::new(probe_executable)
+            .args([
+                "--ignored",
+                "--exact",
+                "sandbox_windows_native_write_probe",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env_remove(CANARY_GRANDCHILD_ENV)
+            .output()
+            .expect("grandchild native probe starts");
+        if output.status.code() == Some(CANARY_DENIED_EXIT)
+            && String::from_utf8_lossy(&output.stdout).contains(CANARY_DENIED_MARKER)
+        {
+            exit_probe(CANARY_DENIED_EXIT, CANARY_GRANDCHILD_DENIED_MARKER);
+        }
+        eprintln!(
+            "SEREN_CANARY_GRANDCHILD_UNEXPECTED_RESULT status={:?}",
+            output.status
+        );
+        process::exit(CANARY_PROBE_FAILURE_EXIT);
+    }
+
+    let target = PathBuf::from(target);
+    let mut file = match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)
+    {
+        Ok(file) => file,
+        Err(error) if error.raw_os_error() == Some(5) => {
+            exit_probe(CANARY_DENIED_EXIT, CANARY_DENIED_MARKER);
+        }
+        Err(error) => fail_probe(&error),
+    };
+    if let Err(error) = file.write_all(b"allowed") {
+        if error.raw_os_error() == Some(5) {
+            exit_probe(CANARY_DENIED_EXIT, CANARY_DENIED_MARKER);
+        }
+        fail_probe(&error);
+    }
+    println!("{CANARY_WRITE_MARKER}");
 }
 
 #[test]
 fn sandbox_windows_workspace_write_canary_succeeds() {
-    let workspace = tempfile::tempdir().expect("workspace tempdir");
-    let inside = workspace.path().join("inside.txt");
+    let (_root, workspace) = workspace_fixture();
+    let inside = workspace.join("inside.txt");
+    prove_target_is_writable(&inside);
     let policy = workspace_policy(SandboxMode::WorkspaceWrite, &workspace);
-    let shell = command_shell();
 
-    let output = run_command(
-        &policy,
-        workspace.path(),
-        &shell,
-        &["/d", "/c", &format!("echo allowed>{}", redirect(&inside))],
-    );
+    // A relative target exercises the child-current-directory conversion.
+    let output = run_native_write_probe(&policy, &workspace, Path::new("inside.txt"), false);
 
     assert!(
         output.status.success(),
-        "workspace write failed: status={:?} stderr={}",
+        "workspace write failed: status={:?} stdout={} stderr={}",
         output.status,
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(inside.is_file());
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(CANARY_WRITE_MARKER),
+        "workspace-write marker missing"
+    );
+    assert_eq!(
+        fs::read(&inside).expect("workspace canary file exists"),
+        b"allowed"
+    );
 }
 
 #[test]
 fn sandbox_windows_outside_write_canary_is_denied() {
-    let workspace = tempfile::tempdir().expect("workspace tempdir");
-    let outside = tempfile::tempdir().expect("outside tempdir");
-    let outside_file = outside.path().join("outside.txt");
+    let (root, workspace) = workspace_fixture();
+    let outside = root.path().join("outside.txt");
+    prove_target_is_writable(&outside);
     let policy = workspace_policy(SandboxMode::WorkspaceWrite, &workspace);
-    let shell = command_shell();
-    let started_marker = "SEREN_CANARY_OUTSIDE_WRITE_STARTED";
-    let denied_marker = "SEREN_CANARY_OUTSIDE_WRITE_DENIED";
 
-    let output = run_command(
-        &policy,
-        workspace.path(),
-        &shell,
-        &[
-            "/d",
-            "/c",
-            &denied_write_script(&outside_file, started_marker, denied_marker),
-        ],
-    );
+    let output = run_native_write_probe(&policy, &workspace, &outside, false);
 
-    assert_contained_denial(&output, denied_marker);
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains(started_marker),
-        "outside-write canary never started: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        !outside_file.exists(),
-        "outside write unexpectedly succeeded: status={:?} stdout={} stderr={}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_access_denied(&output, CANARY_DENIED_MARKER);
+    assert!(!outside.exists(), "outside write unexpectedly succeeded");
 }
 
 #[test]
 fn sandbox_windows_read_only_denies_workspace_write() {
-    let workspace = tempfile::tempdir().expect("workspace tempdir");
-    let inside = workspace.path().join("read-only.txt");
+    let (_root, workspace) = workspace_fixture();
+    let inside = workspace.join("read-only.txt");
+    prove_target_is_writable(&inside);
     let policy = workspace_policy(SandboxMode::ReadOnly, &workspace);
-    let shell = command_shell();
-    let started_marker = "SEREN_CANARY_READ_ONLY_WRITE_STARTED";
-    let denied_marker = "SEREN_CANARY_READ_ONLY_WRITE_DENIED";
 
-    let output = run_command(
-        &policy,
-        workspace.path(),
-        &shell,
-        &[
-            "/d",
-            "/c",
-            &denied_write_script(&inside, started_marker, denied_marker),
-        ],
-    );
+    // A relative target proves the workspace is reachable but not writable.
+    let output = run_native_write_probe(&policy, &workspace, Path::new("read-only.txt"), false);
 
-    assert_contained_denial(&output, denied_marker);
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains(started_marker),
-        "read-only canary never started: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_access_denied(&output, CANARY_DENIED_MARKER);
     assert!(
         !inside.exists(),
-        "read-only workspace write unexpectedly succeeded: status={:?} stdout={} stderr={}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        "read-only workspace write unexpectedly succeeded"
     );
 }
 
 #[test]
-fn sandbox_windows_grandchild_cannot_escape_job() {
-    let workspace = tempfile::tempdir().expect("workspace tempdir");
-    let outside = tempfile::tempdir().expect("outside tempdir");
-    let outside_file = outside.path().join("grandchild.txt");
+fn sandbox_windows_grandchild_inherits_restricted_token() {
+    let (root, workspace) = workspace_fixture();
+    let outside = root.path().join("grandchild.txt");
+    prove_target_is_writable(&outside);
     let policy = workspace_policy(SandboxMode::WorkspaceWrite, &workspace);
-    let shell = command_shell();
-    let started_marker = "SEREN_CANARY_GRANDCHILD_STARTED";
-    let denied_marker = "SEREN_CANARY_GRANDCHILD_WRITE_DENIED";
-    // Run a marker from a real child cmd.exe before the write-attempt child.
-    // The parent then emits the denial marker only after observing no escape.
-    let grandchild_script = format!(
-        "{shell} /d /c echo {started_marker} & {shell} /d /c echo denied>{outside}",
-        outside = redirect(&outside_file)
-    );
-    let script = format!(
-        "{grandchild_script} & if exist {outside} (echo SEREN_CANARY_UNEXPECTED_WRITE & exit /b {CANARY_UNEXPECTED_WRITE_EXIT}) else (echo {denied_marker} & exit /b {CANARY_DENIED_EXIT})",
-        outside = redirect(&outside_file)
-    );
 
-    let output = run_command(&policy, workspace.path(), &shell, &["/d", "/c", &script]);
+    let output = run_native_write_probe(&policy, &workspace, &outside, true);
 
-    assert_contained_denial(&output, denied_marker);
+    assert_access_denied(&output, CANARY_GRANDCHILD_DENIED_MARKER);
+    assert!(!outside.exists(), "grandchild write unexpectedly succeeded");
+}
+
+#[test]
+fn sandbox_windows_batch_wrapper_preserves_quoted_paths_and_arguments() {
+    let (_root, workspace) = workspace_fixture();
+    let script_directory = workspace.join("batch scripts");
+    fs::create_dir(&script_directory).expect("batch-script directory exists");
+    let script = script_directory.join("write result.cmd");
+    let result_file = workspace.join("batch result.txt");
+    fs::write(
+        &script,
+        b"@echo off\r\nif not \"%~1\"==\"argument with spaces\" exit /b 43\r\n>\"%~2\" echo batch-ok\r\nexit /b 0\r\n",
+    )
+    .expect("batch canary is written");
+    let policy = workspace_policy(SandboxMode::WorkspaceWrite, &workspace);
+
+    let output = sandbox_launcher_command(&policy, &workspace, &script)
+        .arg("argument with spaces")
+        .arg(&result_file)
+        .output()
+        .expect("sandbox batch launcher starts");
+
     assert!(
-        String::from_utf8_lossy(&output.stdout).contains(started_marker),
-        "grandchild canary never started: stdout={} stderr={}",
+        output.status.success(),
+        "batch wrapper failed: status={:?} stdout={} stderr={}",
+        output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        !outside_file.exists(),
-        "grandchild write unexpectedly succeeded: status={:?} stderr={}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr)
+    assert_eq!(
+        fs::read_to_string(&result_file)
+            .expect("batch result exists")
+            .trim(),
+        "batch-ok"
     );
 }
 
