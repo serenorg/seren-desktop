@@ -7990,7 +7990,7 @@ dependencies = [
 [[package]]
 name = "seren-memory-sdk"
 version = "0.1.0"
-source = "git+https://github.com/serenorg/seren-memory-sdk.git?branch=main#0133c145953bcf133b1d4d76bdbee4d4183607f"
+source = "git+https://github.com/serenorg/seren-memory-sdk.git?branch=main#b256cbc618667d8e480fbf1c84d90af07af85fc1"
 dependencies = [
  "chrono",
  "reqwest 0.12.28",
