@@ -2,15 +2,15 @@
 // ABOUTME: Keeps local SQLite as the fast path and mirrors durable text rows to Postgres.
 
 use postgres::{Client as PgClient, Row as PgRow};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashSet;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 
 use crate::auth;
-use crate::services::database::{now_ms, DbPool, HISTORY_SYNC_TABLES};
+use crate::services::database::{DbPool, HISTORY_SYNC_TABLES, now_ms};
 
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com/publishers/seren-db";
 const HISTORY_SYNC_STORE: &str = "history_sync.json";
@@ -775,31 +775,86 @@ fn mark_synced(app: &AppHandle, table_name: &str, row_id: &str) -> Result<(), St
     })
 }
 
+const TOMBSTONE_CONVERSATION_SQL: &str = "UPDATE seren_desktop.conversations
+    SET title = '', payload = '{}'::jsonb, deleted_at = $2, row_version = row_version + 1
+    WHERE id = $1";
+const TOMBSTONE_MESSAGE_SQL: &str = "UPDATE seren_desktop.messages
+    SET content = NULL, payload = '{}'::jsonb, deleted_at = $2, row_version = row_version + 1
+    WHERE id = $1";
+const TOMBSTONE_MESSAGE_EVENT_SQL: &str = "UPDATE seren_desktop.message_events
+    SET payload = '{}'::jsonb, deleted_at = $2, row_version = row_version + 1
+    WHERE id = $1";
+const TOMBSTONE_MEETING_SQL: &str = "UPDATE seren_desktop.meetings
+    SET title = '', notes_markdown = NULL, notes_struct_json = NULL, payload = '{}'::jsonb,
+        deleted_at = $2, row_version = row_version + 1
+    WHERE id = $1";
+const TOMBSTONE_TRANSCRIPT_SEGMENT_SQL: &str = "UPDATE seren_desktop.transcript_segments
+    SET text = '', payload = '{}'::jsonb, deleted_at = $2, row_version = row_version + 1
+    WHERE id = $1";
+const TOMBSTONE_MEETING_SPEAKER_ASSIGNMENT_SQL: &str =
+    "UPDATE seren_desktop.meeting_speaker_assignments
+     SET display_name = '', attendee_email = NULL, source_key = '', payload = '{}'::jsonb,
+         deleted_at = $2, row_version = row_version + 1
+     WHERE id = $1";
+const TOMBSTONE_MESSAGES_BY_CONVERSATION_SQL: &str = "UPDATE seren_desktop.messages
+    SET content = NULL, payload = '{}'::jsonb, deleted_at = $2, row_version = row_version + 1
+    WHERE conversation_id = $1";
+const TOMBSTONE_MESSAGE_EVENTS_BY_CONVERSATION_SQL: &str = "UPDATE seren_desktop.message_events
+    SET payload = '{}'::jsonb, deleted_at = $2, row_version = row_version + 1
+    WHERE conversation_id = $1";
+const TOMBSTONE_MESSAGE_EVENTS_BY_MESSAGE_SQL: &str = "UPDATE seren_desktop.message_events
+    SET payload = '{}'::jsonb, deleted_at = $2, row_version = row_version + 1
+    WHERE message_id = $1";
+const TOMBSTONE_TRANSCRIPT_SEGMENTS_BY_MEETING_SQL: &str =
+    "UPDATE seren_desktop.transcript_segments
+     SET text = '', payload = '{}'::jsonb, deleted_at = $2, row_version = row_version + 1
+     WHERE meeting_id = $1";
+const TOMBSTONE_MEETING_SPEAKER_ASSIGNMENTS_BY_MEETING_SQL: &str =
+    "UPDATE seren_desktop.meeting_speaker_assignments
+     SET display_name = '', attendee_email = NULL, source_key = '', payload = '{}'::jsonb,
+         deleted_at = $2, row_version = row_version + 1
+     WHERE meeting_id = $1";
+
+fn tombstone_update_sql(table_name: &str) -> Option<&'static str> {
+    match table_name {
+        "conversations" => Some(TOMBSTONE_CONVERSATION_SQL),
+        "messages" => Some(TOMBSTONE_MESSAGE_SQL),
+        "message_events" => Some(TOMBSTONE_MESSAGE_EVENT_SQL),
+        "meetings" => Some(TOMBSTONE_MEETING_SQL),
+        "transcript_segments" => Some(TOMBSTONE_TRANSCRIPT_SEGMENT_SQL),
+        "meeting_speaker_assignments" => Some(TOMBSTONE_MEETING_SPEAKER_ASSIGNMENT_SQL),
+        _ => None,
+    }
+}
+
+fn update_tombstone_row(
+    client: &mut PgClient,
+    table_name: &str,
+    row_id: &str,
+    deleted_at: i64,
+) -> Result<(), String> {
+    let sql = tombstone_update_sql(table_name)
+        .ok_or_else(|| format!("unsupported history-sync tombstone table: {table_name}"))?;
+    client
+        .execute(sql, &[&row_id, &deleted_at])
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
 fn push_tombstone(client: &mut PgClient, item: &OutboxItem) -> Result<(), String> {
     let deleted_at = item.enqueued_at;
     match item.table_name.as_str() {
         "conversations" => {
+            update_tombstone_row(client, "conversations", &item.row_id, deleted_at)?;
             client
                 .execute(
-                    "UPDATE seren_desktop.conversations
-                     SET deleted_at = $2, row_version = row_version + 1
-                     WHERE id = $1",
+                    TOMBSTONE_MESSAGES_BY_CONVERSATION_SQL,
                     &[&item.row_id, &deleted_at],
                 )
                 .map_err(|err| err.to_string())?;
             client
                 .execute(
-                    "UPDATE seren_desktop.messages
-                     SET deleted_at = $2, row_version = row_version + 1
-                     WHERE conversation_id = $1",
-                    &[&item.row_id, &deleted_at],
-                )
-                .map_err(|err| err.to_string())?;
-            client
-                .execute(
-                    "UPDATE seren_desktop.message_events
-                     SET deleted_at = $2, row_version = row_version + 1
-                     WHERE conversation_id = $1",
+                    TOMBSTONE_MESSAGE_EVENTS_BY_CONVERSATION_SQL,
                     &[&item.row_id, &deleted_at],
                 )
                 .map_err(|err| err.to_string())?;
@@ -811,31 +866,25 @@ fn push_tombstone(client: &mut PgClient, item: &OutboxItem) -> Result<(), String
                 .map_err(|err| err.to_string())?;
         }
         "messages" => {
-            update_deleted_at(client, "messages", &item.row_id, deleted_at)?;
+            update_tombstone_row(client, "messages", &item.row_id, deleted_at)?;
             client
                 .execute(
-                    "UPDATE seren_desktop.message_events
-                     SET deleted_at = $2, row_version = row_version + 1
-                     WHERE message_id = $1",
+                    TOMBSTONE_MESSAGE_EVENTS_BY_MESSAGE_SQL,
                     &[&item.row_id, &deleted_at],
                 )
                 .map_err(|err| err.to_string())?;
         }
         "meetings" => {
-            update_deleted_at(client, "meetings", &item.row_id, deleted_at)?;
+            update_tombstone_row(client, "meetings", &item.row_id, deleted_at)?;
             client
                 .execute(
-                    "UPDATE seren_desktop.transcript_segments
-                     SET deleted_at = $2, row_version = row_version + 1
-                     WHERE meeting_id = $1",
+                    TOMBSTONE_TRANSCRIPT_SEGMENTS_BY_MEETING_SQL,
                     &[&item.row_id, &deleted_at],
                 )
                 .map_err(|err| err.to_string())?;
             client
                 .execute(
-                    "UPDATE seren_desktop.meeting_speaker_assignments
-                     SET deleted_at = $2, row_version = row_version + 1
-                     WHERE meeting_id = $1",
+                    TOMBSTONE_MEETING_SPEAKER_ASSIGNMENTS_BY_MEETING_SQL,
                     &[&item.row_id, &deleted_at],
                 )
                 .map_err(|err| err.to_string())?;
@@ -849,27 +898,10 @@ fn push_tombstone(client: &mut PgClient, item: &OutboxItem) -> Result<(), String
                 .map_err(|err| err.to_string())?;
         }
         "message_events" | "transcript_segments" | "meeting_speaker_assignments" => {
-            update_deleted_at(client, &item.table_name, &item.row_id, deleted_at)?;
+            update_tombstone_row(client, &item.table_name, &item.row_id, deleted_at)?;
         }
         _ => {}
     }
-    Ok(())
-}
-
-fn update_deleted_at(
-    client: &mut PgClient,
-    table_name: &str,
-    row_id: &str,
-    deleted_at: i64,
-) -> Result<(), String> {
-    let sql = format!(
-        "UPDATE seren_desktop.{table_name}
-         SET deleted_at = $2, row_version = row_version + 1
-         WHERE id = $1"
-    );
-    client
-        .execute(&sql, &[&row_id, &deleted_at])
-        .map_err(|err| err.to_string())?;
     Ok(())
 }
 
@@ -1971,7 +2003,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::database::{save_message_record, setup_schema, PersistedMessage};
+    use crate::services::database::{PersistedMessage, save_message_record, setup_schema};
     use std::cell::RefCell;
 
     const SCOPE_A: &str = "scope-a";
@@ -2004,6 +2036,63 @@ mod tests {
                 !ddl.contains(forbidden),
                 "history sync schema must not contain {forbidden}"
             );
+        }
+    }
+
+    #[test]
+    fn true_deletion_tombstone_sql_clears_remote_content_in_the_delete_update() {
+        let ddl = remote_schema_sql().join("\n").to_lowercase();
+        assert!(ddl.contains("title           text not null"));
+        assert!(ddl.contains("content         text"));
+        assert!(ddl.contains("payload         jsonb not null"));
+
+        for (table, expected_assignments) in [
+            (
+                "conversations",
+                &["title = ''", "payload = '{}'::jsonb"] as &[&str],
+            ),
+            ("messages", &["content = NULL", "payload = '{}'::jsonb"]),
+            ("message_events", &["payload = '{}'::jsonb"]),
+            (
+                "transcript_segments",
+                &["text = ''", "payload = '{}'::jsonb"],
+            ),
+        ] {
+            let sql = tombstone_update_sql(table).expect("known tombstone table");
+            assert!(
+                sql.contains("deleted_at = $2"),
+                "{table} must set deleted_at in its content-erasure update"
+            );
+            assert!(
+                sql.contains("row_version = row_version + 1"),
+                "{table} must advance row_version with the tombstone"
+            );
+            for assignment in expected_assignments {
+                assert!(
+                    sql.contains(assignment),
+                    "{table} tombstone must clear {assignment}"
+                );
+            }
+        }
+
+        for (sql, expected_assignments) in [
+            (
+                TOMBSTONE_MESSAGES_BY_CONVERSATION_SQL,
+                &["content = NULL", "payload = '{}'::jsonb"] as &[&str],
+            ),
+            (
+                TOMBSTONE_MESSAGE_EVENTS_BY_CONVERSATION_SQL,
+                &["payload = '{}'::jsonb"],
+            ),
+            (
+                TOMBSTONE_MESSAGE_EVENTS_BY_MESSAGE_SQL,
+                &["payload = '{}'::jsonb"],
+            ),
+        ] {
+            assert!(sql.contains("deleted_at = $2"));
+            for assignment in expected_assignments {
+                assert!(sql.contains(assignment));
+            }
         }
     }
 

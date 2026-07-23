@@ -5,8 +5,8 @@ use crate::commands::provider_runtime::DERIVED_KIND_CASE_SQL;
 use crate::happy_bridge::HappyBridgeManager;
 use crate::services::conversation_index::{self, IndexableMessage, open_index_db};
 use crate::services::database::{
-    DbPool, PersistedMessage, enqueue_sync_tombstone, init_db, mark_sync_upsert,
-    save_message_record,
+    DbPool, PersistedMessage, WalCheckpointMode, checkpoint_wal, enqueue_sync_tombstone, init_db,
+    mark_sync_upsert, save_message_record,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,21 @@ fn delete_conversation_index_best_effort(app: &AppHandle, conversation_id: &str)
             conversation_id,
             err
         ),
+    }
+}
+
+fn vacuum_database(conn: &Connection) -> rusqlite::Result<()> {
+    // `delete_conversation_records` commits before its callers reach this helper;
+    // VACUUM is intentionally outside that delete transaction.
+    conn.execute_batch("VACUUM")?;
+    checkpoint_wal(conn, WalCheckpointMode::Truncate)?;
+    Ok(())
+}
+
+fn vacuum_conversation_index_best_effort(app: &AppHandle) {
+    match open_index_db(app).and_then(|conn| vacuum_database(&conn)) {
+        Ok(()) => {}
+        Err(err) => log::warn!("[ConversationIndex] Failed to vacuum index after deletion: {err}"),
     }
 }
 
@@ -552,10 +567,12 @@ pub async fn delete_conversation(app: AppHandle, id: String) -> Result<(), Strin
     let index_id = id.clone();
     run_db(app.clone(), move |conn| {
         delete_conversation_records(conn, &[id])?;
+        vacuum_database(conn)?;
         Ok(())
     })
     .await?;
     delete_conversation_index_best_effort(&app, &index_id);
+    vacuum_conversation_index_best_effort(&app);
     Ok(())
 }
 
@@ -571,12 +588,14 @@ pub async fn delete_conversations_by_employee(
             .collect::<rusqlite::Result<Vec<_>>>()?;
         drop(stmt);
         let deleted = delete_conversation_records(conn, &conversation_ids)?;
+        vacuum_database(conn)?;
         Ok((deleted as i64, conversation_ids))
     })
     .await?;
     for conversation_id in &conversation_ids {
         delete_conversation_index_best_effort(&app, conversation_id);
     }
+    vacuum_conversation_index_best_effort(&app);
     Ok(deleted)
 }
 
@@ -2066,14 +2085,14 @@ mod tests {
         AgentArchiveOrigin, AgentConversation, DERIVED_KIND_CASE_SQL, ExpectedHappyRestoration,
         HappyRestorationCandidate, HappyRestorationLookup, archive_agent_conversation_in_db,
         archive_happy_provider_session_in_db, claim_happy_provider_session_owner_in_db,
-        claim_happy_provider_session_owner_with_provenance_in_db, emit_happy_archive_event,
-        emit_happy_provider_archive_event, is_happy_provider_session_archived_in_db,
-        list_legacy_happy_restoration_candidates_in_db, lookup_agent_conversation_owner_in_db,
-        lookup_happy_restoration_candidate_in_db, lookup_happy_session_id_by_conversation_in_db,
-        migrate_happy_restoration_relay_in_db, set_agent_conversation_session_id_in_db,
-        upsert_agent_conversation_in_db,
+        claim_happy_provider_session_owner_with_provenance_in_db, delete_conversation_records,
+        emit_happy_archive_event, emit_happy_provider_archive_event,
+        is_happy_provider_session_archived_in_db, list_legacy_happy_restoration_candidates_in_db,
+        lookup_agent_conversation_owner_in_db, lookup_happy_restoration_candidate_in_db,
+        lookup_happy_session_id_by_conversation_in_db, migrate_happy_restoration_relay_in_db,
+        set_agent_conversation_session_id_in_db, upsert_agent_conversation_in_db, vacuum_database,
     };
-    use crate::services::database::setup_schema;
+    use crate::services::database::{configure_connection, setup_schema};
     use rusqlite::{Connection, params};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -2083,6 +2102,47 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         setup_schema(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn true_deletion_delete_and_vacuum_erases_deleted_message_canary_from_chat_db() {
+        const CANARY: &str = "true-deletion-canary-1a6b4ec5-83d7-44e4-a044-81c1fe94b24d";
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("chat.db");
+        let wal_path = temp_dir.path().join("chat.db-wal");
+
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            configure_connection(&conn).unwrap();
+            setup_schema(&conn).unwrap();
+            conn.execute(
+                "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Chat', 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO messages (id, conversation_id, role, content, timestamp)
+                 VALUES ('m1', 'c1', 'user', ?1, 2)",
+                params![CANARY],
+            )
+            .unwrap();
+
+            delete_conversation_records(&conn, &["c1".to_string()]).unwrap();
+            vacuum_database(&conn).unwrap();
+        }
+
+        for path in [&db_path, &wal_path] {
+            if path.exists() {
+                let bytes = std::fs::read(path).unwrap();
+                assert!(
+                    !bytes
+                        .windows(CANARY.len())
+                        .any(|window| window == CANARY.as_bytes()),
+                    "deleted canary remained in {}",
+                    path.display()
+                );
+            }
+        }
     }
 
     fn insert_happy_restoration_candidate(conn: &Connection, id: &str, happy_session_id: &str) {
