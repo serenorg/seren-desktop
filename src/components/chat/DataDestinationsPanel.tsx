@@ -4,7 +4,7 @@
 import type { Component } from "solid-js";
 import { createMemo, For, Show } from "solid-js";
 import { privacyStore } from "@/stores/privacy.store";
-import { settingsState } from "@/stores/settings.store";
+import { settingsState, settingsStore } from "@/stores/settings.store";
 import { threadStore } from "@/stores/thread.store";
 
 interface DataDestinationsPanelProps {
@@ -47,6 +47,25 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
       control: "Settings → Memory",
       enabled: () =>
         settingsState.app.memoryEnabled &&
+        !privacyStore.isMemoryExcluded(props.conversationId),
+    },
+    {
+      label: "Verbatim transcript archival",
+      detail: () => {
+        if (privacyStore.isMemoryExcluded(props.conversationId)) {
+          return "Excluded for this conversation";
+        }
+        if (!settingsState.app.memoryEnabled) {
+          return "Memory capture is disabled";
+        }
+        return settingsStore.get("sourceRetentionEnabled")
+          ? "Completed turns may be retained as verbatim sources by cloud memory"
+          : "Off by default; derived memories may still be created";
+      },
+      control: "Settings → Memory",
+      enabled: () =>
+        settingsState.app.memoryEnabled &&
+        settingsStore.get("sourceRetentionEnabled") &&
         !privacyStore.isMemoryExcluded(props.conversationId),
     },
     {

@@ -167,7 +167,7 @@ describe("memory service integration path", () => {
       sessionId: undefined,
       orgId: undefined,
       projectContext: undefined,
-      retainSource: true,
+      retainSource: false,
       sourceExternalId: "desktop:test:message-1",
       sourceRevision: "1",
       sourceUri: "seren://desktop/conversations/test/messages/message-1",
