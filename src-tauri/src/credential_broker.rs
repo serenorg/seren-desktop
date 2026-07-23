@@ -2,7 +2,8 @@
 // ABOUTME: Child processes present an opaque per-session capability; only the broker adds Authorization.
 
 use std::collections::HashMap;
-use std::io::Read;
+use std::fmt::Write as _;
+use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -318,13 +319,62 @@ impl PublisherCredentialBroker {
 
         let status = StatusCode(response.status().as_u16());
         let headers = forwarded_response_headers(&response);
-        let length = response.content_length().map(|value| value as usize);
-        let reader = RevocableReader {
-            inner: response,
-            revoked: Arc::clone(&route.revoked),
-        };
-        let _ = request.respond(Response::new(status, headers, reader, length, None));
+        relay_streamed_response(
+            request,
+            status,
+            headers,
+            RevocableReader {
+                inner: response,
+                revoked: Arc::clone(&route.revoked),
+            },
+        );
     }
+}
+
+/// Writes the response frame by hand instead of through `Response`, because
+/// tiny_http's chunked encoder buffers 8 KiB before it touches the socket. An
+/// MCP event stream is far smaller than that, so a buffered relay would hold
+/// the child's `initialize` result unsent until the upstream closed.
+fn relay_streamed_response(
+    request: Request,
+    status: StatusCode,
+    headers: Vec<Header>,
+    mut reader: impl Read,
+) {
+    let mut head = format!("HTTP/1.1 {} {}\r\n", status.0, status.default_reason_phrase());
+    for header in &headers {
+        let _ = write!(head, "{}: {}\r\n", header.field, header.value.as_str());
+    }
+    // Self-delimiting framing, and a closed connection afterwards so a stream
+    // cut short by revocation cannot leave a half-written body on a reused
+    // socket.
+    head.push_str("Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
+
+    let mut writer = request.into_writer();
+    if writer.write_all(head.as_bytes()).is_err() || writer.flush().is_err() {
+        return;
+    }
+
+    let mut buffer = [0u8; 8192];
+    loop {
+        let filled = match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(filled) => filled,
+            // Revocation and upstream faults both land here. Drop the socket
+            // without a terminating chunk so the child sees a truncated stream
+            // rather than a clean, trustworthy end.
+            Err(_) => return,
+        };
+        if write!(writer, "{filled:x}\r\n").is_err()
+            || writer.write_all(&buffer[..filled]).is_err()
+            || writer.write_all(b"\r\n").is_err()
+            || writer.flush().is_err()
+        {
+            return;
+        }
+    }
+    let _ = writer.write_all(b"0\r\n\r\n");
+    let _ = writer.flush();
 }
 
 /// Stops relaying upstream bytes once the session's capability is revoked, so a
