@@ -113,6 +113,7 @@ export const HappyRemoteSettings: Component = () => {
   const [advertisedRoots, setAdvertisedRoots] = createSignal<string[]>([]);
   const [busy, setBusy] = createSignal(false);
   const [message, setMessage] = createSignal<string | null>(null);
+  const [confirmingReset, setConfirmingReset] = createSignal(false);
   const [pairingPayload, setPairingPayload] = createSignal<string | null>(null);
   const [pairingQr, setPairingQr] = createSignal<string | null>(null);
   const [pairingError, setPairingError] = createSignal(false);
@@ -245,7 +246,7 @@ export const HappyRemoteSettings: Component = () => {
   };
 
   const unpair = async () => {
-    if (!window.confirm(RESET_COPY)) return;
+    setConfirmingReset(false);
     setBusy(true);
     setMessage(null);
     try {
@@ -253,7 +254,11 @@ export const HappyRemoteSettings: Component = () => {
       setStatus(await disableRemoteAccess());
       setPairingPayload(null);
       setPairingQr(null);
-    } catch {
+    } catch (error) {
+      console.error(
+        "[HappyRemoteSettings] Could not reset remote access:",
+        error,
+      );
       setMessage("Could not reset remote access.");
     } finally {
       setBusy(false);
@@ -441,23 +446,57 @@ export const HappyRemoteSettings: Component = () => {
         </div>
       </Show>
 
-      <div class="flex items-center justify-between gap-4 py-4 border-b border-border">
-        <span class="flex flex-col gap-0.5">
-          <span class="text-[0.95rem] font-medium text-foreground">
-            Unpair and reset
+      <div class="py-4 border-b border-border">
+        <div class="flex items-center justify-between gap-4">
+          <span class="flex flex-col gap-0.5">
+            <span class="text-[0.95rem] font-medium text-foreground">
+              Unpair and reset
+            </span>
+            <span class="text-[0.8rem] text-muted-foreground">
+              Remove this machine's remote identity and disable remote access
+            </span>
           </span>
-          <span class="text-[0.8rem] text-muted-foreground">
-            Remove this machine's remote identity and disable remote access
-          </span>
-        </span>
-        <button
-          type="button"
-          class="px-3 py-1.5 border border-destructive/60 bg-transparent rounded-md text-destructive text-[0.8rem] cursor-pointer hover:bg-destructive/10 disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={() => void unpair()}
-          disabled={busy()}
-        >
-          Unpair and reset
-        </button>
+          <Show when={!confirmingReset()}>
+            <button
+              type="button"
+              data-testid="happy-unpair-start"
+              class="px-3 py-1.5 border border-destructive/60 bg-transparent rounded-md text-destructive text-[0.8rem] cursor-pointer hover:bg-destructive/10 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => setConfirmingReset(true)}
+              disabled={busy()}
+            >
+              Unpair and reset
+            </button>
+          </Show>
+        </div>
+
+        <Show when={confirmingReset()}>
+          <div
+            role="alert"
+            data-testid="happy-unpair-confirmation"
+            class="mt-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3"
+          >
+            <p class="m-0 text-[0.8rem] leading-normal text-foreground">
+              {RESET_COPY}
+            </p>
+            <div class="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                class="px-3 py-1.5 border border-border-strong bg-transparent rounded-md text-foreground text-[0.8rem] cursor-pointer hover:bg-surface-2"
+                onClick={() => setConfirmingReset(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="happy-unpair-confirm"
+                class="px-3 py-1.5 border border-destructive bg-destructive rounded-md text-white text-[0.8rem] cursor-pointer hover:opacity-90"
+                onClick={() => void unpair()}
+              >
+                Reset identity
+              </button>
+            </div>
+          </div>
+        </Show>
       </div>
 
       <Show when={message()}>
