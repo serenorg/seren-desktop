@@ -537,6 +537,17 @@ export interface BrokeredSerenCredential {
   apiBaseUrl: string;
 }
 
+/** Truthful sandbox posture returned by the trusted Rust sandbox module. */
+export interface AgentSandboxStatus {
+  backend: string;
+  spec_available: boolean;
+  enforced_at_launch: boolean;
+  fail_closed: boolean;
+  effective_mode: string;
+  network_enabled: boolean;
+  detail: string;
+}
+
 async function invokeProvider<T>(
   command: string,
   args?: Record<string, unknown>,
@@ -556,6 +567,23 @@ async function invokeProvider<T>(
 // ============================================================================
 // Tauri Command Wrappers
 // ============================================================================
+
+/**
+ * Read the sandbox posture that the trusted host can actually prepare for an
+ * agent launch. This is intentionally separate from the requested settings
+ * mode, which is not proof that a platform backend can build its spec.
+ */
+export async function getAgentSandboxStatus(
+  mode: string,
+  projectRoot: string,
+  networkEnabled: boolean,
+): Promise<AgentSandboxStatus> {
+  return invoke<AgentSandboxStatus>("agent_sandbox_status", {
+    mode,
+    projectRoot,
+    networkEnabled,
+  });
+}
 
 /**
  * Spawn a new agent runtime session.
