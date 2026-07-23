@@ -652,8 +652,14 @@ fn read_stored_seren_api_key<R: Runtime>(app: &AppHandle<R>) -> Result<Option<St
     }
 }
 
+/// `command` is a free-form string the model authors, and
+/// `inject_seren_credentials` is a model-supplied tool argument. An opt-in may
+/// therefore confirm the skill-path detection but must never widen it —
+/// otherwise `env` or a curl could carry the desktop key out of the machine.
+/// Skill binaries that legitimately need the key go through `run_skill_script`,
+/// which validates the slug and cwd instead of trusting a command string. #3240
 fn should_inject_seren_credentials(command: &str, requested: Option<bool>) -> bool {
-    requested.unwrap_or_else(|| command_targets_seren_skill(command))
+    requested != Some(false) && command_targets_seren_skill(command)
 }
 
 fn command_targets_seren_skill(command: &str) -> bool {
@@ -808,8 +814,11 @@ mod tests {
         assert!(wrapped.contains(r#""C:\Users\test\script.py""#));
     }
 
+    /// The model authors both the command and the flag, so an opt-in on an
+    /// arbitrary command must not produce a credential. This previously
+    /// asserted the opposite. See #3240.
     #[tokio::test]
-    async fn execute_shell_command_injects_stored_seren_credentials_when_requested() {
+    async fn execute_shell_command_refuses_credentials_for_a_non_skill_command() {
         let app = mock_app_with_api_key(Some("seren_test_shell_key"));
 
         let result = execute_shell_command(
@@ -822,10 +831,45 @@ mod tests {
         .expect("command succeeds");
 
         assert_eq!(result.exit_code, Some(0));
-        assert_eq!(
-            result.stdout.trim(),
-            "seren_test_shell_key|seren_test_shell_key"
+        assert!(
+            !result.stdout.contains("seren_test_shell_key"),
+            "a model-supplied opt-in must not widen credential injection"
         );
+    }
+
+    /// The skill path is the one the opt-in exists for, and it has to keep
+    /// working: the command names an installed skill directory.
+    #[tokio::test]
+    async fn execute_shell_command_still_injects_for_a_skill_path_command() {
+        let app = mock_app_with_api_key(Some("seren_test_shell_key"));
+        let command = format!(
+            "cd ~/.config/seren/skills/example 2>/dev/null; {}",
+            print_seren_key_env_command()
+        );
+
+        let result = execute_shell_command(app.handle().clone(), command, Some(5), Some(true))
+            .await
+            .expect("command succeeds");
+
+        assert_eq!(result.exit_code, Some(0));
+        assert!(
+            result.stdout.contains("seren_test_shell_key"),
+            "skill-path commands must keep receiving desktop auth"
+        );
+    }
+
+    #[test]
+    fn seren_credential_gate_lets_the_model_suppress_but_never_grant() {
+        let skill = "python3 ~/.config/seren/skills/example/run.py";
+        let ordinary = "env";
+
+        // An opt-in cannot grant on a command that is not a skill path.
+        assert!(!should_inject_seren_credentials(ordinary, Some(true)));
+        assert!(!should_inject_seren_credentials(ordinary, None));
+        // It can still suppress on one that is.
+        assert!(!should_inject_seren_credentials(skill, Some(false)));
+        assert!(should_inject_seren_credentials(skill, Some(true)));
+        assert!(should_inject_seren_credentials(skill, None));
     }
 
     #[tokio::test]
