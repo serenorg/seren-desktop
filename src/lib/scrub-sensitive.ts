@@ -5,9 +5,10 @@ const PATTERNS: Array<{ regex: RegExp; replacement: string }> = [
   // API keys (Stripe-style sk_live_* and sk_test_*)
   { regex: /sk_(live|test)_[a-zA-Z0-9]+/g, replacement: "[REDACTED_API_KEY]" },
 
-  // Seren API keys (seren_xxx_yyy format)
+  // Seren API keys (seren_<key-id>_<secret> format). Key ids and secrets may
+  // contain URL-safe separators, so do not leave a hyphenated lease behind.
   {
-    regex: /seren_[a-zA-Z0-9]+_[a-zA-Z0-9]+/g,
+    regex: /seren_[a-zA-Z0-9_-]+_[a-zA-Z0-9_-]+/g,
     replacement: "[REDACTED_SEREN_KEY]",
   },
 

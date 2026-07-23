@@ -52,7 +52,10 @@ describe("#1852 — Fix 3: self-inflicted terminates do not surface in chat", ()
   it("agentStore.terminateSession adds the session id BEFORE the provider IPC kill", () => {
     const idx = agentStoreSource.indexOf("async terminateSession(");
     expect(idx).toBeGreaterThan(0);
-    const body = agentStoreSource.slice(idx, idx + 2000);
+    // Credential teardown now happens between the existing self-inflicted
+    // marker and provider kill. Keep asserting their order without making the
+    // source-window size part of the lifecycle contract.
+    const body = agentStoreSource.slice(idx, idx + 3200);
     const addIdx = body.indexOf("expectedTerminateSessionIds.add(sessionId)");
     const ipcIdx = body.indexOf("providerService.terminateSession(sessionId)");
     expect(addIdx).toBeGreaterThan(0);

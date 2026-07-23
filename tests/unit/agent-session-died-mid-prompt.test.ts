@@ -162,7 +162,10 @@ describe("#1952 — dropped-prompt recovery keeps context and replay invisible",
   it("downgrades missing backend session termination during recovery to info logging", () => {
     const idx = agentStoreSource.indexOf("async terminateSession(");
     expect(idx).toBeGreaterThan(0);
-    const body = agentStoreSource.slice(idx, idx + 2200);
+    // Session teardown now revokes the session credential before the existing
+    // provider-runtime recovery branch. Keep inspecting that branch rather
+    // than treating the fixed source-window length as product behavior.
+    const body = agentStoreSource.slice(idx, idx + 3200);
     expect(body).toContain('message.includes("not found")');
     expect(body).toContain("terminateSession: backend session already gone");
   });

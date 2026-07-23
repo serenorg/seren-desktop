@@ -244,6 +244,79 @@ function buildClaudeSpawnInvocation({
   };
 }
 
+// The agent process must not inherit the desktop process wholesale: a parent
+// shell can carry unrelated API keys, tokens, and cloud credentials. Keep only
+// the runtime locations and terminal/locale settings Claude needs, then add
+// the deliberately generated MCP and policy values below. #3194.
+const CLAUDE_PARENT_ENV_ALLOWLIST = [
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "TERM",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TZ",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_RUNTIME_DIR",
+  "SystemRoot",
+  "WINDIR",
+  "ComSpec",
+  "PATHEXT",
+  // Injected by the Rust desktop host and consumed by local MCP config.
+  "SEREN_HOST",
+  "SEREN_DESKTOP",
+  "SEREN_EMBEDDED_NODE_BIN",
+  "SEREN_PLAYWRIGHT_MCP_COMMAND",
+];
+
+function buildClaudeSpawnEnv({
+  childEnv,
+  extendedPath,
+  cwd,
+  sandboxMode,
+  sandboxProfile,
+  approvalPolicy,
+  autoApproveReads,
+  networkEnabled,
+}) {
+  const inherited = {};
+  for (const name of CLAUDE_PARENT_ENV_ALLOWLIST) {
+    const value = process.env[name];
+    if (value !== undefined) inherited[name] = value;
+  }
+
+  return {
+    ...inherited,
+    // This config is constructed for the current spawn. In particular, the
+    // session lease key can only arrive through childEnv, never process.env.
+    ...childEnv,
+    PATH: extendedPath,
+    SEREN_AGENT_PROJECT_ROOT: cwd,
+    SEREN_AGENT_SANDBOX_MODE: sandboxMode ?? "workspace-write",
+    SEREN_AGENT_SANDBOX_PROFILE:
+      sandboxProfile?.kind === "seatbelt"
+        ? sandboxProfile.profile
+        : sandboxProfile?.kind === "linux-launcher"
+          ? sandboxProfile.policyBase64
+          : sandboxProfile?.kind === "windows-launcher"
+            ? sandboxProfile.policyBase64
+            : "",
+    SEREN_AGENT_APPROVAL_POLICY: approvalPolicy ?? "on-request",
+    SEREN_AGENT_AUTO_APPROVE_READS:
+      autoApproveReads === false ? "false" : "true",
+    SEREN_AGENT_NETWORK_ENABLED: networkEnabled === false ? "false" : "true",
+  };
+}
+
 /**
  * Build a PATH string that includes well-known CLI install locations.
  * GUI apps don't inherit the user's shell profile, so tools installed via
@@ -2628,7 +2701,6 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     currentModelId = null,
     currentModeId = "default",
     mcpConfigJson = null,
-    spawnEnv = {},
     reasoningEffort = DEFAULT_CLAUDE_EFFORT,
     serenMcpConfigured = false,
     serenMcpProxy = null,
@@ -2657,7 +2729,6 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       currentModelId,
       currentModeId,
       mcpConfigJson,
-      spawnEnv,
       fastModeEnabled: false,
       reasoningEffort:
         normalizeEffort(reasoningEffort) ?? DEFAULT_CLAUDE_EFFORT,
@@ -2813,26 +2884,16 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
           spawnInvocation.args,
           {
             cwd,
-            env: {
-              ...process.env,
-              ...mcpConfig.childEnv,
-              PATH: extendedPath,
-              SEREN_AGENT_PROJECT_ROOT: cwd,
-              SEREN_AGENT_SANDBOX_MODE: sandboxMode ?? "workspace-write",
-              SEREN_AGENT_SANDBOX_PROFILE:
-                sandboxProfile?.kind === "seatbelt"
-                  ? sandboxProfile.profile
-                  : sandboxProfile?.kind === "linux-launcher"
-                    ? sandboxProfile.policyBase64
-                    : sandboxProfile?.kind === "windows-launcher"
-                      ? sandboxProfile.policyBase64
-                      : "",
-              SEREN_AGENT_APPROVAL_POLICY: approvalPolicy ?? "on-request",
-              SEREN_AGENT_AUTO_APPROVE_READS:
-                autoApproveReads === false ? "false" : "true",
-              SEREN_AGENT_NETWORK_ENABLED:
-                networkEnabled === false ? "false" : "true",
-            },
+            env: buildClaudeSpawnEnv({
+              childEnv: mcpConfig.childEnv,
+              extendedPath,
+              cwd,
+              sandboxMode,
+              sandboxProfile,
+              approvalPolicy,
+              autoApproveReads,
+              networkEnabled,
+            }),
             stdio: ["pipe", "pipe", "pipe"],
             shell: spawnInvocation.shell,
           },
@@ -2910,7 +2971,6 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         currentModelId: preferredModel,
         currentModeId: "default",
         mcpConfigJson: mcpConfig.claudeMcpConfigJson,
-        spawnEnv: mcpConfig.childEnv,
         reasoningEffort: effectiveEffort,
         serenMcpConfigured,
         serenMcpProxy,
@@ -3541,6 +3601,7 @@ export {
   comparePickerEntries as _comparePickerEntries,
   resolveSpawnShell as _resolveSpawnShell,
   buildClaudeSpawnInvocation as _buildClaudeSpawnInvocation,
+  buildClaudeSpawnEnv as _buildClaudeSpawnEnv,
   buildClaudeArgs as _buildClaudeArgs,
   removeClaudeArgsTempFiles as _removeClaudeArgsTempFiles,
   buildClaudePolicySettings as _buildClaudePolicySettings,

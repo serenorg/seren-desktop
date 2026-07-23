@@ -20,6 +20,7 @@ import {
   storeRefreshToken,
   storeToken,
 } from "@/lib/tauri-bridge";
+import { revokeAllCredentialLeases } from "@/services/credential-lease";
 import { clearAuthState, requestSignInModal } from "@/stores/auth.store";
 
 export type { LoginResult };
@@ -132,6 +133,18 @@ export async function login(
  * Logout and clear stored tokens.
  */
 export async function logout(): Promise<void> {
+  // Revoke while the Rust manager can still authenticate the API request.
+  // It drops local lease access before its remote call and retains only a
+  // non-secret retry record if the network is unavailable. Token clearing must
+  // still complete on a remote failure so logout cannot leave credentials live.
+  try {
+    await revokeAllCredentialLeases();
+  } catch (error) {
+    console.warn(
+      "Failed to revoke session credential leases during logout:",
+      error,
+    );
+  }
   await clearToken();
   await clearRefreshToken();
   await clearDefaultOrganizationId();

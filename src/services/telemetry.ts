@@ -55,6 +55,29 @@ export function websiteApiUrl(path: string): string {
   }`;
 }
 
+const SEREN_SECRET_ENV_NAME = /^SEREN_.*(?:KEY|TOKEN|SECRET)$/i;
+
+/**
+ * Remove values of runtime Seren secrets at capture time. Static pattern
+ * scrubbing catches known token formats; this closes the gap for a valid but
+ * newly shaped session lease or a future `SEREN_*_SECRET` value.
+ */
+export function scrubTelemetryText(value: string): string {
+  let scrubbed = scrubSensitive(value);
+  const runtimeEnv = (
+    globalThis as typeof globalThis & {
+      process?: { env?: Record<string, string | undefined> };
+    }
+  ).process?.env;
+
+  if (!runtimeEnv) return scrubbed;
+  for (const [name, secret] of Object.entries(runtimeEnv)) {
+    if (!SEREN_SECRET_ENV_NAME.test(name) || !secret) continue;
+    scrubbed = scrubbed.split(secret).join("[REDACTED]");
+  }
+  return scrubbed;
+}
+
 export function buildEmployeeInterestTelemetryPayload(
   input: EmployeeInterestTelemetryInput,
   now = new Date(),
@@ -129,8 +152,8 @@ export class TelemetryService {
     }
 
     const report: ErrorReport = {
-      message: scrubSensitive(error.message || "Unknown error"),
-      stack: error.stack ? scrubSensitive(error.stack) : undefined,
+      message: scrubTelemetryText(error.message || "Unknown error"),
+      stack: error.stack ? scrubTelemetryText(error.stack) : undefined,
       timestamp: new Date().toISOString(),
       appVersion: this.getAppVersion(),
       platform: this.getPlatform(),
@@ -289,7 +312,7 @@ function scrubContext(ctx: Record<string, unknown>): Record<string, unknown> {
   const scrubbed: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(ctx)) {
     if (typeof value === "string") {
-      scrubbed[key] = scrubSensitive(value);
+      scrubbed[key] = scrubTelemetryText(value);
     } else if (value && typeof value === "object" && !Array.isArray(value)) {
       scrubbed[key] = scrubContext(value as Record<string, unknown>);
     } else {
