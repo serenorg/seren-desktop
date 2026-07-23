@@ -213,6 +213,45 @@ describe("skills.fetchIndex via Seren Skills API", () => {
     expect(result[0]?.slug).toBe("skill-a");
   });
 
+  it("unwraps the authenticated gateway ApiResult envelope around the catalog", async () => {
+    // Model the authenticated publisher execution envelope.
+    mockListSkills.mockResolvedValueOnce({
+      data: {
+        data: {
+          status: 200,
+          body: catalogResponse([skillSummary("skill-a")], 1),
+          content_type: "application/json",
+          cost: "0",
+        },
+      },
+    });
+
+    const { skills } = await import("@/services/skills");
+    const result = await skills.fetchIndex(true);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.slug).toBe("skill-a");
+  });
+
+  it("rejects a failed publisher execution even when its body resembles a catalog", async () => {
+    mockListSkills.mockResolvedValueOnce({
+      data: {
+        data: {
+          status: 403,
+          body: catalogResponse([skillSummary("skill-a")], 1),
+          content_type: "application/json",
+          cost: "0",
+        },
+      },
+    });
+
+    const { skills } = await import("@/services/skills");
+
+    await expect(skills.fetchIndex(true)).rejects.toThrow(
+      "Failed to list seren-skills catalog: 403",
+    );
+  });
+
   it("throws a clear error for malformed catalog responses", async () => {
     mockListSkills.mockResolvedValueOnce({
       data: {

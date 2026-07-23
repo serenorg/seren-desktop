@@ -551,17 +551,19 @@ function findApiResultFailure(
 function normalizeSkillsCatalogPage(
   value: unknown,
 ): SkillsCatalogResponsePage | null {
-  if (!value || typeof value !== "object") return null;
-  const response = value as { data?: unknown; pagination?: unknown };
-  if (!Array.isArray(response.data)) return null;
-  const pagination = response.pagination as { total?: unknown } | null;
-  return {
-    skills: response.data as SkillSummary[],
-    total:
-      pagination && typeof pagination.total === "number"
-        ? pagination.total
-        : response.data.length,
-  };
+  // Catalog responses may be nested in publisher execution envelopes.
+  return findInResponseEnvelopes(value, (candidate) => {
+    const response = candidate as { data?: unknown; pagination?: unknown };
+    if (!Array.isArray(response.data)) return null;
+    const pagination = response.pagination as { total?: unknown } | null;
+    return {
+      skills: response.data as SkillSummary[],
+      total:
+        pagination && typeof pagination.total === "number"
+          ? pagination.total
+          : response.data.length,
+    };
+  });
 }
 
 function normalizeSkillBundle(value: unknown): SkillBundle | null {
@@ -889,6 +891,16 @@ async function fetchSerenSkillsPage(
     const status = response ? `: ${response.status}` : "";
     throw new Error(`Failed to list seren-skills catalog${status}`);
   }
+  const apiResultFailure = findApiResultFailure(data);
+  if (apiResultFailure) {
+    const message = apiResultFailure.message
+      ? ` (${apiResultFailure.message})`
+      : "";
+    throw new SkillsApiError(
+      `Failed to list seren-skills catalog: ${apiResultFailure.status}${message}`,
+      apiResultFailure.status,
+    );
+  }
 
   const page = normalizeSkillsCatalogPage(data);
   if (!page) {
@@ -934,6 +946,16 @@ async function fetchOwnedSkillsPage(
     throw new SkillsApiError(
       `Failed to list owned seren-skills${suffix}`,
       status,
+    );
+  }
+  const apiResultFailure = findApiResultFailure(data);
+  if (apiResultFailure) {
+    const message = apiResultFailure.message
+      ? ` (${apiResultFailure.message})`
+      : "";
+    throw new SkillsApiError(
+      `Failed to list owned seren-skills: ${apiResultFailure.status}${message}`,
+      apiResultFailure.status,
     );
   }
   const page = normalizeSkillsCatalogPage(data);
