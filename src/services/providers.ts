@@ -104,19 +104,6 @@ export interface AgentInfo {
   unavailableReason?: string;
 }
 
-export type SandboxLaunchSpec =
-  | { kind: "seatbelt"; profile: string }
-  | {
-      kind: "linux-launcher";
-      launcherPath: string;
-      policyBase64: string;
-    }
-  | {
-      kind: "windows-launcher";
-      launcherPath: string;
-      policyBase64: string;
-    };
-
 // Remote sessions (provider runtime listSessions capability)
 export interface RemoteSessionInfo {
   sessionId: string;
@@ -538,27 +525,10 @@ export async function spawnAgent(
   lmStudioApiKey?: string,
   autoApproveReads?: boolean,
 ): Promise<AgentSessionInfo> {
-  const fullAccess =
-    sandboxMode === "full-access" || sandboxMode === "danger-full-access";
-  const isMacOsDesktop =
-    typeof navigator !== "undefined" &&
-    /Macintosh|Mac OS X/i.test(navigator.userAgent);
-  const isLinuxDesktop =
-    typeof navigator !== "undefined" && /Linux/i.test(navigator.userAgent);
-  const isWindowsDesktop =
-    typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
-  const sandboxProfile =
-    agentType === "claude-code" &&
-    isTauriRuntime() &&
-    (isMacOsDesktop || isLinuxDesktop || isWindowsDesktop) &&
-    !fullAccess
-      ? await invoke<SandboxLaunchSpec>("agent_sandbox_profile", {
-          mode: sandboxMode ?? "workspace-write",
-          projectRoot: cwd,
-          networkEnabled: networkEnabled !== false,
-        })
-      : null;
-
+  // The OS sandbox launch spec is deliberately absent here. The provider
+  // runtime resolves it from the trusted app binary for every spawn path, so a
+  // renderer-supplied spec could neither be trusted nor kept in sync with the
+  // paths that never reach this function. #3230.
   return invokeProvider<AgentSessionInfo>(
     "provider_spawn",
     {
@@ -567,7 +537,6 @@ export async function spawnAgent(
       localSessionId: localSessionId ?? null,
       resumeAgentSessionId: resumeAgentSessionId ?? null,
       sandboxMode: sandboxMode ?? null,
-      sandboxProfile,
       serenCapability: serenCredential?.capability ?? null,
       serenMcpUrl: serenCredential?.mcpUrl ?? null,
       serenApiBaseUrl: serenCredential?.apiBaseUrl ?? null,

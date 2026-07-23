@@ -12,5 +12,10 @@ fn main() {
     {
         seren_desktop_lib::sandbox::sandbox_run_main(args);
     }
+    if args.get(1).is_some_and(|argument| {
+        argument == seren_desktop_lib::commands::sandbox::SANDBOX_SPEC_ARGUMENT
+    }) {
+        seren_desktop_lib::commands::sandbox::sandbox_spec_main(args);
+    }
     seren_desktop_lib::run()
 }
