@@ -14,6 +14,7 @@ import {
   buildProviderMcpConfig,
   resolveBrokeredSerenCredential,
 } from "./mcp-config.mjs";
+import { resolveSandboxLaunchSpec } from "./sandbox-spec.mjs";
 import { composeWindowsShellCommand } from "./windows-shell-args.mjs";
 
 // Agent runtimes are loaded in isolation (#2457). Each runtime module is
@@ -1736,7 +1737,26 @@ export function createProviderHandlers({
     }
   }
 
-  async function spawnOwnedSession(params) {
+  async function spawnOwnedSession(callerParams) {
+    // Every provider_spawn caller reaches this one function — the desktop
+    // renderer, a paired role's inner spawn, an orchestrator one-shot, and the
+    // Happy mobile bridge. Discard whatever launch spec the caller sent and
+    // resolve the real one from the trusted app binary, so no caller can widen
+    // or replace the boundary and no caller has to know how to build it. #3230.
+    const { sandboxProfile: _callerSuppliedSpec, ...sanitizedParams } =
+      callerParams;
+    const params = {
+      ...sanitizedParams,
+      sandboxProfile:
+        sanitizedParams.agentType === "claude-code"
+          ? resolveSandboxLaunchSpec({
+              sandboxMode: sanitizedParams.sandboxMode,
+              cwd: sanitizedParams.cwd,
+              networkEnabled: sanitizedParams.networkEnabled,
+            })
+          : null,
+    };
+
     const {
       agentType,
       cwd,

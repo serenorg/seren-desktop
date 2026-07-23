@@ -479,6 +479,22 @@ fn spawn_node_process(
     // the per-CLI config JSON / TOML.
     command.env("SEREN_EMBEDDED_NODE_BIN", node_bin);
 
+    // serenorg/seren-desktop#3230 — a bounded agent's launch spec is produced by
+    // this binary's `__seren-sandbox-spec` subcommand, not by whichever caller
+    // issued provider_spawn. Without this path the runtime has no trusted source
+    // for the spec and every bounded launch fails closed.
+    match std::env::current_exe() {
+        Ok(app_binary) => {
+            command.env("SEREN_SANDBOX_SPEC_BIN", app_binary);
+        }
+        Err(err) => {
+            log::error!(
+                "[ProviderRuntime] Could not resolve the app binary for sandbox specs: {}",
+                err
+            );
+        }
+    }
+
     crate::embedded_runtime::sanitize_spawn_env(&mut command);
 
     command
