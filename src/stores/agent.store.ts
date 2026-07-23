@@ -2165,7 +2165,8 @@ export type ErrorKind =
   | "binary_missing"
   | "crash_ceiling"
   | "summary_call_failed"
-  | "seed_failed";
+  | "seed_failed"
+  | "privileged_provider_blocked";
 
 export interface TurnError {
   kind: ErrorKind;
