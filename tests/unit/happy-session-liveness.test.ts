@@ -34,7 +34,7 @@ function createClient() {
     | undefined;
   const rpcHandlers = new Map<
     string,
-    (payload: Record<string, unknown>) => unknown
+    (payload: Record<string, unknown> | null) => unknown
   >();
   return {
     close: vi.fn(async () => {}),
@@ -55,7 +55,7 @@ function createClient() {
     },
     keepAlive: vi.fn(),
     lastSeq: 0,
-    invokeRpc(name: string, payload: Record<string, unknown>) {
+    invokeRpc(name: string, payload: Record<string, unknown> | null) {
       const handler = rpcHandlers.get(name);
       if (!handler) throw new Error(`Happy RPC handler ${name} is not registered`);
       return handler(payload);
@@ -75,7 +75,10 @@ function createClient() {
     ),
     rpcHandlerManager: {
       registerHandler: vi.fn(
-        (name: string, handler: (payload: Record<string, unknown>) => unknown) => {
+        (
+          name: string,
+          handler: (payload: Record<string, unknown> | null) => unknown,
+        ) => {
           rpcHandlers.set(name, handler);
         },
       ),
@@ -446,6 +449,68 @@ describe("Happy session liveness", () => {
     harness.publish({
       kind: "status",
       sessionId: "local-session",
+      payload: { status: "ready" },
+    });
+    for (let index = 0; index < 4; index += 1) await Promise.resolve();
+    expect(harness.api.sessionSyncClient).toHaveBeenCalledTimes(1);
+    await harness.layer.close();
+    expect(harness.client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("authenticates killSession and retires the tracked provider exactly once", async () => {
+    vi.useFakeTimers();
+    const summary = {
+      sessionId: "kill-session",
+      agentSessionId: "kill-native-session",
+      agentType: "codex",
+      cwd: SYNTHETIC_ROOT,
+      title: "Synthetic kill session",
+      status: "ready",
+    };
+    const harness = createLayerHarness({ initialSessions: [summary] });
+
+    await harness.layer.start();
+    expect(harness.client.keepAlive).toHaveBeenCalledTimes(1);
+
+    await expect(harness.client.invokeRpc("killSession", null)).resolves.toEqual({
+      success: false,
+      message: "Unauthenticated kill request",
+    });
+    vi.advanceTimersByTime(2_000);
+    expect(harness.client.keepAlive).toHaveBeenCalledTimes(2);
+    expect(harness.source.terminate).not.toHaveBeenCalled();
+
+    await expect(harness.client.invokeRpc("killSession", {})).resolves.toEqual({
+      success: true,
+      message: "Killing happy-cli process",
+    });
+    const stoppedAt = harness.client.keepAlive.mock.calls.length;
+    vi.advanceTimersByTime(4_000);
+    expect(harness.client.keepAlive).toHaveBeenCalledTimes(stoppedAt);
+
+    await expect(harness.client.invokeRpc("killSession", {})).resolves.toEqual({
+      success: true,
+      message: "Killing happy-cli process",
+    });
+    await vi.waitFor(() =>
+      expect(harness.source.terminate).toHaveBeenCalledWith(summary.sessionId),
+    );
+    expect(harness.source.terminate).toHaveBeenCalledTimes(1);
+    expect(harness.supervisorCall).toHaveBeenCalledWith("conversation_archive", {
+      conversationId: summary.sessionId,
+      providerSessionId: summary.sessionId,
+    });
+    expect(harness.supervisorCall.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.source.terminate.mock.invocationCallOrder[0],
+    );
+    expect(harness.api.deactivateSession).toHaveBeenCalledWith("relay-session");
+    await vi.waitFor(() =>
+      expect(harness.sessionKeyStore.delete).toHaveBeenCalledWith(summary.sessionId),
+    );
+
+    harness.publish({
+      kind: "status",
+      sessionId: summary.sessionId,
       payload: { status: "ready" },
     });
     for (let index = 0; index < 4; index += 1) await Promise.resolve();

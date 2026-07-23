@@ -1533,6 +1533,29 @@ export function createHappyLayer({
     }
   }
 
+  function retireTrackedSession(entry) {
+    const sessionId = entry.sessionId;
+    if (sessions.get(sessionId) !== entry) return;
+
+    sessions.delete(sessionId);
+    liveSessions.delete(sessionId);
+    promptQueue.clear(sessionId);
+    turnCorrelator.clear(sessionId);
+    assistantMessageCoalescer.clear(sessionId);
+    delete pendingRequests[sessionId];
+    sessionCreationPromises.delete(sessionId);
+    terminatedSessions.mark(sessionId);
+    remotelyArchivedSessions.add(sessionId);
+    entry.liveness.stop();
+    const disposal = retirePersistedSession({
+      sessionId,
+      entry,
+      terminateProvider: true,
+      blockRevival: true,
+    });
+    trackSessionDisposal(disposal);
+  }
+
   function registerInbound(entry) {
     const { client } = entry;
     client.on("inboundProcessingError", () => {
@@ -1543,32 +1566,7 @@ export function createHappyLayer({
       });
       debug("Happy relay input processing stopped after a durable processing failure");
     });
-    client.on("archived", () => {
-      const sessionId = entry.sessionId;
-      if (sessions.get(sessionId) !== entry) return;
-
-      // Happy's native runners treat a mobile archive as termination. Mirror
-      // that contract without letting the next pulse reactivate the relay row.
-      sessions.delete(sessionId);
-      liveSessions.delete(sessionId);
-      promptQueue.clear(sessionId);
-      turnCorrelator.clear(sessionId);
-      assistantMessageCoalescer.clear(sessionId);
-      delete pendingRequests[sessionId];
-      sessionCreationPromises.delete(sessionId);
-      terminatedSessions.mark(sessionId);
-      remotelyArchivedSessions.add(sessionId);
-      entry.liveness.stop();
-      const disposal = (async () => {
-        await retirePersistedSession({
-          sessionId,
-          entry,
-          terminateProvider: true,
-          blockRevival: true,
-        });
-      })();
-      trackSessionDisposal(disposal);
-    });
+    client.on("archived", () => retireTrackedSession(entry));
     client.onUserMessage(async (message) => {
       const processed = await promptQueue.enqueue(entry.sessionId, { entry, message });
       if (!processed) {
@@ -1600,6 +1598,20 @@ export function createHappyLayer({
     };
     client.rpcHandlerManager.registerHandler("abort", cancelSession("abort"));
     client.rpcHandlerManager.registerHandler("switch", cancelSession("switch"));
+    client.rpcHandlerManager.registerHandler("killSession", async (params) => {
+      if (params === null) {
+        debug("dropped unauthenticated Happy killSession request");
+        return {
+          success: false,
+          message: "Unauthenticated kill request",
+        };
+      }
+      retireTrackedSession(entry);
+      return {
+        success: true,
+        message: "Killing happy-cli process",
+      };
+    });
     client.rpcHandlerManager.registerHandler("permission", async (response) => {
       try {
         return await handlePermissionResponse(entry, response);
