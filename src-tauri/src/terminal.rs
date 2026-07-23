@@ -7,7 +7,7 @@ use std::{
     collections::{HashMap, VecDeque},
     env,
     io::{Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -2371,11 +2371,7 @@ fn codex_session_id_from_rollout_path(path: &str) -> Option<String> {
         return None;
     }
     let stem = file.strip_prefix("rollout-")?.strip_suffix(".jsonl")?;
-    let (sep_idx, candidate) = stem.match_indices('-').rev().find_map(|(idx, _)| {
-        canonical_session_uuid(&stem[idx + 1..])
-            .ok()
-            .map(|id| (idx, id))
-    })?;
+    let (sep_idx, candidate) = rollout_stem_session_uuid(stem)?;
     let timestamp = &stem[..sep_idx];
     if timestamp.len() != "YYYY-MM-DDThh-mm-ss".len() {
         return None;
@@ -2400,6 +2396,73 @@ fn codex_session_id_from_rollout_path(path: &str) -> Option<String> {
         return None;
     }
     Some(candidate)
+}
+
+/// Extract and canonicalize the trailing session UUID from a rollout filename
+/// stem (the part after `rollout-` and before `.jsonl`). Returns the byte index
+/// of the separator preceding the UUID and the canonical hyphenated UUID.
+fn rollout_stem_session_uuid(stem: &str) -> Option<(usize, String)> {
+    stem.match_indices('-').rev().find_map(|(idx, _)| {
+        canonical_session_uuid(&stem[idx + 1..])
+            .ok()
+            .map(|id| (idx, id))
+    })
+}
+
+/// Extract the canonical Codex session UUID from a bare rollout filename such as
+/// `rollout-2026-06-16T07-24-21-<uuid>.jsonl`. Unlike
+/// `codex_session_id_from_rollout_path`, this does not cross-check the enclosing
+/// date directories, so it can match files discovered while walking the sessions
+/// tree from a known root.
+fn codex_session_id_from_rollout_filename(file_name: &str) -> Option<String> {
+    let stem = file_name.strip_prefix("rollout-")?.strip_suffix(".jsonl")?;
+    rollout_stem_session_uuid(stem).map(|(_, id)| id)
+}
+
+/// Resolve `~/.codex/sessions`, where Codex writes per-session rollout
+/// transcripts. Returns `None` when the home directory cannot be determined.
+pub(crate) fn codex_sessions_root() -> Option<PathBuf> {
+    dirs::home_dir().map(|home| home.join(".codex").join("sessions"))
+}
+
+/// Collect every Codex rollout transcript under `sessions_root` whose embedded
+/// session UUID equals `session_id`. Pure filesystem scan; returns an empty
+/// vector when `session_id` is not a valid UUID or the tree is unreadable.
+pub(crate) fn codex_transcripts_for_session(sessions_root: &Path, session_id: &str) -> Vec<PathBuf> {
+    let canonical = match canonical_session_uuid(session_id) {
+        Ok(id) => id,
+        Err(_) => return Vec::new(),
+    };
+    let mut matches = Vec::new();
+    collect_codex_rollouts(sessions_root, &canonical, &mut matches);
+    matches
+}
+
+fn collect_codex_rollouts(dir: &Path, canonical_id: &str, out: &mut Vec<PathBuf>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(file_type) if file_type.is_dir() => {
+                collect_codex_rollouts(&path, canonical_id, out);
+            }
+            Ok(file_type) if file_type.is_file() => {
+                let matches_session = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(codex_session_id_from_rollout_filename)
+                    .as_deref()
+                    == Some(canonical_id);
+                if matches_session {
+                    out.push(path);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Open file paths held by a live process. Linux reads `/proc/<pid>/fd`;
@@ -3902,6 +3965,29 @@ mod tests {
         ] {
             assert_eq!(codex_session_id_from_rollout_path(path), None, "{path}");
         }
+    }
+
+    #[test]
+    fn codex_transcripts_for_session_matches_only_that_session() {
+        let target = "5973b6c0-94b8-487b-a530-2aeb6098ae0e";
+        let other = "11111111-2222-4333-8444-555555555555";
+        let root = tempfile::TempDir::new().expect("tempdir");
+        let day = root.path().join("2026").join("06").join("16");
+        std::fs::create_dir_all(&day).expect("mkdir");
+        let wanted = day.join(format!("rollout-2026-06-16T07-24-21-{target}.jsonl"));
+        let unrelated = day.join(format!("rollout-2026-06-16T09-00-00-{other}.jsonl"));
+        let not_a_rollout = day.join(format!("notes-{target}.txt"));
+        for path in [&wanted, &unrelated, &not_a_rollout] {
+            std::fs::write(path, b"{}").expect("write");
+        }
+
+        let found = codex_transcripts_for_session(root.path(), target);
+        assert_eq!(found, vec![wanted]);
+
+        // A non-UUID id must never match (path-injection defense).
+        assert!(codex_transcripts_for_session(root.path(), "../../etc/passwd").is_empty());
+        // A missing root is a no-op, not an error.
+        assert!(codex_transcripts_for_session(&root.path().join("absent"), target).is_empty());
     }
 
     #[test]
