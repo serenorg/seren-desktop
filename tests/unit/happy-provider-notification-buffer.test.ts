@@ -37,7 +37,9 @@ afterEach(async () => {
  * Answers the handshake and every later RPC, and hands the live socket back so
  * the test can push notifications the way the provider runtime does.
  */
-async function startProviderRuntime(): Promise<{
+async function startProviderRuntime(
+  { rejectMethods = new Set<string>() }: { rejectMethods?: Set<string> } = {},
+): Promise<{
   port: number;
   socket: Promise<{ send(data: string): void }>;
 }> {
@@ -50,6 +52,16 @@ async function startProviderRuntime(): Promise<{
       connection.on("message", (raw) => {
         const message = JSON.parse(String(raw));
         if (message.id === undefined || message.id === null) return;
+        if (rejectMethods.has(message.method)) {
+          connection.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              error: { code: -32000, message: "synthetic provider rejection" },
+            }),
+          );
+          return;
+        }
         connection.send(
           JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }),
         );
@@ -70,6 +82,19 @@ function connectedClient(port: number): BridgeClient {
 }
 
 describe("Happy provider notification buffering (#3150)", () => {
+  it("distinguishes a confirmed provider rejection from an ambiguous disconnect", async () => {
+    const runtime = await startProviderRuntime({
+      rejectMethods: new Set(["provider_spawn"]),
+    });
+    const client = connectedClient(runtime.port);
+    await client.connect();
+
+    await expect(client.call("provider_spawn")).rejects.toMatchObject({
+      message: "synthetic provider rejection",
+      providerRequestRejected: true,
+    });
+  });
+
   it("delivers a turn completion that arrived before registration subscribed", async () => {
     // A bridge restart during a live turn seeds the session busy from the
     // list-time snapshot, then spends several relay round trips before

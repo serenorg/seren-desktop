@@ -3129,6 +3129,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       currentModelId: session.currentModelId,
       currentModeId: session.currentModeId,
       pendingPermissions: listPendingPermissions(session),
+      pid: session.process?.pid ?? null,
     }));
   }
 

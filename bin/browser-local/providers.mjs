@@ -2013,6 +2013,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         currentModelId: session.currentModelId,
         currentModeId: session.currentModeId,
         pendingPermissions: listPendingPermissions(session),
+        pid: session.process?.pid ?? null,
       })),
       ...(await claudeRuntime.listSessions()),
       ...(await geminiRuntime.listSessions()),

@@ -11,7 +11,7 @@ const agentStoreSource = readFileSync(
 );
 
 describe("#1769 — kickPredictiveCompact drains pendingPrompts on abort", () => {
-  it("non-success and catch branches both call drainAfterPredictiveAbort", () => {
+  it("non-success and catch both request an owner-guarded abort drain", () => {
     // Without this, the #1749 race-guard queue (pendingPrompts populated when
     // the user submits while a standby is being warmed) is stranded forever
     // when the standby's seed prompt fails — e.g. the Gateway 504 in the
@@ -31,24 +31,30 @@ describe("#1769 — kickPredictiveCompact drains pendingPrompts on abort", () =>
     );
     const kickBody = agentStoreSource.slice(fnStart, drainHelperStart);
 
-    const drainCalls = kickBody.match(
-      /this\.drainAfterPredictiveAbort\(sessionId\)/g,
-    );
+    const abortRequests = kickBody.match(/shouldDrainAfterAbort = true/g);
     expect(
-      drainCalls,
-      "kickPredictiveCompact must call drainAfterPredictiveAbort in both abort branches",
+      abortRequests,
+      "both abort branches must request the centralized drain",
     ).toHaveLength(2);
+    expect(
+      kickBody.match(/this\.drainAfterPredictiveAbort\(sessionId\)/g),
+      "the finally block must contain one generation-guarded drain",
+    ).toHaveLength(1);
 
-    // Each drain call must run AFTER the predictiveCompactInFlight flag is
-    // cleared on the same branch. Otherwise the drained sendPrompt re-enters
-    // and trips the #1749 enqueue guard, restranding the prompt.
+    // The centralized drain must run only after the current lease releases and
+    // the predictiveCompactInFlight flag clears. Otherwise a stale archived
+    // generation can drain or unlock a newer run on the same session id.
+    const leaseRelease = kickBody.indexOf(
+      "predictiveCompactMutex.release(predictiveCompactLease)",
+    );
     const nonSuccessFlagClear = kickBody.indexOf(
       'setState("sessions", sessionId, "predictiveCompactInFlight", false)',
     );
     const firstDrain = kickBody.indexOf(
       "this.drainAfterPredictiveAbort(sessionId)",
     );
-    expect(nonSuccessFlagClear).toBeGreaterThan(0);
+    expect(leaseRelease).toBeGreaterThan(0);
+    expect(nonSuccessFlagClear).toBeGreaterThan(leaseRelease);
     expect(firstDrain).toBeGreaterThan(nonSuccessFlagClear);
   });
 

@@ -827,7 +827,7 @@ export async function updateConversation(
 }
 
 /**
- * Create (or re-open) an agent conversation.
+ * Create or refresh an agent conversation without changing archive state.
  */
 export async function createAgentConversation(
   id: string,
@@ -880,6 +880,37 @@ export async function setAgentConversationSessionId(
     throw new Error("Conversation operations require Tauri runtime");
   }
   await invoke("set_agent_conversation_session_id", { id, agentSessionId });
+}
+
+export async function claimHappyProviderSessionOwner(
+  conversationId: string,
+  providerSessionId: string,
+  agentSessionId?: string,
+): Promise<{ archived: boolean }> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  return await invoke<{ archived: boolean }>(
+    "claim_happy_provider_session_owner",
+    {
+      conversationId,
+      providerSessionId,
+      agentSessionId: agentSessionId ?? null,
+    },
+  );
+}
+
+export async function fenceHappyProviderSessionArchive(
+  providerSessionId: string,
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("fence_happy_provider_session_archive", {
+    providerSessionId,
+  });
 }
 
 /**

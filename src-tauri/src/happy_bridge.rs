@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -18,11 +18,19 @@ const MAX_RESTART_ATTEMPTS: u32 = 3;
 const MAX_BACKOFF_SECONDS: u64 = 30;
 const STOP_GRACE_PERIOD: Duration = Duration::from_secs(5);
 const SUPERVISOR_NOTIFY_TIMEOUT: Duration = Duration::from_millis(500);
+// Identity retirement first waits for any in-flight provider spawn/session
+// creation, then may need one final relay lookup and deactivation. Keep the
+// Rust deadline above that combined worst case so a completed reset is not
+// mistaken for a failure and followed by revival of the old identity.
+const IDENTITY_RESET_TIMEOUT: Duration = Duration::from_secs(180);
+const BRIDGE_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const KILL_LOCK_ATTEMPTS: u32 = 20;
 const KILL_LOCK_RETRY_DELAY: Duration = Duration::from_millis(25);
 const STATUS_EVENT: &str = "happy-bridge://status";
 const PAIRING_EVENT: &str = "happy-bridge://pairing";
 const CREDENTIAL_ACCOUNT: &str = "happy-bridge-pairing-credential";
+const SESSION_KEY_STORE_FILENAME: &str = "happy-session-keys.v1.json";
+const SESSION_KEY_STORE_RESET_FILENAME: &str = "happy-session-keys.v1.reset-pending";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -59,23 +67,31 @@ struct ProviderRuntimeConnection {
 struct HappyBridgeProcess {
     child: Child,
     _stdin: Arc<Mutex<ChildStdin>>,
+    generation: u64,
     spawned_at: Instant,
     restart_budget_rearmed: bool,
 }
 
 pub struct HappyBridgeManager {
+    lifecycle: Mutex<()>,
     process: Arc<Mutex<Option<HappyBridgeProcess>>>,
     monitor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     status: Arc<Mutex<HappyBridgeStatus>>,
-    // These mutexes are always acquired independently; never hold one while awaiting the other.
+    // Restart accounting is independent of the output/credential gates below.
+    // Credential mutation is always acquired before the output gate.
     restart_attempts: Arc<Mutex<u32>>,
     stopping: Arc<AtomicBool>,
     pairing_payload: Arc<Mutex<Option<String>>>,
+    identity_reset_result: Mutex<Option<(String, bool)>>,
+    process_generation: AtomicU64,
+    output_gate: Mutex<()>,
+    credential_mutation: Mutex<()>,
 }
 
 impl HappyBridgeManager {
     pub fn new() -> Self {
         Self {
+            lifecycle: Mutex::new(()),
             process: Arc::new(Mutex::new(None)),
             monitor_handle: Mutex::new(None),
             status: Arc::new(Mutex::new(HappyBridgeStatus {
@@ -85,10 +101,53 @@ impl HappyBridgeManager {
             restart_attempts: Arc::new(Mutex::new(0)),
             stopping: Arc::new(AtomicBool::new(false)),
             pairing_payload: Arc::new(Mutex::new(None)),
+            identity_reset_result: Mutex::new(None),
+            process_generation: AtomicU64::new(0),
+            output_gate: Mutex::new(()),
+            credential_mutation: Mutex::new(()),
+        }
+    }
+
+    fn is_process_generation_current(&self, generation: u64) -> bool {
+        self.process_generation.load(Ordering::Acquire) == generation
+    }
+
+    fn require_current_process_generation(&self, generation: u64) -> Result<(), String> {
+        self.is_process_generation_current(generation)
+            .then_some(())
+            .ok_or_else(|| "stale Happy bridge process".to_string())
+    }
+
+    fn require_process_write_allowed(&self, generation: u64) -> Result<(), String> {
+        if self.stopping.load(Ordering::Acquire) {
+            return Err("Happy bridge is stopping".to_string());
+        }
+        self.require_current_process_generation(generation)
+    }
+
+    async fn advance_process_generation(&self) -> u64 {
+        // Notification handlers hold this gate while checking their generation
+        // and updating Rust state, so advancing here is a hard boundary: no
+        // notification from the previous child can commit after this returns.
+        let _output = self.output_gate.lock().await;
+        self.process_generation
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1)
+    }
+
+    async fn invalidate_process_generation_if_current(&self, generation: u64) {
+        let _output = self.output_gate.lock().await;
+        if self.is_process_generation_current(generation) {
+            self.process_generation.fetch_add(1, Ordering::AcqRel);
         }
     }
 
     pub async fn start(&self, app: &AppHandle) -> Result<(), String> {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.start_inner(app).await
+    }
+
+    async fn start_inner(&self, app: &AppHandle) -> Result<(), String> {
         {
             let mut guard = self.process.lock().await;
             if let Some(process) = guard.as_mut() {
@@ -117,14 +176,40 @@ impl HappyBridgeManager {
         Ok(())
     }
 
+    async fn restart_from_monitor(&self, app: &AppHandle) -> Result<(), String> {
+        let _lifecycle = self.lifecycle.lock().await;
+        if self.stopping.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        {
+            let mut guard = self.process.lock().await;
+            if let Some(process) = guard.as_mut()
+                && process
+                    .child
+                    .try_wait()
+                    .map_err(|error| format!("Failed checking Happy bridge: {error}"))?
+                    .is_none()
+            {
+                return Ok(());
+            }
+            *guard = None;
+        }
+        self.start_process(app).await
+    }
+
     async fn start_process(&self, app: &AppHandle) -> Result<(), String> {
+        let generation = self.advance_process_generation().await;
         let provider_runtime = app
             .state::<crate::provider_runtime::ProviderRuntimeState>()
             .ensure_started(app)
             .await?;
         let node_binary = resolve_node_binary(app);
         let bridge_entry = find_happy_bridge_mjs()?;
-        let machine_identity = self.load_pairing_credential(app)?.map(|credential| {
+        let pairing_credential = self.load_pairing_credential(app)?;
+        if let Some(directory) = happy_home_dir(app) {
+            reconcile_session_key_store_reset(&directory, pairing_credential.is_some())?;
+        }
+        let machine_identity = pairing_credential.map(|credential| {
             serde_json::from_str(&credential).unwrap_or_else(|_| Value::String(credential))
         });
         // Reuse the existing conversation reader as the source of recent project roots.
@@ -219,7 +304,7 @@ impl HappyBridgeManager {
         )
         .await
         .map_err(|error| format!("Failed to advertise Happy project folders: {error}"))?;
-        pipe_bridge_output(&mut child, Arc::clone(&stdin), app.clone());
+        pipe_bridge_output(&mut child, Arc::clone(&stdin), app.clone(), generation);
         let mut guard = self.process.lock().await;
         // `stop()` can take the process slot while a start is still in flight.
         // Storing the child now would leave a live bridge accepting inbound
@@ -232,6 +317,7 @@ impl HappyBridgeManager {
         *guard = Some(HappyBridgeProcess {
             child,
             _stdin: stdin,
+            generation,
             spawned_at: Instant::now(),
             restart_budget_rearmed: false,
         });
@@ -254,16 +340,28 @@ impl HappyBridgeManager {
     }
 
     pub async fn stop<R: tauri::Runtime>(&self, app: &AppHandle<R>) -> Result<(), String> {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.stop_inner(app).await
+    }
+
+    async fn stop_inner<R: tauri::Runtime>(&self, app: &AppHandle<R>) -> Result<(), String> {
         self.stopping.store(true, Ordering::Release);
         if let Some(handle) = self.monitor_handle.lock().await.take() {
             handle.abort();
         }
 
         let process = self.process.lock().await.take();
-        if let Some(mut process) = process {
+        let terminate_result = if let Some(mut process) = process {
             let stdin = Arc::clone(&process._stdin);
-            terminate_child(&mut process.child, Some(&stdin)).await?;
-        }
+            terminate_child(&mut process.child, Some(&stdin)).await
+        } else {
+            Ok(())
+        };
+        // Keep this exact child generation current while its graceful close
+        // drains correlated cleanup RPCs. The lifecycle lock prevents a
+        // replacement child from starting until termination completes.
+        self.advance_process_generation().await;
+        terminate_result?;
         // A pairing payload is only usable while the process that minted it is
         // alive, because the matching secret key lives in that process. Drop it
         // so a restart cannot hand back a code whose secret half is gone.
@@ -285,6 +383,152 @@ impl HappyBridgeManager {
             .is_some()
     }
 
+    async fn wait_until_running(&self) -> Result<(), String> {
+        let deadline = tokio::time::Instant::now() + BRIDGE_READY_TIMEOUT;
+        loop {
+            let status = self.status().await;
+            match status.state {
+                HappyBridgeState::Running => return Ok(()),
+                HappyBridgeState::Error => {
+                    return Err(status
+                        .detail
+                        .unwrap_or_else(|| "Happy bridge failed to start".to_string()));
+                }
+                HappyBridgeState::Stopped | HappyBridgeState::Starting => {}
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err("Happy bridge did not become ready for identity reset".to_string());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn request_identity_retirement(&self) -> Result<(), String> {
+        let stdin = {
+            let guard = self.process.lock().await;
+            let Some(process) = guard.as_ref() else {
+                return Err("Happy bridge is not running".to_string());
+            };
+            Arc::clone(&process._stdin)
+        };
+        let request_id = uuid::Uuid::new_v4().to_string();
+        *self.identity_reset_result.lock().await = None;
+        notify_supervisor(
+            &stdin,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "identity_reset",
+                "params": { "requestId": request_id },
+            }),
+        )
+        .await?;
+
+        let deadline = tokio::time::Instant::now() + IDENTITY_RESET_TIMEOUT;
+        loop {
+            if let Some(success) = matching_identity_reset_result(
+                self.identity_reset_result.lock().await.take(),
+                &request_id,
+            ) {
+                return if success {
+                    Ok(())
+                } else {
+                    Err(
+                        "Happy could not retire every remote session; check the network and retry"
+                            .to_string(),
+                    )
+                };
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(
+                    "Happy session retirement timed out; check the network and retry".to_string(),
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn record_identity_reset_result(
+        &self,
+        generation: u64,
+        request_id: String,
+        success: bool,
+    ) {
+        let _output = self.output_gate.lock().await;
+        if !self.is_process_generation_current(generation) {
+            return;
+        }
+        *self.identity_reset_result.lock().await = Some((request_id, success));
+    }
+
+    async fn restore_after_failed_reset(
+        &self,
+        app: &AppHandle,
+        was_running: bool,
+        reset_error: String,
+    ) -> Result<(), String> {
+        let stop_error = self.stop_inner(app).await.err();
+        let restart_error = if was_running {
+            self.start_inner(app).await.err()
+        } else {
+            None
+        };
+        let failures = [stop_error, restart_error]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        if failures.is_empty() {
+            Err(reset_error)
+        } else {
+            Err(format!(
+                "{reset_error}; bridge recovery failed: {}",
+                failures.join("; ")
+            ))
+        }
+    }
+
+    pub async fn reset_identity(&self, app: &AppHandle) -> Result<(), String> {
+        let _lifecycle = self.lifecycle.lock().await;
+        // Keep the credential check, remote retirement, child stop and keychain
+        // deletion in one mutation transaction. A store already in progress
+        // finishes before this check; a later store is rejected until stop has
+        // invalidated its child generation.
+        let _credential_mutation = self.credential_mutation.lock().await;
+        if self.load_pairing_credential(app)?.is_none() {
+            self.stop_inner(app).await?;
+            return self.delete_pairing_identity_transaction(app);
+        }
+        let was_running = self.process_exists().await;
+        if !was_running {
+            self.start_inner(app).await?;
+        }
+        if let Err(error) = self.wait_until_running().await {
+            return self
+                .restore_after_failed_reset(app, was_running, error)
+                .await;
+        }
+
+        // Prevent the monitor from replacing the old-identity process while its
+        // sessions are being retired and the credential transaction is pending.
+        self.stopping.store(true, Ordering::Release);
+        if let Err(error) = self.request_identity_retirement().await {
+            return self
+                .restore_after_failed_reset(app, was_running, error)
+                .await;
+        }
+        if let Err(error) = self.stop_inner(app).await {
+            return self
+                .restore_after_failed_reset(app, was_running, error)
+                .await;
+        }
+        if let Err(error) = self.delete_pairing_identity_transaction(app) {
+            if was_running {
+                let _ = self.start_inner(app).await;
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub async fn update_roots(&self, roots: Vec<String>) -> Result<(), String> {
         // The stdin handle is cloned out and the process lock released before
         // writing. A bridge that is alive but not draining stdin blocks the
@@ -303,6 +547,25 @@ impl HappyBridgeManager {
                 "jsonrpc": "2.0",
                 "method": "roots_update",
                 "params": { "roots": roots },
+            }),
+        )
+        .await
+    }
+
+    pub async fn retire_provider_session(&self, provider_session_id: &str) -> Result<(), String> {
+        let stdin = {
+            let guard = self.process.lock().await;
+            let Some(process) = guard.as_ref() else {
+                return Err("Happy bridge is not running".to_string());
+            };
+            Arc::clone(&process._stdin)
+        };
+        notify_supervisor(
+            &stdin,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "provider_session_retire",
+                "params": { "providerSessionId": provider_session_id },
             }),
         )
         .await
@@ -340,12 +603,17 @@ impl HappyBridgeManager {
         }
     }
 
-    async fn record_status_report(
+    async fn record_status_report<R: tauri::Runtime>(
         &self,
-        app: &AppHandle,
+        app: &AppHandle<R>,
+        generation: u64,
         state: Option<String>,
         detail: Option<String>,
     ) {
+        let _output = self.output_gate.lock().await;
+        if !self.is_process_generation_current(generation) {
+            return;
+        }
         // The restart budget is refunded only by sustained uptime (see
         // `should_rearm`). A connection report says startup succeeded once, not
         // that the process is durable, so refunding here would let a bridge that
@@ -360,9 +628,36 @@ impl HappyBridgeManager {
         let _ = app.emit(STATUS_EVENT, status.clone());
     }
 
-    async fn record_pairing_payload<R: tauri::Runtime>(&self, app: &AppHandle<R>, payload: String) {
+    async fn record_pairing_payload<R: tauri::Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        generation: u64,
+        payload: String,
+    ) {
+        let _output = self.output_gate.lock().await;
+        if !self.is_process_generation_current(generation) {
+            return;
+        }
         *self.pairing_payload.lock().await = Some(payload.clone());
         let _ = app.emit(PAIRING_EVENT, payload);
+    }
+
+    async fn store_pairing_credential_for_generation(
+        &self,
+        app: &AppHandle,
+        generation: u64,
+        credential: &str,
+    ) -> Result<(), String> {
+        self.require_process_write_allowed(generation)?;
+        // Do not await this lock from the stdout dispatcher. During reset the
+        // same dispatcher must remain free to consume identity_reset_result.
+        let _credential_mutation = self
+            .credential_mutation
+            .try_lock()
+            .map_err(|_| "pairing credential reset is in progress".to_string())?;
+        let _output = self.output_gate.lock().await;
+        self.require_process_write_allowed(generation)?;
+        self.store_pairing_credential(app, credential)
     }
 
     /// Store the opaque credential received during pairing in the OS credential
@@ -406,6 +701,14 @@ impl HappyBridgeManager {
         Ok(())
     }
 
+    fn delete_pairing_identity_transaction(&self, app: &AppHandle) -> Result<(), String> {
+        let directory = happy_home_dir(app)
+            .ok_or_else(|| "failed to resolve Happy session key store directory".to_string())?;
+        let credential_present = self.load_pairing_credential(app)?.is_some();
+        reconcile_session_key_store_reset(&directory, credential_present)?;
+        reset_session_key_store_transaction(&directory, || self.delete_pairing_credential(app))
+    }
+
     async fn set_status<R: tauri::Runtime>(
         &self,
         app: &AppHandle<R>,
@@ -418,6 +721,7 @@ impl HappyBridgeManager {
     }
 
     pub fn kill_sync(&self) {
+        self.process_generation.fetch_add(1, Ordering::AcqRel);
         if let Ok(mut guard) = self.monitor_handle.try_lock() {
             if let Some(handle) = guard.take() {
                 handle.abort();
@@ -489,14 +793,14 @@ async fn monitor_process(
 ) {
     loop {
         tokio::time::sleep(Duration::from_secs(2)).await;
-        let (exited, should_rearm) = {
+        let (exited, should_rearm, exited_generation) = {
             let mut guard = process.lock().await;
             match guard.as_mut() {
                 None => {
                     if stopping.load(Ordering::Acquire) {
                         return;
                     }
-                    (true, false)
+                    (true, false, None)
                 }
                 Some(process) => match process.child.try_wait() {
                     Ok(None) => {
@@ -508,19 +812,25 @@ async fn monitor_process(
                         if rearm {
                             process.restart_budget_rearmed = true;
                         }
-                        (false, rearm)
+                        (false, rearm, None)
                     }
                     Ok(Some(_)) => {
+                        let generation = process.generation;
                         *guard = None;
-                        (true, false)
+                        (true, false, Some(generation))
                     }
                     Err(error) => {
                         log::warn!("[HappyBridge] Failed checking process status: {error}");
-                        (false, false)
+                        (false, false, None)
                     }
                 },
             }
         };
+        if let Some(generation) = exited_generation {
+            app.state::<HappyBridgeManager>()
+                .invalidate_process_generation_if_current(generation)
+                .await;
+        }
         if should_rearm {
             *restart_attempts.lock().await = 0;
         }
@@ -561,7 +871,7 @@ async fn monitor_process(
         tokio::time::sleep(delay).await;
 
         let manager = app.state::<HappyBridgeManager>();
-        if let Err(error) = manager.start_process(&app).await {
+        if let Err(error) = manager.restart_from_monitor(&app).await {
             if attempt >= MAX_RESTART_ATTEMPTS {
                 let failed = HappyBridgeStatus {
                     state: HappyBridgeState::Error,
@@ -630,6 +940,13 @@ fn report_state(state: Option<&str>) -> Option<HappyBridgeState> {
     }
 }
 
+fn matching_identity_reset_result(
+    result: Option<(String, bool)>,
+    expected_request_id: &str,
+) -> Option<bool> {
+    result.and_then(|(request_id, success)| (request_id == expected_request_id).then_some(success))
+}
+
 fn should_rearm(spawned_at: Instant, already_rearmed: bool, now: Instant) -> bool {
     !already_rearmed && now.duration_since(spawned_at) >= Duration::from_secs(60)
 }
@@ -642,6 +959,95 @@ fn happy_home_dir(app: &AppHandle) -> Option<PathBuf> {
         .app_data_dir()
         .ok()
         .map(|dir| dir.join("happy-bridge"))
+}
+
+#[cfg(unix)]
+fn sync_directory(directory: &std::path::Path) -> Result<(), String> {
+    std::fs::File::open(directory)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| format!("failed to sync Happy session-key directory: {error}"))
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_directory: &std::path::Path) -> Result<(), String> {
+    Ok(())
+}
+
+fn stage_session_key_store_reset(directory: &std::path::Path) -> Result<bool, String> {
+    let store = directory.join(SESSION_KEY_STORE_FILENAME);
+    let staged = directory.join(SESSION_KEY_STORE_RESET_FILENAME);
+    if staged.exists() {
+        return Err("Happy session-key reset is already pending".to_string());
+    }
+    if !store.exists() {
+        return Ok(false);
+    }
+    std::fs::rename(&store, &staged)
+        .map_err(|error| format!("failed to stage Happy session keys for reset: {error}"))?;
+    sync_directory(directory)?;
+    Ok(true)
+}
+
+fn restore_staged_session_key_store(directory: &std::path::Path) -> Result<(), String> {
+    let store = directory.join(SESSION_KEY_STORE_FILENAME);
+    let staged = directory.join(SESSION_KEY_STORE_RESET_FILENAME);
+    if store.exists() {
+        return Err("Happy session-key store already exists while restoring reset".to_string());
+    }
+    std::fs::rename(&staged, &store)
+        .map_err(|error| format!("failed to restore Happy session keys: {error}"))?;
+    sync_directory(directory)
+}
+
+fn finish_session_key_store_reset(directory: &std::path::Path) -> Result<(), String> {
+    let staged = directory.join(SESSION_KEY_STORE_RESET_FILENAME);
+    match std::fs::remove_file(&staged) {
+        Ok(()) => sync_directory(directory),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "failed to remove reset Happy session keys: {error}"
+        )),
+    }
+}
+
+fn reconcile_session_key_store_reset(
+    directory: &std::path::Path,
+    credential_present: bool,
+) -> Result<(), String> {
+    let staged = directory.join(SESSION_KEY_STORE_RESET_FILENAME);
+    if !staged.exists() {
+        return Ok(());
+    }
+    if credential_present {
+        restore_staged_session_key_store(directory)
+    } else {
+        finish_session_key_store_reset(directory)
+    }
+}
+
+fn reset_session_key_store_transaction<F>(
+    directory: &std::path::Path,
+    delete_credential: F,
+) -> Result<(), String>
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    let staged = stage_session_key_store_reset(directory)?;
+    if let Err(error) = delete_credential() {
+        if staged {
+            restore_staged_session_key_store(directory).map_err(|restore_error| {
+                format!("{error}; failed to restore Happy session keys: {restore_error}")
+            })?;
+        }
+        return Err(error);
+    }
+    if staged && let Err(error) = finish_session_key_store_reset(directory) {
+        // The credential is already gone and every relay row was confirmed
+        // inactive. Leaving the encrypted tombstone is safe; startup sees
+        // there is no old credential and retries this unlink.
+        log::warn!("[HappyBridge] Failed to remove reset session-key tombstone: {error}");
+    }
+    Ok(())
 }
 
 fn resolve_node_binary(app: &AppHandle) -> PathBuf {
@@ -770,7 +1176,15 @@ fn parse_supervisor_line(line: &str) -> Result<SupervisorRequest, Value> {
 
     if !matches!(
         method,
-        "conversation_create" | "conversation_lookup" | "identity_store"
+        "conversation_create"
+            | "conversation_archive"
+            | "conversation_delete"
+            | "conversation_happy_session_lookup"
+            | "conversation_lookup"
+            | "conversation_owner_lookup"
+            | "provider_session_archive"
+            | "provider_session_archive_lookup"
+            | "identity_store"
     ) {
         return Err(error_response(id, -32601, "unknown supervisor method"));
     }
@@ -791,12 +1205,20 @@ fn required_string(params: &Value, key: &str) -> Result<String, String> {
         .ok_or_else(|| format!("{key} is required"))
 }
 
+fn required_uuid(params: &Value, key: &str) -> Result<String, String> {
+    let value = required_string(params, key)?;
+    uuid::Uuid::parse_str(&value).map_err(|_| format!("{key} must be a UUID"))?;
+    Ok(value)
+}
+
 async fn dispatch_supervisor_request(
     app: &AppHandle,
     request: SupervisorRequest,
+    generation: u64,
 ) -> Result<Value, String> {
     match request.method.as_str() {
         "conversation_create" => {
+            let conversation_id = required_uuid(&request.params, "conversationId")?;
             let agent_type = required_string(&request.params, "agentType")?;
             let cwd = required_string(&request.params, "cwd")?;
             let title = required_string(&request.params, "title")?;
@@ -813,7 +1235,7 @@ async fn dispatch_supervisor_request(
             .map_err(|error| error.to_string())?;
             let conversation = crate::commands::chat::create_agent_conversation_record(
                 app.clone(),
-                uuid::Uuid::new_v4().to_string(),
+                conversation_id,
                 title,
                 agent_type,
                 Some(cwd.clone()),
@@ -841,6 +1263,71 @@ async fn dispatch_supervisor_request(
                 None => json!({}),
             })
         }
+        "conversation_happy_session_lookup" => {
+            let conversation_id = required_uuid(&request.params, "conversationId")?;
+            let happy_session_id = crate::commands::chat::lookup_happy_session_id_by_conversation(
+                app.clone(),
+                conversation_id,
+            )
+            .await?;
+            Ok(match happy_session_id {
+                Some(happy_session_id) => json!({ "happySessionId": happy_session_id }),
+                None => json!({}),
+            })
+        }
+        "conversation_owner_lookup" => {
+            let provider_session_id = required_uuid(&request.params, "providerSessionId")?;
+            let agent_session_id = request
+                .params
+                .get("agentSessionId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(ToOwned::to_owned);
+            let conversation_id = crate::commands::chat::lookup_agent_conversation_owner(
+                app.clone(),
+                provider_session_id,
+                agent_session_id,
+            )
+            .await?;
+            Ok(match conversation_id {
+                Some(conversation_id) => json!({ "conversationId": conversation_id }),
+                None => json!({}),
+            })
+        }
+        "provider_session_archive" => {
+            let provider_session_id = required_uuid(&request.params, "providerSessionId")?;
+            crate::commands::chat::archive_happy_provider_session_from_happy(
+                app.clone(),
+                provider_session_id,
+            )
+            .await?;
+            Ok(json!({ "archived": true }))
+        }
+        "provider_session_archive_lookup" => {
+            let provider_session_id = required_uuid(&request.params, "providerSessionId")?;
+            let archived = crate::commands::chat::is_happy_provider_session_archived(
+                app.clone(),
+                provider_session_id,
+            )
+            .await?;
+            Ok(json!({ "archived": archived }))
+        }
+        "conversation_archive" => {
+            let conversation_id = required_uuid(&request.params, "conversationId")?;
+            let provider_session_id = required_uuid(&request.params, "providerSessionId")?;
+            crate::commands::chat::archive_agent_conversation_from_happy(
+                app.clone(),
+                conversation_id,
+                provider_session_id,
+            )
+            .await?;
+            Ok(json!({ "archived": true }))
+        }
+        "conversation_delete" => {
+            let conversation_id = required_uuid(&request.params, "conversationId")?;
+            crate::commands::chat::delete_conversation(app.clone(), conversation_id).await?;
+            Ok(json!({ "deleted": true }))
+        }
         "identity_store" => {
             let identity = request
                 .params
@@ -851,21 +1338,30 @@ async fn dispatch_supervisor_request(
                 .map(ToOwned::to_owned)
                 .unwrap_or_else(|| identity.to_string());
             app.state::<HappyBridgeManager>()
-                .store_pairing_credential(app, &credential)?;
+                .store_pairing_credential_for_generation(app, generation, &credential)
+                .await?;
             Ok(json!({ "stored": true }))
         }
         _ => Err("unknown supervisor method".to_string()),
     }
 }
 
-async fn dispatch_supervisor_line(app: &AppHandle, line: &str, stdin: &Arc<Mutex<ChildStdin>>) {
+async fn dispatch_supervisor_line(
+    app: &AppHandle,
+    line: &str,
+    stdin: &Arc<Mutex<ChildStdin>>,
+    generation: u64,
+) {
+    let manager = app.state::<HappyBridgeManager>();
+    if !manager.is_process_generation_current(generation) {
+        return;
+    }
     if let Ok(value) = serde_json::from_str::<Value>(line) {
         if let Some(object) = value.as_object()
             && object.get("id").is_none()
             && let Some(method) = object.get("method").and_then(Value::as_str)
         {
             let params = object.get("params").cloned().unwrap_or_else(|| json!({}));
-            let manager = app.state::<HappyBridgeManager>();
             match method {
                 "status_report" => {
                     let state = params
@@ -876,12 +1372,28 @@ async fn dispatch_supervisor_line(app: &AppHandle, line: &str, stdin: &Arc<Mutex
                         .get("detail")
                         .and_then(Value::as_str)
                         .map(ToOwned::to_owned);
-                    manager.record_status_report(app, state, detail).await;
+                    manager
+                        .record_status_report(app, generation, state, detail)
+                        .await;
                 }
                 "pairing_payload" => {
                     if let Some(payload) = params.get("payload").and_then(Value::as_str) {
                         manager
-                            .record_pairing_payload(app, payload.to_string())
+                            .record_pairing_payload(app, generation, payload.to_string())
+                            .await;
+                    }
+                }
+                "identity_reset_result" => {
+                    if let (Some(request_id), Some(success)) = (
+                        params.get("requestId").and_then(Value::as_str),
+                        params.get("success").and_then(Value::as_bool),
+                    ) {
+                        manager
+                            .record_identity_reset_result(
+                                generation,
+                                request_id.to_string(),
+                                success,
+                            )
                             .await;
                     }
                 }
@@ -895,7 +1407,7 @@ async fn dispatch_supervisor_line(app: &AppHandle, line: &str, stdin: &Arc<Mutex
         Err(response) => response,
         Ok(request) => {
             let id = request.id.clone();
-            match dispatch_supervisor_request(app, request).await {
+            match dispatch_supervisor_request(app, request, generation).await {
                 Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
                 Err(error) => error_response(id, -32000, &error),
             }
@@ -1037,7 +1549,12 @@ where
     }
 }
 
-fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: AppHandle) {
+fn pipe_bridge_output(
+    child: &mut Child,
+    stdin: Arc<Mutex<ChildStdin>>,
+    app: AppHandle,
+    generation: u64,
+) {
     if let Some(stdout) = child.stdout.take() {
         let stdout_stdin = Arc::clone(&stdin);
         tauri::async_runtime::spawn(async move {
@@ -1045,7 +1562,7 @@ fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: App
             loop {
                 match read_bounded_line(&mut reader).await {
                     Ok(Some(BoundedLine::Complete(line))) => {
-                        dispatch_supervisor_line(&app, &line, &stdout_stdin).await;
+                        dispatch_supervisor_line(&app, &line, &stdout_stdin, generation).await;
                     }
                     Ok(Some(BoundedLine::Oversized)) => {
                         write_supervisor_response(
@@ -1069,9 +1586,10 @@ fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: App
                     Err(error) => {
                         log::warn!("[HappyBridge] Supervisor channel read failed: {error}");
                         app.state::<HappyBridgeManager>()
-                            .set_status(
+                            .record_status_report(
                                 &app,
-                                HappyBridgeState::Error,
+                                generation,
+                                Some("error".to_string()),
                                 Some("supervisor channel closed".to_string()),
                             )
                             .await;
@@ -1099,12 +1617,16 @@ fn pipe_bridge_output(child: &mut Child, stdin: Arc<Mutex<ChildStdin>>, app: App
 mod tests {
     use super::{
         BoundedLine, HappyBridgeState, MAX_RESTART_ATTEMPTS, MAX_SUPERVISOR_LINE_BYTES,
-        discovered_project_roots, error_response, is_advertised_root, next_restart_attempt,
-        notify_supervisor, parse_supervisor_line, read_bounded_line, report_state, restart_allowed,
-        restart_delay, should_rearm,
+        SESSION_KEY_STORE_FILENAME, SESSION_KEY_STORE_RESET_FILENAME, discovered_project_roots,
+        error_response, is_advertised_root, matching_identity_reset_result, next_restart_attempt,
+        notify_supervisor, parse_supervisor_line, read_bounded_line,
+        reconcile_session_key_store_reset, report_state, required_uuid,
+        reset_session_key_store_transaction, restart_allowed, restart_delay, should_rearm,
+        stage_session_key_store_reset,
     };
     use crate::commands::happy_bridge::{ADVERTISED_ROOTS_KEY, SETTINGS_STORE};
     use serde_json::Value;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tauri_plugin_store::StoreExt;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, duplex};
@@ -1124,6 +1646,79 @@ mod tests {
         app
     }
 
+    #[test]
+    fn remote_conversation_ids_must_be_preallocated_uuids() {
+        let valid = serde_json::json!({
+            "conversationId": "00000000-0000-4000-8000-000000000123"
+        });
+        assert_eq!(
+            required_uuid(&valid, "conversationId").unwrap(),
+            "00000000-0000-4000-8000-000000000123"
+        );
+        assert_eq!(
+            required_uuid(
+                &serde_json::json!({ "conversationId": "not-a-uuid" }),
+                "conversationId"
+            )
+            .unwrap_err(),
+            "conversationId must be a UUID"
+        );
+    }
+
+    #[test]
+    fn identity_reset_ack_must_match_the_pending_request() {
+        assert_eq!(
+            matching_identity_reset_result(Some(("expected".to_string(), true)), "expected"),
+            Some(true)
+        );
+        assert_eq!(
+            matching_identity_reset_result(Some(("stale".to_string(), true)), "expected"),
+            None
+        );
+    }
+
+    #[test]
+    fn identity_reset_stages_and_restores_session_keys_transactionally() {
+        let directory = tempfile::tempdir().unwrap();
+        let binding_store = directory.path().join(SESSION_KEY_STORE_FILENAME);
+        let staged = directory.path().join(SESSION_KEY_STORE_RESET_FILENAME);
+        let unrelated = directory.path().join("unrelated.json");
+        std::fs::write(&binding_store, "synthetic encrypted payload").unwrap();
+        std::fs::write(&unrelated, "keep").unwrap();
+
+        let error = reset_session_key_store_transaction(directory.path(), || {
+            Err("synthetic credential deletion failure".to_string())
+        })
+        .unwrap_err();
+        assert_eq!(error, "synthetic credential deletion failure");
+        // A keychain-deletion failure leaves the old credential installed, so
+        // the transaction must restore its only decryptable session-key store.
+        assert!(binding_store.exists());
+        assert!(!staged.exists());
+
+        reset_session_key_store_transaction(directory.path(), || Ok(())).unwrap();
+        assert!(!binding_store.exists());
+        assert!(!staged.exists());
+        assert!(unrelated.exists());
+    }
+
+    #[test]
+    fn startup_reconciles_an_interrupted_identity_reset_from_credential_state() {
+        let with_credential = tempfile::tempdir().unwrap();
+        let store = with_credential.path().join(SESSION_KEY_STORE_FILENAME);
+        std::fs::write(&store, "synthetic encrypted payload").unwrap();
+        stage_session_key_store_reset(with_credential.path()).unwrap();
+        reconcile_session_key_store_reset(with_credential.path(), true).unwrap();
+        assert!(store.exists());
+
+        let without_credential = tempfile::tempdir().unwrap();
+        let store = without_credential.path().join(SESSION_KEY_STORE_FILENAME);
+        std::fs::write(&store, "synthetic encrypted payload").unwrap();
+        stage_session_key_store_reset(without_credential.path()).unwrap();
+        reconcile_session_key_store_reset(without_credential.path(), false).unwrap();
+        assert!(!store.exists());
+    }
+
     #[tokio::test]
     async fn stopping_discards_the_pairing_payload_of_the_dead_process() {
         // Regression: the payload outlived the process that minted it, so
@@ -1131,9 +1726,14 @@ mod tests {
         // secret key had died with the previous bridge and pairing never completed.
         let app = mock_app_with_roots(None);
         let manager = super::HappyBridgeManager::new();
+        let generation = manager.advance_process_generation().await;
 
         manager
-            .record_pairing_payload(app.handle(), "payload-from-bridge-a".to_string())
+            .record_pairing_payload(
+                app.handle(),
+                generation,
+                "payload-from-bridge-a".to_string(),
+            )
             .await;
         assert!(
             manager.pairing_payload.lock().await.is_some(),
@@ -1147,6 +1747,92 @@ mod tests {
         assert!(
             manager.pairing_payload.lock().await.is_none(),
             "a payload minted by a stopped bridge must not be handed out"
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_child_output_cannot_mutate_bridge_or_credentials() {
+        let app = mock_app_with_roots(None);
+        let manager = super::HappyBridgeManager::new();
+        let stale_generation = manager.advance_process_generation().await;
+        let current_generation = manager.advance_process_generation().await;
+
+        manager
+            .record_status_report(
+                app.handle(),
+                current_generation,
+                Some("connected".to_string()),
+                Some("Connected".to_string()),
+            )
+            .await;
+        manager
+            .record_status_report(
+                app.handle(),
+                stale_generation,
+                Some("error".to_string()),
+                Some("stale child".to_string()),
+            )
+            .await;
+        assert!(matches!(
+            manager.status().await.state,
+            HappyBridgeState::Running
+        ));
+
+        manager
+            .record_pairing_payload(
+                app.handle(),
+                current_generation,
+                "current-payload".to_string(),
+            )
+            .await;
+        manager
+            .record_pairing_payload(app.handle(), stale_generation, "stale-payload".to_string())
+            .await;
+        assert_eq!(
+            manager.pairing_payload.lock().await.as_deref(),
+            Some("current-payload")
+        );
+
+        manager
+            .record_identity_reset_result(current_generation, "current".to_string(), true)
+            .await;
+        manager
+            .record_identity_reset_result(stale_generation, "stale".to_string(), false)
+            .await;
+        assert_eq!(
+            manager.identity_reset_result.lock().await.as_ref(),
+            Some(&("current".to_string(), true))
+        );
+
+        assert_eq!(
+            manager
+                .require_current_process_generation(stale_generation)
+                .unwrap_err(),
+            "stale Happy bridge process"
+        );
+    }
+
+    #[tokio::test]
+    async fn process_writes_are_rejected_while_stopping_and_after_generation_advance() {
+        let manager = super::HappyBridgeManager::new();
+        let generation = manager.advance_process_generation().await;
+        assert!(manager.require_process_write_allowed(generation).is_ok());
+
+        manager.stopping.store(true, Ordering::Release);
+        assert_eq!(
+            manager
+                .require_process_write_allowed(generation)
+                .expect_err("stopping rejects identity writes"),
+            "Happy bridge is stopping",
+        );
+
+        manager.stopping.store(false, Ordering::Release);
+        manager.advance_process_generation().await;
+        assert_eq!(
+            manager
+                .require_process_write_allowed(generation)
+                .expect_err("stale generations stay rejected"),
+            "stale Happy bridge process",
         );
     }
 
@@ -1172,9 +1858,7 @@ mod tests {
         let nested = consented.path().join("nested");
         std::fs::create_dir(&nested).expect("nested dir");
 
-        let app = mock_app_with_roots(Some(vec![
-            consented.path().to_string_lossy().to_string(),
-        ]));
+        let app = mock_app_with_roots(Some(vec![consented.path().to_string_lossy().to_string()]));
 
         let sibling_path = sibling.path().to_string_lossy().to_string();
         assert!(
@@ -1273,8 +1957,14 @@ mod tests {
 
     #[test]
     fn bridge_error_status_is_preserved_as_error() {
-        assert!(matches!(report_state(Some("error")), Some(HappyBridgeState::Error)));
-        assert!(matches!(report_state(Some("connected")), Some(HappyBridgeState::Running)));
+        assert!(matches!(
+            report_state(Some("error")),
+            Some(HappyBridgeState::Error)
+        ));
+        assert!(matches!(
+            report_state(Some("connected")),
+            Some(HappyBridgeState::Running)
+        ));
         assert!(report_state(Some("starting")).is_none());
     }
 
@@ -1305,6 +1995,51 @@ mod tests {
         .expect_err("unknown method must fail");
         assert_eq!(response["error"]["code"], -32601);
         assert_eq!(response["id"], 7);
+    }
+
+    #[test]
+    fn supervisor_channel_accepts_happy_session_lookup() {
+        let request = parse_supervisor_line(
+            r#"{"jsonrpc":"2.0","id":7,"method":"conversation_happy_session_lookup","params":{"conversationId":"00000000-0000-4000-8000-000000000123"}}"#,
+        )
+        .expect("lookup method is allowlisted");
+        assert_eq!(request.method, "conversation_happy_session_lookup");
+    }
+
+    #[test]
+    fn supervisor_channel_accepts_conversation_owner_lookup() {
+        let request = parse_supervisor_line(
+            r#"{"jsonrpc":"2.0","id":9,"method":"conversation_owner_lookup","params":{"providerSessionId":"00000000-0000-4000-8000-000000000123"}}"#,
+        )
+        .expect("owner lookup method is allowlisted");
+        assert_eq!(request.method, "conversation_owner_lookup");
+    }
+
+    #[test]
+    fn supervisor_channel_accepts_conversation_archive() {
+        let request = parse_supervisor_line(
+            r#"{"jsonrpc":"2.0","id":8,"method":"conversation_archive","params":{"conversationId":"00000000-0000-4000-8000-000000000123","providerSessionId":"00000000-0000-4000-8000-000000000124"}}"#,
+        )
+        .expect("archive method is allowlisted");
+        assert_eq!(request.method, "conversation_archive");
+    }
+
+    #[test]
+    fn supervisor_channel_accepts_provider_session_archive() {
+        let request = parse_supervisor_line(
+            r#"{"jsonrpc":"2.0","id":10,"method":"provider_session_archive","params":{"providerSessionId":"00000000-0000-4000-8000-000000000123"}}"#,
+        )
+        .expect("provider-only archive method is allowlisted");
+        assert_eq!(request.method, "provider_session_archive");
+    }
+
+    #[test]
+    fn supervisor_channel_accepts_provider_session_archive_lookup() {
+        let request = parse_supervisor_line(
+            r#"{"jsonrpc":"2.0","id":11,"method":"provider_session_archive_lookup","params":{"providerSessionId":"00000000-0000-4000-8000-000000000123"}}"#,
+        )
+        .expect("provider archive lookup method is allowlisted");
+        assert_eq!(request.method, "provider_session_archive_lookup");
     }
 
     #[test]
@@ -1354,7 +2089,10 @@ mod tests {
         let (reader, mut writer) = duplex(1024);
         let writer_task = tokio::spawn(async move {
             writer.write_all(&[0xff, 0xfe]).await.unwrap();
-            writer.write_all(b"\n{\"jsonrpc\":\"2.0\"}\n").await.unwrap();
+            writer
+                .write_all(b"\n{\"jsonrpc\":\"2.0\"}\n")
+                .await
+                .unwrap();
         });
         let mut reader = BufReader::new(reader);
 

@@ -21,6 +21,26 @@ function installedClientSources(): Array<{ name: string; source: string }> {
   }));
 }
 
+type InvalidateSyncConstructor = new (command: () => Promise<void>) => {
+  invalidate: () => void;
+  invalidateAndAwait: () => Promise<void>;
+  stop: () => void;
+};
+
+function loadInstalledInvalidateSync(source: string): InvalidateSyncConstructor {
+  const classStart = source.indexOf("class InvalidateSync {");
+  const classEnd = source.indexOf("\n\nfunction isRecord", classStart);
+  if (classStart < 0 || classEnd < 0) {
+    throw new Error("Happy InvalidateSync implementation not found");
+  }
+  const classSource = source.slice(classStart, classEnd);
+  const evaluate = new Function(
+    "backoff",
+    `${classSource}\nreturn InvalidateSync;`,
+  ) as (backoff: (command: () => Promise<void>) => Promise<void>) => InvalidateSyncConstructor;
+  return evaluate(async (command) => command());
+}
+
 describe("happy relay sync patch", () => {
   const sources = installedClientSources();
 
@@ -30,6 +50,33 @@ describe("happy relay sync patch", () => {
     const version = declared.dependencies.happy;
     // A bump without regenerating the patch silently reverts every fix below.
     expect(workspace).toContain(`happy@${version}: patches/happy@${version}.patch`);
+  });
+
+  it("lets the bridge supply a stable data-key session encryption key", () => {
+    for (const { source } of sources) {
+      const createStart = source.indexOf("async getOrCreateSession(opts)");
+      const createEnd = source.indexOf("async getOrCreateMachine(opts)", createStart);
+      const createBody = source.slice(createStart, createEnd);
+      expect(createBody).toContain(
+        "opts.encryptionKey ? new Uint8Array(opts.encryptionKey) : getRandomBytes(32)",
+      );
+      expect(createBody).toContain('throw new Error("Session encryption key must be 32 bytes")');
+    }
+  });
+
+  it("sets a validated resume cursor before the session socket connects", () => {
+    for (const { source } of sources) {
+      const constructorStart = source.indexOf("constructor(token, session, options = {})");
+      const socketConnect = source.indexOf("this.socket.connect();", constructorStart);
+      const cursorAssignment = source.indexOf("this.lastSeq = resumeFromSeq;", constructorStart);
+      expect(constructorStart).toBeGreaterThan(-1);
+      expect(cursorAssignment).toBeGreaterThan(constructorStart);
+      expect(cursorAssignment).toBeLessThan(socketConnect);
+      expect(source).toContain(
+        'throw new Error("Session resume sequence must be a non-negative safe integer")',
+      );
+      expect(source).toContain("sessionSyncClient(session, options)");
+    }
   });
 
   it("skips relay messages the socket handler already routed", () => {
@@ -88,17 +135,57 @@ describe("happy relay sync patch", () => {
     }
   });
 
-  it("flushes the outbox before stopping the send sync on close", () => {
+  it("joins the single-flight outbox drain before stopping send sync on close", () => {
     for (const { source } of sources) {
       const closeIndex = source.indexOf("[API] socket.close() called");
       expect(closeIndex).toBeGreaterThan(-1);
       const closeBody = source.slice(closeIndex, closeIndex + 600);
-      const flushIndex = closeBody.indexOf("await this.flushOutbox()");
+      const flushIndex = closeBody.indexOf("await this.sendSync.invalidateAndAwait()");
       const stopIndex = closeBody.indexOf("this.sendSync.stop()");
       expect(flushIndex).toBeGreaterThan(-1);
-      // stop() latches a flag that makes a pending flush a no-op, so ordering is
-      // the whole fix: flush must complete first or the turn's tail is dropped.
       expect(flushIndex).toBeLessThan(stopIndex);
+      expect(closeBody).not.toContain("await this.flushOutbox()");
+    }
+  });
+
+  it("serializes close behind a delayed relay drain without losing or duplicating messages", async () => {
+    for (const { source } of sources) {
+      const InvalidateSync = loadInstalledInvalidateSync(source);
+      const outbox = ["first"];
+      const postedBatches: string[][] = [];
+      let activeDrains = 0;
+      let maxActiveDrains = 0;
+      let releaseFirstPost: (() => void) | undefined;
+      const firstPostBlocked = new Promise<void>((resolve) => {
+        releaseFirstPost = resolve;
+      });
+
+      const sync = new InvalidateSync(async () => {
+        activeDrains += 1;
+        maxActiveDrains = Math.max(maxActiveDrains, activeDrains);
+        try {
+          const batch = outbox.slice();
+          if (batch.length === 0) return;
+          postedBatches.push(batch);
+          if (postedBatches.length === 1) {
+            await firstPostBlocked;
+          }
+          outbox.splice(0, batch.length);
+        } finally {
+          activeDrains -= 1;
+        }
+      });
+
+      sync.invalidate();
+      outbox.push("second");
+      const closeDrain = sync.invalidateAndAwait();
+      releaseFirstPost?.();
+      await closeDrain;
+      sync.stop();
+
+      expect(postedBatches).toEqual([["first"], ["second"]]);
+      expect(maxActiveDrains).toBe(1);
+      expect(outbox).toEqual([]);
     }
   });
 
