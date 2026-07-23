@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { PredictiveCompactMutex } from "@/stores/agent.store";
 
 const agentStoreSource = readFileSync(
   resolve("src/stores/agent.store.ts"),
@@ -17,10 +18,19 @@ describe("#1631 — predictive compaction threshold & concurrency", () => {
     );
   });
 
-  it("declares a module-level predictiveCompactBusy flag", () => {
-    expect(agentStoreSource).toMatch(
-      /let predictiveCompactBusy\s*=\s*false/,
-    );
+  it("does not let an archived run release a newer thread's mutex", () => {
+    const mutex = new PredictiveCompactMutex();
+    const archivedLease = mutex.tryAcquire("same-session");
+    expect(archivedLease).not.toBeNull();
+    if (!archivedLease) throw new Error("expected archived lease");
+    expect(mutex.releaseCurrentForAny(["same-session"])).toBe(true);
+    const newerLease = mutex.tryAcquire("same-session");
+    expect(newerLease).not.toBeNull();
+    if (!newerLease) throw new Error("expected newer lease");
+    expect(mutex.release(archivedLease)).toBe(false);
+    expect(mutex.tryAcquire("third-run")).toBeNull();
+    expect(mutex.release(newerLease)).toBe(true);
+    expect(mutex.tryAcquire("third-run")).not.toBeNull();
   });
 
   it("gates the trigger in promptComplete on all four invariants", () => {
@@ -45,15 +55,20 @@ describe("#1631 — compactAgentConversation accepts mode", () => {
 });
 
 describe("#1631 — kickPredictiveCompact + promoteStandbyAndDispatch", () => {
-  it("kickPredictiveCompact symbol exists and is idempotent via busy flag", () => {
+  it("kickPredictiveCompact symbol exists and is idempotent via the mutex", () => {
     expect(agentStoreSource).toContain("async kickPredictiveCompact(");
-    expect(agentStoreSource).toContain("if (predictiveCompactBusy) return");
+    expect(agentStoreSource).toContain(
+      "predictiveCompactMutex.tryAcquire(sessionId)",
+    );
+    expect(agentStoreSource).toContain(
+      "predictiveCompactMutex.release(predictiveCompactLease)",
+    );
   });
 
-  it("#1716 — sets predictiveCompactBusy + predictiveCompactInFlight synchronously before the first await", () => {
+  it("#1716 — acquires the mutex + sets predictiveCompactInFlight synchronously before the first await", () => {
     // The duplicate-spawn race (#1716) was: the 85% auto-compact branch
     // called compactAgentConversation directly, so the global mutex
-    // (`predictiveCompactBusy`) and per-session flag
+    // (the owner-aware mutex) and per-session flag
     // (`predictiveCompactInFlight`) stayed false until well after the
     // first `await` (the Sonnet-4 summary call). The 70% predictive block
     // that ran on the same `promptComplete` event then saw clean guards
@@ -68,13 +83,15 @@ describe("#1631 — kickPredictiveCompact + promoteStandbyAndDispatch", () => {
     const fnEnd = agentStoreSource.indexOf("\n  },", fnStart);
     const fnBody = agentStoreSource.slice(fnStart, fnEnd);
 
-    const busyFlipIdx = fnBody.indexOf("predictiveCompactBusy = true");
+    const mutexAcquireIdx = fnBody.indexOf(
+      "predictiveCompactMutex.tryAcquire(sessionId)",
+    );
     const inFlightFlipIdx = fnBody.indexOf(
       'setState("sessions", sessionId, "predictiveCompactInFlight", true)',
     );
     const firstAwaitIdx = fnBody.indexOf("await ");
 
-    expect(busyFlipIdx, "predictiveCompactBusy must be flipped true").toBeGreaterThan(
+    expect(mutexAcquireIdx, "predictive mutex must be acquired").toBeGreaterThan(
       0,
     );
     expect(
@@ -83,8 +100,8 @@ describe("#1631 — kickPredictiveCompact + promoteStandbyAndDispatch", () => {
     ).toBeGreaterThan(0);
     expect(firstAwaitIdx, "first await must exist").toBeGreaterThan(0);
     expect(
-      busyFlipIdx,
-      "predictiveCompactBusy must flip BEFORE the first await",
+      mutexAcquireIdx,
+      "predictive mutex must be acquired BEFORE the first await",
     ).toBeLessThan(firstAwaitIdx);
     expect(
       inFlightFlipIdx,
@@ -123,6 +140,27 @@ describe("#1631 — kickPredictiveCompact + promoteStandbyAndDispatch", () => {
   it("sendPrompt checks for a ready standby and promotes when present", () => {
     expect(agentStoreSource).toContain("standby.seedCompleted === true");
     expect(agentStoreSource).toContain("await this.promoteStandbyAndDispatch(");
+  });
+
+  it("releases a cancelled warm-up generation before awaiting termination", () => {
+    const cancelStart = agentStoreSource.indexOf(
+      "Standby not ready at submit; cancelling warm-up",
+    );
+    expect(cancelStart).toBeGreaterThan(0);
+    const cancelBody = agentStoreSource.slice(cancelStart, cancelStart + 1200);
+    const release = cancelBody.indexOf(
+      "predictiveCompactMutex.releaseCurrentForAny([sessionId])",
+    );
+    const flagClear = cancelBody.indexOf(
+      'setState("sessions", sessionId, "predictiveCompactInFlight", false)',
+    );
+    const terminate = cancelBody.indexOf(
+      "await this.terminateSession(cancelledStandbyId)",
+    );
+
+    expect(release).toBeGreaterThan(0);
+    expect(flagClear).toBeGreaterThan(release);
+    expect(terminate).toBeGreaterThan(flagClear);
   });
 });
 

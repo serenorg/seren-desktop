@@ -1252,7 +1252,24 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     migrate_orphan_messages(conn)?;
 
     setup_provider_runtime_schema(conn)?;
+    setup_happy_provider_session_lifecycle_schema(conn)?;
 
+    Ok(())
+}
+
+/// Durable archive fence for provider sessions that may not have a
+/// conversation row yet (fresh spawns and predictive standbys).
+fn setup_happy_provider_session_lifecycle_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS happy_provider_session_lifecycle (
+            provider_session_id TEXT PRIMARY KEY,
+            conversation_id TEXT,
+            is_archived INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_happy_provider_session_lifecycle_conversation
+         ON happy_provider_session_lifecycle(conversation_id);",
+    )?;
     Ok(())
 }
 

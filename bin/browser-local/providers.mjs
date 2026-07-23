@@ -121,6 +121,7 @@ export function createUnavailableRuntime(label, reason) {
     listSessions: async () => [],
     spawnSession: unavailable,
     sendPrompt: unavailable,
+    submitPrompt: unavailable,
     cancelPrompt: unavailable,
     terminateSession: unavailable,
     setPermissionMode: unavailable,
@@ -136,6 +137,155 @@ export function createUnavailableRuntime(label, reason) {
     testConnection: unavailable,
     startServer: unavailable,
     stopServer: unavailable,
+  };
+}
+
+function optionalNonEmptyString(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function spawnIdentity(params) {
+  return {
+    agentType: optionalNonEmptyString(params?.agentType),
+    cwd: optionalNonEmptyString(params?.cwd),
+    resumeAgentSessionId: optionalNonEmptyString(
+      params?.resumeAgentSessionId,
+    ),
+  };
+}
+
+function assertCompatibleSpawn(
+  identity,
+  candidate,
+  { allowMissingCandidateNative = false } = {},
+) {
+  if (
+    identity.agentType !== optionalNonEmptyString(candidate?.agentType) ||
+    identity.cwd !== optionalNonEmptyString(candidate?.cwd)
+  ) {
+    throw new Error(
+      "A provider session with this local session ID already exists with a different agent or working directory.",
+    );
+  }
+
+  const candidateAgentSessionId = optionalNonEmptyString(
+    candidate?.agentSessionId ?? candidate?.resumeAgentSessionId,
+  );
+  if (
+    identity.resumeAgentSessionId &&
+    (!allowMissingCandidateNative || candidateAgentSessionId) &&
+    identity.resumeAgentSessionId !== candidateAgentSessionId
+  ) {
+    throw new Error(
+      "A provider session with this local session ID already exists with a different native session ID.",
+    );
+  }
+}
+
+/**
+ * Claim a local session ID before any asynchronous lookup or process spawn.
+ * This keeps simultaneous Happy restore paths from creating two provider
+ * children for the same durable binding.
+ */
+export function createSynchronousSpawnCoordinator({
+  spawn,
+  listSessions,
+  emit,
+}) {
+  const inFlight = new Map();
+
+  const reemitReady = (session) => {
+    if (session?.status !== "ready") return;
+    emit("provider://session-status", {
+      sessionId: session.id,
+      status: "ready",
+      agentSessionId: session.agentSessionId,
+    });
+  };
+
+  return function coordinateSpawn(params = {}) {
+    const localSessionId = optionalNonEmptyString(params.localSessionId);
+    if (!localSessionId) {
+      return spawn(params).then((session) => ({
+        ...session,
+        reused: false,
+        owned: true,
+      }));
+    }
+
+    const identity = spawnIdentity(params);
+    const active = inFlight.get(localSessionId);
+    if (active) {
+      try {
+        assertCompatibleSpawn(identity, active.identity, {
+          allowMissingCandidateNative: true,
+        });
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      return active.promise.then((session) => {
+        // The winning caller may have had a weaker restore contract (for
+        // example, desktop replay versus Happy replay suppression). Validate
+        // the resolved process against this joiner's own native-ID
+        // postcondition before returning it.
+        assertCompatibleSpawn(identity, session);
+        reemitReady(session);
+        return {
+          ...session,
+          reused: true,
+          owned: false,
+        };
+      });
+    }
+
+    let resolveFlight;
+    let rejectFlight;
+    const flightPromise = new Promise((resolve, reject) => {
+      resolveFlight = resolve;
+      rejectFlight = reject;
+    });
+    const flight = { identity, promise: flightPromise };
+    // This write intentionally happens before listSessions() or spawn() can
+    // yield. Every later caller sees and joins this exact flight.
+    inFlight.set(localSessionId, flight);
+
+    void (async () => {
+      const listed = await listSessions();
+      const existing = listed.find(
+        (session) => session?.id === localSessionId,
+      );
+      if (existing) {
+        assertCompatibleSpawn(identity, existing);
+        if (existing.status !== "ready") {
+          throw new Error(
+            "A provider session with this local session ID exists but is not ready for reuse.",
+          );
+        }
+        reemitReady(existing);
+        return {
+          ...existing,
+          reused: true,
+          owned: false,
+        };
+      }
+
+      const session = await spawn(params);
+      return {
+        ...session,
+        reused: false,
+        owned: true,
+      };
+    })().then(resolveFlight, rejectFlight);
+
+    const clearFlight = () => {
+      if (inFlight.get(localSessionId) === flight) {
+        inFlight.delete(localSessionId);
+      }
+    };
+    // Handle both outcomes explicitly so cleanup cannot create an orphaned
+    // rejected promise.
+    void flightPromise.then(clearFlight, clearFlight);
+    return flightPromise;
   };
 }
 
@@ -882,8 +1032,8 @@ function replayToolLikeItem(emit, session, item) {
     return;
   }
 
-  emitToolCall(emit, session, item, item?.status ?? "completed");
-  emitToolResult(emit, session, item);
+  emitToolCall(emit, session, item, item?.status ?? "completed", true);
+  emitToolResult(emit, session, item, true);
 }
 
 function replayThreadItems(emit, session, thread) {
@@ -926,7 +1076,13 @@ function isToolLikeItem(item) {
   );
 }
 
-function emitToolCall(emit, session, item, statusOverride) {
+function emitToolCall(
+  emit,
+  session,
+  item,
+  statusOverride,
+  replay = false,
+) {
   const type = String(item?.type ?? "").toLowerCase();
   if (!isToolLikeItem(item)) {
     return;
@@ -952,10 +1108,11 @@ function emitToolCall(emit, session, item, statusOverride) {
     kind: item.type ?? "tool",
     status: statusOverride ?? item.status ?? "in_progress",
     parameters: item,
+    ...(replay ? { replay: true } : {}),
   });
 }
 
-function emitToolResult(emit, session, item) {
+function emitToolResult(emit, session, item, replay = false) {
   if (!isToolLikeItem(item)) {
     return;
   }
@@ -986,6 +1143,7 @@ function emitToolResult(emit, session, item) {
       (item.exitCode && item.exitCode !== 0
         ? `Command exited with code ${item.exitCode}`
         : undefined),
+    ...(replay ? { replay: true } : {}),
   });
 
   session.toolOutputs.delete(toolCallId);
@@ -1090,6 +1248,13 @@ function isRecoverableResumeError(message) {
     lower.includes("does not exist") ||
     lower.includes("no rollout") ||
     lower.includes("timed out")
+  );
+}
+
+export function shouldFallbackCodexResume(error, requireExactResume = false) {
+  return (
+    requireExactResume !== true &&
+    isRecoverableResumeError(error instanceof Error ? error.message : error)
   );
 }
 
@@ -1461,7 +1626,11 @@ function attachProcessListeners(
   });
 }
 
-export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-runtime" }) {
+export function createProviderHandlers({
+  emit: rawEmit,
+  runtimeMode = "provider-runtime",
+  spawnCodex = spawnCodexProcess,
+}) {
   const sessions = new Map();
   const permissionResolutions = createResolutionTracker();
   const diffProposalResolutions = createResolutionTracker();
@@ -1529,7 +1698,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
   );
 
   async function withTemporaryCodexSession(cwd, callback) {
-    const processHandle = spawnCodexProcess(cwd);
+    const processHandle = spawnCodex(cwd);
     const session = createCodexSessionRecord({
       sessionId: randomUUID(),
       cwd,
@@ -1564,12 +1733,14 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     }
   }
 
-  async function spawnSession(params) {
+  async function spawnOwnedSession(params) {
     const {
       agentType,
       cwd,
       localSessionId,
       resumeAgentSessionId,
+      requireExactResume,
+      suppressHistoryReplay,
       apiKey,
       mcpServers,
       approvalPolicy,
@@ -1604,6 +1775,11 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     if (agentType !== "codex") {
       throw new Error(`Unsupported browser-local agent type: ${agentType}`);
     }
+    if (requireExactResume === true && !resumeAgentSessionId) {
+      throw new Error(
+        "Codex exact resume requires a native agent session ID.",
+      );
+    }
 
     const sessionId = localSessionId ?? randomUUID();
     const resolvedMode = modeFromApprovalPolicy(approvalPolicy);
@@ -1612,7 +1788,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     let processHandle;
     try {
       if (apiKey) serenMcpProxy = await createSerenMcpOAuthProxy();
-      processHandle = spawnCodexProcess(cwd, {
+      processHandle = spawnCodex(cwd, {
         apiKey,
         mcpServers,
         serenMcpGatewayUrl: serenMcpProxy?.url,
@@ -1713,7 +1889,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
           );
           resumedExistingThread = true;
         } catch (error) {
-          if (!isRecoverableResumeError(error instanceof Error ? error.message : error)) {
+          if (!shouldFallbackCodexResume(error, requireExactResume)) {
             throw error;
           }
           threadResult = await sendRequest(
@@ -1736,6 +1912,14 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         threadResult?.thread?.id ??
         threadResult?.threadId ??
         session.agentSessionId;
+      if (
+        requireExactResume === true &&
+        session.agentSessionId !== resumeAgentSessionId
+      ) {
+        throw new Error(
+          "Codex resumed a different native session than the one requested.",
+        );
+      }
       session.codexVersion = threadResult?.thread?.cliVersion ?? session.codexVersion;
       const requestedModelId =
         getSelectedModelRecord(session)?.modelId ??
@@ -1768,7 +1952,11 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       session.serviceTier =
         session.serviceTier ?? normalizeServiceTier(threadResult?.serviceTier);
 
-      if (resumedExistingThread && session.agentSessionId) {
+      if (
+        resumedExistingThread &&
+        session.agentSessionId &&
+        suppressHistoryReplay !== true
+      ) {
         let replayThread = threadResult?.thread;
         if (!Array.isArray(replayThread?.turns)) {
           const threadRead = await sendRequest(
@@ -1819,7 +2007,19 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     }
   }
 
-  async function sendPrompt({ sessionId, prompt, context, origin = "desktop" }) {
+  const spawnSession = createSynchronousSpawnCoordinator({
+    spawn: spawnOwnedSession,
+    listSessions,
+    emit,
+  });
+
+  async function sendPrompt({
+    sessionId,
+    prompt,
+    context,
+    origin = "desktop",
+    onAccepted,
+  }) {
     const source = normalizeOrigin(origin);
     const session = sessions.get(sessionId);
     if (!session) {
@@ -1829,7 +2029,13 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
           text: prompt,
           origin: source,
         });
-        return pairedRuntime.sendPrompt({ sessionId, prompt, context, origin: source });
+        return pairedRuntime.sendPrompt({
+          sessionId,
+          prompt,
+          context,
+          origin: source,
+          onAccepted,
+        });
       }
       if (geminiRuntime.hasSession(sessionId)) {
         emit("provider://user-message", {
@@ -1837,7 +2043,13 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
           text: prompt,
           origin: source,
         });
-        return geminiRuntime.sendPrompt({ sessionId, prompt, context, origin: source });
+        return geminiRuntime.sendPrompt({
+          sessionId,
+          prompt,
+          context,
+          origin: source,
+          onAccepted,
+        });
       }
       if (grokRuntime.hasSession(sessionId)) {
         emit("provider://user-message", {
@@ -1845,7 +2057,13 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
           text: prompt,
           origin: source,
         });
-        return grokRuntime.sendPrompt({ sessionId, prompt, context, origin: source });
+        return grokRuntime.sendPrompt({
+          sessionId,
+          prompt,
+          context,
+          origin: source,
+          onAccepted,
+        });
       }
       if (lmStudioRuntime.hasSession(sessionId)) {
         emit("provider://user-message", {
@@ -1853,14 +2071,26 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
           text: prompt,
           origin: source,
         });
-        return lmStudioRuntime.sendPrompt({ sessionId, prompt, context, origin: source });
+        return lmStudioRuntime.sendPrompt({
+          sessionId,
+          prompt,
+          context,
+          origin: source,
+          onAccepted,
+        });
       }
       emit("provider://user-message", {
         sessionId,
         text: prompt,
         origin: source,
       });
-      return claudeRuntime.sendPrompt({ sessionId, prompt, context, origin: source });
+      return claudeRuntime.sendPrompt({
+        sessionId,
+        prompt,
+        context,
+        origin: source,
+        onAccepted,
+      });
     }
     if (session.currentPrompt) {
       throw new Error("Another prompt is already active for this session.");
@@ -1885,6 +2115,10 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         reject: rejectPromise,
       };
     });
+    // turn/start can fail before the success path reaches `await
+    // pendingPrompt`. Mark the internal turn promise handled immediately; the
+    // RPC-facing error still propagates through sendPrompt's catch below.
+    pendingPrompt.catch(() => {});
 
     try {
       const response = await sendRequest(
@@ -1898,16 +2132,63 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
       if (typeof turnId === "string") {
         session.activeTurnId = turnId;
       }
+      onAccepted?.();
 
       await pendingPrompt;
     } catch (error) {
-      session.status = "ready";
+      const promptWasActive = session.currentPrompt !== null;
       rejectCurrentPrompt(
         session,
         error instanceof Error ? error : new Error(String(error)),
       );
+      if (promptWasActive && sessions.get(sessionId) === session) {
+        session.status = "ready";
+        emit("provider://error", {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        emit(
+          "provider://session-status",
+          buildSessionStatus(session, "ready"),
+        );
+      }
       throw error;
     }
+  }
+
+  function submitPrompt(params) {
+    if (
+      pairedRuntime.hasSession(params?.sessionId) ||
+      lmStudioRuntime.hasSession(params?.sessionId)
+    ) {
+      return Promise.reject(
+        new Error(
+          "This provider does not expose an explicit prompt acceptance boundary.",
+        ),
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      let accepted = false;
+      const promptPromise = sendPrompt({
+        ...params,
+        onAccepted() {
+          if (accepted) return;
+          accepted = true;
+          resolve({
+            accepted: true,
+            sessionId: params?.sessionId,
+          });
+        },
+      });
+
+      // The submit RPC ends at acceptance, but the turn keeps running. Always
+      // observe its eventual failure so it cannot become an unhandled
+      // rejection; provider runtimes emit their own late error/status events.
+      void promptPromise.catch((error) => {
+        if (!accepted) reject(error);
+      });
+    });
   }
 
   async function cancelPrompt({ sessionId }) {
@@ -2013,6 +2294,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
         currentModelId: session.currentModelId,
         currentModeId: session.currentModeId,
         pendingPermissions: listPendingPermissions(session),
+        pid: session.process?.pid ?? null,
       })),
       ...(await claudeRuntime.listSessions()),
       ...(await geminiRuntime.listSessions()),
@@ -2041,7 +2323,10 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
     }
 
     session.currentModeId = mode === "ask" ? "ask" : "auto";
-    emit("provider://session-status", buildSessionStatus(session));
+    emit("provider://session-status", {
+      ...buildSessionStatus(session),
+      readinessUnchanged: true,
+    });
   }
 
   async function setOAuthRouting({ sessionId, routing }) {
@@ -2456,6 +2741,7 @@ export function createProviderHandlers({ emit: rawEmit, runtimeMode = "provider-
   return {
     spawnSession,
     sendPrompt,
+    submitPrompt,
     cancelPrompt,
     terminateSession,
     listSessions,
@@ -2486,6 +2772,7 @@ export {
   buildCodexThreadStartParams as _buildCodexThreadStartParams,
   buildCodexTurnStartParams as _buildCodexTurnStartParams,
   buildSessionStatus as _buildCodexSessionStatus,
+  replayThreadItems as _replayCodexThreadItems,
   codexServiceTierFromFastModeValue as _codexServiceTierFromFastModeValue,
   codexApprovalPolicy as _codexApprovalPolicy,
   modeFromApprovalPolicy as _modeFromApprovalPolicy,

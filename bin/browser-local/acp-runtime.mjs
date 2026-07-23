@@ -104,7 +104,13 @@ function createAcpSessionRecord({
 // JSON-RPC framing (newline-delimited JSON over stdio)
 // ============================================================================
 
-function sendRequest(session, method, params, timeoutMs = 30_000) {
+function sendRequest(
+  session,
+  method,
+  params,
+  timeoutMs = 30_000,
+  { onWritten } = {},
+) {
   const id = session.nextRequestId;
   session.nextRequestId += 1;
 
@@ -128,7 +134,31 @@ function sendRequest(session, method, params, timeoutMs = 30_000) {
       reject: rejectPromise,
     });
 
-    session.process.stdin.write(`${JSON.stringify(payload)}\n`);
+    const rejectWrite = (error) => {
+      session.pendingRequests.delete(String(id));
+      clearTimeout(timeout);
+      rejectPromise(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    };
+    try {
+      session.process.stdin.write(
+        `${JSON.stringify(payload)}\n`,
+        (error) => {
+          if (error) {
+            rejectWrite(error);
+            return;
+          }
+          try {
+            onWritten?.();
+          } catch (callbackError) {
+            rejectWrite(callbackError);
+          }
+        },
+      );
+    } catch (error) {
+      rejectWrite(error);
+    }
   });
 }
 
@@ -465,6 +495,20 @@ function buildSessionStatus(session, status = session.status) {
   };
 }
 
+async function applyAcpPermissionMode(session, mode, emit, request = sendRequest) {
+  await request(
+    session,
+    "session/set_mode",
+    { sessionId: session.agentSessionId, modeId: mode },
+    5_000,
+  );
+  session.currentModeId = mode;
+  emit("provider://session-status", {
+    ...buildSessionStatus(session),
+    readinessUnchanged: true,
+  });
+}
+
 function attachProcessListeners(emit, sessions, session) {
   const logPrefix =
     session.logPrefix ?? providerLogPrefix(session.agentType);
@@ -552,6 +596,7 @@ export function createAcpRuntime({
     const {
       cwd,
       localSessionId,
+      requireExactResume,
       apiKey,
       mcpServers,
       approvalPolicy,
@@ -560,6 +605,12 @@ export function createAcpRuntime({
       timeoutSecs,
       initialModelId,
     } = params;
+
+    if (requireExactResume === true) {
+      throw new Error(
+        `${adapter.agentName} does not support exact ACP session resume.`,
+      );
+    }
 
     const sessionId = localSessionId ?? randomUUID();
     const resolvedMode = adapter.resolveInitialMode({
@@ -715,7 +766,7 @@ export function createAcpRuntime({
     }
   }
 
-  async function sendPrompt({ sessionId, prompt, context }) {
+  async function sendPrompt({ sessionId, prompt, context, onAccepted }) {
     const session = sessions.get(sessionId);
     if (!session) {
       throw new Error(`No ${adapter.agentName} session: ${sessionId}`);
@@ -771,6 +822,7 @@ export function createAcpRuntime({
         },
         // Coding-agent turns can run for minutes on large tasks.
         10 * 60_000,
+        { onWritten: onAccepted },
       );
 
       const stopReason = response?.stopReason ?? "completed";
@@ -786,10 +838,17 @@ export function createAcpRuntime({
       await pendingPrompt;
     } catch (error) {
       session.status = "ready";
+      const promptWasActive = session.currentPrompt !== null;
       rejectCurrentPrompt(
         session,
         error instanceof Error ? error : new Error(String(error)),
       );
+      if (promptWasActive && sessions.get(sessionId) === session) {
+        emit("provider://error", {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       emit("provider://session-status", buildSessionStatus(session, "ready"));
       throw error;
     }
@@ -866,6 +925,7 @@ export function createAcpRuntime({
       currentModelId: session.currentModelId,
       currentModeId: session.currentModeId,
       pendingPermissions: listPendingPermissions(session),
+      pid: session.process?.pid ?? null,
     }));
   }
 
@@ -879,17 +939,10 @@ export function createAcpRuntime({
       throw new Error(`Unknown ${adapter.agentName} mode: ${mode}`);
     }
 
-    session.currentModeId = mode;
-    // ACP `session/set_mode` lets the agent know about the change too.
-    sendRequest(
-      session,
-      "session/set_mode",
-      { sessionId: session.agentSessionId, modeId: mode },
-      5_000,
-    ).catch(() => {
-      // Best-effort — older ACP agents may not support set_mode yet.
-    });
-    emit("provider://session-status", buildSessionStatus(session));
+    // A restored Happy session must not advertise a saved restrictive mode
+    // until the ACP agent has acknowledged it. Treat unsupported/rejected mode
+    // changes as failures so the restore owner can retire the permissive child.
+    await applyAcpPermissionMode(session, mode, emit);
   }
 
   async function setOAuthRouting({ sessionId, routing }) {
@@ -986,3 +1039,8 @@ export function createAcpRuntime({
     setModel,
   };
 }
+
+export {
+  applyAcpPermissionMode as _applyAcpPermissionMode,
+  sendRequest as _sendAcpRequest,
+};

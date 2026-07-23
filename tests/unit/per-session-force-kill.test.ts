@@ -34,6 +34,22 @@ describe("#2313 — runtime spawn response carries the agent child PID", () => {
     // Sanity: the claude spawn return (not just a comment) carries it.
     expect(claudeRuntimeSource).toContain("pid: session.process?.pid ?? null");
   });
+
+  it("provider reattachment snapshots preserve the child PID", () => {
+    for (const file of [
+      "bin/browser-local/claude-runtime.mjs",
+      "bin/browser-local/providers.mjs",
+      "bin/browser-local/acp-runtime.mjs",
+    ]) {
+      const src = readFileSync(resolve(file), "utf-8");
+      const listStart = src.indexOf("async function listSessions()");
+      const listBody = src.slice(listStart, listStart + 900);
+      expect(listStart, `${file} must expose listSessions`).toBeGreaterThan(0);
+      expect(listBody, `${file} must preserve pid during reattachment`).toContain(
+        "pid: session.process?.pid ?? null",
+      );
+    }
+  });
 });
 
 describe("#2313 — forceKillSession service is native-guarded and invokes the command", () => {

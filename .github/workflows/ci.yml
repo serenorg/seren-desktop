@@ -259,7 +259,9 @@ jobs:
         run: pnpm tauri build --config src-tauri/tauri.ci.json
       - name: Run Windows sandbox canaries
         if: matrix.os == 'windows-latest'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --test sandbox_windows
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --lib restricted_token_creation_succeeds
+          cargo test --manifest-path src-tauri/Cargo.toml --test sandbox_windows
       - name: Build (macOS)
         if: matrix.os == 'macos-latest'
         run: pnpm tauri build --config src-tauri/tauri.ci.json

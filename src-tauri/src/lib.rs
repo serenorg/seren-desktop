@@ -1117,6 +1117,8 @@ pub fn run() {
             commands::chat::create_agent_conversation,
             commands::chat::get_agent_conversation,
             commands::chat::set_agent_conversation_session_id,
+            commands::chat::claim_happy_provider_session_owner,
+            commands::chat::fence_happy_provider_session_archive,
             commands::chat::set_agent_conversation_title,
             commands::chat::set_agent_conversation_model_id,
             commands::chat::set_agent_conversation_permission_mode,

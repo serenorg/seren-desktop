@@ -78,18 +78,26 @@ describe("provider-to-neutral session event translation", () => {
       client: {
         call: async (method: string, params: Record<string, unknown>) => {
           calls.push([method, params]);
-          return [];
+          return method === "provider_submit_prompt"
+            ? { accepted: true, sessionId: params.sessionId }
+            : [];
         },
         subscribeNotifications: () => () => {},
       },
     });
 
-    await source.sendPrompt("session-1", "hello");
+    await expect(source.sendPrompt("session-1", "hello")).resolves.toEqual({
+      accepted: true,
+      sessionId: "session-1",
+    });
     await source.terminate("session-1");
     await source.respondToPermission("session-1", "request-1", "allow_once");
 
     expect(calls).toEqual([
-      ["provider_prompt", { sessionId: "session-1", prompt: "hello", origin: "remote" }],
+      [
+        "provider_submit_prompt",
+        { sessionId: "session-1", prompt: "hello", origin: "remote" },
+      ],
       ["provider_terminate", { sessionId: "session-1" }],
       [
         "provider_respond_to_permission",
@@ -100,6 +108,154 @@ describe("provider-to-neutral session event translation", () => {
           origin: "remote",
         },
       ],
+    ]);
+  });
+
+  it("fails closed when the provider does not explicitly accept a prompt", async () => {
+    const source = createProviderSource({
+      config: { machineName: "test-machine" },
+      client: {
+        call: async () => ({ accepted: false }),
+        subscribeNotifications: () => () => {},
+      },
+    });
+
+    await expect(source.sendPrompt("session-1", "hello")).rejects.toThrow(
+      /did not acknowledge prompt acceptance/,
+    );
+  });
+
+  it("marks exact restores and applies persisted permission mode before returning", async () => {
+    const calls: Array<[string, Record<string, unknown>]> = [];
+    const source = createProviderSource({
+      config: { machineName: "test-machine" },
+      client: {
+        call: async (method: string, params: Record<string, unknown>) => {
+          calls.push([method, params]);
+          if (method === "provider_spawn") {
+            return {
+              id: "local-session",
+              agentType: "codex",
+              cwd: "/project",
+              status: "ready",
+              agentSessionId: "native-session",
+              reused: true,
+              owned: false,
+            };
+          }
+          return null;
+        },
+        subscribeNotifications: () => () => {},
+      },
+    });
+
+    await expect(
+      source.spawn({
+        agentType: "codex",
+        cwd: "/project",
+        localSessionId: "local-session",
+        resumeAgentSessionId: "native-session",
+        initialModelId: "model-1",
+        permissionMode: "bypassPermissions",
+      }),
+    ).resolves.toMatchObject({
+      sessionId: "local-session",
+      agentSessionId: "native-session",
+      reused: true,
+      owned: false,
+    });
+
+    expect(calls).toEqual([
+      [
+        "provider_spawn",
+        expect.objectContaining({
+          localSessionId: "local-session",
+          resumeAgentSessionId: "native-session",
+          requireExactResume: true,
+          suppressHistoryReplay: true,
+          freshContextReset: false,
+          initialModelId: "model-1",
+        }),
+      ],
+      [
+        "provider_set_permission_mode",
+        {
+          sessionId: "local-session",
+          mode: "auto",
+        },
+      ],
+    ]);
+  });
+
+  it("requires a native ID from a fresh context-reset spawn", async () => {
+    const source = createProviderSource({
+      config: { machineName: "test-machine" },
+      client: {
+        call: async () => ({
+          id: "local-session",
+          agentType: "claude-code",
+          cwd: "/project",
+          status: "ready",
+          owned: true,
+        }),
+        subscribeNotifications: () => () => {},
+      },
+    });
+
+    await expect(
+      source.spawn({
+        agentType: "claude-code",
+        cwd: "/project",
+        localSessionId: "local-session",
+        freshContextReset: true,
+      }),
+    ).rejects.toThrow(/did not produce a native agent session ID/);
+  });
+
+  it("retires a reused ACP provider when saved permission mode is rejected", async () => {
+    const calls: Array<[string, Record<string, unknown>]> = [];
+    const source = createProviderSource({
+      config: { machineName: "test-machine" },
+      client: {
+        call: async (method: string, params: Record<string, unknown>) => {
+          calls.push([method, params]);
+          if (method === "provider_spawn") {
+            return {
+              id: "local-acp-session",
+              agentType: "gemini",
+              cwd: "/project",
+              status: "ready",
+              agentSessionId: "fresh-acp-native",
+              reused: true,
+              owned: false,
+            };
+          }
+          if (method === "provider_set_permission_mode") {
+            throw new Error("synthetic ACP set_mode rejection");
+          }
+          return null;
+        },
+        subscribeNotifications: () => () => {},
+      },
+    });
+
+    await expect(
+      source.spawn({
+        agentType: "gemini",
+        cwd: "/project",
+        localSessionId: "local-acp-session",
+        freshContextReset: true,
+        permissionMode: "plan",
+      }),
+    ).rejects.toThrow("synthetic ACP set_mode rejection");
+
+    expect(calls).toEqual([
+      ["provider_spawn", expect.objectContaining({ freshContextReset: true })],
+      [
+        "provider_set_permission_mode",
+        { sessionId: "local-acp-session", mode: "plan" },
+      ],
+      ["provider_terminate", { sessionId: "local-acp-session" }],
     ]);
   });
 });

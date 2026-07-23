@@ -2,15 +2,16 @@
 // ABOUTME: Handles CRUD operations for conversations and messages in SQLite.
 
 use crate::commands::provider_runtime::DERIVED_KIND_CASE_SQL;
+use crate::happy_bridge::HappyBridgeManager;
 use crate::services::conversation_index::{self, IndexableMessage, open_index_db};
 use crate::services::database::{
     DbPool, PersistedMessage, enqueue_sync_tombstone, init_db, mark_sync_upsert,
     save_message_record,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 fn load_indexable_message_meta(
     conn: &Connection,
@@ -102,7 +103,7 @@ pub(crate) fn delete_conversation_records(
     conn: &Connection,
     conversation_ids: &[String],
 ) -> rusqlite::Result<usize> {
-    let tx = conn.unchecked_transaction()?;
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
     let mut deleted = 0;
     for id in conversation_ids {
         let mut event_stmt =
@@ -222,6 +223,40 @@ pub struct AgentConversation {
     pub project_id: Option<String>,
     pub project_root: Option<String>,
     pub is_archived: bool,
+}
+
+/// Exact desktop record required to restore a provider process for a persisted
+/// Happy relay binding. This deliberately carries both stored root columns so
+/// the supervisor can canonicalize and compare them immediately before spawn
+/// and again before the atomic ownership claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HappyRestorationCandidate {
+    pub conversation_id: String,
+    pub title: String,
+    pub agent_type: String,
+    pub agent_session_id: Option<String>,
+    pub agent_cwd: String,
+    pub agent_model_id: Option<String>,
+    pub agent_permission_mode: Option<String>,
+    pub project_root: String,
+    pub is_archived: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HappyRestorationLookup {
+    NotHappyOrigin,
+    InvalidHappyOrigin { is_archived: bool },
+    Candidate(HappyRestorationCandidate),
+}
+
+/// Pre-key-store Happy conversation paired with the relay row recorded by the
+/// released desktop build. Startup uses this only to migrate rows that have no
+/// durable encrypted binding yet; exact lookup/claim still revalidates every
+/// field after the replacement relay row exists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LegacyHappyRestorationCandidate {
+    pub happy_session_id: String,
+    pub conversation: HappyRestorationCandidate,
 }
 
 /// Wire-format row for the unified `list_conversations` command. Carries
@@ -594,7 +629,7 @@ pub(crate) async fn create_agent_conversation_record(
         .or_else(|| agent_cwd.as_deref().and_then(normalize_project_root));
     let project_id = normalized_project_root.clone();
 
-    let convo = AgentConversation {
+    let mut convo = AgentConversation {
         id: id.clone(),
         title: title.clone(),
         created_at,
@@ -609,9 +644,22 @@ pub(crate) async fn create_agent_conversation_record(
         is_archived: false,
     };
 
-    run_db(app, move |conn| {
-        conn.execute(
-            "INSERT INTO conversations (
+    let persisted_convo = convo.clone();
+    let is_archived = run_db(app, move |conn| {
+        upsert_agent_conversation_in_db(conn, &persisted_convo)
+    })
+    .await?;
+    convo.is_archived = is_archived;
+
+    Ok(convo)
+}
+
+fn upsert_agent_conversation_in_db(
+    conn: &Connection,
+    convo: &AgentConversation,
+) -> rusqlite::Result<bool> {
+    conn.execute(
+        "INSERT INTO conversations (
                 id,
                 title,
                 created_at,
@@ -623,74 +671,714 @@ pub(crate) async fn create_agent_conversation_record(
                 agent_metadata,
                 project_id,
                 project_root
-            ) VALUES (?1, ?2, ?3, 0, 'agent', ?4, ?5, ?6, ?7, ?8, ?9)
+            ) VALUES (
+                ?1,
+                ?2,
+                ?3,
+                COALESCE((
+                    SELECT is_archived
+                    FROM happy_provider_session_lifecycle
+                    WHERE provider_session_id = ?1
+                ), 0),
+                'agent',
+                ?4,
+                ?5,
+                ?6,
+                ?7,
+                ?8,
+                ?9
+            )
              ON CONFLICT(id) DO UPDATE SET
-                is_archived = 0,
                 agent_type = excluded.agent_type,
                 agent_session_id = COALESCE(excluded.agent_session_id, conversations.agent_session_id),
                 agent_cwd = COALESCE(conversations.agent_cwd, excluded.agent_cwd),
                 agent_metadata = COALESCE(excluded.agent_metadata, conversations.agent_metadata),
                 project_id = COALESCE(conversations.project_id, excluded.project_id),
                 project_root = COALESCE(conversations.project_root, excluded.project_root)",
-            params![
-                id,
-                title,
-                created_at,
-                agent_type,
-                agent_session_id,
-                agent_cwd,
-                agent_metadata,
-                project_id,
-                normalized_project_root
-            ],
+        params![
+            convo.id,
+            convo.title,
+            convo.created_at,
+            convo.agent_type,
+            convo.agent_session_id,
+            convo.agent_cwd,
+            convo.agent_metadata,
+            convo.project_id,
+            convo.project_root,
+        ],
+    )?;
+    conn.execute(
+        "UPDATE happy_provider_session_lifecycle
+         SET conversation_id = COALESCE(conversation_id, ?1),
+             updated_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000
+         WHERE provider_session_id = ?1",
+        params![convo.id],
+    )?;
+    // Idempotent create/resume calls may arrive after another actor archives
+    // the row. They can refresh agent metadata, but only an explicit restore
+    // operation may make an archived conversation active again.
+    mark_sync_upsert(conn, "conversations", &convo.id)?;
+    conn.query_row(
+        "SELECT is_archived FROM conversations WHERE id = ?1",
+        params![convo.id],
+        |row| row.get(0),
+    )
+}
+
+pub(crate) async fn lookup_happy_restoration_candidate(
+    app: AppHandle,
+    provider_session_id: String,
+    happy_session_id: String,
+) -> Result<HappyRestorationLookup, String> {
+    run_db(app, move |conn| {
+        lookup_happy_restoration_candidate_in_db(conn, &provider_session_id, &happy_session_id)
+    })
+    .await
+}
+
+pub(crate) async fn list_legacy_happy_restoration_candidates(
+    app: AppHandle,
+) -> Result<Vec<LegacyHappyRestorationCandidate>, String> {
+    run_db(app, list_legacy_happy_restoration_candidates_in_db).await
+}
+
+fn list_legacy_happy_restoration_candidates_in_db(
+    conn: &Connection,
+) -> rusqlite::Result<Vec<LegacyHappyRestorationCandidate>> {
+    let sql = format!(
+        "SELECT c.id,
+                json_extract(c.agent_metadata, '$.happy_session_id')
+         FROM conversations c
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         LEFT JOIN happy_provider_session_lifecycle hpsl
+           ON hpsl.provider_session_id = c.id
+         WHERE c.is_archived = 0
+           AND hpsl.provider_session_id IS NULL
+           AND ({case}) = 'agent'
+           AND json_valid(c.agent_metadata)
+           AND json_type(c.agent_metadata, '$.happy_session_id') = 'text'
+         ORDER BY c.created_at ASC, c.id ASC",
+        case = DERIVED_KIND_CASE_SQL,
+    );
+    let rows = conn
+        .prepare(&sql)?
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut candidates = Vec::new();
+    for (conversation_id, happy_session_id) in rows {
+        if let HappyRestorationLookup::Candidate(conversation) =
+            lookup_happy_restoration_candidate_in_db(conn, &conversation_id, &happy_session_id)?
+            && !conversation.is_archived
+        {
+            candidates.push(LegacyHappyRestorationCandidate {
+                happy_session_id,
+                conversation,
+            });
+        }
+    }
+    Ok(candidates)
+}
+
+pub(crate) async fn migrate_happy_restoration_relay(
+    app: AppHandle,
+    conversation_id: String,
+    expected_happy_session_id: String,
+    replacement_happy_session_id: String,
+) -> Result<bool, String> {
+    run_db(app, move |conn| {
+        migrate_happy_restoration_relay_in_db(
+            conn,
+            &conversation_id,
+            &expected_happy_session_id,
+            &replacement_happy_session_id,
+        )
+    })
+    .await
+}
+
+fn migrate_happy_restoration_relay_in_db(
+    conn: &Connection,
+    conversation_id: &str,
+    expected_happy_session_id: &str,
+    replacement_happy_session_id: &str,
+) -> rusqlite::Result<bool> {
+    if replacement_happy_session_id.trim().is_empty() {
+        return Ok(false);
+    }
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let lookup =
+        lookup_happy_restoration_candidate_in_db(&tx, conversation_id, expected_happy_session_id)?;
+    let HappyRestorationLookup::Candidate(candidate) = lookup else {
+        return Ok(false);
+    };
+    if candidate.is_archived || candidate.conversation_id != conversation_id {
+        return Ok(false);
+    }
+
+    // A successful current bridge claim leaves a durable lifecycle row. Its
+    // presence distinguishes a genuinely retired current session (whose
+    // encrypted key binding is intentionally deleted) from a pre-lifecycle
+    // v3.72 row that still needs one-time migration. A matching ready binding
+    // can acknowledge the old relay id without rotating it.
+    let recorded_lifecycle = tx
+        .query_row(
+            "SELECT conversation_id, is_archived
+             FROM happy_provider_session_lifecycle
+             WHERE provider_session_id = ?1",
+            params![conversation_id],
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, bool>(1)?)),
+        )
+        .optional()?;
+    if replacement_happy_session_id == expected_happy_session_id {
+        if matches!(
+            recorded_lifecycle.as_ref(),
+            Some((Some(owner), _)) if owner != conversation_id
+        ) || matches!(
+            recorded_lifecycle.as_ref(),
+            Some((_, archived)) if *archived
+        ) {
+            return Ok(false);
+        }
+        tx.execute(
+            "INSERT INTO happy_provider_session_lifecycle
+                (provider_session_id, conversation_id, is_archived, updated_at)
+             VALUES (?1, ?1, 0, CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+             ON CONFLICT(provider_session_id) DO UPDATE SET
+                conversation_id = excluded.conversation_id,
+                updated_at = excluded.updated_at",
+            params![conversation_id],
         )?;
-        mark_sync_upsert(conn, "conversations", &id)?;
-        Ok(())
+        tx.commit()?;
+        return Ok(true);
+    }
+    // A lifecycle row appearing after candidate discovery means another
+    // current bridge already claimed or retired this provider. Never rotate
+    // its relay identity using a stale legacy-migration response.
+    if recorded_lifecycle.is_some() {
+        return Ok(false);
+    }
+
+    let replacement_owner_sql = format!(
+        "SELECT c.id
+         FROM conversations c
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         WHERE ({case}) = 'agent'
+           AND json_valid(c.agent_metadata)
+           AND json_extract(c.agent_metadata, '$.happy_session_id') = ?1
+         LIMIT 1",
+        case = DERIVED_KIND_CASE_SQL,
+    );
+    if tx
+        .query_row(
+            &replacement_owner_sql,
+            params![replacement_happy_session_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .is_some()
+    {
+        return Ok(false);
+    }
+
+    let original_metadata = tx.query_row(
+        "SELECT agent_metadata FROM conversations WHERE id = ?1 AND is_archived = 0",
+        params![conversation_id],
+        |row| row.get::<_, String>(0),
+    )?;
+    let mut metadata = match serde_json::from_str::<serde_json::Value>(&original_metadata) {
+        Ok(serde_json::Value::Object(object)) => object,
+        _ => return Ok(false),
+    };
+    if metadata
+        .get("happy_session_id")
+        .and_then(serde_json::Value::as_str)
+        != Some(expected_happy_session_id)
+    {
+        return Ok(false);
+    }
+    metadata.insert(
+        "happy_session_id".to_string(),
+        serde_json::Value::String(replacement_happy_session_id.to_string()),
+    );
+    let replacement_metadata = serde_json::to_string(&metadata)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+    let updated = tx.execute(
+        "UPDATE conversations
+         SET agent_metadata = ?1
+         WHERE id = ?2 AND is_archived = 0 AND agent_metadata = ?3",
+        params![replacement_metadata, conversation_id, original_metadata],
+    )?;
+    if updated != 1 {
+        return Ok(false);
+    }
+    tx.execute(
+        "INSERT INTO happy_provider_session_lifecycle
+            (provider_session_id, conversation_id, is_archived, updated_at)
+         VALUES (?1, ?1, 0, CAST(strftime('%s', 'now') AS INTEGER) * 1000)",
+        params![conversation_id],
+    )?;
+    mark_sync_upsert(&tx, "conversations", conversation_id)?;
+    tx.commit()?;
+    Ok(true)
+}
+
+fn lookup_happy_restoration_candidate_in_db(
+    conn: &Connection,
+    provider_session_id: &str,
+    happy_session_id: &str,
+) -> rusqlite::Result<HappyRestorationLookup> {
+    let sql = format!(
+        "SELECT c.id, c.title, c.agent_type, c.agent_session_id,
+                c.agent_cwd, c.agent_model_id, c.agent_permission_mode,
+                c.agent_metadata, c.project_root, c.is_archived,
+                ({case}) AS derived_kind
+         FROM conversations c
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         WHERE c.id = ?1
+         LIMIT 1",
+        case = DERIVED_KIND_CASE_SQL,
+    );
+    let row = conn
+        .query_row(&sql, params![provider_session_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, i32>(9)? != 0,
+                row.get::<_, String>(10)?,
+            ))
+        })
+        .optional()?;
+    let Some((
+        conversation_id,
+        title,
+        agent_type,
+        agent_session_id,
+        agent_cwd,
+        agent_model_id,
+        agent_permission_mode,
+        agent_metadata,
+        project_root,
+        is_archived,
+        derived_kind,
+    )) = row
+    else {
+        return Ok(HappyRestorationLookup::NotHappyOrigin);
+    };
+
+    // A local/provider id match is necessary but never sufficient. The
+    // Happy-origin marker written by `conversation_create` must parse and map
+    // to this exact relay row; otherwise a desktop-origin thread with the same
+    // UUID could be revived remotely.
+    let parsed_metadata = agent_metadata
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
+    let Some(happy_session_marker) = parsed_metadata
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+        .and_then(|object| object.get("happy_session_id"))
+    else {
+        return Ok(HappyRestorationLookup::NotHappyOrigin);
+    };
+    let Some(recorded_happy_session_id) = happy_session_marker
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(HappyRestorationLookup::InvalidHappyOrigin { is_archived });
+    };
+    if recorded_happy_session_id != happy_session_id || derived_kind != "agent" {
+        return Ok(HappyRestorationLookup::InvalidHappyOrigin { is_archived });
+    }
+
+    // A relay id is a one-to-one provenance key. Duplicate metadata is
+    // ambiguous even when one duplicate happens to share the requested local
+    // id, so fail closed rather than selecting a row with LIMIT 1.
+    let unique_sql = format!(
+        "SELECT c.id
+         FROM conversations c
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         WHERE ({case}) = 'agent'
+           AND json_valid(c.agent_metadata)
+           AND json_extract(
+                CASE WHEN json_valid(c.agent_metadata)
+                     THEN c.agent_metadata
+                     ELSE NULL END,
+                '$.happy_session_id'
+           ) = ?1
+         LIMIT 2",
+        case = DERIVED_KIND_CASE_SQL,
+    );
+    let mapped_ids = conn
+        .prepare(&unique_sql)?
+        .query_map(params![happy_session_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if mapped_ids.len() != 1 || mapped_ids[0] != provider_session_id {
+        return Ok(HappyRestorationLookup::InvalidHappyOrigin { is_archived });
+    }
+
+    let Some(agent_type) = agent_type.filter(|value| !value.trim().is_empty()) else {
+        return Ok(HappyRestorationLookup::InvalidHappyOrigin { is_archived });
+    };
+    let Some(agent_cwd) = agent_cwd.filter(|value| !value.trim().is_empty()) else {
+        return Ok(HappyRestorationLookup::InvalidHappyOrigin { is_archived });
+    };
+    let Some(project_root) = project_root.filter(|value| !value.trim().is_empty()) else {
+        return Ok(HappyRestorationLookup::InvalidHappyOrigin { is_archived });
+    };
+
+    Ok(HappyRestorationLookup::Candidate(
+        HappyRestorationCandidate {
+            conversation_id,
+            title,
+            agent_type,
+            agent_session_id,
+            agent_cwd,
+            agent_model_id,
+            agent_permission_mode,
+            project_root,
+            is_archived,
+        },
+    ))
+}
+
+pub(crate) async fn lookup_happy_session_id_by_conversation(
+    app: AppHandle,
+    conversation_id: String,
+) -> Result<Option<String>, String> {
+    run_db(app, move |conn| {
+        lookup_happy_session_id_by_conversation_in_db(conn, &conversation_id)
+    })
+    .await
+}
+
+fn lookup_happy_session_id_by_conversation_in_db(
+    conn: &Connection,
+    conversation_id: &str,
+) -> rusqlite::Result<Option<String>> {
+    let sql = format!(
+        "SELECT c.agent_metadata
+         FROM conversations c
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         WHERE c.id = ?1 AND ({case}) = 'agent'
+         LIMIT 1",
+        case = DERIVED_KIND_CASE_SQL,
+    );
+    let metadata = conn
+        .query_row(&sql, params![conversation_id], |row| {
+            row.get::<_, Option<String>>(0)
+        })
+        .optional()?
+        .flatten();
+    Ok(metadata.and_then(|raw| {
+        serde_json::from_str::<serde_json::Value>(&raw)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("happy_session_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+    }))
+}
+
+fn lookup_agent_conversation_owner_in_db(
+    conn: &Connection,
+    provider_session_id: &str,
+    agent_session_id: Option<&str>,
+) -> rusqlite::Result<(Option<String>, bool)> {
+    let lifecycle_sql = format!(
+        "SELECT c.id
+         FROM happy_provider_session_lifecycle hpsl
+         JOIN conversations c ON c.id = hpsl.conversation_id
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         WHERE hpsl.provider_session_id = ?1
+           AND ({case}) = 'agent'
+         LIMIT 1",
+        case = DERIVED_KIND_CASE_SQL,
+    );
+    if let Some(owner) = conn
+        .query_row(&lifecycle_sql, params![provider_session_id], |row| {
+            row.get::<_, String>(0)
+        })
+        .optional()?
+    {
+        return Ok((Some(owner), false));
+    }
+
+    let direct_sql = format!(
+        "SELECT c.id
+         FROM conversations c
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         WHERE c.id = ?1 AND ({case}) = 'agent'
+         LIMIT 1",
+        case = DERIVED_KIND_CASE_SQL,
+    );
+    if let Some(owner) = conn
+        .query_row(&direct_sql, params![provider_session_id], |row| {
+            row.get::<_, String>(0)
+        })
+        .optional()?
+    {
+        return Ok((Some(owner), false));
+    }
+
+    let Some(agent_session_id) = agent_session_id else {
+        return Ok((None, false));
+    };
+    let fallback_sql = format!(
+        "SELECT c.id
+         FROM conversations c
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         WHERE c.agent_session_id = ?1 AND ({case}) = 'agent'
+         LIMIT 2",
+        case = DERIVED_KIND_CASE_SQL,
+    );
+    let mut statement = conn.prepare(&fallback_sql)?;
+    let owners = statement
+        .query_map(params![agent_session_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((owners.first().cloned(), owners.len() > 1))
+}
+
+fn claim_happy_provider_session_owner_in_db(
+    conn: &Connection,
+    conversation_id: &str,
+    provider_session_id: &str,
+    agent_session_id: Option<&str>,
+) -> rusqlite::Result<bool> {
+    claim_happy_provider_session_owner_with_provenance_in_db(
+        conn,
+        conversation_id,
+        provider_session_id,
+        agent_session_id,
+        None,
+    )?
+    .ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
+/// Identity captured by the pre-spawn lookup and echoed by the bridge. Because
+/// this struct is itself optional, a `None` native session id is an exact
+/// expected-absence assertion rather than a wildcard.
+struct ExpectedHappyRestoration<'a> {
+    happy_session_id: &'a str,
+    agent_type: &'a str,
+    agent_session_id: Option<&'a str>,
+    agent_permission_mode: Option<&'a str>,
+    agent_cwd: &'a str,
+    project_root: &'a str,
+}
+
+fn claim_happy_provider_session_owner_with_provenance_in_db(
+    conn: &Connection,
+    conversation_id: &str,
+    provider_session_id: &str,
+    agent_session_id: Option<&str>,
+    expected: Option<ExpectedHappyRestoration<'_>>,
+) -> rusqlite::Result<Option<bool>> {
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    if let Some(expected) = expected {
+        if conversation_id != provider_session_id {
+            return Ok(None);
+        }
+        let exact = lookup_happy_restoration_candidate_in_db(
+            &tx,
+            provider_session_id,
+            expected.happy_session_id,
+        )?;
+        let HappyRestorationLookup::Candidate(candidate) = exact else {
+            return Ok(None);
+        };
+        if candidate.agent_type != expected.agent_type
+            || candidate.agent_session_id.as_deref() != expected.agent_session_id
+            || candidate.agent_permission_mode.as_deref() != expected.agent_permission_mode
+            || candidate.agent_cwd != expected.agent_cwd
+            || candidate.project_root != expected.project_root
+        {
+            return Ok(None);
+        }
+    } else {
+        let sql = format!(
+            "SELECT 1
+             FROM conversations c
+             LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+             WHERE c.id = ?1 AND ({case}) = 'agent'
+             LIMIT 1",
+            case = DERIVED_KIND_CASE_SQL,
+        );
+        if tx
+            .query_row(&sql, params![conversation_id], |_| Ok(()))
+            .optional()?
+            .is_none()
+        {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+    }
+
+    tx.execute(
+        "INSERT INTO happy_provider_session_lifecycle
+            (provider_session_id, conversation_id, is_archived, updated_at)
+         VALUES (?1, ?2, 0, CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+         ON CONFLICT(provider_session_id) DO UPDATE SET
+            conversation_id = excluded.conversation_id,
+            updated_at = excluded.updated_at",
+        params![provider_session_id, conversation_id],
+    )?;
+    let archived = tx.query_row(
+        "SELECT hpsl.is_archived OR c.is_archived
+         FROM happy_provider_session_lifecycle hpsl
+         JOIN conversations c ON c.id = hpsl.conversation_id
+         WHERE hpsl.provider_session_id = ?1",
+        params![provider_session_id],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if archived {
+        tx.execute(
+            "UPDATE happy_provider_session_lifecycle
+             SET is_archived = 1
+             WHERE provider_session_id = ?1",
+            params![provider_session_id],
+        )?;
+        archive_agent_conversation_in_db(&tx, conversation_id)?;
+    } else if let Some(agent_session_id) = agent_session_id {
+        if !set_agent_conversation_session_id_in_db(&tx, conversation_id, agent_session_id)? {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+    }
+    tx.commit()?;
+    Ok(Some(archived))
+}
+
+/// Persist an exact provider-session archive fence without emitting another
+/// frontend archive event. The Happy event listener uses this for sibling
+/// sessions before attempting process teardown, so a transient provider RPC
+/// failure cannot let the sibling reattach or promote later.
+#[tauri::command]
+pub async fn fence_happy_provider_session_archive(
+    app: AppHandle,
+    provider_session_id: String,
+) -> Result<(), String> {
+    uuid::Uuid::parse_str(&provider_session_id)
+        .map_err(|_| "providerSessionId must be a UUID".to_string())?;
+    let persisted_provider_session_id = provider_session_id.clone();
+    run_db(app.clone(), move |conn| {
+        archive_happy_provider_session_in_db(conn, &persisted_provider_session_id).map(|_| ())
     })
     .await?;
 
-    Ok(convo)
+    // The SQLite row is the crash-safe source of truth. Also notify the live
+    // bridge so it can mark its encrypted relay binding retiring immediately;
+    // startup reconciliation consults the SQLite fence if this write races a
+    // bridge crash.
+    if let Some(manager) = app.try_state::<HappyBridgeManager>()
+        && manager.process_exists().await
+        && let Err(error) = manager.retire_provider_session(&provider_session_id).await
+    {
+        log::warn!("[HappyBridge] Failed to notify live bridge of provider retirement: {error}");
+    }
+    Ok(())
 }
 
-pub(crate) async fn lookup_agent_conversation_by_happy_session(
-    app: AppHandle,
-    happy_session_id: String,
-) -> Result<Option<AgentConversation>, String> {
-    run_db(app, move |conn| {
-        let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, agent_type, agent_session_id,
-                    agent_cwd, agent_model_id, agent_permission_mode,
-                    agent_metadata, project_id, project_root, is_archived
-             FROM conversations
-             WHERE kind = 'agent'
-               AND json_extract(agent_metadata, '$.happy_session_id') = ?1
+fn archive_happy_provider_session_in_db(
+    conn: &Connection,
+    provider_session_id: &str,
+) -> rusqlite::Result<Option<String>> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "INSERT INTO happy_provider_session_lifecycle
+            (provider_session_id, conversation_id, is_archived, updated_at)
+         VALUES (?1, NULL, 1, CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+         ON CONFLICT(provider_session_id) DO UPDATE SET
+            is_archived = 1,
+            updated_at = excluded.updated_at",
+        params![provider_session_id],
+    )?;
+
+    let (mut owner, _) = lookup_agent_conversation_owner_in_db(&tx, provider_session_id, None)?;
+    if owner.is_none() {
+        let direct_sql = format!(
+            "SELECT c.id
+             FROM conversations c
+             LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+             WHERE c.id = ?1 AND ({case}) = 'agent'
              LIMIT 1",
-        )?;
-
-        let conversation = stmt.query_row(params![happy_session_id], |row| {
-            Ok(AgentConversation {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                created_at: row.get(2)?,
-                agent_type: row.get(3)?,
-                agent_session_id: row.get(4)?,
-                agent_cwd: row.get(5)?,
-                agent_model_id: row.get(6)?,
-                agent_permission_mode: row.get(7)?,
-                agent_metadata: row.get(8)?,
-                project_id: row.get(9)?,
-                project_root: row.get(10)?,
-                is_archived: row.get::<_, i32>(11)? != 0,
+            case = DERIVED_KIND_CASE_SQL,
+        );
+        owner = tx
+            .query_row(&direct_sql, params![provider_session_id], |row| {
+                row.get::<_, String>(0)
             })
-        });
+            .optional()?;
+    }
+    let Some(conversation_id) = owner else {
+        tx.commit()?;
+        return Ok(None);
+    };
+    tx.execute(
+        "UPDATE happy_provider_session_lifecycle
+         SET conversation_id = ?2
+         WHERE provider_session_id = ?1",
+        params![provider_session_id, conversation_id],
+    )?;
+    let archived = archive_agent_conversation_in_db(&tx, &conversation_id)?;
+    tx.commit()?;
+    if archived {
+        Ok(Some(conversation_id))
+    } else {
+        Ok(None)
+    }
+}
 
-        match conversation {
-            Ok(conversation) => Ok(Some(conversation)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(error) => Err(error),
-        }
+fn is_happy_provider_session_archived_in_db(
+    conn: &Connection,
+    provider_session_id: &str,
+) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT is_archived
+         FROM happy_provider_session_lifecycle
+         WHERE provider_session_id = ?1",
+        params![provider_session_id],
+        |row| row.get::<_, bool>(0),
+    )
+    .optional()
+    .map(|archived| archived.unwrap_or(false))
+}
+
+pub(crate) async fn is_happy_provider_session_archived(
+    app: AppHandle,
+    provider_session_id: String,
+) -> Result<bool, String> {
+    run_db(app, move |conn| {
+        is_happy_provider_session_archived_in_db(conn, &provider_session_id)
     })
     .await
+}
+
+pub(crate) async fn lookup_agent_conversation_owner(
+    app: AppHandle,
+    provider_session_id: String,
+    agent_session_id: Option<String>,
+) -> Result<Option<String>, String> {
+    let (owner, ambiguous) = run_db(app, move |conn| {
+        lookup_agent_conversation_owner_in_db(
+            conn,
+            &provider_session_id,
+            agent_session_id.as_deref(),
+        )
+    })
+    .await?;
+    if ambiguous {
+        return Err("provider session maps to multiple agent conversations".to_string());
+    }
+    Ok(owner)
 }
 
 #[tauri::command]
@@ -749,14 +1437,140 @@ pub async fn set_agent_conversation_session_id(
     agent_session_id: String,
 ) -> Result<(), String> {
     run_db(app, move |conn| {
-        conn.execute(
-            "UPDATE conversations SET agent_session_id = ?1 WHERE id = ?2 AND kind = 'agent'",
-            params![agent_session_id, id],
-        )?;
-        mark_sync_upsert(conn, "conversations", &id)?;
+        if !set_agent_conversation_session_id_in_db(conn, &id, &agent_session_id)? {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
         Ok(())
     })
     .await
+}
+
+fn set_agent_conversation_session_id_in_db(
+    conn: &Connection,
+    id: &str,
+    agent_session_id: &str,
+) -> rusqlite::Result<bool> {
+    let sql = format!(
+        "SELECT 1
+         FROM conversations c
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         WHERE c.id = ?1
+           AND ({case}) = 'agent'
+         LIMIT 1",
+        case = DERIVED_KIND_CASE_SQL,
+    );
+    let is_agent = conn
+        .query_row(&sql, params![id], |_| Ok(()))
+        .optional()?
+        .is_some();
+    if !is_agent {
+        return Ok(false);
+    }
+    if conn.execute(
+        "UPDATE conversations SET agent_session_id = ?1 WHERE id = ?2",
+        params![agent_session_id, id],
+    )? != 1
+    {
+        return Ok(false);
+    }
+    mark_sync_upsert(conn, "conversations", id)?;
+    Ok(true)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HappyProviderSessionOwnerClaim {
+    pub(crate) archived: bool,
+}
+
+#[tauri::command]
+pub async fn claim_happy_provider_session_owner(
+    app: AppHandle,
+    conversation_id: String,
+    provider_session_id: String,
+    agent_session_id: Option<String>,
+) -> Result<HappyProviderSessionOwnerClaim, String> {
+    uuid::Uuid::parse_str(&conversation_id)
+        .map_err(|_| "conversation_id must be a UUID".to_string())?;
+    uuid::Uuid::parse_str(&provider_session_id)
+        .map_err(|_| "provider_session_id must be a UUID".to_string())?;
+    let index_id = conversation_id.clone();
+    let target_provider_session_id = provider_session_id.clone();
+    let archived = run_db(app.clone(), move |conn| {
+        claim_happy_provider_session_owner_in_db(
+            conn,
+            &conversation_id,
+            &provider_session_id,
+            agent_session_id.as_deref(),
+        )
+    })
+    .await?;
+    if archived {
+        refresh_conversation_index_meta_best_effort(
+            app.clone(),
+            index_id.clone(),
+            None,
+            Some(true),
+        )
+        .await;
+        emit_happy_provider_archive_event(&app, Some(&index_id), &target_provider_session_id);
+    }
+    Ok(HappyProviderSessionOwnerClaim { archived })
+}
+
+pub(crate) async fn claim_restored_happy_provider_session_owner(
+    app: AppHandle,
+    conversation_id: String,
+    provider_session_id: String,
+    happy_session_id: String,
+    agent_session_id: Option<String>,
+    expected_agent_type: String,
+    expected_agent_session_id: Option<String>,
+    expected_agent_permission_mode: Option<String>,
+    expected_agent_cwd: String,
+    expected_project_root: String,
+) -> Result<HappyProviderSessionOwnerClaim, String> {
+    uuid::Uuid::parse_str(&conversation_id)
+        .map_err(|_| "conversationId must be a UUID".to_string())?;
+    uuid::Uuid::parse_str(&provider_session_id)
+        .map_err(|_| "providerSessionId must be a UUID".to_string())?;
+    if conversation_id != provider_session_id || happy_session_id.trim().is_empty() {
+        return Err("Happy restoration claim was rejected".to_string());
+    }
+
+    let index_id = conversation_id.clone();
+    let target_provider_session_id = provider_session_id.clone();
+    let claimed = run_db(app.clone(), move |conn| {
+        claim_happy_provider_session_owner_with_provenance_in_db(
+            conn,
+            &conversation_id,
+            &provider_session_id,
+            agent_session_id.as_deref(),
+            Some(ExpectedHappyRestoration {
+                happy_session_id: &happy_session_id,
+                agent_type: &expected_agent_type,
+                agent_session_id: expected_agent_session_id.as_deref(),
+                agent_permission_mode: expected_agent_permission_mode.as_deref(),
+                agent_cwd: &expected_agent_cwd,
+                project_root: &expected_project_root,
+            }),
+        )
+    })
+    .await?;
+    let Some(archived) = claimed else {
+        return Err("Happy restoration claim was rejected".to_string());
+    };
+    if archived {
+        refresh_conversation_index_meta_best_effort(
+            app.clone(),
+            index_id.clone(),
+            None,
+            Some(true),
+        )
+        .await;
+        emit_happy_provider_archive_event(&app, Some(&index_id), &target_provider_session_id);
+    }
+    Ok(HappyProviderSessionOwnerClaim { archived })
 }
 
 #[tauri::command]
@@ -927,18 +1741,134 @@ pub async fn set_agent_conversation_metadata(
 
 #[tauri::command]
 pub async fn archive_agent_conversation(app: AppHandle, id: String) -> Result<(), String> {
-    let index_id = id.clone();
-    run_db(app.clone(), move |conn| {
-        conn.execute(
-            "UPDATE conversations SET is_archived = 1 WHERE id = ?1 AND kind = 'agent'",
-            params![id],
-        )?;
-        mark_sync_upsert(conn, "conversations", &id)?;
-        Ok(())
+    archive_agent_conversation_with_origin(app, id, AgentArchiveOrigin::Desktop, None).await
+}
+
+pub(crate) async fn archive_agent_conversation_from_happy(
+    app: AppHandle,
+    id: String,
+    provider_session_id: String,
+) -> Result<(), String> {
+    archive_agent_conversation_with_origin(
+        app,
+        id,
+        AgentArchiveOrigin::Happy,
+        Some(provider_session_id),
+    )
+    .await
+}
+
+pub(crate) async fn archive_happy_provider_session_from_happy(
+    app: AppHandle,
+    provider_session_id: String,
+) -> Result<Option<String>, String> {
+    let target_provider_session_id = provider_session_id.clone();
+    let conversation_id = run_db(app.clone(), move |conn| {
+        archive_happy_provider_session_in_db(conn, &provider_session_id)
     })
     .await?;
-    refresh_conversation_index_meta_best_effort(app, index_id, None, Some(true)).await;
+    if let Some(conversation_id) = conversation_id.as_deref() {
+        refresh_conversation_index_meta_best_effort(
+            app.clone(),
+            conversation_id.to_string(),
+            None,
+            Some(true),
+        )
+        .await;
+    }
+    emit_happy_provider_archive_event(
+        &app,
+        conversation_id.as_deref(),
+        &target_provider_session_id,
+    );
+    Ok(conversation_id)
+}
+
+#[derive(Clone, Copy)]
+enum AgentArchiveOrigin {
+    Desktop,
+    Happy,
+}
+
+async fn archive_agent_conversation_with_origin(
+    app: AppHandle,
+    id: String,
+    origin: AgentArchiveOrigin,
+    provider_session_id: Option<String>,
+) -> Result<(), String> {
+    let index_id = id.clone();
+    let archived = run_db(app.clone(), move |conn| {
+        archive_agent_conversation_in_db(conn, &id)
+    })
+    .await?;
+    if !archived {
+        return Err("agent conversation was not found".to_string());
+    }
+    refresh_conversation_index_meta_best_effort(app.clone(), index_id.clone(), None, Some(true))
+        .await;
+    emit_happy_archive_event(&app, origin, &index_id, provider_session_id.as_deref());
     Ok(())
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HappyConversationArchivedEvent<'a> {
+    conversation_id: Option<&'a str>,
+    target_provider_session_id: &'a str,
+}
+
+pub(crate) fn emit_happy_provider_archive_event<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    conversation_id: Option<&str>,
+    target_provider_session_id: &str,
+) {
+    let _ = app.emit(
+        "happy-bridge://conversation-archived",
+        HappyConversationArchivedEvent {
+            conversation_id,
+            target_provider_session_id,
+        },
+    );
+}
+
+fn emit_happy_archive_event<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    origin: AgentArchiveOrigin,
+    conversation_id: &str,
+    provider_session_id: Option<&str>,
+) {
+    if let (AgentArchiveOrigin::Happy, Some(target_provider_session_id)) =
+        (origin, provider_session_id)
+    {
+        emit_happy_provider_archive_event(app, Some(conversation_id), target_provider_session_id);
+    }
+}
+
+fn archive_agent_conversation_in_db(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
+    let sql = format!(
+        "SELECT ({case}) = 'agent'
+         FROM conversations c
+         LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
+         WHERE c.id = ?1
+         LIMIT 1",
+        case = DERIVED_KIND_CASE_SQL,
+    );
+    let is_agent = conn
+        .query_row(&sql, params![id], |row| row.get::<_, bool>(0))
+        .optional()?
+        .unwrap_or(false);
+    if !is_agent {
+        return Ok(false);
+    }
+    let changed = conn.execute(
+        "UPDATE conversations SET is_archived = 1 WHERE id = ?1",
+        params![id],
+    )?;
+    if changed != 1 {
+        return Ok(false);
+    }
+    mark_sync_upsert(conn, "conversations", id)?;
+    Ok(true)
 }
 
 // ============================================================================
@@ -1132,14 +2062,733 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::DERIVED_KIND_CASE_SQL;
+    use super::{
+        AgentArchiveOrigin, AgentConversation, DERIVED_KIND_CASE_SQL, ExpectedHappyRestoration,
+        HappyRestorationCandidate, HappyRestorationLookup, archive_agent_conversation_in_db,
+        archive_happy_provider_session_in_db, claim_happy_provider_session_owner_in_db,
+        claim_happy_provider_session_owner_with_provenance_in_db, emit_happy_archive_event,
+        emit_happy_provider_archive_event, is_happy_provider_session_archived_in_db,
+        list_legacy_happy_restoration_candidates_in_db, lookup_agent_conversation_owner_in_db,
+        lookup_happy_restoration_candidate_in_db, lookup_happy_session_id_by_conversation_in_db,
+        migrate_happy_restoration_relay_in_db, set_agent_conversation_session_id_in_db,
+        upsert_agent_conversation_in_db,
+    };
     use crate::services::database::setup_schema;
     use rusqlite::{Connection, params};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use tauri::Listener;
 
     fn open() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         setup_schema(&conn).unwrap();
         conn
+    }
+
+    fn insert_happy_restoration_candidate(conn: &Connection, id: &str, happy_session_id: &str) {
+        conn.execute(
+            "INSERT INTO conversations (
+                id, title, created_at, kind, agent_type, agent_session_id,
+                agent_cwd, agent_model_id, agent_permission_mode,
+                agent_metadata, project_root
+             ) VALUES (
+                ?1, 'Remote thread', 1000, 'agent', 'codex', 'native-before',
+                '/synthetic/consented', 'saved-model', 'saved-permission',
+                ?2, '/synthetic/consented'
+             )",
+            params![
+                id,
+                serde_json::json!({ "happy_session_id": happy_session_id }).to_string(),
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn happy_restoration_lookup_returns_exact_saved_resume_fields() {
+        let conn = open();
+        insert_happy_restoration_candidate(&conn, "provider-local-id", "relay-id");
+
+        assert_eq!(
+            lookup_happy_restoration_candidate_in_db(&conn, "provider-local-id", "relay-id",)
+                .unwrap(),
+            HappyRestorationLookup::Candidate(HappyRestorationCandidate {
+                conversation_id: "provider-local-id".to_string(),
+                title: "Remote thread".to_string(),
+                agent_type: "codex".to_string(),
+                agent_session_id: Some("native-before".to_string()),
+                agent_cwd: "/synthetic/consented".to_string(),
+                agent_model_id: Some("saved-model".to_string()),
+                agent_permission_mode: Some("saved-permission".to_string()),
+                project_root: "/synthetic/consented".to_string(),
+                is_archived: false,
+            }),
+        );
+    }
+
+    #[test]
+    fn legacy_happy_candidates_are_exact_unarchived_rows_and_rebind_atomically() {
+        let conn = open();
+        insert_happy_restoration_candidate(&conn, "provider-local-id", "legacy-relay-id");
+
+        let candidates = list_legacy_happy_restoration_candidates_in_db(&conn).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].happy_session_id, "legacy-relay-id");
+        assert_eq!(
+            candidates[0].conversation.conversation_id,
+            "provider-local-id"
+        );
+
+        assert!(
+            migrate_happy_restoration_relay_in_db(
+                &conn,
+                "provider-local-id",
+                "legacy-relay-id",
+                "replacement-relay-id",
+            )
+            .unwrap()
+        );
+        assert!(matches!(
+            lookup_happy_restoration_candidate_in_db(
+                &conn,
+                "provider-local-id",
+                "replacement-relay-id",
+            )
+            .unwrap(),
+            HappyRestorationLookup::Candidate(_)
+        ));
+        assert!(
+            list_legacy_happy_restoration_candidates_in_db(&conn)
+                .unwrap()
+                .is_empty(),
+            "the committed migration lifecycle must exclude this current row",
+        );
+        assert!(
+            !migrate_happy_restoration_relay_in_db(
+                &conn,
+                "provider-local-id",
+                "legacy-relay-id",
+                "stale-replacement",
+            )
+            .unwrap(),
+            "a stale migration must not overwrite the committed relay marker",
+        );
+
+        conn.execute(
+            "UPDATE conversations SET is_archived = 1 WHERE id = 'provider-local-id'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            list_legacy_happy_restoration_candidates_in_db(&conn)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn matching_ready_binding_marks_legacy_row_as_current_without_rotating_it() {
+        let conn = open();
+        insert_happy_restoration_candidate(&conn, "provider-local-id", "relay-id");
+
+        assert!(
+            migrate_happy_restoration_relay_in_db(
+                &conn,
+                "provider-local-id",
+                "relay-id",
+                "relay-id",
+            )
+            .unwrap()
+        );
+        assert!(
+            list_legacy_happy_restoration_candidates_in_db(&conn)
+                .unwrap()
+                .is_empty(),
+            "a current row must not become a migration candidate after its key is retired",
+        );
+        assert!(matches!(
+            lookup_happy_restoration_candidate_in_db(&conn, "provider-local-id", "relay-id",)
+                .unwrap(),
+            HappyRestorationLookup::Candidate(_)
+        ));
+        assert!(
+            !migrate_happy_restoration_relay_in_db(
+                &conn,
+                "provider-local-id",
+                "relay-id",
+                "stale-rotation",
+            )
+            .unwrap(),
+            "a lifecycle claim appearing after discovery must reject stale rotation",
+        );
+    }
+
+    #[test]
+    fn happy_restoration_lookup_never_falls_back_and_rejects_ambiguous_provenance() {
+        let conn = open();
+        insert_happy_restoration_candidate(&conn, "provider-local-id", "relay-id");
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type)
+             VALUES ('desktop-origin', 'Desktop thread', 1001, 'agent', 'codex')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO conversations (
+                id, title, created_at, kind, agent_type, agent_cwd,
+                agent_metadata, project_root
+             ) VALUES (
+                'invalid-marker', 'Invalid marker', 1002, 'agent', 'codex',
+                '/synthetic/consented', '{\"happy_session_id\":42}',
+                '/synthetic/consented'
+             )",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(
+            lookup_happy_restoration_candidate_in_db(&conn, "missing-local-id", "relay-id")
+                .unwrap(),
+            HappyRestorationLookup::NotHappyOrigin,
+            "a matching relay id must never substitute for the exact local/provider id",
+        );
+        assert_eq!(
+            lookup_happy_restoration_candidate_in_db(&conn, "desktop-origin", "relay-id").unwrap(),
+            HappyRestorationLookup::NotHappyOrigin,
+            "a desktop-origin row is not remotely restorable without the Happy marker",
+        );
+        assert_eq!(
+            lookup_happy_restoration_candidate_in_db(&conn, "invalid-marker", "relay-id").unwrap(),
+            HappyRestorationLookup::InvalidHappyOrigin { is_archived: false },
+            "a present but invalid Happy marker is not a desktop-origin row",
+        );
+        assert_eq!(
+            lookup_happy_restoration_candidate_in_db(
+                &conn,
+                "provider-local-id",
+                "different-relay-id",
+            )
+            .unwrap(),
+            HappyRestorationLookup::InvalidHappyOrigin { is_archived: false },
+        );
+
+        insert_happy_restoration_candidate(&conn, "duplicate-local-id", "relay-id");
+        assert_eq!(
+            lookup_happy_restoration_candidate_in_db(&conn, "provider-local-id", "relay-id",)
+                .unwrap(),
+            HappyRestorationLookup::InvalidHappyOrigin { is_archived: false },
+            "duplicate relay metadata is ambiguous and must fail closed",
+        );
+    }
+
+    #[test]
+    fn restored_happy_claim_revalidates_provenance_and_preserves_archive_wins() {
+        let conn = open();
+        insert_happy_restoration_candidate(&conn, "provider-local-id", "relay-id");
+
+        assert_eq!(
+            claim_happy_provider_session_owner_with_provenance_in_db(
+                &conn,
+                "provider-local-id",
+                "provider-local-id",
+                Some("native-rejected"),
+                Some(ExpectedHappyRestoration {
+                    happy_session_id: "different-relay-id",
+                    agent_type: "codex",
+                    agent_session_id: Some("native-before"),
+                    agent_permission_mode: Some("saved-permission"),
+                    agent_cwd: "/synthetic/consented",
+                    project_root: "/synthetic/consented",
+                }),
+            )
+            .unwrap(),
+            None,
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM happy_provider_session_lifecycle",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0,
+            "a rejected restoration cannot claim lifecycle ownership",
+        );
+
+        assert_eq!(
+            claim_happy_provider_session_owner_with_provenance_in_db(
+                &conn,
+                "provider-local-id",
+                "provider-local-id",
+                Some("native-restored"),
+                Some(ExpectedHappyRestoration {
+                    happy_session_id: "relay-id",
+                    agent_type: "codex",
+                    agent_session_id: Some("native-before"),
+                    agent_permission_mode: Some("saved-permission"),
+                    agent_cwd: "/synthetic/consented",
+                    project_root: "/synthetic/consented",
+                }),
+            )
+            .unwrap(),
+            Some(false),
+        );
+        assert_eq!(
+            archive_happy_provider_session_in_db(&conn, "provider-local-id").unwrap(),
+            Some("provider-local-id".to_string()),
+        );
+        assert_eq!(
+            claim_happy_provider_session_owner_with_provenance_in_db(
+                &conn,
+                "provider-local-id",
+                "provider-local-id",
+                Some("native-too-late"),
+                Some(ExpectedHappyRestoration {
+                    happy_session_id: "relay-id",
+                    agent_type: "codex",
+                    agent_session_id: Some("native-restored"),
+                    agent_permission_mode: Some("saved-permission"),
+                    agent_cwd: "/synthetic/consented",
+                    project_root: "/synthetic/consented",
+                }),
+            )
+            .unwrap(),
+            Some(true),
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT is_archived, agent_session_id
+                 FROM conversations
+                 WHERE id = 'provider-local-id'",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .unwrap(),
+            (1, Some("native-restored".to_string())),
+            "the archive fence wins and a late claim cannot install its native session id",
+        );
+    }
+
+    #[test]
+    fn restored_happy_claim_rejects_concurrent_agent_identity_changes() {
+        let conn = open();
+        insert_happy_restoration_candidate(&conn, "type-changed", "type-relay");
+        conn.execute(
+            "UPDATE conversations SET agent_type = 'claude' WHERE id = 'type-changed'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            claim_happy_provider_session_owner_with_provenance_in_db(
+                &conn,
+                "type-changed",
+                "type-changed",
+                Some("native-after-spawn"),
+                Some(ExpectedHappyRestoration {
+                    happy_session_id: "type-relay",
+                    agent_type: "codex",
+                    agent_session_id: Some("native-before"),
+                    agent_permission_mode: Some("saved-permission"),
+                    agent_cwd: "/synthetic/consented",
+                    project_root: "/synthetic/consented",
+                }),
+            )
+            .unwrap(),
+            None,
+            "a provider-kind mutation after lookup must reject the claim",
+        );
+
+        insert_happy_restoration_candidate(&conn, "native-changed", "native-relay");
+        conn.execute(
+            "UPDATE conversations
+             SET agent_session_id = 'native-concurrent'
+             WHERE id = 'native-changed'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            claim_happy_provider_session_owner_with_provenance_in_db(
+                &conn,
+                "native-changed",
+                "native-changed",
+                Some("native-after-spawn"),
+                Some(ExpectedHappyRestoration {
+                    happy_session_id: "native-relay",
+                    agent_type: "codex",
+                    agent_session_id: Some("native-before"),
+                    agent_permission_mode: Some("saved-permission"),
+                    agent_cwd: "/synthetic/consented",
+                    project_root: "/synthetic/consented",
+                }),
+            )
+            .unwrap(),
+            None,
+            "a native resume-id mutation after lookup must reject the claim",
+        );
+
+        insert_happy_restoration_candidate(&conn, "permission-changed", "permission-relay");
+        conn.execute(
+            "UPDATE conversations
+             SET agent_permission_mode = 'ask'
+             WHERE id = 'permission-changed'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            claim_happy_provider_session_owner_with_provenance_in_db(
+                &conn,
+                "permission-changed",
+                "permission-changed",
+                Some("native-after-spawn"),
+                Some(ExpectedHappyRestoration {
+                    happy_session_id: "permission-relay",
+                    agent_type: "codex",
+                    agent_session_id: Some("native-before"),
+                    agent_permission_mode: Some("bypassPermissions"),
+                    agent_cwd: "/synthetic/consented",
+                    project_root: "/synthetic/consented",
+                }),
+            )
+            .unwrap(),
+            None,
+            "a permission-mode mutation after lookup must reject the claim",
+        );
+
+        insert_happy_restoration_candidate(&conn, "absence-changed", "absence-relay");
+        conn.execute(
+            "UPDATE conversations
+             SET agent_session_id = 'native-concurrent'
+             WHERE id = 'absence-changed'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            claim_happy_provider_session_owner_with_provenance_in_db(
+                &conn,
+                "absence-changed",
+                "absence-changed",
+                Some("native-after-spawn"),
+                Some(ExpectedHappyRestoration {
+                    happy_session_id: "absence-relay",
+                    agent_type: "codex",
+                    agent_session_id: None,
+                    agent_permission_mode: Some("saved-permission"),
+                    agent_cwd: "/synthetic/consented",
+                    project_root: "/synthetic/consented",
+                }),
+            )
+            .unwrap(),
+            None,
+            "an expected-absent native id must not act as a wildcard",
+        );
+
+        insert_happy_restoration_candidate(&conn, "absence-stable", "stable-relay");
+        conn.execute(
+            "UPDATE conversations SET agent_session_id = NULL WHERE id = 'absence-stable'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            claim_happy_provider_session_owner_with_provenance_in_db(
+                &conn,
+                "absence-stable",
+                "absence-stable",
+                Some("native-after-spawn"),
+                Some(ExpectedHappyRestoration {
+                    happy_session_id: "stable-relay",
+                    agent_type: "codex",
+                    agent_session_id: None,
+                    agent_permission_mode: Some("saved-permission"),
+                    agent_cwd: "/synthetic/consented",
+                    project_root: "/synthetic/consented",
+                }),
+            )
+            .unwrap(),
+            Some(false),
+            "a stable expected absence may install the spawned native id",
+        );
+
+        assert_eq!(
+            conn.query_row(
+                "SELECT agent_session_id FROM conversations WHERE id = 'native-changed'",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap(),
+            Some("native-concurrent".to_string()),
+            "a rejected claim must not overwrite the concurrent native id",
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT agent_session_id FROM conversations WHERE id = 'absence-stable'",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap(),
+            Some("native-after-spawn".to_string()),
+        );
+    }
+
+    #[test]
+    fn happy_archive_resolves_promoted_owner_and_derived_agent_rows() {
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations
+                (id, title, created_at, kind, agent_session_id, agent_metadata)
+             VALUES (?1, 'Promoted agent', 1000, 'chat', ?2, ?3)",
+            params![
+                "owning-conversation",
+                "native-agent-session",
+                r#"{"happy_session_id":"relay-session"}"#,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO provider_session_runtime
+                (thread_id, provider, status, updated_at)
+             VALUES (?1, 'codex', 'active', 2000)",
+            params!["owning-conversation"],
+        )
+        .unwrap();
+
+        let (owner, ambiguous) = lookup_agent_conversation_owner_in_db(
+            &conn,
+            "different-runtime-session",
+            Some("native-agent-session"),
+        )
+        .unwrap();
+        assert_eq!(owner.as_deref(), Some("owning-conversation"));
+        assert!(!ambiguous);
+        assert_eq!(
+            lookup_happy_session_id_by_conversation_in_db(&conn, "owning-conversation")
+                .unwrap()
+                .as_deref(),
+            Some("relay-session"),
+        );
+        assert!(archive_agent_conversation_in_db(&conn, "owning-conversation").unwrap());
+        assert_eq!(
+            conn.query_row(
+                "SELECT is_archived FROM conversations WHERE id = ?1",
+                params!["owning-conversation"],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1,
+        );
+        assert!(!archive_agent_conversation_in_db(&conn, "missing-conversation").unwrap());
+    }
+
+    #[test]
+    fn native_session_id_updates_a_derived_agent_row() {
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind)
+             VALUES ('derived-agent', 'Derived agent', 1000, 'chat')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO provider_session_runtime
+                (thread_id, provider, status, updated_at)
+             VALUES ('derived-agent', 'codex', 'active', 2000)",
+            [],
+        )
+        .unwrap();
+
+        assert!(
+            set_agent_conversation_session_id_in_db(&conn, "derived-agent", "native-session",)
+                .unwrap(),
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT agent_session_id FROM conversations WHERE id = 'derived-agent'",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap()
+            .as_deref(),
+            Some("native-session"),
+        );
+    }
+
+    #[test]
+    fn provider_archive_fence_survives_late_create_and_promotion_claims() {
+        let conn = open();
+
+        assert_eq!(
+            archive_happy_provider_session_in_db(&conn, "late-create").unwrap(),
+            None,
+        );
+        assert!(is_happy_provider_session_archived_in_db(&conn, "late-create").unwrap());
+        assert!(!is_happy_provider_session_archived_in_db(&conn, "not-archived").unwrap());
+        let late = AgentConversation {
+            id: "late-create".to_string(),
+            title: "Late create".to_string(),
+            created_at: 1000,
+            agent_type: "codex".to_string(),
+            agent_session_id: None,
+            agent_cwd: None,
+            agent_model_id: None,
+            agent_permission_mode: None,
+            agent_metadata: None,
+            project_id: None,
+            project_root: None,
+            is_archived: false,
+        };
+        assert!(upsert_agent_conversation_in_db(&conn, &late).unwrap());
+
+        let promoted = AgentConversation {
+            id: "promoted-owner".to_string(),
+            title: "Promoted owner".to_string(),
+            ..late.clone()
+        };
+        assert!(!upsert_agent_conversation_in_db(&conn, &promoted).unwrap());
+        assert_eq!(
+            archive_happy_provider_session_in_db(&conn, "promoted-provider").unwrap(),
+            None,
+        );
+        assert!(
+            claim_happy_provider_session_owner_in_db(
+                &conn,
+                "promoted-owner",
+                "promoted-provider",
+                Some("native-promoted"),
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            lookup_agent_conversation_owner_in_db(&conn, "promoted-provider", None,).unwrap(),
+            (Some("promoted-owner".to_string()), false),
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT is_archived FROM conversations WHERE id = 'promoted-owner'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1,
+        );
+
+        let mapped = AgentConversation {
+            id: "mapped-owner".to_string(),
+            title: "Mapped owner".to_string(),
+            ..late.clone()
+        };
+        assert!(!upsert_agent_conversation_in_db(&conn, &mapped).unwrap());
+        assert!(
+            !claim_happy_provider_session_owner_in_db(
+                &conn,
+                "mapped-owner",
+                "mapped-provider",
+                None,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            archive_happy_provider_session_in_db(&conn, "mapped-provider").unwrap(),
+            Some("mapped-owner".to_string()),
+        );
+
+        let already_archived = AgentConversation {
+            id: "already-archived-owner".to_string(),
+            title: "Already archived owner".to_string(),
+            ..late
+        };
+        assert!(!upsert_agent_conversation_in_db(&conn, &already_archived).unwrap());
+        assert!(archive_agent_conversation_in_db(&conn, "already-archived-owner").unwrap());
+        assert!(
+            claim_happy_provider_session_owner_in_db(
+                &conn,
+                "already-archived-owner",
+                "late-provider-claim",
+                None,
+            )
+            .unwrap(),
+        );
+    }
+
+    #[test]
+    fn only_happy_origin_emits_frontend_archive_invalidation() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app builds");
+        let received = Arc::new(AtomicUsize::new(0));
+        let received_by_listener = Arc::clone(&received);
+        let received_payload = Arc::new(Mutex::new(None));
+        let received_payload_by_listener = Arc::clone(&received_payload);
+        app.handle()
+            .listen("happy-bridge://conversation-archived", move |event| {
+                received_by_listener.fetch_add(1, Ordering::SeqCst);
+                *received_payload_by_listener.lock().unwrap() =
+                    serde_json::from_str::<serde_json::Value>(event.payload()).ok();
+            });
+
+        emit_happy_archive_event(
+            app.handle(),
+            AgentArchiveOrigin::Desktop,
+            "desktop-conversation",
+            None,
+        );
+        assert_eq!(received.load(Ordering::SeqCst), 0);
+        emit_happy_archive_event(
+            app.handle(),
+            AgentArchiveOrigin::Happy,
+            "happy-conversation",
+            Some("happy-provider-session"),
+        );
+        assert_eq!(received.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *received_payload.lock().unwrap(),
+            Some(serde_json::json!({
+                "conversationId": "happy-conversation",
+                "targetProviderSessionId": "happy-provider-session",
+            })),
+        );
+
+        emit_happy_provider_archive_event(app.handle(), None, "unowned-provider-session");
+        assert_eq!(received.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            *received_payload.lock().unwrap(),
+            Some(serde_json::json!({
+                "conversationId": null,
+                "targetProviderSessionId": "unowned-provider-session",
+            })),
+        );
+    }
+
+    #[test]
+    fn late_agent_upsert_preserves_an_archived_row() {
+        let conn = open();
+        let mut conversation = AgentConversation {
+            id: "late-resume".to_string(),
+            title: "Synthetic agent".to_string(),
+            created_at: 1000,
+            agent_type: "codex".to_string(),
+            agent_session_id: None,
+            agent_cwd: Some("/synthetic/project".to_string()),
+            agent_model_id: None,
+            agent_permission_mode: None,
+            agent_metadata: None,
+            project_id: Some("/synthetic/project".to_string()),
+            project_root: Some("/synthetic/project".to_string()),
+            is_archived: false,
+        };
+
+        assert!(!upsert_agent_conversation_in_db(&conn, &conversation).unwrap());
+        assert!(archive_agent_conversation_in_db(&conn, &conversation.id).unwrap());
+
+        conversation.agent_session_id = Some("late-provider-session".to_string());
+        assert!(upsert_agent_conversation_in_db(&conn, &conversation).unwrap());
+        assert_eq!(
+            conn.query_row(
+                "SELECT is_archived, agent_session_id FROM conversations WHERE id = ?1",
+                params![conversation.id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .unwrap(),
+            (1, Some("late-provider-session".to_string())),
+        );
     }
 
     /// Mirror of the production `list_conversations` SQL so tests can

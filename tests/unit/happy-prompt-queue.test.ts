@@ -30,6 +30,123 @@ describe("Happy deferred prompt queue", () => {
     expect(sent).toEqual(["phone prompt"]);
   });
 
+  it("submits only one accepted prompt until the provider reports ready again", async () => {
+    const sent: string[] = [];
+    const queue = createDeferredPromptQueue({
+      send: async (_sessionId: string, prompt: string) => {
+        sent.push(prompt);
+        return { accepted: true };
+      },
+    });
+
+    const first = queue.enqueue("session-1", "first");
+    const second = queue.enqueue("session-1", "second");
+    await expect(first).resolves.toBe(true);
+    expect(sent).toEqual(["first"]);
+
+    queue.setBusy("session-1", false);
+    await expect(second).resolves.toBe(true);
+    expect(sent).toEqual(["first", "second"]);
+    await queue.close();
+  });
+
+  it("preserves an authoritative ready event that overtakes prompt acceptance", async () => {
+    const sent: string[] = [];
+    let acceptFirst: (() => void) | undefined;
+    const queue = createDeferredPromptQueue({
+      send: async (_sessionId: string, prompt: string) => {
+        sent.push(prompt);
+        if (prompt === "first") {
+          await new Promise<void>((resolve) => {
+            acceptFirst = resolve;
+          });
+        }
+        return { accepted: true };
+      },
+    });
+
+    const first = queue.enqueue("session-1", "first");
+    const second = queue.enqueue("session-1", "second");
+    await Promise.resolve();
+    expect(sent).toEqual(["first"]);
+
+    // Provider completion and the submit RPC response use independent frames.
+    queue.setBusy("session-1", false);
+    acceptFirst?.();
+    await expect(first).resolves.toBe(true);
+    await expect(second).resolves.toBe(true);
+    expect(sent).toEqual(["first", "second"]);
+    await queue.close();
+  });
+
+  it("retries when provider readiness overtakes a busy rejection", async () => {
+    const sent: string[] = [];
+    let rejectFirst: ((error: Error) => void) | undefined;
+    const queue = createDeferredPromptQueue({
+      send: (_sessionId: string, prompt: string) => {
+        sent.push(prompt);
+        if (sent.length > 1) return Promise.resolve({ accepted: true });
+        return new Promise((_resolve, reject) => {
+          rejectFirst = reject;
+        });
+      },
+      shouldRetry: isPromptBusyError,
+    });
+
+    const delivered = queue.enqueue("session-1", "first");
+    await Promise.resolve();
+    queue.setBusy("session-1", false);
+    rejectFirst?.(new Error("Another prompt is already active for this session."));
+
+    await expect(delivered).resolves.toBe(true);
+    expect(sent).toEqual(["first", "first"]);
+    await queue.close();
+  });
+
+  it("does not advance to a later prompt after a non-acceptance failure", async () => {
+    const sent: string[] = [];
+    const failure = new Error("provider rejected the prompt");
+    const queue = createDeferredPromptQueue({
+      send: async (_sessionId: string, prompt: string) => {
+        sent.push(prompt);
+        throw failure;
+      },
+    });
+
+    const first = queue.enqueue("session-1", "first");
+    const second = queue.enqueue("session-1", "second");
+    await expect(first).rejects.toBe(failure);
+    queue.setBusy("session-1", false);
+    await Promise.resolve();
+    expect(sent).toEqual(["first"]);
+
+    await queue.close();
+    await expect(second).resolves.toBe(false);
+  });
+
+  it("waits for an in-flight acceptance before clearing unsent prompts on close", async () => {
+    let accept: (() => void) | undefined;
+    const queue = createDeferredPromptQueue({
+      send: () => new Promise<void>((resolve) => {
+        accept = resolve;
+      }),
+    });
+    const first = queue.enqueue("session-1", "first");
+    const second = queue.enqueue("session-1", "second");
+    const closing = queue.close();
+    let closed = false;
+    void closing.then(() => {
+      closed = true;
+    });
+    await Promise.resolve();
+    expect(closed).toBe(false);
+
+    accept?.();
+    await closing;
+    await expect(first).resolves.toBe(true);
+    await expect(second).resolves.toBe(false);
+  });
+
   it("defers on the busy error every runtime actually throws", () => {
     // Read the sentences out of the runtimes rather than restating them, so a
     // provider that words its message differently fails here instead of

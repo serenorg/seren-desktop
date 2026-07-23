@@ -1083,7 +1083,15 @@ function stringifyToolResultContent(content) {
   return undefined;
 }
 
-function emitToolCall(emit, session, toolName, input, toolUseId, status = "in_progress") {
+function emitToolCall(
+  emit,
+  session,
+  toolName,
+  input,
+  toolUseId,
+  status = "in_progress",
+  replay = false,
+) {
   if (typeof toolUseId === "string" && toolUseId.length > 0) {
     session.toolInputs.set(toolUseId, input ?? {});
   }
@@ -1095,16 +1103,25 @@ function emitToolCall(emit, session, toolName, input, toolUseId, status = "in_pr
     kind: toolKindForName(toolName),
     status,
     parameters: input,
+    ...(replay ? { replay: true } : {}),
   });
 }
 
-function emitToolResult(emit, session, toolUseId, content, isError = false) {
+function emitToolResult(
+  emit,
+  session,
+  toolUseId,
+  content,
+  isError = false,
+  replay = false,
+) {
   emit("provider://tool-result", {
     sessionId: session.id,
     toolCallId: toolUseId,
     status: isError ? "failed" : "completed",
     result: isError ? undefined : stringifyToolResultContent(content),
     error: isError ? stringifyToolResultContent(content) ?? "Tool failed." : undefined,
+    ...(replay ? { replay: true } : {}),
   });
 }
 
@@ -1138,6 +1155,25 @@ function rejectPendingControlRequests(session, error) {
 
 function writeMessage(session, payload) {
   session.process.stdin.write(`${JSON.stringify(payload)}\n`);
+}
+
+function writeMessageAccepted(session, payload) {
+  return new Promise((resolve, reject) => {
+    try {
+      session.process.stdin.write(
+        `${JSON.stringify(payload)}\n`,
+        (error) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        },
+      );
+    } catch (error) {
+      reject(error);
+    }
+  });
 }
 
 function sendControlRequest(session, request, timeoutMs = 30_000) {
@@ -1830,6 +1866,7 @@ function replayClaudeHistoryEntry(emit, session, entry) {
           block.input ?? {},
           block.id,
           "completed",
+          true,
         );
         break;
 
@@ -1843,6 +1880,7 @@ function replayClaudeHistoryEntry(emit, session, entry) {
           block.tool_use_id,
           block.content ?? null,
           block.is_error === true,
+          true,
         );
         break;
 
@@ -2711,6 +2749,8 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       cwd,
       localSessionId,
       resumeAgentSessionId,
+      requireExactResume,
+      suppressHistoryReplay,
       apiKey,
       mcpServers,
       approvalPolicy,
@@ -2722,6 +2762,12 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       reasoningEffort,
       initialModelId,
     } = params;
+
+    if (requireExactResume === true && !resumeAgentSessionId) {
+      throw new Error(
+        "Claude exact resume requires a native agent session ID.",
+      );
+    }
 
     const sessionId = localSessionId ?? randomUUID();
 
@@ -3011,32 +3057,51 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       // bookkeeping rides the same drain. Kick replay off in the
       // background and defer the "ready" emit until it drains so the
       // frontend's readyPromise still gates sendPrompt. #1889
-      const replayPromise = resumeAgentSessionId
-        ? replayClaudeHistoryBestEffort(
-            emit,
-            session,
-            cwd,
-            resumeAgentSessionId,
-          ).catch((err) => {
+      if (resumeAgentSessionId && suppressHistoryReplay !== true) {
+        replayClaudeHistoryBestEffort(
+          emit,
+          session,
+          cwd,
+          resumeAgentSessionId,
+        )
+          .catch((err) => {
             console.warn(
               `${claudeLogPrefix} history replay failed:`,
               err?.message ?? err,
             );
           })
-        : Promise.resolve();
+          .then(() => {
+            // The session may have been terminated mid-replay (user closed
+            // the thread). Only flip status + emit if our record is still
+            // the active one for this sessionId.
+            if (sessions.get(sessionId) === session) {
+              session.status = "ready";
+              emit(
+                "provider://session-status",
+                buildSessionStatus(session, "ready"),
+              );
+            }
+          });
+      } else {
+        // Fresh sessions and Happy's exact restore suppress replay entirely.
+        // Return a truthful ready snapshot so startup never depends on this
+        // notification surviving the provider client's bounded pre-subscribe
+        // event buffer.
+        session.status = "ready";
+        emit(
+          "provider://session-status",
+          buildSessionStatus(session, "ready"),
+        );
+      }
 
-      replayPromise.then(() => {
-        // The session may have been terminated mid-replay (user closed
-        // the thread). Only flip status + emit if our record is still
-        // the active one for this sessionId.
-        if (sessions.get(sessionId) === session) {
-          session.status = "ready";
-          emit(
-            "provider://session-status",
-            buildSessionStatus(session, "ready"),
-          );
-        }
-      });
+      if (
+        requireExactResume === true &&
+        session.agentSessionId !== resumeAgentSessionId
+      ) {
+        throw new Error(
+          "Claude resumed a different native session than the one requested.",
+        );
+      }
 
       return {
         id: session.id,
@@ -3065,7 +3130,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     }
   }
 
-  async function sendPrompt({ sessionId, prompt, context }) {
+  async function sendPrompt({ sessionId, prompt, context, onAccepted }) {
     const session = sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
@@ -3090,17 +3155,39 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         reject: rejectPromise,
       };
     });
+    pendingPrompt.catch(() => {});
 
-    writeMessage(session, {
-      type: "user",
-      message: {
-        role: "user",
-        content: combinedPrompt,
-      },
-      session_id: session.agentSessionId,
-    });
+    try {
+      await writeMessageAccepted(session, {
+        type: "user",
+        message: {
+          role: "user",
+          content: combinedPrompt,
+        },
+        session_id: session.agentSessionId,
+      });
+      onAccepted?.();
+    } catch (error) {
+      const promptWasActive = session.currentPrompt !== null;
+      rejectCurrentPrompt(
+        session,
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      if (promptWasActive && sessions.get(sessionId) === session) {
+        session.status = "ready";
+        emit("provider://error", {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        emit(
+          "provider://session-status",
+          buildSessionStatus(session, "ready"),
+        );
+      }
+      throw error;
+    }
 
-    return pendingPrompt;
+    await pendingPrompt;
   }
 
   async function cancelPrompt({ sessionId }) {
@@ -3189,6 +3276,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       currentModelId: session.currentModelId,
       currentModeId: session.currentModeId,
       pendingPermissions: listPendingPermissions(session),
+      pid: session.process?.pid ?? null,
     }));
   }
 
@@ -3242,7 +3330,10 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     );
 
     session.currentModeId = mode;
-    emit("provider://session-status", buildSessionStatus(session));
+    emit("provider://session-status", {
+      ...buildSessionStatus(session),
+      readinessUnchanged: true,
+    });
   }
 
   async function setOAuthRouting({ sessionId, routing }) {
@@ -3497,6 +3588,8 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
 // 1M-tier semantics and picker ordering can be exercised without spinning
 // up a full session.
 export {
+  writeMessageAccepted as _writeClaudeMessageAccepted,
+  replayClaudeHistoryEntry as _replayClaudeHistoryEntry,
   inferClaudeContextWindow as _inferClaudeContextWindow,
   augmentWithLegacyOpus as _augmentWithLegacyOpus,
   ensurePreferredModelRecord as _ensurePreferredModelRecord,

@@ -4,7 +4,7 @@
 import WebSocket from "ws";
 
 const RPC_TIMEOUT_MS = 30_000;
-const MAX_QUEUED_NOTIFICATIONS = 32;
+const MAX_QUEUED_NOTIFICATIONS_PER_SESSION = 32;
 
 const PROVIDER_EVENT_KINDS = new Map([
   ["provider://message-chunk", "assistant-delta"],
@@ -75,7 +75,8 @@ class ProviderRuntimeClient {
     this.nextId = 0;
     this.pending = new Map();
     this.notificationListeners = new Set();
-    this.notificationQueue = [];
+    this.notificationQueues = new Map();
+    this.notificationSequence = 0;
     this.onUnexpectedDisconnect = onUnexpectedDisconnect;
     this.intentionalClose = false;
     this.disconnectReported = false;
@@ -121,7 +122,12 @@ class ProviderRuntimeClient {
     this.pending.delete(message.id);
     clearTimeout(pending.timer);
     if (message.error) {
-      pending.reject(new Error(message.error.message ?? "provider runtime RPC failed"));
+      const error = new Error(message.error.message ?? "provider runtime RPC failed");
+      // The local runtime only returns an RPC error after its spawn handler has
+      // cleaned up the failed session. Keep this distinct from a socket loss or
+      // timeout, where creation may have succeeded and must be reconciled.
+      error.providerRequestRejected = true;
+      pending.reject(error);
     } else {
       pending.resolve(message.result);
     }
@@ -132,10 +138,15 @@ class ProviderRuntimeClient {
   // already running, leaving the queue for that session marked busy forever.
   dispatchNotification(method, params) {
     if (this.notificationListeners.size === 0) {
-      if (this.notificationQueue.length === MAX_QUEUED_NOTIFICATIONS) {
-        this.notificationQueue.shift();
+      const queueKey =
+        typeof params?.sessionId === "string" ? params.sessionId : "__provider_runtime__";
+      let queue = this.notificationQueues.get(queueKey);
+      if (!queue) {
+        queue = [];
+        this.notificationQueues.set(queueKey, queue);
       }
-      this.notificationQueue.push({ method, params });
+      if (queue.length === MAX_QUEUED_NOTIFICATIONS_PER_SESSION) queue.shift();
+      queue.push({ method, params, sequence: ++this.notificationSequence });
       return;
     }
     for (const listener of this.notificationListeners) listener(method, params);
@@ -143,8 +154,11 @@ class ProviderRuntimeClient {
 
   subscribeNotifications(listener) {
     this.notificationListeners.add(listener);
-    while (this.notificationQueue.length > 0) {
-      const notification = this.notificationQueue.shift();
+    const queued = [...this.notificationQueues.values()]
+      .flat()
+      .sort((left, right) => left.sequence - right.sequence);
+    this.notificationQueues.clear();
+    for (const notification of queued) {
       listener(notification.method, notification.params);
     }
     return () => this.notificationListeners.delete(listener);
@@ -174,7 +188,7 @@ class ProviderRuntimeClient {
     }
     this.pending.clear();
     this.notificationListeners.clear();
-    this.notificationQueue.length = 0;
+    this.notificationQueues.clear();
     const socket = this.socket;
     this.socket = null;
     if (!socket || socket.readyState !== WebSocket.OPEN) return Promise.resolve();
@@ -202,6 +216,11 @@ function normalizeSession(session) {
     ...(session.agentSessionId ? { agentSessionId: session.agentSessionId } : {}),
     ...(Array.isArray(session.pendingPermissions)
       ? { pendingPermissions: session.pendingPermissions }
+      : {}),
+    ...(typeof session.reused === "boolean" ? { reused: session.reused } : {}),
+    ...(typeof session.owned === "boolean" ? { owned: session.owned } : {}),
+    ...(session.freshContextReset === true
+      ? { freshContextReset: true }
       : {}),
   };
 }
@@ -269,11 +288,18 @@ export function createProviderSource({ client, config, debugLog = () => {} }) {
     },
 
     async sendPrompt(sessionId, text) {
-      await client.call("provider_prompt", {
+      const result = await client.call("provider_submit_prompt", {
         sessionId,
         prompt: text,
         origin: "remote",
       });
+      if (result?.accepted !== true) {
+        throw new Error("Provider did not acknowledge prompt acceptance.");
+      }
+      return {
+        accepted: true,
+        sessionId,
+      };
     },
 
     async cancel(sessionId) {
@@ -313,11 +339,30 @@ export function createProviderSource({ client, config, debugLog = () => {} }) {
     },
 
     async spawn(spec) {
+      const resumeAgentSessionId =
+        typeof spec.resumeAgentSessionId === "string" &&
+        spec.resumeAgentSessionId.length > 0
+          ? spec.resumeAgentSessionId
+          : null;
+      const requireExactResume =
+        spec.requireExactResume ?? (resumeAgentSessionId !== null);
+      const suppressHistoryReplay =
+        spec.suppressHistoryReplay ?? (resumeAgentSessionId !== null);
+      const freshContextReset = spec.freshContextReset === true;
+      if (freshContextReset && resumeAgentSessionId) {
+        throw new Error(
+          "A fresh context reset cannot also request an exact native resume.",
+        );
+      }
+
       const result = await client.call("provider_spawn", {
         agentType: spec.agentType,
         cwd: spec.cwd,
         localSessionId: spec.localSessionId ?? null,
-        resumeAgentSessionId: spec.resumeAgentSessionId ?? null,
+        resumeAgentSessionId,
+        requireExactResume,
+        suppressHistoryReplay,
+        freshContextReset,
         sandboxMode: spec.sandboxMode ?? null,
         approvalPolicy: spec.approvalPolicy ?? null,
         networkEnabled: spec.networkEnabled ?? null,
@@ -325,7 +370,49 @@ export function createProviderSource({ client, config, debugLog = () => {} }) {
         initialModelId: spec.initialModelId ?? null,
         reasoningEffort: spec.reasoningEffort ?? null,
       });
-      const session = normalizeSession(result);
+      const session = normalizeSession({
+        ...result,
+        ...(freshContextReset ? { freshContextReset: true } : {}),
+      });
+      const rejectSpawn = async (error) => {
+        if (typeof session.sessionId === "string" && session.sessionId.length > 0) {
+          try {
+            await client.call("provider_terminate", {
+              sessionId: session.sessionId,
+            });
+          } catch {
+            // Preserve the contract failure that made the session unusable.
+          }
+        }
+        throw error;
+      };
+      if (
+        freshContextReset &&
+        (typeof session.agentSessionId !== "string" ||
+          session.agentSessionId.length === 0)
+      ) {
+        return rejectSpawn(
+          new Error(
+            "Fresh context reset did not produce a native agent session ID.",
+          ),
+        );
+      }
+      if (
+        typeof spec.permissionMode === "string" &&
+        spec.permissionMode.length > 0
+      ) {
+        try {
+          await client.call("provider_set_permission_mode", {
+            sessionId: session.sessionId,
+            mode: providerPermissionMode(
+              spec.permissionMode,
+              session.agentType,
+            ),
+          });
+        } catch (error) {
+          return rejectSpawn(error);
+        }
+      }
       agentTypes.set(session.sessionId, session.agentType);
       return session;
     },

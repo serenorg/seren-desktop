@@ -600,8 +600,11 @@ export async function cancelPrompt(sessionId: string): Promise<void> {
 /**
  * Terminate an agent runtime session.
  */
-export async function terminateSession(sessionId: string): Promise<void> {
-  return invokeProvider("provider_terminate", { sessionId });
+export async function terminateSession(
+  sessionId: string,
+  options?: { timeoutMs?: number | null },
+): Promise<void> {
+  return invokeProvider("provider_terminate", { sessionId }, options);
 }
 
 /**

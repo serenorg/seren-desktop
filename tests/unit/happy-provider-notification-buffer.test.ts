@@ -37,7 +37,9 @@ afterEach(async () => {
  * Answers the handshake and every later RPC, and hands the live socket back so
  * the test can push notifications the way the provider runtime does.
  */
-async function startProviderRuntime(): Promise<{
+async function startProviderRuntime(
+  { rejectMethods = new Set<string>() }: { rejectMethods?: Set<string> } = {},
+): Promise<{
   port: number;
   socket: Promise<{ send(data: string): void }>;
 }> {
@@ -50,6 +52,16 @@ async function startProviderRuntime(): Promise<{
       connection.on("message", (raw) => {
         const message = JSON.parse(String(raw));
         if (message.id === undefined || message.id === null) return;
+        if (rejectMethods.has(message.method)) {
+          connection.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              error: { code: -32000, message: "synthetic provider rejection" },
+            }),
+          );
+          return;
+        }
         connection.send(
           JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }),
         );
@@ -70,6 +82,19 @@ function connectedClient(port: number): BridgeClient {
 }
 
 describe("Happy provider notification buffering (#3150)", () => {
+  it("distinguishes a confirmed provider rejection from an ambiguous disconnect", async () => {
+    const runtime = await startProviderRuntime({
+      rejectMethods: new Set(["provider_spawn"]),
+    });
+    const client = connectedClient(runtime.port);
+    await client.connect();
+
+    await expect(client.call("provider_spawn")).rejects.toMatchObject({
+      message: "synthetic provider rejection",
+      providerRequestRejected: true,
+    });
+  });
+
   it("delivers a turn completion that arrived before registration subscribed", async () => {
     // A bridge restart during a live turn seeds the session busy from the
     // list-time snapshot, then spends several relay round trips before
@@ -138,5 +163,43 @@ describe("Happy provider notification buffering (#3150)", () => {
     expect(received).toHaveLength(32);
     expect(received[0].payload.text).toBe("chunk-8");
     expect(received[31].payload.text).toBe("chunk-39");
+  });
+
+  it("does not evict one session's completion behind restore chatter from other sessions", async () => {
+    const runtime = await startProviderRuntime();
+    const client = connectedClient(runtime.port);
+    await client.connect();
+    const socket = await runtime.socket;
+
+    socket.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "provider://prompt-complete",
+        params: { sessionId: "active-session", stopReason: "completed" },
+      }),
+    );
+    for (let index = 0; index < 40; index += 1) {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "provider://session-status",
+          params: { sessionId: `restored-session-${index}`, status: "ready" },
+        }),
+      );
+    }
+    await client.call("provider_ping");
+
+    const received: Array<{ kind: string; sessionId: string }> = [];
+    const source = createProviderSource({
+      client,
+      config: { machineName: "buffer-test" },
+    }) as { subscribe(onEvent: (event: unknown) => void): () => void };
+    source.subscribe((event) => received.push(event as { kind: string; sessionId: string }));
+
+    expect(received).toHaveLength(41);
+    expect(received[0]).toMatchObject({
+      kind: "turn-complete",
+      sessionId: "active-session",
+    });
   });
 });
