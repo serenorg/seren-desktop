@@ -364,9 +364,9 @@ export const FILE_TOOLS: ToolDefinition[] = [
           inject_seren_credentials: {
             type: "boolean",
             description:
-              "Set true only for Seren-owned skill scripts or publisher clients that need Desktop auth. " +
-              "This injects the logged-in user's SEREN_API_KEY and API_KEY into the subprocess. " +
-              "Do not set for ordinary user-requested shell commands.",
+              "Set false to withhold Desktop auth from a Seren skill script that would otherwise receive it. " +
+              "Setting true does not grant anything: SEREN_API_KEY and API_KEY are injected only when the " +
+              "command targets an installed Seren skill path, regardless of this flag.",
           },
         },
         required: ["command"],
