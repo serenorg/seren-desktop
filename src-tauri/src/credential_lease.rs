@@ -448,7 +448,34 @@ fn select_startup_reaper_records(records: &[LeaseLedgerEntry]) -> Vec<LeaseLedge
 
 #[cfg(test)]
 mod tests {
-    use super::{CredentialLeaseLedger, LeaseLedgerEntry, select_startup_reaper_records};
+    use super::{
+        CredentialLease, CredentialLeaseLedger, LeaseLedgerEntry, select_startup_reaper_records,
+    };
+
+    /// The renderer reads these exact names. A rename here silently leaves a
+    /// session without Seren MCP, so pin the wire contract rather than trusting
+    /// the derive.
+    #[test]
+    fn credential_lease_exposes_broker_endpoints_and_no_key() {
+        let lease = CredentialLease {
+            session_id: "session-a".to_string(),
+            key_id: "key-a".to_string(),
+            expires_at: "2030-01-01T00:00:00Z".to_string(),
+            capability: "capability-a".to_string(),
+            mcp_url: "http://127.0.0.1:1/route/mcp".to_string(),
+            api_base_url: "http://127.0.0.1:1/route/api/".to_string(),
+        };
+        let value = serde_json::to_value(&lease).expect("lease serializes");
+        let object = value.as_object().expect("lease is an object");
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["apiBaseUrl", "capability", "expiresAt", "keyId", "mcpUrl", "sessionId"]
+        );
+        assert!(object.get("apiKey").is_none());
+        assert!(object.get("api_key").is_none());
+    }
 
     fn record(session_id: &str, key_id: &str, pending_revocation: bool) -> LeaseLedgerEntry {
         LeaseLedgerEntry {

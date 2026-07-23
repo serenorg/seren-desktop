@@ -40,6 +40,17 @@ fn main() -> Result<(), String> {
     println!("broker api base: {}", endpoints.api_base_url);
     println!("capability length: {}", endpoints.capability.len());
 
+    // `--hold` keeps the listener up and prints the capability so an external
+    // harness (the provider runtime, a real CLI) can drive the same chain the
+    // app uses. Only ever used against a key the operator supplied.
+    if std::env::args().any(|arg| arg == "--hold") {
+        println!("capability: {}", endpoints.capability);
+        println!("READY");
+        let mut discard = String::new();
+        let _ = std::io::stdin().read_line(&mut discard);
+        return Ok(());
+    }
+
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
