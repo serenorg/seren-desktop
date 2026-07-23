@@ -139,7 +139,9 @@ describe("happy relay sync patch", () => {
     for (const { source } of sources) {
       const closeIndex = source.indexOf("[API] socket.close() called");
       expect(closeIndex).toBeGreaterThan(-1);
-      const closeBody = source.slice(closeIndex, closeIndex + 600);
+      const closeEnd = source.indexOf("startSmartReconnect()", closeIndex);
+      expect(closeEnd).toBeGreaterThan(closeIndex);
+      const closeBody = source.slice(closeIndex, closeEnd);
       const flushIndex = closeBody.indexOf("await this.sendSync.invalidateAndAwait()");
       const stopIndex = closeBody.indexOf("this.sendSync.stop()");
       expect(flushIndex).toBeGreaterThan(-1);

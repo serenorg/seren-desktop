@@ -1,8 +1,26 @@
 diff --git a/dist/lib.d.cts b/dist/lib.d.cts
-index 53beeafa77133ba937b0159185d32458a84ad6d1..06adc11d7bd9dc85887b25139eaefed55f6cd1a4 100644
+index 53beeafa77133ba937b0159185d32458a84ad6d1..fd7687a1edc7c18e366f905010ded86da53ee554 100644
 --- a/dist/lib.d.cts
 +++ b/dist/lib.d.cts
-@@ -772,6 +772,7 @@ declare class ApiClient {
+@@ -512,9 +512,14 @@ declare class ApiSessionClient extends EventEmitter {
+     private pendingOutbox;
+     private readonly sendSync;
+     private readonly receiveSync;
+-    constructor(token: string, session: Session);
+-    onUserMessage(callback: (data: UserMessage) => void): void;
+-    onFileEvent(callback: (data: FileEventMessage) => void): void;
++    constructor(token: string, session: Session, options?: {
++        resumeFromSeq?: number;
++        onMessageProcessed?: (seq: number) => void | Promise<void>;
++        inboundCloseTimeoutMs?: number;
++    });
++    hasArchiveSignal(): boolean;
++    onUserMessage(callback: (data: UserMessage) => void | Promise<void>): void;
++    onFileEvent(callback: (data: FileEventMessage) => void | Promise<void>): void;
+     /**
+      * Derive (and cache) the blob decryption key for this session.
+      * Legacy sessions use deriveKey(masterSecret, 'Happy Blobs', ['master']).
+@@ -772,6 +777,7 @@ declare class ApiClient {
          tag: string;
          metadata: Metadata;
          state: AgentState | null;
@@ -10,22 +28,42 @@ index 53beeafa77133ba937b0159185d32458a84ad6d1..06adc11d7bd9dc85887b25139eaefed5
      }): Promise<Session | null>;
      /**
       * Register or update machine with the server
-@@ -782,7 +783,9 @@ declare class ApiClient {
+@@ -782,7 +788,11 @@ declare class ApiClient {
          metadata: MachineMetadata;
          daemonState?: DaemonState;
      }): Promise<Machine>;
 -    sessionSyncClient(session: Session): ApiSessionClient;
 +    sessionSyncClient(session: Session, options?: {
 +        resumeFromSeq?: number;
++        onMessageProcessed?: (seq: number) => void | Promise<void>;
++        inboundCloseTimeoutMs?: number;
 +    }): ApiSessionClient;
      machineSyncClient(machine: Machine): ApiMachineClient;
      push(): PushNotificationClient;
      /**
 diff --git a/dist/lib.d.mts b/dist/lib.d.mts
-index 53beeafa77133ba937b0159185d32458a84ad6d1..06adc11d7bd9dc85887b25139eaefed55f6cd1a4 100644
+index 53beeafa77133ba937b0159185d32458a84ad6d1..fd7687a1edc7c18e366f905010ded86da53ee554 100644
 --- a/dist/lib.d.mts
 +++ b/dist/lib.d.mts
-@@ -772,6 +772,7 @@ declare class ApiClient {
+@@ -512,9 +512,14 @@ declare class ApiSessionClient extends EventEmitter {
+     private pendingOutbox;
+     private readonly sendSync;
+     private readonly receiveSync;
+-    constructor(token: string, session: Session);
+-    onUserMessage(callback: (data: UserMessage) => void): void;
+-    onFileEvent(callback: (data: FileEventMessage) => void): void;
++    constructor(token: string, session: Session, options?: {
++        resumeFromSeq?: number;
++        onMessageProcessed?: (seq: number) => void | Promise<void>;
++        inboundCloseTimeoutMs?: number;
++    });
++    hasArchiveSignal(): boolean;
++    onUserMessage(callback: (data: UserMessage) => void | Promise<void>): void;
++    onFileEvent(callback: (data: FileEventMessage) => void | Promise<void>): void;
+     /**
+      * Derive (and cache) the blob decryption key for this session.
+      * Legacy sessions use deriveKey(masterSecret, 'Happy Blobs', ['master']).
+@@ -772,6 +777,7 @@ declare class ApiClient {
          tag: string;
          metadata: Metadata;
          state: AgentState | null;
@@ -33,40 +71,110 @@ index 53beeafa77133ba937b0159185d32458a84ad6d1..06adc11d7bd9dc85887b25139eaefed5
      }): Promise<Session | null>;
      /**
       * Register or update machine with the server
-@@ -782,7 +783,9 @@ declare class ApiClient {
+@@ -782,7 +788,11 @@ declare class ApiClient {
          metadata: MachineMetadata;
          daemonState?: DaemonState;
      }): Promise<Machine>;
 -    sessionSyncClient(session: Session): ApiSessionClient;
 +    sessionSyncClient(session: Session, options?: {
 +        resumeFromSeq?: number;
++        onMessageProcessed?: (seq: number) => void | Promise<void>;
++        inboundCloseTimeoutMs?: number;
 +    }): ApiSessionClient;
      machineSyncClient(machine: Machine): ApiMachineClient;
      push(): PushNotificationClient;
      /**
 diff --git a/dist/types-CV0guBiJ.mjs b/dist/types-CV0guBiJ.mjs
-index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..c6fc8bed186aa1f3d76973f14d4752d5a76443b7 100644
+index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..073aed7103490a1c46e6b68f9f6fc1207b53c3e3 100644
 --- a/dist/types-CV0guBiJ.mjs
 +++ b/dist/types-CV0guBiJ.mjs
-@@ -2142,10 +2142,16 @@ class ApiSessionClient extends EventEmitter {
+@@ -2128,6 +2128,7 @@ class ApiSessionClient extends EventEmitter {
+   encryptionVariant;
+   reconnectInterval = null;
+   ignoreArchiveSignal = false;
++  archiveSignaled = false;
+   skipInitialMessages = false;
+   claudeSessionProtocolState = {
+     currentTurnId: null,
+@@ -2141,11 +2142,41 @@ class ApiSessionClient extends EventEmitter {
+     activeSubagents: /* @__PURE__ */ new Set()
    };
    lastSeq = 0;
++  lastProcessedSeq = 0;
++  messageProcessedCallback = null;
++  orderedInbound = false;
++  inboundRecords = [];
++  inboundDraining = false;
++  inboundDrainPromise = null;
++  inboundFailed = false;
++  inboundFailurePending = null;
++  inboundActiveRecord = null;
++  inboundClosing = false;
++  inboundClosed = false;
++  inboundClosePromise = null;
++  inboundCloseTimeoutMs = 3e3;
    pendingOutbox = [];
 +  outboundMessageLocalIds = /* @__PURE__ */ new Set();
    sendSync;
    receiveSync;
 -  constructor(token, session) {
++  static MAX_PENDING_INBOUND_RECORDS = 256;
 +  constructor(token, session, options = {}) {
      super();
 +    const resumeFromSeq = options.resumeFromSeq ?? 0;
 +    if (!Number.isSafeInteger(resumeFromSeq) || resumeFromSeq < 0) {
 +      throw new Error("Session resume sequence must be a non-negative safe integer");
 +    }
++    if (options.onMessageProcessed !== void 0 && typeof options.onMessageProcessed !== "function") {
++      throw new Error("Session message processed callback must be a function");
++    }
++    if (options.inboundCloseTimeoutMs !== void 0 && (!Number.isSafeInteger(options.inboundCloseTimeoutMs) || options.inboundCloseTimeoutMs <= 0)) {
++      throw new Error("Session inbound close timeout must be a positive safe integer");
++    }
 +    this.lastSeq = resumeFromSeq;
++    this.lastProcessedSeq = resumeFromSeq;
++    this.messageProcessedCallback = options.onMessageProcessed ?? null;
++    this.orderedInbound = this.messageProcessedCallback !== null;
++    this.inboundCloseTimeoutMs = options.inboundCloseTimeoutMs ?? 3e3;
      this.token = token;
      this.sessionId = session.id;
      this.metadata = session.metadata;
-@@ -2206,18 +2212,22 @@ class ApiSessionClient extends EventEmitter {
+@@ -2177,6 +2208,10 @@ class ApiSessionClient extends EventEmitter {
+       autoConnect: false
+     });
+     this.socket.on("connect", () => {
++      if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++        this.socket.close();
++        return;
++      }
+       logger.debug("Socket connected successfully");
+       if (this.reconnectInterval) {
+         clearInterval(this.reconnectInterval);
+@@ -2191,33 +2226,59 @@ class ApiSessionClient extends EventEmitter {
+     this.socket.on("disconnect", (reason) => {
+       logger.debug(`[API] Socket disconnected: ${reason}`);
+       this.rpcHandlerManager.onSocketDisconnect();
+-      this.startSmartReconnect();
++      if (!this.inboundClosing && !this.inboundClosed && !this.inboundFailed && !this.inboundFailurePending) {
++        this.startSmartReconnect();
++      }
+     });
+     this.socket.on("connect_error", (error) => {
+       logger.debug("[API] Socket connection error:", error);
+       this.rpcHandlerManager.onSocketDisconnect();
+-      this.startSmartReconnect();
++      if (!this.inboundClosing && !this.inboundClosed && !this.inboundFailed && !this.inboundFailurePending) {
++        this.startSmartReconnect();
++      }
+     });
+     this.socket.on("update", (data) => {
+       try {
++        if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++          return;
++        }
+         logger.debugLargeJson("[SOCKET] [UPDATE] Received update:", data);
+         if (!data.body) {
+           logger.debug("[SOCKET] [UPDATE] [ERROR] No body in update!");
            return;
          }
          if (data.body.t === "new-message") {
@@ -74,6 +182,21 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..c6fc8bed186aa1f3d76973f14d4752d5
 -          if (typeof messageSeq !== "number" || messageSeq !== this.lastSeq + 1 || data.body.message.content.t !== "encrypted") {
 +          const message = data.body.message;
 +          const messageSeq = message?.seq;
++          if (this.orderedInbound) {
++            if (!Number.isSafeInteger(messageSeq) || messageSeq < 0) {
++              this.requestInboundProcessingFailure(new Error("Relay message sequence must be a non-negative safe integer"));
++              return;
++            }
++            if (messageSeq <= this.lastSeq) {
++              return;
++            }
++            if (messageSeq !== this.lastSeq + 1) {
++              this.receiveSync.invalidate();
++              return;
++            }
++            this.acceptInboundRecord(message);
++            return;
++          }
 +          if (typeof messageSeq !== "number" || messageSeq !== this.lastSeq + 1 || message?.content?.t !== "encrypted") {
              this.receiveSync.invalidate();
              return;
@@ -93,11 +216,353 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..c6fc8bed186aa1f3d76973f14d4752d5
          } else if (data.body.t === "update-session") {
            if (data.body.metadata && data.body.metadata.version > this.metadataVersion) {
              this.metadata = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(data.body.metadata.value));
-@@ -2454,7 +2464,17 @@ class ApiSessionClient extends EventEmitter {
+@@ -2229,6 +2290,7 @@ class ApiSessionClient extends EventEmitter {
+                 this.ignoreArchiveSignal = false;
+               } else {
+                 logger.debug(`[SOCKET] Session archived (${meta.lifecycleState}), exiting...`);
++                this.archiveSignaled = true;
+                 this.emit("archived");
+               }
+             }
+@@ -2251,14 +2313,43 @@ class ApiSessionClient extends EventEmitter {
+     });
+     this.socket.connect();
+   }
++  hasArchiveSignal() {
++    return this.archiveSignaled;
++  }
+   onUserMessage(callback) {
+     this.pendingMessageCallback = callback;
++    if (this.orderedInbound) {
++      for (const pending of this.pendingMessages.splice(0)) {
++        void Promise.resolve().then(() => {
++          if (this.inboundClosed || this.inboundFailed) {
++            const error = new Error("Session inbound processing stopped");
++            error.name = "AbortError";
++            throw error;
++          }
++          return callback(pending.data);
++        }).then(pending.resolve, pending.reject);
++      }
++      return;
++    }
+     while (this.pendingMessages.length > 0) {
+       callback(this.pendingMessages.shift());
+     }
+   }
+   onFileEvent(callback) {
+     this.pendingFileEventCallback = callback;
++    if (this.orderedInbound) {
++      for (const pending of this.pendingFileEvents.splice(0)) {
++        void Promise.resolve().then(() => {
++          if (this.inboundClosed || this.inboundFailed) {
++            const error = new Error("Session inbound processing stopped");
++            error.name = "AbortError";
++            throw error;
++          }
++          return callback(pending.data);
++        }).then(pending.resolve, pending.reject);
++      }
++      return;
++    }
+     while (this.pendingFileEvents.length > 0) {
+       callback(this.pendingFileEvents.shift());
+     }
+@@ -2403,6 +2494,257 @@ class ApiSessionClient extends EventEmitter {
+       "X-Happy-Client": `cli-coding-session/${configuration.currentCliVersion}`
+     };
+   }
++  acceptInboundRecord(message, skipRouting = false) {
++    if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++      return false;
++    }
++    const seq = message?.seq;
++    if (!Number.isSafeInteger(seq) || seq < 0) {
++      this.requestInboundProcessingFailure(new Error("Relay message sequence must be a non-negative safe integer"));
++      return false;
++    }
++    if (seq <= this.lastSeq) {
++      return true;
++    }
++    if (seq !== this.lastSeq + 1) {
++      this.requestInboundProcessingFailure(new Error(`Relay message sequence gap: expected ${this.lastSeq + 1}, received ${seq}`));
++      return false;
++    }
++    if (this.inboundRecords.length >= ApiSessionClient.MAX_PENDING_INBOUND_RECORDS) {
++      this.requestInboundProcessingFailure(new Error("Relay inbound processing queue is full"));
++      return false;
++    }
++    const isOutboundEcho = this.outboundMessageLocalIds.delete(message.localId);
++    this.lastSeq = seq;
++    this.inboundRecords.push({
++      seq,
++      message,
++      skipRouting,
++      isOutboundEcho
++    });
++    void this.drainInboundRecords();
++    return true;
++  }
++  drainInboundRecords() {
++    if (!this.orderedInbound || this.inboundFailed || this.inboundClosed) {
++      return Promise.resolve();
++    }
++    if (this.inboundDrainPromise) {
++      return this.inboundDrainPromise;
++    }
++    const operation = this.runInboundDrain();
++    this.inboundDrainPromise = operation;
++    void operation.then(
++      () => {
++        if (this.inboundDrainPromise === operation) this.inboundDrainPromise = null;
++      },
++      () => {
++        if (this.inboundDrainPromise === operation) this.inboundDrainPromise = null;
++      }
++    );
++    return operation;
++  }
++  async runInboundDrain() {
++    this.inboundDraining = true;
++    try {
++      while (this.inboundRecords.length > 0 && !this.inboundFailed && !this.inboundClosed) {
++        const record = this.inboundRecords[0];
++        this.inboundActiveRecord = record;
++        if (record.seq !== this.lastProcessedSeq + 1) {
++          throw new Error(`Relay processed sequence gap: expected ${this.lastProcessedSeq + 1}, received ${record.seq}`);
++        }
++        if (!record.skipRouting && !record.isOutboundEcho && record.message?.content?.t === "encrypted") {
++          const body = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(record.message.content.c));
++          logger.debug("[API] Processing ordered relay message", {
++            seq: record.seq,
++            role: typeof body?.role === "string" ? body.role : "unknown",
++            contentType: typeof body?.content?.type === "string" ? body.content.type : "unknown"
++          });
++          await this.routeIncomingMessageOrdered(body, record.seq);
++        }
++        if (this.inboundClosed || this.inboundFailed) {
++          return;
++        }
++        await this.messageProcessedCallback(record.seq);
++        if (this.inboundClosed || this.inboundFailed) {
++          return;
++        }
++        this.lastProcessedSeq = record.seq;
++        this.inboundRecords.shift();
++        this.inboundActiveRecord = null;
++        if (this.inboundFailurePending) {
++          const failure = this.inboundFailurePending;
++          this.inboundFailurePending = null;
++          this.failInboundProcessing(failure);
++          return;
++        }
++      }
++    } catch (error) {
++      this.inboundActiveRecord = null;
++      if (!this.inboundClosed) {
++        this.failInboundProcessing(error);
++      }
++    } finally {
++      this.inboundActiveRecord = null;
++      this.inboundDraining = false;
++    }
++  }
++  async routeIncomingMessageOrdered(message, seq) {
++    const userResult = UserMessageSchema.safeParse(message);
++    if (userResult.success) {
++      if (this.pendingMessageCallback) {
++        await this.pendingMessageCallback(userResult.data);
++      } else {
++        await new Promise((resolve, reject) => {
++          this.pendingMessages.push({
++            data: userResult.data,
++            seq,
++            resolve,
++            reject
++          });
++        });
++      }
++      return;
++    }
++    const fileResult = FileEventMessageSchema.safeParse(message);
++    if (fileResult.success) {
++      const ev = fileResult.data.content.data.ev;
++      logger.debug("[API] Received ordered file event", {
++        seq,
++        size: ev.size,
++        hasMimeType: Boolean(ev.mimeType)
++      });
++      if (this.pendingFileEventCallback) {
++        await this.pendingFileEventCallback(fileResult.data);
++      } else {
++        await new Promise((resolve, reject) => {
++          this.pendingFileEvents.push({
++            data: fileResult.data,
++            seq,
++            resolve,
++            reject
++          });
++        });
++      }
++      return;
++    }
++    for (const listener of this.rawListeners("message")) {
++      await listener.call(this, message);
++    }
++  }
++  rejectPendingInbound(error) {
++    for (const pending of this.pendingMessages.splice(0)) {
++      pending.reject(error);
++    }
++    for (const pending of this.pendingFileEvents.splice(0)) {
++      pending.reject(error);
++    }
++  }
++  requestInboundProcessingFailure(error) {
++    if (!this.orderedInbound || this.inboundFailed || this.inboundClosed || this.inboundFailurePending) {
++      return;
++    }
++    const failure = error instanceof Error ? error : new Error("Relay inbound processing failed");
++    if (!this.inboundActiveRecord) {
++      this.failInboundProcessing(failure);
++      return;
++    }
++    this.inboundFailurePending = failure;
++    this.receiveSync.stop();
++    if (this.reconnectInterval) {
++      clearInterval(this.reconnectInterval);
++      this.reconnectInterval = null;
++    }
++    this.socket.close();
++    this.rejectPendingInbound(failure);
++    if (this.inboundRecords[0] === this.inboundActiveRecord) {
++      this.inboundRecords.splice(1);
++    }
++    logger.debug("[API] Relay inbound processing will stop after its accepted record is checkpointed", { error: failure });
++  }
++  failInboundProcessing(error) {
++    if (!this.orderedInbound || this.inboundFailed || this.inboundClosed) {
++      return;
++    }
++    const failure = error instanceof Error ? error : new Error("Relay inbound processing failed");
++    this.inboundFailurePending = null;
++    this.inboundFailed = true;
++    this.receiveSync.stop();
++    if (this.reconnectInterval) {
++      clearInterval(this.reconnectInterval);
++      this.reconnectInterval = null;
++    }
++    this.rejectPendingInbound(failure);
++    this.inboundRecords.length = 0;
++    this.socket.close();
++    logger.debug("[API] Relay inbound processing stopped", { error: failure });
++    try {
++      this.emit("inboundProcessingError", failure);
++    } catch (listenerError) {
++      logger.debug("[API] Relay inbound processing error listener failed", { error: listenerError });
++    }
++  }
++  closeInboundProcessing() {
++    if (this.inboundClosed) {
++      return;
++    }
++    this.inboundClosed = true;
++    if (!this.orderedInbound) {
++      return;
++    }
++    const error = new Error("Session client closed");
++    error.name = "AbortError";
++    this.receiveSync.stop();
++    this.rejectPendingInbound(error);
++    this.inboundRecords.length = 0;
++  }
++  drainInboundProcessingForClose() {
++    if (!this.orderedInbound) {
++      this.closeInboundProcessing();
++      return Promise.resolve();
++    }
++    if (this.inboundClosePromise) {
++      return this.inboundClosePromise;
++    }
++    const operation = this.runInboundClose();
++    this.inboundClosePromise = operation;
++    return operation;
++  }
++  async runInboundClose() {
++    if (this.inboundClosed) {
++      return;
++    }
++    this.inboundClosing = true;
++    this.receiveSync.stop();
++    if (this.reconnectInterval) {
++      clearInterval(this.reconnectInterval);
++      this.reconnectInterval = null;
++    }
++    this.socket.close();
++    let timeout;
++    const timedOut = await Promise.race([
++      this.drainInboundRecords().then(() => false),
++      new Promise((resolve) => {
++        timeout = setTimeout(() => resolve(true), this.inboundCloseTimeoutMs);
++      })
++    ]);
++    if (timeout) clearTimeout(timeout);
++    if (timedOut) {
++      const failure = new Error(`Timed out draining relay input after ${this.inboundCloseTimeoutMs}ms`);
++      this.failInboundProcessing(failure);
++      this.inboundClosed = true;
++      throw failure;
++    }
++    if (this.inboundFailed) {
++      this.inboundClosed = true;
++      return;
++    }
++    this.inboundClosed = true;
++    const error = new Error("Session client closed");
++    error.name = "AbortError";
++    this.rejectPendingInbound(error);
++    this.inboundRecords.length = 0;
++  }
+   routeIncomingMessage(message) {
+     const userResult = UserMessageSchema.safeParse(message);
+     if (userResult.success) {
+@@ -2430,6 +2772,9 @@ class ApiSessionClient extends EventEmitter {
+     this.emit("message", message);
+   }
+   async fetchMessages() {
++    if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++      return;
++    }
+     const skipRouting = this.skipInitialMessages;
+     if (skipRouting) {
+       this.skipInitialMessages = false;
+@@ -2448,13 +2793,39 @@ class ApiSessionClient extends EventEmitter {
+           timeout: 6e4
+         }
+       );
++      if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++        return;
++      }
+       const messages = Array.isArray(response.data.messages) ? response.data.messages : [];
+       let maxSeq = afterSeq;
+       for (const message of messages) {
          if (message.seq > maxSeq) {
            maxSeq = message.seq;
          }
 -        if (skipRouting) continue;
++        if (this.orderedInbound) {
++          if (!Number.isSafeInteger(message?.seq) || message.seq < 0) {
++            this.requestInboundProcessingFailure(new Error("Relay message sequence must be a non-negative safe integer"));
++            return;
++          }
++          if (message.seq <= this.lastSeq) {
++            continue;
++          }
++          if (!this.acceptInboundRecord(message, skipRouting)) {
++            return;
++          }
++          continue;
++        }
 +        // The socket handler routes live messages and advances lastSeq while
 +        // this fetch is parked on its await. Without this guard the page that
 +        // comes back re-routes anything the socket already delivered, and a
@@ -112,7 +577,30 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..c6fc8bed186aa1f3d76973f14d4752d5
          if (message.content?.t !== "encrypted") {
            continue;
          }
-@@ -2487,10 +2507,13 @@ class ApiSessionClient extends EventEmitter {
+@@ -2469,16 +2840,19 @@ class ApiSessionClient extends EventEmitter {
+           });
+         }
+       }
+-      this.lastSeq = Math.max(this.lastSeq, maxSeq);
++      if (!this.orderedInbound) {
++        this.lastSeq = Math.max(this.lastSeq, maxSeq);
++      }
+       const hasMore = !!response.data.hasMore;
+-      if (hasMore && maxSeq === afterSeq) {
++      const nextAfterSeq = this.orderedInbound ? this.lastSeq : maxSeq;
++      if (hasMore && nextAfterSeq === afterSeq) {
+         logger.debug("[API] fetchMessages pagination stalled, stopping to avoid infinite loop", {
+           sessionId: this.sessionId,
+           afterSeq
+         });
+         break;
+       }
+-      afterSeq = maxSeq;
++      afterSeq = nextAfterSeq;
+       if (!hasMore) {
+         break;
+       }
+@@ -2487,10 +2861,13 @@ class ApiSessionClient extends EventEmitter {
    static MAX_OUTBOX_BATCH_SIZE = 50;
    async flushOutbox() {
      while (this.pendingOutbox.length > 0) {
@@ -129,7 +617,7 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..c6fc8bed186aa1f3d76973f14d4752d5
          `${configuration.serverUrl}/v3/sessions/${encodeURIComponent(this.sessionId)}/messages`,
          {
            messages: batch
-@@ -2500,17 +2523,16 @@ class ApiSessionClient extends EventEmitter {
+@@ -2500,17 +2877,16 @@ class ApiSessionClient extends EventEmitter {
            timeout: 6e4
          }
        );
@@ -150,10 +638,17 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..c6fc8bed186aa1f3d76973f14d4752d5
      });
      if (invalidate) {
        this.sendSync.invalidate();
-@@ -2777,6 +2799,14 @@ class ApiSessionClient extends EventEmitter {
+@@ -2777,6 +3153,21 @@ class ApiSessionClient extends EventEmitter {
    }
    async close() {
      logger.debug("[API] socket.close() called");
++    let inboundCloseError = null;
++    try {
++      await this.drainInboundProcessingForClose();
++    } catch (error) {
++      inboundCloseError = error;
++      logger.debug("[API] Failed to drain relay input during close", { error });
++    }
 +    // Join the existing single-flight sender before stopping it. Calling
 +    // flushOutbox() directly here can overlap an in-flight drain, causing both
 +    // callers to POST and splice the same batch while the relay is delayed.
@@ -165,7 +660,36 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..c6fc8bed186aa1f3d76973f14d4752d5
      this.sendSync.stop();
      this.receiveSync.stop();
      if (this.reconnectInterval) {
-@@ -5229,7 +5259,10 @@ class ApiClient {
+@@ -2784,10 +3175,17 @@ class ApiSessionClient extends EventEmitter {
+       this.reconnectInterval = null;
+     }
+     this.socket.close();
++    if (inboundCloseError) throw inboundCloseError;
+   }
+   startSmartReconnect() {
++    if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) return;
+     if (this.reconnectInterval) return;
+     this.reconnectInterval = setInterval(() => {
++      if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++        clearInterval(this.reconnectInterval);
++        this.reconnectInterval = null;
++        return;
++      }
+       if (this.socket.connected) {
+         clearInterval(this.reconnectInterval);
+         this.reconnectInterval = null;
+@@ -2803,7 +3201,9 @@ class ApiSessionClient extends EventEmitter {
+     if (shouldReconnect()) {
+       logger.debug("[API] Network up + lid open \u2014 reconnecting in 1s");
+       setTimeout(() => {
+-        if (!this.socket.connected) this.socket.connect();
++        if (!this.inboundClosing && !this.inboundClosed && !this.inboundFailed && !this.inboundFailurePending && !this.socket.connected) {
++          this.socket.connect();
++        }
+       }, 1e3);
+     }
+   }
+@@ -5229,7 +5629,10 @@ class ApiClient {
      let encryptionKey;
      let encryptionVariant;
      if (this.credential.encryption.type === "dataKey") {
@@ -177,7 +701,7 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..c6fc8bed186aa1f3d76973f14d4752d5
        encryptionVariant = "dataKey";
        let encryptedDataKey = libsodiumEncryptForPublicKey(encryptionKey, this.credential.encryption.publicKey);
        dataEncryptionKey = new Uint8Array(encryptedDataKey.length + 1);
-@@ -5419,8 +5452,8 @@ class ApiClient {
+@@ -5419,8 +5822,8 @@ class ApiClient {
        throw error;
      }
    }
@@ -189,28 +713,96 @@ index 09c68a0e9c1c90e55115b3bcdfc92a0d408325b6..c6fc8bed186aa1f3d76973f14d4752d5
    machineSyncClient(machine) {
      return new ApiMachineClient(this.credential.token, machine);
 diff --git a/dist/types-D0KwHfY9.cjs b/dist/types-D0KwHfY9.cjs
-index 4aebb1233520dbe47c2069294ff3664300e99177..c08a2a3c7a733a8c2947e7044f73ac111682af27 100644
+index 4aebb1233520dbe47c2069294ff3664300e99177..eb34477c01d4a5a050f7a9401966e7e5d35e0a3f 100644
 --- a/dist/types-D0KwHfY9.cjs
 +++ b/dist/types-D0KwHfY9.cjs
-@@ -2145,10 +2145,16 @@ class ApiSessionClient extends node_events.EventEmitter {
+@@ -2131,6 +2131,7 @@ class ApiSessionClient extends node_events.EventEmitter {
+   encryptionVariant;
+   reconnectInterval = null;
+   ignoreArchiveSignal = false;
++  archiveSignaled = false;
+   skipInitialMessages = false;
+   claudeSessionProtocolState = {
+     currentTurnId: null,
+@@ -2144,11 +2145,41 @@ class ApiSessionClient extends node_events.EventEmitter {
+     activeSubagents: /* @__PURE__ */ new Set()
    };
    lastSeq = 0;
++  lastProcessedSeq = 0;
++  messageProcessedCallback = null;
++  orderedInbound = false;
++  inboundRecords = [];
++  inboundDraining = false;
++  inboundDrainPromise = null;
++  inboundFailed = false;
++  inboundFailurePending = null;
++  inboundActiveRecord = null;
++  inboundClosing = false;
++  inboundClosed = false;
++  inboundClosePromise = null;
++  inboundCloseTimeoutMs = 3e3;
    pendingOutbox = [];
 +  outboundMessageLocalIds = /* @__PURE__ */ new Set();
    sendSync;
    receiveSync;
 -  constructor(token, session) {
++  static MAX_PENDING_INBOUND_RECORDS = 256;
 +  constructor(token, session, options = {}) {
      super();
 +    const resumeFromSeq = options.resumeFromSeq ?? 0;
 +    if (!Number.isSafeInteger(resumeFromSeq) || resumeFromSeq < 0) {
 +      throw new Error("Session resume sequence must be a non-negative safe integer");
 +    }
++    if (options.onMessageProcessed !== void 0 && typeof options.onMessageProcessed !== "function") {
++      throw new Error("Session message processed callback must be a function");
++    }
++    if (options.inboundCloseTimeoutMs !== void 0 && (!Number.isSafeInteger(options.inboundCloseTimeoutMs) || options.inboundCloseTimeoutMs <= 0)) {
++      throw new Error("Session inbound close timeout must be a positive safe integer");
++    }
 +    this.lastSeq = resumeFromSeq;
++    this.lastProcessedSeq = resumeFromSeq;
++    this.messageProcessedCallback = options.onMessageProcessed ?? null;
++    this.orderedInbound = this.messageProcessedCallback !== null;
++    this.inboundCloseTimeoutMs = options.inboundCloseTimeoutMs ?? 3e3;
      this.token = token;
      this.sessionId = session.id;
      this.metadata = session.metadata;
-@@ -2209,18 +2215,22 @@ class ApiSessionClient extends node_events.EventEmitter {
+@@ -2180,6 +2211,10 @@ class ApiSessionClient extends node_events.EventEmitter {
+       autoConnect: false
+     });
+     this.socket.on("connect", () => {
++      if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++        this.socket.close();
++        return;
++      }
+       logger.debug("Socket connected successfully");
+       if (this.reconnectInterval) {
+         clearInterval(this.reconnectInterval);
+@@ -2194,33 +2229,59 @@ class ApiSessionClient extends node_events.EventEmitter {
+     this.socket.on("disconnect", (reason) => {
+       logger.debug(`[API] Socket disconnected: ${reason}`);
+       this.rpcHandlerManager.onSocketDisconnect();
+-      this.startSmartReconnect();
++      if (!this.inboundClosing && !this.inboundClosed && !this.inboundFailed && !this.inboundFailurePending) {
++        this.startSmartReconnect();
++      }
+     });
+     this.socket.on("connect_error", (error) => {
+       logger.debug("[API] Socket connection error:", error);
+       this.rpcHandlerManager.onSocketDisconnect();
+-      this.startSmartReconnect();
++      if (!this.inboundClosing && !this.inboundClosed && !this.inboundFailed && !this.inboundFailurePending) {
++        this.startSmartReconnect();
++      }
+     });
+     this.socket.on("update", (data) => {
+       try {
++        if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++          return;
++        }
+         logger.debugLargeJson("[SOCKET] [UPDATE] Received update:", data);
+         if (!data.body) {
+           logger.debug("[SOCKET] [UPDATE] [ERROR] No body in update!");
            return;
          }
          if (data.body.t === "new-message") {
@@ -218,6 +810,21 @@ index 4aebb1233520dbe47c2069294ff3664300e99177..c08a2a3c7a733a8c2947e7044f73ac11
 -          if (typeof messageSeq !== "number" || messageSeq !== this.lastSeq + 1 || data.body.message.content.t !== "encrypted") {
 +          const message = data.body.message;
 +          const messageSeq = message?.seq;
++          if (this.orderedInbound) {
++            if (!Number.isSafeInteger(messageSeq) || messageSeq < 0) {
++              this.requestInboundProcessingFailure(new Error("Relay message sequence must be a non-negative safe integer"));
++              return;
++            }
++            if (messageSeq <= this.lastSeq) {
++              return;
++            }
++            if (messageSeq !== this.lastSeq + 1) {
++              this.receiveSync.invalidate();
++              return;
++            }
++            this.acceptInboundRecord(message);
++            return;
++          }
 +          if (typeof messageSeq !== "number" || messageSeq !== this.lastSeq + 1 || message?.content?.t !== "encrypted") {
              this.receiveSync.invalidate();
              return;
@@ -237,11 +844,353 @@ index 4aebb1233520dbe47c2069294ff3664300e99177..c08a2a3c7a733a8c2947e7044f73ac11
          } else if (data.body.t === "update-session") {
            if (data.body.metadata && data.body.metadata.version > this.metadataVersion) {
              this.metadata = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(data.body.metadata.value));
-@@ -2457,7 +2467,17 @@ class ApiSessionClient extends node_events.EventEmitter {
+@@ -2232,6 +2293,7 @@ class ApiSessionClient extends node_events.EventEmitter {
+                 this.ignoreArchiveSignal = false;
+               } else {
+                 logger.debug(`[SOCKET] Session archived (${meta.lifecycleState}), exiting...`);
++                this.archiveSignaled = true;
+                 this.emit("archived");
+               }
+             }
+@@ -2254,14 +2316,43 @@ class ApiSessionClient extends node_events.EventEmitter {
+     });
+     this.socket.connect();
+   }
++  hasArchiveSignal() {
++    return this.archiveSignaled;
++  }
+   onUserMessage(callback) {
+     this.pendingMessageCallback = callback;
++    if (this.orderedInbound) {
++      for (const pending of this.pendingMessages.splice(0)) {
++        void Promise.resolve().then(() => {
++          if (this.inboundClosed || this.inboundFailed) {
++            const error = new Error("Session inbound processing stopped");
++            error.name = "AbortError";
++            throw error;
++          }
++          return callback(pending.data);
++        }).then(pending.resolve, pending.reject);
++      }
++      return;
++    }
+     while (this.pendingMessages.length > 0) {
+       callback(this.pendingMessages.shift());
+     }
+   }
+   onFileEvent(callback) {
+     this.pendingFileEventCallback = callback;
++    if (this.orderedInbound) {
++      for (const pending of this.pendingFileEvents.splice(0)) {
++        void Promise.resolve().then(() => {
++          if (this.inboundClosed || this.inboundFailed) {
++            const error = new Error("Session inbound processing stopped");
++            error.name = "AbortError";
++            throw error;
++          }
++          return callback(pending.data);
++        }).then(pending.resolve, pending.reject);
++      }
++      return;
++    }
+     while (this.pendingFileEvents.length > 0) {
+       callback(this.pendingFileEvents.shift());
+     }
+@@ -2406,6 +2497,257 @@ class ApiSessionClient extends node_events.EventEmitter {
+       "X-Happy-Client": `cli-coding-session/${configuration.currentCliVersion}`
+     };
+   }
++  acceptInboundRecord(message, skipRouting = false) {
++    if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++      return false;
++    }
++    const seq = message?.seq;
++    if (!Number.isSafeInteger(seq) || seq < 0) {
++      this.requestInboundProcessingFailure(new Error("Relay message sequence must be a non-negative safe integer"));
++      return false;
++    }
++    if (seq <= this.lastSeq) {
++      return true;
++    }
++    if (seq !== this.lastSeq + 1) {
++      this.requestInboundProcessingFailure(new Error(`Relay message sequence gap: expected ${this.lastSeq + 1}, received ${seq}`));
++      return false;
++    }
++    if (this.inboundRecords.length >= ApiSessionClient.MAX_PENDING_INBOUND_RECORDS) {
++      this.requestInboundProcessingFailure(new Error("Relay inbound processing queue is full"));
++      return false;
++    }
++    const isOutboundEcho = this.outboundMessageLocalIds.delete(message.localId);
++    this.lastSeq = seq;
++    this.inboundRecords.push({
++      seq,
++      message,
++      skipRouting,
++      isOutboundEcho
++    });
++    void this.drainInboundRecords();
++    return true;
++  }
++  drainInboundRecords() {
++    if (!this.orderedInbound || this.inboundFailed || this.inboundClosed) {
++      return Promise.resolve();
++    }
++    if (this.inboundDrainPromise) {
++      return this.inboundDrainPromise;
++    }
++    const operation = this.runInboundDrain();
++    this.inboundDrainPromise = operation;
++    void operation.then(
++      () => {
++        if (this.inboundDrainPromise === operation) this.inboundDrainPromise = null;
++      },
++      () => {
++        if (this.inboundDrainPromise === operation) this.inboundDrainPromise = null;
++      }
++    );
++    return operation;
++  }
++  async runInboundDrain() {
++    this.inboundDraining = true;
++    try {
++      while (this.inboundRecords.length > 0 && !this.inboundFailed && !this.inboundClosed) {
++        const record = this.inboundRecords[0];
++        this.inboundActiveRecord = record;
++        if (record.seq !== this.lastProcessedSeq + 1) {
++          throw new Error(`Relay processed sequence gap: expected ${this.lastProcessedSeq + 1}, received ${record.seq}`);
++        }
++        if (!record.skipRouting && !record.isOutboundEcho && record.message?.content?.t === "encrypted") {
++          const body = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(record.message.content.c));
++          logger.debug("[API] Processing ordered relay message", {
++            seq: record.seq,
++            role: typeof body?.role === "string" ? body.role : "unknown",
++            contentType: typeof body?.content?.type === "string" ? body.content.type : "unknown"
++          });
++          await this.routeIncomingMessageOrdered(body, record.seq);
++        }
++        if (this.inboundClosed || this.inboundFailed) {
++          return;
++        }
++        await this.messageProcessedCallback(record.seq);
++        if (this.inboundClosed || this.inboundFailed) {
++          return;
++        }
++        this.lastProcessedSeq = record.seq;
++        this.inboundRecords.shift();
++        this.inboundActiveRecord = null;
++        if (this.inboundFailurePending) {
++          const failure = this.inboundFailurePending;
++          this.inboundFailurePending = null;
++          this.failInboundProcessing(failure);
++          return;
++        }
++      }
++    } catch (error) {
++      this.inboundActiveRecord = null;
++      if (!this.inboundClosed) {
++        this.failInboundProcessing(error);
++      }
++    } finally {
++      this.inboundActiveRecord = null;
++      this.inboundDraining = false;
++    }
++  }
++  async routeIncomingMessageOrdered(message, seq) {
++    const userResult = UserMessageSchema.safeParse(message);
++    if (userResult.success) {
++      if (this.pendingMessageCallback) {
++        await this.pendingMessageCallback(userResult.data);
++      } else {
++        await new Promise((resolve, reject) => {
++          this.pendingMessages.push({
++            data: userResult.data,
++            seq,
++            resolve,
++            reject
++          });
++        });
++      }
++      return;
++    }
++    const fileResult = FileEventMessageSchema.safeParse(message);
++    if (fileResult.success) {
++      const ev = fileResult.data.content.data.ev;
++      logger.debug("[API] Received ordered file event", {
++        seq,
++        size: ev.size,
++        hasMimeType: Boolean(ev.mimeType)
++      });
++      if (this.pendingFileEventCallback) {
++        await this.pendingFileEventCallback(fileResult.data);
++      } else {
++        await new Promise((resolve, reject) => {
++          this.pendingFileEvents.push({
++            data: fileResult.data,
++            seq,
++            resolve,
++            reject
++          });
++        });
++      }
++      return;
++    }
++    for (const listener of this.rawListeners("message")) {
++      await listener.call(this, message);
++    }
++  }
++  rejectPendingInbound(error) {
++    for (const pending of this.pendingMessages.splice(0)) {
++      pending.reject(error);
++    }
++    for (const pending of this.pendingFileEvents.splice(0)) {
++      pending.reject(error);
++    }
++  }
++  requestInboundProcessingFailure(error) {
++    if (!this.orderedInbound || this.inboundFailed || this.inboundClosed || this.inboundFailurePending) {
++      return;
++    }
++    const failure = error instanceof Error ? error : new Error("Relay inbound processing failed");
++    if (!this.inboundActiveRecord) {
++      this.failInboundProcessing(failure);
++      return;
++    }
++    this.inboundFailurePending = failure;
++    this.receiveSync.stop();
++    if (this.reconnectInterval) {
++      clearInterval(this.reconnectInterval);
++      this.reconnectInterval = null;
++    }
++    this.socket.close();
++    this.rejectPendingInbound(failure);
++    if (this.inboundRecords[0] === this.inboundActiveRecord) {
++      this.inboundRecords.splice(1);
++    }
++    logger.debug("[API] Relay inbound processing will stop after its accepted record is checkpointed", { error: failure });
++  }
++  failInboundProcessing(error) {
++    if (!this.orderedInbound || this.inboundFailed || this.inboundClosed) {
++      return;
++    }
++    const failure = error instanceof Error ? error : new Error("Relay inbound processing failed");
++    this.inboundFailurePending = null;
++    this.inboundFailed = true;
++    this.receiveSync.stop();
++    if (this.reconnectInterval) {
++      clearInterval(this.reconnectInterval);
++      this.reconnectInterval = null;
++    }
++    this.rejectPendingInbound(failure);
++    this.inboundRecords.length = 0;
++    this.socket.close();
++    logger.debug("[API] Relay inbound processing stopped", { error: failure });
++    try {
++      this.emit("inboundProcessingError", failure);
++    } catch (listenerError) {
++      logger.debug("[API] Relay inbound processing error listener failed", { error: listenerError });
++    }
++  }
++  closeInboundProcessing() {
++    if (this.inboundClosed) {
++      return;
++    }
++    this.inboundClosed = true;
++    if (!this.orderedInbound) {
++      return;
++    }
++    const error = new Error("Session client closed");
++    error.name = "AbortError";
++    this.receiveSync.stop();
++    this.rejectPendingInbound(error);
++    this.inboundRecords.length = 0;
++  }
++  drainInboundProcessingForClose() {
++    if (!this.orderedInbound) {
++      this.closeInboundProcessing();
++      return Promise.resolve();
++    }
++    if (this.inboundClosePromise) {
++      return this.inboundClosePromise;
++    }
++    const operation = this.runInboundClose();
++    this.inboundClosePromise = operation;
++    return operation;
++  }
++  async runInboundClose() {
++    if (this.inboundClosed) {
++      return;
++    }
++    this.inboundClosing = true;
++    this.receiveSync.stop();
++    if (this.reconnectInterval) {
++      clearInterval(this.reconnectInterval);
++      this.reconnectInterval = null;
++    }
++    this.socket.close();
++    let timeout;
++    const timedOut = await Promise.race([
++      this.drainInboundRecords().then(() => false),
++      new Promise((resolve) => {
++        timeout = setTimeout(() => resolve(true), this.inboundCloseTimeoutMs);
++      })
++    ]);
++    if (timeout) clearTimeout(timeout);
++    if (timedOut) {
++      const failure = new Error(`Timed out draining relay input after ${this.inboundCloseTimeoutMs}ms`);
++      this.failInboundProcessing(failure);
++      this.inboundClosed = true;
++      throw failure;
++    }
++    if (this.inboundFailed) {
++      this.inboundClosed = true;
++      return;
++    }
++    this.inboundClosed = true;
++    const error = new Error("Session client closed");
++    error.name = "AbortError";
++    this.rejectPendingInbound(error);
++    this.inboundRecords.length = 0;
++  }
+   routeIncomingMessage(message) {
+     const userResult = UserMessageSchema.safeParse(message);
+     if (userResult.success) {
+@@ -2433,6 +2775,9 @@ class ApiSessionClient extends node_events.EventEmitter {
+     this.emit("message", message);
+   }
+   async fetchMessages() {
++    if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++      return;
++    }
+     const skipRouting = this.skipInitialMessages;
+     if (skipRouting) {
+       this.skipInitialMessages = false;
+@@ -2451,13 +2796,39 @@ class ApiSessionClient extends node_events.EventEmitter {
+           timeout: 6e4
+         }
+       );
++      if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++        return;
++      }
+       const messages = Array.isArray(response.data.messages) ? response.data.messages : [];
+       let maxSeq = afterSeq;
+       for (const message of messages) {
          if (message.seq > maxSeq) {
            maxSeq = message.seq;
          }
 -        if (skipRouting) continue;
++        if (this.orderedInbound) {
++          if (!Number.isSafeInteger(message?.seq) || message.seq < 0) {
++            this.requestInboundProcessingFailure(new Error("Relay message sequence must be a non-negative safe integer"));
++            return;
++          }
++          if (message.seq <= this.lastSeq) {
++            continue;
++          }
++          if (!this.acceptInboundRecord(message, skipRouting)) {
++            return;
++          }
++          continue;
++        }
 +        // The socket handler routes live messages and advances lastSeq while
 +        // this fetch is parked on its await. Without this guard the page that
 +        // comes back re-routes anything the socket already delivered, and a
@@ -256,7 +1205,30 @@ index 4aebb1233520dbe47c2069294ff3664300e99177..c08a2a3c7a733a8c2947e7044f73ac11
          if (message.content?.t !== "encrypted") {
            continue;
          }
-@@ -2490,10 +2510,13 @@ class ApiSessionClient extends node_events.EventEmitter {
+@@ -2472,16 +2843,19 @@ class ApiSessionClient extends node_events.EventEmitter {
+           });
+         }
+       }
+-      this.lastSeq = Math.max(this.lastSeq, maxSeq);
++      if (!this.orderedInbound) {
++        this.lastSeq = Math.max(this.lastSeq, maxSeq);
++      }
+       const hasMore = !!response.data.hasMore;
+-      if (hasMore && maxSeq === afterSeq) {
++      const nextAfterSeq = this.orderedInbound ? this.lastSeq : maxSeq;
++      if (hasMore && nextAfterSeq === afterSeq) {
+         logger.debug("[API] fetchMessages pagination stalled, stopping to avoid infinite loop", {
+           sessionId: this.sessionId,
+           afterSeq
+         });
+         break;
+       }
+-      afterSeq = maxSeq;
++      afterSeq = nextAfterSeq;
+       if (!hasMore) {
+         break;
+       }
+@@ -2490,10 +2864,13 @@ class ApiSessionClient extends node_events.EventEmitter {
    static MAX_OUTBOX_BATCH_SIZE = 50;
    async flushOutbox() {
      while (this.pendingOutbox.length > 0) {
@@ -273,7 +1245,7 @@ index 4aebb1233520dbe47c2069294ff3664300e99177..c08a2a3c7a733a8c2947e7044f73ac11
          `${configuration.serverUrl}/v3/sessions/${encodeURIComponent(this.sessionId)}/messages`,
          {
            messages: batch
-@@ -2503,17 +2526,16 @@ class ApiSessionClient extends node_events.EventEmitter {
+@@ -2503,17 +2880,16 @@ class ApiSessionClient extends node_events.EventEmitter {
            timeout: 6e4
          }
        );
@@ -294,10 +1266,17 @@ index 4aebb1233520dbe47c2069294ff3664300e99177..c08a2a3c7a733a8c2947e7044f73ac11
      });
      if (invalidate) {
        this.sendSync.invalidate();
-@@ -2780,6 +2802,14 @@ class ApiSessionClient extends node_events.EventEmitter {
+@@ -2780,6 +3156,21 @@ class ApiSessionClient extends node_events.EventEmitter {
    }
    async close() {
      logger.debug("[API] socket.close() called");
++    let inboundCloseError = null;
++    try {
++      await this.drainInboundProcessingForClose();
++    } catch (error) {
++      inboundCloseError = error;
++      logger.debug("[API] Failed to drain relay input during close", { error });
++    }
 +    // Join the existing single-flight sender before stopping it. Calling
 +    // flushOutbox() directly here can overlap an in-flight drain, causing both
 +    // callers to POST and splice the same batch while the relay is delayed.
@@ -309,7 +1288,36 @@ index 4aebb1233520dbe47c2069294ff3664300e99177..c08a2a3c7a733a8c2947e7044f73ac11
      this.sendSync.stop();
      this.receiveSync.stop();
      if (this.reconnectInterval) {
-@@ -5232,7 +5262,10 @@ class ApiClient {
+@@ -2787,10 +3178,17 @@ class ApiSessionClient extends node_events.EventEmitter {
+       this.reconnectInterval = null;
+     }
+     this.socket.close();
++    if (inboundCloseError) throw inboundCloseError;
+   }
+   startSmartReconnect() {
++    if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) return;
+     if (this.reconnectInterval) return;
+     this.reconnectInterval = setInterval(() => {
++      if (this.inboundClosing || this.inboundClosed || this.inboundFailed || this.inboundFailurePending) {
++        clearInterval(this.reconnectInterval);
++        this.reconnectInterval = null;
++        return;
++      }
+       if (this.socket.connected) {
+         clearInterval(this.reconnectInterval);
+         this.reconnectInterval = null;
+@@ -2806,7 +3204,9 @@ class ApiSessionClient extends node_events.EventEmitter {
+     if (shouldReconnect()) {
+       logger.debug("[API] Network up + lid open \u2014 reconnecting in 1s");
+       setTimeout(() => {
+-        if (!this.socket.connected) this.socket.connect();
++        if (!this.inboundClosing && !this.inboundClosed && !this.inboundFailed && !this.inboundFailurePending && !this.socket.connected) {
++          this.socket.connect();
++        }
+       }, 1e3);
+     }
+   }
+@@ -5232,7 +5632,10 @@ class ApiClient {
      let encryptionKey;
      let encryptionVariant;
      if (this.credential.encryption.type === "dataKey") {
@@ -321,7 +1329,7 @@ index 4aebb1233520dbe47c2069294ff3664300e99177..c08a2a3c7a733a8c2947e7044f73ac11
        encryptionVariant = "dataKey";
        let encryptedDataKey = libsodiumEncryptForPublicKey(encryptionKey, this.credential.encryption.publicKey);
        dataEncryptionKey = new Uint8Array(encryptedDataKey.length + 1);
-@@ -5422,8 +5455,8 @@ class ApiClient {
+@@ -5422,8 +5825,8 @@ class ApiClient {
        throw error;
      }
    }

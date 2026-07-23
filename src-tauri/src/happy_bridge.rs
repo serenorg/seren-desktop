@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
+use unicode_normalization::UnicodeNormalization;
 
 pub const HAPPY_RELAY_URL: &str = "https://api.cluster-fluster.com";
 const MAX_RESTART_ATTEMPTS: u32 = 3;
@@ -887,26 +888,33 @@ async fn monitor_process(
 }
 
 /// Asks the bridge to shut down over the supervisor channel, then falls back to
-/// signals. Windows has no SIGTERM, so before this the child was never told to
-/// exit: every stop burned the full grace period and was then hard-killed,
-/// skipping the relay disconnect so the machine was left to time out. The
-/// notification is sent on every platform, which also gives unix a clean
-/// shutdown ahead of SIGTERM rather than relying on the signal handler alone.
+/// signals only when that notification cannot be delivered. Windows has no
+/// SIGTERM, so before this the child was never told to exit: every stop burned
+/// the full grace period and was then hard-killed, skipping the relay disconnect
+/// so the machine was left to time out. On unix, immediately signaling after a
+/// successful notification is also unsafe: the signal handler could win the
+/// race and lose the explicit-disable retirement flag carried by the request.
 async fn terminate_child(
     child: &mut Child,
     stdin: Option<&Arc<Mutex<ChildStdin>>>,
 ) -> Result<(), String> {
-    if let Some(stdin) = stdin {
+    let shutdown_notified = if let Some(stdin) = stdin {
         // Bounded: a wedged bridge that is not draining stdin must not stall the
         // stop path, which is exactly the deadlock the grace period exists for.
         // The signal and kill fallbacks below cover a failed write.
-        let _ = notify_supervisor(stdin, json!({ "jsonrpc": "2.0", "method": "shutdown" })).await;
-    }
+        notify_supervisor(stdin, shutdown_notification())
+            .await
+            .is_ok()
+    } else {
+        false
+    };
 
     #[cfg(unix)]
-    if let Some(pid) = child.id() {
-        unsafe {
-            libc::kill(pid as i32, libc::SIGTERM);
+    if !shutdown_notified {
+        if let Some(pid) = child.id() {
+            unsafe {
+                libc::kill(pid as i32, libc::SIGTERM);
+            }
         }
     }
 
@@ -917,6 +925,13 @@ async fn terminate_child(
             .await
             .map_err(|err| format!("Failed to stop Happy bridge: {err}")),
     }
+}
+
+fn shutdown_notification() -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "method": "shutdown",
+    })
 }
 
 fn restart_delay(attempt: u32) -> Duration {
@@ -1126,6 +1141,47 @@ fn is_advertised_root<R: tauri::Runtime>(app: &AppHandle<R>, cwd: &str) -> bool 
         .any(|root| root == candidate)
 }
 
+/// Serialize an already-canonical path in the same form Node's `realpath`
+/// returns. Windows' Rust canonicalizer uses verbatim paths (`\\?\C:\...` or
+/// `\\?\UNC\...`), while Node returns ordinary DOS/UNC paths. This conversion
+/// also applies the NFC normalization used by `canonicalAbsolutePath` in
+/// `validate.mjs`. It is intentionally wire-only: authorization and symlink
+/// checks continue to compare canonical `PathBuf`s before reaching this
+/// function.
+fn canonical_path_for_wire(path: &Path) -> Option<String> {
+    let path = path.to_str()?;
+    let path = if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else {
+        path.strip_prefix(r"\\?\").unwrap_or(path).to_owned()
+    };
+    Some(path.nfc().collect())
+}
+
+/// Resolve the two root columns written for a Happy-originated conversation to
+/// one exact, currently authorized canonical directory. Requiring both columns
+/// prevents a partially overwritten desktop row from choosing whichever path
+/// happens to remain usable.
+fn canonical_happy_restoration_root<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    agent_cwd: &str,
+    project_root: &str,
+) -> Option<String> {
+    let agent_cwd = std::fs::canonicalize(agent_cwd).ok()?;
+    let project_root = std::fs::canonicalize(project_root).ok()?;
+    if agent_cwd != project_root {
+        return None;
+    }
+    let authorized = crate::commands::happy_bridge::saved_advertised_roots(app)
+        .iter()
+        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .any(|root| root == agent_cwd);
+    if !authorized {
+        return None;
+    }
+    canonical_path_for_wire(&agent_cwd)
+}
+
 /// The distinct project folders behind the user's agent conversations, in the
 /// order they were seen. A failed lookup is reported rather than absorbed: an
 /// empty set is also what a user with no projects has, so absorbing it started a
@@ -1181,6 +1237,9 @@ fn parse_supervisor_line(line: &str) -> Result<SupervisorRequest, Value> {
             | "conversation_delete"
             | "conversation_happy_session_lookup"
             | "conversation_lookup"
+            | "conversation_restore_candidates"
+            | "conversation_migrate_happy_session"
+            | "conversation_claim"
             | "conversation_owner_lookup"
             | "provider_session_archive"
             | "provider_session_archive_lookup"
@@ -1209,6 +1268,14 @@ fn required_uuid(params: &Value, key: &str) -> Result<String, String> {
     let value = required_string(params, key)?;
     uuid::Uuid::parse_str(&value).map_err(|_| format!("{key} must be a UUID"))?;
     Ok(value)
+}
+
+fn required_nullable_string(params: &Value, key: &str) -> Result<Option<String>, String> {
+    match params.get(key) {
+        Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => Ok(Some(value.clone())),
+        _ => Err(format!("{key} must be a non-empty string or null")),
+    }
 }
 
 async fn dispatch_supervisor_request(
@@ -1247,21 +1314,166 @@ async fn dispatch_supervisor_request(
             Ok(json!({ "conversationId": conversation.id }))
         }
         "conversation_lookup" => {
+            let provider_session_id = required_uuid(&request.params, "providerSessionId")?;
             let happy_session_id = required_string(&request.params, "happySessionId")?;
-            let conversation = crate::commands::chat::lookup_agent_conversation_by_happy_session(
+            let lookup = crate::commands::chat::lookup_happy_restoration_candidate(
                 app.clone(),
+                provider_session_id,
                 happy_session_id,
             )
             .await?;
-            Ok(match conversation {
-                Some(conversation) => json!({
-                    "conversationId": conversation.id,
-                    "agentSessionId": conversation.agent_session_id,
-                    "cwd": conversation.agent_cwd,
-                    "agentType": conversation.agent_type,
+            Ok(match lookup {
+                crate::commands::chat::HappyRestorationLookup::NotHappyOrigin => json!({
+                    "restorable": false,
+                    "happyOrigin": false,
+                    "retire": false,
                 }),
-                None => json!({}),
+                crate::commands::chat::HappyRestorationLookup::InvalidHappyOrigin {
+                    is_archived,
+                } => json!({
+                    "restorable": false,
+                    "happyOrigin": true,
+                    "retire": true,
+                    "archived": is_archived,
+                }),
+                crate::commands::chat::HappyRestorationLookup::Candidate(conversation)
+                    if conversation.is_archived =>
+                {
+                    json!({
+                        "restorable": false,
+                        "happyOrigin": true,
+                        "retire": true,
+                        "archived": true,
+                    })
+                }
+                crate::commands::chat::HappyRestorationLookup::Candidate(conversation) => {
+                    match canonical_happy_restoration_root(
+                        app,
+                        &conversation.agent_cwd,
+                        &conversation.project_root,
+                    ) {
+                        Some(cwd) => json!({
+                            "restorable": true,
+                            "happyOrigin": true,
+                            "retire": false,
+                            "conversationId": conversation.conversation_id,
+                            "agentSessionId": conversation.agent_session_id,
+                            "agentModelId": conversation.agent_model_id,
+                            "agentPermissionMode": conversation.agent_permission_mode,
+                            "cwd": cwd,
+                            "agentType": conversation.agent_type,
+                            "title": conversation.title,
+                            "archived": false,
+                        }),
+                        None => json!({
+                            "restorable": false,
+                            "happyOrigin": true,
+                            "retire": true,
+                            "archived": false,
+                        }),
+                    }
+                }
             })
+        }
+        "conversation_restore_candidates" => {
+            let candidates =
+                crate::commands::chat::list_legacy_happy_restoration_candidates(app.clone())
+                    .await?;
+            let candidates = candidates
+                .into_iter()
+                .filter_map(|candidate| {
+                    let conversation = candidate.conversation;
+                    let cwd = canonical_happy_restoration_root(
+                        app,
+                        &conversation.agent_cwd,
+                        &conversation.project_root,
+                    )?;
+                    Some(json!({
+                        "conversationId": conversation.conversation_id,
+                        "happySessionId": candidate.happy_session_id,
+                        "agentSessionId": conversation.agent_session_id,
+                        "agentModelId": conversation.agent_model_id,
+                        "agentPermissionMode": conversation.agent_permission_mode,
+                        "cwd": cwd,
+                        "agentType": conversation.agent_type,
+                        "title": conversation.title,
+                    }))
+                })
+                .collect::<Vec<_>>();
+            Ok(json!({ "candidates": candidates }))
+        }
+        "conversation_migrate_happy_session" => {
+            let conversation_id = required_uuid(&request.params, "conversationId")?;
+            let expected_happy_session_id =
+                required_string(&request.params, "expectedHappySessionId")?;
+            let replacement_happy_session_id =
+                required_string(&request.params, "replacementHappySessionId")?;
+            let migrated = crate::commands::chat::migrate_happy_restoration_relay(
+                app.clone(),
+                conversation_id,
+                expected_happy_session_id,
+                replacement_happy_session_id,
+            )
+            .await?;
+            if !migrated {
+                return Err("Happy relay migration was rejected".to_string());
+            }
+            Ok(json!({ "migrated": true }))
+        }
+        "conversation_claim" => {
+            let conversation_id = required_uuid(&request.params, "conversationId")?;
+            let provider_session_id = required_uuid(&request.params, "providerSessionId")?;
+            if conversation_id != provider_session_id {
+                return Err("Happy restoration claim was rejected".to_string());
+            }
+            let happy_session_id = required_string(&request.params, "happySessionId")?;
+            let cwd = required_string(&request.params, "cwd")?;
+            let expected_agent_type = required_string(&request.params, "expectedAgentType")?;
+            let expected_agent_session_id =
+                required_nullable_string(&request.params, "expectedAgentSessionId")?;
+            let expected_agent_permission_mode =
+                required_nullable_string(&request.params, "expectedAgentPermissionMode")?;
+            let agent_session_id = request
+                .params
+                .get("agentSessionId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(ToOwned::to_owned);
+            let lookup = crate::commands::chat::lookup_happy_restoration_candidate(
+                app.clone(),
+                provider_session_id.clone(),
+                happy_session_id.clone(),
+            )
+            .await?;
+            let crate::commands::chat::HappyRestorationLookup::Candidate(conversation) = lookup
+            else {
+                return Err("Happy restoration claim was rejected".to_string());
+            };
+            if !conversation.is_archived {
+                let canonical_root = canonical_happy_restoration_root(
+                    app,
+                    &conversation.agent_cwd,
+                    &conversation.project_root,
+                )
+                .ok_or_else(|| "Happy restoration root is no longer authorized".to_string())?;
+                if cwd != canonical_root {
+                    return Err("Happy restoration root changed before claim".to_string());
+                }
+            }
+            let claim = crate::commands::chat::claim_restored_happy_provider_session_owner(
+                app.clone(),
+                conversation_id,
+                provider_session_id,
+                happy_session_id,
+                agent_session_id,
+                expected_agent_type,
+                expected_agent_session_id,
+                expected_agent_permission_mode,
+                conversation.agent_cwd,
+                conversation.project_root,
+            )
+            .await?;
+            Ok(json!({ "archived": claim.archived }))
         }
         "conversation_happy_session_lookup" => {
             let conversation_id = required_uuid(&request.params, "conversationId")?;
@@ -1617,10 +1829,11 @@ fn pipe_bridge_output(
 mod tests {
     use super::{
         BoundedLine, HappyBridgeState, MAX_RESTART_ATTEMPTS, MAX_SUPERVISOR_LINE_BYTES,
-        SESSION_KEY_STORE_FILENAME, SESSION_KEY_STORE_RESET_FILENAME, discovered_project_roots,
+        SESSION_KEY_STORE_FILENAME, SESSION_KEY_STORE_RESET_FILENAME,
+        canonical_happy_restoration_root, canonical_path_for_wire, discovered_project_roots,
         error_response, is_advertised_root, matching_identity_reset_result, next_restart_attempt,
         notify_supervisor, parse_supervisor_line, read_bounded_line,
-        reconcile_session_key_store_reset, report_state, required_uuid,
+        reconcile_session_key_store_reset, report_state, required_nullable_string, required_uuid,
         reset_session_key_store_transaction, restart_allowed, restart_delay, should_rearm,
         stage_session_key_store_reset,
     };
@@ -1905,6 +2118,83 @@ mod tests {
     }
 
     #[test]
+    fn happy_restoration_requires_matching_canonical_advertised_root_columns() {
+        let consented = tempfile::tempdir().expect("consented dir");
+        let other = tempfile::tempdir().expect("other dir");
+        let consented_path = consented.path().to_string_lossy().to_string();
+        let other_path = other.path().to_string_lossy().to_string();
+        let canonical =
+            canonical_path_for_wire(&std::fs::canonicalize(consented.path()).unwrap()).unwrap();
+        let app = mock_app_with_roots(Some(vec![consented_path.clone()]));
+
+        assert_eq!(
+            canonical_happy_restoration_root(app.handle(), &consented_path, &consented_path,),
+            Some(canonical),
+        );
+        assert_eq!(
+            canonical_happy_restoration_root(app.handle(), &consented_path, &other_path),
+            None,
+            "stored cwd and project root must resolve to the same exact consented directory",
+        );
+    }
+
+    #[test]
+    fn canonical_root_wire_format_matches_node_on_windows() {
+        assert_eq!(
+            canonical_path_for_wire(std::path::Path::new(r"\\?\C:\Users\Example\Project")),
+            Some(r"C:\Users\Example\Project".to_string()),
+        );
+        assert_eq!(
+            canonical_path_for_wire(std::path::Path::new(
+                r"\\?\UNC\server.example\share\Project",
+            )),
+            Some(r"\\server.example\share\Project".to_string()),
+        );
+        assert_eq!(
+            canonical_path_for_wire(std::path::Path::new(r"C:\Users\Example\Project")),
+            Some(r"C:\Users\Example\Project".to_string()),
+            "an ordinary Node-shaped path remains unchanged",
+        );
+    }
+
+    #[test]
+    fn canonical_root_wire_format_normalizes_decomposed_macos_paths() {
+        assert_eq!(
+            canonical_path_for_wire(std::path::Path::new("/tmp/Cafe\u{301}/A\u{30a}")),
+            Some("/tmp/Caf\u{e9}/\u{c5}".to_string()),
+            "decomposed filesystem paths must match JavaScript's NFC identity",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn happy_restoration_root_recheck_detects_symlink_retarget() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().expect("temp dir");
+        let first = directory.path().join("first");
+        let second = directory.path().join("second");
+        let alias = directory.path().join("consented-alias");
+        std::fs::create_dir(&first).unwrap();
+        std::fs::create_dir(&second).unwrap();
+        symlink(&first, &alias).unwrap();
+        let alias_path = alias.to_string_lossy().to_string();
+        let app = mock_app_with_roots(Some(vec![alias_path.clone()]));
+
+        let before =
+            canonical_happy_restoration_root(app.handle(), &alias_path, &alias_path).unwrap();
+        std::fs::remove_file(&alias).unwrap();
+        symlink(&second, &alias).unwrap();
+        let after =
+            canonical_happy_restoration_root(app.handle(), &alias_path, &alias_path).unwrap();
+
+        assert_ne!(
+            before, after,
+            "the post-spawn canonical comparison must reject a retargeted root alias",
+        );
+    }
+
+    #[test]
     fn effective_advertised_roots_keeps_only_discovered_projects() {
         let consented = tempfile::tempdir().expect("temp dir");
         let consented_path = consented.path().to_string_lossy().to_string();
@@ -2004,6 +2294,34 @@ mod tests {
         )
         .expect("lookup method is allowlisted");
         assert_eq!(request.method, "conversation_happy_session_lookup");
+    }
+
+    #[test]
+    fn supervisor_channel_accepts_conversation_claim() {
+        let request = parse_supervisor_line(
+            r#"{"jsonrpc":"2.0","id":12,"method":"conversation_claim","params":{"conversationId":"00000000-0000-4000-8000-000000000123","providerSessionId":"00000000-0000-4000-8000-000000000123","happySessionId":"relay-id","cwd":"/synthetic/consented","expectedAgentType":"codex","expectedAgentSessionId":null,"expectedAgentPermissionMode":null}}"#,
+        )
+        .expect("restoration claim method is allowlisted");
+        assert_eq!(request.method, "conversation_claim");
+        assert_eq!(
+            required_nullable_string(&request.params, "expectedAgentSessionId").unwrap(),
+            None,
+            "JSON null is an explicit expected-absence assertion",
+        );
+        assert!(
+            required_nullable_string(&request.params, "missingExpectedAgentSessionId").is_err(),
+            "a missing expectation must not be treated as expected absence",
+        );
+        assert_eq!(
+            required_nullable_string(&request.params, "expectedAgentPermissionMode").unwrap(),
+            None,
+            "JSON null is an explicit expected permission-mode absence assertion",
+        );
+        assert!(
+            required_nullable_string(&request.params, "missingExpectedAgentPermissionMode")
+                .is_err(),
+            "a missing permission expectation must not be treated as expected absence",
+        );
     }
 
     #[test]

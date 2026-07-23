@@ -25,6 +25,8 @@ const AUTH_POLL_MS = 1000;
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 const SESSION_KEEP_ALIVE_MS = 2000;
 const DEFAULT_CODEX_APPROVAL_POLICY = "on-failure";
+const HAPPY_CONTEXT_RESET_NOTICE =
+  "Provider context reset: the original native session was unavailable, so Seren started a new provider context for this existing Happy thread.";
 const BUSY_SESSION_STATUSES = new Set(["prompting", "busy", "running"]);
 const DENY_OPTION_IDS = new Set([
   "deny",
@@ -230,6 +232,8 @@ const HAPPY_AGENT_TYPES = new Map([
   ["grok", "grok"],
   ["codex", "codex"],
 ]);
+const RESTORABLE_HAPPY_AGENT_TYPES = new Set(HAPPY_AGENT_TYPES.values());
+const EXACT_RESUME_HAPPY_AGENT_TYPES = new Set(["claude-code", "codex"]);
 
 function happyAgentType(agent) {
   if (agent === undefined || agent === null) return "claude-code";
@@ -399,50 +403,95 @@ export function createDeferredPromptQueue({
   const queues = new Map();
   const busySessions = new Set();
   const drainingSessions = new Set();
+  const readyDuringSubmission = new Set();
+  const cancelledSessions = new Set();
+  const failedSessions = new Set();
+  const drainOperations = new Set();
   let closed = false;
 
   async function drain(sessionId) {
-    if (closed || busySessions.has(sessionId) || drainingSessions.has(sessionId)) {
+    if (
+      closed ||
+      failedSessions.has(sessionId) ||
+      busySessions.has(sessionId) ||
+      drainingSessions.has(sessionId)
+    ) {
       return;
     }
     const queue = queues.get(sessionId);
     if (!queue?.length) return;
 
     drainingSessions.add(sessionId);
+    busySessions.add(sessionId);
     try {
-      while (!closed && queue.length > 0 && !busySessions.has(sessionId)) {
-        const item = queue[0];
-        try {
-          await send(sessionId, item.value);
-          queue.shift();
-          item.resolve(true);
-        } catch (error) {
-          if (shouldRetry(error)) {
-            busySessions.add(sessionId);
-            onError(error, { deferred: true, sessionId });
-            break;
+      // Submit exactly one head item. Acceptance only means the provider owns
+      // this prompt; the next relay record must wait for an explicit ready,
+      // error, or turn-complete event from that provider.
+      const item = queue[0];
+      try {
+        const outcome = await send(sessionId, item.value);
+        if (queue[0] === item) queue.shift();
+        item.resolve(!cancelledSessions.has(sessionId));
+        // Provider events and RPC responses use independent frames. Preserve an
+        // authoritative completion that overtakes the acceptance response;
+        // configuration-only status events are filtered by publishEvent.
+        const providerBecameReady = readyDuringSubmission.delete(sessionId);
+        if (outcome?.terminalDiscard === true || providerBecameReady) {
+          busySessions.delete(sessionId);
+        }
+      } catch (error) {
+        if (shouldRetry(error)) {
+          onError(error, { deferred: true, sessionId });
+          if (readyDuringSubmission.delete(sessionId)) {
+            busySessions.delete(sessionId);
           }
-          queue.shift();
-          item.resolve(false);
+        } else {
+          if (queue[0] === item) queue.shift();
+          item.reject(error);
+          failedSessions.add(sessionId);
           onError(error, { deferred: false, sessionId });
         }
       }
     } finally {
       drainingSessions.delete(sessionId);
-      if (queue.length === 0) queues.delete(sessionId);
+      if (queue.length === 0 || cancelledSessions.has(sessionId)) {
+        queues.delete(sessionId);
+        if (cancelledSessions.delete(sessionId)) failedSessions.delete(sessionId);
+      } else if (!closed && !busySessions.has(sessionId)) {
+        void startDrain(sessionId);
+      }
     }
+  }
+
+  function startDrain(sessionId) {
+    const operation = drain(sessionId);
+    drainOperations.add(operation);
+    void operation.then(
+      () => drainOperations.delete(operation),
+      () => drainOperations.delete(operation),
+    );
+    return operation;
   }
 
   function clear(sessionId) {
     const queue = queues.get(sessionId) ?? [];
-    queues.delete(sessionId);
     busySessions.delete(sessionId);
+    readyDuringSubmission.delete(sessionId);
+    if (drainingSessions.has(sessionId)) {
+      cancelledSessions.add(sessionId);
+      for (const item of queue.splice(1)) item.resolve(false);
+      return;
+    }
+    queues.delete(sessionId);
+    cancelledSessions.delete(sessionId);
+    failedSessions.delete(sessionId);
     for (const item of queue.splice(0)) item.resolve(false);
   }
 
   return {
     enqueue(sessionId, value) {
       if (closed) return Promise.resolve(false);
+      if (failedSessions.has(sessionId)) return Promise.resolve(false);
       const queue = queues.get(sessionId) ?? [];
       // A paired peer must not be able to grow memory without bound while a
       // long local turn is active. Preserve the oldest accepted prompts.
@@ -454,23 +503,35 @@ export function createDeferredPromptQueue({
         return Promise.resolve(false);
       }
       queues.set(sessionId, queue);
-      const result = new Promise((resolve) => queue.push({ value, resolve }));
-      void drain(sessionId);
+      const result = new Promise((resolve, reject) =>
+        queue.push({ value, resolve, reject }),
+      );
+      void startDrain(sessionId);
       return result;
     },
     setBusy(sessionId, busy) {
       if (busy) {
         busySessions.add(sessionId);
+        readyDuringSubmission.delete(sessionId);
+        return;
+      }
+      if (failedSessions.has(sessionId)) return;
+      if (drainingSessions.has(sessionId)) {
+        readyDuringSubmission.add(sessionId);
         return;
       }
       busySessions.delete(sessionId);
-      void drain(sessionId);
+      void startDrain(sessionId);
     },
     clear,
-    close() {
+    async close() {
       closed = true;
+      await Promise.allSettled([...drainOperations]);
       for (const sessionId of Array.from(queues.keys())) clear(sessionId);
       busySessions.clear();
+      readyDuringSubmission.clear();
+      cancelledSessions.clear();
+      failedSessions.clear();
     },
   };
 }
@@ -617,6 +678,8 @@ export function createHappyLayer({
   const spawnOperations = new Set();
   const layerOperations = new Set();
   const remotelyArchivedSessions = new Set();
+  const ownershipPendingSessions = new Set();
+  const ownershipPendingProviderStatuses = new Map();
   const terminatedSessions = createTerminatedSessionTracker();
   const pendingRequests = Object.create(null);
   const liveSessions = new Set();
@@ -624,6 +687,8 @@ export function createHappyLayer({
   const assistantMessageCoalescer = createAssistantMessageCoalescer();
 
   const sessionSummaries = new Map();
+  const sessionSummaryRevisions = new Map();
+  let sessionSummaryRevision = 0;
   let summariesRefreshPromise = null;
 
   function debug(message) {
@@ -739,10 +804,11 @@ export function createHappyLayer({
     blockRevival = false,
     desktopAlreadyFenced = false,
     agentSessionId,
+    conversationId: knownConversationId,
   }) {
     let retiringBinding = binding;
     const shouldArchiveConversation = blockRevival || binding?.blockRevival === true;
-    let conversationId = binding?.conversationId;
+    let conversationId = knownConversationId ?? binding?.conversationId;
     let archiveProviderOnly = false;
     const ownerAgentSessionId =
       agentSessionId ?? entry?.summary?.agentSessionId ?? binding?.agentSessionId;
@@ -930,10 +996,406 @@ export function createHappyLayer({
           blockRevival: desktopAlreadyFenced,
           desktopAlreadyFenced,
         });
-        if (retired) terminatedSessions.mark(binding.sessionId);
+        if (!retired) {
+          throw new Error("Persisted Happy session retirement did not complete");
+        }
+        terminatedSessions.mark(binding.sessionId);
       });
-    await Promise.allSettled(retirements);
+    await Promise.all(retirements);
     return blocked;
+  }
+
+  async function migrateLegacyHappyProviderBindings(blockedSessionIds) {
+    if (!sessionKeyStore || !api || !identity) return;
+    const response = await supervisorChannel.call("conversation_restore_candidates", {});
+    if (!Array.isArray(response?.candidates)) {
+      throw new Error("Happy conversation migration returned an invalid candidate list");
+    }
+    const bindingsBySessionId = new Map(
+      (await persistedSessionBindings()).map((binding) => [binding.sessionId, binding]),
+    );
+    const machineId = identity.machineId ?? "seren-desktop";
+
+    for (const candidate of response.candidates) {
+      const sessionId = candidate?.conversationId;
+      const legacyHappySessionId = candidate?.happySessionId;
+      if (
+        typeof sessionId !== "string" ||
+        !UUID_PATTERN.test(sessionId) ||
+        typeof legacyHappySessionId !== "string" ||
+        legacyHappySessionId.length === 0 ||
+        blockedSessionIds.has(sessionId)
+      ) {
+        continue;
+      }
+      if (
+        typeof candidate.agentType !== "string" ||
+        !RESTORABLE_HAPPY_AGENT_TYPES.has(candidate.agentType) ||
+        typeof candidate.cwd !== "string"
+      ) {
+        throw new Error("Happy conversation migration candidate was invalid");
+      }
+      const root = validateSpawnRoot(candidate.cwd, advertisedRoots);
+      if (!root.ok || root.root !== candidate.cwd) {
+        throw new Error("Happy conversation migration root was no longer authorized");
+      }
+
+      let binding = bindingsBySessionId.get(sessionId) ?? null;
+      if (
+        binding?.state === "ready" &&
+        binding.happySessionId === legacyHappySessionId
+      ) {
+        // Rows created before the lifecycle fence existed can already have a
+        // valid encrypted binding. Acknowledge that exact pair in SQLite
+        // before provider notifications are subscribed so a later natural
+        // termination (which deletes the key binding) cannot be mistaken for
+        // another v3.72 migration candidate and resurrected.
+        await supervisorChannel.call("conversation_migrate_happy_session", {
+          conversationId: sessionId,
+          expectedHappySessionId: legacyHappySessionId,
+          replacementHappySessionId: legacyHappySessionId,
+        });
+        if (binding.legacyRelayRetired === true) {
+          binding = await sessionKeyStore.clearLegacyRelayRetired(sessionId);
+          bindingsBySessionId.set(sessionId, binding);
+        }
+        continue;
+      }
+      if (!binding) {
+        binding = await sessionKeyStore.getOrCreate(
+          sessionId,
+          `seren-migrated-${randomUUID()}`,
+        );
+        bindingsBySessionId.set(sessionId, binding);
+      }
+      if (binding.state === "retiring") continue;
+
+      if (
+        binding.state === "ready" &&
+        binding.happySessionId !== legacyHappySessionId &&
+        binding.legacyRelayRetired !== true
+      ) {
+        const retired = await api.deactivateSession(legacyHappySessionId);
+        if (!retired) {
+          throw new Error("Legacy Happy relay row could not be retired");
+        }
+        binding = await sessionKeyStore.markLegacyRelayRetired(sessionId);
+        bindingsBySessionId.set(sessionId, binding);
+      }
+
+      if (binding.state === "pending") {
+        if (binding.legacyRelayRetired !== true) {
+          const retired = await api.deactivateSession(legacyHappySessionId);
+          if (!retired) {
+            throw new Error("Legacy Happy relay row could not be retired");
+          }
+          binding = await sessionKeyStore.markLegacyRelayRetired(sessionId);
+          bindingsBySessionId.set(sessionId, binding);
+        }
+        if (binding.relayTag === `seren-${sessionId}`) {
+          binding = await sessionKeyStore.replacePendingTag(
+            sessionId,
+            `seren-migrated-${randomUUID()}`,
+          );
+          bindingsBySessionId.set(sessionId, binding);
+        }
+        const metadata = sessionMetadata(
+          config,
+          {
+            sessionId,
+            agentType: candidate.agentType,
+            cwd: root.root,
+            title: candidate.title,
+            status: "initializing",
+          },
+          machineId,
+        );
+        const replacement = await getOrCreateUsableHappySession({
+          api,
+          tag: binding.relayTag,
+          metadata,
+          state: { controlledByUser: true },
+          encryptionKey: binding.key,
+          persistReady: async (happySessionId) => {
+            binding = await sessionKeyStore.markReady(sessionId, happySessionId);
+            bindingsBySessionId.set(sessionId, binding);
+          },
+        });
+        if (!isUsableHappySession(replacement)) {
+          throw new Error("Replacement Happy relay row could not be created");
+        }
+      }
+
+      if (
+        binding?.state !== "ready" ||
+        typeof binding.happySessionId !== "string" ||
+        binding.happySessionId === legacyHappySessionId ||
+        binding.legacyRelayRetired !== true
+      ) {
+        throw new Error("Happy relay migration binding was inconsistent");
+      }
+      const migrated = await supervisorChannel.call(
+        "conversation_migrate_happy_session",
+        {
+          conversationId: sessionId,
+          expectedHappySessionId: legacyHappySessionId,
+          replacementHappySessionId: binding.happySessionId,
+        },
+      );
+      if (migrated?.migrated !== true) {
+        throw new Error("Happy relay migration was not committed");
+      }
+      binding = await sessionKeyStore.clearLegacyRelayRetired(sessionId);
+      bindingsBySessionId.set(sessionId, binding);
+    }
+  }
+
+  async function discardUnclaimedSessionEntry(sessionId) {
+    const creation = sessionCreationPromises.get(sessionId);
+    if (creation) await creation.catch(() => null);
+    const entry = sessions.get(sessionId);
+    if (!entry) return;
+    sessions.delete(sessionId);
+    liveSessions.delete(sessionId);
+    promptQueue.clear(sessionId);
+    turnCorrelator.clear(sessionId);
+    assistantMessageCoalescer.clear(sessionId);
+    delete pendingRequests[sessionId];
+    sessionCreationPromises.delete(sessionId);
+    entry.liveness.stop();
+    await entry.client.close().catch(() =>
+      debug("failed to close relay client for a rejected ownership claim"),
+    );
+  }
+
+  async function unwindStartupProviders(sessionIds) {
+    const ids = [...new Set(sessionIds)];
+    for (const sessionId of ids) {
+      // Provider termination emits its terminal status before the RPC returns.
+      // Reinstall the ownership fence first so that cleanup cannot retire the
+      // durable relay binding that a future bridge restart must reuse.
+      ownershipPendingSessions.add(sessionId);
+      promptQueue.setBusy(sessionId, true);
+    }
+    await Promise.allSettled(ids.map((sessionId) => discardUnclaimedSessionEntry(sessionId)));
+    await Promise.allSettled(ids.map((sessionId) => source.terminate(sessionId)));
+    for (const sessionId of ids) {
+      ownershipPendingProviderStatuses.delete(sessionId);
+      promptQueue.clear(sessionId);
+    }
+  }
+
+  async function restorePersistedProviderSessions(listed, blockedSessionIds) {
+    const listedIds = new Set(listed.map((summary) => summary.sessionId));
+    const bindings = await persistedSessionBindings();
+    const restored = [];
+    const spawnedByThisStartup = [];
+    const unclaimedSpawnedSessions = new Set();
+    const pendingStartupClaims = new Set();
+
+    try {
+      for (const binding of bindings) {
+        if (
+          binding.state !== "ready" ||
+          listedIds.has(binding.sessionId) ||
+          blockedSessionIds.has(binding.sessionId)
+        ) {
+          continue;
+        }
+
+        const lookup = await supervisorChannel.call("conversation_lookup", {
+          providerSessionId: binding.sessionId,
+          happySessionId: binding.happySessionId,
+        });
+        const happyOrigin = lookup?.happyOrigin === true;
+        const shouldRetire = happyOrigin && lookup?.retire === true;
+        if (shouldRetire) {
+          const retired = await retirePersistedSession({
+            sessionId: binding.sessionId,
+            binding,
+            providerAlreadyRetired: true,
+            blockRevival: lookup?.archived === true,
+            desktopAlreadyFenced: lookup?.archived === true,
+          });
+          if (!retired) {
+            throw new Error("Invalid Happy provider binding could not be retired");
+          }
+          blockedSessionIds.add(binding.sessionId);
+          continue;
+        }
+        // A ready binding can also belong to a desktop-originated session whose
+        // provider will be restored by the frontend. Never infer Happy
+        // ownership from the local/provider id alone.
+        if (!happyOrigin || lookup?.restorable !== true) continue;
+
+        if (
+          lookup.conversationId !== binding.sessionId ||
+          typeof lookup.agentType !== "string" ||
+          typeof lookup.cwd !== "string"
+        ) {
+          throw new Error("Happy conversation lookup returned an invalid restore descriptor");
+        }
+        if (!RESTORABLE_HAPPY_AGENT_TYPES.has(lookup.agentType)) {
+          const retired = await retirePersistedSession({
+            sessionId: binding.sessionId,
+            binding,
+            providerAlreadyRetired: true,
+          });
+          if (!retired) {
+            throw new Error("Unsupported Happy provider binding could not be retired");
+          }
+          blockedSessionIds.add(binding.sessionId);
+          continue;
+        }
+        const root = validateSpawnRoot(lookup.cwd, advertisedRoots);
+        if (!root.ok || root.root !== lookup.cwd) {
+          const retired = await retirePersistedSession({
+            sessionId: binding.sessionId,
+            binding,
+            providerAlreadyRetired: true,
+          });
+          if (!retired) {
+            throw new Error("Out-of-scope Happy provider binding could not be retired");
+          }
+          blockedSessionIds.add(binding.sessionId);
+          continue;
+        }
+        const hasStoredNativeSession =
+          typeof lookup.agentSessionId === "string" && lookup.agentSessionId.length > 0;
+        const canResumeExactNativeSession =
+          hasStoredNativeSession && EXACT_RESUME_HAPPY_AGENT_TYPES.has(lookup.agentType);
+        const spawnSpec = {
+          agentType: lookup.agentType,
+          cwd: root.root,
+          localSessionId: binding.sessionId,
+          ...(canResumeExactNativeSession
+            ? {
+                resumeAgentSessionId: lookup.agentSessionId,
+                requireExactResume: true,
+                suppressHistoryReplay: true,
+              }
+            : {
+                freshContextReset: true,
+                suppressHistoryReplay: true,
+              }),
+          ...(typeof lookup.agentModelId === "string" && lookup.agentModelId.length > 0
+            ? { initialModelId: lookup.agentModelId }
+            : {}),
+          ...(typeof lookup.agentPermissionMode === "string" &&
+          lookup.agentPermissionMode.length > 0
+            ? { permissionMode: lookup.agentPermissionMode }
+            : {}),
+          approvalPolicy: defaultApprovalPolicy(lookup.agentType),
+        };
+        ownershipPendingSessions.add(binding.sessionId);
+        pendingStartupClaims.add(binding.sessionId);
+        promptQueue.setBusy(binding.sessionId, true);
+        const spawned = await source.spawn(spawnSpec);
+        if (typeof spawned?.sessionId === "string" && spawned.sessionId.length > 0) {
+          // Spawning can reconfigure a same-ID process even when another caller
+          // owns it. Until the atomic claim succeeds, every touched process must
+          // be retired on failure so a stale permissive mode cannot survive.
+          unclaimedSpawnedSessions.add(spawned.sessionId);
+        }
+        const owned = spawned?.owned === true;
+        if (owned) spawnedByThisStartup.push(spawned.sessionId);
+        if (
+          spawned?.sessionId !== binding.sessionId ||
+          spawned?.agentType !== lookup.agentType ||
+          spawned?.cwd !== root.root ||
+          typeof spawned?.agentSessionId !== "string" ||
+          spawned.agentSessionId.length === 0
+        ) {
+          throw new Error("Happy provider restore did not preserve its exact identity");
+        }
+
+        const claim = await supervisorChannel.call("conversation_claim", {
+          conversationId: binding.sessionId,
+          providerSessionId: binding.sessionId,
+          happySessionId: binding.happySessionId,
+          cwd: root.root,
+          expectedAgentType: lookup.agentType,
+          expectedAgentSessionId: hasStoredNativeSession ? lookup.agentSessionId : null,
+          expectedAgentPermissionMode:
+            typeof lookup.agentPermissionMode === "string" ? lookup.agentPermissionMode : null,
+          agentSessionId: spawned.agentSessionId,
+        });
+        if (claim?.archived === true) {
+          // Archive wins over either caller's process ownership. A reused
+          // exact provider is still the process backing this archived row.
+          await source.terminate(binding.sessionId);
+          unclaimedSpawnedSessions.delete(binding.sessionId);
+          if (owned) {
+            spawnedByThisStartup.splice(
+              spawnedByThisStartup.lastIndexOf(binding.sessionId),
+              1,
+            );
+          }
+          const retired = await retirePersistedSession({
+            sessionId: binding.sessionId,
+            binding: {
+              ...binding,
+              conversationId: binding.sessionId,
+              agentSessionId: spawned.agentSessionId,
+            },
+            providerAlreadyRetired: true,
+            blockRevival: true,
+            desktopAlreadyFenced: true,
+          });
+          if (!retired) throw new Error("Archived Happy provider binding could not be retired");
+          pendingStartupClaims.delete(binding.sessionId);
+          ownershipPendingSessions.delete(binding.sessionId);
+          ownershipPendingProviderStatuses.delete(binding.sessionId);
+          promptQueue.clear(binding.sessionId);
+          blockedSessionIds.add(binding.sessionId);
+          continue;
+        }
+        if (claim?.archived !== false) {
+          throw new Error("Happy conversation ownership claim returned an invalid result");
+        }
+        unclaimedSpawnedSessions.delete(binding.sessionId);
+
+        const observedStatus = ownershipPendingProviderStatuses.get(binding.sessionId);
+        pendingStartupClaims.delete(binding.sessionId);
+        ownershipPendingSessions.delete(binding.sessionId);
+        ownershipPendingProviderStatuses.delete(binding.sessionId);
+
+        const summary = {
+          ...spawned,
+          ...(typeof observedStatus === "string" ? { status: observedStatus } : {}),
+          title: typeof lookup.title === "string" ? lookup.title : spawned.title,
+          freshContextReset: !canResumeExactNativeSession,
+        };
+        promptQueue.setBusy(
+          binding.sessionId,
+          BUSY_SESSION_STATUSES.has(summary.status) || summary.status === "initializing",
+        );
+        sessionSummaries.set(summary.sessionId, summary);
+        listedIds.add(summary.sessionId);
+        restored.push(summary);
+      }
+      return { summaries: restored, ownedSessionIds: spawnedByThisStartup };
+    } catch (error) {
+      const sessionsToTerminate = new Set([
+        ...spawnedByThisStartup,
+        ...unclaimedSpawnedSessions,
+      ]);
+      await unwindStartupProviders(sessionsToTerminate);
+      const abandonedPendingClaims = [...pendingStartupClaims].filter(
+        (sessionId) => !sessionsToTerminate.has(sessionId),
+      );
+      await Promise.allSettled(
+        abandonedPendingClaims.map((sessionId) => discardUnclaimedSessionEntry(sessionId)),
+      );
+      for (const sessionId of pendingStartupClaims) {
+        ownershipPendingProviderStatuses.delete(sessionId);
+        promptQueue.clear(sessionId);
+        if (!sessionsToTerminate.has(sessionId)) {
+          ownershipPendingSessions.delete(sessionId);
+        }
+      }
+      throw error;
+    }
   }
 
   function trackSessionDisposal(disposal) {
@@ -978,14 +1440,33 @@ export function createHappyLayer({
   async function refreshSessionSummaries() {
     if (summariesRefreshPromise) return summariesRefreshPromise;
     summariesRefreshPromise = (async () => {
+      const refreshRevision = sessionSummaryRevision;
       const listed = await source.listSessions();
+      const previous = new Map(sessionSummaries);
       sessionSummaries.clear();
       for (const summary of listed) {
-        sessionSummaries.set(summary.sessionId, summary);
+        const latest =
+          (sessionSummaryRevisions.get(summary.sessionId) ?? 0) > refreshRevision
+            ? { ...summary, ...previous.get(summary.sessionId) }
+            : summary;
+        sessionSummaries.set(summary.sessionId, latest);
         const entry = sessions.get(summary.sessionId);
-        if (entry) entry.summary = summary;
+        if (entry) entry.summary = latest;
       }
-      return listed;
+      // A provider event can introduce a session while the list RPC is in
+      // flight. Retain that newer event-backed summary even if the older list
+      // snapshot did not contain it.
+      for (const [sessionId, summary] of previous) {
+        if (
+          !sessionSummaries.has(sessionId) &&
+          (sessionSummaryRevisions.get(sessionId) ?? 0) > refreshRevision
+        ) {
+          sessionSummaries.set(sessionId, summary);
+        }
+      }
+      return listed.map(
+        (summary) => sessionSummaries.get(summary.sessionId) ?? summary,
+      );
     })();
     try {
       return await summariesRefreshPromise;
@@ -1054,6 +1535,14 @@ export function createHappyLayer({
 
   function registerInbound(entry) {
     const { client } = entry;
+    client.on("inboundProcessingError", () => {
+      entry.liveness.stop();
+      supervisorChannel.notify("status_report", {
+        state: "error",
+        detail: "relay input processing failed",
+      });
+      debug("Happy relay input processing stopped after a durable processing failure");
+    });
     client.on("archived", () => {
       const sessionId = entry.sessionId;
       if (sessions.get(sessionId) !== entry) return;
@@ -1080,8 +1569,17 @@ export function createHappyLayer({
       })();
       trackSessionDisposal(disposal);
     });
-    client.onUserMessage((message) => {
-      void promptQueue.enqueue(entry.sessionId, { entry, message });
+    client.onUserMessage(async (message) => {
+      const processed = await promptQueue.enqueue(entry.sessionId, { entry, message });
+      if (!processed) {
+        throw new Error("Happy user message was not accepted before session teardown");
+      }
+    });
+    client.onFileEvent(async () => {
+      // Provider runtimes do not accept binary/file attachments yet. Treat the
+      // record as a terminal discard so its exact relay sequence can advance
+      // without retrying it forever after every bridge restart.
+      debug("discarded unsupported Happy file attachment");
     });
     // Decryption failure yields null params rather than throwing, and these two
     // handlers ignore their argument, so without this guard a relay could cancel
@@ -1115,19 +1613,19 @@ export function createHappyLayer({
   async function handleUserMessage(entry, message) {
     if (message?.role !== "user" || message?.content?.type !== "text") {
       debug("dropped invalid Happy user message");
-      return;
+      return { accepted: false, terminalDiscard: true };
     }
     if (typeof message.content.text !== "string" || message.content.text.length === 0) {
       debug("dropped empty Happy user message");
-      return;
+      return { accepted: false, terminalDiscard: true };
     }
     const mode = message.meta?.permissionMode;
     if (message.meta && mode !== undefined && !isSupportedPermissionMode(mode)) {
       debug("dropped invalid Happy permission mode");
-      return;
+      return { accepted: false, terminalDiscard: true };
     }
     if (typeof mode === "string") await source.setPermissionMode(entry.sessionId, mode);
-    await source.sendPrompt(entry.sessionId, message.content.text);
+    return source.sendPrompt(entry.sessionId, message.content.text);
   }
 
   async function handlePermissionResponse(entry, response) {
@@ -1180,7 +1678,7 @@ export function createHappyLayer({
     const machineId = identity.machineId ?? "seren-desktop";
     const metadata = sessionMetadata(config, summary, machineId);
     const legacyTag = `seren-${sessionId}`;
-    const binding = sessionKeyStore
+    let binding = sessionKeyStore
       ? await sessionKeyStore.getOrCreate(sessionId, legacyTag)
       : null;
     if (binding?.state === "retiring") {
@@ -1206,15 +1704,23 @@ export function createHappyLayer({
         conversationId: sessionId,
       });
       const previousHappySessionId = recorded?.happySessionId;
-      if (
-        typeof previousHappySessionId === "string" &&
-        previousHappySessionId.length > 0 &&
-        !(await sessionApi.deactivateSession(previousHappySessionId))
-      ) {
-        throw new Error("Previous Happy relay row could not be retired");
+      if (typeof previousHappySessionId === "string" && previousHappySessionId.length > 0) {
+        if (!(await sessionApi.deactivateSession(previousHappySessionId))) {
+          throw new Error("Previous Happy relay row could not be retired");
+        }
+        // The archive endpoint retires the row, not its unique tag. Reusing
+        // that tag with a newly generated data key returns the old ciphertext
+        // and fails during decrypt, so persist the replacement tag before its
+        // POST and make a crash retry use the same safe row.
+        binding = await sessionKeyStore.replacePendingTag(
+          sessionId,
+          `seren-migrated-${randomUUID()}`,
+        );
       }
     }
     const resumedBinding = binding?.state === "ready";
+    const firstLegacyBinding =
+      binding?.state === "pending" && binding.relayTag === legacyTag;
     const session = await getOrCreateUsableHappySession({
       api: sessionApi,
       tag: binding?.relayTag ?? legacyTag,
@@ -1294,19 +1800,50 @@ export function createHappyLayer({
       return null;
     }
 
+    // Provider status can advance while relay/key-store HTTP calls above are
+    // pending. Install the entry from the latest authoritative summary so an
+    // early completion cannot be overwritten by the stale list snapshot.
+    summary = sessionSummaries.get(sessionId) ?? summary;
+
     let client;
-    const resumeFromSeq =
-      resumedBinding || session.seq > 0
-        ? typeof session.seq === "number"
-          ? session.seq
-          : 0
-        : 0;
+    const relaySnapshotSeq = Number.isSafeInteger(session.seq) && session.seq >= 0
+      ? session.seq
+      : 0;
+    let resumeFromSeq = 0;
     try {
-      // The SDK applies this cursor before opening its socket, so the initial
-      // fetch and a concurrent N+1 socket update cannot replay older prompts.
-      client = sessionApi.sessionSyncClient(session, { resumeFromSeq });
+      if (resumedBinding) {
+        if (Number.isSafeInteger(binding.processedThroughSeq)) {
+          if (binding.processedThroughSeq > relaySnapshotSeq) {
+            throw new Error("Persisted Happy processed sequence exceeds the relay snapshot");
+          }
+          resumeFromSeq = binding.processedThroughSeq;
+        } else {
+          // One-time migration for bindings written before durable inbound
+          // cursors existed. The old bridge already observed this snapshot and
+          // cannot prove which records were acted on, so seed at its high-water
+          // mark rather than replaying an arbitrary historical prompt.
+          await sessionKeyStore.markProcessedThroughSeq(sessionId, relaySnapshotSeq);
+          resumeFromSeq = relaySnapshotSeq;
+        }
+      } else if (firstLegacyBinding) {
+        // v3.72 had no durable binding/cursor. The POST snapshot is the exact
+        // high-water mark before this socket starts: seeding it prevents old
+        // inbound prompts from replaying, while records arriving after the
+        // response receive a larger sequence and are still delivered.
+        await sessionKeyStore.markProcessedThroughSeq(sessionId, relaySnapshotSeq);
+        resumeFromSeq = relaySnapshotSeq;
+      }
+      client = sessionApi.sessionSyncClient(session, {
+        resumeFromSeq,
+        onMessageProcessed: async (seq) => {
+          const persisted = await sessionKeyStore.markProcessedThroughSeq(sessionId, seq);
+          if (persisted.processedThroughSeq !== seq) {
+            throw new Error("Happy processed sequence did not advance exactly");
+          }
+        },
+      });
     } catch (error) {
-      await sessionApi.deactivateSession(session.id);
+      if (!resumedBinding) await sessionApi.deactivateSession(session.id);
       throw error;
     }
     // Do not rewrite lifecycle metadata when resuming. A mobile archive can
@@ -1321,13 +1858,24 @@ export function createHappyLayer({
         summary,
         session,
         client,
+        suppressProviderHistoryReplay: resumedBinding,
         liveness: createSessionLiveness(client, thinking),
       };
       sessions.set(sessionId, entry);
       liveSessions.add(sessionId);
-      promptQueue.setBusy(sessionId, thinking);
+      promptQueue.setBusy(
+        sessionId,
+        thinking || summary?.status === "initializing" || ownershipPendingSessions.has(sessionId),
+      );
       rememberPendingPermissions(sessionId, summary?.pendingPermissions);
       registerInbound(entry);
+      // ApiSessionClient connects inside its constructor. Its durable latch
+      // closes the constructor-to-listener window without changing the SDK's
+      // EventEmitter behavior for other consumers.
+      if (client.hasArchiveSignal?.()) {
+        client.emit("archived");
+      }
+      if (sessions.get(sessionId) !== entry) return null;
       client.sendSessionEvent({ type: "switch", mode: "remote" });
       return entry;
     } catch (error) {
@@ -1373,6 +1921,27 @@ export function createHappyLayer({
   }
 
   async function publishEvent(event) {
+    const providerStatus = event.kind === "status" ? event.payload?.status : null;
+    const readinessUnchanged = event.payload?.readinessUnchanged === true;
+    const providerThinking =
+      !readinessUnchanged && BUSY_SESSION_STATUSES.has(providerStatus);
+    const providerReady =
+      !readinessUnchanged &&
+      (event.kind === "turn-complete" ||
+        event.kind === "error" ||
+        ["ready", "idle", "completed"].includes(providerStatus));
+    if (ownershipPendingSessions.has(event.sessionId)) {
+      if (providerThinking) {
+        ownershipPendingProviderStatuses.set(event.sessionId, providerStatus);
+      } else if (providerReady) {
+        ownershipPendingProviderStatuses.set(event.sessionId, "ready");
+      }
+      // The provider is not authorized to own this desktop/relay identity
+      // until its atomic claim succeeds. Keep all output and entry creation
+      // behind that fence; the latest readiness is replayed from the spawn
+      // snapshot after ownership is established.
+      return;
+    }
     // An entry only exists if it passed the scope check when it was created, so
     // a tracked session stays tracked; an unknown one is gated here, before any
     // bookkeeping, so out-of-scope sessions accumulate no state either.
@@ -1399,16 +1968,32 @@ export function createHappyLayer({
       }
       return;
     }
+    const trackedBeforeReplay = sessions.get(event.sessionId);
+    if (
+      trackedBeforeReplay?.suppressProviderHistoryReplay === true &&
+      (event.payload?.replay === true || event.payload?.historyReplay === true)
+    ) {
+      return;
+    }
     let summary =
       (await sessionSummary(event.sessionId)) ?? sessions.get(event.sessionId)?.summary ?? null;
     const observedAgentSessionId = event.payload?.agentSessionId;
-    if (
-      summary &&
-      typeof observedAgentSessionId === "string" &&
-      observedAgentSessionId.length > 0
-    ) {
-      summary = { ...summary, agentSessionId: observedAgentSessionId };
+    if (summary) {
+      const observedStatus = providerThinking
+        ? providerStatus
+        : providerReady
+          ? providerStatus ?? "ready"
+          : null;
+      summary = {
+        ...summary,
+        ...(observedStatus ? { status: observedStatus } : {}),
+        ...(typeof observedAgentSessionId === "string" && observedAgentSessionId.length > 0
+          ? { agentSessionId: observedAgentSessionId }
+          : {}),
+      };
       sessionSummaries.set(event.sessionId, summary);
+      sessionSummaryRevision += 1;
+      sessionSummaryRevisions.set(event.sessionId, sessionSummaryRevision);
       const trackedEntry = sessions.get(event.sessionId);
       if (trackedEntry) trackedEntry.summary = summary;
     }
@@ -1443,15 +2028,9 @@ export function createHappyLayer({
       debug("dropped event for session outside advertised roots");
       return;
     }
-    const providerStatus = event.kind === "status" ? event.payload?.status : null;
-    const providerThinking = BUSY_SESSION_STATUSES.has(providerStatus);
-    const providerReady =
-      event.kind === "turn-complete" ||
-      event.kind === "error" ||
-      ["ready", "idle", "completed"].includes(providerStatus);
     if (providerThinking) {
       promptQueue.setBusy(event.sessionId, true);
-    } else if (providerReady) {
+    } else if (providerReady && !ownershipPendingSessions.has(event.sessionId)) {
       promptQueue.setBusy(event.sessionId, false);
     }
     if (terminal) {
@@ -1466,6 +2045,12 @@ export function createHappyLayer({
     rememberPermission(event);
     const entry = await findOrCreateSession(event.sessionId, summary);
     if (!entry) return;
+    if (
+      entry.suppressProviderHistoryReplay === true &&
+      (event.payload?.replay === true || event.payload?.historyReplay === true)
+    ) {
+      return;
+    }
     if (providerThinking) {
       entry.liveness.setThinking(true);
     } else if (providerReady) {
@@ -1533,6 +2118,10 @@ export function createHappyLayer({
     let providerConfirmedAbsent = false;
     let pendingProviderRetired = false;
     let unexpectedProviderSessionId = null;
+    let claimAttempted = false;
+    let archiveWon = false;
+    let pendingDisposed = false;
+    ownershipPendingSessions.add(pendingSessionId);
     try {
       // Entry creation itself persists the key/tag and can create the relay
       // row. Keep it inside the unwind scope so a client-construction failure
@@ -1568,10 +2157,10 @@ export function createHappyLayer({
           localSessionId: conversation.conversationId,
           approvalPolicy: defaultApprovalPolicy(agentType),
         });
-      } catch (error) {
-        providerConfirmedAbsent = error?.providerRequestRejected === true;
-        throw error;
-      }
+        } catch (error) {
+          providerConfirmedAbsent = error?.providerRequestRejected === true;
+          throw error;
+        }
       if (!spawned?.sessionId) throw new Error("provider spawn returned no session");
       if (closing || identityResetting || sessions.get(pendingSessionId) !== pending) {
         try {
@@ -1597,23 +2186,70 @@ export function createHappyLayer({
         }
         throw new Error("provider did not preserve the preallocated session id");
       }
-      pending.summary = spawned;
+      claimAttempted = true;
+      const claim = await supervisorChannel.call("conversation_claim", {
+        conversationId: pendingSessionId,
+        providerSessionId: pendingSessionId,
+        happySessionId: pending.happySessionId,
+        cwd: validation.root,
+        expectedAgentType: agentType,
+        expectedAgentSessionId: null,
+        expectedAgentPermissionMode: null,
+        agentSessionId:
+          typeof spawned.agentSessionId === "string" && spawned.agentSessionId.length > 0
+            ? spawned.agentSessionId
+            : null,
+      });
+      if (claim?.archived === true) {
+        archiveWon = true;
+        // The frontend can win the same-ID spawn flight, returning owned:false.
+        // The archived claim still fences this exact provider process.
+        await source.terminate(pendingSessionId);
+        pendingProviderRetired = true;
+        await discardPendingSpawn(pendingSessionId, pending, {
+          providerAlreadyRetired: true,
+          blockRevival: true,
+          desktopAlreadyFenced: true,
+          conversationId: pendingSessionId,
+          agentSessionId: spawned.agentSessionId,
+        });
+        pendingDisposed = true;
+        throw new Error("Happy conversation was archived during provider spawn");
+      }
+      if (claim?.archived !== false) {
+        throw new Error("Happy conversation ownership claim returned an invalid result");
+      }
+      const observedStatus = ownershipPendingProviderStatuses.get(pendingSessionId);
+      const claimedSummary =
+        typeof observedStatus === "string" ? { ...spawned, status: observedStatus } : spawned;
+      pending.summary = claimedSummary;
       liveSessions.add(pendingSessionId);
       // Seed the cache so the first streamed event resolves this session's
       // provider without re-listing.
-      sessionSummaries.set(pendingSessionId, spawned);
+      sessionSummaries.set(pendingSessionId, claimedSummary);
+      ownershipPendingSessions.delete(pendingSessionId);
+      ownershipPendingProviderStatuses.delete(pendingSessionId);
+      promptQueue.setBusy(
+        pendingSessionId,
+        BUSY_SESSION_STATUSES.has(claimedSummary.status) ||
+          claimedSummary.status === "initializing",
+      );
       return { type: "success", sessionId: pending.happySessionId };
     } catch (error) {
+      ownershipPendingSessions.delete(pendingSessionId);
+      ownershipPendingProviderStatuses.delete(pendingSessionId);
       if (unexpectedProviderSessionId) {
         await source
           .terminate(unexpectedProviderSessionId)
           .catch(() => debug("failed to retry mismatched provider termination"));
       }
-      await discardPendingSpawn(pendingSessionId, pending, {
-        providerNeverStarted: !providerSpawnAttempted || providerConfirmedAbsent,
-        providerAlreadyRetired: pendingProviderRetired,
-      });
-      if (conversationCreated) {
+      if (!pendingDisposed) {
+        await discardPendingSpawn(pendingSessionId, pending, {
+          providerNeverStarted: !providerSpawnAttempted || providerConfirmedAbsent,
+          providerAlreadyRetired: pendingProviderRetired,
+        });
+      }
+      if (conversationCreated && !claimAttempted && !archiveWon) {
         await supervisorChannel
           .call("conversation_delete", { conversationId: pendingSessionId })
           .catch(() => debug("failed to roll back abandoned Happy conversation"));
@@ -1772,7 +2408,14 @@ export function createHappyLayer({
   async function discardPendingSpawn(
     pendingSessionId,
     pending,
-    { providerNeverStarted = false, providerAlreadyRetired = false } = {},
+    {
+      providerNeverStarted = false,
+      providerAlreadyRetired = false,
+      blockRevival = false,
+      desktopAlreadyFenced = false,
+      conversationId,
+      agentSessionId,
+    } = {},
   ) {
     if (pending && sessions.get(pendingSessionId) === pending) {
       sessions.delete(pendingSessionId);
@@ -1782,6 +2425,7 @@ export function createHappyLayer({
       delete pendingRequests[pendingSessionId];
       sessionCreationPromises.delete(pendingSessionId);
     }
+    promptQueue.clear(pendingSessionId);
     const binding = pending ? null : await persistedSessionBinding(pendingSessionId);
     if (!pending && !binding) return;
     const providerIsRetired = providerNeverStarted || providerAlreadyRetired;
@@ -1790,6 +2434,10 @@ export function createHappyLayer({
       ...(pending ? { entry: pending } : { binding }),
       terminateProvider: !providerIsRetired,
       providerAlreadyRetired: providerIsRetired,
+      blockRevival,
+      desktopAlreadyFenced,
+      conversationId,
+      agentSessionId,
     });
   }
 
@@ -1916,14 +2564,16 @@ export function createHappyLayer({
 
   async function finishRegistration() {
     return startupStatusGate.complete(async () => {
+      // The provider client buffers per-session notifications until subscribe.
+      // Complete the one-time pre-key-store relay migration and every atomic
+      // restore claim first: flushing a queued status any earlier could create
+      // an inbound relay handler for a provider that does not own the desktop
+      // conversation yet.
       await updateCapabilities();
       const listed = await refreshSessionSummaries();
       const blockedSessionIds = await reconcilePersistedSessions(listed);
-      for (const summary of listed) {
-        if (blockedSessionIds.has(summary.sessionId)) continue;
-        if (!isSessionInScope(summary)) continue;
-        await createSessionEntry(summary.sessionId, summary);
-      }
+      await migrateLegacyHappyProviderBindings(blockedSessionIds);
+      const restored = await restorePersistedProviderSessions(listed, blockedSessionIds);
       sourceSubscription?.();
       sourceSubscription = source.subscribe((event) => {
         void trackLayerOperation(
@@ -1931,6 +2581,30 @@ export function createHappyLayer({
           "failed to publish Happy session event",
         );
       });
+      try {
+        for (const summary of [...listed, ...restored.summaries]) {
+          if (blockedSessionIds.has(summary.sessionId)) continue;
+          if (!isSessionInScope(summary)) continue;
+          const entry = await findOrCreateSession(
+            summary.sessionId,
+            sessionSummaries.get(summary.sessionId) ?? summary,
+          );
+          if (entry && summary.freshContextReset === true) {
+            for (const message of translateNeutralEvent({
+              kind: "service-message",
+              sessionId: summary.sessionId,
+              payload: { text: HAPPY_CONTEXT_RESET_NOTICE },
+            })) {
+              if (message.transport === "session") {
+                entry.client.sendSessionProtocolMessage(message.envelope);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        await unwindStartupProviders(restored.ownedSessionIds);
+        throw error;
+      }
     });
   }
 
@@ -1948,7 +2622,7 @@ export function createHappyLayer({
       closing = true;
       sourceSubscription?.();
       supervisorSubscription?.();
-      promptQueue.close();
+      await promptQueue.close();
       turnCorrelator.close();
       assistantMessageCoalescer.close();
       cancelPairing();
@@ -1959,20 +2633,23 @@ export function createHappyLayer({
       await drainOperations(spawnOperations);
       await drainOperations(layerOperations);
       await Promise.allSettled([...sessionCreationPromises.values()]);
-      // Awaited rather than fire-and-forget: the caller exits the process once
-      // this resolves, and tearing the event loop down while these closes are
-      // still in flight aborts the process on Windows.
+      // Shutdown is a passive detach. Provider crashes, updater restarts, app
+      // restarts, and the Off -> On pause must preserve the active relay row.
+      // Await each SDK close so accepted inbound work reaches its durable cursor.
       await Promise.allSettled(
-        [...sessions.values()].map((entry) =>
-          disposeHappySessionEntry({ api, entry, debugLog: debug }).catch(() =>
-            debug("failed to close Happy session"),
-          ),
-        ),
+        [...sessions.values()].map(async (entry) => {
+          entry.liveness.stop();
+          await entry.client.close().catch(() =>
+            debug("failed to detach Happy session client"),
+          );
+        }),
       );
       sessions.clear();
       await drainOperations(sessionDisposals);
       sessionDisposals.clear();
       remotelyArchivedSessions.clear();
+      ownershipPendingSessions.clear();
+      ownershipPendingProviderStatuses.clear();
       terminatedSessions.clear();
       machineClient?.shutdown();
       machineClient = null;

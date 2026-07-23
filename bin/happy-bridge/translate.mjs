@@ -241,6 +241,8 @@ export function translateNeutralEvent(event, { provider = AGENT_PROVIDER } = {})
   const text = stringValue(payload.text);
 
   switch (event.kind) {
+    case "service-message":
+      return text ? [service(payload, text)] : [];
     case "assistant-delta":
       if (!text) return [];
       return [eventEnvelope("agent", {

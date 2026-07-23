@@ -60,13 +60,27 @@ describe("Happy session key store", () => {
       expect((await stat(store.filePath)).mode & 0o777).toBe(0o600);
     }
 
+    expect(await store.markLegacyRelayRetired(sessionId)).toMatchObject({
+      state: "pending",
+      legacyRelayRetired: true,
+    });
     const reopened = createHappySessionKeyStore({ directory, machineKey });
+    expect(await reopened.list()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sessionId, legacyRelayRetired: true }),
+      ]),
+    );
     const ready = await reopened.markReady(sessionId, "synthetic-relay-row");
     expect(ready).toMatchObject({
       state: "ready",
       relayTag: "seren-synthetic-session",
       happySessionId: "synthetic-relay-row",
+      processedThroughSeq: 0,
+      legacyRelayRetired: true,
     });
+    expect(await reopened.clearLegacyRelayRetired(sessionId)).not.toHaveProperty(
+      "legacyRelayRetired",
+    );
     expect(Buffer.from(ready.key)).toEqual(Buffer.from(first.key));
     await expect(reopened.replacePendingTag(sessionId, "replacement")).rejects.toThrow(
       /cannot change relay tags/,
@@ -79,8 +93,19 @@ describe("Happy session key store", () => {
       state: "ready",
       relayTag: "seren-synthetic-session",
       happySessionId: "synthetic-relay-row",
+      processedThroughSeq: 0,
     });
     expect(Buffer.from(reopenedReady.key)).toEqual(Buffer.from(first.key));
+    expect(await reopened.markProcessedThroughSeq(sessionId, 7)).toMatchObject({
+      state: "ready",
+      processedThroughSeq: 7,
+    });
+    expect(await reopened.markProcessedThroughSeq(sessionId, 3)).toMatchObject({
+      processedThroughSeq: 7,
+    });
+    await expect(reopened.markProcessedThroughSeq(sessionId, -1)).rejects.toThrow(
+      /non-negative safe integer/,
+    );
     await expect(reopened.markReady(sessionId, "different-relay-row")).rejects.toThrow(
       /different relay row/,
     );
@@ -90,6 +115,7 @@ describe("Happy session key store", () => {
       happySessionId: "synthetic-relay-row",
       providerRetired: false,
       blockRevival: false,
+      processedThroughSeq: 7,
     });
     const providerRetired = await reopened.markRetiring(
       sessionId,

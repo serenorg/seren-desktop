@@ -7974,6 +7974,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "unicode-normalization",
  "unicode-width",
  "url",
  "urlencoding",

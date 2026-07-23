@@ -16,7 +16,7 @@ fn set_enabled(app: &AppHandle, enabled: bool) -> Result<(), String> {
     store.save().map_err(|err| err.to_string())
 }
 
-fn is_enabled(app: &AppHandle) -> bool {
+pub(crate) fn is_enabled(app: &AppHandle) -> bool {
     app.store(SETTINGS_STORE)
         .ok()
         .and_then(|store| store.get(ENABLED_KEY))
