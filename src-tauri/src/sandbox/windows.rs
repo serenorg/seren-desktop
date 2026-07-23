@@ -23,7 +23,7 @@ mod platform {
         ACL, AdjustTokenPrivileges, AllocateAndInitializeSid, CopySid, CreateRestrictedToken,
         CreateWellKnownSid, DACL_SECURITY_INFORMATION, DISABLE_MAX_PRIVILEGE, FreeSid,
         GetLengthSid, GetTokenInformation, LUA_TOKEN, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW,
-        PSECURITY_DESCRIPTOR, PSID, SE_PRIVILEGE_ENABLED, SECURITY_APP_PACKAGE_AUTHORITY,
+        PSECURITY_DESCRIPTOR, PSID, SE_PRIVILEGE_ENABLED, SECURITY_NT_AUTHORITY,
         SID_AND_ATTRIBUTES, SUB_CONTAINERS_AND_OBJECTS_INHERIT, SetTokenInformation,
         TOKEN_ACCESS_MASK, TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_PRIVILEGES, TOKEN_ADJUST_SESSIONID,
         TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_GROUPS, TOKEN_PRIVILEGES,
@@ -298,10 +298,14 @@ mod platform {
 
         let mut sid = PSID::default();
         unsafe {
+            // Use a synthetic NT-authority SID (S-1-5-21-...) as the restricting
+            // capability, matching the pinned Codex restricted-token backend.
+            // App-package capability SIDs (S-1-15-3-...) are rejected by
+            // CreateRestrictedToken with WRITE_RESTRICTED on windows-latest. #3219.
             AllocateAndInitializeSid(
-                &SECURITY_APP_PACKAGE_AUTHORITY,
+                &SECURITY_NT_AUTHORITY,
                 5,
-                3,
+                21,
                 hashes[0],
                 hashes[1],
                 hashes[2],
