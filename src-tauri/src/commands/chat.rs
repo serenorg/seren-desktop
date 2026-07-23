@@ -226,6 +226,7 @@ pub struct Conversation {
     pub project_root: Option<String>,
     pub is_archived: bool,
     pub employee_id: Option<String>,
+    #[serde(default)]
     pub privileged: bool,
     pub counsel_direction: Option<String>,
 }
@@ -244,6 +245,7 @@ pub struct AgentConversation {
     pub project_id: Option<String>,
     pub project_root: Option<String>,
     pub is_archived: bool,
+    #[serde(default)]
     pub privileged: bool,
     pub counsel_direction: Option<String>,
 }
@@ -306,6 +308,10 @@ pub struct UnifiedConversationRow {
     pub agent_permission_mode: Option<String>,
     pub agent_metadata: Option<String>,
     pub project_id: Option<String>,
+    // Older bridge/cache payloads predate Privileged Matter Mode. Treat an
+    // omitted value as non-privileged so rolling updates keep deserializing;
+    // the durable SQLite value is hydrated immediately after the read.
+    #[serde(default)]
     pub privileged: bool,
     pub counsel_direction: Option<String>,
 }
