@@ -11,6 +11,9 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use seren_desktop_lib::sandbox::{SandboxMode, SandboxPolicy};
 use tempfile::TempDir;
 
+const CANARY_DENIED_EXIT: i32 = 23;
+const CANARY_UNEXPECTED_ACCESS_EXIT: i32 = 41;
+
 fn policy_payload(policy: &SandboxPolicy) -> String {
     STANDARD.encode(serde_json::to_vec(policy).expect("policy serializes"))
 }
@@ -32,6 +35,36 @@ fn run_command(policy: &SandboxPolicy, cwd: &Path, command: &str, args: &[&str])
 fn workspace_policy(mode: SandboxMode, workspace: &TempDir) -> SandboxPolicy {
     SandboxPolicy::new(mode, vec![workspace.path().to_path_buf()], Vec::new(), true)
         .expect("test workspace policy is valid")
+}
+
+fn assert_launcher_ran(output: &Output) {
+    let status = output.status.code();
+    // A launcher fault is not a Landlock denial. Individual canaries must
+    // prove their own command ran and observed the expected restriction. #3219.
+    assert_ne!(status, Some(64), "launcher rejected arguments: {output:?}");
+    assert_ne!(status, Some(65), "launcher rejected policy: {output:?}");
+    assert_ne!(
+        status,
+        Some(69),
+        "launcher failed before the canary ran: {output:?}"
+    );
+}
+
+fn assert_contained_denial(output: &Output, denied_marker: &str) {
+    assert_launcher_ran(output);
+    assert_eq!(
+        output.status.code(),
+        Some(CANARY_DENIED_EXIT),
+        "canary did not report its contained denial: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(denied_marker),
+        "canary denial marker missing: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -65,10 +98,16 @@ fn sandbox_outside_write_canary_is_denied() {
         &policy,
         workspace.path(),
         "/bin/sh",
-        &["-c", &format!("touch '{}'", outside_file.display())],
+        &[
+            "-c",
+            &format!(
+                "printf 'SEREN_CANARY_OUTSIDE_WRITE_STARTED\\n'; if touch '{}'; then printf 'SEREN_CANARY_UNEXPECTED_WRITE\\n'; exit {CANARY_UNEXPECTED_ACCESS_EXIT}; else printf 'SEREN_CANARY_OUTSIDE_WRITE_DENIED\\n'; exit {CANARY_DENIED_EXIT}; fi",
+                outside_file.display()
+            ),
+        ],
     );
 
-    assert!(!output.status.success());
+    assert_contained_denial(&output, "SEREN_CANARY_OUTSIDE_WRITE_DENIED");
     assert!(!outside_file.exists());
 }
 
@@ -95,19 +134,26 @@ fn sandbox_deny_read_canary_is_denied() {
         &[
             "-c",
             &format!(
-                "cat '{}' && ! cat '{}'",
+                "cat '{}'; if cat '{}'; then printf 'SEREN_CANARY_UNEXPECTED_READ\\n'; exit {CANARY_UNEXPECTED_ACCESS_EXIT}; else printf 'SEREN_CANARY_DENY_READ_DENIED\\n'; fi",
                 readable_file.display(),
                 denied_file.display()
             ),
         ],
     );
 
+    assert_launcher_ran(&output);
     assert!(
         output.status.success(),
         "read canary failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "readable");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("readable"));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("SEREN_CANARY_DENY_READ_DENIED"),
+        "deny-read canary did not reach its own denial marker: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -123,11 +169,21 @@ fn sandbox_grandchild_write_cannot_escape() {
         "/bin/sh",
         &[
             "-c",
-            &format!("/bin/sh -c \"touch '{}'\"", outside_file.display()),
+            &format!(
+                "/bin/sh -c \"printf 'SEREN_CANARY_GRANDCHILD_STARTED\\n'; touch '{}'\"; if [ -e '{}' ]; then printf 'SEREN_CANARY_UNEXPECTED_WRITE\\n'; exit {CANARY_UNEXPECTED_ACCESS_EXIT}; else printf 'SEREN_CANARY_GRANDCHILD_WRITE_DENIED\\n'; exit {CANARY_DENIED_EXIT}; fi",
+                outside_file.display(),
+                outside_file.display()
+            ),
         ],
     );
 
-    assert!(!output.status.success());
+    assert_contained_denial(&output, "SEREN_CANARY_GRANDCHILD_WRITE_DENIED");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("SEREN_CANARY_GRANDCHILD_STARTED"),
+        "grandchild canary never started: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(!outside_file.exists());
 }
 
@@ -148,19 +204,29 @@ fn sandbox_network_disabled_denies_tcp_or_fails_closed() {
         &policy,
         workspace.path(),
         "/bin/bash",
-        &["-c", &format!("exec 3<>/dev/tcp/127.0.0.1/{port}")],
+        &[
+            "-c",
+            &format!(
+                "if exec 3<>/dev/tcp/127.0.0.1/{port}; then printf 'SEREN_CANARY_UNEXPECTED_CONNECT\\n'; exit {CANARY_UNEXPECTED_ACCESS_EXIT}; else printf 'SEREN_CANARY_NETWORK_DENIED\\n'; exit {CANARY_DENIED_EXIT}; fi"
+            ),
+        ],
     );
 
-    if output.status.code() != Some(69) {
+    let status = output.status.code();
+    assert_ne!(status, Some(64), "launcher rejected arguments: {output:?}");
+    assert_ne!(status, Some(65), "launcher rejected policy: {output:?}");
+    if status == Some(69) {
+        // Older kernels may lack Landlock's TCP ABI. This remains an allowed,
+        // explicit fail-closed result only when the backend identifies that
+        // capability gap, not a generic launcher fault.
         assert!(
-            !output.status.success()
-                && (String::from_utf8_lossy(&output.stderr).contains("Permission denied")
-                    || String::from_utf8_lossy(&output.stderr).contains("Operation not permitted")
-                    || String::from_utf8_lossy(&output.stderr).contains("Network is unreachable")),
-            "network canary did not show a denied connect: status={:?} stderr={}",
-            output.status,
+            String::from_utf8_lossy(&output.stderr).contains("Landlock")
+                && String::from_utf8_lossy(&output.stderr).contains("TCP"),
+            "network launcher exit 69 was not the documented TCP-ABI fail-closed path: stderr={}",
             String::from_utf8_lossy(&output.stderr)
         );
+    } else {
+        assert_contained_denial(&output, "SEREN_CANARY_NETWORK_DENIED");
     }
 }
 
@@ -174,10 +240,15 @@ fn sandbox_read_only_denies_workspace_write() {
         &policy,
         workspace.path(),
         "/bin/sh",
-        &["-c", "touch read-only-escape"],
+        &[
+            "-c",
+            &format!(
+                "if touch read-only-escape; then printf 'SEREN_CANARY_UNEXPECTED_WRITE\\n'; exit {CANARY_UNEXPECTED_ACCESS_EXIT}; else printf 'SEREN_CANARY_READ_ONLY_WRITE_DENIED\\n'; exit {CANARY_DENIED_EXIT}; fi"
+            ),
+        ],
     );
 
-    assert!(!output.status.success());
+    assert_contained_denial(&output, "SEREN_CANARY_READ_ONLY_WRITE_DENIED");
     assert!(!inside_file.exists());
 }
 
