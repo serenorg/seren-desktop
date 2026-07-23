@@ -22,6 +22,69 @@ afterEach(async () => {
 });
 
 describe("Happy pairing shutdown", () => {
+  it("retries a reset authorization poll with the same keypair", async () => {
+    const publicKeys: string[] = [];
+    let requestCount = 0;
+    let resolveRetryStarted: (() => void) | undefined;
+    const retryStarted = new Promise<void>((resolve) => {
+      resolveRetryStarted = resolve;
+    });
+    const server = createServer((request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        publicKeys.push(String(JSON.parse(body).publicKey));
+        requestCount += 1;
+        if (requestCount === 1) {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end("{}");
+          return;
+        }
+        if (requestCount === 2) {
+          request.socket.destroy();
+          return;
+        }
+        resolveRetryStarted?.();
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("test server did not bind");
+    }
+
+    const layer = createHappyLayer({
+      config: {
+        machineIdentity: null,
+        machineName: "pairing-retry-test",
+        relayUrl: `http://127.0.0.1:${address.port}`,
+      },
+      source: {},
+      supervisorChannel: {
+        notify: () => {},
+        onNotification: () => () => {},
+      },
+    });
+
+    await layer.start();
+    try {
+      await Promise.race([
+        retryStarted,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("authorization poll was not retried")), 3_000),
+        ),
+      ]);
+      expect(requestCount).toBe(3);
+      expect(new Set(publicKeys)).toHaveLength(1);
+    } finally {
+      await layer.close();
+    }
+  });
+
   it("aborts the authorization request before close resolves", async () => {
     let requestCount = 0;
     let authorizationRequestClosed = false;
