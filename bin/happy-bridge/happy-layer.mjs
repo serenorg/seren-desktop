@@ -210,6 +210,10 @@ async function readAuthRequest(relayUrl, publicKey, signal) {
   return JSON.parse(response.body);
 }
 
+function isRetryableAuthPollError(error) {
+  return error && typeof error === "object" && error.code === "ECONNRESET";
+}
+
 function machineMetadata(config, capabilities = { agents: [], roots: [] }) {
   return {
     host: config.machineName,
@@ -2496,7 +2500,16 @@ export function createHappyLayer({
         debug("pairing abandoned before authorization");
         return false;
       }
-      const result = await readAuthRequest(config.relayUrl, keyPair.publicKey, signal);
+      let result;
+      try {
+        result = await readAuthRequest(config.relayUrl, keyPair.publicKey, signal);
+      } catch (error) {
+        if (pairingCancelled || error?.name === "AbortError") throw error;
+        if (!isRetryableAuthPollError(error)) throw error;
+        debug("pairing authorization poll retrying after ECONNRESET");
+        await new Promise((resolve) => setTimeout(resolve, AUTH_POLL_MS));
+        continue;
+      }
       // Checked again after the round trip: an authorization that lands while
       // the user is dismissing the dialog must not be accepted.
       if (pairingCancelled) {
