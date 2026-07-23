@@ -4,9 +4,9 @@
 import path from "node:path";
 
 const SEREN_MCP_SERVER_NAME = "seren-mcp";
-const SEREN_MCP_API_KEY_ENV = "SEREN_API_KEY";
-const SEREN_MCP_GATEWAY_URL =
-  process.env.SEREN_MCP_GATEWAY_URL ?? "https://mcp.serendb.com/mcp";
+// The child receives a loopback-broker capability, never a Seren API key. The
+// name ends in _TOKEN so the provider-runtime log scrubber already covers it.
+const SEREN_MCP_CAPABILITY_ENV = "SEREN_MCP_CAPABILITY_TOKEN";
 
 // serenorg/seren-desktop#1883 — Claude / Codex CLIs are compiled binaries that
 // spawn stdio MCP children via libc execvp() against their own minimal PATH.
@@ -41,6 +41,20 @@ function trimToNull(value) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/**
+ * The renderer hands every spawn a loopback-broker capability instead of a
+ * Seren API key. All three values must be present for the Seren MCP server to
+ * be configured; a partial set means no gateway access rather than a fallback
+ * to some other credential. See #3194.
+ */
+export function resolveBrokeredSerenCredential(params) {
+  const capability = trimToNull(params?.serenCapability);
+  const mcpUrl = trimToNull(params?.serenMcpUrl);
+  const apiBaseUrl = trimToNull(params?.serenApiBaseUrl);
+  if (!capability || !mcpUrl || !apiBaseUrl) return null;
+  return { capability, mcpUrl, apiBaseUrl };
+}
+
 function normalizeLocalServer(server) {
   if (!server || server.enabled === false || server.type !== "local") {
     return null;
@@ -68,8 +82,8 @@ function normalizeLocalServer(server) {
   };
 }
 
-function createRemoteSerenServer(apiKey, gatewayUrl = SEREN_MCP_GATEWAY_URL) {
-  if (!trimToNull(apiKey)) {
+function createRemoteSerenServer(capability, gatewayUrl) {
+  if (!trimToNull(capability) || !trimToNull(gatewayUrl)) {
     return null;
   }
 
@@ -78,9 +92,9 @@ function createRemoteSerenServer(apiKey, gatewayUrl = SEREN_MCP_GATEWAY_URL) {
     type: "http",
     url: gatewayUrl,
     headers: {
-      Authorization: `Bearer \${${SEREN_MCP_API_KEY_ENV}}`,
+      Authorization: `Bearer \${${SEREN_MCP_CAPABILITY_ENV}}`,
     },
-    bearerTokenEnvVar: SEREN_MCP_API_KEY_ENV,
+    bearerTokenEnvVar: SEREN_MCP_CAPABILITY_ENV,
   };
 }
 
@@ -235,12 +249,12 @@ function buildAcpMcpServers(servers, { mcpCapabilities = {} } = {}) {
 }
 
 export function buildProviderMcpConfig({
-  apiKey,
+  serenCapability,
   mcpServers,
   serenMcpGatewayUrl,
 } = {}) {
   const normalizedServers = dedupeServers([
-    createRemoteSerenServer(apiKey, serenMcpGatewayUrl),
+    createRemoteSerenServer(serenCapability, serenMcpGatewayUrl),
     ...((Array.isArray(mcpServers) ? mcpServers : [])
       .map((server) => normalizeLocalServer(server))
       .filter(Boolean)),
@@ -248,9 +262,9 @@ export function buildProviderMcpConfig({
 
   return {
     childEnv:
-      trimToNull(apiKey) == null
+      trimToNull(serenCapability) == null
         ? {}
-        : { [SEREN_MCP_API_KEY_ENV]: trimToNull(apiKey) },
+        : { [SEREN_MCP_CAPABILITY_ENV]: trimToNull(serenCapability) },
     claudeMcpConfigJson: buildClaudeMcpConfig(normalizedServers),
     codexMcpConfigOverride: buildCodexMcpOverride(normalizedServers),
     acpMcpServers: (mcpCapabilities) =>

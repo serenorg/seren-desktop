@@ -3901,14 +3901,19 @@ export const agentStore = {
           setState("installStatus", null);
         }
 
-        // A child process receives a unique, expiring lease instead of the
-        // persistent desktop-wide publisher key. Rust owns the remote key id,
-        // retry ledger, and revocation; this value is used only for immediate
-        // MCP configuration during this spawn. #3194.
-        let apiKey: string | undefined;
+        // A child process receives an opaque loopback-broker capability, never
+        // a publisher key. Rust owns the remote key id, the real key material,
+        // the retry ledger, and revocation. #3194.
+        let serenCredential:
+          | { capability: string; mcpUrl: string; apiBaseUrl: string }
+          | undefined;
         if (authStore.isAuthenticated) {
           const lease = await createCredentialLease(localSessionId);
-          apiKey = lease.apiKey;
+          serenCredential = {
+            capability: lease.capability,
+            mcpUrl: lease.mcpUrl,
+            apiBaseUrl: lease.apiBaseUrl,
+          };
           credentialLeaseCreated = true;
         }
         const enabledMcpServers = getEnabledMcpServers();
@@ -3947,7 +3952,7 @@ export const agentStore = {
         await refreshClaudeMemoryMdBeforeSpawn(
           cwd,
           resolvedAgentType,
-          Boolean(apiKey),
+          Boolean(serenCredential),
         );
 
         console.log("[AgentStore] Spawning agent process...");
@@ -3955,7 +3960,7 @@ export const agentStore = {
           resolvedAgentType,
           cwd,
           settingsStore.settings.agentSandboxMode,
-          apiKey ?? undefined,
+          serenCredential,
           approvalPolicy,
           settingsStore.settings.agentSearchEnabled,
           settingsStore.settings.agentNetworkEnabled,

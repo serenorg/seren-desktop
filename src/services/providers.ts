@@ -475,6 +475,17 @@ export type AgentEvent =
   | { type: "loginRequired"; data: LoginRequiredEvent }
   | { type: "mcpDegraded"; data: McpDegradedEvent };
 
+/**
+ * What a spawned agent is given in place of a Seren API key: an opaque
+ * capability plus the loopback endpoints the Rust broker will accept it on.
+ * The real publisher key stays in the Rust host. See #3194.
+ */
+export interface BrokeredSerenCredential {
+  capability: string;
+  mcpUrl: string;
+  apiBaseUrl: string;
+}
+
 async function invokeProvider<T>(
   command: string,
   args?: Record<string, unknown>,
@@ -501,7 +512,7 @@ async function invokeProvider<T>(
  * @param agentType - The type of agent to spawn (claude-code or codex)
  * @param cwd - Working directory for the agent session
  * @param sandboxMode - Optional sandbox mode for restricting agent capabilities
- * @param apiKey - Optional API key to enable Seren MCP tools for the agent
+ * @param serenCredential - Optional loopback broker capability + endpoints that enable Seren MCP tools
  * @param approvalPolicy - Optional approval policy for command execution
  * @param searchEnabled - Optional flag to enable web search
  * @param networkEnabled - Optional flag to enable direct network access
@@ -512,7 +523,7 @@ export async function spawnAgent(
   agentType: AgentType,
   cwd: string,
   sandboxMode?: string,
-  apiKey?: string,
+  serenCredential?: BrokeredSerenCredential,
   approvalPolicy?: string,
   searchEnabled?: boolean,
   networkEnabled?: boolean,
@@ -557,7 +568,9 @@ export async function spawnAgent(
       resumeAgentSessionId: resumeAgentSessionId ?? null,
       sandboxMode: sandboxMode ?? null,
       sandboxProfile,
-      apiKey: apiKey ?? null,
+      serenCapability: serenCredential?.capability ?? null,
+      serenMcpUrl: serenCredential?.mcpUrl ?? null,
+      serenApiBaseUrl: serenCredential?.apiBaseUrl ?? null,
       approvalPolicy: approvalPolicy ?? null,
       searchEnabled: searchEnabled ?? null,
       networkEnabled: networkEnabled ?? null,

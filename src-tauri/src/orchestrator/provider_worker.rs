@@ -294,7 +294,9 @@ pub async fn complete_oneshot(
         "agentType": agent_type,
         "localSessionId": local_session_id,
         "cwd": cwd,
-        "apiKey": Value::Null,
+        // A one-shot run gets no credential lease, so it gets no broker
+        // capability and no Seren MCP server. #3194
+        "serenCapability": Value::Null,
         "mcpServers": [],
         "approvalPolicy": "on-request",
         "sandboxMode": "read-only",

@@ -10,7 +10,10 @@ import {
 } from "./agent-registry.mjs";
 import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
 import { providerLogPrefix } from "./logging.mjs";
-import { buildProviderMcpConfig } from "./mcp-config.mjs";
+import {
+  buildProviderMcpConfig,
+  resolveBrokeredSerenCredential,
+} from "./mcp-config.mjs";
 import { composeWindowsShellCommand } from "./windows-shell-args.mjs";
 
 // Agent runtimes are loaded in isolation (#2457). Each runtime module is
@@ -519,10 +522,10 @@ function buildInitializeParams() {
 
 function spawnCodexProcess(
   cwd,
-  { apiKey, mcpServers, serenMcpGatewayUrl, networkEnabled } = {},
+  { serenCapability, mcpServers, serenMcpGatewayUrl, networkEnabled } = {},
 ) {
   const mcpConfig = buildProviderMcpConfig({
-    apiKey,
+    serenCapability,
     mcpServers,
     serenMcpGatewayUrl,
   });
@@ -1741,7 +1744,6 @@ export function createProviderHandlers({
       resumeAgentSessionId,
       requireExactResume,
       suppressHistoryReplay,
-      apiKey,
       mcpServers,
       approvalPolicy,
       sandboxMode,
@@ -1784,12 +1786,18 @@ export function createProviderHandlers({
     const sessionId = localSessionId ?? randomUUID();
     const resolvedMode = modeFromApprovalPolicy(approvalPolicy);
     const resolvedSandbox = sandboxFromMode(sandboxMode, networkEnabled);
+    const serenCredential = resolveBrokeredSerenCredential(params);
     let serenMcpProxy = null;
     let processHandle;
     try {
-      if (apiKey) serenMcpProxy = await createSerenMcpOAuthProxy();
+      if (serenCredential) {
+        serenMcpProxy = await createSerenMcpOAuthProxy({
+          gatewayUrl: serenCredential.mcpUrl,
+          apiUrl: serenCredential.apiBaseUrl,
+        });
+      }
       processHandle = spawnCodex(cwd, {
-        apiKey,
+        serenCapability: serenCredential?.capability,
         mcpServers,
         serenMcpGatewayUrl: serenMcpProxy?.url,
         networkEnabled,

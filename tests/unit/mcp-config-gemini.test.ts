@@ -67,7 +67,8 @@ describe("#1887 — buildProviderMcpConfig emits Gemini-shaped mcpServers", () =
     const { buildProviderMcpConfig } = await loadModule();
 
     const { geminiMcpServers } = buildProviderMcpConfig({
-      apiKey: "test-key",
+      serenCapability: "test-capability",
+      serenMcpGatewayUrl: "http://127.0.0.1:4321/route/mcp",
       mcpServers: [],
     });
 
@@ -77,7 +78,7 @@ describe("#1887 — buildProviderMcpConfig emits Gemini-shaped mcpServers", () =
     expect(result[0].name).toBe("seren-mcp");
     expect(result[0].url).toMatch(/^https?:\/\//);
     expect(result[0].headers).toEqual([
-      { name: "Authorization", value: "Bearer ${SEREN_API_KEY}" },
+      { name: "Authorization", value: "Bearer ${SEREN_MCP_CAPABILITY_TOKEN}" },
     ]);
   });
 
@@ -85,7 +86,8 @@ describe("#1887 — buildProviderMcpConfig emits Gemini-shaped mcpServers", () =
     const { buildProviderMcpConfig } = await loadModule();
 
     const { geminiMcpServers } = buildProviderMcpConfig({
-      apiKey: "test-key",
+      serenCapability: "test-capability",
+      serenMcpGatewayUrl: "http://127.0.0.1:4321/route/mcp",
       mcpServers: [PLAYWRIGHT_SERVER],
     });
 
@@ -96,14 +98,16 @@ describe("#1887 — buildProviderMcpConfig emits Gemini-shaped mcpServers", () =
     expect(result[0].name).toBe("playwright");
   });
 
-  it("childEnv carries SEREN_API_KEY so the gemini-cli child can resolve the Authorization header", async () => {
+  it("childEnv carries only the broker capability so the gemini-cli child can resolve the Authorization header", async () => {
     const { buildProviderMcpConfig } = await loadModule();
 
     const { childEnv } = buildProviderMcpConfig({
-      apiKey: "test-key",
+      serenCapability: "test-capability",
+      serenMcpGatewayUrl: "http://127.0.0.1:4321/route/mcp",
       mcpServers: [],
     });
 
-    expect(childEnv.SEREN_API_KEY).toBe("test-key");
+    expect(childEnv.SEREN_MCP_CAPABILITY_TOKEN).toBe("test-capability");
+    expect(childEnv.SEREN_API_KEY).toBeUndefined();
   });
 });

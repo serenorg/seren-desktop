@@ -47,6 +47,7 @@ pub mod sandbox;
 
 pub mod audio;
 mod auth;
+pub mod credential_broker;
 pub mod credential_lease;
 // Public so the headless `claude_memory_sync` example can drive the
 // AppHandle-free sync core (#2639) without launching the app.
@@ -629,7 +630,18 @@ pub fn run() {
             .manage(orchestrator::eval::EvalState::new())
             .manage(orchestrator::tool_bridge::ToolResultBridge::new())
             .manage(provider_runtime::ProviderRuntimeState::new())
-            .manage(credential_lease::CredentialLeaseManager::new())
+            .manage(credential_lease::CredentialLeaseManager::new(
+                // A broker that cannot bind leaves the app without any safe
+                // place to hold a publisher key, so lease creation fails closed
+                // rather than falling back to child-environment exposure. #3194
+                match credential_broker::PublisherCredentialBroker::start() {
+                    Ok(broker) => Some(broker),
+                    Err(error) => {
+                        log::error!("[credential-broker] Disabled: {error}");
+                        None
+                    }
+                },
+            ))
             .manage(happy_bridge::HappyBridgeManager::new())
             .manage(std::sync::Arc::new(
                 commands::updater::ShutdownGuard::default(),

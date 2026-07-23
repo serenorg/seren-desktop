@@ -1,18 +1,10 @@
 // ABOUTME: Per-agent-session loopback proxy for deterministic Seren OAuth account routing.
-// ABOUTME: Forwards MCP traffic unchanged except selected call_publisher requests, which use the supported Core selector header.
+// ABOUTME: Relays to the Rust credential broker, which owns the only real publisher credential.
 
 import { randomBytes } from "node:crypto";
 import http from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-
-const DEFAULT_SEREN_MCP_GATEWAY_URL =
-  process.env.SEREN_MCP_GATEWAY_URL ?? "https://mcp.serendb.com/mcp";
-const DEFAULT_SEREN_API_URL =
-  process.env.SEREN_API_BASE ??
-  process.env.SEREN_API_URL ??
-  process.env.VITE_SEREN_API_URL ??
-  "https://api.serendb.com";
 
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -458,15 +450,29 @@ function sendLocalProxyFailure(request, response) {
   }
 }
 
-export async function createSerenMcpOAuthProxy({
-  gatewayUrl = DEFAULT_SEREN_MCP_GATEWAY_URL,
-  apiUrl = DEFAULT_SEREN_API_URL,
-} = {}) {
+/**
+ * The proxy holds no credential of its own, so its upstream must be either the
+ * loopback credential broker (which injects the real key) or a TLS origin. A
+ * plaintext remote upstream would put brokered traffic on the wire in clear.
+ */
+function assertRelayableUpstream(url) {
+  if (url.protocol === "https:") return;
+  if (url.protocol === "http:" && url.hostname === "127.0.0.1") return;
+  throw new Error(
+    "Seren OAuth routing proxy requires an HTTPS or loopback-broker upstream",
+  );
+}
+
+export async function createSerenMcpOAuthProxy({ gatewayUrl, apiUrl } = {}) {
+  if (!gatewayUrl || !apiUrl) {
+    throw new Error(
+      "Seren OAuth routing proxy requires brokered gateway and API upstreams",
+    );
+  }
   const gateway = new URL(gatewayUrl);
   const api = new URL(apiUrl);
-  if (gateway.protocol !== "https:" || api.protocol !== "https:") {
-    throw new Error("Seren OAuth routing proxy requires HTTPS upstreams");
-  }
+  assertRelayableUpstream(gateway);
+  assertRelayableUpstream(api);
 
   let routing = null;
   let closed = false;

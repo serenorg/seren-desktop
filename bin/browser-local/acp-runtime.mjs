@@ -5,7 +5,10 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import readline from "node:readline";
 
-import { buildProviderMcpConfig } from "./mcp-config.mjs";
+import {
+  buildProviderMcpConfig,
+  resolveBrokeredSerenCredential,
+} from "./mcp-config.mjs";
 import { providerLogPrefix } from "./logging.mjs";
 import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
 
@@ -597,7 +600,6 @@ export function createAcpRuntime({
       cwd,
       localSessionId,
       requireExactResume,
-      apiKey,
       mcpServers,
       approvalPolicy,
       sandboxMode,
@@ -626,14 +628,20 @@ export function createAcpRuntime({
     const resolvedModel = adapter.resolveInitialModelId
       ? adapter.resolveInitialModelId(requestedModel)
       : requestedModel;
+    const serenCredential = resolveBrokeredSerenCredential(params);
     let serenMcpProxy = null;
     let mcpConfig;
     let processHandle;
     let session;
     try {
-      if (apiKey) serenMcpProxy = await createSerenMcpOAuthProxy();
+      if (serenCredential) {
+        serenMcpProxy = await createSerenMcpOAuthProxy({
+          gatewayUrl: serenCredential.mcpUrl,
+          apiUrl: serenCredential.apiBaseUrl,
+        });
+      }
       mcpConfig = buildProviderMcpConfig({
-        apiKey,
+        serenCapability: serenCredential?.capability,
         mcpServers,
         serenMcpGatewayUrl: serenMcpProxy?.url,
       });
