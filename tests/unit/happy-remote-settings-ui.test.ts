@@ -75,3 +75,22 @@ describe("Happy advertised-root consent (#3144)", () => {
     expect(call?.[1].trim()).toBe('Some("agent".to_string())');
   });
 });
+
+describe("Happy identity reset confirmation (#3223)", () => {
+  it("awaits the supported Tauri dialog before invoking the reset", () => {
+    const unpair = remoteSettings.slice(
+      remoteSettings.indexOf("const unpair = async () => {"),
+      remoteSettings.indexOf("\n  return ("),
+    );
+
+    expect(remoteSettings).toContain(
+      'import { confirm } from "@tauri-apps/plugin-dialog";',
+    );
+    expect(unpair).toContain("const confirmed = await confirm(RESET_COPY");
+    expect(unpair).toContain("if (!confirmed) return;");
+    expect(unpair).not.toContain("window.confirm");
+    expect(unpair.indexOf("await confirm")).toBeLessThan(
+      unpair.indexOf("resetRemoteIdentity()"),
+    );
+  });
+});

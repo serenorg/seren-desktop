@@ -1,6 +1,7 @@
 // ABOUTME: Settings controls for the Happy remote access bridge.
 // ABOUTME: Keeps pairing, connection state, and advertised project roots local to Settings.
 
+import { confirm } from "@tauri-apps/plugin-dialog";
 import {
   type Component,
   createSignal,
@@ -245,7 +246,11 @@ export const HappyRemoteSettings: Component = () => {
   };
 
   const unpair = async () => {
-    if (!window.confirm(RESET_COPY)) return;
+    const confirmed = await confirm(RESET_COPY, {
+      title: "Reset Happy remote access",
+      kind: "warning",
+    });
+    if (!confirmed) return;
     setBusy(true);
     setMessage(null);
     try {
