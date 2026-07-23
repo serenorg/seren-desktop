@@ -752,7 +752,9 @@ export async function processConversationTurn(
     conversationId: context?.conversationId,
     sessionId: context?.sessionId,
     projectContext: context?.projectContext,
-    retainSource: sourceExternalId !== undefined,
+    retainSource:
+      sourceExternalId !== undefined &&
+      settingsStore.get("sourceRetentionEnabled") === true,
     sourceExternalId,
     sourceRevision: context?.sourceRevision,
     sourceUri: context?.sourceUri,
@@ -778,7 +780,9 @@ export async function processAssistantResponseMemory(
     conversationId: context?.conversationId,
     sessionId: context?.sessionId,
     projectContext: context?.projectContext,
-    retainSource: sourceExternalId !== undefined,
+    retainSource:
+      sourceExternalId !== undefined &&
+      settingsStore.get("sourceRetentionEnabled") === true,
     sourceExternalId,
     sourceRevision: context?.sourceRevision,
     sourceUri: context?.sourceUri,

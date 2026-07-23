@@ -2023,6 +2023,32 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </label>
             </div>
 
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.sourceRetentionEnabled}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "sourceRetentionEnabled",
+                      e.currentTarget.checked,
+                    )
+                  }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
+                />
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Verbatim Transcript Archival
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Store completed conversation text alongside derived cloud
+                    memories. This is off by default. Memory-excluded
+                    conversations never send transcript sources.
+                  </span>
+                </span>
+              </label>
+            </div>
+
             <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
               Claude Code Auto-Memory Interceptor
             </h4>

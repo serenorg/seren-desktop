@@ -106,6 +106,12 @@ export interface Settings {
   // Memory settings
   memoryEnabled: boolean;
   /**
+   * Retain completed conversation text as a verbatim source in the cloud
+   * memory service. Derived memories are controlled independently by
+   * `memoryEnabled`; transcript retention is opt-in for privacy.
+   */
+  sourceRetentionEnabled: boolean;
+  /**
    * Intercept Claude Code auto-memory writes at
    * ~/.claude/projects/*\/memory/*.md, persist each file to SerenDB through
    * the auto-provisioned `claude-agent-prefs` project, and delete the
@@ -264,6 +270,7 @@ const DEFAULT_SETTINGS: Settings = {
   semanticIndexingEnabled: false,
   // Memory
   memoryEnabled: true,
+  sourceRetentionEnabled: false,
   // Claude Code auto-memory interceptor — on by default so every Seren
   // Desktop user gets secure SerenDB-backed preference storage out of the
   // box. The interceptor auto-provisions a "claude-agent-prefs" project +
