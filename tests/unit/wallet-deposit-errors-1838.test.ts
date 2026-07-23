@@ -86,7 +86,7 @@ describe("#1838 supportSignature differentiates HTTP failures by endpoint", () =
 describe("#1838 captureSupportError leaves a trail when dedupe drops a capture", () => {
   beforeEach(() => {
     installBrowserGlobals();
-    localStorage.setItem("seren_api_key", "seren_test_key");
+    localStorage.setItem("seren_token", "seren_test_token");
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubGlobal(

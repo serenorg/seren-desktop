@@ -233,6 +233,25 @@ describe("support report hook behavior", () => {
     expect(supportHooks.seenSignatures()).toHaveLength(1);
   });
 
+  it("submits browser reports with the session credential", async () => {
+    localStorage.setItem("seren_token", "session-token");
+    localStorage.setItem("seren_api_key", "restricted-publisher-key");
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(new Response(null, { status: 201 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await captureSupportError({
+      kind: "session_credential_test",
+      message: "session credential test",
+      stack: [],
+    });
+    await flushSupportPipeline();
+
+    const request = fetchMock.mock.calls[0]?.[0] as Request;
+    expect(request.headers.get("Authorization")).toBe("Bearer session-token");
+  });
+
   it("does not drop concurrent unrelated captures", async () => {
     await Promise.all([
       captureSupportError({
@@ -253,7 +272,7 @@ describe("support report hook behavior", () => {
   });
 
   it("logs submit failures through console.warn with the report signature without re-entering reporting (#1736)", async () => {
-    localStorage.setItem("seren_api_key", "seren_test_key");
+    localStorage.setItem("seren_token", "seren_test_token");
     vi.stubGlobal(
       "fetch",
       vi.fn(() => Promise.reject(new Error("Bearer secret-token"))),

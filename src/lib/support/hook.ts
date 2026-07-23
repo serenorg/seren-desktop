@@ -1,7 +1,8 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { API_BASE } from "@/lib/config";
-import { getSerenApiKey, isTauriRuntime } from "@/lib/tauri-bridge";
+import { appFetch } from "@/lib/fetch";
+import { getToken, isTauriRuntime } from "@/lib/tauri-bridge";
 import {
   capSupportPayload,
   redactString,
@@ -254,17 +255,17 @@ async function submitPayload(
     }
   }
 
-  const apiKey = await getSerenApiKey();
-  if (!apiKey) {
-    return { status: "failed", reason: "no-api-key" };
+  const token = await getToken();
+  if (!token) {
+    return { status: "failed", reason: "no-session-token" };
   }
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}/support/report`, {
+    response = await appFetch(`${API_BASE}/support/report`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),

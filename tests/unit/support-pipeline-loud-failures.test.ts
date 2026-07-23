@@ -10,6 +10,10 @@ const hookSource = readFileSync(
   resolve("src/lib/support/hook.ts"),
   "utf-8",
 );
+const nativeSupportSource = readFileSync(
+  resolve("src-tauri/src/support.rs"),
+  "utf-8",
+);
 
 describe("#1736 support-pipeline submission failures are loud, not silent", () => {
   it("submitPayload surfaces non-2xx fetch responses as a failure (response.ok / status check)", () => {
@@ -23,15 +27,17 @@ describe("#1736 support-pipeline submission failures are loud, not silent", () =
     expect(fn).toMatch(/response\.ok|response\.status|\.status\s*[<>=!]/);
   });
 
-  it("the no-api-key silent skip is at minimum logged with a structured reason", () => {
-    // The browser path returned silently when getSerenApiKey() was empty.
-    // Auth refreshes during the user's session can leave the key briefly
-    // unset; when that races a console.error capture, the report drops
-    // without any signal. Require that the no-api-key branch logs a
-    // recognizable reason — pinning the literal token "no-api-key" so a
+  it("the missing-session-token skip is logged with a structured reason", () => {
+    // The browser path must identify a missing session credential rather
+    // than silently dropping the report. Pin the literal reason so a
     // rename in the warn message does not silently regress the audit
     // trail.
-    expect(hookSource).toMatch(/no-api-key/);
+    expect(hookSource).toMatch(/no-session-token/);
+  });
+
+  it("native support submission uses the refreshable session credential", () => {
+    expect(nativeSupportSource).toMatch(/auth::authenticated_request/);
+    expect(nativeSupportSource).not.toMatch(/SEREN_API_KEY_KEY|read_api_key/);
   });
 
   it("submission failure logging uses console.warn (not console.debug) and includes the report signature", () => {

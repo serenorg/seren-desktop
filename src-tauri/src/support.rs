@@ -20,7 +20,6 @@ use tauri_plugin_store::StoreExt;
 type HmacSha256 = Hmac<Sha256>;
 
 const AUTH_STORE: &str = "auth.json";
-const SEREN_API_KEY_KEY: &str = "seren_api_key";
 const SUPPORT_SALT_KEY: &str = "support_report_salt";
 const SUPPORT_REPORT_PATH: &str = "/support/report";
 const DEFAULT_API_BASE: &str = "https://api.serendb.com";
@@ -195,10 +194,7 @@ pub async fn sweep_support_crash_reports(app: AppHandle) -> Result<(), String> {
         // sidecars (a live report deferred after a transient submit failure).
         // Anything else is a stray file we delete rather than replay.
         if !is_pending && !is_crash_recovery_sidecar(&bundle) {
-            log::warn!(
-                "[support-report] deleting stray sidecar {}",
-                path.display()
-            );
+            log::warn!("[support-report] deleting stray sidecar {}", path.display());
             if let Err(err) = fs::remove_file(&path) {
                 log::warn!(
                     "[support-report] failed to delete stray sidecar {}: {err}",
@@ -267,21 +263,6 @@ fn support_salt(app: &AppHandle) -> Result<Vec<u8>, String> {
     Ok(salt.to_vec())
 }
 
-fn read_api_key(app: &AppHandle) -> Result<String, String> {
-    let key = app
-        .store(AUTH_STORE)
-        .map_err(|err| err.to_string())?
-        .get(SEREN_API_KEY_KEY)
-        .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_default();
-
-    if key.is_empty() {
-        return Err("seren api key not available".to_string());
-    }
-
-    Ok(key)
-}
-
 enum PostOutcome {
     Success,
     /// Terminal failure (4xx, malformed payload, etc.). Caller should NOT retry
@@ -318,20 +299,11 @@ async fn post_with_client(app: &AppHandle, client: &reqwest::Client, bundle: Val
 }
 
 async fn post_attempt(app: &AppHandle, client: &reqwest::Client, bundle: &Value) -> PostOutcome {
-    let api_key = match read_api_key(app) {
-        Ok(key) => key,
-        // Startup crash replay can run before auth state is hydrated. Keep
-        // persisted crash sidecars so a later launch/session can upload them.
-        Err(err) => return PostOutcome::TransientFailure(err),
-    };
-
     let url = support_report_url(app);
-    let result = client
-        .post(&url)
-        .bearer_auth(&api_key)
-        .json(bundle)
-        .send()
-        .await;
+    let result = crate::auth::authenticated_request(app, client, |client, token| {
+        client.post(&url).bearer_auth(token).json(bundle)
+    })
+    .await;
 
     let response = match result {
         Ok(response) => response,
