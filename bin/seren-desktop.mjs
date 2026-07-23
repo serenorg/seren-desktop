@@ -240,6 +240,7 @@ function registerBrowserLocalHandlers() {
 
   registerHandler("provider_spawn", providerHandlers.spawnSession);
   registerHandler("provider_prompt", providerHandlers.sendPrompt);
+  registerHandler("provider_submit_prompt", providerHandlers.submitPrompt);
   registerHandler("provider_cancel", providerHandlers.cancelPrompt);
   registerHandler("provider_terminate", providerHandlers.terminateSession);
   registerHandler("provider_list_sessions", providerHandlers.listSessions);

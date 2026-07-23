@@ -80,20 +80,13 @@ describe("#1889 — Claude spawnSession defers history replay off the await path
     ).toMatch(/sessions\.get\(sessionId\)\s*===\s*session/);
   });
 
-  it("spawn return reports the pre-replay status (still 'initializing')", () => {
-    // After the fix, spawnSession returns BEFORE replay finishes. At return
-    // time the session is still in 'initializing' state — the deferred
-    // emit flips it to 'ready' later. The literal status value isn't what
-    // matters; what matters is that `session.status = "ready"` happens
-    // INSIDE the deferred .then, not before the return.
-    const readyAssignmentInThen =
-      /\.then\s*\(\s*\(\s*\)\s*=>\s*\{[\s\S]*?session\.status\s*=\s*"ready"[\s\S]*?\}\s*\)/.test(
-        body,
-      );
-    expect(
-      readyAssignmentInThen,
-      "session.status = 'ready' must happen inside the deferred .then(...), not synchronously before the spawn return.",
-    ).toBe(true);
+  it("returns ready synchronously only when no history replay is running", () => {
+    expect(body).toMatch(
+      /if\s*\(resumeAgentSessionId\s*&&\s*suppressHistoryReplay\s*!==\s*true\)/,
+    );
+    expect(body).toMatch(
+      /\.then\s*\([\s\S]*?session\.status\s*=\s*"ready"[\s\S]*?\}\s*else\s*\{[\s\S]*?session\.status\s*=\s*"ready"/,
+    );
   });
 });
 

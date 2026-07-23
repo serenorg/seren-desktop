@@ -24,7 +24,14 @@ afterEach(() => {
 });
 
 function createClient() {
-  const eventHandlers = new Map<string, () => void>();
+  const eventHandlers = new Map<string, (...args: unknown[]) => void>();
+  let archiveSignaled = false;
+  let userMessageHandler:
+    | ((message: Record<string, unknown>) => void | Promise<void>)
+    | undefined;
+  let fileEventHandler:
+    | ((message: Record<string, unknown>) => void | Promise<void>)
+    | undefined;
   const rpcHandlers = new Map<
     string,
     (payload: Record<string, unknown>) => unknown
@@ -32,7 +39,19 @@ function createClient() {
   return {
     close: vi.fn(async () => {}),
     emit(event: string) {
+      if (event === "archived") archiveSignaled = true;
       eventHandlers.get(event)?.();
+    },
+    hasArchiveSignal() {
+      return archiveSignaled;
+    },
+    async dispatchUserMessage(message: Record<string, unknown>) {
+      if (!userMessageHandler) throw new Error("Happy user-message handler is not registered");
+      await userMessageHandler(message);
+    },
+    async dispatchFileEvent(message: Record<string, unknown>) {
+      if (!fileEventHandler) throw new Error("Happy file-event handler is not registered");
+      await fileEventHandler(message);
     },
     keepAlive: vi.fn(),
     lastSeq: 0,
@@ -41,10 +60,19 @@ function createClient() {
       if (!handler) throw new Error(`Happy RPC handler ${name} is not registered`);
       return handler(payload);
     },
-    on: vi.fn((event: string, handler: () => void) => {
+    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       eventHandlers.set(event, handler);
     }),
-    onUserMessage: vi.fn(),
+    onFileEvent: vi.fn(
+      (handler: (message: Record<string, unknown>) => void | Promise<void>) => {
+        fileEventHandler = handler;
+      },
+    ),
+    onUserMessage: vi.fn(
+      (handler: (message: Record<string, unknown>) => void | Promise<void>) => {
+        userMessageHandler = handler;
+      },
+    ),
     rpcHandlerManager: {
       registerHandler: vi.fn(
         (name: string, handler: (payload: Record<string, unknown>) => unknown) => {
@@ -71,6 +99,8 @@ function createMemorySessionKeyStore() {
     blockRevival?: boolean;
     conversationId?: string;
     agentSessionId?: string;
+    processedThroughSeq?: number;
+    legacyRelayRetired?: boolean;
   };
   const bindings = new Map<string, Binding>();
   let generation = 0;
@@ -102,9 +132,36 @@ function createMemorySessionKeyStore() {
       if (binding.state === "ready" && binding.happySessionId !== happySessionId) {
         throw new Error("relay row changed");
       }
+      if (binding.state === "ready") return copy(binding);
       binding.state = "ready";
       binding.happySessionId = happySessionId;
+      binding.processedThroughSeq = 0;
       return copy(binding);
+    }),
+    markProcessedThroughSeq: vi.fn(async (sessionId: string, seq: number) => {
+      const binding = bindings.get(sessionId);
+      if (!binding || binding.state !== "ready") throw new Error("binding is not ready");
+      binding.processedThroughSeq = Math.max(binding.processedThroughSeq ?? 0, seq);
+      return copy(binding);
+    }),
+    markLegacyRelayRetired: vi.fn(async (sessionId: string) => {
+      const binding = bindings.get(sessionId);
+      if (!binding || (binding.state !== "pending" && binding.state !== "ready")) {
+        throw new Error("binding is not active");
+      }
+      binding.legacyRelayRetired = true;
+      return copy(binding);
+    }),
+    clearLegacyRelayRetired: vi.fn(async (sessionId: string) => {
+      const binding = bindings.get(sessionId);
+      if (!binding) throw new Error("missing binding");
+      delete binding.legacyRelayRetired;
+      return copy(binding);
+    }),
+    clearProcessedThroughSeq: vi.fn(async (sessionId: string) => {
+      const binding = bindings.get(sessionId);
+      if (!binding || binding.state !== "ready") throw new Error("binding is not ready");
+      delete binding.processedThroughSeq;
     }),
     markRetiring: vi.fn(
       async (
@@ -125,6 +182,7 @@ function createMemorySessionKeyStore() {
         throw new Error("relay row changed");
       }
       binding.state = "retiring";
+      delete binding.legacyRelayRetired;
       binding.providerRetired = binding.providerRetired === true || providerRetired;
       binding.blockRevival = binding.blockRevival === true || blockRevival;
       if (happySessionId) binding.happySessionId = happySessionId;
@@ -143,6 +201,7 @@ function createMemorySessionKeyStore() {
 }
 
 function createLayerHarness({
+  archiveDuringClientConstruction = false,
   initialSessions = [],
   machineIdentity = {
     token: "test",
@@ -151,11 +210,13 @@ function createLayerHarness({
   },
   sessionKeyStore = createMemorySessionKeyStore(),
 }: {
+  archiveDuringClientConstruction?: boolean;
   initialSessions?: Array<Record<string, unknown>>;
   machineIdentity?: Record<string, unknown>;
   sessionKeyStore?: ReturnType<typeof createMemorySessionKeyStore>;
 } = {}) {
   const client = createClient();
+  let onMessageProcessed: ((seq: number) => void | Promise<void>) | undefined;
   let machineHandlers:
     | { spawnSession(options: Record<string, unknown>): Promise<Record<string, unknown>> }
     | undefined;
@@ -176,8 +237,16 @@ function createLayerHarness({
     })),
     machineSyncClient: vi.fn(() => machineClient),
     sessionSyncClient: vi.fn(
-      (_session: Record<string, unknown>, options?: { resumeFromSeq?: number }) => {
+      (
+        _session: Record<string, unknown>,
+        options?: {
+          resumeFromSeq?: number;
+          onMessageProcessed?: (seq: number) => void | Promise<void>;
+        },
+      ) => {
         client.lastSeq = options?.resumeFromSeq ?? 0;
+        onMessageProcessed = options?.onMessageProcessed;
+        if (archiveDuringClientConstruction) client.emit("archived");
         return client;
       },
     ),
@@ -190,11 +259,16 @@ function createLayerHarness({
     cancel: vi.fn(async () => {}),
     listSessions: vi.fn(async () => initialSessions),
     respondToPermission: vi.fn(async () => {}),
+    sendPrompt: vi.fn(async () => ({ accepted: true })),
+    setPermissionMode: vi.fn(async () => {}),
     spawn: vi.fn(async (spec: Record<string, unknown>) => ({
       sessionId: String(spec.localSessionId),
       agentType: "codex",
+      agentSessionId: "synthetic-native-session",
       cwd: SYNTHETIC_ROOT,
       status: "ready",
+      reused: false,
+      owned: true,
     })),
     subscribe: vi.fn((handler: (event: Record<string, unknown>) => void) => {
       publishProviderEvent = handler;
@@ -202,12 +276,20 @@ function createLayerHarness({
     }),
     terminate: vi.fn(async () => {}),
   };
-  const supervisorCall = vi.fn(async (method: string, params: Record<string, unknown>) => ({
-    conversationId:
-      method === "conversation_owner_lookup"
-        ? params.providerSessionId
-        : params.conversationId,
-  }));
+  const supervisorCall = vi.fn(async (method: string, params: Record<string, unknown>) => {
+    if (method === "conversation_restore_candidates") return { candidates: [] };
+    if (method === "conversation_migrate_happy_session") return { migrated: true };
+    if (method === "conversation_lookup") {
+      return { restorable: false, happyOrigin: false, retire: false };
+    }
+    if (method === "conversation_claim") return { archived: false };
+    return {
+      conversationId:
+        method === "conversation_owner_lookup"
+          ? params.providerSessionId
+          : params.conversationId,
+    };
+  });
   const supervisorNotify = vi.fn();
   let supervisorNotificationHandler:
     | ((method: string, params: Record<string, unknown>) => void)
@@ -235,6 +317,14 @@ function createLayerHarness({
     api,
     client,
     layer,
+    async processUserMessage(message: Record<string, unknown>, seq: number) {
+      await client.dispatchUserMessage(message);
+      await onMessageProcessed?.(seq);
+    },
+    async processFileEvent(message: Record<string, unknown>, seq: number) {
+      await client.dispatchFileEvent(message);
+      await onMessageProcessed?.(seq);
+    },
     publish(event: Record<string, unknown>) {
       if (!publishProviderEvent) throw new Error("provider subscription is not ready");
       publishProviderEvent(event);
@@ -255,6 +345,39 @@ function createLayerHarness({
 }
 
 describe("Happy session liveness", () => {
+  it("retires an archive delivered while the session client is being constructed", async () => {
+    const summary = {
+      sessionId: "constructor-archive-session",
+      agentType: "codex",
+      cwd: SYNTHETIC_ROOT,
+      title: "Synthetic constructor archive",
+      status: "ready",
+    };
+    const harness = createLayerHarness({
+      archiveDuringClientConstruction: true,
+      initialSessions: [summary],
+    });
+
+    await harness.layer.start();
+
+    await vi.waitFor(() =>
+      expect(harness.source.terminate).toHaveBeenCalledWith(summary.sessionId),
+    );
+    await vi.waitFor(() =>
+      expect(harness.api.deactivateSession).toHaveBeenCalledWith("relay-session"),
+    );
+    expect(harness.client.sendSessionEvent).not.toHaveBeenCalled();
+    expect(harness.api.sessionSyncClient).toHaveBeenCalledTimes(1);
+
+    harness.publish({
+      kind: "status",
+      sessionId: summary.sessionId,
+      payload: { status: "ready" },
+    });
+    await Promise.resolve();
+    expect(harness.api.sessionSyncClient).toHaveBeenCalledTimes(1);
+  });
+
   it("wires provider status into pulses and stops an entry archived from mobile", async () => {
     vi.useFakeTimers();
     const summary = {
@@ -342,6 +465,7 @@ describe("Happy session liveness", () => {
     };
     const harness = createLayerHarness({ initialSessions: [summary] });
     harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
       if (method === "conversation_owner_lookup") {
         return { conversationId: "owning-conversation" };
       }
@@ -391,6 +515,7 @@ describe("Happy session liveness", () => {
     };
     const harness = createLayerHarness({ initialSessions: [summary] });
     harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
       if (method === "conversation_owner_lookup") return {};
       return { conversationId: params.conversationId };
     });
@@ -471,6 +596,7 @@ describe("Happy session liveness", () => {
     };
     const harness = createLayerHarness({ initialSessions: [summary] });
     harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
       if (method === "conversation_owner_lookup") {
         return { conversationId: "late-native-id-owner" };
       }
@@ -519,6 +645,7 @@ describe("Happy session liveness", () => {
       sessionKeyStore,
     });
     interrupted.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
       if (method === "conversation_owner_lookup") {
         throw new Error("synthetic interrupted lookup");
       }
@@ -556,6 +683,7 @@ describe("Happy session liveness", () => {
       sessionKeyStore,
     });
     restarted.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
       if (method === "conversation_owner_lookup") {
         expect(params).toEqual({
           providerSessionId: summary.sessionId,
@@ -617,6 +745,9 @@ describe("Happy session liveness", () => {
       "stable-relay-session",
     );
     await first.layer.close();
+    expect(first.client.sendSessionDeath).not.toHaveBeenCalled();
+    expect(first.api.deactivateSession).not.toHaveBeenCalled();
+    expect(first.client.close).toHaveBeenCalledTimes(1);
     expect(sessionKeyStore.delete).not.toHaveBeenCalled();
 
     const restarted = createLayerHarness({
@@ -649,10 +780,1170 @@ describe("Happy session liveness", () => {
     expect(restarted.client.updateMetadata).not.toHaveBeenCalled();
 
     await restarted.layer.close();
-    expect(order).toEqual(["death", "deactivate", "close"]);
+    expect(order).toEqual(["close"]);
+    expect(restarted.client.sendSessionDeath).not.toHaveBeenCalled();
+    expect(restarted.api.deactivateSession).not.toHaveBeenCalled();
     const pulsesAtClose = restarted.client.keepAlive.mock.calls.length;
     vi.advanceTimersByTime(4_000);
     expect(restarted.client.keepAlive).toHaveBeenCalledTimes(pulsesAtClose);
+  });
+
+  it("restores an exact Happy provider and checkpoints only its accepted relay sequence", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000321";
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(providerSessionId, `seren-${providerSessionId}`);
+    await sessionKeyStore.markReady(providerSessionId, "persisted-relay-session");
+    await sessionKeyStore.markProcessedThroughSeq(providerSessionId, 4);
+    const harness = createLayerHarness({ initialSessions: [], sessionKeyStore });
+    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: "persisted-relay-session",
+      metadata,
+      seq: 9,
+    }));
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
+      if (method === "provider_session_archive_lookup") return { archived: false };
+      if (method === "conversation_lookup") {
+        expect(params).toEqual({
+          providerSessionId,
+          happySessionId: "persisted-relay-session",
+        });
+        return {
+          restorable: true,
+          happyOrigin: true,
+          retire: false,
+          archived: false,
+          conversationId: providerSessionId,
+          agentType: "codex",
+          agentSessionId: "native-session-to-resume",
+          agentModelId: "synthetic-model",
+          agentPermissionMode: "ask",
+          title: "Synthetic restored provider",
+          cwd: SYNTHETIC_ROOT,
+        };
+      }
+      if (method === "conversation_claim") return { archived: false };
+      return { conversationId: params.conversationId };
+    });
+
+    await harness.layer.start();
+
+    expect(harness.source.spawn).toHaveBeenCalledWith({
+      agentType: "codex",
+      cwd: SYNTHETIC_ROOT,
+      localSessionId: providerSessionId,
+      resumeAgentSessionId: "native-session-to-resume",
+      requireExactResume: true,
+      suppressHistoryReplay: true,
+      initialModelId: "synthetic-model",
+      permissionMode: "ask",
+      approvalPolicy: "on-failure",
+    });
+    expect(harness.supervisorCall).toHaveBeenCalledWith("conversation_claim", {
+      conversationId: providerSessionId,
+      providerSessionId,
+      happySessionId: "persisted-relay-session",
+      cwd: SYNTHETIC_ROOT,
+      expectedAgentType: "codex",
+      expectedAgentSessionId: "native-session-to-resume",
+      expectedAgentPermissionMode: "ask",
+      agentSessionId: "synthetic-native-session",
+    });
+    expect(harness.api.sessionSyncClient).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "persisted-relay-session" }),
+      expect.objectContaining({ resumeFromSeq: 4 }),
+    );
+
+    let acceptPrompt: (() => void) | undefined;
+    harness.source.sendPrompt.mockImplementationOnce(
+      () => new Promise<{ accepted: true }>((resolve) => {
+        acceptPrompt = () => resolve({ accepted: true });
+      }),
+    );
+    sessionKeyStore.markProcessedThroughSeq.mockClear();
+    harness.client.lastSeq = 99;
+    const processing = harness.processUserMessage(
+      { role: "user", content: { type: "text", text: "continue" } },
+      5,
+    );
+    await vi.waitFor(() =>
+      expect(harness.source.sendPrompt).toHaveBeenCalledWith(providerSessionId, "continue"),
+    );
+    expect(sessionKeyStore.markProcessedThroughSeq).not.toHaveBeenCalled();
+
+    acceptPrompt?.();
+    await processing;
+    expect(sessionKeyStore.markProcessedThroughSeq).toHaveBeenCalledWith(
+      providerSessionId,
+      5,
+    );
+    expect(sessionKeyStore.markProcessedThroughSeq).not.toHaveBeenCalledWith(
+      providerSessionId,
+      99,
+    );
+    await harness.layer.close();
+  });
+
+  it("keeps buffered provider readiness inert until the restore claim succeeds", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000324";
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(providerSessionId, `seren-${providerSessionId}`);
+    await sessionKeyStore.markReady(providerSessionId, "claim-gated-relay");
+    const harness = createLayerHarness({ initialSessions: [], sessionKeyStore });
+    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: "claim-gated-relay",
+      metadata,
+      seq: 0,
+    }));
+    harness.source.spawn.mockImplementation(async (spec) => ({
+      sessionId: String(spec.localSessionId),
+      agentType: "codex",
+      agentSessionId: "claim-gated-native-session",
+      cwd: SYNTHETIC_ROOT,
+      status: "initializing",
+      reused: true,
+      owned: false,
+    }));
+    let releaseClaim: (() => void) | undefined;
+    let claimReturned = false;
+    const claimGate = new Promise<void>((resolve) => {
+      releaseClaim = resolve;
+    });
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
+      if (method === "provider_session_archive_lookup") return { archived: false };
+      if (method === "conversation_lookup") {
+        return {
+          restorable: true,
+          happyOrigin: true,
+          retire: false,
+          archived: false,
+          conversationId: providerSessionId,
+          agentType: "codex",
+          agentSessionId: "claim-gated-native-session",
+          cwd: SYNTHETIC_ROOT,
+        };
+      }
+      if (method === "conversation_claim") {
+        await claimGate;
+        claimReturned = true;
+        return { archived: false };
+      }
+      return { conversationId: params.conversationId };
+    });
+    harness.source.subscribe.mockImplementation((handler) => {
+      expect(claimReturned).toBe(true);
+      handler({
+        kind: "status",
+        sessionId: providerSessionId,
+        payload: {
+          status: "ready",
+          agentSessionId: "claim-gated-native-session",
+        },
+      });
+      return () => {};
+    });
+
+    const starting = harness.layer.start();
+    await vi.waitFor(() =>
+      expect(harness.supervisorCall).toHaveBeenCalledWith(
+        "conversation_claim",
+        expect.anything(),
+      ),
+    );
+    expect(harness.source.subscribe).not.toHaveBeenCalled();
+    expect(harness.api.sessionSyncClient).not.toHaveBeenCalled();
+    expect(harness.client.onUserMessage).not.toHaveBeenCalled();
+    expect(harness.source.sendPrompt).not.toHaveBeenCalled();
+
+    releaseClaim?.();
+    await starting;
+
+    expect(harness.source.subscribe).toHaveBeenCalledTimes(1);
+    expect(harness.api.sessionSyncClient).toHaveBeenCalledTimes(1);
+    expect(harness.client.onUserMessage).toHaveBeenCalledTimes(1);
+    expect(harness.source.sendPrompt).not.toHaveBeenCalled();
+
+    await harness.processUserMessage(
+      { role: "user", content: { type: "text", text: "after claim" } },
+      1,
+    );
+    expect(harness.source.sendPrompt).toHaveBeenCalledWith(
+      providerSessionId,
+      "after claim",
+    );
+    await harness.layer.close();
+  });
+
+  it("retires a reused provider when archive wins the startup ownership claim", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000322";
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(providerSessionId, `seren-${providerSessionId}`);
+    await sessionKeyStore.markReady(providerSessionId, "archived-restore-relay");
+    const harness = createLayerHarness({ initialSessions: [], sessionKeyStore });
+    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: "archived-restore-relay",
+      metadata,
+      seq: 0,
+    }));
+    harness.source.spawn.mockImplementation(async (spec) => ({
+      sessionId: String(spec.localSessionId),
+      agentType: "codex",
+      agentSessionId: "reused-restored-native-session",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+      reused: true,
+      owned: false,
+    }));
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
+      if (method === "provider_session_archive_lookup") return { archived: false };
+      if (method === "conversation_lookup") {
+        return {
+          restorable: true,
+          happyOrigin: true,
+          retire: false,
+          archived: false,
+          conversationId: providerSessionId,
+          agentType: "codex",
+          agentSessionId: "reused-restored-native-session",
+          cwd: SYNTHETIC_ROOT,
+        };
+      }
+      if (method === "conversation_claim") return { archived: true };
+      return { conversationId: params.conversationId };
+    });
+
+    await harness.layer.start();
+
+    expect(harness.source.terminate).toHaveBeenCalledWith(providerSessionId);
+    expect(harness.api.deactivateSession).toHaveBeenCalledWith("archived-restore-relay");
+    expect(harness.api.sessionSyncClient).not.toHaveBeenCalled();
+    expect(harness.sessionKeyStore.delete).toHaveBeenCalledWith(providerSessionId);
+    await harness.layer.close();
+  });
+
+  it("retires a reconfigured reused provider when its atomic restore claim is rejected", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000323";
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(providerSessionId, `seren-${providerSessionId}`);
+    await sessionKeyStore.markReady(providerSessionId, "rejected-restore-relay");
+    const harness = createLayerHarness({ initialSessions: [], sessionKeyStore });
+    let rejectClaim: (() => void) | undefined;
+    const claimGate = new Promise<never>((_resolve, reject) => {
+      rejectClaim = () => reject(new Error("Happy restoration claim was rejected"));
+    });
+    harness.source.spawn.mockImplementation(async (spec) => ({
+      sessionId: String(spec.localSessionId),
+      agentType: "codex",
+      agentSessionId: "reused-rejected-native-session",
+      cwd: SYNTHETIC_ROOT,
+      status: "initializing",
+      reused: true,
+      owned: false,
+    }));
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
+      if (method === "provider_session_archive_lookup") return { archived: false };
+      if (method === "conversation_lookup") {
+        return {
+          restorable: true,
+          happyOrigin: true,
+          retire: false,
+          archived: false,
+          conversationId: providerSessionId,
+          agentType: "codex",
+          agentSessionId: "reused-rejected-native-session",
+          agentPermissionMode: "bypassPermissions",
+          cwd: SYNTHETIC_ROOT,
+        };
+      }
+      if (method === "conversation_claim") {
+        return claimGate;
+      }
+      return { conversationId: params.conversationId };
+    });
+
+    const starting = harness.layer.start();
+    await vi.waitFor(() =>
+      expect(harness.supervisorCall).toHaveBeenCalledWith(
+        "conversation_claim",
+        expect.anything(),
+      ),
+    );
+    expect(harness.api.sessionSyncClient).not.toHaveBeenCalled();
+    expect(harness.client.onUserMessage).not.toHaveBeenCalled();
+    expect(harness.client.keepAlive).not.toHaveBeenCalled();
+    expect(harness.source.sendPrompt).not.toHaveBeenCalled();
+    rejectClaim?.();
+    await expect(starting).rejects.toThrow(
+      "Happy restoration claim was rejected",
+    );
+
+    expect(harness.source.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: "bypassPermissions" }),
+    );
+    expect(harness.source.terminate).toHaveBeenCalledWith(providerSessionId);
+    expect(harness.api.sessionSyncClient).not.toHaveBeenCalled();
+    await harness.layer.close();
+  });
+
+  it("does not treat a permission-only status as provider readiness", async () => {
+    const summary = {
+      sessionId: "permission-status-session",
+      agentType: "claude-code",
+      agentSessionId: "native-permission-status",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+    };
+    const harness = createLayerHarness({ initialSessions: [summary] });
+    let acceptFirst: (() => void) | undefined;
+    harness.source.sendPrompt.mockImplementation(async (_sessionId, text) => {
+      if (text === "first") {
+        await new Promise<void>((resolve) => {
+          acceptFirst = resolve;
+        });
+      }
+      return { accepted: true };
+    });
+    await harness.layer.start();
+
+    const first = harness.processUserMessage(
+      { role: "user", content: { type: "text", text: "first" } },
+      1,
+    );
+    await vi.waitFor(() =>
+      expect(harness.source.sendPrompt).toHaveBeenCalledWith(summary.sessionId, "first"),
+    );
+    harness.publish({
+      kind: "status",
+      sessionId: summary.sessionId,
+      payload: { status: "ready", readinessUnchanged: true },
+    });
+    acceptFirst?.();
+    await first;
+
+    const second = harness.processUserMessage(
+      { role: "user", content: { type: "text", text: "second" } },
+      2,
+    );
+    for (let index = 0; index < 4; index += 1) await Promise.resolve();
+    expect(harness.source.sendPrompt).toHaveBeenCalledTimes(1);
+
+    harness.publish({
+      kind: "status",
+      sessionId: summary.sessionId,
+      payload: { status: "ready" },
+    });
+    await second;
+    expect(harness.source.sendPrompt).toHaveBeenNthCalledWith(
+      2,
+      summary.sessionId,
+      "second",
+    );
+    await harness.layer.close();
+  });
+
+  it("captures completion before slow startup work despite restore chatter", async () => {
+    const active = {
+      sessionId: "active-startup-session",
+      agentType: "codex",
+      agentSessionId: "active-startup-native",
+      cwd: SYNTHETIC_ROOT,
+      status: "prompting",
+    };
+    const harness = createLayerHarness({ initialSessions: [active] });
+    let finishRelayLookup: (() => void) | undefined;
+    harness.api.getOrCreateSession.mockImplementation(
+      ({ metadata }: { metadata: Record<string, unknown> }) =>
+        new Promise<Record<string, unknown>>((resolve) => {
+          finishRelayLookup ??= () =>
+            resolve({ id: "startup-race-relay", metadata });
+        }),
+    );
+
+    const starting = harness.layer.start();
+    await vi.waitFor(() => expect(harness.source.subscribe).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(harness.api.getOrCreateSession).toHaveBeenCalledTimes(1));
+    harness.publish({
+      kind: "turn-complete",
+      sessionId: active.sessionId,
+      payload: { stopReason: "completed" },
+    });
+    for (let index = 0; index < 40; index += 1) {
+      harness.publish({
+        kind: "status",
+        sessionId: `restore-chatter-${index}`,
+        payload: { status: "ready" },
+      });
+    }
+    finishRelayLookup?.();
+    await starting;
+
+    expect(harness.api.getOrCreateSession).toHaveBeenCalledTimes(1);
+    expect(harness.api.sessionSyncClient).toHaveBeenCalledTimes(1);
+    expect(harness.client.onUserMessage).toHaveBeenCalledTimes(1);
+    await harness.processUserMessage(
+      { role: "user", content: { type: "text", text: "after restart" } },
+      1,
+    );
+    await vi.waitFor(() =>
+      expect(harness.source.sendPrompt).toHaveBeenCalledWith(
+        active.sessionId,
+        "after restart",
+      ),
+    );
+    await harness.layer.close();
+  });
+
+  it("seeds a legacy ready binding at the relay snapshot exactly once", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000984";
+    const summary = {
+      sessionId: providerSessionId,
+      agentType: "codex",
+      agentSessionId: "native-existing",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+    };
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(providerSessionId, `seren-${providerSessionId}`);
+    await sessionKeyStore.markReady(providerSessionId, "legacy-cursor-relay");
+    await sessionKeyStore.clearProcessedThroughSeq(providerSessionId);
+    const harness = createLayerHarness({
+      initialSessions: [summary],
+      sessionKeyStore,
+    });
+    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: "legacy-cursor-relay",
+      metadata,
+      seq: 9,
+    }));
+
+    await harness.layer.start();
+
+    expect(sessionKeyStore.markProcessedThroughSeq).toHaveBeenCalledTimes(1);
+    expect(sessionKeyStore.markProcessedThroughSeq).toHaveBeenCalledWith(
+      providerSessionId,
+      9,
+    );
+    expect(harness.api.sessionSyncClient).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "legacy-cursor-relay" }),
+      expect.objectContaining({ resumeFromSeq: 9 }),
+    );
+    await harness.layer.close();
+  });
+
+  it("seeds an unbound v3.72 relay snapshot before accepting only newer input", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000988";
+    const summary = {
+      sessionId: providerSessionId,
+      agentType: "codex",
+      agentSessionId: "native-existing",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+    };
+    const sessionKeyStore = createMemorySessionKeyStore();
+    const harness = createLayerHarness({
+      initialSessions: [summary],
+      sessionKeyStore,
+    });
+    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: "v372-existing-relay",
+      metadata,
+      seq: 12,
+    }));
+
+    await harness.layer.start();
+
+    expect(harness.api.sessionSyncClient).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "v372-existing-relay" }),
+      expect.objectContaining({ resumeFromSeq: 12 }),
+    );
+    expect(sessionKeyStore.markProcessedThroughSeq).toHaveBeenCalledWith(
+      providerSessionId,
+      12,
+    );
+    expect(harness.source.sendPrompt).not.toHaveBeenCalled();
+
+    await harness.processUserMessage(
+      { role: "user", content: { type: "text", text: "new after upgrade" } },
+      13,
+    );
+    expect(harness.source.sendPrompt).toHaveBeenCalledTimes(1);
+    expect(harness.source.sendPrompt).toHaveBeenCalledWith(
+      providerSessionId,
+      "new after upgrade",
+    );
+    await harness.layer.close();
+  });
+
+  it("does not resurrect a current session after successful terminal retirement", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000987";
+    const happySessionId = "current-terminal-relay";
+    const summary = {
+      sessionId: providerSessionId,
+      agentType: "codex",
+      agentSessionId: "current-terminal-native",
+      cwd: SYNTHETIC_ROOT,
+      title: "Synthetic current terminal thread",
+      status: "ready",
+    };
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(providerSessionId, `seren-${providerSessionId}`);
+    await sessionKeyStore.markReady(providerSessionId, happySessionId);
+    let lifecycleRecorded = false;
+    const restorationCandidates = () =>
+      lifecycleRecorded
+        ? []
+        : [
+            {
+              conversationId: providerSessionId,
+              happySessionId,
+              agentType: summary.agentType,
+              agentSessionId: summary.agentSessionId,
+              cwd: summary.cwd,
+              title: summary.title,
+            },
+          ];
+    const first = createLayerHarness({
+      initialSessions: [summary],
+      sessionKeyStore,
+    });
+    first.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: happySessionId,
+      metadata,
+      seq: 0,
+    }));
+    first.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") {
+        return { candidates: restorationCandidates() };
+      }
+      if (method === "conversation_migrate_happy_session") {
+        expect(params).toEqual({
+          conversationId: providerSessionId,
+          expectedHappySessionId: happySessionId,
+          replacementHappySessionId: happySessionId,
+        });
+        lifecycleRecorded = true;
+        return { migrated: true };
+      }
+      if (method === "provider_session_archive_lookup") return { archived: false };
+      return { conversationId: params.conversationId };
+    });
+
+    await first.layer.start();
+    expect(lifecycleRecorded).toBe(true);
+    expect(
+      first.supervisorCall.mock.invocationCallOrder.find(
+        (_, index) =>
+          first.supervisorCall.mock.calls[index]?.[0] ===
+          "conversation_migrate_happy_session",
+      ),
+    ).toBeLessThan(first.source.subscribe.mock.invocationCallOrder[0]);
+
+    first.publish({
+      kind: "status",
+      sessionId: providerSessionId,
+      payload: { status: "terminated" },
+    });
+    await vi.waitFor(() =>
+      expect(sessionKeyStore.delete).toHaveBeenCalledWith(providerSessionId),
+    );
+    expect(await sessionKeyStore.list()).toEqual([]);
+    await first.layer.close();
+
+    const restarted = createLayerHarness({ initialSessions: [], sessionKeyStore });
+    restarted.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") {
+        return { candidates: restorationCandidates() };
+      }
+      if (method === "provider_session_archive_lookup") return { archived: false };
+      return { conversationId: params.conversationId };
+    });
+
+    await restarted.layer.start();
+
+    expect(restarted.api.getOrCreateSession).not.toHaveBeenCalled();
+    expect(restarted.api.deactivateSession).not.toHaveBeenCalled();
+    expect(restarted.source.spawn).not.toHaveBeenCalled();
+    expect(restarted.api.sessionSyncClient).not.toHaveBeenCalled();
+    await restarted.layer.close();
+  });
+
+  it("migrates a v3.72 Happy conversation with no binding or provider before restoring it", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000989";
+    const legacyHappySessionId = "v372-lost-key-relay";
+    const replacementHappySessionId = "v372-replacement-relay";
+    let recordedHappySessionId = legacyHappySessionId;
+    const sessionKeyStore = createMemorySessionKeyStore();
+    const harness = createLayerHarness({ initialSessions: [], sessionKeyStore });
+    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: replacementHappySessionId,
+      metadata,
+      seq: 0,
+    }));
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") {
+        return {
+          candidates: [
+            {
+              conversationId: providerSessionId,
+              happySessionId: recordedHappySessionId,
+              agentType: "codex",
+              agentSessionId: "v372-native-session",
+              cwd: SYNTHETIC_ROOT,
+              title: "Synthetic v3.72 thread",
+            },
+          ],
+        };
+      }
+      if (method === "conversation_migrate_happy_session") {
+        expect(params).toEqual({
+          conversationId: providerSessionId,
+          expectedHappySessionId: legacyHappySessionId,
+          replacementHappySessionId,
+        });
+        recordedHappySessionId = replacementHappySessionId;
+        return { migrated: true };
+      }
+      if (method === "provider_session_archive_lookup") return { archived: false };
+      if (method === "conversation_lookup") {
+        expect(params).toEqual({
+          providerSessionId,
+          happySessionId: replacementHappySessionId,
+        });
+        return {
+          restorable: true,
+          happyOrigin: true,
+          retire: false,
+          archived: false,
+          conversationId: providerSessionId,
+          agentType: "codex",
+          agentSessionId: "v372-native-session",
+          cwd: SYNTHETIC_ROOT,
+          title: "Synthetic v3.72 thread",
+        };
+      }
+      if (method === "conversation_claim") return { archived: false };
+      return { conversationId: params.conversationId };
+    });
+
+    await harness.layer.start();
+
+    expect(harness.api.deactivateSession).toHaveBeenCalledWith(
+      legacyHappySessionId,
+    );
+    expect(harness.supervisorCall.mock.invocationCallOrder.find((_, index) =>
+      harness.supervisorCall.mock.calls[index]?.[0] ===
+      "conversation_migrate_happy_session"
+    )).toBeLessThan(harness.source.subscribe.mock.invocationCallOrder[0]);
+    expect(harness.source.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        localSessionId: providerSessionId,
+        resumeAgentSessionId: "v372-native-session",
+        requireExactResume: true,
+      }),
+    );
+    expect(harness.api.sessionSyncClient).toHaveBeenCalledTimes(1);
+    expect(harness.api.sessionSyncClient).toHaveBeenCalledWith(
+      expect.objectContaining({ id: replacementHappySessionId }),
+      expect.anything(),
+    );
+    expect(await sessionKeyStore.list()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: providerSessionId,
+          state: "ready",
+          happySessionId: replacementHappySessionId,
+          processedThroughSeq: 0,
+        }),
+      ]),
+    );
+    await harness.layer.close();
+  });
+
+  it("rotates a pending legacy tag before a listed v3.72 provider and survives the next cold restart", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000990";
+    const legacyHappySessionId = "v372-pre-stable-relay";
+    const replacementHappySessionId = "v372-listed-replacement";
+    const summary = {
+      sessionId: providerSessionId,
+      agentType: "codex",
+      agentSessionId: "v372-listed-native",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+    };
+    let recordedHappySessionId = legacyHappySessionId;
+    let migrationRecorded = false;
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(providerSessionId, `seren-${providerSessionId}`);
+
+    const configureSupervisor = (harness: ReturnType<typeof createLayerHarness>) => {
+      harness.supervisorCall.mockImplementation(async (method, params) => {
+        if (method === "conversation_restore_candidates") {
+          return {
+            candidates: migrationRecorded
+              ? []
+              : [
+                  {
+                    conversationId: providerSessionId,
+                    happySessionId: recordedHappySessionId,
+                    agentType: "codex",
+                    agentSessionId: "v372-listed-native",
+                    cwd: SYNTHETIC_ROOT,
+                    title: "Synthetic listed v3.72 thread",
+                  },
+                ],
+          };
+        }
+        if (method === "conversation_migrate_happy_session") {
+          expect(params.expectedHappySessionId).toBe(legacyHappySessionId);
+          expect(params.replacementHappySessionId).toBe(replacementHappySessionId);
+          recordedHappySessionId = replacementHappySessionId;
+          migrationRecorded = true;
+          return { migrated: true };
+        }
+        if (method === "provider_session_archive_lookup") return { archived: false };
+        if (method === "conversation_lookup") {
+          return {
+            restorable: true,
+            happyOrigin: true,
+            retire: false,
+            archived: false,
+            conversationId: providerSessionId,
+            agentType: "codex",
+            agentSessionId: "v372-listed-native",
+            cwd: SYNTHETIC_ROOT,
+            title: "Synthetic listed v3.72 thread",
+          };
+        }
+        if (method === "conversation_claim") return { archived: false };
+        return { conversationId: params.conversationId };
+      });
+    };
+
+    const upgraded = createLayerHarness({
+      initialSessions: [summary],
+      sessionKeyStore,
+    });
+    configureSupervisor(upgraded);
+    upgraded.api.getOrCreateSession.mockImplementation(async ({ tag, metadata }) => {
+      expect(tag).toMatch(/^seren-migrated-/);
+      return { id: replacementHappySessionId, metadata, seq: 0 };
+    });
+
+    await upgraded.layer.start();
+
+    expect(sessionKeyStore.replacePendingTag).toHaveBeenCalledWith(
+      providerSessionId,
+      expect.stringMatching(/^seren-migrated-/),
+    );
+    expect(upgraded.source.spawn).not.toHaveBeenCalled();
+    expect(upgraded.api.sessionSyncClient).toHaveBeenCalledTimes(1);
+    expect(upgraded.api.sessionSyncClient).toHaveBeenCalledWith(
+      expect.objectContaining({ id: replacementHappySessionId }),
+      expect.anything(),
+    );
+    await upgraded.layer.close();
+
+    const restarted = createLayerHarness({ initialSessions: [], sessionKeyStore });
+    configureSupervisor(restarted);
+    restarted.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: replacementHappySessionId,
+      metadata,
+      seq: 0,
+    }));
+    await restarted.layer.start();
+
+    expect(restarted.api.deactivateSession).not.toHaveBeenCalledWith(
+      legacyHappySessionId,
+    );
+    expect(restarted.source.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        localSessionId: providerSessionId,
+        resumeAgentSessionId: "v372-listed-native",
+        requireExactResume: true,
+      }),
+    );
+    expect(restarted.api.sessionSyncClient).toHaveBeenCalledTimes(1);
+    await restarted.layer.close();
+  });
+
+  it("repairs a ready #3218 replacement whose SQLite marker was never migrated", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000991";
+    const legacyHappySessionId = "intermediate-legacy-relay";
+    const replacementHappySessionId = "intermediate-ready-relay";
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(providerSessionId, "seren-v2-intermediate");
+    await sessionKeyStore.markReady(providerSessionId, replacementHappySessionId);
+    const harness = createLayerHarness({ initialSessions: [], sessionKeyStore });
+    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: replacementHappySessionId,
+      metadata,
+      seq: 0,
+    }));
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") {
+        return {
+          candidates: [
+            {
+              conversationId: providerSessionId,
+              happySessionId: legacyHappySessionId,
+              agentType: "codex",
+              agentSessionId: "intermediate-native",
+              cwd: SYNTHETIC_ROOT,
+              title: "Synthetic intermediate thread",
+            },
+          ],
+        };
+      }
+      if (method === "conversation_migrate_happy_session") {
+        expect(params).toMatchObject({
+          conversationId: providerSessionId,
+          expectedHappySessionId: legacyHappySessionId,
+          replacementHappySessionId,
+        });
+        return { migrated: true };
+      }
+      if (method === "provider_session_archive_lookup") return { archived: false };
+      if (method === "conversation_lookup") {
+        return {
+          restorable: true,
+          happyOrigin: true,
+          retire: false,
+          archived: false,
+          conversationId: providerSessionId,
+          agentType: "codex",
+          agentSessionId: "intermediate-native",
+          cwd: SYNTHETIC_ROOT,
+        };
+      }
+      if (method === "conversation_claim") return { archived: false };
+      return { conversationId: params.conversationId };
+    });
+
+    await harness.layer.start();
+
+    expect(harness.api.deactivateSession).toHaveBeenCalledWith(
+      legacyHappySessionId,
+    );
+    expect(sessionKeyStore.markLegacyRelayRetired).toHaveBeenCalledWith(
+      providerSessionId,
+    );
+    expect(sessionKeyStore.clearLegacyRelayRetired).toHaveBeenCalledWith(
+      providerSessionId,
+    );
+    expect(harness.source.spawn).toHaveBeenCalledTimes(1);
+    await harness.layer.close();
+  });
+
+  it("fails startup when a persisted cursor exceeds the relay snapshot", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000985";
+    const summary = {
+      sessionId: providerSessionId,
+      agentType: "codex",
+      agentSessionId: "native-existing",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+    };
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(providerSessionId, `seren-${providerSessionId}`);
+    await sessionKeyStore.markReady(providerSessionId, "invalid-cursor-relay");
+    await sessionKeyStore.markProcessedThroughSeq(providerSessionId, 10);
+    const harness = createLayerHarness({
+      initialSessions: [summary],
+      sessionKeyStore,
+    });
+    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: "invalid-cursor-relay",
+      metadata,
+      seq: 9,
+    }));
+
+    await expect(harness.layer.start()).rejects.toThrow(
+      "Persisted Happy processed sequence exceeds the relay snapshot",
+    );
+    expect(harness.api.sessionSyncClient).not.toHaveBeenCalled();
+    expect(harness.supervisorNotify).toHaveBeenCalledWith("status_report", {
+      state: "error",
+      detail: "startup failed",
+    });
+    await harness.layer.close();
+  });
+
+  it.each([true, false])(
+    "unwinds an earlier restore on later startup failure (owned: %s)",
+    async (firstOwned) => {
+    const firstProviderSessionId = "00000000-0000-4000-8000-000000000986";
+    const failedProviderSessionId = "00000000-0000-4000-8000-000000000987";
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(
+      firstProviderSessionId,
+      `seren-${firstProviderSessionId}`,
+    );
+    await sessionKeyStore.markReady(firstProviderSessionId, "first-restore-relay");
+    await sessionKeyStore.getOrCreate(
+      failedProviderSessionId,
+      `seren-${failedProviderSessionId}`,
+    );
+    await sessionKeyStore.markReady(failedProviderSessionId, "failed-restore-relay");
+    const harness = createLayerHarness({ initialSessions: [], sessionKeyStore });
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
+      if (method === "provider_session_archive_lookup") return { archived: false };
+      if (method === "conversation_lookup") {
+        return {
+          restorable: true,
+          happyOrigin: true,
+          retire: false,
+          archived: false,
+          conversationId: params.providerSessionId,
+          agentType: "codex",
+          agentSessionId: `native-${params.providerSessionId}`,
+          cwd: SYNTHETIC_ROOT,
+        };
+      }
+      if (method === "conversation_claim") return { archived: false };
+      return { conversationId: params.conversationId };
+    });
+    harness.source.spawn.mockImplementation(async (spec) => {
+      if (spec.localSessionId === failedProviderSessionId) {
+        throw new Error("synthetic exact-resume failure");
+      }
+      return {
+        sessionId: firstProviderSessionId,
+        agentType: "codex",
+        agentSessionId: `native-${firstProviderSessionId}`,
+        cwd: SYNTHETIC_ROOT,
+        status: "ready",
+        reused: !firstOwned,
+        owned: firstOwned,
+      };
+    });
+    harness.source.terminate.mockImplementation(async (sessionId) => {
+      if (firstOwned && sessionId === firstProviderSessionId) {
+        harness.publish({
+          kind: "status",
+          sessionId,
+          payload: { status: "terminated" },
+        });
+      }
+    });
+
+    await expect(harness.layer.start()).rejects.toThrow("synthetic exact-resume failure");
+    if (firstOwned) {
+      expect(harness.source.terminate).toHaveBeenCalledWith(firstProviderSessionId);
+    } else {
+      expect(harness.source.terminate).not.toHaveBeenCalledWith(firstProviderSessionId);
+    }
+    expect(harness.api.sessionSyncClient).not.toHaveBeenCalled();
+    expect(harness.supervisorNotify).toHaveBeenCalledWith("status_report", {
+      state: "error",
+      detail: "startup failed",
+    });
+    expect(harness.supervisorNotify).not.toHaveBeenCalledWith(
+      "status_report",
+      expect.objectContaining({ state: "connected" }),
+    );
+    await harness.layer.close();
+    expect(harness.api.deactivateSession).not.toHaveBeenCalledWith(
+      "first-restore-relay",
+    );
+    expect(harness.sessionKeyStore.delete).not.toHaveBeenCalledWith(
+      firstProviderSessionId,
+    );
+    expect(await harness.sessionKeyStore.list()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: firstProviderSessionId,
+          state: "ready",
+          happySessionId: "first-restore-relay",
+        }),
+      ]),
+    );
+    },
+  );
+
+  it("claims a legacy fresh context before registering relay input and emits a reset notice", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000765";
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(providerSessionId, `seren-${providerSessionId}`);
+    await sessionKeyStore.markReady(providerSessionId, "legacy-relay-session");
+    const harness = createLayerHarness({ initialSessions: [], sessionKeyStore });
+    const order: string[] = [];
+    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: "legacy-relay-session",
+      metadata,
+      seq: 0,
+    }));
+    harness.source.spawn.mockImplementation(async (spec) => {
+      order.push("spawn");
+      return {
+        sessionId: String(spec.localSessionId),
+        agentType: "codex",
+        agentSessionId: "fresh-native-session",
+        cwd: SYNTHETIC_ROOT,
+        status: "ready",
+        freshContextReset: true,
+        reused: false,
+        owned: true,
+      };
+    });
+    harness.api.sessionSyncClient.mockImplementation((session, options) => {
+      order.push("register-relay-input");
+      harness.client.lastSeq = options?.resumeFromSeq ?? 0;
+      return harness.client;
+    });
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
+      if (method === "provider_session_archive_lookup") return { archived: false };
+      if (method === "conversation_lookup") {
+        return {
+          restorable: true,
+          happyOrigin: true,
+          retire: false,
+          archived: false,
+          conversationId: providerSessionId,
+          agentType: "codex",
+          agentSessionId: null,
+          cwd: SYNTHETIC_ROOT,
+        };
+      }
+      if (method === "conversation_claim") {
+        order.push("claim");
+        expect(params.expectedAgentType).toBe("codex");
+        expect(params.expectedAgentSessionId).toBeNull();
+        expect(params.expectedAgentPermissionMode).toBeNull();
+        expect(params.agentSessionId).toBe("fresh-native-session");
+        return { archived: false };
+      }
+      return { conversationId: params.conversationId };
+    });
+
+    await harness.layer.start();
+
+    expect(harness.source.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        localSessionId: providerSessionId,
+        freshContextReset: true,
+        suppressHistoryReplay: true,
+      }),
+    );
+    expect(order).toEqual(["spawn", "claim", "register-relay-input"]);
+    expect(harness.client.sendSessionProtocolMessage).toHaveBeenCalledTimes(1);
+    await harness.layer.close();
+  });
+
+  it("starts a fresh ACP context when the saved native session cannot resume exactly", async () => {
+    const providerSessionId = "00000000-0000-4000-8000-000000000766";
+    const sessionKeyStore = createMemorySessionKeyStore();
+    await sessionKeyStore.getOrCreate(providerSessionId, `seren-${providerSessionId}`);
+    await sessionKeyStore.markReady(providerSessionId, "legacy-acp-relay-session");
+    const harness = createLayerHarness({ initialSessions: [], sessionKeyStore });
+    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: "legacy-acp-relay-session",
+      metadata,
+      seq: 0,
+    }));
+    harness.source.spawn.mockImplementation(async (spec) => ({
+      sessionId: String(spec.localSessionId),
+      agentType: "gemini",
+      agentSessionId: "fresh-acp-native-session",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+      freshContextReset: true,
+      reused: false,
+      owned: true,
+    }));
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
+      if (method === "provider_session_archive_lookup") return { archived: false };
+      if (method === "conversation_lookup") {
+        return {
+          restorable: true,
+          happyOrigin: true,
+          retire: false,
+          archived: false,
+          conversationId: providerSessionId,
+          agentType: "gemini",
+          agentSessionId: "saved-acp-native-session",
+          cwd: SYNTHETIC_ROOT,
+        };
+      }
+      if (method === "conversation_claim") {
+        expect(params).toMatchObject({
+          expectedAgentType: "gemini",
+          expectedAgentSessionId: "saved-acp-native-session",
+          expectedAgentPermissionMode: null,
+          agentSessionId: "fresh-acp-native-session",
+        });
+        return { archived: false };
+      }
+      return { conversationId: params.conversationId };
+    });
+
+    await harness.layer.start();
+
+    expect(harness.source.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentType: "gemini",
+        localSessionId: providerSessionId,
+        freshContextReset: true,
+        suppressHistoryReplay: true,
+      }),
+    );
+    expect(harness.source.spawn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ requireExactResume: true }),
+    );
+    expect(harness.client.sendSessionProtocolMessage).toHaveBeenCalledTimes(1);
+    await harness.layer.close();
+  });
+
+  it("suppresses provider history replay when reopening an existing relay row", async () => {
+    const summary = {
+      sessionId: "replay-session",
+      agentType: "codex",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+    };
+    const sessionKeyStore = createMemorySessionKeyStore();
+    const first = createLayerHarness({ initialSessions: [summary], sessionKeyStore });
+    await first.layer.start();
+    await first.layer.close();
+
+    const restarted = createLayerHarness({ initialSessions: [summary], sessionKeyStore });
+    await restarted.layer.start();
+    restarted.client.sendSessionProtocolMessage.mockClear();
+    restarted.client.sendAgentMessage.mockClear();
+
+    restarted.publish({
+      kind: "assistant-delta",
+      sessionId: summary.sessionId,
+      payload: { text: "historical", replay: true },
+    });
+    restarted.publish({
+      kind: "turn-complete",
+      sessionId: summary.sessionId,
+      payload: { stopReason: "HistoryReplay", historyReplay: true },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(restarted.client.sendSessionProtocolMessage).not.toHaveBeenCalled();
+    expect(restarted.client.sendAgentMessage).not.toHaveBeenCalled();
+
+    restarted.publish({
+      kind: "assistant-delta",
+      sessionId: summary.sessionId,
+      payload: { text: "live" },
+    });
+    restarted.publish({
+      kind: "turn-complete",
+      sessionId: summary.sessionId,
+      payload: { stopReason: "completed" },
+    });
+    await vi.waitFor(() =>
+      expect(restarted.client.sendSessionProtocolMessage).toHaveBeenCalled(),
+    );
+    await restarted.layer.close();
   });
 
   it("retires archived metadata before constructing a client on restart", async () => {
@@ -709,6 +2000,7 @@ describe("Happy session liveness", () => {
     const order: string[] = [];
     const harness = createLayerHarness({ initialSessions: [summary] });
     harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
       if (method === "conversation_happy_session_lookup") {
         order.push("lookup");
         return { happySessionId: "pre-stable-relay-row" };
@@ -719,7 +2011,8 @@ describe("Happy session liveness", () => {
       order.push(`deactivate:${happySessionId}`);
       return true;
     });
-    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => {
+    harness.api.getOrCreateSession.mockImplementation(async ({ tag, metadata }) => {
+      expect(tag).toMatch(/^seren-migrated-/);
       order.push("create-replacement");
       return { id: "replacement-relay-row", metadata, seq: 0 };
     });
@@ -735,19 +2028,44 @@ describe("Happy session liveness", () => {
       summary.sessionId,
       "replacement-relay-row",
     );
+    expect(harness.sessionKeyStore.replacePendingTag).toHaveBeenCalledWith(
+      summary.sessionId,
+      expect.stringMatching(/^seren-migrated-/),
+    );
     await harness.layer.close();
   });
 
   it("allows a naturally terminated provider to recover with the same desktop id", async () => {
     const summary = {
-      sessionId: "recovering-session",
+      sessionId: "00000000-0000-4000-8000-000000000992",
       agentType: "codex",
       cwd: SYNTHETIC_ROOT,
       title: "Synthetic recovering session",
       status: "ready",
     };
     const harness = createLayerHarness({ initialSessions: [summary] });
+    let priorRelayRecorded = false;
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
+      if (method === "conversation_happy_session_lookup") {
+        return priorRelayRecorded
+          ? { happySessionId: "natural-recovery-old-relay" }
+          : {};
+      }
+      return { conversationId: params.conversationId };
+    });
+    harness.api.getOrCreateSession.mockImplementation(async ({ tag, metadata }) => {
+      if (!priorRelayRecorded) {
+        return { id: "natural-recovery-old-relay", metadata, seq: 0 };
+      }
+      if (tag === `seren-${summary.sessionId}`) {
+        throw new Error("synthetic lost-key decrypt collision");
+      }
+      expect(tag).toMatch(/^seren-migrated-/);
+      return { id: "natural-recovery-new-relay", metadata, seq: 0 };
+    });
     await harness.layer.start();
+    priorRelayRecorded = true;
 
     harness.publish({
       kind: "status",
@@ -761,6 +2079,10 @@ describe("Happy session liveness", () => {
       payload: { status: "ready" },
     });
     await vi.waitFor(() => expect(harness.api.sessionSyncClient).toHaveBeenCalledTimes(2));
+    expect(harness.sessionKeyStore.replacePendingTag).toHaveBeenCalledWith(
+      summary.sessionId,
+      expect.stringMatching(/^seren-migrated-/),
+    );
 
     await harness.layer.close();
   });
@@ -850,6 +2172,7 @@ describe("Happy session liveness", () => {
       sessionKeyStore,
     });
     restarted.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
       if (method === "provider_session_archive_lookup") {
         return { archived: params.providerSessionId === summary.sessionId };
       }
@@ -1481,7 +2804,110 @@ describe("Happy session liveness", () => {
     expect(typeof conversationId).toBe("string");
     expect(relayTag).toBe(`seren-${String(conversationId)}`);
     expect(providerId).toBe(conversationId);
+    expect(harness.supervisorCall).toHaveBeenCalledWith("conversation_claim", {
+      conversationId,
+      providerSessionId: conversationId,
+      happySessionId: "relay-session",
+      cwd: SYNTHETIC_ROOT,
+      expectedAgentType: "codex",
+      expectedAgentSessionId: null,
+      expectedAgentPermissionMode: null,
+      agentSessionId: "synthetic-native-session",
+    });
 
+    await harness.layer.close();
+  });
+
+  it("replays Claude readiness only after the remote spawn owns its conversation", async () => {
+    let finishClaim: (() => void) | undefined;
+    const claimGate = new Promise<void>((resolve) => {
+      finishClaim = resolve;
+    });
+    const harness = createLayerHarness();
+    harness.source.spawn.mockImplementation(async (spec) => ({
+      sessionId: String(spec.localSessionId),
+      agentType: "claude-code",
+      agentSessionId: "synthetic-native-session",
+      cwd: SYNTHETIC_ROOT,
+      status: "initializing",
+      reused: false,
+      owned: true,
+    }));
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
+      if (method === "conversation_lookup") {
+        return { restorable: false, happyOrigin: false, retire: false };
+      }
+      if (method === "conversation_claim") {
+        await claimGate;
+        return { archived: false };
+      }
+      return { conversationId: params.conversationId };
+    });
+    await harness.layer.start();
+
+    const spawning = harness.spawn({ directory: SYNTHETIC_ROOT, agent: "claude" });
+    await vi.waitFor(() => expect(harness.source.spawn).toHaveBeenCalled());
+    const providerSessionId = String(
+      harness.source.spawn.mock.calls[0]?.[0]?.localSessionId,
+    );
+    const processing = harness.processUserMessage(
+      { role: "user", content: { type: "text", text: "after claim" } },
+      1,
+    );
+    harness.publish({
+      kind: "status",
+      sessionId: providerSessionId,
+      payload: { status: "ready", agentSessionId: "synthetic-native-session" },
+    });
+    await Promise.resolve();
+    expect(harness.source.sendPrompt).not.toHaveBeenCalled();
+
+    finishClaim?.();
+    await expect(spawning).resolves.toMatchObject({ type: "success" });
+    await processing;
+    expect(harness.source.sendPrompt).toHaveBeenCalledWith(
+      providerSessionId,
+      "after claim",
+    );
+    await harness.layer.close();
+  });
+
+  it("preserves an archive that wins the remote spawn ownership claim", async () => {
+    const harness = createLayerHarness();
+    harness.source.spawn.mockImplementation(async (spec) => ({
+      sessionId: String(spec.localSessionId),
+      agentType: "codex",
+      agentSessionId: "reused-native-session",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+      reused: true,
+      owned: false,
+    }));
+    harness.supervisorCall.mockImplementation(async (method, params) => {
+      if (method === "conversation_restore_candidates") return { candidates: [] };
+      if (method === "conversation_lookup") {
+        return { restorable: false, happyOrigin: false, retire: false };
+      }
+      if (method === "conversation_claim") return { archived: true };
+      return { conversationId: params.conversationId };
+    });
+    await harness.layer.start();
+
+    await expect(harness.spawn({ directory: SYNTHETIC_ROOT, agent: "codex" })).resolves.toEqual({
+      type: "error",
+      errorMessage: "Happy conversation was archived during provider spawn",
+    });
+
+    const conversationId = harness.supervisorCall.mock.calls.find(
+      ([method]) => method === "conversation_create",
+    )?.[1]?.conversationId;
+    expect(harness.source.terminate).toHaveBeenCalledWith(conversationId);
+    expect(harness.supervisorCall).not.toHaveBeenCalledWith(
+      "conversation_delete",
+      expect.anything(),
+    );
+    expect(harness.sessionKeyStore.delete).toHaveBeenCalledWith(conversationId);
     await harness.layer.close();
   });
 

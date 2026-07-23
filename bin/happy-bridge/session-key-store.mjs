@@ -101,6 +101,15 @@ function validateAgentSessionId(sessionId) {
   return sessionId;
 }
 
+function validateProcessedThroughSeq(processedThroughSeq) {
+  if (!Number.isSafeInteger(processedThroughSeq) || processedThroughSeq < 0) {
+    throw new TypeError(
+      "Happy processed sequence must be a non-negative safe integer",
+    );
+  }
+  return processedThroughSeq;
+}
+
 function copyBinding(binding) {
   return {
     state: binding.state,
@@ -121,6 +130,10 @@ function copyBinding(binding) {
     ...(typeof binding.happySessionId === "string"
       ? { happySessionId: binding.happySessionId }
       : {}),
+    ...(Number.isSafeInteger(binding.processedThroughSeq)
+      ? { processedThroughSeq: binding.processedThroughSeq }
+      : {}),
+    ...(binding.legacyRelayRetired === true ? { legacyRelayRetired: true } : {}),
   };
 }
 
@@ -179,22 +192,37 @@ function parsePayload(plaintext) {
       const hasHappySessionId = Object.hasOwn(entry, "happySessionId");
       const hasConversationId = Object.hasOwn(entry, "conversationId");
       const hasAgentSessionId = Object.hasOwn(entry, "agentSessionId");
+      const hasProcessedThroughSeq = Object.hasOwn(entry, "processedThroughSeq");
+      const hasLegacyRelayRetired = Object.hasOwn(entry, "legacyRelayRetired");
+      const legacyRetirementKey = hasLegacyRelayRetired
+        ? ["legacyRelayRetired"]
+        : [];
       const expectedKeys =
         entry.state === "retiring"
           ? [
               ...(hasAgentSessionId ? ["agentSessionId"] : []),
               "blockRevival",
               "key",
+              ...legacyRetirementKey,
               "providerRetired",
               "relayTag",
+              ...(hasProcessedThroughSeq ? ["processedThroughSeq"] : []),
               "sessionId",
               "state",
               ...(hasConversationId ? ["conversationId"] : []),
               ...(hasHappySessionId ? ["happySessionId"] : []),
             ].sort()
           : hasHappySessionId
-            ? ["happySessionId", "key", "relayTag", "sessionId", "state"]
-            : ["key", "relayTag", "sessionId", "state"];
+            ? [
+                "happySessionId",
+                "key",
+                ...legacyRetirementKey,
+                ...(hasProcessedThroughSeq ? ["processedThroughSeq"] : []),
+                "relayTag",
+                "sessionId",
+                "state",
+              ]
+            : ["key", ...legacyRetirementKey, "relayTag", "sessionId", "state"];
       if (Object.keys(entry).sort().join("\0") !== expectedKeys.join("\0")) {
         throw invalidStore();
       }
@@ -211,7 +239,8 @@ function parsePayload(plaintext) {
       if (
         (state === "ready" && !hasHappySessionId) ||
         (state === "pending" && hasHappySessionId) ||
-        (state !== "retiring" && (hasConversationId || hasAgentSessionId))
+        (state !== "retiring" && (hasConversationId || hasAgentSessionId)) ||
+        (state === "pending" && hasProcessedThroughSeq)
       ) {
         throw invalidStore();
       }
@@ -219,6 +248,9 @@ function parsePayload(plaintext) {
         state === "retiring" &&
         (typeof entry.providerRetired !== "boolean" || typeof entry.blockRevival !== "boolean")
       ) {
+        throw invalidStore();
+      }
+      if (hasLegacyRelayRetired && entry.legacyRelayRetired !== true) {
         throw invalidStore();
       }
       const binding = {
@@ -241,6 +273,12 @@ function parsePayload(plaintext) {
       if (hasHappySessionId) {
         binding.happySessionId = validateRelaySessionId(entry.happySessionId);
       }
+      if (hasProcessedThroughSeq) {
+        binding.processedThroughSeq = validateProcessedThroughSeq(
+          entry.processedThroughSeq,
+        );
+      }
+      if (hasLegacyRelayRetired) binding.legacyRelayRetired = true;
       entries.set(sessionId, binding);
     }
   } catch (error) {
@@ -316,6 +354,10 @@ function encryptEntries(entries, machineKey) {
         ...(typeof binding.happySessionId === "string"
           ? { happySessionId: binding.happySessionId }
           : {}),
+        ...(Number.isSafeInteger(binding.processedThroughSeq)
+          ? { processedThroughSeq: binding.processedThroughSeq }
+          : {}),
+        ...(binding.legacyRelayRetired === true ? { legacyRelayRetired: true } : {}),
       })),
     }),
     "utf8",
@@ -538,6 +580,59 @@ export function createHappySessionKeyStore({ directory, machineKey }) {
         }
         binding.state = "ready";
         binding.happySessionId = happySessionId;
+        binding.processedThroughSeq = 0;
+        await writeEntries(filePath, entries, pairingMachineKey);
+        return copyBinding(binding);
+      });
+    },
+
+    async markProcessedThroughSeq(sessionId, processedThroughSeq) {
+      validateSessionId(sessionId);
+      validateProcessedThroughSeq(processedThroughSeq);
+      return serializeForPath(filePath, async () => {
+        const entries = await loadEntries(filePath, pairingMachineKey);
+        const binding = entries?.get(sessionId);
+        if (!binding) throw new Error("Happy session binding does not exist");
+        if (binding.state !== "ready") {
+          throw new Error(
+            "Only a ready Happy session binding can advance its processed sequence",
+          );
+        }
+        const previous = binding.processedThroughSeq;
+        if (Number.isSafeInteger(previous) && previous >= processedThroughSeq) {
+          return copyBinding(binding);
+        }
+        binding.processedThroughSeq = processedThroughSeq;
+        await writeEntries(filePath, entries, pairingMachineKey);
+        return copyBinding(binding);
+      });
+    },
+
+    async markLegacyRelayRetired(sessionId) {
+      validateSessionId(sessionId);
+      return serializeForPath(filePath, async () => {
+        const entries = await loadEntries(filePath, pairingMachineKey);
+        const binding = entries?.get(sessionId);
+        if (!binding) throw new Error("Happy session binding does not exist");
+        if (binding.state !== "pending" && binding.state !== "ready") {
+          throw new Error(
+            "Only an active Happy session binding can retire its legacy relay row",
+          );
+        }
+        binding.legacyRelayRetired = true;
+        await writeEntries(filePath, entries, pairingMachineKey);
+        return copyBinding(binding);
+      });
+    },
+
+    async clearLegacyRelayRetired(sessionId) {
+      validateSessionId(sessionId);
+      return serializeForPath(filePath, async () => {
+        const entries = await loadEntries(filePath, pairingMachineKey);
+        const binding = entries?.get(sessionId);
+        if (!binding) throw new Error("Happy session binding does not exist");
+        if (binding.legacyRelayRetired !== true) return copyBinding(binding);
+        delete binding.legacyRelayRetired;
         await writeEntries(filePath, entries, pairingMachineKey);
         return copyBinding(binding);
       });
@@ -587,6 +682,7 @@ export function createHappySessionKeyStore({ directory, machineKey }) {
           throw new Error("Happy session binding resolved to a different agent session");
         }
         binding.state = "retiring";
+        delete binding.legacyRelayRetired;
         binding.providerRetired = binding.providerRetired === true || providerRetired;
         binding.blockRevival = binding.blockRevival === true || blockRevival;
         if (happySessionId !== undefined) binding.happySessionId = happySessionId;

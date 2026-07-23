@@ -164,4 +164,42 @@ describe("Happy provider notification buffering (#3150)", () => {
     expect(received[0].payload.text).toBe("chunk-8");
     expect(received[31].payload.text).toBe("chunk-39");
   });
+
+  it("does not evict one session's completion behind restore chatter from other sessions", async () => {
+    const runtime = await startProviderRuntime();
+    const client = connectedClient(runtime.port);
+    await client.connect();
+    const socket = await runtime.socket;
+
+    socket.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "provider://prompt-complete",
+        params: { sessionId: "active-session", stopReason: "completed" },
+      }),
+    );
+    for (let index = 0; index < 40; index += 1) {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "provider://session-status",
+          params: { sessionId: `restored-session-${index}`, status: "ready" },
+        }),
+      );
+    }
+    await client.call("provider_ping");
+
+    const received: Array<{ kind: string; sessionId: string }> = [];
+    const source = createProviderSource({
+      client,
+      config: { machineName: "buffer-test" },
+    }) as { subscribe(onEvent: (event: unknown) => void): () => void };
+    source.subscribe((event) => received.push(event as { kind: string; sessionId: string }));
+
+    expect(received).toHaveLength(41);
+    expect(received[0]).toMatchObject({
+      kind: "turn-complete",
+      sessionId: "active-session",
+    });
+  });
 });

@@ -10,7 +10,7 @@ use std::time::Duration;
 use std::time::Instant;
 use tauri::{AppHandle, Manager, State};
 
-use crate::{mcp, provider_runtime, terminal};
+use crate::{happy_bridge, mcp, provider_runtime, terminal};
 
 /// Global flag set by `updater_pre_install` and cleared only by relaunch.
 /// While set, spawn-side commands must reject new child processes so the
@@ -191,6 +191,15 @@ pub async fn updater_pre_install(
         false
     };
 
+    // Stop the Happy bridge while the provider runtime is still reachable so
+    // its graceful, passive shutdown can drain accepted relay work. Operational
+    // shutdown preserves relay rows and bindings for the post-update restart.
+    if let Some(state) = app.try_state::<happy_bridge::HappyBridgeManager>()
+        && let Err(error) = state.stop(&app).await
+    {
+        log::warn!("[Updater] Happy bridge did not stop cleanly: {error}");
+    }
+
     // Drain the provider runtime supervisor. This is the largest holder of
     // the embedded `node.exe` handle.
     let provider_runtime_drained =
@@ -237,10 +246,20 @@ pub async fn updater_pre_install(
 /// (#2230 functional audit).
 #[tauri::command]
 pub async fn updater_pre_install_release(
+    app: AppHandle,
     guard: State<'_, Arc<ShutdownGuard>>,
+    happy_state: State<'_, happy_bridge::HappyBridgeManager>,
 ) -> Result<(), String> {
     guard.release();
     log::info!("[Updater] Pre-install shutdown released (install failed or cancelled)");
+
+    if crate::commands::happy_bridge::is_enabled(&app) {
+        happy_state
+            .start(&app)
+            .await
+            .map_err(|error| format!("Failed to restart Happy bridge: {error}"))?;
+    }
+
     Ok(())
 }
 
@@ -333,6 +352,50 @@ mod tests {
         // Re-engaging after release works (a second update attempt).
         guard.engage();
         assert!(guard.is_engaged());
+    }
+
+    #[test]
+    fn updater_happy_lifecycle_preserves_restart_order() {
+        // The Happy bridge must drain while its provider runtime is still
+        // reachable. If install is cancelled, the spawn guard must be released
+        // before an enabled bridge is restarted.
+        let source = include_str!("updater.rs");
+        let pre_install_start = source
+            .find("pub async fn updater_pre_install(")
+            .expect("updater_pre_install must exist");
+        let release_start = source
+            .find("pub async fn updater_pre_install_release(")
+            .expect("updater_pre_install_release must exist");
+        let pre_install = &source[pre_install_start..release_start];
+        let happy_stop = pre_install
+            .find("state.stop(&app).await")
+            .expect("pre-install must stop the Happy bridge");
+        let provider_kill = pre_install
+            .find("state.kill_sync()")
+            .expect("pre-install must kill the provider runtime");
+        assert!(
+            happy_stop < provider_kill,
+            "Happy must stop before the provider runtime"
+        );
+
+        let release_end = source[release_start..]
+            .find("async fn wait_for_node_handle_release")
+            .map(|offset| release_start + offset)
+            .expect("release command must precede the handle-release helper");
+        let release = &source[release_start..release_end];
+        let guard_release = release
+            .find("guard.release()")
+            .expect("release command must clear the shutdown guard");
+        let enabled_check = release
+            .find("is_enabled(&app)")
+            .expect("release command must re-check persisted Happy consent");
+        let happy_start = release
+            .find(".start(&app)")
+            .expect("release command must restart the Happy bridge");
+        assert!(
+            guard_release < enabled_check && enabled_check < happy_start,
+            "release must clear the guard, check consent, then restart Happy"
+        );
     }
 
     #[test]
