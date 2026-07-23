@@ -13,7 +13,7 @@ use tauri::State;
 use seren_memory_sdk::bootstrap::BootstrapOrchestrator;
 use seren_memory_sdk::cache::LocalCache;
 use seren_memory_sdk::client::MemoryClient;
-use seren_memory_sdk::models::{CachedMemory, ContextSource, SessionContext};
+use seren_memory_sdk::models::{CachedMemory, ContextSource, MemoryScope, SessionContext};
 use seren_memory_sdk::sync::SyncEngine;
 
 const AUTH_STORE: &str = "auth.json";
@@ -414,6 +414,9 @@ pub async fn memory_remember(
     let org_uuid = org_id
         .as_deref()
         .and_then(|value| uuid::Uuid::parse_str(value).ok());
+    let session_uuid = session_id
+        .as_deref()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok());
     state.ensure_cache()?;
     let cached = CachedMemory {
         id: local_id,
@@ -432,7 +435,10 @@ pub async fn memory_remember(
         let guard = state.cache.lock().map_err(|e| e.to_string())?;
         if let Some(cache) = guard.as_ref() {
             cache
-                .insert_memory_scoped(&cached, project_uuid, org_uuid)
+                .insert_memory_scoped(
+                    &cached,
+                    MemoryScope::new(project_uuid, org_uuid, session_uuid),
+                )
                 .ok();
         }
     }
