@@ -1,9 +1,16 @@
-// ABOUTME: Tests that only finalized assistant messages are persisted to SQLite.
-// ABOUTME: Prevents regression where intermediate tool-call flushes pollute restored history.
+// ABOUTME: Tests claude-code full-turn history persistence to SQLite (#3247) —
+// ABOUTME: tool calls, diffs, and every intermediate assistant block survive reload.
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import type { StoredMessage } from "@/lib/tauri-bridge";
+import {
+  type AgentMessage,
+  reconstructStoredAgentMessage,
+  serializeAgentMessageMetadata,
+} from "@/stores/agent.store";
+import type { DiffEvent, ToolCallEvent } from "@/services/providers";
 
 const agentStoreSource = readFileSync(
   resolve("src/stores/agent.store.ts"),
@@ -16,13 +23,20 @@ const agentChatSource = readFileSync(
 );
 
 describe("agent message persistence guards", () => {
-  it("persistAgentMessage only stores user, assistant, and handoff types", () => {
-    const fnStart = agentStoreSource.indexOf(
-      "function persistAgentMessage(",
-    );
-    const fnBody = agentStoreSource.slice(fnStart, fnStart + 700);
+  it("persistAgentMessage persists claude-code tool/diff blocks but drops them for other providers", () => {
+    // #3247 supersedes the old "final assistant text only" intent for
+    // claude-code: the full turn now persists. The guard must (a) still drop
+    // non-prose blocks by default, (b) admit tool/diff, and (c) gate that on
+    // claude-code so provider-replay agents (codex/gemini) are not duplicated
+    // on every --resume.
+    const fnStart = agentStoreSource.indexOf("function persistAgentMessage(");
+    const fnBody = agentStoreSource.slice(fnStart, fnStart + 900);
     expect(fnBody).toContain(
-      'if (msg.type !== "user" && msg.type !== "assistant" && msg.type !== "handoff")',
+      'msg.type !== "user" &&\n    msg.type !== "assistant" &&\n    msg.type !== "handoff"',
+    );
+    expect(fnBody).toContain('if (sessionAgentType !== "claude-code") return;');
+    expect(fnBody).toContain(
+      'if (msg.type !== "tool" && msg.type !== "diff") return;',
     );
   });
 
@@ -146,11 +160,14 @@ describe("agent message persistence guards", () => {
     );
   });
 
-  it("handleToolCall persists only replayed intermediate assistant flushes", () => {
-    // Live handleToolCall still flushes streamingContent into the UI for
-    // ordering without persisting partial text. History replay chunks are
-    // different: they are complete historical assistant messages, so the
-    // replay-marked flush must persist before the tool card interrupts it.
+  it("handleToolCall seals each claude-code assistant block into its own row", () => {
+    // Replay chunks are complete historical messages, so the replay-marked
+    // flush still persists before the tool card interrupts it. Live claude-code
+    // blocks were already checkpointed under assistantDraftMessageId by
+    // persistStreamingAssistantDraft; the fix (#3247) is to RETIRE that draft
+    // id at the tool boundary so the next block after the tool card lands in a
+    // fresh row instead of overwriting this one — the reused draft id was what
+    // collapsed a multi-block turn down to its final answer.
     const toolCallHandler = agentStoreSource.slice(
       agentStoreSource.indexOf("handleToolCall(sessionId: string, toolCall:"),
     );
@@ -166,12 +183,25 @@ describe("agent message persistence guards", () => {
     );
     expect(flushBlock.length).toBeGreaterThan(0);
 
+    // Replay flush still persists before the tool card.
     expect(flushBlock).toContain("session.streamingContentReplay === true");
     const persistIdx = flushBlock.indexOf("persistAgentMessage(");
     const replayGuardIdx = flushBlock.indexOf(
       "session.streamingContentReplay === true",
     );
     expect(persistIdx).toBeGreaterThan(replayGuardIdx);
+
+    // The claude-code seal retires the draft id so blocks append, not overwrite.
+    expect(flushBlock).toContain(
+      'const sealsClaudeBlock = session.info.agentType === "claude-code"',
+    );
+    expect(flushBlock).toContain(
+      'setState("sessions", sessionId, "assistantDraftMessageId", undefined)',
+    );
+    const sealIdx = flushBlock.indexOf(
+      'setState("sessions", sessionId, "assistantDraftMessageId", undefined)',
+    );
+    expect(sealIdx).toBeGreaterThan(flushBlock.indexOf("if (sealsClaudeBlock)"));
   });
 
   it("Codex resume lets provider replay repair partial SQLite history", () => {
@@ -295,5 +325,167 @@ describe("#2499 — agent thread transcript must fall back to durable history wh
     );
     const window = agentChatSource.slice(callIdx - 220, callIdx);
     expect(window).toContain("session.messages.length === 0");
+  });
+});
+
+describe("#3247 — claude-code tool/diff blocks round-trip through SQLite", () => {
+  const row = (
+    over: Partial<StoredMessage> & Pick<StoredMessage, "role" | "content">,
+  ): StoredMessage => ({
+    id: "m1",
+    conversation_id: "c1",
+    model: null,
+    timestamp: 1000,
+    metadata: null,
+    provider: "claude-code",
+    ...over,
+  });
+
+  // Persist a produced AgentMessage exactly as persistAgentMessage would (role
+  // "assistant" for anything non-user, metadata from serializeAgentMessageMetadata)
+  // then reconstruct it — the real serialize→store→read path, no mocks.
+  const persistThenReconstruct = (msg: AgentMessage): AgentMessage =>
+    reconstructStoredAgentMessage(
+      row({
+        id: msg.id,
+        role: msg.type === "user" ? "user" : "assistant",
+        content: msg.content,
+        timestamp: msg.timestamp,
+        metadata: serializeAgentMessageMetadata(msg),
+        provider: msg.type === "user" ? null : (msg.provider ?? "claude-code"),
+      }),
+    );
+
+  it("restores a tool call with its payload and toolCallId", () => {
+    const toolCall: ToolCallEvent = {
+      sessionId: "s1",
+      toolCallId: "toolu_abc",
+      title: "Read file src/main.rs",
+      name: "Read",
+      kind: "read",
+      status: "completed",
+      parameters: { path: "src/main.rs" },
+      result: "fn main() {}",
+    };
+    const original: AgentMessage = {
+      id: "t1",
+      type: "tool",
+      content: toolCall.title,
+      timestamp: 1234,
+      toolCallId: toolCall.toolCallId,
+      toolCall,
+    };
+
+    const restored = persistThenReconstruct(original);
+    expect(restored.type).toBe("tool");
+    expect(restored.toolCallId).toBe("toolu_abc");
+    expect(restored.toolCall).toEqual(toolCall);
+    expect(restored.content).toBe("Read file src/main.rs");
+    expect(restored.provider).toBe("claude-code");
+  });
+
+  it("restores a diff block with its path and text", () => {
+    const diff: DiffEvent = {
+      sessionId: "s1",
+      toolCallId: "toolu_edit",
+      path: "src/lib.rs",
+      oldText: "let x = 1;",
+      newText: "let x = 2;",
+    };
+    const original: AgentMessage = {
+      id: "d1",
+      type: "diff",
+      content: "Modified: src/lib.rs",
+      timestamp: 1235,
+      toolCallId: diff.toolCallId,
+      diff,
+    };
+
+    const restored = persistThenReconstruct(original);
+    expect(restored.type).toBe("diff");
+    expect(restored.toolCallId).toBe("toolu_edit");
+    expect(restored.diff).toEqual(diff);
+    expect(restored.content).toBe("Modified: src/lib.rs");
+  });
+
+  it("keeps assistant, handoff, and user rows classified correctly", () => {
+    const handoff = persistThenReconstruct({
+      id: "h1",
+      type: "handoff",
+      content: "Claude → Codex",
+      timestamp: 2,
+      provider: "seren",
+    });
+    expect(handoff.type).toBe("handoff");
+
+    expect(
+      reconstructStoredAgentMessage(row({ role: "user", content: "hi" })).type,
+    ).toBe("user");
+    // A bare assistant row (no metadata) must not be misread as a tool/diff.
+    const bare = reconstructStoredAgentMessage(
+      row({ role: "assistant", content: "ok" }),
+    );
+    expect(bare.type).toBe("assistant");
+    expect(bare.toolCall).toBeUndefined();
+    expect(bare.diff).toBeUndefined();
+    // An assistant row carrying final_output_validation metadata stays assistant.
+    expect(
+      reconstructStoredAgentMessage(
+        row({
+          role: "assistant",
+          content: "answer",
+          metadata: JSON.stringify({
+            v: 1,
+            final_output_validation: {
+              displayText: "answer",
+              safeDisplayText: "answer",
+            },
+          }),
+        }),
+      ).type,
+    ).toBe("assistant");
+  });
+
+  it("serializes tool/diff payloads into block metadata, prose stays null", () => {
+    const toolMeta = serializeAgentMessageMetadata({
+      id: "t",
+      type: "tool",
+      content: "x",
+      timestamp: 0,
+      toolCall: {
+        sessionId: "s",
+        toolCallId: "tc",
+        title: "x",
+        kind: "read",
+        status: "completed",
+      },
+    });
+    expect(JSON.parse(toolMeta as string).block_type).toBe("tool");
+
+    const plainAssistant = serializeAgentMessageMetadata({
+      id: "a",
+      type: "assistant",
+      content: "hi",
+      timestamp: 0,
+    });
+    expect(plainAssistant).toBeNull();
+  });
+});
+
+describe("#3247 — loadPersistedAgentHistory wiring", () => {
+  it("reconstructs blocks, reads the full cap, and keeps tool payloads out of the bootstrap context", () => {
+    const fnIdx = agentStoreSource.indexOf(
+      "async function loadPersistedAgentHistory(",
+    );
+    expect(fnIdx).toBeGreaterThan(0);
+    const fnBody = agentStoreSource.slice(fnIdx, fnIdx + 1600);
+    // Uses the shared reconstruction helper for the UI messages.
+    expect(fnBody).toContain("stored.map(reconstructStoredAgentMessage)");
+    // Restores the full stored transcript, not the old 200-row window.
+    expect(fnBody).toContain("AGENT_HISTORY_READ_LIMIT");
+    // Bootstrap context is prose-only — tool/diff rows are filtered out.
+    expect(fnBody).toContain(
+      "parsePersistedBlockMetadata(m.metadata)?.block_type === undefined",
+    );
   });
 });

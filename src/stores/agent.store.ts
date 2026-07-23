@@ -618,6 +618,7 @@ import {
   getAgentConversation,
   getMessages,
   listConversations,
+  type StoredMessage,
   saveMessage,
   setAgentConversationMetadata as setAgentConversationMetadataDb,
   setAgentConversationModelId as setAgentConversationModelIdDb,
@@ -710,6 +711,15 @@ const CLAUDE_MEMORY_EVIDENCE_LIMIT = 20;
 // (scaled-to-zero) database takes far longer, so we cap the spawn wait here
 // and let the render finish in the background instead of stalling the spawn.
 const CLAUDE_MEMORY_RENDER_BEFORE_SPAWN_TIMEOUT_MS = 4_000;
+
+// Restore window for a thread's persisted transcript. Matches the Rust
+// per-conversation cap (`MAX_MESSAGES_PER_CONVERSATION`) so full-turn
+// claude-code history (#3247) restores completely instead of truncating after
+// a couple of tool-heavy turns.
+const AGENT_HISTORY_READ_LIMIT = 1000;
+// Tail of human-readable prose rows summarized into the agent's bootstrap
+// context. Bounds the resume prompt now that many non-prose rows can precede it.
+const AGENT_HISTORY_CONTEXT_LINES = 200;
 
 function disposeTauriListener(
   listener: Promise<UnlistenFn> | null,
@@ -2004,15 +2014,102 @@ function serializeAgentConversationMetadata(
     : null;
 }
 
-function serializeAgentMessageMetadata(msg: AgentMessage): string | null {
+/**
+ * Metadata shape for a persisted non-prose turn block (#3247). A `tool` or
+ * `diff` message rides in the `messages` table as a `role: "assistant"` row;
+ * `block_type` plus the serialized payload let `reconstructStoredAgentMessage`
+ * rebuild the original `AgentMessage.type`/`toolCall`/`diff` on read.
+ */
+interface PersistedBlockMetadata {
+  block_type?: "tool" | "diff";
+  tool_call?: ToolCallEvent;
+  diff?: DiffEvent;
+}
+
+function parsePersistedBlockMetadata(
+  raw: string | null | undefined,
+): PersistedBlockMetadata | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as PersistedBlockMetadata;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function serializeAgentMessageMetadata(
+  msg: AgentMessage,
+): string | null {
   if (msg.type === "handoff") {
     return JSON.stringify({ v: 1, paired_handoff: true });
+  }
+  // Tool calls and file diffs carry their payload in metadata so the full
+  // claude-code turn — not just its final answer — survives reload, export,
+  // and sync (#3247). The transient live stdout buffer (`partialResult`) is
+  // dropped by the final status upsert, so it never lands here.
+  if (msg.type === "tool" && msg.toolCall) {
+    return JSON.stringify({
+      v: 1,
+      block_type: "tool",
+      tool_call: msg.toolCall,
+    });
+  }
+  if (msg.type === "diff" && msg.diff) {
+    return JSON.stringify({ v: 1, block_type: "diff", diff: msg.diff });
   }
   if (!msg.finalOutputValidation) return null;
   return JSON.stringify({
     v: 1,
     final_output_validation: msg.finalOutputValidation,
   });
+}
+
+/**
+ * Rebuild an `AgentMessage` from a persisted SQLite row. Tool/diff blocks
+ * (#3247) reconstruct their `type` and payload from `block_type` metadata;
+ * everything else maps to user/handoff/assistant as before. Pure and exported
+ * for round-trip regression coverage.
+ */
+export function reconstructStoredAgentMessage(m: StoredMessage): AgentMessage {
+  if (m.role === "user") {
+    return {
+      id: m.id,
+      type: "user",
+      content: m.content,
+      timestamp: m.timestamp,
+    };
+  }
+  const block = parsePersistedBlockMetadata(m.metadata);
+  if (block?.block_type === "tool" && block.tool_call) {
+    return {
+      id: m.id,
+      type: "tool",
+      content: m.content,
+      timestamp: m.timestamp,
+      toolCallId: block.tool_call.toolCallId,
+      toolCall: block.tool_call,
+      provider: m.provider ?? undefined,
+    };
+  }
+  if (block?.block_type === "diff" && block.diff) {
+    return {
+      id: m.id,
+      type: "diff",
+      content: m.content,
+      timestamp: m.timestamp,
+      toolCallId: block.diff.toolCallId,
+      diff: block.diff,
+      provider: m.provider ?? undefined,
+    };
+  }
+  return {
+    id: m.id,
+    type: isPairedHandoffMetadata(m.metadata) ? "handoff" : "assistant",
+    content: m.content,
+    timestamp: m.timestamp,
+    provider: m.provider ?? undefined,
+  };
 }
 
 function isPairedHandoffMetadata(metadata: string | null | undefined): boolean {
@@ -2026,8 +2123,12 @@ function isPairedHandoffMetadata(metadata: string | null | undefined): boolean {
 
 /**
  * Persist an agent message to SQLite so history survives session restarts.
- * Only user and assistant messages are stored — tool calls, diffs, and
- * internal events are transient and replayed by the provider.
+ * User, assistant, and handoff rows always persist. For `claude-code` the full
+ * turn is persisted too — `tool` calls and file `diff`s (#3247) — so reload,
+ * export, and sync show the work between prompts, not just each turn's final
+ * answer. Other providers replay their own transcript on `--resume` (their
+ * `restoredMessages` is emptied), so persisting these for them would duplicate
+ * on every resume; they stay final-text-only.
  */
 function persistAgentMessage(
   conversationId: string,
@@ -2036,8 +2137,16 @@ function persistAgentMessage(
 ): void {
   // Handoff activity lines persist as assistant rows with a metadata marker
   // so the paired transcript survives restarts (#2368).
-  if (msg.type !== "user" && msg.type !== "assistant" && msg.type !== "handoff")
-    return;
+  if (
+    msg.type !== "user" &&
+    msg.type !== "assistant" &&
+    msg.type !== "handoff"
+  ) {
+    // Full-turn persistence is claude-code-only; see the doc comment above for
+    // why other providers stay final-text-only.
+    if (sessionAgentType !== "claude-code") return;
+    if (msg.type !== "tool" && msg.type !== "diff") return;
+  }
   // Producer provenance: prefer an explicit value on the message, otherwise
   // fall back to the agent type of the session that produced this turn —
   // which the caller passes in explicitly so we never walk `state.sessions`
@@ -2115,29 +2224,30 @@ async function loadPersistedAgentHistory(
   conversationId: string,
 ): Promise<{ messages: AgentMessage[]; context: string }> {
   try {
-    const stored = await getMessages(conversationId, 200);
+    // Read up to the per-conversation storage cap so tool-heavy claude-code
+    // turns restore in full (#3247) — a single turn can be dozens of tool
+    // rows, which the old 200-row window truncated after a couple of turns.
+    const stored = await getMessages(conversationId, AGENT_HISTORY_READ_LIMIT);
     if (!stored || stored.length === 0) {
       return { messages: [], context: "" };
     }
 
-    const messages: AgentMessage[] = stored.map((m) => ({
-      id: m.id,
-      type:
-        m.role === "user"
-          ? ("user" as const)
-          : isPairedHandoffMetadata(m.metadata)
-            ? ("handoff" as const)
-            : ("assistant" as const),
-      content: m.content,
-      timestamp: m.timestamp,
-      provider: m.provider ?? undefined,
-    }));
+    const messages: AgentMessage[] = stored.map(reconstructStoredAgentMessage);
 
-    // Build a concise conversation summary for the agent's context
-    const lines = stored.map(
-      (m) =>
-        `[${m.role}]: ${m.content.length > 500 ? `${m.content.slice(0, 500)}…` : m.content}`,
-    );
+    // Build a concise conversation summary for the agent's bootstrap context
+    // from human-readable prose only. Tool/diff blocks now persist too (#3247);
+    // feeding their raw payloads into the prompt would bloat it without adding
+    // conversational signal, so skip them and cap the tail.
+    const lines = stored
+      .filter(
+        (m) =>
+          parsePersistedBlockMetadata(m.metadata)?.block_type === undefined,
+      )
+      .slice(-AGENT_HISTORY_CONTEXT_LINES)
+      .map(
+        (m) =>
+          `[${m.role}]: ${m.content.length > 500 ? `${m.content.slice(0, 500)}…` : m.content}`,
+      );
     const context =
       "Here is the conversation history from your previous session. " +
       "Continue from where you left off.\n\n" +
@@ -8803,9 +8913,19 @@ export const agentStore = {
     }
     if (session.streamingContent) {
       const scrubbed = scrubAgentMarkup(session.streamingContent);
+      // For claude-code this turn is persisted in full (#3247). The live block
+      // was already written under assistantDraftMessageId by
+      // persistStreamingAssistantDraft, so the UI message reuses that id, and
+      // below the draft id is retired so the NEXT block after this tool card
+      // lands in its own row instead of overwriting this one — the reused draft
+      // id was what collapsed every block into the turn's final answer.
+      const sealsClaudeBlock = session.info.agentType === "claude-code";
       if (scrubbed) {
         const contentMsg: AgentMessage = {
-          id: session.streamingContentMessageId ?? crypto.randomUUID(),
+          id:
+            (sealsClaudeBlock ? session.assistantDraftMessageId : undefined) ??
+            session.streamingContentMessageId ??
+            crypto.randomUUID(),
           type: "assistant",
           content: scrubbed,
           timestamp: session.streamingContentTimestamp ?? Date.now(),
@@ -8822,13 +8942,17 @@ export const agentStore = {
           );
         }
       }
-      // Live intermediate flushes capture partial streaming text and must
-      // stay UI-only. Replay-marked chunks are complete historical assistant
-      // messages, so they were persisted above before the tool card interrupts.
+      // Replay-marked chunks are complete historical assistant messages, so
+      // they were persisted above before the tool card interrupts. Live
+      // claude-code blocks are persisted incrementally as the draft; other
+      // providers keep partial live flushes UI-only.
       setState("sessions", sessionId, "streamingContent", "");
       setState("sessions", sessionId, "streamingContentTimestamp", undefined);
       setState("sessions", sessionId, "streamingContentReplay", undefined);
       setState("sessions", sessionId, "streamingContentMessageId", undefined);
+      if (sealsClaudeBlock) {
+        setState("sessions", sessionId, "assistantDraftMessageId", undefined);
+      }
     }
 
     // Skip duplicate if a message with this toolCallId already exists
