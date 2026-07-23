@@ -354,6 +354,10 @@ mod platform {
                 Attributes: 0,
             },
         ];
+        // This is the exact valid combination used by the pinned Codex
+        // backend. CreateRestrictedToken accepts the three flags together;
+        // the failure fixed by #3219 was the invalid app-package-style
+        // restricting SID, not this flag set.
         let flags = DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED;
         let mut restricted_token = HANDLE::default();
         unsafe {
@@ -417,6 +421,24 @@ mod platform {
         enable_change_notify_privilege(restricted_token.get())?;
 
         Ok(restricted_token)
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn restricted_token_creation_succeeds() {
+        let workspace = tempfile::tempdir().expect("workspace tempdir");
+        let policy = SandboxPolicy::new(
+            SandboxMode::WorkspaceWrite,
+            vec![workspace.path().to_path_buf()],
+            Vec::new(),
+            true,
+        )
+        .expect("test workspace policy is valid");
+        let capability = capability_sid(&policy).expect("capability SID is valid");
+        let token = create_restricted_token(capability.as_psid())
+            .expect("CreateRestrictedToken accepts the restricting SID set");
+
+        assert!(!token.get().is_invalid(), "restricted token is valid");
     }
 
     fn world_sid() -> Result<SidBytes, SandboxError> {
