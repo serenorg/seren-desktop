@@ -40,6 +40,7 @@ pub struct CredentialLease {
 #[derive(Clone)]
 struct ActiveLease {
     key_id: String,
+    revoke_id: String,
     expires_at: String,
     endpoints: crate::credential_broker::BrokeredEndpoints,
 }
@@ -47,7 +48,12 @@ struct ActiveLease {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct LeaseLedgerEntry {
     session_id: String,
+    /// Short public identifier, kept for diagnostics.
     key_id: String,
+    /// Record UUID used to revoke. Absent in ledgers written before this was
+    /// distinguished from `key_id`; those records cannot be revoked remotely.
+    #[serde(default)]
+    revoke_id: String,
     expires_at: String,
     #[serde(default)]
     pending_revocation: bool,
@@ -67,6 +73,10 @@ struct DataResponse<T> {
 #[derive(Deserialize)]
 struct ApiKeyCreated {
     api_key: String,
+    /// Record UUID. Despite the delete route naming its path parameter
+    /// `key_id`, it is typed `format: uuid` and only accepts this value.
+    id: String,
+    /// Short public identifier. Useful for logs; rejected by the delete route.
     key_id: String,
     expires_at: Option<String>,
 }
@@ -169,20 +179,27 @@ impl CredentialLeaseManager {
             .await
             .map_err(|error| format!("Credential lease creation response was invalid: {error}"))?
             .data;
-        if created.key_id.trim().is_empty() || created.api_key.trim().is_empty() {
+        if created.api_key.trim().is_empty() {
             return Err("Credential lease creation response omitted key material.".to_string());
+        }
+        // Without the revocation handle the key could never be withdrawn, so
+        // treat its absence as a failed creation rather than issuing a lease
+        // that only server-side expiry can end.
+        if created.id.trim().is_empty() {
+            return Err("Credential lease creation response omitted its revocation id.".to_string());
         }
 
         let expires_at = created.expires_at.unwrap_or_default();
         let record = LeaseLedgerEntry {
             session_id: session_id.clone(),
             key_id: created.key_id.clone(),
+            revoke_id: created.id.clone(),
             expires_at: expires_at.clone(),
             pending_revocation: false,
         };
 
         if let Err(error) = self.append_ledger_record(app, record.clone()) {
-            let revoke_result = self.revoke_remote_key(app, &record.key_id).await;
+            let revoke_result = self.revoke_remote_key(app, &record.revoke_id).await;
             return Err(match revoke_result {
                 Ok(()) => format!("Could not persist credential lease cleanup record: {error}"),
                 Err(revoke_error) => format!(
@@ -223,6 +240,7 @@ impl CredentialLeaseManager {
             session_id.clone(),
             ActiveLease {
                 key_id: created.key_id.clone(),
+                revoke_id: created.id.clone(),
                 expires_at: expires_at.clone(),
                 endpoints: endpoints.clone(),
             },
@@ -251,10 +269,14 @@ impl CredentialLeaseManager {
         let active = self.active.lock().await.remove(&session_id);
         let mut records = self.records_for_session(app, &session_id)?;
         if let Some(active) = active {
-            if !records.iter().any(|record| record.key_id == active.key_id) {
+            if !records
+                .iter()
+                .any(|record| record.revoke_id == active.revoke_id)
+            {
                 records.push(LeaseLedgerEntry {
                     session_id,
                     key_id: active.key_id,
+                    revoke_id: active.revoke_id,
                     expires_at: active.expires_at,
                     pending_revocation: false,
                 });
@@ -273,10 +295,14 @@ impl CredentialLeaseManager {
         let active = std::mem::take(&mut *self.active.lock().await);
         let mut records = read_ledger(app)?.leases;
         for (session_id, lease) in active {
-            if !records.iter().any(|record| record.key_id == lease.key_id) {
+            if !records
+                .iter()
+                .any(|record| record.revoke_id == lease.revoke_id)
+            {
                 records.push(LeaseLedgerEntry {
                     session_id,
                     key_id: lease.key_id,
+                    revoke_id: lease.revoke_id,
                     expires_at: lease.expires_at,
                     pending_revocation: false,
                 });
@@ -305,7 +331,7 @@ impl CredentialLeaseManager {
         record: LeaseLedgerEntry,
     ) -> Result<(), String> {
         let mut ledger = read_ledger(app)?;
-        ledger.leases.retain(|entry| entry.key_id != record.key_id);
+        ledger.leases.retain(|entry| entry.revoke_id != record.revoke_id);
         ledger.leases.push(record);
         write_ledger(app, &ledger)
     }
@@ -340,16 +366,28 @@ impl CredentialLeaseManager {
             return Ok(());
         }
 
-        let mut revoked_key_ids = HashSet::new();
-        let mut failed_key_ids = HashSet::new();
+        let mut revoked_ids = HashSet::new();
+        let mut failed_ids = HashSet::new();
         let mut failures = Vec::new();
         for record in &records {
-            match self.revoke_remote_key(app, &record.key_id).await {
+            // A record written before the revocation handle was distinguished
+            // from the public key id carries no usable value. Retrying it
+            // forever would just log the same rejection every launch, so drop
+            // it and let server-side expiry finish the job.
+            if record.revoke_id.trim().is_empty() {
+                log::warn!(
+                    "[credential-lease] Discarding a lease record with no revocation id; \
+                     the remote key expires on its own."
+                );
+                revoked_ids.insert(record.revoke_id.clone());
+                continue;
+            }
+            match self.revoke_remote_key(app, &record.revoke_id).await {
                 Ok(()) => {
-                    revoked_key_ids.insert(record.key_id.clone());
+                    revoked_ids.insert(record.revoke_id.clone());
                 }
                 Err(error) => {
-                    failed_key_ids.insert(record.key_id.clone());
+                    failed_ids.insert(record.revoke_id.clone());
                     failures.push(error);
                 }
             }
@@ -358,15 +396,15 @@ impl CredentialLeaseManager {
         let mut ledger = read_ledger(app)?;
         ledger
             .leases
-            .retain(|record| !revoked_key_ids.contains(&record.key_id));
+            .retain(|record| !revoked_ids.contains(&record.revoke_id));
         for mut failed_record in records
             .into_iter()
-            .filter(|record| failed_key_ids.contains(&record.key_id))
+            .filter(|record| failed_ids.contains(&record.revoke_id))
         {
             if let Some(existing) = ledger
                 .leases
                 .iter_mut()
-                .find(|record| record.key_id == failed_record.key_id)
+                .find(|record| record.revoke_id == failed_record.revoke_id)
             {
                 existing.pending_revocation = true;
             } else {
@@ -386,14 +424,17 @@ impl CredentialLeaseManager {
         }
     }
 
-    async fn revoke_remote_key(&self, app: &AppHandle, key_id: &str) -> Result<(), String> {
-        let key_id = key_id.trim();
-        if key_id.is_empty() {
-            return Err("Credential lease record omitted a key id.".to_string());
+    /// `revoke_id` is the API key record UUID. The delete route names its path
+    /// parameter `key_id` but only accepts the UUID; the short public `key_id`
+    /// is rejected with HTTP 400. See #3237.
+    async fn revoke_remote_key(&self, app: &AppHandle, revoke_id: &str) -> Result<(), String> {
+        let revoke_id = revoke_id.trim();
+        if revoke_id.is_empty() {
+            return Err("Credential lease record omitted a revocation id.".to_string());
         }
         let path = format!(
             "{GATEWAY_BASE_URL}{DEFAULT_ORG_API_KEYS_PATH}/{}",
-            urlencoding::encode(key_id)
+            urlencoding::encode(revoke_id)
         );
         let response = crate::auth::authenticated_request(app, &self.client, |client, token| {
             client.delete(&path).bearer_auth(token)
@@ -449,7 +490,8 @@ fn select_startup_reaper_records(records: &[LeaseLedgerEntry]) -> Vec<LeaseLedge
 #[cfg(test)]
 mod tests {
     use super::{
-        CredentialLease, CredentialLeaseLedger, LeaseLedgerEntry, select_startup_reaper_records,
+        ApiKeyCreated, CredentialLease, CredentialLeaseLedger, LeaseLedgerEntry,
+        select_startup_reaper_records,
     };
 
     /// The renderer reads these exact names. A rename here silently leaves a
@@ -481,9 +523,54 @@ mod tests {
         LeaseLedgerEntry {
             session_id: session_id.to_string(),
             key_id: key_id.to_string(),
+            revoke_id: format!("00000000-0000-4000-8000-{key_id:0>12}"),
             expires_at: "2030-01-01T00:00:00Z".to_string(),
             pending_revocation,
         }
+    }
+
+    /// The delete route names its path parameter `key_id` but types it
+    /// `format: uuid`, so sending the short public key id gets HTTP 400 and no
+    /// lease is ever withdrawn. Pin the two apart. See #3237.
+    #[test]
+    fn credential_lease_revokes_with_the_record_uuid_not_the_public_key_id() {
+        let created: ApiKeyCreated = serde_json::from_value(serde_json::json!({
+            "api_key": "seren_public_secret",
+            "id": "8ec6b4b4-6f0e-4a1e-9a1a-1d2f3c4b5a60",
+            "key_id": "Ii0O3Sc78q",
+            "expires_at": "2030-01-01T00:00:00Z",
+        }))
+        .expect("creation response deserializes");
+
+        let entry = LeaseLedgerEntry {
+            session_id: "session-a".to_string(),
+            key_id: created.key_id.clone(),
+            revoke_id: created.id.clone(),
+            expires_at: created.expires_at.clone().unwrap_or_default(),
+            pending_revocation: false,
+        };
+
+        assert_ne!(entry.revoke_id, entry.key_id);
+        assert_eq!(entry.revoke_id, "8ec6b4b4-6f0e-4a1e-9a1a-1d2f3c4b5a60");
+        assert_eq!(uuid::Uuid::parse_str(&entry.revoke_id).is_ok(), true);
+        assert!(uuid::Uuid::parse_str(&entry.key_id).is_err());
+    }
+
+    /// Ledgers written before the two ids were distinguished carry no usable
+    /// revocation handle. They must be dropped, not retried every launch.
+    #[test]
+    fn credential_lease_ledger_reads_records_written_before_revoke_ids() {
+        let legacy = serde_json::json!({
+            "leases": [{
+                "session_id": "session-a",
+                "key_id": "Ii0O3Sc78q",
+                "expires_at": "2030-01-01T00:00:00Z",
+                "pending_revocation": true,
+            }]
+        });
+        let ledger: CredentialLeaseLedger =
+            serde_json::from_value(legacy).expect("legacy ledger still parses");
+        assert_eq!(ledger.leases[0].revoke_id, "");
     }
 
     #[test]
