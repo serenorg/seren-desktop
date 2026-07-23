@@ -20,7 +20,7 @@ import type { OperationClass } from "./approval-config";
 import {
   classifyGatewayOperation,
   getApprovalRequirement,
-  isHighRiskVerb,
+  isHighRiskOperation,
 } from "./approval-config";
 import {
   hasSessionDenial,
@@ -230,7 +230,8 @@ async function authorizeToolOperation(
   const operationClass =
     options?.operationClass ??
     classifyGatewayOperation(publisherSlug, toolName);
-  const highRisk = operationClass === "high-risk" || isHighRiskVerb(toolName);
+  const highRisk =
+    operationClass === "high-risk" || isHighRiskOperation(toolName);
 
   if (operationClass === "trusted-read" && !highRisk) {
     return { approved: true };
