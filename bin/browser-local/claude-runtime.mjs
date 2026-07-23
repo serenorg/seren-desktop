@@ -9,7 +9,10 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
-import { buildProviderMcpConfig } from "./mcp-config.mjs";
+import {
+  buildProviderMcpConfig,
+  resolveBrokeredSerenCredential,
+} from "./mcp-config.mjs";
 import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
 import {
   buildEffortArgs,
@@ -2751,7 +2754,6 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       resumeAgentSessionId,
       requireExactResume,
       suppressHistoryReplay,
-      apiKey,
       mcpServers,
       approvalPolicy,
       sandboxMode,
@@ -2780,11 +2782,12 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     }
 
     const remoteSessionId = resumeAgentSessionId ?? randomUUID();
-    // The Seren gateway is only in the MCP config when an API key is present
-    // (see createRemoteSerenServer). Mirror that check so the post-spawn tool
-    // audit only runs for sessions that actually expect gateway tools. #2802
-    const serenMcpConfigured =
-      typeof apiKey === "string" && apiKey.trim().length > 0;
+    const serenCredential = resolveBrokeredSerenCredential(params);
+    // The Seren gateway is only in the MCP config when a broker capability is
+    // present (see createRemoteSerenServer). Mirror that check so the
+    // post-spawn tool audit only runs for sessions that actually expect
+    // gateway tools. #2802
+    const serenMcpConfigured = serenCredential != null;
     const claudeBin = resolveClaudeBinary();
     const extendedPath = buildExtendedPath();
     const effectiveEffort =
@@ -2808,9 +2811,14 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     let claudeArgs;
     let policySettingsJson;
     try {
-      if (apiKey) serenMcpProxy = await createSerenMcpOAuthProxy();
+      if (serenCredential) {
+        serenMcpProxy = await createSerenMcpOAuthProxy({
+          gatewayUrl: serenCredential.mcpUrl,
+          apiUrl: serenCredential.apiBaseUrl,
+        });
+      }
       mcpConfig = buildProviderMcpConfig({
-        apiKey,
+        serenCapability: serenCredential?.capability,
         mcpServers,
         serenMcpGatewayUrl: serenMcpProxy?.url,
       });

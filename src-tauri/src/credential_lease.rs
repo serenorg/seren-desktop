@@ -11,6 +11,8 @@ use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex;
 
+use crate::credential_broker::PublisherCredentialBroker;
+
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 const DEFAULT_ORG_API_KEYS_PATH: &str = "/organizations/default/api-keys";
 const LEASE_STORE: &str = "credential-leases.json";
@@ -21,20 +23,25 @@ const LEASE_EXPIRY_DAYS: u8 = 1;
 // exposes per-publisher scope syntax. See #3194.
 const VERIFIED_LEASE_SCOPES: &[&str] = &["publisher:*"];
 
+/// What the renderer and provider runtime are allowed to see. The real key is
+/// deliberately absent: only the loopback broker holds it, and the capability
+/// below is meaningless anywhere else.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialLease {
     pub session_id: String,
     pub key_id: String,
-    pub api_key: String,
     pub expires_at: String,
+    pub capability: String,
+    pub mcp_url: String,
+    pub api_base_url: String,
 }
 
 #[derive(Clone)]
 struct ActiveLease {
     key_id: String,
-    api_key: String,
     expires_at: String,
+    endpoints: crate::credential_broker::BrokeredEndpoints,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,21 +79,17 @@ pub struct CredentialLeaseManager {
     active: Arc<Mutex<HashMap<String, ActiveLease>>>,
     operation_lock: Arc<Mutex<()>>,
     startup_reaper_pending: Arc<AtomicBool>,
+    broker: Option<PublisherCredentialBroker>,
     client: reqwest::Client,
 }
 
-impl Default for CredentialLeaseManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CredentialLeaseManager {
-    pub fn new() -> Self {
+    pub fn new(broker: Option<PublisherCredentialBroker>) -> Self {
         Self {
             active: Arc::new(Mutex::new(HashMap::new())),
             operation_lock: Arc::new(Mutex::new(())),
             startup_reaper_pending: Arc::new(AtomicBool::new(false)),
+            broker,
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
                 .build()
@@ -101,14 +104,24 @@ impl CredentialLeaseManager {
         self.startup_reaper_pending.store(true, Ordering::Release);
     }
 
-    /// Create a one-day key for a session, persisting its non-secret identity
-    /// before the key value crosses the command boundary.
+    /// Create a one-day key for a session and hand it to the loopback broker.
+    /// The caller receives only the broker's opaque capability, so the key
+    /// value never crosses the command boundary at all.
     pub async fn create_lease(
         &self,
         app: &AppHandle,
         session_id: String,
     ) -> Result<CredentialLease, String> {
         let session_id = validate_session_id(session_id)?;
+        let Some(broker) = self.broker.as_ref() else {
+            // Fail closed. Without a broker there is nowhere to put the key
+            // except a child environment, which is the exposure this exists to
+            // remove.
+            return Err(
+                "The publisher credential broker is unavailable; refusing to issue a lease."
+                    .to_string(),
+            );
+        };
         while self.startup_reaper_pending.load(Ordering::Acquire) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -124,8 +137,10 @@ impl CredentialLeaseManager {
             return Ok(CredentialLease {
                 session_id,
                 key_id: existing.key_id,
-                api_key: existing.api_key,
                 expires_at: existing.expires_at,
+                capability: existing.endpoints.capability,
+                mcp_url: existing.endpoints.mcp_url,
+                api_base_url: existing.endpoints.api_base_url,
             });
         }
 
@@ -189,27 +204,48 @@ impl CredentialLeaseManager {
             });
         }
 
+        // The key moves straight into the broker. `created.api_key` is not
+        // returned, logged, or stored anywhere else.
+        let endpoints = match broker.register(&session_id, &created.api_key, &expires_at) {
+            Ok(endpoints) => endpoints,
+            Err(error) => {
+                let revoke_result = self.revoke_records_locked(app, vec![record]).await;
+                return Err(match revoke_result {
+                    Ok(()) => format!("Credential broker registration failed ({error}); key was revoked."),
+                    Err(revoke_error) => format!(
+                        "Credential broker registration failed ({error}); key revocation was queued: {revoke_error}"
+                    ),
+                });
+            }
+        };
+
         self.active.lock().await.insert(
             session_id.clone(),
             ActiveLease {
                 key_id: created.key_id.clone(),
-                api_key: created.api_key.clone(),
                 expires_at: expires_at.clone(),
+                endpoints: endpoints.clone(),
             },
         );
 
         Ok(CredentialLease {
             session_id,
             key_id: created.key_id,
-            api_key: created.api_key,
             expires_at,
+            capability: endpoints.capability,
+            mcp_url: endpoints.mcp_url,
+            api_base_url: endpoints.api_base_url,
         })
     }
 
-    /// Remove local access before attempting remote revocation. Failed remote
+    /// Close the broker route before anything else, so the session is denied
+    /// even while the remote revocation is still in flight. Failed remote
     /// requests remain in the non-secret ledger for a later retry/reaper.
     pub async fn revoke_lease(&self, app: &AppHandle, session_id: String) -> Result<(), String> {
         let session_id = validate_session_id(session_id)?;
+        if let Some(broker) = self.broker.as_ref() {
+            broker.revoke_session(&session_id);
+        }
         let _operation = self.operation_lock.lock().await;
 
         let active = self.active.lock().await.remove(&session_id);
@@ -230,6 +266,9 @@ impl CredentialLeaseManager {
     /// Locally deny every active lease, then make one best-effort remote
     /// revocation attempt per known key.
     pub async fn revoke_all(&self, app: &AppHandle) -> Result<(), String> {
+        if let Some(broker) = self.broker.as_ref() {
+            broker.revoke_all();
+        }
         let _operation = self.operation_lock.lock().await;
         let active = std::mem::take(&mut *self.active.lock().await);
         let mut records = read_ledger(app)?.leases;
@@ -409,7 +448,34 @@ fn select_startup_reaper_records(records: &[LeaseLedgerEntry]) -> Vec<LeaseLedge
 
 #[cfg(test)]
 mod tests {
-    use super::{CredentialLeaseLedger, LeaseLedgerEntry, select_startup_reaper_records};
+    use super::{
+        CredentialLease, CredentialLeaseLedger, LeaseLedgerEntry, select_startup_reaper_records,
+    };
+
+    /// The renderer reads these exact names. A rename here silently leaves a
+    /// session without Seren MCP, so pin the wire contract rather than trusting
+    /// the derive.
+    #[test]
+    fn credential_lease_exposes_broker_endpoints_and_no_key() {
+        let lease = CredentialLease {
+            session_id: "session-a".to_string(),
+            key_id: "key-a".to_string(),
+            expires_at: "2030-01-01T00:00:00Z".to_string(),
+            capability: "capability-a".to_string(),
+            mcp_url: "http://127.0.0.1:1/route/mcp".to_string(),
+            api_base_url: "http://127.0.0.1:1/route/api/".to_string(),
+        };
+        let value = serde_json::to_value(&lease).expect("lease serializes");
+        let object = value.as_object().expect("lease is an object");
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["apiBaseUrl", "capability", "expiresAt", "keyId", "mcpUrl", "sessionId"]
+        );
+        assert!(object.get("apiKey").is_none());
+        assert!(object.get("api_key").is_none());
+    }
 
     fn record(session_id: &str, key_id: &str, pending_revocation: bool) -> LeaseLedgerEntry {
         LeaseLedgerEntry {

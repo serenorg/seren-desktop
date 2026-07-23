@@ -34,6 +34,19 @@ describe("agent session credential leases (#3194)", () => {
     expect(spawnBody).not.toContain("ensureApiKey()");
   });
 
+  it("hands the spawn the broker endpoints and never a key", () => {
+    const spawnBody = bodyAfter("async spawnSession(");
+    expect(spawnBody).toContain("capability: lease.capability");
+    expect(spawnBody).toContain("mcpUrl: lease.mcpUrl");
+    expect(spawnBody).toContain("apiBaseUrl: lease.apiBaseUrl");
+    expect(spawnBody).not.toContain("lease.apiKey");
+    // providerService.spawnAgent takes the brokered credential in the slot the
+    // raw key used to occupy.
+    expect(bodyAfter("async spawnSession(", 30_000)).toMatch(
+      /agentSandboxMode,\s*\n\s*serenCredential,/,
+    );
+  });
+
   it("revokes the lease in the common teardown and stale-session cleanup paths", () => {
     const teardownBody = bodyAfter("async terminateSession(");
     const resumeBody = bodyAfter("async resumeAgentConversation(");

@@ -337,11 +337,13 @@ describe("LM Studio runtime wiring", () => {
 
   it("keeps LM Studio server auth separate from Seren MCP gateway auth", () => {
     expect(runtimeSource).toContain("const lmStudioApiKey");
-    expect(runtimeSource).toContain("const serenApiKey");
+    expect(runtimeSource).toContain("const serenCredential");
     expect(runtimeSource).toContain(
       "mcpGateway: createMcpGatewayClient({",
     );
-    expect(runtimeSource).toContain("apiKey: serenApiKey");
+    // The gateway client presents the loopback-broker capability; the real
+    // publisher key never enters this runtime process. #3194
+    expect(runtimeSource).toContain("capability: serenCredential?.capability");
     expect(runtimeSource).toContain("url: serenMcpProxy?.url");
   });
 

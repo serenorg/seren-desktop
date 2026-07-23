@@ -22,11 +22,10 @@ import {
   pathIsWithin,
 } from "./file-access-policy.mjs";
 import { providerLogPrefix } from "./logging.mjs";
+import { resolveBrokeredSerenCredential } from "./mcp-config.mjs";
 import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
 
 const DEFAULT_BASE_URL = "http://localhost:1234";
-const DEFAULT_MCP_GATEWAY_URL =
-  process.env.SEREN_MCP_GATEWAY_URL ?? "https://mcp.serendb.com/mcp";
 const LMSTUDIO_AGENT_TYPE = "lmstudio";
 const MAX_TOOL_ITERATIONS = 25;
 const DEFAULT_CONTEXT_LENGTH = 4096;
@@ -409,7 +408,7 @@ async function parseMcpResponse(response) {
   return { sessionId, result: payload.result ?? null };
 }
 
-function createMcpGatewayClient({ apiKey, url = DEFAULT_MCP_GATEWAY_URL } = {}) {
+function createMcpGatewayClient({ capability, url } = {}) {
   let nextId = 1;
   let sessionId = null;
   let initialized = false;
@@ -418,7 +417,7 @@ function createMcpGatewayClient({ apiKey, url = DEFAULT_MCP_GATEWAY_URL } = {}) 
     const headers = {
       Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      ...(capability ? { Authorization: `Bearer ${capability}` } : {}),
       ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
     };
     const response = await fetch(url, {
@@ -443,7 +442,7 @@ function createMcpGatewayClient({ apiKey, url = DEFAULT_MCP_GATEWAY_URL } = {}) 
       headers: {
         Accept: "application/json, text/event-stream",
         "Content-Type": "application/json",
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        ...(capability ? { Authorization: `Bearer ${capability}` } : {}),
         "Mcp-Session-Id": sessionId,
       },
       body: JSON.stringify({
@@ -470,14 +469,16 @@ function createMcpGatewayClient({ apiKey, url = DEFAULT_MCP_GATEWAY_URL } = {}) 
 
   return {
     async listTools() {
-      if (!apiKey) return [];
+      if (!capability || !url) return [];
       await ensureInitialized();
       const result = await request("tools/list", {});
       return Array.isArray(result?.tools) ? result.tools : [];
     },
     async callTool(name, args) {
-      if (!apiKey) {
-        throw new Error("Seren MCP gateway is unavailable because no Seren API key is loaded.");
+      if (!capability || !url) {
+        throw new Error(
+          "Seren MCP gateway is unavailable because this session has no credential lease.",
+        );
       }
       await ensureInitialized();
       const result = await request("tools/call", {
@@ -1565,7 +1566,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
     const sessionId = params.localSessionId ?? randomUUID();
     const baseUrl = normalizeLmStudioBaseUrl(params.lmStudioBaseUrl);
     const lmStudioApiKey = trimToNull(params.lmStudioApiKey);
-    const serenApiKey = trimToNull(params.apiKey);
+    const serenCredential = resolveBrokeredSerenCredential(params);
     const client = createClient(baseUrl);
 
     if (!(await probeServer(baseUrl, lmStudioApiKey))) {
@@ -1598,7 +1599,12 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
 
     let serenMcpProxy = null;
     try {
-      if (serenApiKey) serenMcpProxy = await createSerenMcpOAuthProxy();
+      if (serenCredential) {
+        serenMcpProxy = await createSerenMcpOAuthProxy({
+          gatewayUrl: serenCredential.mcpUrl,
+          apiUrl: serenCredential.apiBaseUrl,
+        });
+      }
     } catch (error) {
       await client[Symbol.asyncDispose]?.().catch(() => {});
       throw error;
@@ -1618,7 +1624,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
         apiKey: lmStudioApiKey,
         client,
         mcpGateway: createMcpGatewayClient({
-          apiKey: serenApiKey,
+          capability: serenCredential?.capability,
           url: serenMcpProxy?.url,
         }),
         serenMcpProxy,

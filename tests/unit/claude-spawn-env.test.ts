@@ -27,7 +27,7 @@ describe("Claude spawn environment (#3194)", () => {
     process.env[CANARY_ENV_NAME] = "canary-parent-secret";
 
     const env = buildClaudeSpawnEnv({
-      childEnv: { SEREN_API_KEY: "session-lease-value" },
+      childEnv: { SEREN_MCP_CAPABILITY_TOKEN: "session-capability" },
       extendedPath: "/runtime/bin:/usr/bin",
       cwd: "/workspace/project",
       sandboxMode: "workspace-write",
@@ -38,7 +38,7 @@ describe("Claude spawn environment (#3194)", () => {
     });
 
     expect(env.PATH).toBe("/runtime/bin:/usr/bin");
-    expect(env.SEREN_API_KEY).toBe("session-lease-value");
+    expect(env.SEREN_MCP_CAPABILITY_TOKEN).toBe("session-capability");
     expect(env.SEREN_AGENT_PROJECT_ROOT).toBe("/workspace/project");
     expect(env[CANARY_ENV_NAME]).toBeUndefined();
     expect(Object.values(env)).not.toContain("canary-parent-secret");
