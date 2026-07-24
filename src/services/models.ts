@@ -1,7 +1,10 @@
-// ABOUTME: Models service for fetching available AI models from OpenRouter.
-// ABOUTME: Fetches the full list of models directly from OpenRouter's public API.
+// ABOUTME: Models service for fetching the searchable AI model catalog.
+// ABOUTME: Fetches the catalog from the Seren Gateway's seren-models publisher.
 
+import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
+import { getGatewayHeaders } from "@/lib/providers/seren";
+import { unwrapPublisherBody } from "@/lib/publisher-response";
 
 export interface Model {
   id: string;
@@ -10,17 +13,17 @@ export interface Model {
   contextWindow: number;
 }
 
-interface OpenRouterModel {
+interface CatalogModel {
   id: string;
   name: string;
   context_length: number;
 }
 
-interface OpenRouterResponse {
-  data: OpenRouterModel[];
+interface CatalogResponse {
+  data?: CatalogModel[];
 }
 
-const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
+const CATALOG_URL = `${apiBase}/publishers/seren-models/models`;
 
 let cachedModels: Model[] | null = null;
 let cacheTimestamp = 0;
@@ -39,21 +42,27 @@ export const modelsService = {
     }
 
     try {
-      const response = await appFetch(OPENROUTER_MODELS_URL);
+      const response = await appFetch(CATALOG_URL, {
+        method: "GET",
+        headers: await getGatewayHeaders(CATALOG_URL),
+      });
 
       if (!response.ok) {
-        console.warn("Failed to fetch models from OpenRouter, using defaults");
+        console.warn(
+          "Failed to fetch model catalog from Seren, using defaults",
+        );
         return getDefaultModels();
       }
 
-      const data: OpenRouterResponse = await response.json();
+      const data = unwrapPublisherBody<CatalogResponse>(
+        await response.json(),
+      ) as CatalogResponse;
 
-      if (!data.data || data.data.length === 0) {
-        console.warn("OpenRouter returned empty models list, using defaults");
+      if (!Array.isArray(data?.data) || data.data.length === 0) {
+        console.warn("Seren returned an empty model catalog, using defaults");
         return getDefaultModels();
       }
 
-      // Transform OpenRouter models to our format
       const models = data.data
         .filter((m) => m.id && m.name)
         .map((m) => {
@@ -80,7 +89,7 @@ export const modelsService = {
       cacheTimestamp = now;
       return cachedModels;
     } catch (err) {
-      console.warn("Error fetching models from OpenRouter:", err);
+      console.warn("Error fetching model catalog from Seren:", err);
       return getDefaultModels();
     }
   },
