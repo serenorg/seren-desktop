@@ -7,7 +7,11 @@ import { mcpClient } from "@/lib/mcp/client";
 import { isOAuthTokenError } from "@/lib/oauth-tool-errors";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
 import { reportError } from "@/lib/support/hook";
-import { type PaymentRequirements, parsePaymentRequirements } from "@/lib/x402";
+import {
+  type PaymentRequirements,
+  parsePaymentRequirements,
+  resolvePaymentCharge,
+} from "@/lib/x402";
 import {
   callGatewayTool,
   callSerenTool,
@@ -268,6 +272,67 @@ async function settleApprovalContinuation(
       err,
     );
     return null;
+  }
+}
+
+/**
+ * The host's verdict on reserving a priced call's realized cost against its
+ * covering lease (#3193-G). Mirrors `SpendReservation` in
+ * `src-tauri/src/tool_authorization.rs`.
+ */
+interface SpendReservation {
+  outcome: "charged" | "escalate" | "uncovered";
+  reservationId?: string;
+}
+
+/**
+ * Reserve a priced call's realized cost against the lease that covers it, at the
+ * x402 payment gate and before any payment is signed. Fails closed: if the host
+ * cannot verify the budget, the call is treated as an escalation (an explicit
+ * prompt) rather than a silent payment.
+ */
+async function reserveLeaseSpend(
+  publisherSlug: string,
+  toolName: string,
+  conversationId: string,
+  context: OperationContext,
+  costMicros: number,
+  asset: string,
+): Promise<SpendReservation> {
+  try {
+    return await invoke<SpendReservation>("reserve_lease_spend", {
+      route: "gateway",
+      publisherSlug,
+      toolName,
+      conversationId,
+      context,
+      asset,
+      costMicros,
+    });
+  } catch (err) {
+    console.error("[Tool Executor] Failed to reserve lease spend:", err);
+    return { outcome: "escalate" };
+  }
+}
+
+/**
+ * Settle a spend reservation once its payment resolves. `settledMicros` null
+ * releases the whole reservation (the payment never completed); a number
+ * reconciles the lease's spend to the amount actually paid. Best-effort: a failed
+ * settle leaves the reserved charge standing (a conservative over-charge), never a
+ * silent release.
+ */
+async function settleLeaseSpend(
+  reservationId: string,
+  settledMicros: number | null,
+): Promise<void> {
+  try {
+    await invoke("settle_lease_spend", {
+      reservationId,
+      settledMicros: settledMicros ?? undefined,
+    });
+  } catch (err) {
+    console.error("[Tool Executor] Failed to settle lease spend:", err);
   }
 }
 
@@ -1361,19 +1426,65 @@ async function executeGatewayTool(
         };
       }
 
+      // Meter the realized cost against the covering lease's monetary budget
+      // BEFORE any payment is signed (#3193-G). The 402 is the first point the
+      // real price is known, so this is where the host-owned budget is charged.
+      const charge = resolvePaymentCharge(requirements);
+      if (!charge) {
+        return {
+          tool_call_id: toolCallId,
+          content:
+            "Payment required but the charge amount could not be determined; refusing to pay an indeterminable cost.",
+          is_error: true,
+        };
+      }
+      // Match the same context the initial authorize used (the original args,
+      // before OAuth connection_id resolution) so the charge lands on the exact
+      // lease that authorized this call.
+      const leaseContext = contextForPublisherRoute("gateway", args);
+      const reservation = await reserveLeaseSpend(
+        publisherSlug,
+        toolName,
+        sessionConversationId(conversationId),
+        leaseContext,
+        charge.micros,
+        charge.asset,
+      );
+      // Over budget (or a mismatched asset) under a lease → force an explicit
+      // prompt so an over-budget payment is never signed silently. Within budget
+      // → the reservation is charged and settled once the payment resolves. No
+      // lease → the x402 approval UI remains the gate, exactly as before.
+      const requireApproval = reservation.outcome === "escalate";
+      const reservationId =
+        reservation.outcome === "charged"
+          ? (reservation.reservationId ?? null)
+          : null;
+
       // Use the x402 service to handle payment (shows UI, signs, etc.)
       const paymentResult = await x402Service.handlePaymentRequired(
         `seren-gateway/${publisherSlug}`,
         toolName,
         new Error(JSON.stringify(response.payment_proxy)),
+        { requireApproval },
       );
 
       if (!paymentResult?.success) {
+        // The payment never completed — release the reserved budget so a
+        // cancelled or failed payment does not permanently consume the lease.
+        if (reservationId) {
+          await settleLeaseSpend(reservationId, null);
+        }
         return {
           tool_call_id: toolCallId,
           content: paymentResult?.error || "Payment was cancelled or failed",
           is_error: true,
         };
+      }
+
+      // Payment committed: finalize the reservation once (keeps the charge; a
+      // delta only arises if a pre-call estimate was reserved earlier).
+      if (reservationId) {
+        await settleLeaseSpend(reservationId, charge.micros);
       }
 
       // If crypto payment was signed, retry with the payment header

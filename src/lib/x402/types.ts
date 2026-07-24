@@ -181,6 +181,43 @@ export function isInsufficientCredit(
 }
 
 /**
+ * The realized monetary charge of a 402, in the micro-units the host lease budget
+ * meters (a 6-decimal stablecoin's base unit is already a micro-unit), plus an
+ * asset identifier for the budget's asset guard.
+ */
+export interface PaymentCharge {
+  micros: number;
+  asset: string;
+}
+
+/**
+ * Resolve the realized charge of a 402 for lease metering: the token amount and
+ * asset of the first x402 option, or the prepaid minimum when only credit is
+ * accepted. Returns null when no amount can be determined or it is not a safe
+ * integer count of micro-units — the caller then refuses to pay an
+ * indeterminable amount rather than metering a wrong one.
+ */
+export function resolvePaymentCharge(
+  requirements: PaymentRequirements,
+): PaymentCharge | null {
+  const option = getX402Option(requirements);
+  if (option) {
+    const micros = Number(option.amount);
+    if (!Number.isSafeInteger(micros) || micros < 0) return null;
+    return { micros, asset: option.asset };
+  }
+  const minimum = requirements.insufficientCredit?.minimumRequired;
+  if (minimum !== undefined) {
+    const micros = Number(minimum);
+    if (!Number.isSafeInteger(micros) || micros < 0) return null;
+    // Prepaid credit is USD-denominated SerenBucks, distinct from any on-chain
+    // asset a lease might pin.
+    return { micros, asset: "serenbucks" };
+  }
+  return null;
+}
+
+/**
  * Format amount in USDC (6 decimals) to human-readable string.
  */
 export function formatUsdcAmount(amountRaw: string): string {

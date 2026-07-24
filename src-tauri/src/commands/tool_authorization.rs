@@ -13,7 +13,7 @@ use crate::capability_lease::{
 };
 use crate::orchestrator::types::TaskExecutionState;
 use crate::tool_authorization::{
-    AuthorizationDecision, OperationContext, ToolAuthorizationState, ToolRoute,
+    AuthorizationDecision, OperationContext, SpendReservation, ToolAuthorizationState, ToolRoute,
 };
 
 /// Classify a model-originated tool call and return the host's decision. The
@@ -64,6 +64,52 @@ pub fn record_tool_operation_decision(
 ) -> Result<(), String> {
     let route = ToolRoute::parse(&route)?;
     state.record_decision(route, &publisher_slug, &tool_name, &conversation_id, approved)
+}
+
+/// Reserve a priced call's realized monetary cost against the lease that covers
+/// it (#3193-G), at the x402 payment gate and *before* any payment is signed. The
+/// renderer calls this once the 402 reveals the real price. `"charged"` carries a
+/// `reservationId` the renderer settles once the payment resolves; `"escalate"`
+/// tells the renderer to force an explicit approval (the silent budget cannot
+/// absorb this spend) rather than paying; `"uncovered"` means no lease applies and
+/// the renderer uses its own payment gate. Charging is host-owned and persisted —
+/// the renderer never supplies the amount charged.
+#[tauri::command]
+pub fn reserve_lease_spend(
+    state: State<'_, ToolAuthorizationState>,
+    route: String,
+    publisher_slug: String,
+    tool_name: String,
+    conversation_id: String,
+    context: Option<OperationContext>,
+    asset: String,
+    cost_micros: u64,
+) -> Result<SpendReservation, String> {
+    let route = ToolRoute::parse(&route)?;
+    let context = context.unwrap_or_default();
+    state.reserve_lease_spend(
+        route,
+        &publisher_slug,
+        &tool_name,
+        &conversation_id,
+        &context,
+        &asset,
+        cost_micros,
+    )
+}
+
+/// Settle a spend reservation once its payment resolves (#3193-G). `settledMicros`
+/// omitted (`None`) releases the whole reservation — the payment never completed;
+/// a value reconciles the lease's spend from the reserved estimate to the amount
+/// actually paid. Idempotent: settling an unknown or already-settled reservation
+/// is a no-op.
+#[tauri::command]
+pub fn settle_lease_spend(
+    state: State<'_, ToolAuthorizationState>,
+    reservation_id: String,
+    settled_micros: Option<u64>,
+) -> Result<(), String> {
+    state.settle_lease_spend(&reservation_id, settled_micros)
 }
 
 /// Derive a *proposed* capability bundle for a task. This is read-only: it grants

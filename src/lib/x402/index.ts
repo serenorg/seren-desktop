@@ -9,9 +9,11 @@ export {
   hasX402Option,
   type InsufficientCredit,
   isInsufficientCredit,
+  type PaymentCharge,
   type PaymentOption,
   type PaymentRequirements,
   parsePaymentRequirements,
+  resolvePaymentCharge,
   type X402PaymentOption,
   type X402ResourceInfo,
 } from "./types";
