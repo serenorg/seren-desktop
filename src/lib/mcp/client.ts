@@ -147,9 +147,14 @@ function createMcpClient() {
 
   /**
    * Call a tool on an MCP server.
+   *
+   * `authHandle` is the host-minted dispatch handle from the authorization
+   * gate (#3193-F). The Rust transport refuses tool execution without a live
+   * handle for the exact server, tool, and arguments.
    */
   type CallToolOptions = {
     signal?: AbortSignal;
+    authHandle?: string;
   };
 
   type RetryToolOptions = CallToolOptions & {
@@ -198,6 +203,7 @@ function createMcpClient() {
       serverName,
       toolName: call.name,
       arguments: call.arguments,
+      authHandle: options?.authHandle,
     }).catch((error) => {
       throw parseMcpError(error, serverName);
     });
@@ -439,6 +445,7 @@ function createMcpClient() {
       serverName,
       toolName: call.name,
       arguments: call.arguments,
+      authHandle: options?.authHandle,
     }).catch((error) => {
       throw parseMcpError(error, serverName);
     });

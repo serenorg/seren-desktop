@@ -1614,7 +1614,7 @@ created if missing.",
                     return ("Missing required parameter: url".to_string(), true);
                 }
                 let timeout_ms = args["timeout_ms"].as_u64();
-                match crate::commands::web::web_fetch(url, timeout_ms).await {
+                match crate::commands::web::fetch_web_content(url, timeout_ms).await {
                     Ok(fetch_result) => (fetch_result.content, false),
                     Err(e) => (e, true),
                 }

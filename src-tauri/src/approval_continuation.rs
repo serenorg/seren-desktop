@@ -128,6 +128,12 @@ pub struct RequestedCapability {
     pub host: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// Opaque host-computed operation binding (#3193-F), echoed by the renderer
+    /// from the gate's prompt decision. The post-approval dispatch handle is
+    /// minted against it, so an approval can only ever release the exact
+    /// operation the gate blocked. Tampering fails closed at the transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<String>,
 }
 
 /// The renderer's contract for a freshly registered (or deduped) continuation.
@@ -160,6 +166,11 @@ pub struct ResolveOutcome {
     pub changed: bool,
     pub state: ContinuationState,
     pub task_state: TaskExecutionState,
+    /// Host-minted dispatch handle (#3193-F), present only on the single
+    /// pending→approved settle and bound to the registered capability. Replays
+    /// and non-approve outcomes never carry one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispatch_handle: Option<String>,
 }
 
 /// A redacted continuation record for inspection surfaces (slice D). Never carries
@@ -295,6 +306,11 @@ impl ContinuationRow {
 /// on publisher + operation + resource target (matching the gate's session-grant
 /// key and publisher predicates).
 pub fn fingerprint(cap: &RequestedCapability) -> String {
+    // The exact-operation binding participates so a pending request only dedups
+    // a retry of the same operation with the same arguments (#3193-F). Without
+    // it, a coarser match could hand a differently-argued retry a continuation
+    // whose post-approval handle it can never redeem.
+    let binding = cap.binding.as_deref().unwrap_or("");
     match ToolRoute::parse(&cap.route) {
         Ok(ToolRoute::Shell) | Ok(ToolRoute::Skill) => {
             let program = cap
@@ -302,7 +318,7 @@ pub fn fingerprint(cap: &RequestedCapability) -> String {
                 .as_deref()
                 .and_then(command_program)
                 .unwrap_or_default();
-            format!("{}|{}", cap.route, program)
+            format!("{}|{}|{}", cap.route, program, binding)
         }
         Ok(ToolRoute::Web) => {
             let host = cap
@@ -311,16 +327,17 @@ pub fn fingerprint(cap: &RequestedCapability) -> String {
                 .unwrap_or_default()
                 .trim()
                 .to_lowercase();
-            format!("web|{host}")
+            format!("web|{host}|{binding}")
         }
         // Gateway/Seren/Mcp, and any unrecognized route treated conservatively as a
         // publisher operation, key on operation + resource identity.
         _ => format!(
-            "{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}",
             cap.route,
             cap.publisher_slug,
             cap.tool_name,
-            cap.target.as_deref().unwrap_or("")
+            cap.target.as_deref().unwrap_or(""),
+            binding
         ),
     }
 }
@@ -598,6 +615,7 @@ mod tests {
             command: None,
             host: None,
             target: None,
+            binding: None,
         }
     }
 

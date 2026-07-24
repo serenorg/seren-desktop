@@ -5,11 +5,35 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
+
+use crate::tool_authorization::{
+    ToolAuthorizationState, ToolRoute, binding_for_command, binding_for_skill,
+};
+
+/// Redeem the dispatch handle for a subprocess execution (#3193-F). Every
+/// renderer-invokable subprocess command runs this before spawning anything:
+/// no live host-minted handle for this exact command line (or skill argv)
+/// means no execution, regardless of caller.
+fn consume_subprocess_handle<R: Runtime>(
+    app: &AppHandle<R>,
+    route: ToolRoute,
+    tool_name: &str,
+    binding: &str,
+    auth_handle: Option<&str>,
+) -> Result<(), String> {
+    app.state::<ToolAuthorizationState>().consume_dispatch_handle(
+        auth_handle.unwrap_or_default(),
+        route,
+        "seren",
+        tool_name,
+        binding,
+    )
+}
 
 /// Tauri event channel for streaming Bash stdout/stderr while the command
 /// is still running (#2100). Payload: [`ShellProgressEvent`]. Subscribed
@@ -129,7 +153,15 @@ pub async fn execute_shell_command<R: Runtime>(
     command: String,
     timeout_secs: Option<u64>,
     inject_seren_credentials: Option<bool>,
+    auth_handle: Option<String>,
 ) -> Result<CommandResult, String> {
+    consume_subprocess_handle(
+        &app,
+        ToolRoute::Shell,
+        "execute_command",
+        &binding_for_command(&command),
+        auth_handle.as_deref(),
+    )?;
     let api_key = if should_inject_seren_credentials(&command, inject_seren_credentials) {
         read_stored_seren_api_key(&app)?
     } else {
@@ -152,7 +184,15 @@ pub async fn execute_shell_command_streaming<R: Runtime>(
     timeout_secs: Option<u64>,
     inject_seren_credentials: Option<bool>,
     tool_call_id: String,
+    auth_handle: Option<String>,
 ) -> Result<CommandResult, String> {
+    consume_subprocess_handle(
+        &app,
+        ToolRoute::Shell,
+        "execute_command",
+        &binding_for_command(&command),
+        auth_handle.as_deref(),
+    )?;
     if tool_call_id.trim().is_empty() {
         return Err("tool_call_id must not be empty".to_string());
     }
@@ -230,7 +270,15 @@ pub async fn run_skill_script<R: Runtime>(
     env: Option<HashMap<String, String>>,
     timeout_secs: Option<u64>,
     inject_seren_credentials: Option<bool>,
+    auth_handle: Option<String>,
 ) -> Result<CommandResult, String> {
+    consume_subprocess_handle(
+        &app,
+        ToolRoute::Skill,
+        "run_skill_script",
+        &binding_for_skill(&skill_slug, &argv),
+        auth_handle.as_deref(),
+    )?;
     let cwd = validate_skill_script_cwd(&skill_slug, &cwd)?;
     let (program, args) = validate_skill_script_argv(&argv)?;
     let api_key = if inject_seren_credentials.unwrap_or(true) {
@@ -797,7 +845,27 @@ mod tests {
             store.set(SEREN_API_KEY_KEY, json!(api_key));
         }
 
+        // The subprocess commands redeem a dispatch handle before spawning
+        // (#3193-F), so the mock app manages a real in-memory authorization
+        // store the tests mint handles from.
+        app.manage(ToolAuthorizationState::new(PathBuf::from(":memory:")));
+
         app
+    }
+
+    /// A real host-minted handle for one exact command, so command-level tests
+    /// exercise the same verify/consume path production dispatches take.
+    fn handle_for_command<R: Runtime>(app: &tauri::App<R>, command: &str) -> Option<String> {
+        Some(
+            app.state::<ToolAuthorizationState>()
+                .mint_dispatch_handle_for_test(
+                    ToolRoute::Shell,
+                    "seren",
+                    "execute_command",
+                    &binding_for_command(command),
+                )
+                .expect("test handle mints"),
+        )
     }
 
     #[test]
@@ -826,6 +894,7 @@ mod tests {
             print_seren_key_env_command().to_string(),
             Some(5),
             Some(true),
+            handle_for_command(&app, print_seren_key_env_command()),
         )
         .await
         .expect("command succeeds");
@@ -847,15 +916,99 @@ mod tests {
             print_seren_key_env_command()
         );
 
-        let result = execute_shell_command(app.handle().clone(), command, Some(5), Some(true))
-            .await
-            .expect("command succeeds");
+        let auth_handle = handle_for_command(&app, &command);
+        let result =
+            execute_shell_command(app.handle().clone(), command, Some(5), Some(true), auth_handle)
+                .await
+                .expect("command succeeds");
 
         assert_eq!(result.exit_code, Some(0));
         assert!(
             result.stdout.contains("seren_test_shell_key"),
             "skill-path commands must keep receiving desktop auth"
         );
+    }
+
+    /// #3193-F acceptance: the transport commands refuse to execute when
+    /// invoked directly (bypassing the executor) with no handle, and a handle
+    /// minted for a different command cannot be redeemed for this one.
+    #[tokio::test]
+    async fn subprocess_transports_refuse_without_a_matching_dispatch_handle() {
+        let app = mock_app_with_api_key(None);
+
+        let no_handle = execute_shell_command(
+            app.handle().clone(),
+            "echo hi".to_string(),
+            Some(5),
+            None,
+            None,
+        )
+        .await;
+        assert!(no_handle.is_err(), "direct invocation without a handle must refuse");
+
+        let wrong_command = handle_for_command(&app, "echo something-else");
+        let mismatched = execute_shell_command(
+            app.handle().clone(),
+            "echo hi".to_string(),
+            Some(5),
+            None,
+            wrong_command,
+        )
+        .await;
+        assert!(mismatched.is_err(), "a handle for another command must refuse");
+
+        let streaming = execute_shell_command_streaming(
+            app.handle().clone(),
+            "echo hi".to_string(),
+            Some(5),
+            None,
+            "tool-1".to_string(),
+            None,
+        )
+        .await;
+        assert!(streaming.is_err(), "the streaming transport enforces identically");
+
+        let skill = run_skill_script(
+            app.handle().clone(),
+            "demo".to_string(),
+            "/tmp".to_string(),
+            vec!["node".to_string(), "run.js".to_string()],
+            None,
+            Some(5),
+            None,
+            None,
+        )
+        .await;
+        assert!(skill.is_err(), "skill scripts refuse without a handle");
+    }
+
+    /// The happy path still works end-to-end: a handle minted for the exact
+    /// command redeems once, and a replay of the same spent handle refuses.
+    #[tokio::test]
+    async fn subprocess_transport_redeems_a_matching_handle_exactly_once() {
+        let app = mock_app_with_api_key(None);
+        let auth_handle = handle_for_command(&app, "echo hi");
+
+        let result = execute_shell_command(
+            app.handle().clone(),
+            "echo hi".to_string(),
+            Some(5),
+            None,
+            auth_handle.clone(),
+        )
+        .await
+        .expect("a matching handle executes");
+        assert_eq!(result.exit_code, Some(0));
+
+        let replay = execute_shell_command(
+            app.handle().clone(),
+            "echo hi".to_string(),
+            Some(5),
+            None,
+            auth_handle,
+        )
+        .await;
+        assert!(replay.is_err(), "a spent handle must not execute again");
     }
 
     #[test]
@@ -881,6 +1034,7 @@ mod tests {
             print_seren_key_env_command().to_string(),
             Some(5),
             None,
+            handle_for_command(&app, print_seren_key_env_command()),
         )
         .await
         .expect("command succeeds");
@@ -898,6 +1052,7 @@ mod tests {
             print_seren_key_env_command().to_string(),
             Some(5),
             Some(true),
+            handle_for_command(&app, print_seren_key_env_command()),
         )
         .await
         .expect("command succeeds");

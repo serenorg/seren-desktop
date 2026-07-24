@@ -1,6 +1,7 @@
 // ABOUTME: MCP Gateway service for connecting to Seren MCP gateway via MCP protocol.
 // ABOUTME: Uses rmcp HTTP streaming transport to connect to mcp.serendb.com/mcp.
 
+import { invoke } from "@tauri-apps/api/core";
 import {
   API_BASE,
   MCP_GATEWAY_INITIALIZE_METHOD,
@@ -162,6 +163,37 @@ async function connectGatewayWithRetry(apiKey: string): Promise<void> {
 }
 
 /**
+ * Authorize a gateway catalog read (list_agent_publishers / list_mcp_tools)
+ * through the host gate and return the dispatch handle the MCP transport
+ * requires (#3193-F). These are host-classified trusted reads, so the gate
+ * allows them silently; anything else — including a gate failure — refuses.
+ */
+async function catalogReadHandle(
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const decision = await invoke<{ decision: string; handle?: string | null }>(
+    "authorize_tool_operation",
+    {
+      route: "seren",
+      publisherSlug: "seren",
+      toolName,
+      conversationId: "gateway-catalog",
+      context: {},
+      callArgs: args,
+    },
+  );
+  if (decision.decision !== "allow" || !decision.handle) {
+    throw new McpGatewayError(
+      `Gateway catalog read ${toolName} was not authorized`,
+      403,
+      MCP_GATEWAY_URL,
+    );
+  }
+  return decision.handle;
+}
+
+/**
  * Parse publisher slug from MCP tool name.
  * Publisher tools are named like "mcp__publisher-slug__tool-name".
  * Returns null for built-in gateway tools (no mcp__ prefix).
@@ -210,6 +242,7 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
   const pubResult: McpToolResult = await mcpClient.callToolHttp(
     SEREN_MCP_SERVER_NAME,
     { name: "list_agent_publishers", arguments: {} },
+    { authHandle: await catalogReadHandle("list_agent_publishers", {}) },
   );
 
   if (pubResult.isError || !pubResult.content) {
@@ -271,6 +304,11 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
       const toolResult: McpToolResult = await mcpClient.callToolHttp(
         SEREN_MCP_SERVER_NAME,
         { name: "list_mcp_tools", arguments: { publisher: slug } },
+        {
+          authHandle: await catalogReadHandle("list_mcp_tools", {
+            publisher: slug,
+          }),
+        },
       );
       if (toolResult.isError || !toolResult.content) {
         console.warn(
@@ -500,6 +538,7 @@ export function getBuiltinToolSchemas(): McpToolInfo[] {
 export async function callSerenTool(
   toolName: string,
   args: Record<string, unknown>,
+  authHandle?: string,
 ) {
   if (!isConnected) {
     throw new McpGatewayError(
@@ -509,10 +548,14 @@ export async function callSerenTool(
     );
   }
   const startTime = Date.now();
-  const result = await mcpClient.callToolHttp(SEREN_MCP_SERVER_NAME, {
-    name: toolName,
-    arguments: args,
-  });
+  const result = await mcpClient.callToolHttp(
+    SEREN_MCP_SERVER_NAME,
+    {
+      name: toolName,
+      arguments: args,
+    },
+    { authHandle },
+  );
   const executionTime = Date.now() - startTime;
   return {
     result: result.content,
@@ -649,6 +692,7 @@ async function callSelectedPublisherTool(
   connectionId: string,
   payment: unknown,
   startTime: number,
+  authHandle?: string,
 ): Promise<McpToolCallResponse> {
   const url = `${API_BASE}/publishers/${encodeURIComponent(
     publisherSlug,
@@ -658,6 +702,11 @@ async function callSelectedPublisherTool(
     "Content-Type": "application/json",
     "x-seren-oauth-connection-id": connectionId,
   };
+  // Dispatch handle for the Rust gateway bridge (#3193-F). The bridge consumes
+  // and strips this header before the request leaves the app.
+  if (authHandle) {
+    headers["x-seren-auth-handle"] = authHandle;
+  }
 
   if (typeof payment === "string" && payment.length > 0) {
     headers[x402PaymentHeaderName(payment)] = payment;
@@ -712,6 +761,7 @@ export async function callGatewayTool(
   publisherSlug: string,
   toolName: string,
   args: Record<string, unknown>,
+  authHandle?: string,
 ): Promise<McpToolCallResponse> {
   if (!isConnected) {
     throw new McpGatewayError(
@@ -739,6 +789,7 @@ export async function callGatewayTool(
         connection_id,
         _x402_payment,
         startTime,
+        authHandle,
       );
     }
 
@@ -751,10 +802,14 @@ export async function callGatewayTool(
 
     let result: McpToolResult;
     if (nativeName) {
-      result = await mcpClient.callToolHttp(SEREN_MCP_SERVER_NAME, {
-        name: nativeName,
-        arguments: toolArgs,
-      });
+      result = await mcpClient.callToolHttp(
+        SEREN_MCP_SERVER_NAME,
+        {
+          name: nativeName,
+          arguments: toolArgs,
+        },
+        { authHandle },
+      );
     } else {
       const dispatchArgs: Record<string, unknown> = {
         publisher: publisherSlug,
@@ -764,10 +819,14 @@ export async function callGatewayTool(
       if (_x402_payment !== undefined) {
         dispatchArgs._x402_payment = _x402_payment;
       }
-      result = await mcpClient.callToolHttp(SEREN_MCP_SERVER_NAME, {
-        name: "call_publisher",
-        arguments: dispatchArgs,
-      });
+      result = await mcpClient.callToolHttp(
+        SEREN_MCP_SERVER_NAME,
+        {
+          name: "call_publisher",
+          arguments: dispatchArgs,
+        },
+        { authHandle },
+      );
     }
 
     const executionTime = Date.now() - startTime;

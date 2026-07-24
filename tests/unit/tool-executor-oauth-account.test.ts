@@ -63,7 +63,8 @@ describe("tool executor OAuth account routing", () => {
       is_error: false,
     });
     // These tests exercise OAuth account routing, not classification: let the
-    // host gate allow the Gmail read so the routing logic under test runs.
+    // host gate allow the Gmail read (with a dispatch handle, #3193-F) so the
+    // routing logic under test runs.
     mocks.invoke.mockImplementation(async (cmd: string) => {
       if (cmd === "authorize_tool_operation") {
         return {
@@ -72,6 +73,7 @@ describe("tool executor OAuth account routing", () => {
           operationClass: "trusted-read",
           description: "",
           isDestructive: false,
+          handle: "handle-allow",
         };
       }
       return undefined;
@@ -105,10 +107,15 @@ describe("tool executor OAuth account routing", () => {
     });
 
     expect(result.is_error).toBe(false);
-    expect(mocks.callGatewayTool).toHaveBeenCalledWith("gmail", "get_messages", {
-      q: "from:example",
-      connection_id: "conn-google-personal",
-    });
+    expect(mocks.callGatewayTool).toHaveBeenCalledWith(
+      "gmail",
+      "get_messages",
+      {
+        q: "from:example",
+        connection_id: "conn-google-personal",
+      },
+      "handle-allow",
+    );
   });
 
   it("resolves the owning run's OAuth account, not the chat the user is viewing", async () => {
@@ -145,10 +152,15 @@ describe("tool executor OAuth account routing", () => {
     );
 
     expect(result.is_error).toBe(false);
-    expect(mocks.callGatewayTool).toHaveBeenCalledWith("gmail", "get_messages", {
-      q: "from:example",
-      connection_id: "conn-google-personal",
-    });
+    expect(mocks.callGatewayTool).toHaveBeenCalledWith(
+      "gmail",
+      "get_messages",
+      {
+        q: "from:example",
+        connection_id: "conn-google-personal",
+      },
+      "handle-allow",
+    );
   });
 
   it("fails closed before dispatch when multiple accounts have no default or chat selection", async () => {
@@ -245,7 +257,10 @@ describe("tool executor OAuth account routing", () => {
         q: "safe-read",
         connection_id: "conn-google-personal",
       },
+      "handle-allow",
     );
+    // The x402 retry redeems the SAME host-minted handle — one authorization
+    // covers the dispatch plus its payment retry (#3193-F).
     expect(mocks.callGatewayTool).toHaveBeenNthCalledWith(
       2,
       "gmail",
@@ -255,6 +270,7 @@ describe("tool executor OAuth account routing", () => {
         connection_id: "conn-google-personal",
         _x402_payment: signedV2Payment,
       },
+      "handle-allow",
     );
   });
 });

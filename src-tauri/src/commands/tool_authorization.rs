@@ -24,6 +24,10 @@ use crate::tool_authorization::{
 /// (command, host, resource target, monetary cost). It is optional so callers
 /// that have nothing to contribute pass nothing; a predicate that needs a field
 /// simply will not match a call that omits it.
+///
+/// `call_args` is the full tool-argument payload for the operation. The host
+/// derives the exact-operation binding from it (#3193-F); an `allow` without it
+/// carries no dispatch handle, and the transports then refuse to execute.
 #[tauri::command]
 pub fn authorize_tool_operation(
     state: State<'_, ToolAuthorizationState>,
@@ -32,10 +36,18 @@ pub fn authorize_tool_operation(
     tool_name: String,
     conversation_id: String,
     context: Option<OperationContext>,
+    call_args: Option<serde_json::Value>,
 ) -> Result<AuthorizationDecision, String> {
     let route = ToolRoute::parse(&route)?;
     let context = context.unwrap_or_default();
-    state.authorize(route, &publisher_slug, &tool_name, &conversation_id, &context)
+    state.authorize(
+        route,
+        &publisher_slug,
+        &tool_name,
+        &conversation_id,
+        &context,
+        call_args.as_ref(),
+    )
 }
 
 /// Persist a prompt outcome host-side. Classification is re-derived here, so a

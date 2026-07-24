@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mcpClient } from "@/lib/mcp/client";
 import { isOAuthTokenError } from "@/lib/oauth-tool-errors";
+import { reportError } from "@/lib/support/hook";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
 import { type PaymentRequirements, parsePaymentRequirements } from "@/lib/x402";
 import {
@@ -69,6 +70,13 @@ interface AuthorizationDecision {
   operationClass: "trusted-read" | "high-risk" | "unclassified";
   description: string;
   isDestructive: boolean;
+  /** Host-minted dispatch handle, present only on "allow" (#3193-F). The
+   * transports refuse to execute without it; this code only ferries it. */
+  handle?: string | null;
+  /** Opaque host-computed operation binding, present on "prompt". Echoed into
+   * the suspended continuation so the post-approval handle is bound to the
+   * exact operation the gate blocked. */
+  binding?: string | null;
 }
 
 // A gate failure must never become a silent allow.
@@ -141,6 +149,8 @@ interface RequestedCapability {
   command?: string;
   host?: string;
   target?: string;
+  /** Opaque host-computed operation binding from the gate's prompt decision. */
+  binding?: string;
 }
 
 /**
@@ -159,12 +169,26 @@ interface RegisteredContinuation {
 }
 
 /**
- * Outcome of authorizing one tool call. On a block, the structured tool result
- * is ready to return to the model — never a generic "not approved" string, so a
- * denial, expiry, and skip are distinguishable and the model can adapt.
+ * The host's answer to settling a continuation. `dispatchHandle` is present
+ * only on the single pending→approved settle (#3193-F) — it is the proof the
+ * transports require before executing the approved operation.
+ */
+interface ResolveOutcome {
+  changed: boolean;
+  state: "pending" | "approved" | "denied" | "skipped" | "expired";
+  taskState: string;
+  dispatchHandle?: string | null;
+}
+
+/**
+ * Outcome of authorizing one tool call. On approval the host-minted dispatch
+ * `handle` accompanies it — every transport refuses to execute without one. On
+ * a block, the structured tool result is ready to return to the model — never a
+ * generic "not approved" string, so a denial, expiry, and skip are
+ * distinguishable and the model can adapt.
  */
 type ToolAuthorization =
-  | { approved: true; connectionId?: string | null }
+  | { approved: true; handle: string; connectionId?: string | null }
   | { approved: false; toolResult: ToolResult };
 
 type BlockedKind = "denied" | "expired" | "skipped";
@@ -173,7 +197,8 @@ type BlockedKind = "denied" | "expired" | "skipped";
  * Register a host-owned suspended continuation for a blocked action, so the
  * paused action becomes a visible, resumable record (never a hung tool call) and
  * equivalent retries dedup to one pending request. Returns null if the host is
- * unavailable — the approval UI still runs; only the persisted state is skipped.
+ * unavailable — the action then fails closed, since only a settled continuation
+ * can mint the dispatch handle the transports require (#3193-F).
  */
 async function registerApprovalContinuation(
   route: ToolRoute,
@@ -193,6 +218,7 @@ async function registerApprovalContinuation(
     command: context.command,
     host: context.host,
     target: context.target,
+    binding: decision.binding ?? undefined,
   };
   try {
     return await invoke<RegisteredContinuation>(
@@ -216,30 +242,32 @@ async function registerApprovalContinuation(
 /**
  * Settle a suspended continuation exactly once. Approve/deny/skip are user
  * decisions; expire is the system outcome of a lapsed approval UI. Idempotent
- * host-side, so a failed settle is safe to ignore.
+ * host-side. Returns the host outcome — an approve settle carries the
+ * dispatch handle the transports require — or null when the host call failed
+ * (the dispatch then fails closed for lack of a handle).
  */
 async function settleApprovalContinuation(
   registered: RegisteredContinuation,
   kind: "approve" | "deny" | "skip" | "expire",
-): Promise<void> {
+): Promise<ResolveOutcome | null> {
   try {
     if (kind === "expire") {
-      await invoke("expire_approval_continuation", {
+      return await invoke<ResolveOutcome>("expire_approval_continuation", {
         approvalId: registered.approvalId,
         resumeToken: registered.resumeToken,
-      });
-    } else {
-      await invoke("resolve_approval_continuation", {
-        approvalId: registered.approvalId,
-        resumeToken: registered.resumeToken,
-        decision: kind,
       });
     }
+    return await invoke<ResolveOutcome>("resolve_approval_continuation", {
+      approvalId: registered.approvalId,
+      resumeToken: registered.resumeToken,
+      decision: kind,
+    });
   } catch (err) {
     console.error(
       "[Tool Executor] Failed to settle approval continuation:",
       err,
     );
+    return null;
   }
 }
 
@@ -287,6 +315,7 @@ async function consultAuthorizationGate(
   toolName: string,
   conversationId: string,
   context: OperationContext,
+  callArgs: Record<string, unknown>,
 ): Promise<AuthorizationDecision> {
   try {
     return await invoke<AuthorizationDecision>("authorize_tool_operation", {
@@ -295,6 +324,9 @@ async function consultAuthorizationGate(
       toolName,
       conversationId,
       context,
+      // The host derives the exact-operation binding from the full argument
+      // payload; without it no dispatch handle can be minted (#3193-F).
+      callArgs,
     });
   } catch (err) {
     console.error("[Tool Executor] Authorization gate unavailable:", err);
@@ -521,11 +553,24 @@ async function authorizeToolOperation(
     toolName,
     sessionId,
     context,
+    args,
   );
   const capability = `${publisherSlug}/${toolName}`;
 
   if (decision.decision === "allow") {
-    return { approved: true };
+    // An allow without a redeemable handle cannot dispatch — fail closed
+    // rather than let the transport produce a confusing refusal.
+    if (!decision.handle) {
+      reportError(
+        "ToolDispatchHandleMissing",
+        `Host allowed ${capability} but minted no dispatch handle`,
+      );
+      return {
+        approved: false,
+        toolResult: blockedToolResult(toolCallId, "denied", capability),
+      };
+    }
+    return { approved: true, handle: decision.handle };
   }
   if (decision.decision === "deny") {
     console.log(`[Tool Executor] Host denied ${publisherSlug}/${toolName}`);
@@ -537,7 +582,9 @@ async function authorizeToolOperation(
 
   // A prompt suspends the action: record it host-side so the block is visible and
   // resumable (never a hung call), then run the approval UI and settle it exactly
-  // once with the outcome.
+  // once with the outcome. The continuation is also where the post-approval
+  // dispatch handle is minted (#3193-F), so registration failing means the
+  // action cannot proceed even if the user approves — fail closed up front.
   const registered = await registerApprovalContinuation(
     route,
     publisherSlug,
@@ -546,6 +593,12 @@ async function authorizeToolOperation(
     context,
     sessionId,
   );
+  if (!registered) {
+    return {
+      approved: false,
+      toolResult: blockedToolResult(toolCallId, "denied", capability),
+    };
+  }
 
   const approval = await requestGatewayApproval(
     publisherSlug,
@@ -557,7 +610,7 @@ async function authorizeToolOperation(
       isDestructive: decision.isDestructive,
       operationClass: decision.operationClass,
     },
-    { threadId: sessionId, continuationId: registered?.approvalId },
+    { threadId: sessionId, continuationId: registered.approvalId },
   );
 
   // Only an explicit approve/deny is durable. A timeout is an expiry and a skip
@@ -575,10 +628,27 @@ async function authorizeToolOperation(
   }
 
   if (approval.approved) {
-    if (registered) {
-      await settleApprovalContinuation(registered, "approve");
+    const settled = await settleApprovalContinuation(registered, "approve");
+    // Only the pending→approved settle mints a handle. A deduped duplicate or
+    // a host-side expiry yields none — the dispatch fails closed and the model
+    // may retry through a fresh gate consultation.
+    if (!settled?.dispatchHandle) {
+      const kind: BlockedKind = settled?.state === "expired" ? "expired" : "denied";
+      return {
+        approved: false,
+        toolResult: blockedToolResult(
+          toolCallId,
+          kind,
+          capability,
+          registered.approvalId,
+        ),
+      };
     }
-    return { approved: true, connectionId: approval.connectionId };
+    return {
+      approved: true,
+      handle: settled.dispatchHandle,
+      connectionId: approval.connectionId,
+    };
   }
 
   const kind: BlockedKind = approval.timedOut
@@ -586,19 +656,17 @@ async function authorizeToolOperation(
     : approval.skipped
       ? "skipped"
       : "denied";
-  if (registered) {
-    await settleApprovalContinuation(
-      registered,
-      approval.timedOut ? "expire" : approval.skipped ? "skip" : "deny",
-    );
-  }
+  await settleApprovalContinuation(
+    registered,
+    approval.timedOut ? "expire" : approval.skipped ? "skip" : "deny",
+  );
   return {
     approved: false,
     toolResult: blockedToolResult(
       toolCallId,
       kind,
       capability,
-      registered?.approvalId,
+      registered.approvalId,
     ),
   };
 }
@@ -614,6 +682,7 @@ async function authorizeSubprocess(
   route: "shell" | "skill",
   toolName: string,
   command: string,
+  args: Record<string, unknown>,
   conversationId: string | null,
   toolCallId: string,
   runApprovalUi: (link: ApprovalLink) => Promise<GatewayApprovalResult>,
@@ -626,6 +695,7 @@ async function authorizeSubprocess(
     toolName,
     sessionId,
     context,
+    args,
   );
   // The lease/gate key a subprocess on its leading program token; use that as the
   // capability label so a block names what the user actually saw.
@@ -638,9 +708,21 @@ async function authorizeSubprocess(
     };
   }
   if (decision.decision === "allow") {
-    return { approved: true };
+    if (!decision.handle) {
+      reportError(
+        "ToolDispatchHandleMissing",
+        `Host allowed ${capability} but minted no dispatch handle`,
+      );
+      return {
+        approved: false,
+        toolResult: blockedToolResult(toolCallId, "denied", capability),
+      };
+    }
+    return { approved: true, handle: decision.handle };
   }
 
+  // The continuation mints the post-approval dispatch handle (#3193-F);
+  // without it an approval cannot execute, so registration is required.
   const registered = await registerApprovalContinuation(
     route,
     "seren",
@@ -649,16 +731,32 @@ async function authorizeSubprocess(
     context,
     sessionId,
   );
+  if (!registered) {
+    return {
+      approved: false,
+      toolResult: blockedToolResult(toolCallId, "denied", capability),
+    };
+  }
   const outcome = await runApprovalUi({
     threadId: sessionId,
-    continuationId: registered?.approvalId,
+    continuationId: registered.approvalId,
   });
 
   if (outcome.approved) {
-    if (registered) {
-      await settleApprovalContinuation(registered, "approve");
+    const settled = await settleApprovalContinuation(registered, "approve");
+    if (!settled?.dispatchHandle) {
+      const kind: BlockedKind = settled?.state === "expired" ? "expired" : "denied";
+      return {
+        approved: false,
+        toolResult: blockedToolResult(
+          toolCallId,
+          kind,
+          capability,
+          registered.approvalId,
+        ),
+      };
     }
-    return { approved: true };
+    return { approved: true, handle: settled.dispatchHandle };
   }
 
   const kind: BlockedKind = outcome.timedOut
@@ -666,19 +764,17 @@ async function authorizeSubprocess(
     : outcome.skipped
       ? "skipped"
       : "denied";
-  if (registered) {
-    await settleApprovalContinuation(
-      registered,
-      outcome.timedOut ? "expire" : outcome.skipped ? "skip" : "deny",
-    );
-  }
+  await settleApprovalContinuation(
+    registered,
+    outcome.timedOut ? "expire" : outcome.skipped ? "skip" : "deny",
+  );
   return {
     approved: false,
     toolResult: blockedToolResult(
       toolCallId,
       kind,
       capability,
-      registered?.approvalId,
+      registered.approvalId,
     ),
   };
 }
@@ -813,7 +909,7 @@ export async function executeTool(
       if (!auth.approved) {
         return auth.toolResult;
       }
-      const response = await callSerenTool(serenToolName, args);
+      const response = await callSerenTool(serenToolName, args, auth.handle);
       const content =
         typeof response.result === "string"
           ? response.result
@@ -894,7 +990,7 @@ export async function executeTool(
           url: string;
           status: number;
           truncated: boolean;
-        }>("web_fetch", { url, timeoutMs });
+        }>("web_fetch", { url, timeoutMs, authHandle: auth.handle });
 
         if (response.status >= 400) {
           result = `Error: HTTP ${response.status} for ${response.url}`;
@@ -924,6 +1020,7 @@ export async function executeTool(
           "shell",
           "execute_command",
           command,
+          args,
           conversationId,
           toolCall.id,
           (link) => requestShellApproval(command, timeoutSecs, link),
@@ -943,7 +1040,10 @@ export async function executeTool(
           stderr: string;
           exit_code: number | null;
           timed_out: boolean;
-        }>("execute_shell_command_streaming", invokeArgs);
+        }>("execute_shell_command_streaming", {
+          ...invokeArgs,
+          authHandle: auth.handle,
+        });
 
         if (cmdResult.timed_out) {
           result = `Command timed out after ${timeoutSecs} seconds.\nstderr: ${cmdResult.stderr}`;
@@ -982,6 +1082,7 @@ export async function executeTool(
           "skill",
           "run_skill_script",
           argv.join(" "),
+          args,
           conversationId,
           toolCall.id,
           (link) => requestShellApproval(preview, timeoutSecs, link),
@@ -1019,7 +1120,7 @@ export async function executeTool(
           stderr: string;
           exit_code: number | null;
           timed_out: boolean;
-        }>("run_skill_script", invokeArgs);
+        }>("run_skill_script", { ...invokeArgs, authHandle: auth.handle });
 
         if (cmdResult.timed_out) {
           result = `Skill script timed out after ${timeoutSecs} seconds.\nstderr: ${cmdResult.stderr}`;
@@ -1083,10 +1184,14 @@ async function executeMcpTool(
       return auth.toolResult;
     }
 
-    const result = await mcpClient.callTool(serverName, {
-      name: toolName,
-      arguments: args,
-    });
+    const result = await mcpClient.callTool(
+      serverName,
+      {
+        name: toolName,
+        arguments: args,
+      },
+      { authHandle: auth.handle },
+    );
 
     // Convert MCP result content to string
     let content = "";
@@ -1177,6 +1282,9 @@ async function executeGatewayTool(
       console.log("[Tool Executor] Operation blocked before execution");
       return auth.toolResult;
     }
+    // One authorization covers the initial dispatch plus its x402 payment
+    // retries — the host-minted handle carries that exact allowance.
+    const authHandle = auth.handle;
 
     if (auth.connectionId) {
       callArgs = { ...args, connection_id: auth.connectionId };
@@ -1197,7 +1305,12 @@ async function executeGatewayTool(
     }
     callArgs = resolvedArgs.args;
 
-    const response = await callGatewayTool(publisherSlug, toolName, callArgs);
+    const response = await callGatewayTool(
+      publisherSlug,
+      toolName,
+      callArgs,
+      authHandle,
+    );
 
     // Check if this is a payment proxy response (requires client-side signing)
     if (response.is_error && response.payment_proxy) {
@@ -1243,6 +1356,7 @@ async function executeGatewayTool(
           publisherSlug,
           toolName,
           retryArgs,
+          authHandle,
         );
 
         const retryContent =
@@ -1272,6 +1386,7 @@ async function executeGatewayTool(
           publisherSlug,
           toolName,
           callArgs,
+          authHandle,
         );
 
         const retryContent =
