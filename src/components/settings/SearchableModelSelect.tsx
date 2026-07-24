@@ -1,4 +1,4 @@
-// ABOUTME: Searchable dropdown for selecting AI models from the Seren catalog.
+// ABOUTME: Searchable dropdown for selecting AI models from OpenRouter.
 // ABOUTME: Fetches full model list and allows filtering by name/provider.
 
 import {
@@ -148,7 +148,7 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (
           <div class="overflow-y-auto max-h-60">
             <Show when={isLoading()}>
               <div class="p-4 text-center text-muted-foreground text-[13px]">
-                Loading model catalog...
+                Loading models from OpenRouter...
               </div>
             </Show>
 

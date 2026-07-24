@@ -1,5 +1,5 @@
 // ABOUTME: Model selector dropdown for choosing AI models in chat.
-// ABOUTME: Shows searchable model list from the Seren catalog with provider filtering.
+// ABOUTME: Shows searchable model list from OpenRouter with provider filtering.
 
 import type { Component } from "solid-js";
 import {
@@ -64,7 +64,7 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
   const [draftProvider, setDraftProvider] = createSignal<ProviderId | null>(
     null,
   );
-  const [catalogModels, setCatalogModels] = createSignal<Model[]>([]);
+  const [openRouterModels, setOpenRouterModels] = createSignal<Model[]>([]);
   const [isLoadingModels, setIsLoadingModels] = createSignal(false);
   const [privateModels, setPrivateModels] = createSignal<ProviderModel[]>([]);
   let containerRef: HTMLDivElement | undefined;
@@ -140,7 +140,7 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
   // Default models from provider store (curated list)
   const defaultModels = () => providerStore.getModels(currentProvider());
 
-  // Load full model list from the Seren catalog or private models catalog.
+  // Load full model list from OpenRouter or private models catalog.
   createEffect(() => {
     const privatePolicy = authStore.privateChatPolicy;
     const privateEnabled = isPrivateChat();
@@ -188,7 +188,7 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
         }
 
         const models = await modelsService.getAvailable();
-        setCatalogModels(models);
+        setOpenRouterModels(models);
       } catch (err) {
         console.error("Failed to load available models:", err);
       } finally {
@@ -218,9 +218,9 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
       return defaultModels();
     }
 
-    // Searching - use the full Seren catalog for the Seren provider
-    if (currentProvider() === "seren" && catalogModels().length > 0) {
-      const allModels = catalogModels().map((m) => ({
+    // Searching - use full OpenRouter catalog for Seren provider
+    if (currentProvider() === "seren" && openRouterModels().length > 0) {
+      const allModels = openRouterModels().map((m) => ({
         id: m.id,
         name: m.name,
         contextWindow: m.contextWindow,
@@ -263,13 +263,13 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
     }
 
     const models = defaultModels();
-    // First check defaults, then check the full Seren catalog
+    // First check defaults, then check full OpenRouter list for Seren
     const found = models.find((model) => model.id === activeModel);
     if (found) return found;
 
     // Check full catalog for Seren provider (user may have selected a non-default model)
     if (currentProvider() === "seren") {
-      const orModel = catalogModels().find((m) => m.id === activeModel);
+      const orModel = openRouterModels().find((m) => m.id === activeModel);
       if (orModel) {
         return {
           id: orModel.id,
