@@ -166,6 +166,57 @@ async fn persist_completion_message(app: AppHandle, mut message: PersistedMessag
     }
 }
 
+/// Completion integrity (#3193-C): consult the host continuation store and, when a
+/// task still has an approval pending, append a notice to its final summary so it
+/// cannot silently report a clean finish. Applied to the `Complete` event before
+/// it is persisted or forwarded, so both the stored message and the frontend see
+/// the same disclosed text.
+///
+/// The guard never blocks a legitimate completion: a store error, a missing state,
+/// or nothing pending leaves the event untouched. It fires when a completion
+/// coexists with a pending approval — a settle failure that leaves a stuck pending
+/// record, or a future parallel/branch flow — rather than the common linear path,
+/// where the renderer holds the tool call open until the approval resolves.
+fn guard_completion(app: &AppHandle, conversation_id: &str, event: WorkerEvent) -> WorkerEvent {
+    let WorkerEvent::Complete {
+        final_content,
+        thinking,
+        cost,
+        rlm_steps,
+    } = event
+    else {
+        return event;
+    };
+    let notice = app
+        .try_state::<crate::tool_authorization::ToolAuthorizationState>()
+        .and_then(
+            |state| match state.resolution_summary(conversation_id) {
+                Ok(summary) => summary.completion_notice(),
+                Err(err) => {
+                    log::warn!(
+                        "[Orchestrator] Completion-integrity check failed for {conversation_id}: {err}"
+                    );
+                    None
+                }
+            },
+        );
+    let final_content = match notice {
+        Some(note) => {
+            log::warn!(
+                "[Orchestrator] Task {conversation_id} completed with an approval still pending"
+            );
+            format!("{final_content}{note}")
+        }
+        None => final_content,
+    };
+    WorkerEvent::Complete {
+        final_content,
+        thinking,
+        cost,
+        rlm_steps,
+    }
+}
+
 /// Sleep for `duration`, returning early if the cancel flag flips to true.
 ///
 /// Returns `true` if the sleep completed normally, `false` if cancelled.
@@ -386,6 +437,7 @@ pub async fn orchestrate(
             if let WorkerEvent::Content { text } = &event {
                 streamed_content.push_str(text);
             }
+            let event = guard_completion(&app_clone, &conversation_id, event);
             if matches!(event, WorkerEvent::Complete { .. }) {
                 if let Some(record) = completion_message_record(
                     &conversation_id,
@@ -626,6 +678,8 @@ async fn execute_single_task(
                                 if let WorkerEvent::Error { ref message } = worker_event {
                                     captured_error = Some(message.clone());
                                 }
+                                let worker_event =
+                                    guard_completion(&app_for_events, &conv_id, worker_event);
                                 if matches!(worker_event, WorkerEvent::Complete { .. }) {
                                     if let Some(record) = completion_message_record(
                                         &conv_id,
