@@ -107,6 +107,17 @@ export interface ResolutionSummary {
   expired: number;
 }
 
+/**
+ * Mirrors `TaskStateSnapshot` in `src-tauri/src/approval_continuation.rs` — the
+ * host's authoritative live task state, pushed on the `orchestrator://task-execution-state`
+ * event at every gate suspend/settle.
+ */
+export interface TaskStateSnapshot {
+  conversationId: string;
+  state: TaskExecutionState;
+  summary: ResolutionSummary;
+}
+
 /** Mirrors `AuditEntry` in `src-tauri/src/authorization_audit.rs`. */
 export interface AuthorizationAuditEntry {
   id: number;

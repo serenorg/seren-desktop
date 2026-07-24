@@ -1,7 +1,7 @@
 // ABOUTME: Tauri commands exposing the host-owned tool authorization gate to the renderer.
 // ABOUTME: The renderer consults the gate before every route and records prompt outcomes host-side.
 
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::approval_continuation::{
     ContinuationScope, ContinuationView, RegisteredContinuation, RequestedCapability,
@@ -204,13 +204,44 @@ pub fn delete_standing_policy(
     state.delete_standing_policy(&policy_id)
 }
 
+/// The host's authoritative task-execution-state broadcast. Emitted on every gate
+/// suspend/settle so the frontend converges immediately instead of waiting on its
+/// poll, and so a host-initiated transition (a reload sweep) surfaces at once. The
+/// payload is `approval_continuation::TaskStateSnapshot`.
+pub const TASK_EXECUTION_STATE_EVENT: &str = "orchestrator://task-execution-state";
+
+/// Broadcast the host's authoritative task-execution state for a conversation after
+/// a gate suspend/settle. Best-effort: a snapshot or emit failure is logged, never
+/// surfaced to the caller — the store mutation already succeeded and the frontend's
+/// poll is the backstop, so a missed push must not fail the command.
+pub(crate) fn emit_task_execution_state(
+    app: &AppHandle,
+    state: &ToolAuthorizationState,
+    conversation_id: &str,
+) {
+    match state.task_state_snapshot(conversation_id) {
+        Ok(snapshot) => {
+            if let Err(err) = app.emit(TASK_EXECUTION_STATE_EVENT, &snapshot) {
+                log::warn!(
+                    "[tool-authorization] Failed to emit task state for {conversation_id}: {err}"
+                );
+            }
+        }
+        Err(err) => log::warn!(
+            "[tool-authorization] Failed to snapshot task state for {conversation_id}: {err}"
+        ),
+    }
+}
+
 /// Register a suspended continuation for an authorization-blocked action so the
 /// paused action is a visible, resumable record rather than a hung tool call
 /// (#3193-C). The renderer calls this when the gate returns `prompt`, then keeps
 /// the returned `resumeToken` in its own state and forwards only `modelResult` to
-/// the model. Equivalent retries dedup to one pending request.
+/// the model. Equivalent retries dedup to one pending request. The host broadcasts
+/// the conversation's new (blocked) state so the frontend shows it without polling.
 #[tauri::command]
 pub fn register_approval_continuation(
+    app: AppHandle,
     state: State<'_, ToolAuthorizationState>,
     conversation_id: String,
     requested: RequestedCapability,
@@ -220,7 +251,9 @@ pub fn register_approval_continuation(
     // A linear turn is the conservative default: the whole task waits unless the
     // caller can prove the blocked action is an independent branch.
     let scope = scope.unwrap_or(ContinuationScope::Linear);
-    state.register_continuation(&conversation_id, requested, scope, ttl_secs)
+    let registered = state.register_continuation(&conversation_id, requested, scope, ttl_secs)?;
+    emit_task_execution_state(&app, &state, &conversation_id);
+    Ok(registered)
 }
 
 /// Resolve a suspended continuation with the user's decision (approve/deny/skip).
@@ -228,12 +261,17 @@ pub fn register_approval_continuation(
 /// that learns the public `approvalId` cannot self-approve.
 #[tauri::command]
 pub fn resolve_approval_continuation(
+    app: AppHandle,
     state: State<'_, ToolAuthorizationState>,
     approval_id: String,
     resume_token: String,
     decision: ResolveDecision,
 ) -> Result<ResolveOutcome, String> {
-    state.resolve_continuation(&approval_id, &resume_token, decision)
+    let outcome = state.resolve_continuation(&approval_id, &resume_token, decision)?;
+    if let Ok(Some(conversation_id)) = state.conversation_for_approval(&approval_id) {
+        emit_task_execution_state(&app, &state, &conversation_id);
+    }
+    Ok(outcome)
 }
 
 /// Explicitly expire a suspended continuation (the renderer's approval timeout),
@@ -241,11 +279,16 @@ pub fn resolve_approval_continuation(
 /// tool failure. Idempotent and token-gated.
 #[tauri::command]
 pub fn expire_approval_continuation(
+    app: AppHandle,
     state: State<'_, ToolAuthorizationState>,
     approval_id: String,
     resume_token: String,
 ) -> Result<ResolveOutcome, String> {
-    state.expire_continuation(&approval_id, &resume_token)
+    let outcome = state.expire_continuation(&approval_id, &resume_token)?;
+    if let Ok(Some(conversation_id)) = state.conversation_for_approval(&approval_id) {
+        emit_task_execution_state(&app, &state, &conversation_id);
+    }
+    Ok(outcome)
 }
 
 /// The live task-execution state for a conversation, derived from its
