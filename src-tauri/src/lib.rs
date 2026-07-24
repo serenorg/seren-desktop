@@ -1141,6 +1141,8 @@ pub fn run() {
             commands::credential_lease::credential_lease_revoke_all,
             commands::tool_authorization::authorize_tool_operation,
             commands::tool_authorization::record_tool_operation_decision,
+            commands::tool_authorization::reserve_lease_spend,
+            commands::tool_authorization::settle_lease_spend,
             commands::tool_authorization::propose_capability_bundle,
             commands::tool_authorization::grant_capability_lease,
             commands::tool_authorization::list_capability_leases,

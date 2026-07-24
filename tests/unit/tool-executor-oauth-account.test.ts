@@ -76,6 +76,12 @@ describe("tool executor OAuth account routing", () => {
           handle: "handle-allow",
         };
       }
+      // No lease is granted in these routing tests, so a 402's realized cost is
+      // not lease-scoped: the host reports `uncovered` and the payment gate is
+      // unchanged (#3193-G).
+      if (cmd === "reserve_lease_spend") {
+        return { outcome: "uncovered" };
+      }
       return undefined;
     });
   });
@@ -212,8 +218,28 @@ describe("tool executor OAuth account routing", () => {
 
   it("retains the owning OAuth connection when retrying a signed x402 payment", async () => {
     const { executeTool } = await import("@/lib/tools/executor");
+    // A real 402 carries a payable amount; the host meters it against any
+    // covering lease before signing (#3193-G). This call has no lease, so the
+    // reserve is a passthrough (`uncovered`) and the retry proceeds unchanged.
     const paymentRequiredHeader = btoa(
-      JSON.stringify({ x402Version: 2, accepts: [] }),
+      JSON.stringify({
+        x402Version: 2,
+        resource: {
+          url: "https://gateway/pay",
+          description: "paid read",
+          mimeType: "application/json",
+        },
+        accepts: [
+          {
+            scheme: "exact",
+            network: "base",
+            asset: "0xUSDC",
+            amount: "1000000",
+            payTo: "0x0000000000000000000000000000000000000000",
+            maxTimeoutSeconds: 60,
+          },
+        ],
+      }),
     );
     const signedV2Payment = btoa(JSON.stringify({ x402Version: 2 }));
     mocks.computeAgentOAuthRouting.mockResolvedValue({

@@ -15,6 +15,7 @@ use crate::approval_continuation::{
 use crate::authorization_audit::{self, AuditContext, AuditEntry, AuditEvent};
 use crate::capability_lease::{
     self, CapabilityLease, LeaseBudgets, LeaseOutcome, LeasePredicates, OperationRequest,
+    SpendOutcome,
 };
 use crate::orchestrator::types::TaskExecutionState;
 
@@ -170,6 +171,47 @@ impl AuthorizationDecision {
     }
 }
 
+/// The host's verdict on reserving a call's realized monetary cost against its
+/// covering lease (#3193-G). Returned to the renderer at the x402 payment gate
+/// *before* any payment is signed. `outcome` is authoritative:
+/// - `"charged"` — the cost was decremented from the covering lease's budget and
+///   persisted; `reservation_id` settles it once the payment resolves.
+/// - `"escalate"` — a lease covers the call but cannot absorb this spend (over
+///   budget / mismatched asset); the caller must surface an explicit approval
+///   instead of silently paying.
+/// - `"uncovered"` — no lease covers the call; the caller uses its own payment
+///   gate exactly as before this wiring existed.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpendReservation {
+    pub outcome: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reservation_id: Option<String>,
+}
+
+impl SpendReservation {
+    fn charged(reservation_id: String) -> Self {
+        Self {
+            outcome: "charged".to_string(),
+            reservation_id: Some(reservation_id),
+        }
+    }
+
+    fn escalate() -> Self {
+        Self {
+            outcome: "escalate".to_string(),
+            reservation_id: None,
+        }
+    }
+
+    fn uncovered() -> Self {
+        Self {
+            outcome: "uncovered".to_string(),
+            reservation_id: None,
+        }
+    }
+}
+
 // ============================================================================
 // Dispatch handles (#3193-F) — the enforcement seam that makes the gate
 // non-bypassable. Every side-effecting transport command refuses to execute
@@ -181,6 +223,12 @@ impl AuthorizationDecision {
 /// UI round-trip between the first dispatch and its retry; short enough that a
 /// leaked handle is not a standing capability.
 const DISPATCH_HANDLE_TTL_SECS: i64 = 300;
+
+/// How long a spend reservation stays reconcilable before it is swept as stale.
+/// A reserve→settle round-trip closes within one payment approval window
+/// (minutes); an hour is comfortably beyond that, so only reservations orphaned
+/// by a crash are ever pruned — and their charge is left standing, never released.
+const SPEND_RESERVATION_TTL_SECS: i64 = 3600;
 
 /// Redemptions per handle. Gateway operations legitimately re-dispatch after an
 /// x402 402 (signed-payment retry, or a SerenBucks retry) without re-consulting
@@ -930,6 +978,114 @@ impl ToolAuthorizationState {
         })
     }
 
+    /// Reserve a call's *realized* monetary cost against the lease that covers it
+    /// (#3193-G). Called at the x402 payment gate once the 402 reveals the real
+    /// price, before any payment is signed. Charging the reservation (decrementing
+    /// `spend_used_micros`) and recording it happen under one connection lock, so
+    /// two concurrent priced calls cannot both slip past the last of a budget.
+    ///
+    /// The call has already cleared the gate, so this weighs only the *monetary*
+    /// budget (via `admits_spend`), never the call budget — re-charging a call
+    /// slot here would double-count, and the last call of a call-metered lease
+    /// would spuriously fail. `cost_micros` must be > 0; a free call never reaches
+    /// a 402 and must not consume a reservation.
+    pub fn reserve_lease_spend(
+        &self,
+        route: ToolRoute,
+        publisher_slug: &str,
+        tool_name: &str,
+        conversation_id: &str,
+        context: &OperationContext,
+        asset: &str,
+        cost_micros: u64,
+    ) -> Result<SpendReservation, String> {
+        if cost_micros == 0 {
+            // A zero cost is free: nothing to reserve, nothing to escalate.
+            return Ok(SpendReservation::uncovered());
+        }
+        let class = classify_for_route(route, publisher_slug, tool_name);
+        let request = OperationRequest {
+            route,
+            class,
+            publisher_slug: publisher_slug.to_string(),
+            tool_name: tool_name.to_string(),
+            command: context.command.clone(),
+            host: context.host.clone(),
+            target: context.target.clone(),
+            cost_micros,
+        };
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            record_lease_expiries_audited(conn, conversation_id, &now);
+            let leases = read_leases(conn, conversation_id)?;
+            match capability_lease::spend_for_conversation(
+                &leases,
+                &request,
+                asset,
+                cost_micros,
+                conversation_id,
+                &now,
+            ) {
+                SpendOutcome::Charge(lease_id) => {
+                    // The matcher already proved this lease admits the spend; the
+                    // `find` cannot miss unless a lease vanished mid-lock (it
+                    // cannot — we hold the only connection), so a miss is a safe
+                    // fall-through to "uncovered" rather than a charge on nothing.
+                    let Some(mut lease) = leases.into_iter().find(|l| l.id == lease_id) else {
+                        return Ok(SpendReservation::uncovered());
+                    };
+                    lease.budgets.charge_spend(cost_micros);
+                    write_lease(conn, &lease)?;
+                    let reservation_id = uuid::Uuid::new_v4().to_string();
+                    insert_spend_reservation(
+                        conn,
+                        &reservation_id,
+                        conversation_id,
+                        &lease_id,
+                        cost_micros,
+                        asset,
+                        &now,
+                    )?;
+                    Ok(SpendReservation::charged(reservation_id))
+                }
+                SpendOutcome::Escalate => Ok(SpendReservation::escalate()),
+                SpendOutcome::Uncovered => Ok(SpendReservation::uncovered()),
+            }
+        })
+    }
+
+    /// Settle a reservation once its payment resolves (#3193-G). `settled_micros`
+    /// is the amount actually paid: `None` means the payment never completed, so
+    /// the whole reservation is released back to the budget; `Some(amount)`
+    /// reconciles the lease's spend from the reserved estimate to the true settled
+    /// amount (releasing the over-reserved portion, or charging the shortfall).
+    /// Idempotent: an unknown or already-settled reservation is a no-op, so a
+    /// retried settle never double-releases.
+    pub fn settle_lease_spend(
+        &self,
+        reservation_id: &str,
+        settled_micros: Option<u64>,
+    ) -> Result<(), String> {
+        self.with_conn(|conn| {
+            let Some((lease_id, reserved)) = take_spend_reservation(conn, reservation_id)? else {
+                return Ok(());
+            };
+            let settled = settled_micros.unwrap_or(0);
+            if settled == reserved {
+                return Ok(());
+            }
+            if let Some(mut lease) = read_lease(conn, &lease_id)? {
+                if settled < reserved {
+                    lease.budgets.release_spend(reserved - settled);
+                } else {
+                    lease.budgets.charge_spend(settled - reserved);
+                }
+                write_lease(conn, &lease)?;
+            }
+            Ok(())
+        })
+    }
+
     /// Persist a user-approved lease. Called only from the host-side grant command
     /// a human approval invokes — never from a model tool call — so model output
     /// can never mint or widen a lease. The host owns the id, timestamps, and
@@ -1390,7 +1546,10 @@ impl ToolAuthorizationState {
             let handles = conn
                 .execute("DELETE FROM dispatch_handles", [])
                 .map_err(|e| e.to_string())?;
-            Ok(decisions + leases + continuations + audit_rows + handles)
+            let reservations = conn
+                .execute("DELETE FROM spend_reservations", [])
+                .map_err(|e| e.to_string())?;
+            Ok(decisions + leases + continuations + audit_rows + handles + reservations)
         })
     }
 }
@@ -1595,6 +1754,90 @@ fn write_lease(conn: &Connection, lease: &CapabilityLease) -> Result<(), String>
     Ok(())
 }
 
+/// One live capability lease by id, or `None` if it is unknown or unreadable.
+/// A settlement reconciles the exact lease its reservation charged, so it reads
+/// by id rather than re-running the conversation matcher.
+fn read_lease(conn: &Connection, lease_id: &str) -> Result<Option<CapabilityLease>, String> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT lease_json FROM capability_leases WHERE id = ?1",
+            rusqlite::params![lease_id],
+            |row| row.get(0),
+        )
+        .map(Some)
+        .or_else(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other.to_string()),
+        })?;
+    Ok(json.and_then(|json| serde_json::from_str::<CapabilityLease>(&json).ok()))
+}
+
+/// Record a live spend reservation so a later settle reconciles against the
+/// host-owned reserved amount rather than a renderer-supplied one. Stale rows
+/// (older than the sweep window) are pruned opportunistically so a crash between
+/// reserve and settle cannot grow the table without bound — the already-persisted
+/// charge stays (a conservative over-charge, never a silent release).
+fn insert_spend_reservation(
+    conn: &Connection,
+    reservation_id: &str,
+    conversation_id: &str,
+    lease_id: &str,
+    reserved_micros: u64,
+    asset: &str,
+    now: &str,
+) -> Result<(), String> {
+    let cutoff = timestamp_plus_seconds(conn, -SPEND_RESERVATION_TTL_SECS)?;
+    conn.execute(
+        "DELETE FROM spend_reservations WHERE created_at <= ?1",
+        rusqlite::params![cutoff],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO spend_reservations \
+           (id, conversation_id, lease_id, reserved_micros, asset, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![
+            reservation_id,
+            conversation_id,
+            lease_id,
+            reserved_micros as i64,
+            asset,
+            now,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Load and remove a reservation atomically (under the store lock), returning its
+/// lease id and reserved amount. `None` if the reservation is unknown or already
+/// settled — the source of settle's idempotency.
+fn take_spend_reservation(
+    conn: &Connection,
+    reservation_id: &str,
+) -> Result<Option<(String, u64)>, String> {
+    let row: Option<(String, i64)> = conn
+        .query_row(
+            "SELECT lease_id, reserved_micros FROM spend_reservations WHERE id = ?1",
+            rusqlite::params![reservation_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map(Some)
+        .or_else(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other.to_string()),
+        })?;
+    let Some((lease_id, reserved)) = row else {
+        return Ok(None);
+    };
+    conn.execute(
+        "DELETE FROM spend_reservations WHERE id = ?1",
+        rusqlite::params![reservation_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(Some((lease_id, reserved.max(0) as u64)))
+}
+
 fn init_schema(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS tool_decisions (
@@ -1643,6 +1886,21 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
             lease_id        TEXT,
             uses_remaining  INTEGER NOT NULL,
             expires_at      TEXT NOT NULL,
+            created_at      TEXT NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    // Spend reservations (#3193-G): a live reserve→settle record so the realized
+    // cost charged at the x402 payment gate is reconciled against a host-owned
+    // amount once the payment resolves, not a renderer-supplied one.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS spend_reservations (
+            id              TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            lease_id        TEXT NOT NULL,
+            reserved_micros INTEGER NOT NULL,
+            asset           TEXT,
             created_at      TEXT NOT NULL
         )",
         [],
@@ -2183,6 +2441,210 @@ mod tests {
             );
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- live monetary metering (reserve → settle, #3193-G) --------------
+
+    fn funded_publisher_predicates() -> LeasePredicates {
+        LeasePredicates {
+            publisher_ops: vec![capability_lease::PublisherRule {
+                publisher_slug: "some-dex".to_string(),
+                allow_high_risk: true,
+                target: None,
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn money_budget(max_spend: u64, asset: &str) -> LeaseBudgets {
+        LeaseBudgets {
+            max_calls: Some(100),
+            max_spend_micros: Some(max_spend),
+            asset: Some(asset.to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn spend_used(s: &ToolAuthorizationState) -> u64 {
+        s.list_leases("conv-a").unwrap()[0].budgets.spend_used_micros
+    }
+
+    fn reserve(
+        s: &ToolAuthorizationState,
+        asset: &str,
+        cost_micros: u64,
+    ) -> SpendReservation {
+        s.reserve_lease_spend(
+            ToolRoute::Gateway,
+            "some-dex",
+            "post_swap",
+            "conv-a",
+            &ctx(),
+            asset,
+            cost_micros,
+        )
+        .unwrap()
+    }
+
+    /// A priced call charges its realized cost against the covering lease's
+    /// monetary budget — the core wiring this ticket adds.
+    #[test]
+    fn realized_cost_is_charged_against_the_covering_lease() {
+        let s = state();
+        s.grant_lease("conv-a", "trading", 3600, funded_publisher_predicates(), money_budget(10_000_000, "USDC"))
+            .unwrap();
+        let reservation = reserve(&s, "USDC", 4_000_000);
+        assert_eq!(reservation.outcome, "charged");
+        assert!(reservation.reservation_id.is_some());
+        assert_eq!(spend_used(&s), 4_000_000, "the realized cost decremented the budget");
+    }
+
+    /// A priced call whose cost would exceed the remaining budget escalates
+    /// (before any payment) and leaves the budget untouched.
+    #[test]
+    fn over_budget_priced_call_escalates_without_charging() {
+        let s = state();
+        let mut budget = money_budget(10_000_000, "USDC");
+        budget.spend_used_micros = 8_000_000;
+        s.grant_lease("conv-a", "trading", 3600, funded_publisher_predicates(), budget)
+            .unwrap();
+        let reservation = reserve(&s, "USDC", 5_000_000); // 8M + 5M > 10M
+        assert_eq!(reservation.outcome, "escalate");
+        assert!(reservation.reservation_id.is_none());
+        assert_eq!(spend_used(&s), 8_000_000, "an escalated call must not charge");
+    }
+
+    /// A payment in a different asset than the budget pins escalates rather than
+    /// mis-charging the wrong-asset budget.
+    #[test]
+    fn mismatched_asset_escalates_without_charging() {
+        let s = state();
+        s.grant_lease("conv-a", "trading", 3600, funded_publisher_predicates(), money_budget(10_000_000, "USDC"))
+            .unwrap();
+        let reservation = reserve(&s, "DAI", 1_000_000);
+        assert_eq!(reservation.outcome, "escalate");
+        assert_eq!(spend_used(&s), 0);
+    }
+
+    /// A priced call no lease covers is not lease-scoped: `uncovered`, so the
+    /// caller falls back to its own payment gate. No budget is touched.
+    #[test]
+    fn priced_call_with_no_covering_lease_is_uncovered() {
+        let s = state();
+        // A lease that covers a *different* publisher does not cover this call.
+        let other = LeasePredicates {
+            publisher_ops: vec![capability_lease::PublisherRule {
+                publisher_slug: "attio".to_string(),
+                allow_high_risk: true,
+                target: None,
+            }],
+            ..Default::default()
+        };
+        s.grant_lease("conv-a", "crm", 3600, other, money_budget(10_000_000, "USDC"))
+            .unwrap();
+        let reservation = reserve(&s, "USDC", 1_000_000);
+        assert_eq!(reservation.outcome, "uncovered");
+        assert!(reservation.reservation_id.is_none());
+    }
+
+    /// A zero-cost (free) call reserves nothing and never escalates — free calls
+    /// behave exactly as before this wiring existed.
+    #[test]
+    fn free_call_reserves_nothing() {
+        let s = state();
+        s.grant_lease("conv-a", "trading", 3600, funded_publisher_predicates(), money_budget(10_000_000, "USDC"))
+            .unwrap();
+        let reservation = reserve(&s, "USDC", 0);
+        assert_eq!(reservation.outcome, "uncovered");
+        assert_eq!(spend_used(&s), 0);
+    }
+
+    /// A cancelled/failed payment releases its reservation, so the lease budget is
+    /// not permanently consumed by a payment that never happened.
+    #[test]
+    fn settle_releases_a_reservation_when_payment_fails() {
+        let s = state();
+        s.grant_lease("conv-a", "trading", 3600, funded_publisher_predicates(), money_budget(10_000_000, "USDC"))
+            .unwrap();
+        let reservation = reserve(&s, "USDC", 4_000_000);
+        assert_eq!(spend_used(&s), 4_000_000);
+        s.settle_lease_spend(reservation.reservation_id.as_deref().unwrap(), None)
+            .unwrap();
+        assert_eq!(spend_used(&s), 0, "a failed payment released the reservation");
+    }
+
+    /// Reserve → settle reconciles the lease spend when the settled amount is less
+    /// than the reserved estimate (the over-reserved portion is released).
+    #[test]
+    fn settle_reconciles_a_lower_settled_amount() {
+        let s = state();
+        s.grant_lease("conv-a", "trading", 3600, funded_publisher_predicates(), money_budget(10_000_000, "USDC"))
+            .unwrap();
+        let reservation = reserve(&s, "USDC", 10_000_000);
+        assert_eq!(spend_used(&s), 10_000_000);
+        s.settle_lease_spend(reservation.reservation_id.as_deref().unwrap(), Some(6_000_000))
+            .unwrap();
+        assert_eq!(spend_used(&s), 6_000_000, "spend reconciled down to the settled amount");
+    }
+
+    /// Settling is idempotent: a replayed settle never double-releases.
+    #[test]
+    fn settle_is_idempotent() {
+        let s = state();
+        s.grant_lease("conv-a", "trading", 3600, funded_publisher_predicates(), money_budget(10_000_000, "USDC"))
+            .unwrap();
+        let reservation = reserve(&s, "USDC", 4_000_000);
+        let id = reservation.reservation_id.unwrap();
+        s.settle_lease_spend(&id, None).unwrap();
+        assert_eq!(spend_used(&s), 0);
+        // A second settle of the same reservation is a no-op, not a double-release.
+        s.settle_lease_spend(&id, None).unwrap();
+        assert_eq!(spend_used(&s), 0);
+    }
+
+    /// The realized cost charged at the 402 survives the store being closed and
+    /// reopened on the same on-disk database — spend persistence, not just calls.
+    #[test]
+    fn charged_spend_persists_across_store_reopen_on_disk() {
+        let dir = std::env::temp_dir().join(format!("seren-authz-spend-{}", uuid::Uuid::new_v4()));
+        let db = dir.join("tool_authorization.db");
+        {
+            let s = ToolAuthorizationState::new(db.clone());
+            s.grant_lease("conv-a", "trading", 3600, funded_publisher_predicates(), money_budget(10_000_000, "USDC"))
+                .unwrap();
+            let reservation = s
+                .reserve_lease_spend(
+                    ToolRoute::Gateway,
+                    "some-dex",
+                    "post_swap",
+                    "conv-a",
+                    &ctx(),
+                    "USDC",
+                    4_000_000,
+                )
+                .unwrap();
+            assert_eq!(reservation.outcome, "charged");
+        }
+        {
+            let s = ToolAuthorizationState::new(db.clone());
+            let leases = s.list_leases("conv-a").unwrap();
+            assert_eq!(leases[0].budgets.spend_used_micros, 4_000_000, "charged spend persisted to disk");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The erase-all flow removes live spend reservations too.
+    #[test]
+    fn wipe_clears_spend_reservations() {
+        let s = state();
+        s.grant_lease("conv-a", "trading", 3600, funded_publisher_predicates(), money_budget(10_000_000, "USDC"))
+            .unwrap();
+        let reservation = reserve(&s, "USDC", 4_000_000);
+        let id = reservation.reservation_id.unwrap();
+        s.wipe().unwrap();
+        // The reservation is gone, so settling it is a no-op against a fresh store.
+        s.settle_lease_spend(&id, None).unwrap();
+        assert!(s.list_leases("conv-a").unwrap().is_empty());
     }
 
     /// The renderer sends the operation context as camelCase; pin `costMicros`.

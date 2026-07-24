@@ -112,6 +112,43 @@ impl LeaseBudgets {
         }
         true
     }
+
+    /// Whether this budget can absorb `cost_micros` of `asset` spend, independent
+    /// of the call-count budget. Used when the realized price of a call is known
+    /// only after the gate has already charged the call slot (the x402 402), so
+    /// re-checking `admits` would spuriously fail on the last call of a
+    /// call-metered lease. Asset-aware: a lease that pins an `asset` only absorbs
+    /// spend in that asset — a mismatch is not admitted (the caller escalates
+    /// rather than mis-charging a differently-denominated budget). A lease with no
+    /// pinned `asset` treats its ceiling as denominating whatever is charged.
+    pub fn admits_spend(&self, cost_micros: u64, asset: &str) -> bool {
+        if cost_micros == 0 {
+            return true;
+        }
+        if let Some(granted) = &self.asset
+            && !granted.eq_ignore_ascii_case(asset)
+        {
+            return false;
+        }
+        match self.max_spend_micros {
+            // A priced call with no monetary allowance is not covered.
+            None => false,
+            Some(max) => self.spend_used_micros.saturating_add(cost_micros) <= max,
+        }
+    }
+
+    /// Consume `cost_micros` of the monetary budget. Saturating so a settlement
+    /// that reconciles upward can never wrap the counter.
+    pub fn charge_spend(&mut self, cost_micros: u64) {
+        self.spend_used_micros = self.spend_used_micros.saturating_add(cost_micros);
+    }
+
+    /// Release `cost_micros` previously charged (a reservation whose payment never
+    /// settled, or the over-reserved portion of a settlement). Saturating so a
+    /// double release can never underflow the counter below zero.
+    pub fn release_spend(&mut self, cost_micros: u64) {
+        self.spend_used_micros = self.spend_used_micros.saturating_sub(cost_micros);
+    }
 }
 
 /// A persisted, thread-scoped capability lease. Bound to a conversation (the only
@@ -325,6 +362,76 @@ pub fn evaluate_for_conversation(
     }
 
     LeaseOutcome::Escalate
+}
+
+/// The matcher's verdict for charging a realized monetary cost against the lease
+/// that already authorized a call. Distinct from `LeaseOutcome`: by the time a
+/// price is realized (the x402 402), the call has already passed the gate — this
+/// decides only whether the covering lease's *monetary* budget absorbs the cost.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SpendOutcome {
+    /// A covering lease absorbs the cost; `String` is the lease id to charge.
+    Charge(String),
+    /// A lease covers the call's predicates but cannot absorb this spend (no
+    /// monetary allowance, over budget, a mismatched asset, or an exclusion) —
+    /// the caller escalates *before* paying rather than silently overspending.
+    Escalate,
+    /// No active lease covers the call: it is not running inside a lease
+    /// envelope, so no lease budget applies and the caller uses its own payment
+    /// gate (the x402 approval UI), exactly as before this wiring existed.
+    Uncovered,
+}
+
+/// Decide how a realized `cost_micros` of `asset` charges against the leases
+/// bound to `conversation_id` for a call that has already been authorized.
+///
+/// Resolution mirrors `evaluate_for_conversation`'s `deny > allow` ordering: a
+/// matching exclusion on any active lease escalates (a covered-then-excluded call
+/// must never silently pay). Otherwise the first lease that covers the predicates
+/// *and* whose monetary budget admits the spend is charged; if a lease covers the
+/// predicates but none admits the spend, the verdict is `Escalate`; if nothing
+/// covers the predicates, the verdict is `Uncovered`.
+pub fn spend_for_conversation(
+    leases: &[CapabilityLease],
+    req: &OperationRequest,
+    asset: &str,
+    cost_micros: u64,
+    conversation_id: &str,
+    now: &str,
+) -> SpendOutcome {
+    let active: Vec<&CapabilityLease> = leases
+        .iter()
+        .filter(|lease| lease.is_active(conversation_id, now))
+        .collect();
+
+    // Deny still beats everything: a call an exclusion would deny must not
+    // silently pay under a broader allow.
+    for lease in &active {
+        if lease
+            .predicates
+            .exclusions
+            .iter()
+            .any(|exclusion| exclusion_matches(exclusion, req))
+        {
+            return SpendOutcome::Escalate;
+        }
+    }
+
+    let mut covered = false;
+    for lease in &active {
+        if predicates_cover(lease, req) {
+            covered = true;
+            if lease.budgets.admits_spend(cost_micros, asset) {
+                return SpendOutcome::Charge(lease.id.clone());
+            }
+        }
+    }
+
+    if covered {
+        SpendOutcome::Escalate
+    } else {
+        SpendOutcome::Uncovered
+    }
 }
 
 // ============================================================================
@@ -690,6 +797,159 @@ mod tests {
         let mut priced = gateway_req("some-dex", "post_swap", OperationClass::HighRisk);
         priced.cost_micros = 5_000_000; // 8M + 5M > 10M
         assert_eq!(eval(&[l], &priced, NOW), LeaseOutcome::Escalate);
+    }
+
+    // ---- realized-cost spend matcher (the x402 402 charge point) ----------
+
+    fn funded_publisher_lease(max_spend: u64, spend_used: u64, asset: &str) -> CapabilityLease {
+        lease(
+            LeasePredicates {
+                publisher_ops: vec![PublisherRule {
+                    publisher_slug: "*".to_string(),
+                    allow_high_risk: true,
+                    target: None,
+                }],
+                ..Default::default()
+            },
+            LeaseBudgets {
+                max_calls: Some(100),
+                max_spend_micros: Some(max_spend),
+                spend_used_micros: spend_used,
+                asset: Some(asset.to_string()),
+                ..Default::default()
+            },
+        )
+    }
+
+    fn spend(
+        leases: &[CapabilityLease],
+        req: &OperationRequest,
+        asset: &str,
+        cost_micros: u64,
+    ) -> SpendOutcome {
+        spend_for_conversation(leases, req, asset, cost_micros, "conv-a", NOW)
+    }
+
+    #[test]
+    fn realized_cost_charges_the_covering_lease() {
+        let l = funded_publisher_lease(10_000_000, 0, "USDC");
+        let req = gateway_req("some-dex", "post_swap", OperationClass::HighRisk);
+        assert_eq!(
+            spend(&[l], &req, "USDC", 4_000_000),
+            SpendOutcome::Charge("lease-1".to_string()),
+        );
+    }
+
+    #[test]
+    fn realized_cost_over_remaining_budget_escalates() {
+        // 8M used of 10M → a 5M call cannot be absorbed.
+        let l = funded_publisher_lease(10_000_000, 8_000_000, "USDC");
+        let req = gateway_req("some-dex", "post_swap", OperationClass::HighRisk);
+        assert_eq!(spend(&[l], &req, "USDC", 5_000_000), SpendOutcome::Escalate);
+    }
+
+    #[test]
+    fn priced_call_with_no_allowance_escalates() {
+        let l = lease(
+            LeasePredicates {
+                publisher_ops: vec![PublisherRule {
+                    publisher_slug: "*".to_string(),
+                    allow_high_risk: true,
+                    target: None,
+                }],
+                ..Default::default()
+            },
+            LeaseBudgets { max_calls: Some(100), ..Default::default() },
+        );
+        let req = gateway_req("some-dex", "post_swap", OperationClass::HighRisk);
+        assert_eq!(spend(&[l], &req, "USDC", 1_000_000), SpendOutcome::Escalate);
+    }
+
+    #[test]
+    fn mismatched_asset_escalates_rather_than_mischarging() {
+        // Budget is denominated in USDC; a DAI-priced call must not decrement it.
+        let l = funded_publisher_lease(10_000_000, 0, "USDC");
+        let req = gateway_req("some-dex", "post_swap", OperationClass::HighRisk);
+        assert_eq!(spend(&[l], &req, "DAI", 1_000_000), SpendOutcome::Escalate);
+    }
+
+    #[test]
+    fn unpinned_asset_budget_charges_any_asset() {
+        // A monetary ceiling with no pinned asset denominates whatever is charged.
+        let mut l = funded_publisher_lease(10_000_000, 0, "USDC");
+        l.budgets.asset = None;
+        let req = gateway_req("some-dex", "post_swap", OperationClass::HighRisk);
+        assert_eq!(
+            spend(&[l], &req, "DAI", 1_000_000),
+            SpendOutcome::Charge("lease-1".to_string()),
+        );
+    }
+
+    #[test]
+    fn uncovered_call_is_not_lease_scoped() {
+        // A lease that does not cover the publisher predicates yields Uncovered,
+        // so the caller falls back to its own payment gate rather than escalating.
+        let l = lease(
+            LeasePredicates {
+                network_hosts: vec!["example.com".to_string()],
+                ..Default::default()
+            },
+            LeaseBudgets {
+                max_calls: Some(100),
+                max_spend_micros: Some(10_000_000),
+                asset: Some("USDC".to_string()),
+                ..Default::default()
+            },
+        );
+        let req = gateway_req("some-dex", "post_swap", OperationClass::HighRisk);
+        assert_eq!(spend(&[l], &req, "USDC", 1_000_000), SpendOutcome::Uncovered);
+    }
+
+    #[test]
+    fn spend_admission_is_independent_of_an_exhausted_call_budget() {
+        // The call slot is charged at the gate; by the 402 the last call may have
+        // exhausted `max_calls`. Re-checking `admits` would wrongly reject it —
+        // `admits_spend` must only weigh the monetary budget.
+        let budgets = LeaseBudgets {
+            max_calls: Some(1),
+            calls_used: 1,
+            max_spend_micros: Some(10_000_000),
+            spend_used_micros: 0,
+            asset: Some("USDC".to_string()),
+        };
+        assert!(!budgets.admits(1_000_000), "call budget is exhausted");
+        assert!(
+            budgets.admits_spend(1_000_000, "USDC"),
+            "spend admission ignores the call budget",
+        );
+    }
+
+    #[test]
+    fn charge_and_release_spend_saturate() {
+        let mut budgets = LeaseBudgets {
+            max_spend_micros: Some(u64::MAX),
+            spend_used_micros: 5,
+            ..Default::default()
+        };
+        budgets.charge_spend(10);
+        assert_eq!(budgets.spend_used_micros, 15);
+        budgets.release_spend(100); // saturating: never below zero
+        assert_eq!(budgets.spend_used_micros, 0);
+        budgets.spend_used_micros = u64::MAX;
+        budgets.charge_spend(10); // saturating: never wraps
+        assert_eq!(budgets.spend_used_micros, u64::MAX);
+    }
+
+    #[test]
+    fn spend_exclusion_beats_a_covering_allowance() {
+        // A call an exclusion would deny must escalate the spend, not pay silently.
+        let mut l = funded_publisher_lease(10_000_000, 0, "USDC");
+        l.predicates.exclusions = vec![Exclusion {
+            publisher_slug: Some("some-dex".to_string()),
+            ..Default::default()
+        }];
+        let req = gateway_req("some-dex", "post_swap", OperationClass::HighRisk);
+        assert_eq!(spend(&[l], &req, "USDC", 1_000_000), SpendOutcome::Escalate);
     }
 
     // ---- lifetime binding ------------------------------------------------

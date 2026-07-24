@@ -258,6 +258,17 @@ function createX402Service() {
   }
 
   /**
+   * Options controlling how a payment-required error is handled.
+   */
+  interface HandlePaymentOptions {
+    /** Force an explicit approval prompt, suppressing the crypto auto-approve
+     * threshold. The host lease gate sets this when a call's realized cost would
+     * exceed the task's remaining monetary budget, so an over-budget payment can
+     * never be signed silently (#3193-G). */
+    requireApproval?: boolean;
+  }
+
+  /**
    * Handle an x402 payment required error.
    *
    * Returns the payment result including which method was used.
@@ -266,6 +277,7 @@ function createX402Service() {
     serverName: string,
     toolName: string,
     error: unknown,
+    options?: HandlePaymentOptions,
   ): Promise<X402PaymentResult | null> {
     // Extract payment requirements from the error
     const extracted = extractRequirements(error);
@@ -287,8 +299,11 @@ function createX402Service() {
       return null;
     }
 
-    // Check for auto-approve with crypto (only if crypto is available and preferred)
+    // Check for auto-approve with crypto (only if crypto is available and
+    // preferred). A budget-driven escalation suppresses this so an over-budget
+    // payment always faces an explicit prompt instead of signing silently.
     if (
+      !options?.requireApproval &&
       hasCrypto &&
       x402Option &&
       settingsState.app.preferredPaymentMethod === "crypto"
