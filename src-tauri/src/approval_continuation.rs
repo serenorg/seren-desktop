@@ -204,6 +204,29 @@ impl ResolutionSummary {
     pub fn has_disclosable(&self) -> bool {
         self.unresolved + self.denied + self.skipped + self.expired > 0
     }
+
+    /// Plain-language completion-integrity notice for a task's final summary, or
+    /// `None` when nothing is pending (a clean completion is left untouched).
+    ///
+    /// Scoped to still-`unresolved` (pending) approvals: a task cannot honestly
+    /// report finished while an approval is still open. Settled denials, skips,
+    /// and expiries belong to the turn that produced them and are surfaced as each
+    /// action's own tool result, so they are deliberately not re-disclosed on
+    /// every later completion in the same conversation.
+    pub fn completion_notice(&self) -> Option<String> {
+        if self.unresolved == 0 {
+            return None;
+        }
+        let actions = if self.unresolved == 1 {
+            "action"
+        } else {
+            "actions"
+        };
+        Some(format!(
+            "\n\n_This task is still awaiting approval for {} {} and is not fully complete._",
+            self.unresolved, actions
+        ))
+    }
 }
 
 /// A persisted continuation row.
@@ -737,6 +760,39 @@ mod tests {
         // skipped / expired work must still be disclosed.
         assert!(summary.can_complete());
         assert!(summary.has_disclosable());
+    }
+
+    #[test]
+    fn completion_notice_fires_only_for_pending_approvals() {
+        // A clean completion (nothing pending) is left untouched.
+        let clean = summarize(&[
+            row("a", ContinuationScope::Linear, ContinuationState::Approved),
+            row("b", ContinuationScope::Linear, ContinuationState::Denied),
+        ]);
+        assert_eq!(clean.completion_notice(), None);
+
+        // A pending approval yields a notice that the task is not fully complete.
+        let one_pending = summarize(&[row(
+            "a",
+            ContinuationScope::Linear,
+            ContinuationState::Pending,
+        )]);
+        let notice = one_pending.completion_notice().expect("pending → notice");
+        assert!(notice.contains("still awaiting approval"));
+        assert!(notice.contains("1 action"));
+        assert!(!notice.contains("actions")); // singular for one
+
+        // Plural for several pending.
+        let two_pending = summarize(&[
+            row("a", ContinuationScope::Linear, ContinuationState::Pending),
+            row("b", ContinuationScope::Branch, ContinuationState::Pending),
+        ]);
+        assert!(
+            two_pending
+                .completion_notice()
+                .unwrap()
+                .contains("2 actions")
+        );
     }
 
     #[test]
