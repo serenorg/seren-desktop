@@ -2364,12 +2364,12 @@ pub async fn erase_all_conversation_data(
         )),
     }
 
-    // Tool authorization decisions: conversation-scoped grants/denials.
+    // Tool authorization: conversation-scoped grants/denials and capability leases.
     match authorization_state.wipe() {
         Ok(count) => reports.push(EraseTargetReport::new(
             "tool_authorization_db",
             "ok",
-            Some(format!("{count} decision(s) removed")),
+            Some(format!("{count} authorization record(s) removed")),
         )),
         Err(err) => reports.push(EraseTargetReport::new(
             "tool_authorization_db",

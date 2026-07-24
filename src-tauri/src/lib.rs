@@ -48,6 +48,7 @@ pub mod sandbox;
 
 pub mod audio;
 mod auth;
+pub mod capability_lease;
 pub mod credential_broker;
 pub mod credential_lease;
 // Public so the headless `claude_memory_sync` example can drive the
@@ -1088,6 +1089,10 @@ pub fn run() {
             commands::credential_lease::credential_lease_revoke_all,
             commands::tool_authorization::authorize_tool_operation,
             commands::tool_authorization::record_tool_operation_decision,
+            commands::tool_authorization::propose_capability_bundle,
+            commands::tool_authorization::grant_capability_lease,
+            commands::tool_authorization::list_capability_leases,
+            commands::tool_authorization::revoke_capability_lease,
             // Meeting Mode persistence commands
             commands::audio::create_meeting,
             commands::audio::get_meeting,
