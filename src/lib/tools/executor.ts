@@ -16,18 +16,6 @@ import { computeAgentOAuthRouting } from "@/services/publisher-oauth";
 import { startShellProgressListener } from "@/services/shell-progress";
 import { x402Service } from "@/services/x402";
 import { conversationStore } from "@/stores/conversation.store";
-import type { OperationClass } from "./approval-config";
-import {
-  classifyGatewayOperation,
-  getApprovalRequirement,
-  isHighRiskOperation,
-} from "./approval-config";
-import {
-  hasSessionDenial,
-  hasSessionGrant,
-  recordSessionDenial,
-  recordSessionGrant,
-} from "./approval-session";
 import { parseGatewayToolName, parseMcpToolName } from "./definitions";
 
 const GATEWAY_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -50,8 +38,83 @@ interface GatewayApprovalPrompt {
   isDestructive?: boolean;
 }
 
-interface ToolAuthorizationOptions {
-  operationClass?: OperationClass;
+/**
+ * Executor route the Rust gate classifies. Keep in sync with `ToolRoute` in
+ * `src-tauri/src/tool_authorization.rs`.
+ */
+type ToolRoute = "gateway" | "seren" | "mcp" | "shell" | "skill" | "web";
+
+/**
+ * The host gate's decision. `decision` is authoritative; the renderer only
+ * displays `description`/`isDestructive` and dispatches — it never classifies.
+ */
+interface AuthorizationDecision {
+  decision: "allow" | "deny" | "prompt";
+  promptKind: "one-shot" | "session" | null;
+  operationClass: "trusted-read" | "high-risk" | "unclassified";
+  description: string;
+  isDestructive: boolean;
+}
+
+// A gate failure must never become a silent allow.
+const DENY_DECISION: AuthorizationDecision = {
+  decision: "deny",
+  promptKind: null,
+  operationClass: "unclassified",
+  description: "",
+  isDestructive: false,
+};
+
+/**
+ * Ask the host gate to classify a model-originated call. Passing through the
+ * gate never itself prompts the user; it returns allow/deny/prompt.
+ */
+async function consultAuthorizationGate(
+  route: ToolRoute,
+  publisherSlug: string,
+  toolName: string,
+  conversationId: string,
+): Promise<AuthorizationDecision> {
+  try {
+    return await invoke<AuthorizationDecision>("authorize_tool_operation", {
+      route,
+      publisherSlug,
+      toolName,
+      conversationId,
+    });
+  } catch (err) {
+    console.error("[Tool Executor] Authorization gate unavailable:", err);
+    return DENY_DECISION;
+  }
+}
+
+/**
+ * Persist a prompt outcome host-side. The host re-derives classification, so a
+ * high-risk (one-shot) or trusted-read (silent) operation is never made durable
+ * here — only unclassified session decisions are stored.
+ */
+async function recordAuthorizationDecision(
+  route: ToolRoute,
+  publisherSlug: string,
+  toolName: string,
+  conversationId: string,
+  approved: boolean,
+): Promise<void> {
+  try {
+    await invoke("record_tool_operation_decision", {
+      route,
+      publisherSlug,
+      toolName,
+      conversationId,
+      approved,
+    });
+  } catch (err) {
+    // A failed persist is safe: the next call re-prompts rather than mis-trusting.
+    console.error(
+      "[Tool Executor] Failed to record authorization decision:",
+      err,
+    );
+  }
 }
 
 /**
@@ -148,13 +211,13 @@ async function requestGatewayApproval(
   prompt?: GatewayApprovalPrompt,
 ): Promise<GatewayApprovalResult> {
   const approvalId = `gateway-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const requirement = getApprovalRequirement(publisherSlug, toolName);
 
   console.log(
     `[Tool Executor] Requesting approval for ${publisherSlug}/${toolName} (ID: ${approvalId})`,
   );
 
-  // Emit approval request event for UI to display
+  // Emit approval request event for UI to display. Display metadata is
+  // host-owned (from the gate decision); the renderer does not classify.
   try {
     await emit("gateway-tool-approval-request", {
       approvalId,
@@ -162,10 +225,8 @@ async function requestGatewayApproval(
       toolName,
       args,
       threadId: conversationId ?? conversationStore.activeConversationId,
-      description:
-        requirement?.description ?? prompt?.description ?? "Execute operation",
-      isDestructive:
-        requirement?.isDestructive ?? prompt?.isDestructive ?? false,
+      description: prompt?.description ?? "Execute operation",
+      isDestructive: prompt?.isDestructive ?? false,
     });
   } catch (err) {
     console.error("[Tool Executor] Failed to emit approval request:", err);
@@ -216,42 +277,32 @@ function sessionConversationId(conversationId: string | null): string {
 }
 
 /**
- * Apply the temporary, renderer-side containment policy at every currently
- * reachable publisher route. The future Rust gate will become the trusted
- * boundary; until then this keeps unknown operations from failing open.
+ * Consult the host authorization gate for a publisher-style route (gateway,
+ * built-in Seren, local MCP, or web fetch) and honor its decision. The host owns
+ * classification and the persisted decision state; the renderer only runs the
+ * approval UI when told to prompt and reports the outcome back for persistence.
  */
 async function authorizeToolOperation(
+  route: ToolRoute,
   publisherSlug: string,
   toolName: string,
   args: Record<string, unknown>,
   conversationId: string | null,
-  options?: ToolAuthorizationOptions,
 ): Promise<GatewayApprovalResult> {
-  const operationClass =
-    options?.operationClass ??
-    classifyGatewayOperation(publisherSlug, toolName);
-  const highRisk =
-    operationClass === "high-risk" || isHighRiskOperation(toolName);
+  const sessionId = sessionConversationId(conversationId);
+  const decision = await consultAuthorizationGate(
+    route,
+    publisherSlug,
+    toolName,
+    sessionId,
+  );
 
-  if (operationClass === "trusted-read" && !highRisk) {
+  if (decision.decision === "allow") {
     return { approved: true };
   }
-
-  const sessionId = sessionConversationId(conversationId);
-  if (!highRisk) {
-    if (hasSessionDenial(sessionId, publisherSlug, toolName)) {
-      console.log(
-        `[Tool Executor] Reusing denied session decision for ${publisherSlug}/${toolName}`,
-      );
-      return { approved: false };
-    }
-
-    if (hasSessionGrant(sessionId, publisherSlug, toolName)) {
-      console.log(
-        `[Tool Executor] Reusing granted session decision for ${publisherSlug}/${toolName}`,
-      );
-      return { approved: true };
-    }
+  if (decision.decision === "deny") {
+    console.log(`[Tool Executor] Host denied ${publisherSlug}/${toolName}`);
+    return { approved: false };
   }
 
   const approval = await requestGatewayApproval(
@@ -259,26 +310,49 @@ async function authorizeToolOperation(
     toolName,
     args,
     conversationId,
-    highRisk
-      ? {
-          description: `High-risk operation on ${publisherSlug}/${toolName}`,
-        }
-      : {
-          description: `Unclassified operation on ${publisherSlug} — first use this session`,
-        },
+    {
+      description: decision.description,
+      isDestructive: decision.isDestructive,
+    },
   );
 
-  // High-risk calls are exact one-shot approvals. Only unclassified calls may
-  // receive a temporary, in-memory session decision.
-  if (!highRisk) {
-    if (approval.approved) {
-      recordSessionGrant(sessionId, publisherSlug, toolName);
-    } else {
-      recordSessionDenial(sessionId, publisherSlug, toolName);
-    }
-  }
+  await recordAuthorizationDecision(
+    route,
+    publisherSlug,
+    toolName,
+    sessionId,
+    approval.approved,
+  );
 
   return approval;
+}
+
+/**
+ * Consult the host gate for a subprocess route (shell command or skill script)
+ * and run the shell approval UI when the gate asks to prompt. Subprocess
+ * execution always classifies high-risk host-side, so the gate never persists a
+ * grant; `runApprovalUi` runs on every call, preserving the always-prompt
+ * posture while making the host the single decision point. Fails closed.
+ */
+async function authorizeSubprocess(
+  route: "shell" | "skill",
+  toolName: string,
+  conversationId: string | null,
+  runApprovalUi: () => Promise<boolean>,
+): Promise<boolean> {
+  const decision = await consultAuthorizationGate(
+    route,
+    "seren",
+    toolName,
+    sessionConversationId(conversationId),
+  );
+  if (decision.decision === "deny") {
+    return false;
+  }
+  if (decision.decision === "allow") {
+    return true;
+  }
+  return runApprovalUi();
 }
 
 function deniedToolResult(toolCallId: string): ToolResult {
@@ -404,6 +478,7 @@ export async function executeTool(
       const serenToolName = name.slice("seren__".length);
       const approval = await authorizeToolOperation(
         "seren",
+        "seren",
         serenToolName,
         args,
         conversationId,
@@ -471,6 +546,18 @@ export async function executeTool(
 
     switch (name) {
       case "seren_web_fetch": {
+        // Arbitrary-URL fetch is open-world data egress; gate it before egress.
+        const approval = await authorizeToolOperation(
+          "web",
+          "seren",
+          "web_fetch",
+          args,
+          conversationId,
+        );
+        if (!approval.approved) {
+          return deniedToolResult(toolCall.id);
+        }
+
         const url = args.url as string;
         const timeoutMs = args.timeout_ms as number | undefined;
         const response = await invoke<{
@@ -505,7 +592,12 @@ export async function executeTool(
           invokeArgs.injectSerenCredentials = args.inject_seren_credentials;
         }
 
-        const approved = await requestShellApproval(command, timeoutSecs);
+        const approved = await authorizeSubprocess(
+          "shell",
+          "execute_command",
+          conversationId,
+          () => requestShellApproval(command, timeoutSecs),
+        );
         if (!approved) {
           return {
             tool_call_id: toolCall.id,
@@ -558,7 +650,12 @@ export async function executeTool(
         }
         const timeoutSecs = (args.timeout_secs as number) ?? 30;
         const preview = `${cwd}> ${argv.map((item) => JSON.stringify(item)).join(" ")}`;
-        const approved = await requestShellApproval(preview, timeoutSecs);
+        const approved = await authorizeSubprocess(
+          "skill",
+          "run_skill_script",
+          conversationId,
+          () => requestShellApproval(preview, timeoutSecs),
+        );
         if (!approved) {
           return {
             tool_call_id: toolCall.id,
@@ -645,14 +742,15 @@ async function executeMcpTool(
   conversationId: string | null,
 ): Promise<ToolResult> {
   try {
+    // The "mcp" route tells the host gate this is a local stdio server: its
+    // name is user-controlled and carries no trusted metadata, so its reads are
+    // never auto-trusted even when the name resembles a publisher slug.
     const approval = await authorizeToolOperation(
+      "mcp",
       serverName,
       toolName,
       args,
       conversationId,
-      // Local stdio server names are user-controlled and have no trusted
-      // metadata yet, even when a name happens to resemble a publisher slug.
-      { operationClass: "unclassified" },
     );
     if (!approval.approved) {
       return deniedToolResult(toolCallId);
@@ -741,6 +839,7 @@ async function executeGatewayTool(
     let callArgs = args;
 
     const approval = await authorizeToolOperation(
+      "gateway",
       publisherSlug,
       toolName,
       args,
