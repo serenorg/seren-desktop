@@ -5,8 +5,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mcpClient } from "@/lib/mcp/client";
 import { isOAuthTokenError } from "@/lib/oauth-tool-errors";
-import { reportError } from "@/lib/support/hook";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
+import { reportError } from "@/lib/support/hook";
 import { type PaymentRequirements, parsePaymentRequirements } from "@/lib/x402";
 import {
   callGatewayTool,
@@ -633,7 +633,8 @@ async function authorizeToolOperation(
     // a host-side expiry yields none — the dispatch fails closed and the model
     // may retry through a fresh gate consultation.
     if (!settled?.dispatchHandle) {
-      const kind: BlockedKind = settled?.state === "expired" ? "expired" : "denied";
+      const kind: BlockedKind =
+        settled?.state === "expired" ? "expired" : "denied";
       return {
         approved: false,
         toolResult: blockedToolResult(
@@ -745,7 +746,8 @@ async function authorizeSubprocess(
   if (outcome.approved) {
     const settled = await settleApprovalContinuation(registered, "approve");
     if (!settled?.dispatchHandle) {
-      const kind: BlockedKind = settled?.state === "expired" ? "expired" : "denied";
+      const kind: BlockedKind =
+        settled?.state === "expired" ? "expired" : "denied";
       return {
         approved: false,
         toolResult: blockedToolResult(
