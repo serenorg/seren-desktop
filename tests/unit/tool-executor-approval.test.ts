@@ -444,18 +444,56 @@ describe("tool executor authorization gate", () => {
     const { executeTool } = await import("@/lib/tools/executor");
     mocks.authorizeDecision.decision = "allow";
 
-    await executeTool(serenCall("call_publisher"), "conv-a");
+    await executeTool(serenCall("run_sql"), "conv-a");
 
     expect(authorizeCalls()[0]).toMatchObject({
       route: "seren",
       publisherSlug: "seren",
-      toolName: "call_publisher",
+      toolName: "run_sql",
     });
     expect(mocks.callSerenTool).toHaveBeenCalledWith(
-      "call_publisher",
+      "run_sql",
       { value: "test" },
       "handle-allow",
     );
+  });
+
+  it("authorizes seren__call_publisher as its wrapped publisher operation", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.authorizeDecision.decision = "allow";
+
+    await executeTool(
+      {
+        id: "seren-call-publisher",
+        type: "function",
+        function: {
+          name: "seren__call_publisher",
+          arguments: JSON.stringify({
+            publisher: "gmail",
+            tool: "post_send",
+            tool_args: { to: "a@example.com" },
+          }),
+        },
+      },
+      "conv-a",
+    );
+
+    // The gate must classify the REAL operation (gmail/post_send), not the
+    // generic call_publisher envelope, so a high-risk publisher call cannot
+    // ride an unclassified-call_publisher session grant. The transport
+    // unwraps the same envelope, so the handle binding matches.
+    expect(authorizeCalls()[0]).toMatchObject({
+      route: "gateway",
+      publisherSlug: "gmail",
+      toolName: "post_send",
+    });
+    expect(mocks.callGatewayTool).toHaveBeenCalledWith(
+      "gmail",
+      "post_send",
+      { to: "a@example.com" },
+      "handle-allow",
+    );
+    expect(mocks.callSerenTool).not.toHaveBeenCalled();
   });
 
   it("routes local MCP dispatch through the gate under the mcp route", async () => {

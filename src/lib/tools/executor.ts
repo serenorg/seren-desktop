@@ -900,6 +900,37 @@ export async function executeTool(
     // Check if this is a built-in Seren tool (seren__toolName)
     if (name.startsWith("seren__")) {
       const serenToolName = name.slice("seren__".length);
+      // `call_publisher` is an envelope around a publisher operation. It is
+      // authorized and dispatched AS that operation (#3193-F): the transport
+      // unwraps the envelope to verify the dispatch handle, and classifying
+      // the wrapped operation directly means a high-risk publisher call
+      // cannot ride an "unclassified call_publisher" session grant.
+      if (serenToolName === "call_publisher") {
+        const publisher =
+          typeof args.publisher === "string" ? args.publisher : "";
+        const tool = typeof args.tool === "string" ? args.tool : "";
+        const toolArgs =
+          args.tool_args &&
+          typeof args.tool_args === "object" &&
+          !Array.isArray(args.tool_args)
+            ? (args.tool_args as Record<string, unknown>)
+            : {};
+        if (!publisher || !tool) {
+          return {
+            tool_call_id: toolCall.id,
+            content:
+              "call_publisher requires string `publisher` and `tool` arguments",
+            is_error: true,
+          };
+        }
+        return await executeGatewayTool(
+          toolCall.id,
+          publisher,
+          tool,
+          toolArgs,
+          conversationId,
+        );
+      }
       const auth = await authorizeToolOperation(
         "seren",
         "seren",
