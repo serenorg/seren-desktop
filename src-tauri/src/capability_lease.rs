@@ -168,6 +168,14 @@ pub struct CapabilityLease {
     pub expires_at: String,
     #[serde(default)]
     pub revoked: bool,
+    /// The standing policy this lease was auto-materialized from (#3193-E), or
+    /// `None` for a human-granted lease. Purely attributive: it lets the audit
+    /// trail say "auto-granted from standing policy <id>" and lets the resolver
+    /// avoid re-minting a fresh lease for a policy that already produced one for
+    /// this conversation (so an exhausted budget or expiry re-escalates instead
+    /// of silently regranting).
+    #[serde(default)]
+    pub source_policy_id: Option<String>,
     pub predicates: LeasePredicates,
     pub budgets: LeaseBudgets,
 }
@@ -562,6 +570,7 @@ mod tests {
             created_at: NOW.to_string(),
             expires_at: LATER.to_string(),
             revoked: false,
+            source_policy_id: None,
             predicates,
             budgets,
         }

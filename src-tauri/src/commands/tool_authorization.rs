@@ -12,6 +12,7 @@ use crate::capability_lease::{
     BundleRequest, CapabilityLease, LeaseBudgets, LeasePredicates, ProposedBundle, derive_bundle,
 };
 use crate::orchestrator::types::TaskExecutionState;
+use crate::standing_policy::{StandingPolicy, StandingPolicyInput};
 use crate::tool_authorization::{
     AuthorizationDecision, OperationContext, SpendReservation, ToolAuthorizationState, ToolRoute,
 };
@@ -155,6 +156,52 @@ pub fn revoke_capability_lease(
     lease_id: String,
 ) -> Result<bool, String> {
     state.revoke_lease(&lease_id)
+}
+
+/// Every standing policy, newest first, for the owner settings surface (#3193-E).
+/// Read-only inspection; authoring happens through the create/update/delete
+/// commands below.
+#[tauri::command]
+pub fn list_standing_policies(
+    state: State<'_, ToolAuthorizationState>,
+) -> Result<Vec<StandingPolicy>, String> {
+    state.list_standing_policies()
+}
+
+/// Create an owner-authored standing policy that auto-materializes a bounded lease
+/// for a matching unattended/long-running task (#3193-E). Invoked **only** from
+/// the owner settings surface — there is no model tool or dispatch path that
+/// reaches this command, so model output can never create or widen a standing
+/// policy. The host owns the id and timestamps; the caller supplies only the
+/// reviewed predicates/budgets/duration.
+#[tauri::command]
+pub fn create_standing_policy(
+    state: State<'_, ToolAuthorizationState>,
+    input: StandingPolicyInput,
+) -> Result<StandingPolicy, String> {
+    state.create_standing_policy(input)
+}
+
+/// Update an existing standing policy in place — edit its envelope or toggle it
+/// on/off. Owner-only. Returns `None` if the id is unknown. Disabling stops all
+/// future auto-grants from the policy immediately.
+#[tauri::command]
+pub fn update_standing_policy(
+    state: State<'_, ToolAuthorizationState>,
+    policy_id: String,
+    input: StandingPolicyInput,
+) -> Result<Option<StandingPolicy>, String> {
+    state.update_standing_policy(&policy_id, input)
+}
+
+/// Delete a standing policy. Owner-only. Idempotent — returns whether a policy was
+/// actually removed.
+#[tauri::command]
+pub fn delete_standing_policy(
+    state: State<'_, ToolAuthorizationState>,
+    policy_id: String,
+) -> Result<bool, String> {
+    state.delete_standing_policy(&policy_id)
 }
 
 /// Register a suspended continuation for an authorization-blocked action so the

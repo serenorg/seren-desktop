@@ -18,6 +18,7 @@ use crate::capability_lease::{
     SpendOutcome,
 };
 use crate::orchestrator::types::TaskExecutionState;
+use crate::standing_policy::{self, StandingPolicy, StandingPolicyInput};
 
 /// The small argument slice the gate needs to evaluate lease predicates for a
 /// call. Extracted from the tool arguments by the renderer per route: `command`
@@ -723,6 +724,33 @@ impl ToolAuthorizationState {
             LeaseOutcome::Escalate => {}
         }
 
+        // No active lease covers this call. Before escalating (which, with no
+        // human present, would only time out and stall the task), consult the
+        // owner-defined standing policies (#3193-E): a matching enabled policy
+        // deterministically auto-materializes a bounded, conversation-scoped
+        // lease from the same predicates + budgets a human grant produces — no
+        // UI, no prompt. The call then runs silently under that lease exactly as
+        // it would under a human-granted one. Out-of-policy work still falls
+        // through to the escalation below.
+        if self
+            .try_materialize_standing_policy(conversation_id, &request)?
+            .is_some()
+        {
+            if let LeaseOutcome::Allow(lease_id) =
+                self.evaluate_and_charge_leases(conversation_id, &request)?
+            {
+                let handle = self.mint_handle(
+                    conversation_id,
+                    route,
+                    publisher_slug,
+                    tool_name,
+                    &binding,
+                    Some(&lease_id),
+                )?;
+                return Ok(AuthorizationDecision::allow(class, handle));
+            }
+        }
+
         if class == OperationClass::HighRisk {
             let (description, is_destructive) = prompt_metadata(class, publisher_slug, tool_name);
             return Ok(AuthorizationDecision::prompt(
@@ -1113,6 +1141,8 @@ impl ToolAuthorizationState {
                 created_at: now.clone(),
                 expires_at,
                 revoked: false,
+                // A human-granted lease has no source policy.
+                source_policy_id: None,
                 predicates: predicates.clone(),
                 budgets: budgets.clone(),
             };
@@ -1176,6 +1206,166 @@ impl ToolAuthorizationState {
                 &now,
             );
             Ok(true)
+        })
+    }
+
+    /// Consult the owner-defined standing policies and, if one matches, mint the
+    /// bounded conversation-scoped lease it pre-authorizes (#3193-E). Returns the
+    /// materialized lease, or `None` when nothing matches (the caller then
+    /// escalates exactly as before).
+    ///
+    /// Everything runs under one connection lock, so two racing first-calls for a
+    /// conversation cannot both mint a lease from the same policy. Guardrails:
+    /// - Only **enabled** policies are considered — disabling one stops all future
+    ///   auto-grants at once.
+    /// - A policy that already produced a lease for this conversation is skipped,
+    ///   even if that lease is now exhausted, expired, or revoked. This is what
+    ///   makes an out-of-budget or expired auto-lease re-escalate instead of
+    ///   silently regranting itself on the next call.
+    /// - Coverage is decided by the *same* deterministic matcher a human lease
+    ///   uses (`evaluate_for_conversation` on the candidate). A policy can only
+    ///   pre-authorize *within* its predicates + budgets: a high-risk, priced, or
+    ///   out-of-scope call that the policy does not cover yields no lease, so it
+    ///   still escalates to a one-shot approval.
+    fn try_materialize_standing_policy(
+        &self,
+        conversation_id: &str,
+        request: &OperationRequest,
+    ) -> Result<Option<CapabilityLease>, String> {
+        self.with_conn(|conn| {
+            let policies = read_standing_policies(conn)?;
+            if policies.iter().all(|policy| !policy.enabled) {
+                return Ok(None);
+            }
+            let now = current_timestamp(conn)?;
+            let existing = read_leases(conn, conversation_id)?;
+            let already: std::collections::HashSet<String> = existing
+                .iter()
+                .filter_map(|lease| lease.source_policy_id.clone())
+                .collect();
+
+            for policy in policies.iter().filter(|policy| policy.enabled) {
+                if already.contains(&policy.id) {
+                    continue;
+                }
+                let lease_id = uuid::Uuid::new_v4().to_string();
+                let expires_at = timestamp_plus_seconds(conn, policy.max_duration_secs.max(1))?;
+                let candidate = standing_policy::candidate_lease(
+                    policy,
+                    conversation_id,
+                    &lease_id,
+                    &now,
+                    &expires_at,
+                );
+                // The candidate is evaluated with the exact matcher a granted
+                // lease is, so a policy can never authorize a call its predicates
+                // + budgets do not already cover.
+                if let LeaseOutcome::Allow(_) = capability_lease::evaluate_for_conversation(
+                    std::slice::from_ref(&candidate),
+                    request,
+                    conversation_id,
+                    &now,
+                ) {
+                    write_lease(conn, &candidate)?;
+                    audit(
+                        conn,
+                        conversation_id,
+                        AuditEvent::LeaseAutoGranted,
+                        &AuditContext::for_auto_lease(&candidate, &policy.id),
+                        &now,
+                    );
+                    return Ok(Some(candidate));
+                }
+            }
+            Ok(None)
+        })
+    }
+
+    /// Every standing policy, newest first, for the owner settings surface.
+    pub fn list_standing_policies(&self) -> Result<Vec<StandingPolicy>, String> {
+        self.with_conn(read_standing_policies)
+    }
+
+    /// Persist a new owner-authored standing policy. Invoked only by the settings
+    /// command an owner drives — never from a model tool call — so model output
+    /// can never create or widen a standing policy. The host owns the id and
+    /// timestamps; the caller supplies only the reviewed envelope.
+    pub fn create_standing_policy(
+        &self,
+        input: StandingPolicyInput,
+    ) -> Result<StandingPolicy, String> {
+        if input.label.trim().is_empty() {
+            return Err("A standing policy needs a label.".to_string());
+        }
+        if input.max_duration_secs <= 0 {
+            return Err("A standing policy needs a positive lease duration.".to_string());
+        }
+        let policy_id = uuid::Uuid::new_v4().to_string();
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            let policy = StandingPolicy {
+                id: policy_id.clone(),
+                label: input.label.clone(),
+                enabled: input.enabled,
+                max_duration_secs: input.max_duration_secs,
+                predicates: input.predicates.clone(),
+                budgets: input.budgets.clone(),
+                created_at: now.clone(),
+                updated_at: now,
+            };
+            write_standing_policy(conn, &policy)?;
+            Ok(policy)
+        })
+    }
+
+    /// Update an existing standing policy in place (edit its envelope, or toggle
+    /// `enabled`). Owner-only, like `create_standing_policy`. Returns the updated
+    /// policy, or `None` if the id is unknown. Disabling a policy here stops every
+    /// future auto-grant from it; leases it already materialized are unaffected
+    /// (revoke those separately).
+    pub fn update_standing_policy(
+        &self,
+        policy_id: &str,
+        input: StandingPolicyInput,
+    ) -> Result<Option<StandingPolicy>, String> {
+        if input.label.trim().is_empty() {
+            return Err("A standing policy needs a label.".to_string());
+        }
+        if input.max_duration_secs <= 0 {
+            return Err("A standing policy needs a positive lease duration.".to_string());
+        }
+        self.with_conn(|conn| {
+            let Some(existing) = read_standing_policy(conn, policy_id)? else {
+                return Ok(None);
+            };
+            let now = current_timestamp(conn)?;
+            let policy = StandingPolicy {
+                id: existing.id,
+                label: input.label.clone(),
+                enabled: input.enabled,
+                max_duration_secs: input.max_duration_secs,
+                predicates: input.predicates.clone(),
+                budgets: input.budgets.clone(),
+                created_at: existing.created_at,
+                updated_at: now,
+            };
+            write_standing_policy(conn, &policy)?;
+            Ok(Some(policy))
+        })
+    }
+
+    /// Delete a standing policy. Owner-only. Idempotent — returns whether a policy
+    /// was actually removed. Future auto-grants from it stop immediately; any
+    /// lease it already materialized lives out its own expiry unless revoked.
+    pub fn delete_standing_policy(&self, policy_id: &str) -> Result<bool, String> {
+        self.with_conn(|conn| {
+            let removed = conn
+                .execute(
+                    "DELETE FROM standing_policies WHERE id = ?1",
+                    rusqlite::params![policy_id],
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(removed > 0)
         })
     }
 
@@ -1525,10 +1715,12 @@ impl ToolAuthorizationState {
         })
     }
 
-    /// Erase every stored decision, capability lease, suspended continuation, and
-    /// audit row. Backs the one-shot "erase all local conversation data" flow; the
-    /// next access lazily reopens an empty store. Returns the total number of rows
-    /// removed across all tables.
+    /// Erase every stored decision, capability lease, standing policy, suspended
+    /// continuation, and audit row. Backs the one-shot "erase all local
+    /// conversation data" flow; the next access lazily reopens an empty store.
+    /// Standing policies are cleared too, so a full wipe never leaves a standing
+    /// pre-authorization silently minting leases afterward. Returns the total
+    /// number of rows removed across all tables.
     pub fn wipe(&self) -> Result<usize, String> {
         self.with_conn(|conn| {
             let decisions = conn
@@ -1536,6 +1728,9 @@ impl ToolAuthorizationState {
                 .map_err(|e| e.to_string())?;
             let leases = conn
                 .execute("DELETE FROM capability_leases", [])
+                .map_err(|e| e.to_string())?;
+            let policies = conn
+                .execute("DELETE FROM standing_policies", [])
                 .map_err(|e| e.to_string())?;
             let continuations = conn
                 .execute("DELETE FROM approval_continuations", [])
@@ -1549,7 +1744,7 @@ impl ToolAuthorizationState {
             let reservations = conn
                 .execute("DELETE FROM spend_reservations", [])
                 .map_err(|e| e.to_string())?;
-            Ok(decisions + leases + continuations + audit_rows + handles + reservations)
+            Ok(decisions + leases + policies + continuations + audit_rows + handles + reservations)
         })
     }
 }
@@ -1772,6 +1967,72 @@ fn read_lease(conn: &Connection, lease_id: &str) -> Result<Option<CapabilityLeas
     Ok(json.and_then(|json| serde_json::from_str::<CapabilityLease>(&json).ok()))
 }
 
+/// Every standing policy, newest first. A single corrupt row is logged and
+/// skipped rather than blinding the resolver to the rest.
+fn read_standing_policies(conn: &Connection) -> Result<Vec<StandingPolicy>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT policy_json FROM standing_policies ORDER BY created_at DESC, id DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let mut policies = Vec::new();
+    for row in rows {
+        let json = row.map_err(|e| e.to_string())?;
+        match serde_json::from_str::<StandingPolicy>(&json) {
+            Ok(policy) => policies.push(policy),
+            Err(err) => {
+                log::warn!("[tool-authorization] Skipping unreadable standing policy row: {err}")
+            }
+        }
+    }
+    Ok(policies)
+}
+
+/// One standing policy by id, or `None` if unknown or unreadable.
+fn read_standing_policy(conn: &Connection, policy_id: &str) -> Result<Option<StandingPolicy>, String> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT policy_json FROM standing_policies WHERE id = ?1",
+            rusqlite::params![policy_id],
+            |row| row.get(0),
+        )
+        .map(Some)
+        .or_else(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other.to_string()),
+        })?;
+    Ok(json.and_then(|json| serde_json::from_str::<StandingPolicy>(&json).ok()))
+}
+
+/// Insert or replace a standing policy. The JSON blob is the source of truth;
+/// `enabled` is mirrored to a column only so the resolver can cheaply skip
+/// disabled policies without parsing every blob.
+fn write_standing_policy(conn: &Connection, policy: &StandingPolicy) -> Result<(), String> {
+    let json = serde_json::to_string(policy)
+        .map_err(|e| format!("Standing policy could not be encoded: {e}"))?;
+    conn.execute(
+        "INSERT INTO standing_policies \
+           (id, enabled, policy_json, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(id) DO UPDATE SET \
+           enabled = excluded.enabled, \
+           policy_json = excluded.policy_json, \
+           updated_at = excluded.updated_at",
+        rusqlite::params![
+            policy.id,
+            policy.enabled as i64,
+            json,
+            policy.created_at,
+            policy.updated_at,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Record a live spend reservation so a later settle reconciles against the
 /// host-owned reserved amount rather than a renderer-supplied one. Stale rows
 /// (older than the sweep window) are pruned opportunistically so a crash between
@@ -1870,6 +2131,22 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_capability_leases_conversation \
          ON capability_leases(conversation_id)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    // Standing policies (#3193-E): owner-defined, **non-conversation-scoped**
+    // pre-authorizations that auto-materialize a bounded lease for a matching
+    // task at start. The full policy (predicates + budgets + duration) lives in
+    // the JSON blob; the `enabled` column exists only so the resolver can skip
+    // disabled policies without parsing every blob.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS standing_policies (
+            id          TEXT PRIMARY KEY,
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            policy_json TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        )",
         [],
     )
     .map_err(|e| e.to_string())?;
@@ -3546,6 +3823,273 @@ mod tests {
                 &binding_for_publisher_args(&args)
             )
             .is_err()
+        );
+    }
+
+    // ---- standing policies (#3193-E) — headless pre-authorization -----------
+
+    fn standing_policy_input(
+        label: &str,
+        enabled: bool,
+        duration_secs: i64,
+        predicates: LeasePredicates,
+        budgets: LeaseBudgets,
+    ) -> StandingPolicyInput {
+        StandingPolicyInput {
+            label: label.to_string(),
+            enabled,
+            max_duration_secs: duration_secs,
+            predicates,
+            budgets,
+        }
+    }
+
+    /// The core headless path: a conversation with **no prior lease** and no human
+    /// present runs an in-policy shell command end-to-end with zero prompts,
+    /// because the owner's enabled standing policy auto-materializes a bounded
+    /// lease. The materialized lease is attributed to its source policy and its
+    /// budget is charged, and the audit trail records both the auto-grant and the
+    /// use.
+    #[test]
+    fn standing_policy_auto_materializes_a_lease_for_an_unattended_conversation() {
+        let s = state();
+        let policy = s
+            .create_standing_policy(standing_policy_input(
+                "Unattended coding",
+                true,
+                4 * 3600,
+                command_rules(&["cargo", "pnpm", "git"]),
+                call_budget(500),
+            ))
+            .unwrap();
+
+        // No lease exists yet for this fresh conversation.
+        assert!(s.list_leases("conv-unattended").unwrap().is_empty());
+
+        let decision = s
+            .authorize(
+                ToolRoute::Shell,
+                "seren",
+                "execute_command",
+                "conv-unattended",
+                &cmd_ctx("cargo test --manifest-path src-tauri/Cargo.toml"),
+                None,
+            )
+            .unwrap();
+        assert_eq!(decision.decision, "allow", "in-policy work must not prompt");
+        assert!(decision.handle.is_some(), "an allow must carry a dispatch handle");
+
+        // Exactly one lease was minted, attributed to the policy, and charged.
+        let leases = s.list_leases("conv-unattended").unwrap();
+        assert_eq!(leases.len(), 1, "one auto-materialized lease");
+        assert_eq!(leases[0].source_policy_id.as_deref(), Some(policy.id.as_str()));
+        assert_eq!(leases[0].budgets.calls_used, 1);
+
+        // A second in-policy call runs silently under the same lease (no re-mint).
+        let second = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-unattended", &cmd_ctx("pnpm check"), None)
+            .unwrap();
+        assert_eq!(second.decision, "allow");
+        assert_eq!(s.list_leases("conv-unattended").unwrap().len(), 1, "still one lease");
+
+        let events: Vec<String> = s
+            .list_audit("conv-unattended", 50)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.event)
+            .collect();
+        assert!(events.iter().any(|e| e == "lease_auto_granted"), "auto-grant audited");
+        assert!(events.iter().any(|e| e == "lease_used"), "use audited");
+    }
+
+    /// A standing policy pre-authorizes only within its predicates: a command it
+    /// does not list, and a high-risk publisher op it did not opt into, both still
+    /// produce a single scope-escalation rather than a silent auto-grant.
+    #[test]
+    fn standing_policy_only_pre_authorizes_within_its_predicates() {
+        let s = state();
+        s.create_standing_policy(standing_policy_input(
+            "Unattended coding",
+            true,
+            3600,
+            command_rules(&["cargo"]),
+            call_budget(500),
+        ))
+        .unwrap();
+
+        // An unlisted program is out of policy — one escalation, no lease minted.
+        let out = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("rm -rf /"), None)
+            .unwrap();
+        assert_eq!(out.decision, "prompt");
+        assert_eq!(out.prompt_kind.as_deref(), Some("one-shot"));
+        assert!(s.list_leases("conv-a").unwrap().is_empty(), "no lease for out-of-policy work");
+    }
+
+    /// A high-risk / outbound-send publisher op is not silently pre-authorized by
+    /// a policy that did not explicitly opt into high-risk for that publisher — it
+    /// still requires an explicit one-shot approval.
+    #[test]
+    fn standing_policy_does_not_auto_cover_unopted_high_risk_ops() {
+        let s = state();
+        let predicates = LeasePredicates {
+            publisher_ops: vec![capability_lease::PublisherRule {
+                publisher_slug: "gmail".to_string(),
+                allow_high_risk: false,
+                target: None,
+            }],
+            ..Default::default()
+        };
+        s.create_standing_policy(standing_policy_input("Gmail reads", true, 3600, predicates, call_budget(100)))
+            .unwrap();
+        // Sending mail is high-risk; the policy did not opt into it.
+        let decision = s
+            .authorize(ToolRoute::Gateway, "gmail", "post_send", "conv-a", &ctx(), Some(&serde_json::json!({"to": "x"})))
+            .unwrap();
+        assert_eq!(decision.decision, "prompt");
+        assert_eq!(decision.prompt_kind.as_deref(), Some("one-shot"));
+        assert!(s.list_leases("conv-a").unwrap().is_empty());
+    }
+
+    /// A disabled policy grants nothing: in-policy work escalates exactly as if no
+    /// policy existed, and enabling it (via update) then makes the same call run
+    /// silently — proving the toggle is the control point.
+    #[test]
+    fn disabled_standing_policy_grants_nothing_until_enabled() {
+        let s = state();
+        let policy = s
+            .create_standing_policy(standing_policy_input(
+                "Unattended coding",
+                false,
+                3600,
+                command_rules(&["cargo"]),
+                call_budget(500),
+            ))
+            .unwrap();
+        let blocked = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"), None)
+            .unwrap();
+        assert_eq!(blocked.decision, "prompt", "a disabled policy must not auto-grant");
+        assert!(s.list_leases("conv-a").unwrap().is_empty());
+
+        // Enabling it makes the same call run silently on a fresh conversation.
+        s.update_standing_policy(
+            &policy.id,
+            standing_policy_input("Unattended coding", true, 3600, command_rules(&["cargo"]), call_budget(500)),
+        )
+        .unwrap()
+        .expect("policy exists");
+        let allowed = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-b", &cmd_ctx("cargo build"), None)
+            .unwrap();
+        assert_eq!(allowed.decision, "allow");
+    }
+
+    /// Deleting a policy stops future auto-grants immediately.
+    #[test]
+    fn deleting_a_standing_policy_stops_auto_grants() {
+        let s = state();
+        let policy = s
+            .create_standing_policy(standing_policy_input(
+                "Unattended coding",
+                true,
+                3600,
+                command_rules(&["cargo"]),
+                call_budget(500),
+            ))
+            .unwrap();
+        assert!(s.delete_standing_policy(&policy.id).unwrap());
+        let decision = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-fresh", &cmd_ctx("cargo build"), None)
+            .unwrap();
+        assert_eq!(decision.decision, "prompt");
+        assert!(!s.delete_standing_policy(&policy.id).unwrap(), "second delete is a no-op");
+    }
+
+    /// An auto-lease is bounded: once its budget is exhausted the next in-policy
+    /// call re-escalates rather than silently minting a *fresh* lease from the same
+    /// policy. Exactly one lease is ever materialized per conversation+policy.
+    #[test]
+    fn exhausted_auto_lease_budget_re_escalates_without_reminting() {
+        let s = state();
+        s.create_standing_policy(standing_policy_input(
+            "One-shot budget",
+            true,
+            3600,
+            command_rules(&["cargo"]),
+            call_budget(1),
+        ))
+        .unwrap();
+
+        let first = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"), None)
+            .unwrap();
+        assert_eq!(first.decision, "allow", "first in-budget call runs silently");
+
+        let second = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo test"), None)
+            .unwrap();
+        assert_eq!(second.decision, "prompt", "exhausted budget re-escalates");
+        assert_eq!(
+            s.list_leases("conv-a").unwrap().len(),
+            1,
+            "the policy must not re-mint a fresh lease to dodge its own budget",
+        );
+    }
+
+    /// Revoking an auto-materialized lease is immediate and durable: the policy
+    /// does not silently re-grant a replacement on the next call.
+    #[test]
+    fn revoking_an_auto_lease_is_not_undone_by_the_policy() {
+        let s = state();
+        s.create_standing_policy(standing_policy_input(
+            "Unattended coding",
+            true,
+            3600,
+            command_rules(&["cargo"]),
+            call_budget(500),
+        ))
+        .unwrap();
+        s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"), None)
+            .unwrap();
+        let lease = s.list_leases("conv-a").unwrap().remove(0);
+        assert!(s.revoke_lease(&lease.id).unwrap());
+        let after = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"), None)
+            .unwrap();
+        assert_eq!(after.decision, "prompt", "a revoked auto-lease is not silently re-granted");
+        assert_eq!(s.list_leases("conv-a").unwrap().len(), 1, "no replacement lease minted");
+    }
+
+    /// The model reaches the host only through `authorize` (and dispatch/reserve/
+    /// settle). None of those write a policy: with an empty policy store, an
+    /// in-policy-looking call still escalates — the model can never conjure a
+    /// standing policy or a lease. Only the owner `create_standing_policy` path
+    /// writes one.
+    #[test]
+    fn the_gate_path_cannot_author_a_standing_policy() {
+        let s = state();
+        // No owner policy exists.
+        assert!(s.list_standing_policies().unwrap().is_empty());
+        let decision = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"), None)
+            .unwrap();
+        assert_eq!(decision.decision, "prompt", "the gate cannot self-author a policy");
+        assert!(s.list_standing_policies().unwrap().is_empty(), "authorize wrote no policy");
+        assert!(s.list_leases("conv-a").unwrap().is_empty());
+    }
+
+    /// Validation guards: a policy needs a label and a positive lease duration.
+    #[test]
+    fn create_standing_policy_rejects_invalid_input() {
+        let s = state();
+        assert!(
+            s.create_standing_policy(standing_policy_input("", true, 3600, LeasePredicates::default(), call_budget(1)))
+                .is_err()
+        );
+        assert!(
+            s.create_standing_policy(standing_policy_input("x", true, 0, LeasePredicates::default(), call_budget(1)))
+                .is_err()
         );
     }
 }
