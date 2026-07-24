@@ -2362,38 +2362,48 @@ pub async fn clear_conversation_history(
     Ok(())
 }
 
+/// Delete every conversation (and its messages/events) in the full-reset flow,
+/// enqueueing sync tombstones so the delete propagates to other devices, and
+/// return the deleted conversation ids so the caller can cascade the
+/// cloud-memory retained-source erasure. Mirrors `delete_conversation_records`
+/// for the "clear all" path.
+pub(crate) fn clear_all_history_records(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let conversation_ids = conn
+        .prepare("SELECT id FROM conversations")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for id in &conversation_ids {
+        enqueue_sync_tombstone(conn, "thread_drafts", id)?;
+        enqueue_sync_tombstone(conn, "conversations", id)?;
+    }
+    let event_ids = conn
+        .prepare("SELECT id FROM message_events")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for id in &event_ids {
+        enqueue_sync_tombstone(conn, "message_events", id)?;
+    }
+    let message_ids = conn
+        .prepare("SELECT id FROM messages")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for id in &message_ids {
+        enqueue_sync_tombstone(conn, "messages", id)?;
+    }
+    conn.execute("DELETE FROM message_events", [])?;
+    conn.execute("DELETE FROM messages", [])?;
+    conn.execute("DELETE FROM conversations", [])?;
+    Ok(conversation_ids)
+}
+
 #[tauri::command]
 pub async fn clear_all_history(app: AppHandle) -> Result<(), String> {
-    run_db(app.clone(), move |conn| {
-        let conversation_ids = conn
-            .prepare("SELECT id FROM conversations")?
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for id in &conversation_ids {
-            enqueue_sync_tombstone(conn, "thread_drafts", id)?;
-            enqueue_sync_tombstone(conn, "conversations", id)?;
-        }
-        let event_ids = conn
-            .prepare("SELECT id FROM message_events")?
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for id in &event_ids {
-            enqueue_sync_tombstone(conn, "message_events", id)?;
-        }
-        let message_ids = conn
-            .prepare("SELECT id FROM messages")?
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for id in &message_ids {
-            enqueue_sync_tombstone(conn, "messages", id)?;
-        }
-        conn.execute("DELETE FROM message_events", [])?;
-        conn.execute("DELETE FROM messages", [])?;
-        conn.execute("DELETE FROM conversations", [])?;
-        Ok(())
-    })
-    .await?;
+    let conversation_ids = run_db(app.clone(), clear_all_history_records).await?;
     clear_conversation_index_best_effort(&app);
+    // Cascade the cloud-memory retained-source erasure, matching the per-
+    // conversation delete paths. Best-effort and never fatal: the local reset
+    // has already committed.
+    spawn_memory_source_erase_best_effort(&app, conversation_ids);
     Ok(())
 }
 
@@ -2572,9 +2582,9 @@ mod tests {
         MemorySourceEraseCounts, MemorySourceEraseResponse,
         archive_agent_conversation_in_db, archive_happy_provider_session_in_db,
         claim_happy_provider_session_owner_in_db,
-        claim_happy_provider_session_owner_with_provenance_in_db, cloud_memory_erase_report,
-        collect_agent_transcript_targets,
-        conversation_source_uri, delete_conversation_records, emit_happy_archive_event,
+        claim_happy_provider_session_owner_with_provenance_in_db, clear_all_history_records,
+        cloud_memory_erase_report, collect_agent_transcript_targets, conversation_source_uri,
+        delete_conversation_records, emit_happy_archive_event,
         emit_happy_provider_archive_event,
         is_happy_provider_session_archived_in_db, list_legacy_happy_restoration_candidates_in_db,
         lookup_agent_conversation_owner_in_db, lookup_happy_restoration_candidate_in_db,
@@ -2655,6 +2665,49 @@ mod tests {
         .expect("valid delete-by-source response");
         assert_eq!(response.data.sources_deleted, 2);
         assert_eq!(response.data.memories_deleted, 5);
+    }
+
+    // The full-reset path must hand every conversation id to the cloud-memory
+    // erase cascade, exactly like the per-conversation delete path. If this
+    // regresses (e.g. the collect step is dropped), `clear_all_history` clears
+    // local rows but silently leaves retained transcripts on the memory service
+    // — the residue #3198 exists to prevent.
+    #[test]
+    fn clear_all_history_yields_every_conversation_id_for_cascade() {
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind) VALUES
+               ('c1', 't', 0, 'chat'),
+               ('c2', 't', 0, 'agent'),
+               ('c3', 't', 0, 'chat')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp) VALUES
+               ('m1', 'c1', 'user', 'hi', 0),
+               ('m2', 'c2', 'assistant', 'yo', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message_events (id, conversation_id, message_id, event_type, created_at)
+             VALUES ('e1', 'c1', 'm1', 'text', 0)",
+            [],
+        )
+        .unwrap();
+
+        let mut ids = clear_all_history_records(&conn).unwrap();
+        ids.sort();
+        assert_eq!(ids, vec!["c1", "c2", "c3"]);
+
+        // Local reset is complete: every table is emptied.
+        for table in ["conversations", "messages", "message_events"] {
+            let remaining: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(remaining, 0, "{table} should be empty after clear");
+        }
     }
 
     #[test]
