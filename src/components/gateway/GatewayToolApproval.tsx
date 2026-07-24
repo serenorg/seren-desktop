@@ -364,10 +364,10 @@ export const GatewayToolApproval: Component = () => {
                         {(connection) => (
                           <span class="flex items-center gap-3 text-base text-foreground bg-surface-1 px-3 py-2 rounded-md border border-border min-h-[46px]">
                             <span class="w-7 h-7 rounded-full bg-accent text-primary-foreground flex items-center justify-center text-xs font-semibold shrink-0">
-                              {connectionInitial(connection())}
+                              {connectionInitial(connection)}
                             </span>
                             <span class="truncate">
-                              {formatOAuthConnectionLabel(connection())}
+                              {formatOAuthConnectionLabel(connection)}
                             </span>
                           </span>
                         )}

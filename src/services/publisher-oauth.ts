@@ -346,6 +346,12 @@ export async function setDefaultOAuthConnection(
     );
   }
 
+  if (!data?.connection) {
+    throw new Error(
+      `Failed to set default connection ${connectionId}: response contained no connection`,
+    );
+  }
+
   markOAuthConnectionsChanged();
   return data.connection as OAuthConnection;
 }
